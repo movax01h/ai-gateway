@@ -1,0 +1,61 @@
+version: "v1"
+environment: ambient
+components:
+  - name: "post_recommendation"
+    type: OneOffComponent
+    prompt_id: "recommend_reviewers_post"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_recommend_reviewers_context"
+        as: "reviewer_data"
+        optional: true
+    toolset:
+      - "create_merge_request_note"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "assign_reviewers"
+    type: OneOffComponent
+    prompt_id: "recommend_reviewers_assign"
+    prompt_version: "^1.0.0"
+    inputs:
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:post_recommendation.tool_responses"
+        as: "comment_data"
+    toolset:
+      - "add_merge_request_reviewers"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "post_recommendation"
+    to: "assign_reviewers"
+  - from: "assign_reviewers"
+    to: "end"
+
+flow:
+  entry_point: "post_recommendation"
+  inputs:
+    - category: agent_platform_recommend_reviewers_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        current_reviewers:
+          type: array
+        approval_rules:
+          type: array
+    - category: agent_platform_resource_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        merge_request_id:
+          type: string
