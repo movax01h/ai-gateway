@@ -6,6 +6,7 @@ import pytest
 from packaging.version import Version
 
 from duo_workflow_service.tools.version_compatibility import (
+    AGENT_PLAN_READINESS_SCORE_VERSION,
     AGENT_PLAN_WIDGET_VERSION,
     BASE_DISCUSSION_ID_FIELD_VERSION,
     DEFAULT_FALLBACK_VERSION,
@@ -16,6 +17,7 @@ from duo_workflow_service.tools.version_compatibility import (
     LICENSED_FEATURE_AVAILABILITY_VERSION,
     NOTE_RESOLVABLE_AND_RESOLVED_FIELDS_VERSION,
     get_gitlab_version,
+    supports_agent_plan_readiness_score,
     supports_agent_plan_widget,
     supports_development_widget,
     supports_discussion_id_field,
@@ -151,6 +153,12 @@ class TestVersionCompatibilityFunctions:
             (supports_agent_plan_widget, "19.0.1", True),
             (supports_agent_plan_widget, "18.11.0", False),
             (supports_agent_plan_widget, "18.6.0", False),
+            # supports_agent_plan_readiness_score (threshold: 19.4.0)
+            (supports_agent_plan_readiness_score, "19.4.0", True),
+            (supports_agent_plan_readiness_score, "19.5.0", True),
+            (supports_agent_plan_readiness_score, "19.4.1", True),
+            (supports_agent_plan_readiness_score, "19.3.0", False),
+            (supports_agent_plan_readiness_score, "19.0.0", False),
             # supports_glql_schema_endpoint (threshold: 19.3.0)
             (supports_glql_schema_endpoint, "19.3.0", True),
             (supports_glql_schema_endpoint, "19.3.1", True),
@@ -255,3 +263,15 @@ class TestVersionConstants:
     def test_fallback_version_is_below_agent_plan_widget_threshold(self):
         """Test that fallback version is below agent plan widget threshold."""
         assert DEFAULT_FALLBACK_VERSION < AGENT_PLAN_WIDGET_VERSION
+
+    def test_agent_plan_readiness_score_version_constant(self):
+        """Test that AGENT_PLAN_READINESS_SCORE_VERSION is set correctly."""
+        assert AGENT_PLAN_READINESS_SCORE_VERSION == Version("19.4.0")
+
+    def test_readiness_score_threshold_is_above_agent_plan_widget_threshold(self):
+        """The score field shipped later than the widget, so its floor is higher."""
+        assert AGENT_PLAN_READINESS_SCORE_VERSION > AGENT_PLAN_WIDGET_VERSION
+
+    def test_fallback_version_is_below_agent_plan_readiness_score_threshold(self):
+        """An instance that reports no version must not be sent the score."""
+        assert DEFAULT_FALLBACK_VERSION < AGENT_PLAN_READINESS_SCORE_VERSION

@@ -26,6 +26,7 @@ from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUr
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.version_compatibility import (
     get_gitlab_version,
+    supports_agent_plan_readiness_score,
     supports_agent_plan_widget,
     supports_labels_by_name,
 )
@@ -401,10 +402,48 @@ class WorkItemBaseTool(DuoBaseTool):
         if status_widget:
             input_data["statusWidget"] = status_widget
 
-        if kwargs.get("agent_plan") is not None and supports_agent_plan_widget():
-            input_data["agentPlanWidget"] = {"content": kwargs["agent_plan"]}
+        agent_plan_widget = WorkItemBaseTool._build_agent_plan_widget(kwargs)
+
+        if agent_plan_widget:
+            input_data["agentPlanWidget"] = agent_plan_widget
 
         return input_data, warnings
+
+    @staticmethod
+    def _build_agent_plan_widget(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Build agentPlanWidget input from the plan content and/or its readiness score.
+
+        The two fields are independent inputs to the same widget: a plan-drafting
+        flow writes ``content``, while a scoring flow writes only ``readinessScore``
+        against a plan it did not author. Sending the absent field as ``null`` would
+        clear it, so each key is included only when supplied.
+
+        The fields are also gated independently by GitLab version: the widget type
+        and its ``content`` field exist from 19.0, while ``readinessScore`` was only
+        added to the widget input in 19.4. On a 19.0-19.3 instance ``content`` goes
+        out without ``readinessScore``; before 19.0 neither does, because sending an
+        unknown argument fails the mutation with a schema error.
+
+        Args:
+            kwargs: Input parameters that may contain ``agent_plan`` and/or
+                ``readiness_score``.
+
+        Returns:
+            Dictionary with the agentPlanWidget input, or ``None`` when neither field
+            was supplied or neither survived the version gates.
+        """
+        widget: Dict[str, Any] = {}
+
+        if kwargs.get("agent_plan") is not None and supports_agent_plan_widget():
+            widget["content"] = kwargs["agent_plan"]
+
+        if (
+            kwargs.get("readiness_score") is not None
+            and supports_agent_plan_readiness_score()
+        ):
+            widget["readinessScore"] = kwargs["readiness_score"]
+
+        return widget or None
 
     @staticmethod
     def _build_weight_widget(

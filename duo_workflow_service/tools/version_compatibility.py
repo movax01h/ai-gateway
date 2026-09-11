@@ -21,6 +21,7 @@ AGENT_PLAN_WIDGET_VERSION = Version("19.0.0")
 GROUP_LEVEL_CUSTOM_INSTRUCTIONS_VERSION = Version("19.0.0")
 SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.2.0")
 GLQL_SCHEMA_ENDPOINT_VERSION = Version("19.3.0")
+AGENT_PLAN_READINESS_SCORE_VERSION = Version("19.4.0")
 LABELS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
 
 # Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
@@ -98,6 +99,24 @@ def supports_agent_plan_widget() -> bool:
         True if the agent plan widget is supported (GitLab >= 19.0), False otherwise.
     """
     return get_gitlab_version() >= AGENT_PLAN_WIDGET_VERSION
+
+
+def supports_agent_plan_readiness_score() -> bool:
+    """Check if the agent plan widget input accepts a readiness score.
+
+    ``readinessScore`` was added to the agentPlan widget input
+    (``AgentPlanInputType``) later than ``content``, which has existed since the
+    widget type itself shipped in 19.0, so it needs its own floor rather than
+    riding :func:`supports_agent_plan_widget`.
+
+    The field is additionally gated at runtime by the ``workplan_score`` feature
+    flag on the GitLab side, which no version check can cover: a 19.4+ instance
+    with the flag disabled still rejects the argument.
+
+    Returns:
+        True if ``readinessScore`` is accepted (GitLab >= 19.4), False otherwise.
+    """
+    return get_gitlab_version() >= AGENT_PLAN_READINESS_SCORE_VERSION
 
 
 def supports_licensed_feature_availability() -> bool:
