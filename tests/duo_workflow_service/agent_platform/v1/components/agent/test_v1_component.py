@@ -2609,16 +2609,20 @@ class TestAgentComponentMaxCyclesWarningOffset:
     @pytest.mark.parametrize(
         "max_cycles, expected_offset",
         [
-            (4, 3),  # matches fix_pipeline's checkout step config
-            (1, 0),
-            (11, 10),  # boundary: last value still clamped
-            (12, 10),  # boundary: first value not clamped
+            (4, 2),  # matches fix_pipeline's checkout step config: warns on cycle 2, not 1
+            (3, 1),
+            (2, None),  # the warning would land on the first cycle, so it is off
+            (1, None),
+            (11, 5),  # half the budget while that is below the default
+            (20, 10),  # boundary: last value still clamped
+            (21, 10),  # boundary: first value not clamped
         ],
     )
     def test_plain_int_form_clamps_offset_for_small_thresholds(
         self, make_agent_component, max_cycles, expected_offset
     ):
-        """The legacy plain-int form clamps the default offset to min(10, threshold - 1) for small thresholds."""
+        """The legacy plain-int form defaults the offset to min(10, threshold // 2) and disables it when that would
+        warn on the first cycle."""
         component = make_agent_component(max_cycles=max_cycles)
         assert component._max_cycles_threshold == max_cycles
         assert component._iteration_warning_offset == expected_offset
@@ -2636,7 +2640,14 @@ class TestAgentComponentMaxCyclesWarningOffset:
         form."""
         component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=4))
         assert component._max_cycles_threshold == 4
-        assert component._iteration_warning_offset == 3
+        assert component._iteration_warning_offset == 2
+
+    def test_nested_form_disables_omitted_offset_when_it_would_warn_on_cycle_one(
+        self, make_agent_component
+    ):
+        """A budget too small for a meaningful warning gets none rather than one before any work is done."""
+        component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=2))
+        assert component._iteration_warning_offset is None
 
     @pytest.mark.parametrize("iteration_warning_offset", [4, 5, 10])
     def test_nested_form_rejects_explicit_offset_at_or_above_threshold(

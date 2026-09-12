@@ -777,12 +777,12 @@ class TestSupervisorMaxCycles:
         make_supervisor,
         mock_state_graph,
     ):
-        """The legacy plain-int max_cycles form clamps the default offset to min(10, threshold - 1)."""
+        """The legacy plain-int max_cycles form defaults the offset to min(10, threshold // 2)."""
         supervisor = make_supervisor(max_cycles=7)
         supervisor.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
-        assert call_kwargs["cycle_budget"].iteration_warning_offset == 6
+        assert call_kwargs["cycle_budget"].iteration_warning_offset == 3
 
 
 class TestSupervisorMaxWrapUpRetries:
