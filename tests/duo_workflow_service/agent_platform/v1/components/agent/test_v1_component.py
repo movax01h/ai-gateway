@@ -2621,8 +2621,7 @@ class TestAgentComponentMaxCyclesWarningOffset:
     def test_plain_int_form_clamps_offset_for_small_thresholds(
         self, make_agent_component, max_cycles, expected_offset
     ):
-        """The legacy plain-int form defaults the offset to min(10, threshold // 2) and disables it when that would
-        warn on the first cycle."""
+        """Plain-int max_cycles defaults the offset to min(10, threshold // 2), or None if that warns on cycle 1."""
         component = make_agent_component(max_cycles=max_cycles)
         assert component._max_cycles_threshold == max_cycles
         assert component._iteration_warning_offset == expected_offset
