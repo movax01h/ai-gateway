@@ -119,6 +119,7 @@ def _default_iteration_warning_offset(threshold: int) -> Optional[int]:
     offset = min(_DEFAULT_ITERATION_WARNING_OFFSET, threshold // 2)
     return offset if threshold - offset > 1 else None
 
+
 # Context key under which a subagent's per-invocation subsession ID is exposed when the
 # component is compiled as a standalone subgraph via ``AgentComponent.compile_as_subagent``
 # (the ``SupervisorAgentComponentV2`` / native-``Send``-dispatch code path — see that

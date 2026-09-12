@@ -579,7 +579,7 @@ class TestSupervisorMaxCycles:
 
         call_kwargs = mock_agent_node_cls.call_args[1]
         assert call_kwargs["cycle_budget"].max_cycles == 7
-        assert call_kwargs["cycle_budget"].iteration_warning_offset == 6
+        assert call_kwargs["cycle_budget"].iteration_warning_offset == 3
 
     @pytest.mark.usefixtures(
         "mock_tool_node_cls",

@@ -2609,7 +2609,7 @@ class TestAgentComponentMaxCyclesWarningOffset:
     @pytest.mark.parametrize(
         "max_cycles, expected_offset",
         [
-            (4, 2),  # matches fix_pipeline's checkout step config: warns on cycle 2, not 1
+            (4, 2),  # fix_pipeline's checkout step: warns on cycle 2, not 1
             (3, 1),
             (2, None),  # the warning would land on the first cycle, so it is off
             (1, None),
