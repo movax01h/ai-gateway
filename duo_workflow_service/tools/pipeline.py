@@ -51,6 +51,10 @@ class GetPipelineFailingJobs(DuoBaseTool):
     downstream pipeline URL. Only report no failing jobs after checking the original pipeline
     and all downstream pipelines. Do not ask the user before checking downstream pipelines.
 
+    Each returned job carries `job_name` and `job_id`. `job_url`, `stage`, `failure_reason` (GitLab's
+    reason string for the failure, e.g. `script_failure` or `runner_system_failure`) and `allow_failure`
+    are included only when GitLab returns them for that job.
+
     When no failing jobs are found, the response also includes `pipeline_status`,
     `pipeline_started_at`, and `yaml_errors` when GitLab recorded one. A `failed` pipeline with a
     null `pipeline_started_at` never ran a single job, which means its CI/CD configuration was
@@ -170,6 +174,21 @@ class GetPipelineFailingJobs(DuoBaseTool):
             if job_url:
                 job_url_elem = etree.SubElement(xml_job, "job_url")
                 job_url_elem.text = job_url
+
+            stage = job.get("stage")
+            if stage:
+                stage_elem = etree.SubElement(xml_job, "stage")
+                stage_elem.text = stage
+
+            failure_reason = job.get("failure_reason")
+            if failure_reason:
+                failure_reason_elem = etree.SubElement(xml_job, "failure_reason")
+                failure_reason_elem.text = failure_reason
+
+            allow_failure = job.get("allow_failure")
+            if allow_failure is not None:
+                allow_failure_elem = etree.SubElement(xml_job, "allow_failure")
+                allow_failure_elem.text = str(allow_failure).lower()
 
         failed_jobs_str = "Failed Jobs:\n" + etree.tostring(
             xml_root, pretty_print=True, encoding="unicode"
