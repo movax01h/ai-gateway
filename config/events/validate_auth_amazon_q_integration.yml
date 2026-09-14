@@ -1,0 +1,11 @@
+---
+description: Tracks authentication validation requests for the Amazon Q integration
+internal_events: true
+action: validate_auth_amazon_q_integration
+product_group: duo_chat
+product_categories:
+  - duo_chat
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6800
+tiers:
+  - ultimate
