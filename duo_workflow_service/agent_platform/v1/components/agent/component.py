@@ -102,10 +102,12 @@ RUNTIME_INJECTED_VARS = (
     | MODEL_TEMPLATE_VARIABLES
 )
 
-# Default number of cycles before `max_cycles` at which the agent is warned that it
-# is approaching the soft limit. Shared by the legacy plain-int `max_cycles` form
-# (see `AgentComponentBase.resolve_max_cycles`) and `MaxCyclesConfig`'s own field
-# default, so both forms warn 10 cycles out unless explicitly overridden.
+# Upper bound on the default number of cycles before `max_cycles` at which the agent
+# is warned that it is approaching the soft limit. Both the legacy plain-int
+# `max_cycles` form (see `AgentComponentBase.resolve_max_cycles`) and
+# `MaxCyclesConfig` resolve an omitted offset through
+# `_default_iteration_warning_offset`, which uses this for budgets of 20 or more and
+# half the budget below that.
 _DEFAULT_ITERATION_WARNING_OFFSET: int = 10
 
 
@@ -166,9 +168,9 @@ class MaxCyclesConfig(BaseModel):
 
     @model_validator(mode="after")
     def resolve_or_validate_offset(self) -> Self:
-        """Auto-clamp the offset when omitted, or validate it against threshold when explicitly set.
+        """Derive the offset when omitted, or validate it against threshold when explicitly set.
 
-        `model_fields_set` distinguishes "not provided" (auto-clamp, mirroring the legacy plain-int form's smart
+        `model_fields_set` distinguishes "not provided" (derived, mirroring the legacy plain-int form's smart
         default) from "explicitly provided" (validate strictly — the caller chose both values together, so an
         offset `>= threshold` is a clear misconfiguration worth a hard error rather than a silent no-op).
         """

@@ -2614,11 +2614,11 @@ class TestAgentComponentMaxCyclesWarningOffset:
             (2, None),  # the warning would land on the first cycle, so it is off
             (1, None),
             (11, 5),  # half the budget while that is below the default
-            (20, 10),  # boundary: last value still clamped
-            (21, 10),  # boundary: first value not clamped
+            (19, 9),  # boundary: last threshold where half the budget still wins
+            (22, 10),  # boundary: first threshold where the 10-cycle cap wins
         ],
     )
-    def test_plain_int_form_clamps_offset_for_small_thresholds(
+    def test_plain_int_form_halves_offset_for_small_thresholds(
         self, make_agent_component, max_cycles, expected_offset
     ):
         """Plain-int max_cycles defaults the offset to min(10, threshold // 2), or None if that warns on cycle 1."""
@@ -2632,11 +2632,10 @@ class TestAgentComponentMaxCyclesWarningOffset:
         assert component._max_cycles_threshold == 50
         assert component._iteration_warning_offset == 10
 
-    def test_nested_form_clamps_omitted_offset_for_small_threshold(
+    def test_nested_form_halves_omitted_offset_for_small_threshold(
         self, make_agent_component
     ):
-        """MaxCyclesConfig with iteration_warning_offset omitted also clamps for small thresholds, like the plain-int
-        form."""
+        """MaxCyclesConfig with the offset omitted also halves it for small thresholds, like the plain-int form."""
         component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=4))
         assert component._max_cycles_threshold == 4
         assert component._iteration_warning_offset == 2
@@ -2654,7 +2653,7 @@ class TestAgentComponentMaxCyclesWarningOffset:
     ):
         """MaxCyclesConfig raises when iteration_warning_offset is explicitly set >= threshold.
 
-        Unlike an omitted offset (auto-clamped), an explicitly chosen value that doesn't fit is treated as a deliberate
+        Unlike an omitted offset (halved to fit), an explicitly chosen value that doesn't fit is treated as a deliberate
         misconfiguration.
         """
         with pytest.raises(ValidationError, match="must be less than threshold"):
