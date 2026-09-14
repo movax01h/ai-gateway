@@ -88,7 +88,7 @@ class KindModelProvider(StrEnum):
     GITLAB = "gitlab"
 
     @classmethod
-    def from_definition_provider(cls, provider: str) -> "KindModelProvider":
+    def from_definition_provider(cls, provider: Optional[str]) -> "KindModelProvider":
         if provider == "Anthropic":
             return KindModelProvider.ANTHROPIC
         if provider == "Gemini Enterprise Agent Platform":
