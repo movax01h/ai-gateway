@@ -9,7 +9,6 @@ from ai_gateway.model_selection.types import (
     DevConfig,
     FeatureDeprecatedModel,
 )
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 router = APIRouter()
 
@@ -73,15 +72,11 @@ async def get_models():
     # Maps pseudo-model identifier to _GetModelResponseModel.
     pseudo_models: dict[str, _GetModelResponseModel] = {}
 
-    multi_default_models_enabled = is_feature_enabled(
-        FeatureFlag.AI_GATEWAY_MULTI_DEFAULT_MODELS
-    )
-
     for primitive in selection_config.get_resolved_unit_primitive_config_map().values():
         values = primitive.model_dump()
         default_models = values["default_models"]
 
-        if len(default_models) > 1 and multi_default_models_enabled:
+        if len(default_models) > 1:
             # When there are multiple default models (load balancing across providers),
             # create a pseudo-model using the first model's name without a provider suffix.
             # This pseudo-model is used as the displayed default in the UI.

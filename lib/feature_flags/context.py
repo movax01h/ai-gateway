@@ -34,9 +34,6 @@ class FeatureFlag(StrEnum):
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
     DUO_CHAT_GENERATIVE_UI = "duo_chat_generative_ui"
     # Definition:
-    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/gitlab_com_derisk/ai_gateway_multi_default_models.yml
-    AI_GATEWAY_MULTI_DEFAULT_MODELS = "ai_gateway_multi_default_models"
-    # Definition:
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/dw_read_blobs_api.yml
     DW_READ_BLOBS_API = "dw_read_blobs_api"
     # Definition:
