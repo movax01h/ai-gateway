@@ -116,9 +116,34 @@ def main():
                 components = data["components"]
                 start_node = data["flow"]["entry_point"]
 
+                # Statically named subagents (``subagents: [{name: ...}]``) are folded
+                # into their supervisor at runtime; style them apart and show the delegation.
+                subagents = {
+                    component["name"]: [
+                        entry["name"]
+                        for entry in component.get("subagents") or []
+                        if isinstance(entry, dict) and "name" in entry
+                    ]
+                    for component in components
+                }
+                subagent_names = {
+                    name for names in subagents.values() for name in names
+                }
+
                 diagram += f"    __start__ --> {start_node};\n"
                 for component in components:
-                    diagram += f"    {component['name']}({component['name']}<br>#91;{component['type']}#93;);\n"
+                    style = ":::subagent" if component["name"] in subagent_names else ""
+                    diagram += f"    {component['name']}({component['name']}<br>#91;{component['type']}#93;){style};\n"
+
+                # A subagent that is only named under ``subagents:`` and never declared
+                # as a component would otherwise become an implicit, unstyled mermaid node.
+                declared = {component["name"] for component in components}
+                for name in sorted(subagent_names - declared):
+                    diagram += f"    {name}({name}<br>#91;undeclared#93;):::subagent;\n"
+
+                for supervisor, names in subagents.items():
+                    for name in names:
+                        diagram += f'    {supervisor} -.->|"subagent"| {name};\n'
 
                 for edge in routers:
                     if "to" in edge.keys():
@@ -143,6 +168,10 @@ def main():
                 diagram += "    classDef default fill:#f2f0ff,line-height:1.2;\n"
                 diagram += "    classDef first fill-opacity:0;\n"
                 diagram += "    classDef last fill:#bfb6fc;\n"
+                if subagent_names:
+                    diagram += (
+                        "    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;\n"
+                    )
 
                 output_file.write("```mermaid\n" + diagram + "```\n")
 

@@ -515,13 +515,15 @@ graph TD;
     __end__(__end__):::last;
     __start__ --> developer_agent;
     developer_agent(developer_agent<br>#91;AgentComponent#93;);
-    verifier(verifier<br>#91;AgentComponent#93;);
+    verifier(verifier<br>#91;AgentComponent#93;):::subagent;
     user_input(user_input<br>#91;HumanInputComponent#93;);
+    developer_agent -.->|"subagent"| verifier;
     developer_agent --> user_input;
     user_input --> developer_agent;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
+    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;
 ```
 
 ## Graph: `developer 2.0.0-interactive (v1)` (Flow Registry)
@@ -600,13 +602,15 @@ graph TD;
     __end__(__end__):::last;
     __start__ --> developer_agent;
     developer_agent(developer_agent<br>#91;AgentComponent#93;);
-    review_agent(review_agent<br>#91;AgentComponent#93;);
+    review_agent(review_agent<br>#91;AgentComponent#93;):::subagent;
     user_input(user_input<br>#91;HumanInputComponent#93;);
+    developer_agent -.->|"subagent"| review_agent;
     developer_agent --> user_input;
     user_input --> developer_agent;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
+    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;
 ```
 
 ## Graph: `developer 3.0.0 (v1)` (Flow Registry)
