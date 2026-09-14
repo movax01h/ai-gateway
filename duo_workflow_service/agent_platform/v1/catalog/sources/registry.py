@@ -11,6 +11,9 @@ from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from duo_workflow_service.agent_platform.v1.catalog.errors import (
     CatalogItemConfigError,
 )
+from duo_workflow_service.agent_platform.v1.catalog.sources.ai_catalog_agent import (
+    AiCatalogAgentSource,
+)
 from duo_workflow_service.agent_platform.v1.catalog.sources.base import CatalogSource
 from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
     CatalogItemRef,
@@ -25,7 +28,10 @@ from duo_workflow_service.agent_platform.v1.catalog.sources.workspace_agent impo
 __all__ = ["SOURCES", "default_prompts", "source_for"]
 
 # The one list to extend when a source or a kind is added.
-_STRATEGIES: tuple[CatalogSource, ...] = (WorkspaceAgentSource(),)
+_STRATEGIES: tuple[CatalogSource, ...] = (
+    WorkspaceAgentSource(),
+    AiCatalogAgentSource(),
+)
 
 # Keyed by the pair a reference names, so the lookup is exact and no strategy has to
 # decide whether a kind is its own.
