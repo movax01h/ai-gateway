@@ -1,0 +1,23 @@
+---
+description: Tracks LLM token usage for requests to the troubleshoot_job unit primitive
+internal_events: true
+action: token_usage_troubleshoot_job
+product_group: pipeline_execution
+product_categories:
+  - continuous_integration
+additional_properties:
+  label:
+    description: Always cache_details; the cache token counts are sent as extra properties alongside it
+  cache_read:
+    description: Number of input tokens read from the prompt cache
+  cache_creation:
+    description: Number of input tokens written to the prompt cache
+  ephemeral_5m_input_tokens:
+    description: Number of input tokens written to the 5-minute TTL prompt cache
+  ephemeral_1h_input_tokens:
+    description: Number of input tokens written to the 1-hour TTL prompt cache
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6799
+tiers:
+  - premium
+  - ultimate
