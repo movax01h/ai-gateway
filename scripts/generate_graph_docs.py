@@ -132,8 +132,16 @@ def main():
 
                 diagram += f"    __start__ --> {start_node};\n"
                 for component in components:
+                    label = f"{component['name']}<br>#91;{component['type']}#93;"
+                    # ``max_delegations`` caps ``delegate_task`` calls across all of a
+                    # supervisor's subagents, so it belongs on the supervisor, not an edge.
+                    if (
+                        subagents[component["name"]]
+                        and component.get("max_delegations") is not None
+                    ):
+                        label += f"<br>max_delegations: {component['max_delegations']}"
                     style = ":::subagent" if component["name"] in subagent_names else ""
-                    diagram += f"    {component['name']}({component['name']}<br>#91;{component['type']}#93;){style};\n"
+                    diagram += f"    {component['name']}({label}){style};\n"
 
                 # A subagent that is only named under ``subagents:`` and never declared
                 # as a component would otherwise become an implicit, unstyled mermaid node.
@@ -141,9 +149,11 @@ def main():
                 for name in sorted(subagent_names - declared):
                     diagram += f"    {name}({name}<br>#91;undeclared#93;):::subagent;\n"
 
+                # Bidirectional: the supervisor delegates a task and the subagent hands
+                # its result back to the supervisor.
                 for supervisor, names in subagents.items():
                     for name in names:
-                        diagram += f'    {supervisor} -.->|"subagent"| {name};\n'
+                        diagram += f'    {supervisor} <-.->|"subagent"| {name};\n'
 
                 for edge in routers:
                     if "to" in edge.keys():
