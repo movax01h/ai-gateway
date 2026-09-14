@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import fastapi
 import pytest
-from starlette.datastructures import URL
+from starlette.datastructures import URL, QueryParams
 
 from ai_gateway.config import ConfigModelLimits
 
@@ -31,7 +31,9 @@ def request_factory_fixture():
         request = Mock(spec=fastapi.Request)
         request.url = URL(request_url)
         request.method = "POST"
-        request.query_params = {}
+        # A real request's query params always agree with its URL, and litellm
+        # forwards them to the upstream, so they cannot be left empty here.
+        request.query_params = QueryParams(request.url.query)
         mock_request_body = AsyncMock()
         mock_request_body.return_value = request_body
         request.body = mock_request_body
