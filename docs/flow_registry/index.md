@@ -682,3 +682,7 @@ This method is particularly useful for:
 - Rapid prototyping of new flows
 
 For more advanced options, including a Docker wrapper for reproducible testing, see the [Duo CLI headless mode documentation](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/tree/main/packages/cli?ref_type=heads#headless-mode).
+
+## Design notes
+
+- [Chat engine: the conversational boundary for chat-partial flows](chat_engine.md)
