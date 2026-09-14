@@ -198,7 +198,10 @@ Set the failure category and decision fields based on these criteria:
     <decision>create_plan</decision>
     <response_reason>
       Set decision to `create_plan` when AT LEAST ONE of the failures meets ALL of these criteria:
-      - The failing job blocks the pipeline (`allow_failure: false`) — see `<scope>`
+      - The failing job blocks the pipeline (`allow_failure: false`) — see `<scope>`. A
+        `ci_config_error` identified by `<no_jobs_triage>` satisfies this criterion with no job at
+        all: a rejected configuration blocks the entire pipeline, so never fall back to `no_action`
+        for want of a failing job.
       - The failure does not appear to be infrastructure-related (see the `no_action` categories)
       - You are confident a code or configuration fix can resolve the failure
       {% if merge_request_url %}
@@ -210,6 +213,10 @@ Set the failure category and decision fields based on these criteria:
         This preference applies only to jobs that block the pipeline; it never brings a non-blocking job into scope.
       {% endif %}
       Use this whenever validation by executing the fix locally is warranted — multi-file changes, test failures, build failures, anything where the diff might surprise the reviewer.
+
+      A `ci_config_error` whose `confidence` is `low` belongs here. `create_plan` is the branch for
+      "a fix exists, but it should be executed and validated before it is offered", which is exactly
+      that case. Low confidence narrows how the fix is delivered; it never means there is no fix.
     </response_reason>
   </possible_response>
   {% if merge_request_url %}
@@ -232,6 +239,11 @@ Set the failure category and decision fields based on these criteria:
       - None of the failures meets the criteria for `create_plan`
       - The failure is not a flaky test or infrastructure issue
       - You cannot quote a specific log line that names the failing rule, assertion, or check
+      - `failure_category` is NOT `ci_config_error`. A CI configuration error always has a concrete
+        fix in a file in this repository, so it is never merely commentable. When `confidence` is
+        too low for `direct_code_suggestions`, choose `create_plan` — never `add_comment`. The
+        absence of a quotable log line does not justify `add_comment` here: a rejected configuration
+        produces no job logs by definition, and the CI lint output is the evidence in their place.
     </response_reason>
   </possible_response>
   {% endif %}
@@ -262,7 +274,12 @@ Set the failure category and decision fields based on these criteria:
   - The fix touches a single file
   - The failing rule, assertion, or syntax error is quoted verbatim in the job trace, or for a
     `ci_config_error` in the CI lint output
-  - The specific line number(s) where the fix should be applied is identifiable from the job trace or MR diff (an inline code suggestion cannot be posted without one). Lint errors often name only the offending job or key and no line number; if you cannot pin the line down, this criterion is not met
+  - The specific line number(s) where the fix should be applied is identifiable from the job trace
+    or MR diff (an inline code suggestion cannot be posted without one). Lint errors and CI lint
+    output often name only the offending job or key and no line number: locate that key in the
+    `.gitlab-ci.yml` hunk in `<mr_diffs>` and use its line. If the key is not in the diff and you
+    cannot pin the line down, this criterion is not met — choose `create_plan` rather than relaxing
+    this bar
   - There is no `insufficient_context` signal
   - The `agents_dot_md` content (if any) does NOT direct you to always validate
 
