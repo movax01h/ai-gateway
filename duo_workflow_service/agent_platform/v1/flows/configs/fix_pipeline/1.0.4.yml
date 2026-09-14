@@ -76,7 +76,9 @@ components:
       - get_pipeline_failing_jobs:
           exclude_allow_failure: true
       - get_failing_bridge_jobs
-      - get_job_logs
+      - get_job_logs:
+          byte_offset: null
+          byte_limit: null
       - run_command
       - read_file
       - find_files
