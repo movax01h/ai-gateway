@@ -9,4 +9,3 @@ prompt_template:
   placeholder: history
 params:
   timeout: 300
-  cache_control_injection_points: []
