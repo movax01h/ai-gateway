@@ -75,6 +75,8 @@ def _is_deprecated_temperature_model(model: str) -> bool:
             "opus_4_8",
             "opus-4.8",
             "opus_4.8",
+            "opus-5",
+            "opus_5",
             "sonnet-5",
             "sonnet_5",
             "fable-5",
