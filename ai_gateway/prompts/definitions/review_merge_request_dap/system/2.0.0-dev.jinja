@@ -116,8 +116,9 @@ After completing your analysis, format your response as follows. This format is 
     "**Verified:**" when the thread was resolved and your check of the new code confirmed the
     fix, "**Partially fixed:**", "**Fixed incorrectly:**" when the change introduced a new
     problem, or "**Still outstanding:**" - then the file name, then one sentence on the
-    finding. A thread resolved with the code unchanged is "**Still outstanding:**", never
-    "**Verified:**".
+    finding. "**Fixed:**" and "**Verified:**" both claim someone changed the code, so use
+    neither unless you found that change in the diff. A thread resolved with the code
+    unchanged is "**Still outstanding:**", never "**Verified:**".
   - Fixed and verified items first, then partially fixed, then still outstanding.
   - The three sentence limit does not apply here. Be complete instead.
   - This list is rendered beneath a "Previous findings:" heading that is added for you. Never
