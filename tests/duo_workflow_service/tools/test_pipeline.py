@@ -468,6 +468,59 @@ async def test_get_pipeline_failing_jobs_includes_job_url(gitlab_client_mock, me
 
 
 @pytest.mark.asyncio
+async def test_get_pipeline_failing_jobs_includes_stage_and_failure_reason(
+    gitlab_client_mock, metadata
+):
+    """Each job surfaces stage, failure_reason and allow_failure when the API returns them."""
+    jobs_response = [
+        {
+            "id": 102,
+            "name": "rspec",
+            "status": "failed",
+            "stage": "test",
+            "failure_reason": "runner_system_failure",
+            "allow_failure": False,
+        },
+        # A job without these fields simply has no corresponding elements.
+        {"id": 103, "name": "job3", "status": "failed", "failure_reason": None},
+    ]
+    responses = [
+        GitLabHttpResponse(
+            status_code=200, body=json.dumps(jobs_response), headers={"X-Next-Page": ""}
+        ),
+    ]
+    gitlab_client_mock.aget = AsyncMock(side_effect=responses)
+
+    tool = GetPipelineFailingJobs(metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    response_json = json.loads(response)
+
+    expected_traces = (
+        "Failed Jobs:\n<jobs>\n"
+        "  <job>\n"
+        "    <job_name>rspec</job_name>\n"
+        "    <job_id>102</job_id>\n"
+        "    <stage>test</stage>\n"
+        "    <failure_reason>runner_system_failure</failure_reason>\n"
+        "    <allow_failure>false</allow_failure>\n"
+        "  </job>\n"
+        "  <job>\n"
+        "    <job_name>job3</job_name>\n"
+        "    <job_id>103</job_id>\n"
+        "  </job>\n"
+        "</jobs>\n"
+    )
+
+    assert response_json == {
+        "pipeline_id": 123,
+        "failed_jobs": expected_traces,
+    }
+
+
+@pytest.mark.asyncio
 async def test_get_pipeline_failing_jobs_filters_allow_failure_jobs(
     gitlab_client_mock, metadata
 ):
@@ -503,6 +556,7 @@ async def test_get_pipeline_failing_jobs_filters_allow_failure_jobs(
         "  <job>\n"
         "    <job_name>real_failure</job_name>\n"
         "    <job_id>101</job_id>\n"
+        "    <allow_failure>false</allow_failure>\n"
         "  </job>\n"
         "  <job>\n"
         "    <job_name>another_failure</job_name>\n"
@@ -551,10 +605,12 @@ async def test_get_pipeline_failing_jobs_includes_allow_failure_jobs_by_default(
         "  <job>\n"
         "    <job_name>real_failure</job_name>\n"
         "    <job_id>101</job_id>\n"
+        "    <allow_failure>false</allow_failure>\n"
         "  </job>\n"
         "  <job>\n"
         "    <job_name>allowed_failure</job_name>\n"
         "    <job_id>102</job_id>\n"
+        "    <allow_failure>true</allow_failure>\n"
         "  </job>\n"
         "</jobs>\n"
     )
