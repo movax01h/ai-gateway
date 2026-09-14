@@ -926,3 +926,105 @@ Example response:
 - `200: OK` if the service returns some completions.
 - `422: Unprocessable Entity` if the required attributes are missing.
 - `401: Unauthorized` if the service fails to authenticate using the access token.
+
+## Embeddings
+
+### Code embeddings
+
+Generate embeddings for a list of code snippets. The access token must have the `generate_embeddings_codebase` unit primitive.
+
+Both paths are handled by the same logic: they accept the same payload and return the same response.
+
+```plaintext
+POST /v1/embeddings/code_embeddings/index
+POST /v1/embeddings/code_embeddings/search
+```
+
+| Attribute                   | Type             | Required                            | Description                                                                                                                                                              | Example                            |
+| --------------------------- | ---------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `model_metadata`            | hash             | yes                                 | Metadata of the model used to generate the embeddings.                                                                                                                   |                                    |
+| `model_metadata.provider`   | string           | yes                                 | The model provider. Valid values are `gitlab` for GitLab-managed models and `litellm` for self-hosted models.                                                            | `gitlab`                           |
+| `model_metadata.identifier` | string           | yes                                 | For the `gitlab` provider, the `gitlab_identifier` of an entry in `ai_gateway/model_selection/models.yml`. For the `litellm` provider, the self-hosted model identifier. | `text_embedding_005_vertex`        |
+| `model_metadata.name`       | string           | Required for the `litellm` provider | Must be `embedding`. Do not set it for the `gitlab` provider.                                                                                                            | `embedding`                        |
+| `model_metadata.endpoint`   | string           | Required for the `litellm` provider | The endpoint of the self-hosted model.                                                                                                                                   | `https://api.example.com/v1`       |
+| `model_metadata.api_key`    | string           | no                                  | The API key of the self-hosted model.                                                                                                                                    | `x3iJ-this-Is-key34EXam!pl3`       |
+| `contents`                  | array of strings | yes                                 | The list of texts to generate embeddings for.                                                                                                                            | `["def is_even(n: int) -> bool:"]` |
+| `dimensions`                | int              | no                                  | The number of dimensions of the returned embeddings. Passed through to the model.                                                                                        | `768`                              |
+| `litellm_drop_params`       | boolean          | no                                  | Passed to LiteLLM as `drop_params`. When `true`, LiteLLM drops parameters that the model does not support instead of raising an error.                                   | `true`                             |
+
+Any `model_metadata.provider` other than `gitlab` or `litellm` is rejected with a `422` status code.
+
+For the `litellm` provider, `model_metadata.identifier` follows LiteLLM's `provider/model` convention. An identifier without a `provider/` prefix is treated as `custom_openai`.
+
+```shell
+curl --request POST \
+  --url "http://localhost:5052/v1/embeddings/code_embeddings/index" \
+  --header 'Authorization: Bearer <access_token>' \
+  --header 'X-Gitlab-Authentication-Type: oidc' \
+  --header 'Content-Type: application/json' \
+  --data-raw '{
+    "model_metadata": {
+      "provider": "gitlab",
+      "identifier": "text_embedding_005_vertex"
+    },
+    "contents": [
+      "def is_even(n: int) -> bool:",
+      "return n % 2 == 0"
+    ]
+  }'
+```
+
+**For self-hosted model**
+
+```shell
+curl --request POST \
+  --url "http://localhost:5052/v1/embeddings/code_embeddings/index" \
+  --header 'Authorization: Bearer <access_token>' \
+  --header 'X-Gitlab-Authentication-Type: oidc' \
+  --header 'Content-Type: application/json' \
+  --data-raw '{
+    "model_metadata": {
+      "provider": "litellm",
+      "name": "embedding",
+      "identifier": "custom_openai/my-embedding-model",
+      "endpoint": "https://api.example.com/v1"
+    },
+    "contents": [
+      "def is_even(n: int) -> bool:",
+      "return n % 2 == 0"
+    ]
+  }'
+```
+
+Example response:
+
+```json
+{
+  "model": {
+    "engine": "litellm_embedding",
+    "name": "text-embedding-005",
+    "identifier": "text_embedding_005_vertex"
+  },
+  "predictions": [
+    {
+      "embedding": [-0.017, 0.043, 0.0072, -0.025, 0.031, 0.018],
+      "index": 0
+    },
+    {
+      "embedding": [0.022, -0.019, 0.035, 0.012, -0.028, 0.041],
+      "index": 1
+    }
+  ]
+}
+```
+
+Each `predictions[].index` is the position of the corresponding entry in the request's `contents` array.
+
+#### Responses
+
+- `200: OK` if the service returns embeddings.
+- `400: Bad Request` if the model provider rejects the request.
+- `401: Unauthorized` if the service fails to authenticate using the access token, or the model provider rejects the credentials.
+- `422: Unprocessable Entity` if the required attributes are missing, or `model_metadata` is invalid. For example, an unsupported `provider`, or a missing `name` or `endpoint` for the `litellm` provider.
+- `429: Too Many Requests` if the model provider rate-limits the request.
+- `504: Gateway Timeout` if the request to the model provider times out.
