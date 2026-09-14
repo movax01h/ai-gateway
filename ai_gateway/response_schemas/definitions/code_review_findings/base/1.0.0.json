@@ -88,7 +88,7 @@
                     "status": {
                         "type": "string",
                         "enum": ["fixed", "verified", "partially_fixed", "still_outstanding"],
-                        "description": "fixed: ADDRESSED, every point resolved. verified: the thread was already resolved and your check of the changed code confirmed the fix. partially_fixed: PARTIALLY ADDRESSED. still_outstanding: NOT ADDRESSED, or RESOLVED with the code unchanged; resolving a thread is not a fix."
+                        "description": "fixed: ADDRESSED - the code changed and every point you raised is now fixed in that changed code. verified: RESOLVED and your check of the changed code confirmed the fix. fixed and verified both claim someone changed the code, so use neither unless you found that change in the diff. partially_fixed: PARTIALLY ADDRESSED. still_outstanding: NOT ADDRESSED, or RESOLVED with the code unchanged; resolving a thread is not a fix."
                     },
                     "note": {
                         "type": "string",
