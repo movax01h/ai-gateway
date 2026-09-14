@@ -53,6 +53,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.errors.typing import (
+    CheckpointSaveError,
     EnvelopeVersionMismatchException,
     InvalidRequestException,
     InvalidWorkflowIdException,
@@ -2674,6 +2675,46 @@ async def test_execute_workflow_context_window_exceeded_error_is_collapsed(
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_checkpoint_save_error_details_are_collapsed(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    # The Rails error body embedded in a CheckpointSaveError varies per request, so
+    # the gRPC details must collapse to the exception type plus a stable message.
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_error = CheckpointSaveError(
+        "Failed to save checkpoint: {'message': '400 Bad request - "
+        "PG::UntranslatableCharacter: ERROR: unsupported Unicode escape sequence'}"
+    )
+    mock_workflow.successful_execution = MagicMock(return_value=False)
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
+    mock_context.set_details.assert_called_once_with(
+        "workflow execution failure: CheckpointSaveError: Failed to save checkpoint"
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_valid_workflow_metadata(
     mock_resolve_flow, mock_abstract_workflow_class, auth_user, mock_context, servicer
 ):
@@ -4727,6 +4768,16 @@ def test_extract_error_message_bad_status_event_is_collapsed(status_event, error
         _extract_error_message(error)
         == "Session status cannot be updated due to bad status event"
     )
+
+
+def test_extract_error_message_checkpoint_save_error_is_collapsed():
+    # The Rails error body (PG error, SQL fragment, offending JSON) varies per request,
+    # so it is collapsed to a stable, generic message.
+    error = CheckpointSaveError(
+        "Failed to save checkpoint: {'message': '400 Bad request - "
+        "PG::UntranslatableCharacter: ERROR: unsupported Unicode escape sequence'}"
+    )
+    assert _extract_error_message(error) == "Failed to save checkpoint"
 
 
 @pytest.mark.parametrize(

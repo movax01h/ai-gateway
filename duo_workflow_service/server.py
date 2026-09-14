@@ -48,6 +48,7 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
+    CheckpointSaveError,
     EnvelopeVersionMismatchException,
     InvalidRequestException,
     InvalidWorkflowIdException,
@@ -256,6 +257,41 @@ def _format_pydantic_validation_error(error: PydanticValidationError) -> str:
     return f"{error.title}: {message}" if message else error.title
 
 
+def _collapse_message_patterns(raw: str) -> str | None:
+    """Collapse known per-request message patterns to stable, generic messages.
+
+    Returns None when no known pattern matches, so the caller falls through to the remaining isinstance checks and the
+    str(error) default.
+    """
+    if re.match(
+        r"Failed to create flow from FlowConfig protobuf: \d+ validation errors? for ",
+        raw,
+    ):
+        # FlowConfig parsing wraps a Pydantic ValidationError, embedding the full
+        # field-by-field breakdown (e.g. "2 validation errors for FlowConfig\n
+        # prompts.0.unit_primitives.0\n..."). Collapse it to a generic message so we
+        # don't surface the enum list / internals. The count varies ("1 validation
+        # error" / "N validation errors"), which is why the pattern matches both.
+        return "Failed to create flow from FlowConfig protobuf: validation error"
+    if schema_match := re.match(r"input '.*?' does not match specified schema", raw):
+        # Additional-context validation wraps a jsonschema.ValidationError, whose str()
+        # dumps the full schema and offending instance (e.g. "... does not match
+        # specified schema: ...\n\nFailed validating ...\n\nOn instance: {...}").
+        # Keep only the "input '<category>' does not match specified schema" prefix so
+        # we don't surface the schema/instance internals to the client.
+        return schema_match.group()
+    if graphql_match := re.search(r"GraphQL errors: \[.*\]", raw, re.DOTALL):
+        # GraphQL failures are raised as Exception("GraphQL errors: {data['errors']}"),
+        # embedding a per-request payload (variable names, locations, messages) e.g.
+        # "GraphQL errors: [{'message': 'Variable $workflowId of type
+        # AiDuoWorkflowsWorkflowID! was provided invalid value', ...}]". The list
+        # varies per request and fragments SLO grouping, so strip the ": [...]" payload
+        # and keep only the stable "GraphQL errors" label. Any leading prefix (e.g.
+        # "Invalid workflow ID: ") is preserved.
+        return raw[: graphql_match.start()] + "GraphQL errors"
+    return None
+
+
 def _extract_error_message(error: BaseException) -> str:
     """Extract a clean, normalized error message from a workflow error.
 
@@ -324,39 +360,18 @@ def _extract_error_message(error: BaseException) -> str:
         # that has status finished'}"), which fragments log grouping. Keep only the
         # stable part; both are available as attributes on the exception.
         message = "Session status cannot be updated due to bad status event"
+    elif isinstance(error, CheckpointSaveError):
+        # The Rails error body embedded in the message varies per request (PG error,
+        # SQL fragment, offending JSON), which fragments log grouping and leaks
+        # internals to the client. Collapse it to a stable, generic message.
+        message = "Failed to save checkpoint"
     elif isinstance(error, PydanticValidationError):
         # Component/flow construction failures raised straight from a Pydantic model
         # (e.g. a DeterministicStepComponent whose tool isn't enabled for the flow).
         # str(error) embeds the whole offending input dict, so keep only the stable part.
         message = _format_pydantic_validation_error(error)
-    elif re.match(
-        r"Failed to create flow from FlowConfig protobuf: \d+ validation errors? for ",
-        str(error),
-    ):
-        # FlowConfig parsing wraps a Pydantic ValidationError, embedding the full
-        # field-by-field breakdown (e.g. "2 validation errors for FlowConfig\n
-        # prompts.0.unit_primitives.0\n..."). Collapse it to a generic message so we
-        # don't surface the enum list / internals. The count varies ("1 validation
-        # error" / "N validation errors"), which is why the pattern matches both.
-        message = "Failed to create flow from FlowConfig protobuf: validation error"
-    elif schema_match := re.match(
-        r"input '.*?' does not match specified schema", str(error)
-    ):
-        # Additional-context validation wraps a jsonschema.ValidationError, whose str()
-        # dumps the full schema and offending instance (e.g. "... does not match
-        # specified schema: ...\n\nFailed validating ...\n\nOn instance: {...}").
-        # Keep only the "input '<category>' does not match specified schema" prefix so
-        # we don't surface the schema/instance internals to the client.
-        message = schema_match.group()
-    elif graphql_match := re.search(r"GraphQL errors: \[.*\]", str(error), re.DOTALL):
-        # GraphQL failures are raised as Exception("GraphQL errors: {data['errors']}"),
-        # embedding a per-request payload (variable names, locations, messages) e.g.
-        # "GraphQL errors: [{'message': 'Variable $workflowId of type
-        # AiDuoWorkflowsWorkflowID! was provided invalid value', ...}]". The list
-        # varies per request and fragments SLO grouping, so strip the ": [...]" payload
-        # and keep only the stable "GraphQL errors" label. Any leading prefix (e.g.
-        # "Invalid workflow ID: ") is preserved.
-        message = str(error)[: graphql_match.start()] + "GraphQL errors"
+    elif (collapsed := _collapse_message_patterns(str(error))) is not None:
+        message = collapsed
     elif isinstance(error, ModelError):
         raw = error.message
         # agent_node sets message=str(APIStatusError) which embeds a Python dict, e.g.:
