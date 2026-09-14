@@ -519,9 +519,7 @@ class ModelSelectionConfig:
         if feature_setting := self.get_resolved_unit_primitive_config_map().get(
             feature_setting_name, None
         ):
-            if is_feature_enabled(FeatureFlag.AI_GATEWAY_MULTI_DEFAULT_MODELS):
-                return self.get_model(random.choice(feature_setting.default_models))
-            return self.get_model(feature_setting.default_models[0])
+            return self.get_model(random.choice(feature_setting.default_models))
         raise ValueError(f"Invalid feature setting: {feature_setting_name}")
 
 
