@@ -436,24 +436,42 @@ class Flow(AbstractWorkflow):
 
         return processed_additional_context
 
-    def _resume_command(
+    def _resume_context_update(
         self,
-        goal: str,
         discarded_ui_chat_log: Optional[list[UiChatLog]] = None,
-    ) -> Command:
+    ) -> Optional[dict[str, Any]]:
+        """Resume seam: the ``context`` state update applied when a run resumes.
+
+        On the engine path a RESUME answers an interrupt and carries no message,
+        so a ``Flow`` variant is expected to suppress this refresh and let
+        ingestion own envelope refresh on a new turn. See
+        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2780
+        """
         # `context.inputs` is populated once, at workflow START
         # (`get_workflow_state`). Re-process the additional context sent with
         # this turn so per-turn inputs (e.g. `plan_context.plan_enabled` from the
         # Duo CLI plan/build picker) refresh the flow state on resume. `context`
         # uses a deep-merge reducer, so this updates only the inputs that changed
         # and leaves the rest of the context intact.
-        state_update: dict[str, Any] = {}
         refreshed_inputs = self._process_additional_context(
             self._additional_context or [],
             discarded_ui_chat_log=discarded_ui_chat_log,
         )
         if refreshed_inputs:
-            state_update["context"] = {"inputs": refreshed_inputs}
+            return {"inputs": refreshed_inputs}
+        return None
+
+    def _resume_command(
+        self,
+        goal: str,
+        discarded_ui_chat_log: Optional[list[UiChatLog]] = None,
+    ) -> Command:
+        state_update: dict[str, Any] = {}
+        context_update = self._resume_context_update(
+            discarded_ui_chat_log=discarded_ui_chat_log,
+        )
+        if context_update:
+            state_update["context"] = context_update
 
         event = FlowEvent(event_type=FlowEventType.RESPONSE, message=goal)
         if not self._approval or self._approval.WhichOneof("user_decision") is None:
