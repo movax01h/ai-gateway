@@ -24,13 +24,6 @@ class FeatureFlag(StrEnum):
     # in gitlab/config/feature_flags -- to be added alongside the first flow config
     # that opts in.
     DAP_PARALLEL_SUBAGENTS = "dap_parallel_subagents"
-    # Binds an AgentComponent's response schema with tool_choice="auto" instead of
-    # "any". "any" forces a tool call every turn, which disables extended thinking on
-    # Anthropic models, so a schema agent can loop until max_cycles without ever
-    # consolidating.
-    # Definition:
-    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/experiment/dap_schema_auto_tool_choice.yml
-    DAP_SCHEMA_AUTO_TOOL_CHOICE = "dap_schema_auto_tool_choice"
     # Gates attaching customer-defined workspace agents to foundational flows as
     # subagents, see duo_workflow_service/agent_platform/v1/catalog. Definition:
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/dap_workspace_agents.yml
