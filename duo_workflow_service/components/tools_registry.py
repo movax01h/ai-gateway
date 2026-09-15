@@ -116,6 +116,7 @@ _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
     tools.FindFiles,
     tools.Grep,
     tools.ExtractLinesFromText,
+    tools.FinalizeCodeReviewFindings,
 ]
 
 _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
