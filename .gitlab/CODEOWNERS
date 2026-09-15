@@ -6,6 +6,12 @@
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 /ai_gateway/response_schemas/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 
+# Duo Developer flows and prompts (including the shared system prompt) are
+# co-owned by the Agent Developer team
+/duo_workflow_service/agent_platform/v1/flows/configs/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+/ai_gateway/prompts/definitions/common/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+/ai_gateway/prompts/definitions/developer_*/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+
 # Orbit-specific flows, prompts, and libs are co-owned by the Orbit team
 /duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
 /duo_workflow_service/agent_platform/v1/flows/configs/developer/*-orbit.yml @gitlab-org/orbit
@@ -17,6 +23,11 @@
 
 # Fix Pipeline flow configs
 /duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
+
+# Duo Developer flow configs and prompts (including the shared system prompt)
+/duo_workflow_service/agent_platform/v1/flows/configs/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+/ai_gateway/prompts/definitions/common/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+/ai_gateway/prompts/definitions/developer_*/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
 # Orbit-specific flow configs
 /duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
