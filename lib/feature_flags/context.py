@@ -33,6 +33,7 @@ class FeatureFlag(StrEnum):
     AGENTIC_FOUNDATIONAL_FLOW_TOOL = "agentic_foundational_flow_tool"
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
     DUO_CHAT_GENERATIVE_UI = "duo_chat_generative_ui"
+    DUO_DEVELOPER_MODEL_ROUTING = "duo_developer_model_routing"
     # Definition:
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/dw_read_blobs_api.yml
     DW_READ_BLOBS_API = "dw_read_blobs_api"
