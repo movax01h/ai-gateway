@@ -1758,7 +1758,6 @@ class TestGetRequiredVariables:
 # ID here.
 _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
     {
-        "advanced_code_review_reviewer",
         "analyze_prescan_codebase_results",
         "code_review_prescan",
         "commit_changes",
@@ -1766,6 +1765,7 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "conversation_compaction_manual",
         "convert_ci_push_changes",
         "convert_to_gl_ci",
+        "deep_code_review_reviewer",
         "developer_agent_prompt",
         "ensure_clean_git_state",
         "explore_directories_for_prescan",
