@@ -343,6 +343,7 @@ _outbox = MagicMock(spec=Outbox)
                 "find_files",
                 "grep",
                 "extract_lines_from_text",
+                "finalize_code_review_findings",
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
@@ -368,6 +369,7 @@ _outbox = MagicMock(spec=Outbox)
                 "grep",
                 "mkdir",
                 "extract_lines_from_text",
+                "finalize_code_review_findings",
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
@@ -542,6 +544,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             metadata=tool_metadata
         ),
         "extract_lines_from_text": tools.ExtractLinesFromText(metadata=tool_metadata),
+        "finalize_code_review_findings": tools.FinalizeCodeReviewFindings(
+            metadata=tool_metadata
+        ),
         "get_glql_schema": tools.GetGlqlSchema(metadata=tool_metadata),
         "fetch_glql_schema": tools.FetchGlqlSchema(metadata=tool_metadata),
         "run_glql_query": tools.RunGLQLQuery(metadata=tool_metadata),
@@ -872,6 +877,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "grep",
         "mkdir",
         "extract_lines_from_text",
+        "finalize_code_review_findings",
         "run_tests",
     }
 
@@ -949,6 +955,7 @@ async def test_registry_configuration_with_preapproved_tools(
         "grep",
         "mkdir",
         "extract_lines_from_text",
+        "finalize_code_review_findings",
         "run_tests",
     }
     expected_preapproved = always_enabled_tools.union(read_write_tools)
