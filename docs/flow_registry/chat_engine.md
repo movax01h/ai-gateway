@@ -45,9 +45,10 @@ The chat engine is a boundary policy over the shared executor, not a second engi
 1. **Documented grain only.** Plain input starts turns and `Command(resume=)` answers interrupts. Nothing else is
    graph input.
 
-One live turn per thread is a client contract, not an engine invariant. Concurrent entry is rejected by the Rails
-status machine with a 400. Admission, fencing, and zombie termination are out of scope for the chat engine and are
-tracked separately.
+One live turn per thread is a client contract, not an engine invariant. Nothing fences concurrent entry today, and
+clients disable send while a turn runs. Admission, fencing, and zombie termination are out of scope for the chat
+engine and are tracked in
+[ai-assist#2877](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2877).
 
 ## Where a turn ends
 
@@ -223,3 +224,6 @@ wrong key. Three layers prevent that, in order:
 - `gitlab-lsp`: template `/explain`, `/fix`, `/refactor` and `/tests` in both IDE webviews before the cutover.
 - Pin at session creation and the read-only cutoff for old threads.
 - Per-owner acceptance of the `ui_log_events` change at version swap.
+- At-rest session status, distinct from `INPUT_REQUIRED` at the boundary:
+  [ai-assist#2878](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2878).
+  When it lands, the seeded terminal writes the new status and nothing else in the engine changes.
