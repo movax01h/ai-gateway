@@ -74,6 +74,9 @@ async def get_models():
 
     for primitive in selection_config.get_resolved_unit_primitive_config_map().values():
         values = primitive.model_dump()
+        # default_models is now a list of DefaultModelEntry dicts; extract identifiers
+        # for the API response which expects a flat list of strings.
+        values["default_models"] = primitive.default_model_identifiers
         default_models = values["default_models"]
 
         if len(default_models) > 1:

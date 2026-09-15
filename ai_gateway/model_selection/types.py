@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,3 +27,19 @@ class FeatureDeprecatedModel(DeprecationInfo):
     """
 
     identifier: str
+
+
+class DefaultModelEntry(BaseModel):
+    """A default model entry with an optional traffic-split weight.
+
+    When ``weight`` is provided for at least one entry in a ``default_models``
+    list, **all** entries must carry a weight (validated by
+    ``UnitPrimitiveConfig``).  Weights are passed directly to
+    ``random.choices`` as the ``weights`` argument, so they do not need to sum
+    to any particular value — only their relative magnitudes matter.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    identifier: str
+    weight: Optional[float] = None
