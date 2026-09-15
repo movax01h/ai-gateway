@@ -1,5 +1,6 @@
 # pylint: disable=too-many-lines
 from contextlib import contextmanager
+from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
@@ -41,6 +42,7 @@ from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
+    UiChatLog,
     WorkflowStatusEnum,
 )
 from duo_workflow_service.errors.typing import (
@@ -664,6 +666,57 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 workflow_type=flow_type,
                 user=user,
                 config=sample_flow_config,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run("test goal")
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.update is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry")
+    async def test_resume_command_omits_context_when_seam_returns_none(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """A variant that returns no resume context update yields a Command with no update.
+
+        Additional context is present, so the parent seam would have refreshed
+        `context.inputs`; the override alone decides that nothing crosses on resume.
+        """
+
+        class NoResumeContextFlow(Flow):
+            def _resume_context_update(
+                self,
+                discarded_ui_chat_log: Optional[list[UiChatLog]] = None,
+            ) -> Optional[dict[str, Any]]:
+                return None
+
+        additional_context = AdditionalContext(
+            category="agent_user_environment",
+            content='{"shell_name": "fish"}',
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
+        ):
+            flow = NoResumeContextFlow(
+                workflow_id="test-workflow-resume-seam-override",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+                additional_context=[additional_context],
             )
 
             mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
