@@ -43,6 +43,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import SessionEndedEvent
+from duo_workflow_service.checkpointer.entry_dispatch import (
+    EntryDispatchContext,
+    InitialEntryDispatch,
+    rails_status_dispatch,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     BILLABLE_STATUSES,
     CHECKPOINT_STATUS_TO_STATUS_EVENT,
@@ -364,6 +369,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         gitlab_status_update_callback: (
             Callable[[WorkflowStatusEventEnum], NoReturn] | None
         ) = None,
+        initial_entry_dispatch: InitialEntryDispatch = rails_status_dispatch,
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
         ],
@@ -380,6 +386,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._logger = structlog.stdlib.get_logger("workflow_checkpointer")
         self._workflow_type = workflow_type
         self._workflow_config = workflow_config
+        self._initial_entry_dispatch = initial_entry_dispatch
         self._internal_event_client = internal_event_client
         self._billing_event_service = billing_event_service
         self._orbit_called = False
@@ -630,9 +637,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
     ) -> tuple[WorkflowStatusEventEnum, EventPropertyEnum]:
         """Determine the workflow status event and event property.
 
-        This method analyzes the current state of the workflow to determine whether
-        it's a new workflow (START), a resumption of an interrupted workflow (RESUME),
-        or a retry of an existing workflow (RETRY).
+        The archived session-viability guard applies to every entry.
+        Classification of a viable entry is delegated to the
+        ``initial_entry_dispatch`` strategy — ``rails_status_dispatch`` by
+        default, the legacy Rails-status-driven dispatch.
 
         Args:
             config: The runnable configuration for the workflow.
@@ -647,12 +655,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             UnsupportedStatusEvent: If a `created` workflow already has checkpoints.
             WorkflowAlreadyFinishedException: If the workflow already finished.
         """
-        checkpoint_tuple = (
-            self._workflow_config.get("latest_checkpoint", None)
-            or self._workflow_config["first_checkpoint"]
-        )
-        status = self._workflow_config["workflow_status"]
-
         if self._workflow_config["archived"]:
             error_msg = (
                 "Archived workflow can not be executed. Please create a new workflow."
@@ -661,54 +663,11 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 error_msg
             )
 
-        if status in [
-            WorkflowStatusEnum.INPUT_REQUIRED,
-            WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
-            WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
-        ]:
-            if not checkpoint_tuple:
-                self._logger.error(
-                    "The workflow record of the GitLab database is a continuous state "
-                    "but there are no associtated checkopints."
-                    "This data integrity issue could be caused by the expiring mechanism of checkpoint records."
-                    "We try to execute this workflow, however, there might be an unexpected behavior.",
-                    **self._workflow_config,
-                )
-
-            return WorkflowStatusEventEnum.RESUME, STATUS_TO_EVENT_PROPERTY.get(
-                status, EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN
+        return await self._initial_entry_dispatch(
+            EntryDispatchContext(
+                workflow_config=self._workflow_config,
+                logger=self._logger,
             )
-
-        if status == WorkflowStatusEnum.CREATED:
-            if checkpoint_tuple:
-                raise UnsupportedStatusEvent(
-                    f"Workflow with status 'created' should not have existing checkpoints. "
-                    f"Found checkpoint: {checkpoint_tuple}"
-                )
-            return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID
-
-        if status == WorkflowStatusEnum.FINISHED:
-            # `finished` is terminal in the Rails state machine: the `retry` the
-            # fallback below would send is rejected with a 400 and surfaces as an
-            # INTERNAL gRPC error. Nothing is left to execute, so end the session
-            # cleanly instead — no status event, no graph run, Rails untouched.
-            raise WorkflowAlreadyFinishedException(
-                "Session has already finished and cannot be resumed."
-            )
-
-        if status == WorkflowStatusEnum.STOPPED:
-            # Pure detection — no checkpoint access here. The resolution of this
-            # DWS-internal signal into RESUME/START (or a legacy plain RETRY)
-            # happens in AbstractWorkflow._resolve_stop_recovery; the wire event
-            # sent to Rails is translated to `retry` in _update_workflow_status.
-            return (
-                WorkflowStatusEventEnum.STOP_RECOVERY,
-                EventPropertyEnum.WORKFLOW_RESUME_BY_USER,
-            )
-
-        return (
-            WorkflowStatusEventEnum.RETRY,
-            EventPropertyEnum.WORKFLOW_RESUME_BY_USER,
         )
 
     def _capture_audit_session_ended(self, exc_type, exc_value):
