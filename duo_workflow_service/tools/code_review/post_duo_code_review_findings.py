@@ -1,4 +1,4 @@
-"""Deterministic publish step for the advanced code review flow.
+"""Deterministic publish step for the deep code review flow.
 
 Takes the reviewer's structured findings straight from its schema-validated final answer, applies the confidence gate,
 orders and counts, composes the summary, and posts the findings as JSON. No finding passes through a model after the

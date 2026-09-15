@@ -1,4 +1,4 @@
-# Advanced Duo Code Review: one investigative reviewer agent followed by a
+# Deep Duo Code Review: one investigative reviewer agent followed by a
 # deterministic publish step. No finding passes through a model after the
 # reviewer writes it; the confidence gate is the only (counted) drop.
 # Epic: https://gitlab.com/groups/gitlab-org/-/work_items/21524
@@ -61,7 +61,7 @@ components:
   # Step 3: The reviewer, with read-only repository tools.
   - name: "review"
     type: AgentComponent
-    prompt_id: "advanced_code_review_reviewer"
+    prompt_id: "deep_code_review_reviewer"
     prompt_version: "^1.0.0"
     response_schema_id: "code_review_findings"
     response_schema_version: "^1.0.0"

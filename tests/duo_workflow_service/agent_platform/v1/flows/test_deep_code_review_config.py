@@ -1,6 +1,6 @@
-"""Guards for the shipped advanced_code_review flow config.
+"""Guards for the shipped deep_code_review flow config.
 
-These tests assert on the content of ``advanced_code_review/1.0.0.yml`` (the
+These tests assert on the content of ``deep_code_review/1.0.0.yml`` (the
 four-step pipeline and the router that skips the discussion fetch on a first
 review, the reviewer's schema id, toolset and ``max_cycles``, the fetch step's
 pinned inputs, and the publish step's schema-validated answer and
@@ -15,7 +15,7 @@ from ai_gateway.response_schemas import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 
 
-class TestAdvancedCodeReviewConfig:
+class TestDeepCodeReviewConfig:
     INVESTIGATION_TOOLSET = [
         "gitlab_blob_search",
         "get_repository_file",
@@ -27,7 +27,7 @@ class TestAdvancedCodeReviewConfig:
 
     @classmethod
     def _config(cls) -> FlowConfig:
-        return FlowConfig.from_yaml_config("advanced_code_review", "1.0.0")
+        return FlowConfig.from_yaml_config("deep_code_review", "1.0.0")
 
     @classmethod
     def _components(cls) -> dict:
