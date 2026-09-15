@@ -248,11 +248,10 @@ configurable_unit_primitives:
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
-        - "glm_5_2_fireworks"
-        - "kimi_k2_6_fireworks"
+        - "glm_5_3_fireworks"
         - "kimi_k3_fireworks"
         - "minimax_m3_fireworks"
-        - "qwen_3_6_27b_fireworks"
+        - "qwen_3_8_27b_fireworks"
 
   - feature_setting: "duo_agent_platform_agentic_chat"
     unit_primitives:
@@ -312,11 +311,10 @@ configurable_unit_primitives:
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
-        - "glm_5_2_fireworks"
-        - "kimi_k2_6_fireworks"
+        - "glm_5_3_fireworks"
         - "kimi_k3_fireworks"
         - "minimax_m3_fireworks"
-        - "qwen_3_6_27b_fireworks"
+        - "qwen_3_8_27b_fireworks"
 
   - feature_setting: "duo_developer"
     unit_primitives: []
@@ -373,11 +371,10 @@ configurable_unit_primitives:
     dev:
       selectable_models:
         - "gemini_3_1_pro_preview_vertex"
-        - "glm_5_2_fireworks"
-        - "kimi_k2_6_fireworks"
+        - "glm_5_3_fireworks"
         - "kimi_k3_fireworks"
         - "minimax_m3_fireworks"
-        - "qwen_3_6_27b_fireworks"
+        - "qwen_3_8_27b_fireworks"
 
   - feature_setting: "categorize_question"
     unit_primitives:
