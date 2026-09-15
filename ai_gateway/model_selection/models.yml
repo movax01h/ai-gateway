@@ -1,19 +1,5 @@
 # see docs/model_selection for documentation
 models:
-  - name: "Kimi K2.6"
-    provider: "Fireworks"
-    gitlab_identifier: "kimi_k2_6_fireworks"
-    description: "Open-source 1T MoE multimodal model with strong coding, visual reasoning, and agentic capabilities."
-    cost_indicator: "$"
-    max_context_tokens: 256000
-    model_class_provider: litellm
-    use_model_max_tokens: true
-    params:
-      model: "accounts/fireworks/models/kimi-k2p6"
-      custom_llm_provider: "fireworks_ai"
-      temperature: 0.0
-      max_tokens: 32_766
-
   - name: "Kimi K3"
     provider: "Fireworks"
     gitlab_identifier: "kimi_k3_fireworks"
@@ -42,35 +28,36 @@ models:
       top_p: 0.95
       max_tokens: 64_000
 
-  - name: "GLM 5.2"
+  - name: "GLM 5.3"
     provider: "Fireworks"
-    gitlab_identifier: "glm_5_2_fireworks"
+    gitlab_identifier: "glm_5_3_fireworks"
     description: "Open-source 1M-context MoE model for agentic coding and long-horizon engineering tasks."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
     model_class_provider: litellm
     params:
-      model: "accounts/fireworks/models/glm-5p2"
+      model: "accounts/fireworks/models/glm-5p3"
       custom_llm_provider: "fireworks_ai"
-      temperature: 1.0  # Z.ai SWE-Bench Pro config: temperature=1 (https://huggingface.co/zai-org/GLM-5.2)
+      temperature: 1.0  # Z.ai SWE-Bench Pro config: temperature=1 (https://huggingface.co/zai-org/GLM-5.3)
       top_p: 1.0
       max_tokens: 32_768  # aligned with OSS peers (Kimi K3, Qwen 3.6) on same Fireworks infra
 
-  - name: "Qwen3.6-27B"
+  - name: "Qwen3.8-27B"
     provider: "Fireworks"
-    gitlab_identifier: "qwen_3_6_27b_fireworks"
+    gitlab_identifier: "qwen_3_8_27b_fireworks"
     description: "Open-source model for agentic coding."
     cost_indicator: "$"
-    max_context_tokens: 262_144  # https://huggingface.co/Qwen/Qwen3.6-27B
+    max_context_tokens: 262_144  # https://huggingface.co/Qwen/Qwen3.8-27B
     model_class_provider: litellm
     strip_reasoning: true
     requires_single_system_message: true
     family:
       - qwen
     params:
-      model: "accounts/gitlab/deployments/jc0k81hq"
+      model: "accounts/gitlab/deployments/qcuju3le"
       custom_llm_provider: "fireworks_ai"
-      temperature: 0.0
+      temperature: 1.0
+      top_p: 0.95
       max_tokens: 32_768
 
   - name: "Codestral 25.01"
