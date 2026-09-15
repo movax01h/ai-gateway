@@ -843,7 +843,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     await self._reconcile_session_status()
                 return False
 
-            stop_exception = str(exc_value) == AIO_CANCEL_STOP_WORKFLOW_REQUEST
             infra_stop_exception = (
                 str(exc_value) == AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST
             )
@@ -871,24 +870,22 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             # Past the two resumable endings above, so this session is over.
             self._track_tool_loop_session_summary(exc_type, exc_value)
 
-            if not stop_exception:
+            if str(exc_value) == AIO_CANCEL_STOP_WORKFLOW_REQUEST:
+                status = WorkflowStatusEventEnum.STOP
+            else:
+                status = WorkflowStatusEventEnum.DROP
+
+                if isinstance(exc_value, asyncio.exceptions.CancelledError):
+                    # When this workflow task is cancelled by `workflow_task.cancel`, `CancelledError` is raised.
+                    event = EventEnum.WORKFLOW_ABORTED
+                else:
+                    event = EventEnum.WORKFLOW_FINISH_FAILURE
+
                 log_exception(
                     exc_value,
                     extra={"workflow_id": self._workflow_id, "source": __name__},
                 )
 
-            event = EventEnum.WORKFLOW_FINISH_FAILURE
-            status = WorkflowStatusEventEnum.DROP
-
-            if isinstance(exc_value, asyncio.exceptions.CancelledError):
-                if stop_exception:
-                    event = EventEnum.WORKFLOW_STOP
-                    status = WorkflowStatusEventEnum.STOP
-                else:
-                    # When this workflow task is cancelled by `workflow_task.cancel`, `CancelledError` is raised.
-                    event = EventEnum.WORKFLOW_ABORTED
-
-            if not stop_exception:
                 await self._handle_workflow_exception(exc_value, event)
 
             await self._update_workflow_status_safely(status)
@@ -897,7 +894,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if not self._offline_mode:
             return await self._handle_online_mode_completion()
 
-    async def _handle_online_mode_completion(self) -> Optional[bool]:
+    async def _handle_online_mode_completion(self) -> bool:
         """Handle workflow completion in online mode."""
         # Fire the deferred FINISH now that the graph loop has drained and its
         # terminal checkpoint (the final answer) is persisted, so listeners on
