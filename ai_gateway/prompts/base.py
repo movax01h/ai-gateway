@@ -1105,7 +1105,7 @@ class BasePromptRegistry(ABC):
         models_visited = set()
 
         for unit_primitive_config in model_selection_config.get_unit_primitive_config():
-            for model in unit_primitive_config.default_models:
+            for model in unit_primitive_config.default_model_identifiers:
                 if model in models_visited:
                     continue
 

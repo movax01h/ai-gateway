@@ -1,12 +1,20 @@
 import random
 from itertools import chain
 from pathlib import Path
-from typing import Annotated, Iterable, Literal, Optional
+from typing import Annotated, Any, Iterable, Literal, Optional
 
 import structlog
 import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from ai_gateway.config import (
     ModelReleaseFeatureAttachment,
@@ -25,6 +33,7 @@ from ai_gateway.model_selection.models import (
     ModelClassProvider,
 )
 from ai_gateway.model_selection.types import (
+    DefaultModelEntry,
     DeprecationInfo,
     DevConfig,
     FeatureDeprecatedModel,
@@ -169,12 +178,53 @@ LLMDefinition = Annotated[
 class UnitPrimitiveConfig(BaseModel):
     feature_setting: str
     unit_primitives: list[GitLabUnitPrimitive]
-    default_models: list[str] = Field(min_length=1)
+    default_models: list[DefaultModelEntry] = Field(min_length=1)
     models_for_tags: dict[str, str] = Field(default_factory=dict)
     selectable_models: list[str] = Field(default_factory=list)
     beta_models: list[str] = Field(default_factory=list)
     deprecated_models: list[FeatureDeprecatedModel] = Field(default_factory=list)
     dev: DevConfig | None = None
+
+    @field_validator("default_models", mode="before")
+    @classmethod
+    def coerce_default_models(cls, v: Any) -> Any:
+        """Coerce plain strings in default_models to DefaultModelEntry dicts."""
+        if not isinstance(v, list):
+            return v
+
+        return [
+            {"identifier": entry} if isinstance(entry, str) else entry for entry in v
+        ]
+
+    @model_validator(mode="after")
+    def validate_weights_all_or_none(self) -> "UnitPrimitiveConfig":
+        """Weights must be specified for all entries or for no entries."""
+        weights = [entry.weight for entry in self.default_models]
+        has_weight = [w is not None for w in weights]
+        if any(has_weight) and not all(has_weight):
+            missing = [
+                self.default_models[i].identifier
+                for i, present in enumerate(has_weight)
+                if not present
+            ]
+            raise ValueError(
+                f"Feature '{self.feature_setting}': weight must be specified for all "
+                f"default_models entries or none. Missing weight for: {missing}"
+            )
+        return self
+
+    @property
+    def default_model_identifiers(self) -> list[str]:
+        """Return the list of model identifiers from default_models."""
+        return [entry.identifier for entry in self.default_models]
+
+    @property
+    def default_model_weights(self) -> list[float] | None:
+        """Return weights if all entries have weights, otherwise None."""
+        weights = [entry.weight for entry in self.default_models]
+        if all(w is not None for w in weights):
+            return weights  # type: ignore[return-value]
+        return None
 
 
 class ModelSelectionConfig:
@@ -302,9 +352,9 @@ class ModelSelectionConfig:
 
             for feature_setting, models in self._default_models_override.items():
                 if feature_setting in self._unit_primitive_configs:
-                    self._unit_primitive_configs[
-                        feature_setting
-                    ].default_models = models
+                    self._unit_primitive_configs[feature_setting].default_models = [
+                        DefaultModelEntry(identifier=m) for m in models
+                    ]
 
         return self._unit_primitive_configs
 
@@ -376,7 +426,9 @@ class ModelSelectionConfig:
                         list="default_models",
                     )
                 if valid:
-                    updates["default_models"] = valid
+                    updates["default_models"] = [
+                        DefaultModelEntry(identifier=m) for m in valid
+                    ]
             if updates:
                 result[feature_setting] = upc.model_copy(update=updates)
         return result
@@ -389,7 +441,7 @@ class ModelSelectionConfig:
         errors: set[str] = set()
         for unit_primitive_config in unit_primitive_configs:
             ids = chain(
-                unit_primitive_config.default_models,
+                unit_primitive_config.default_model_identifiers,
                 unit_primitive_config.models_for_tags.values(),
                 unit_primitive_config.selectable_models,
                 unit_primitive_config.beta_models,
@@ -414,7 +466,7 @@ class ModelSelectionConfig:
             f"Feature '{upc.feature_setting}' has default model "
             f"'{default_model}' that is not in selectable_models."
             for upc in unit_primitive_configs
-            for default_model in upc.default_models
+            for default_model in upc.default_model_identifiers
             if upc.selectable_models and default_model not in upc.selectable_models
         ]
         if errors:
@@ -519,7 +571,10 @@ class ModelSelectionConfig:
         if feature_setting := self.get_resolved_unit_primitive_config_map().get(
             feature_setting_name, None
         ):
-            return self.get_model(random.choice(feature_setting.default_models))
+            identifiers = feature_setting.default_model_identifiers
+            weights = feature_setting.default_model_weights
+            chosen = random.choices(identifiers, weights=weights, k=1)[0]
+            return self.get_model(chosen)
         raise ValueError(f"Invalid feature setting: {feature_setting_name}")
 
 

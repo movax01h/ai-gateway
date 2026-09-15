@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import structlog.testing
 from gitlab_cloud_connector import GitLabUnitPrimitive
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.model_selection.model_selection_config import (
@@ -18,6 +18,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ModelSelectionConfig,
     UnitPrimitiveConfig,
 )
+from ai_gateway.model_selection.types import DefaultModelEntry
 from lib.feature_flags.context import current_feature_flag_context
 
 
@@ -126,7 +127,7 @@ def test_get_unit_primitive_config(selection_config):
                 GitLabUnitPrimitive.ASK_COMMIT,
                 GitLabUnitPrimitive.ASK_EPIC,
             ],
-            default_models=["gitlab-model-1"],
+            default_models=[DefaultModelEntry(identifier="gitlab-model-1")],
             selectable_models=["gitlab-model-1"],
             beta_models=["gitlab-model-2"],
             dev=None,
@@ -134,7 +135,10 @@ def test_get_unit_primitive_config(selection_config):
         UnitPrimitiveConfig(
             feature_setting="multiple_defaults",
             unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
-            default_models=["gitlab-model-1", "gitlab-model-2"],
+            default_models=[
+                DefaultModelEntry(identifier="gitlab-model-1"),
+                DefaultModelEntry(identifier="gitlab-model-2"),
+            ],
             selectable_models=["gitlab-model-1", "gitlab-model-2"],
             beta_models=[],
         ),
@@ -150,7 +154,7 @@ def test_get_unit_primitive_config_map(selection_config):
                 GitLabUnitPrimitive.ASK_COMMIT,
                 GitLabUnitPrimitive.ASK_EPIC,
             ],
-            default_models=["gitlab-model-1"],
+            default_models=[DefaultModelEntry(identifier="gitlab-model-1")],
             selectable_models=["gitlab-model-1"],
             beta_models=["gitlab-model-2"],
             dev=None,
@@ -158,7 +162,10 @@ def test_get_unit_primitive_config_map(selection_config):
         "multiple_defaults": UnitPrimitiveConfig(
             feature_setting="multiple_defaults",
             unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
-            default_models=["gitlab-model-1", "gitlab-model-2"],
+            default_models=[
+                DefaultModelEntry(identifier="gitlab-model-1"),
+                DefaultModelEntry(identifier="gitlab-model-2"),
+            ],
             selectable_models=["gitlab-model-1", "gitlab-model-2"],
             beta_models=[],
         ),
@@ -183,9 +190,11 @@ def test_default_models_override_replaces_yaml_defaults():
 
     unit_primitive_map = config.get_unit_primitive_config_map()
 
-    assert unit_primitive_map["test_config"].default_models == ["gitlab-model-2"]
+    assert unit_primitive_map["test_config"].default_model_identifiers == [
+        "gitlab-model-2"
+    ]
     # Unaffected feature settings should retain their YAML defaults.
-    assert unit_primitive_map["multiple_defaults"].default_models == [
+    assert unit_primitive_map["multiple_defaults"].default_model_identifiers == [
         "gitlab-model-1",
         "gitlab-model-2",
     ]
@@ -202,8 +211,10 @@ def test_default_models_override_ignores_unknown_feature_settings():
     unit_primitive_map = config.get_unit_primitive_config_map()
 
     # All feature settings should retain their YAML defaults.
-    assert unit_primitive_map["test_config"].default_models == ["gitlab-model-1"]
-    assert unit_primitive_map["multiple_defaults"].default_models == [
+    assert unit_primitive_map["test_config"].default_model_identifiers == [
+        "gitlab-model-1"
+    ]
+    assert unit_primitive_map["multiple_defaults"].default_model_identifiers == [
         "gitlab-model-1",
         "gitlab-model-2",
     ]
@@ -217,7 +228,9 @@ def test_default_models_override_empty_dict_is_noop():
 
     unit_primitive_map = config.get_unit_primitive_config_map()
 
-    assert unit_primitive_map["test_config"].default_models == ["gitlab-model-1"]
+    assert unit_primitive_map["test_config"].default_model_identifiers == [
+        "gitlab-model-1"
+    ]
 
 
 @pytest.mark.usefixtures("mock_fs")
@@ -237,7 +250,9 @@ def test_instance_uses_get_config_for_overrides():
 
     assert instance._default_models_override == {"test_config": ["gitlab-model-2"]}
     unit_primitive_map = instance.get_unit_primitive_config_map()
-    assert unit_primitive_map["test_config"].default_models == ["gitlab-model-2"]
+    assert unit_primitive_map["test_config"].default_model_identifiers == [
+        "gitlab-model-2"
+    ]
 
 
 @pytest.mark.usefixtures("mock_fs")
@@ -498,8 +513,10 @@ def test_get_model_for_feature(selection_config):
 
 @pytest.mark.usefixtures("mock_fs")
 def test_get_model_for_feature_with_multiple_defaults(selection_config):
-    """Load-balances across all default models via random.choice."""
-    with patch("random.choice", return_value="gitlab-model-2") as mock_random_choice:
+    """Load-balances across all default models via random.choices (uniform when no weights)."""
+    with patch(
+        "random.choices", return_value=["gitlab-model-2"]
+    ) as mock_random_choices:
         assert selection_config.get_model_for_feature(
             "multiple_defaults"
         ) == ChatAnthropicDefinition(
@@ -511,7 +528,124 @@ def test_get_model_for_feature_with_multiple_defaults(selection_config):
             params={"model": "provider-model-2"},
         )
 
-        mock_random_choice.assert_called_once_with(["gitlab-model-1", "gitlab-model-2"])
+        mock_random_choices.assert_called_once_with(
+            ["gitlab-model-1", "gitlab-model-2"], weights=None, k=1
+        )
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_get_model_for_feature_with_weights(selection_config):
+    """When weights are set, random.choices is called with the correct weights."""
+    weighted_config = UnitPrimitiveConfig(
+        feature_setting="multiple_defaults",
+        unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+        default_models=[
+            DefaultModelEntry(identifier="gitlab-model-1", weight=70.0),
+            DefaultModelEntry(identifier="gitlab-model-2", weight=30.0),
+        ],
+        selectable_models=["gitlab-model-1", "gitlab-model-2"],
+    )
+    with patch.object(
+        selection_config,
+        "get_resolved_unit_primitive_config_map",
+        return_value={"multiple_defaults": weighted_config},
+    ):
+        with patch(
+            "random.choices", return_value=["gitlab-model-1"]
+        ) as mock_random_choices:
+            result = selection_config.get_model_for_feature("multiple_defaults")
+
+        assert result.gitlab_identifier == "gitlab-model-1"
+        mock_random_choices.assert_called_once_with(
+            ["gitlab-model-1", "gitlab-model-2"], weights=[70.0, 30.0], k=1
+        )
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_default_model_entry_weight_all_or_none_validation():
+    """UnitPrimitiveConfig raises when only some default_models entries have weights."""
+    with pytest.raises(ValidationError, match="weight must be specified for all"):
+        UnitPrimitiveConfig(
+            feature_setting="bad_config",
+            unit_primitives=[],
+            default_models=[
+                DefaultModelEntry(identifier="gitlab-model-1", weight=70.0),
+                DefaultModelEntry(identifier="gitlab-model-2"),  # missing weight
+            ],
+            selectable_models=["gitlab-model-1", "gitlab-model-2"],
+        )
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_default_model_entry_no_weights_passes_validation():
+    """UnitPrimitiveConfig is valid when no default_models entries have weights."""
+    upc = UnitPrimitiveConfig(
+        feature_setting="no_weights",
+        unit_primitives=[],
+        default_models=[
+            DefaultModelEntry(identifier="gitlab-model-1"),
+            DefaultModelEntry(identifier="gitlab-model-2"),
+        ],
+        selectable_models=["gitlab-model-1", "gitlab-model-2"],
+    )
+    assert upc.default_model_weights is None
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_default_model_entry_all_weights_passes_validation():
+    """UnitPrimitiveConfig is valid when all default_models entries have weights."""
+    upc = UnitPrimitiveConfig(
+        feature_setting="all_weights",
+        unit_primitives=[],
+        default_models=[
+            DefaultModelEntry(identifier="gitlab-model-1", weight=70.0),
+            DefaultModelEntry(identifier="gitlab-model-2", weight=30.0),
+        ],
+        selectable_models=["gitlab-model-1", "gitlab-model-2"],
+    )
+    assert upc.default_model_weights == [70.0, 30.0]
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_default_model_identifiers_property():
+    """default_model_identifiers returns a flat list of identifier strings."""
+    upc = UnitPrimitiveConfig(
+        feature_setting="test",
+        unit_primitives=[],
+        default_models=[
+            DefaultModelEntry(identifier="gitlab-model-1", weight=60.0),
+            DefaultModelEntry(identifier="gitlab-model-2", weight=40.0),
+        ],
+        selectable_models=["gitlab-model-1", "gitlab-model-2"],
+    )
+    assert upc.default_model_identifiers == ["gitlab-model-1", "gitlab-model-2"]
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_coerce_default_models_from_plain_strings():
+    """Plain strings in default_models are coerced to DefaultModelEntry objects."""
+    upc = UnitPrimitiveConfig(
+        feature_setting="test",
+        unit_primitives=[],
+        default_models=["gitlab-model-1", "gitlab-model-2"],
+        selectable_models=["gitlab-model-1", "gitlab-model-2"],
+    )
+    assert upc.default_models == [
+        DefaultModelEntry(identifier="gitlab-model-1"),
+        DefaultModelEntry(identifier="gitlab-model-2"),
+    ]
+    assert upc.default_model_identifiers == ["gitlab-model-1", "gitlab-model-2"]
+
+
+def test_coerce_default_models_rejects_invalid_types():
+    """Coercion from plain strings must not hide type errors for non-string entries."""
+    with pytest.raises(ValidationError, match="Input should be a valid list"):
+        UnitPrimitiveConfig(
+            feature_setting="bad_config",
+            unit_primitives=[],
+            default_models=42,
+            selectable_models=[],
+        )
 
 
 def test_get_model_for_feature_no_feature(selection_config):
@@ -1289,7 +1423,9 @@ class TestEnvModelReleases:
 
         current_feature_flag_context.set({"ai_model_release"})
         resolved_map = config.get_resolved_unit_primitive_config_map()
-        assert resolved_map["test_config"].default_models == ["env-fake-model-vertex"]
+        assert resolved_map["test_config"].default_model_identifiers == [
+            "env-fake-model-vertex"
+        ]
 
         # Cached map must be unchanged
         assert (
@@ -1514,7 +1650,7 @@ class TestEnvModelReleases:
         with structlog.testing.capture_logs() as cap_logs:
             resolved = config.get_resolved_unit_primitive_config_map()
 
-        assert "embargo-model" not in resolved["test_config"].default_models
+        assert "embargo-model" not in resolved["test_config"].default_model_identifiers
         assert any(
             r.get("log_level") == "warning"
             and r.get("gitlab_identifier") == "embargo-model"
