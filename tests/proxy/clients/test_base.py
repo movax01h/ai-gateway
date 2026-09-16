@@ -1,7 +1,9 @@
 # pylint: disable=line-too-long
 import json
+from unittest.mock import Mock
 
 import fastapi
+import httpx
 import litellm
 import pytest
 from fastapi.responses import JSONResponse
@@ -30,19 +32,31 @@ def proxy_client_fixture(
     return ProxyClient(limits, internal_event_client, billing_event_service)
 
 
+@pytest.fixture(name="stream")
+def stream_fixture() -> bool:
+    """Stream flag the test ProxyModel is built with; parametrize to override."""
+    return False
+
+
+@pytest.fixture(name="allowed_headers_to_downstream")
+def allowed_headers_to_downstream_fixture() -> list[str]:
+    """Response headers the test ProxyModel relays; parametrize to override."""
+    return ["Content-Length"]
+
+
 @pytest.fixture(name="test_proxy_model")
-def test_proxy_model_fixture():
+def test_proxy_model_fixture(stream: bool, allowed_headers_to_downstream: list[str]):
     """Fixture providing a test ProxyModel."""
     return ProxyModel(
         base_url="https://api.example.com",
         model_name="test-model",
         upstream_path="/valid_path",
-        stream=False,
+        stream=stream,
         upstream_service="test_service",
         headers_to_upstream={"X-Test-Header": "test"},
         allowed_upstream_models=["test-model"],
         allowed_headers_to_upstream=["Content-Type"],
-        allowed_headers_to_downstream=["Content-Length"],
+        allowed_headers_to_downstream=allowed_headers_to_downstream,
     )
 
 
@@ -182,7 +196,10 @@ async def test_proxy_exception_code(
     billing_event_service,
     test_proxy_model,
 ):
+    """A ProxyException from litellm is returned as its parsed JSON message.
 
+    Upstream error responses no longer arrive this way, so this covers litellm's own failures only.
+    """
     error_content = {
         "type": "error",
         "error": {
@@ -195,7 +212,8 @@ async def test_proxy_exception_code(
         status_code=400, detail=json.dumps(error_content)
     )
 
-    mock_proxy_async_client.request.side_effect = http_exception
+    # litellm dispatches every pass-through request through `send()`.
+    mock_proxy_async_client.send.side_effect = http_exception
 
     proxy_client = ProxyClient(limits, internal_event_client, billing_event_service)
     response = await proxy_client.proxy(request_factory(), test_proxy_model)
@@ -214,12 +232,13 @@ async def test_proxy_exception_code_with_malformed_json_message(
     billing_event_service,
     test_proxy_model,
 ):
-
+    """A ProxyException message that is not JSON is wrapped in a message dict."""
     error_content = "type: invalid_request_error, message: prompt is too long: 200076 tokens > 200000 maximum"
 
     http_exception = fastapi.HTTPException(status_code=400, detail=error_content)
 
-    mock_proxy_async_client.request.side_effect = http_exception
+    # litellm dispatches every pass-through request through `send()`.
+    mock_proxy_async_client.send.side_effect = http_exception
 
     proxy_client = ProxyClient(limits, internal_event_client, billing_event_service)
     response = await proxy_client.proxy(request_factory(), test_proxy_model)
@@ -227,3 +246,70 @@ async def test_proxy_exception_code_with_malformed_json_message(
     assert isinstance(response, JSONResponse)
     assert response.status_code == 400
     assert json.loads(response.body) == {"message": error_content}
+
+
+_UPSTREAM_RATE_LIMIT_BODY = b'{"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your organization\'s rate limit of 8,000,000 input tokens per minute"}}'
+
+
+async def _read_body(response: fastapi.Response) -> bytes:
+    """Read a proxied response body, whether it streams or arrives buffered."""
+    if isinstance(response, fastapi.responses.StreamingResponse):
+        return b"".join(
+            [
+                chunk.encode() if isinstance(chunk, str) else bytes(chunk)
+                async for chunk in response.body_iterator
+            ]
+        )
+
+    return bytes(response.body)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stream", "request_body", "allowed_headers_to_downstream"),
+    [
+        pytest.param(
+            True,
+            b'{"model": "model1", "stream": true}',
+            ["Content-Type"],
+            id="streaming",
+        ),
+        pytest.param(
+            False,
+            b'{"model": "model1"}',
+            ["Content-Type"],
+            id="non-streaming",
+        ),
+    ],
+)
+async def test_upstream_error_body_relayed_unchanged(
+    mock_proxy_async_client,
+    limits,
+    request_factory,
+    internal_event_client,
+    billing_event_service,
+    test_proxy_model,
+    request_body,
+):
+    """An upstream error response reaches the client with its body untouched.
+
+    A streaming upstream error used to be re-raised with the body read as
+    bytes, so it arrived here as the string `b'{"type":"error",...}'`, failed
+    to parse as JSON, and was served as `{"message": "b'...'"}` instead of the
+    provider's own envelope. Both paths now relay the response as it came.
+    """
+    mock_proxy_async_client.send.return_value = httpx.Response(
+        status_code=429,
+        headers={"Content-Type": "application/json"},
+        content=_UPSTREAM_RATE_LIMIT_BODY,
+        request=Mock(),
+    )
+
+    proxy_client = ProxyClient(limits, internal_event_client, billing_event_service)
+    response = await proxy_client.proxy(
+        request_factory(request_body=request_body), test_proxy_model
+    )
+
+    assert response.status_code == 429
+    assert response.headers["content-type"] == "application/json"
+    assert await _read_body(response) == _UPSTREAM_RATE_LIMIT_BODY
