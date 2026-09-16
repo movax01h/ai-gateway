@@ -6,7 +6,7 @@
     "properties": {
         "merge_request_url": {
             "type": "string",
-            "description": "The merge request URL extracted from the git operations result, or constructed from the repository URL and workflow ID when not found.",
+            "description": "The web URL of the created merge request, taken from the git operations result. Empty when no merge request was created.",
             "examples": ["https://gitlab.com/org/project/-/merge_requests/123"]
         },
         "readiness_detection_score": {
