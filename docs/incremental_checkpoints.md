@@ -10,7 +10,7 @@ Incremental checkpoints send only the channels that changed, and within those ch
 
 ## Gating
 
-A per-workflow property gates this feature: `WorkflowConfig.incremental_checkpoints_enabled`, sourced from the workflow's `incrementalCheckpointsEnabled` field (see [`gitlab_api.py`](../duo_workflow_service/gitlab/gitlab_api.py)) and checked in `aput`. Workflows without it enabled receive the legacy payload unchanged. The current rollout is a **shadow write**: `aput` still sends the full `compressed_checkpoint` so reads keep working, and additionally sends the blobs; Rails persists both but reads from the full checkpoint.
+A per-workflow property gates this feature: `WorkflowConfig.incremental_checkpoints_enabled`, sourced from the workflow's `incrementalCheckpointsEnabled` field (see [`gitlab_api.py`](../duo_workflow_service/gitlab/gitlab_api.py)) and checked in `aput`. Workflows without it enabled receive the legacy payload unchanged. The current rollout is a **shadow write**: `aput` still sends the full `compressed_checkpoint` so reads keep working, and additionally sends the blobs; Rails persists both, and reads the header and blobs for any workflow with the column set.
 
 A second gate layers on top: the `incremental_checkpoints_only` server capability, which says the instance stores only the header and the blobs. `aput` then sends the checkpoint skeleton (the langgraph checkpoint minus `channel_values`) instead of `compressed_checkpoint`. Rails advertises the capability from `duo_workflow_write_incremental_only`, workhorse appends it to `clientCapabilities`, and `is_client_capable` reads it here. An instance too old to advertise it keeps receiving the full payload, and Rails accepts both shapes, so a mid-session change can't break a write.
 
