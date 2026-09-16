@@ -22,6 +22,8 @@ from langgraph.errors import GraphRecursionError
 
 from duo_workflow_service.audit_events.event_types import SessionEndedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import (
+    MAX_NESTED_INCREMENTAL_BASELINES,
+    TOP_LEVEL_CHECKPOINT_NS,
     GitLabWorkflow,
     WorkflowStatusEventEnum,
     _dict_of_list_delta,
@@ -273,9 +275,9 @@ def checkpoint_metadata_fixture():
     return metadata
 
 
-def _incremental_state(gitlab_workflow):
-    """The checkpointer's incremental-checkpoint delta state."""
-    return gitlab_workflow._incremental_state
+def _incremental_state(gitlab_workflow, checkpoint_ns=TOP_LEVEL_CHECKPOINT_NS):
+    """Incremental-checkpoint delta state for one LangGraph checkpoint namespace."""
+    return gitlab_workflow._incremental_state_for(checkpoint_ns)
 
 
 @pytest.mark.asyncio
@@ -1812,9 +1814,15 @@ async def test_aput(
     assert post_call_body["thread_ts"] == checkpoint["id"]
     assert post_call_body["parent_ts"] == "parent-checkpoint"
     assert "channel_blobs" not in post_call_body
+    # Omitted for the flow's own top-level lineage.
+    assert "checkpoint_ns" not in post_call_body
 
     assert result == {
-        "configurable": {"thread_id": workflow_id, "checkpoint_id": checkpoint["id"]}
+        "configurable": {
+            "thread_id": workflow_id,
+            "checkpoint_id": checkpoint["id"],
+            "checkpoint_ns": TOP_LEVEL_CHECKPOINT_NS,
+        }
     }
 
 
@@ -5422,3 +5430,562 @@ async def test_aget_tuple_returns_none_for_an_absent_pin(
     }
 
     assert await gitlab_workflow.aget_tuple(config) is None
+
+
+# A nested subgraph invocation (e.g. a delegated subagent) keeps its own checkpoint
+# lineage, separate from the flow's top-level one; `GitLabWorkflow` serves both.
+_NESTED_CHECKPOINT_NS = "delegation:task-1"
+
+
+def _in_lineage(gl_checkpoints, checkpoint_ns):
+    """Stamp fetched rows with the lineage a `checkpoint_ns`-aware GitLab reports.
+
+    `_fetch_most_recent_checkpoint` verifies the lineage of what came back, so a nested lookup is only satisfied by rows
+    that say which lineage they belong to.
+    """
+    return [
+        {**gl_checkpoint, "checkpoint_ns": checkpoint_ns}
+        for gl_checkpoint in gl_checkpoints
+    ]
+
+
+def _query_params(path: str) -> dict[str, str]:
+    return {
+        k: v[0]
+        for k, v in parse_qs(urlparse(path).query, keep_blank_values=True).items()
+    }
+
+
+@pytest.fixture(name="resumable_workflow_config")
+def resumable_workflow_config_fixture(workflow_config):
+    """A workflow that already has checkpoints, so aget_tuple reaches the REST fetch path."""
+    workflow_config["first_checkpoint"] = {}
+    workflow_config["incremental_checkpoints_enabled"] = True
+    return workflow_config
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "checkpoint_ns,expected_param",
+    [
+        (None, TOP_LEVEL_CHECKPOINT_NS),
+        (TOP_LEVEL_CHECKPOINT_NS, TOP_LEVEL_CHECKPOINT_NS),
+        (_NESTED_CHECKPOINT_NS, _NESTED_CHECKPOINT_NS),
+    ],
+    ids=["absent", "top_level", "nested"],
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_scopes_rest_fetch_to_checkpoint_ns(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+    checkpoint_ns,
+    expected_param,
+):
+    """The lookup must always name the lineage it wants, blank included: omitting the parameter asks for the newest
+    checkpoint across *every* lineage."""
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=_in_lineage(compressed_checkpoint_data, expected_param)
+    )
+    configurable: dict[str, Any] = {"thread_id": "1234"}
+    if checkpoint_ns is not None:
+        configurable["checkpoint_ns"] = checkpoint_ns
+
+    result = await gitlab_workflow.aget_tuple({"configurable": configurable})
+
+    assert result is not None
+    params = _query_params(http_client.aget.call_args[1]["path"])
+    assert params["checkpoint_ns"] == expected_param
+    assert params["per_page"] == "1"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_for_nested_ns_bypasses_cached_top_level_checkpoint(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """The session-start `latest_checkpoint` cache only describes the top-level lineage; serving it to a nested lookup
+    would seed the subagent's run with the parent's state."""
+    resumable_workflow_config["latest_checkpoint"] = dict(_GQL_LATEST_CHECKPOINT)
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=_in_lineage(compressed_checkpoint_data, _NESTED_CHECKPOINT_NS),
+    )
+
+    result = await gitlab_workflow.aget_tuple(
+        {"configurable": {"thread_id": "1234", "checkpoint_ns": _NESTED_CHECKPOINT_NS}}
+    )
+
+    assert result is not None
+    assert result.checkpoint["id"] == "5678", (
+        "must not be the cached top-level checkpoint"
+    )
+    params = _query_params(http_client.aget.call_args[1]["path"])
+    assert params["checkpoint_ns"] == _NESTED_CHECKPOINT_NS
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_for_nested_ns_skips_fetch_when_flow_has_no_checkpoints(
+    gitlab_workflow, http_client
+):
+    """Nested lineages only ever branch off an already-checkpointed flow, so an empty flow needs no request for them
+    either."""
+    result = await gitlab_workflow.aget_tuple(
+        {"configurable": {"thread_id": "1234", "checkpoint_ns": _NESTED_CHECKPOINT_NS}}
+    )
+
+    assert result is None
+    http_client.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_reports_checkpoint_ns_on_returned_tuple(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """Both configs carry the namespace the tuple was resolved for — a parent checkpoint always belongs to the same
+    lineage as its child, and LangGraph's ``patch_checkpoint_map`` requires the field for any checkpoint with
+    parents."""
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=_in_lineage(compressed_checkpoint_data, _NESTED_CHECKPOINT_NS),
+    )
+
+    result = await gitlab_workflow.aget_tuple(
+        {"configurable": {"thread_id": "1234", "checkpoint_ns": _NESTED_CHECKPOINT_NS}}
+    )
+
+    assert result is not None
+    assert result.config["configurable"]["checkpoint_ns"] == _NESTED_CHECKPOINT_NS
+    assert result.parent_config is not None
+    assert (
+        result.parent_config["configurable"]["checkpoint_ns"] == _NESTED_CHECKPOINT_NS
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydrates_the_requested_lineage_not_the_rows_own(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """The lineage hydrated is the one that was *requested*, never the one the row reports.
+
+    ``aput`` looks the baseline up by the config's ``checkpoint_ns``, so it has to be filed under the same key as the
+    tuple returned here. The two only differ on GitLab < 19.3, which omits the field from its rows, as mocked here.
+    Naming a ``thread_ts`` needs no lineage check of its own either way: it identifies one checkpoint in the whole
+    flow, so unlike "the most recent one" it cannot be answered by the wrong lineage.
+    """
+    assert "checkpoint_ns" not in compressed_checkpoint_data[0]
+    named_checkpoint = {**compressed_checkpoint_data[0], "current_thread": 3}
+
+    async def mock_aget(path, **_kwargs):
+        # Stubbed per endpoint rather than as "whatever call this path makes today":
+        # which read serves a named checkpoint is gated on the instance's capabilities
+        # (`by_thread_ts` when it stores blobs, a paged list walk otherwise), and the
+        # lineage this hydrates is the same question either way.
+        if "by_thread_ts" in path:
+            return GitLabHttpResponse(status_code=200, body=named_checkpoint)
+        return GitLabHttpResponse(status_code=200, body=[named_checkpoint])
+
+    http_client.aget = mock_aget
+
+    await gitlab_workflow.aget_tuple(
+        {
+            "configurable": {
+                "thread_id": "1234",
+                "checkpoint_id": "5678",
+                "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+            }
+        }
+    )
+
+    nested = _incremental_state(gitlab_workflow, _NESTED_CHECKPOINT_NS)
+    assert nested.prev_checkpoint_id == "5678"
+    assert nested.current_thread == 3
+    assert "conversation_history" in nested.prev_channel_values
+
+    top_level = _incremental_state(gitlab_workflow)
+    assert top_level.prev_checkpoint_id is None
+    assert top_level.current_thread == 0
+    assert top_level.prev_channel_values == {}
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_discards_a_most_recent_checkpoint_from_another_lineage(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """GitLab < 19.3 ignores the ``checkpoint_ns`` filter, so "newest in this lineage" can come back as another
+    lineage's checkpoint.
+
+    Resuming a nested subgraph from the parent's state is the bleed this scoping prevents, so the row is refused and
+    neither baseline is hydrated from it.
+    """
+    assert "checkpoint_ns" not in compressed_checkpoint_data[0]
+    compressed_checkpoint_data[0]["current_thread"] = 3
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    result = await gitlab_workflow.aget_tuple(
+        {"configurable": {"thread_id": "1234", "checkpoint_ns": _NESTED_CHECKPOINT_NS}}
+    )
+
+    assert result is None
+    for state in (
+        _incremental_state(gitlab_workflow, _NESTED_CHECKPOINT_NS),
+        _incremental_state(gitlab_workflow),
+    ):
+        assert state.prev_checkpoint_id is None
+        assert state.current_thread == 0
+        assert state.prev_channel_values == {}
+
+
+def test_nested_delta_baselines_are_trimmed_but_the_top_level_one_is_not(
+    gitlab_workflow,
+):
+    """Nested baselines each hold a copy of their lineage's channel values, so they cannot accumulate for the life of
+    the session.
+
+    Only the cache is dropped: ``current_thread`` survives and advances, so the next write opens a new group rather
+    than reopening the one the dropped values belonged to.
+    """
+    top_level = _incremental_state(gitlab_workflow)
+    top_level.prev_checkpoint_id = "top-level"
+    top_level.prev_channel_values = {"conversation_history": ["kept"]}
+
+    oldest = _incremental_state(gitlab_workflow, "delegation:oldest")
+    oldest.prev_checkpoint_id = "oldest"
+    oldest.prev_channel_values = {"conversation_history": ["dropped"]}
+    oldest.current_thread = 3
+
+    for index in range(MAX_NESTED_INCREMENTAL_BASELINES):
+        state = _incremental_state(gitlab_workflow, f"delegation:{index}")
+        state.prev_checkpoint_id = f"checkpoint-{index}"
+        state.prev_channel_values = {"conversation_history": [index]}
+
+    assert oldest.prev_channel_values == {}
+    assert oldest.prev_checkpoint_id is None
+    assert oldest.current_thread == 4, "a trimmed lineage must not reopen its old group"
+
+    assert top_level.prev_checkpoint_id == "top-level"
+    assert top_level.prev_channel_values == {"conversation_history": ["kept"]}
+
+    newest = _incremental_state(
+        gitlab_workflow, f"delegation:{MAX_NESTED_INCREMENTAL_BASELINES - 1}"
+    )
+    assert newest.prev_checkpoint_id == (
+        f"checkpoint-{MAX_NESTED_INCREMENTAL_BASELINES - 1}"
+    )
+
+
+def test_trimming_an_already_trimmed_baseline_is_a_no_op(gitlab_workflow):
+    """A baseline with nothing cached is skipped, so passing over it again neither logs nor advances its group.
+
+    Without the skip, every later insert would re-trim the same tombstones: `current_thread` would drift upwards for
+    lineages that never wrote anything, and each pass would log a trim that reclaimed nothing.
+    """
+    oldest = _incremental_state(gitlab_workflow, "delegation:oldest")
+    oldest.prev_checkpoint_id = "oldest"
+    oldest.prev_channel_values = {"conversation_history": ["dropped"]}
+    oldest.current_thread = 3
+
+    # Fills the bound, so `delegation:oldest` is trimmed once.
+    for index in range(MAX_NESTED_INCREMENTAL_BASELINES):
+        _incremental_state(
+            gitlab_workflow, f"delegation:{index}"
+        ).prev_checkpoint_id = f"checkpoint-{index}"
+    assert oldest.current_thread == 4
+
+    # One more insert puts the now-empty `delegation:oldest` in the overflow window again.
+    with patch.object(gitlab_workflow._logger, "info") as mock_info:
+        _incremental_state(gitlab_workflow, "delegation:new")
+
+    assert oldest.current_thread == 4, "a tombstoned baseline must not be trimmed twice"
+    trimmed = [
+        call.kwargs["checkpoint_ns"]
+        for call in mock_info.call_args_list
+        if call.args and call.args[0].startswith("Trimming")
+    ]
+    assert trimmed == ["delegation:0"]
+
+
+def test_using_a_nested_baseline_keeps_it_from_being_trimmed_first(gitlab_workflow):
+    """Trimming is least-recently-*used*: a lineage still being written to outlives one that has gone quiet."""
+    for index in range(MAX_NESTED_INCREMENTAL_BASELINES):
+        _incremental_state(
+            gitlab_workflow, f"delegation:{index}"
+        ).prev_checkpoint_id = f"checkpoint-{index}"
+
+    revisited = _incremental_state(gitlab_workflow, "delegation:0")
+    _incremental_state(gitlab_workflow, "delegation:new")
+
+    assert revisited.prev_checkpoint_id == "checkpoint-0"
+    assert (
+        _incremental_state(gitlab_workflow, "delegation:1").prev_checkpoint_id is None
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "checkpoint_ns,expected_payload_ns",
+    [
+        (None, None),
+        (TOP_LEVEL_CHECKPOINT_NS, None),
+        (_NESTED_CHECKPOINT_NS, _NESTED_CHECKPOINT_NS),
+    ],
+    ids=["absent", "top_level_omitted", "nested_sent"],
+)
+async def test_aput_sends_checkpoint_ns_only_for_nested_lineages(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    checkpoint_ns,
+    expected_payload_ns,
+):
+    """Rails treats a blank checkpoint_ns as the top-level lineage, so omitting it keeps the common path's payload
+    identical to what pre-checkpoint_ns instances accept."""
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    configurable: dict[str, Any] = {"checkpoint_id": "parent-checkpoint"}
+    if checkpoint_ns is not None:
+        configurable["checkpoint_ns"] = checkpoint_ns
+
+    result = await gitlab_workflow.aput(
+        {"configurable": configurable},
+        checkpoint_data[0]["checkpoint"],
+        checkpoint_metadata,
+        ChannelVersions(),
+    )
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+    assert post_call_body.get("checkpoint_ns") == expected_payload_ns
+    assert result["configurable"]["checkpoint_ns"] == (
+        checkpoint_ns or TOP_LEVEL_CHECKPOINT_NS
+    )
+
+
+@pytest.mark.asyncio
+async def test_aput_keeps_delta_cache_separate_per_checkpoint_ns(
+    incremental_enabled,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    checkpoint_metadata,
+):
+    """Interleaved writes from two lineages each delta against their own previous checkpoint; deltaing against each
+    other would look like a stale cache and force a full rewrite on every switch."""
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    async def put(checkpoint_id, parent_id, checkpoint_ns, messages):
+        await gitlab_workflow.aput(
+            {
+                "configurable": {
+                    "checkpoint_id": parent_id,
+                    "checkpoint_ns": checkpoint_ns,
+                }
+            },
+            {"id": checkpoint_id, "channel_values": {"messages": messages}},
+            checkpoint_metadata,
+            ChannelVersions({"messages": "1.0"}),
+        )
+        return json.loads(http_client.apost.call_args[1]["body"])
+
+    await put("top-1", None, TOP_LEVEL_CHECKPOINT_NS, ["a"])
+    await put("nested-1", None, _NESTED_CHECKPOINT_NS, ["x"])
+    with patch.object(gitlab_workflow._logger, "warning") as mock_warning:
+        top_2 = await put("top-2", "top-1", TOP_LEVEL_CHECKPOINT_NS, ["a", "b"])
+        nested_2 = await put("nested-2", "nested-1", _NESTED_CHECKPOINT_NS, ["x", "y"])
+
+    mock_warning.assert_not_called()
+    # Both stay on their own lineage's first thread: no stale-cache-driven bump.
+    assert top_2["current_thread"] == 0
+    assert nested_2["current_thread"] == 0
+    assert _incremental_state(gitlab_workflow).prev_channel_values == {
+        "messages": ["a", "b"]
+    }
+    assert _incremental_state(
+        gitlab_workflow, _NESTED_CHECKPOINT_NS
+    ).prev_channel_values == {"messages": ["x", "y"]}
+
+
+@pytest.mark.asyncio
+async def test_alist_reports_each_checkpoints_own_checkpoint_ns(
+    gitlab_workflow, http_client
+):
+    """`alist` is deliberately unfiltered — every lineage mixed together — so each tuple reports its own namespace."""
+    checkpoints = [
+        {
+            **_make_gl_checkpoint("cp-nested", WorkflowStatusEnum.EXECUTION),
+            "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+        },
+        # Rails stores the top-level lineage as NULL, and instances that predate
+        # checkpoint_ns omit the field entirely.
+        {
+            **_make_gl_checkpoint("cp-null", WorkflowStatusEnum.EXECUTION),
+            "checkpoint_ns": None,
+        },
+        _make_gl_checkpoint("cp-absent", WorkflowStatusEnum.EXECUTION),
+    ]
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=checkpoints
+    )
+
+    results = [checkpoint async for checkpoint in gitlab_workflow.alist(None)]
+
+    assert [tuple_.config["configurable"]["checkpoint_ns"] for tuple_ in results] == [
+        _NESTED_CHECKPOINT_NS,
+        TOP_LEVEL_CHECKPOINT_NS,
+        TOP_LEVEL_CHECKPOINT_NS,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_reversed_reports_each_checkpoints_own_checkpoint_ns(
+    gitlab_workflow, http_client
+):
+    nested = {
+        **_make_gl_checkpoint("cp-nested", WorkflowStatusEnum.EXECUTION),
+        "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+    }
+    top_level = _make_gl_checkpoint("cp-top", WorkflowStatusEnum.EXECUTION)
+    mock_aget, _ = _paginated_checkpoints_aget([[nested, top_level]])
+    http_client.aget = mock_aget
+
+    results = [tuple_ async for tuple_ in gitlab_workflow.checkpoints_reversed()]
+
+    assert [tuple_.config["configurable"]["checkpoint_ns"] for tuple_ in results] == [
+        _NESTED_CHECKPOINT_NS,
+        TOP_LEVEL_CHECKPOINT_NS,
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [
+        WorkflowStatusEnum.COMPLETED,
+        WorkflowStatusEnum.ERROR,
+        WorkflowStatusEnum.CANCELLED,
+    ],
+    ids=["completed", "error", "cancelled"],
+)
+async def test_aput_writes_ignores_session_ending_status_from_a_nested_lineage(
+    gitlab_workflow, http_client, workflow_id, status
+):
+    """A nested run writes the same top-level `status` channel as the flow, so its terminal node would otherwise end the
+    session the user is still in — with subagents delegated in parallel, the first one to finish would."""
+    config: RunnableConfig = {
+        "configurable": {
+            "checkpoint_id": "test-id",
+            "thread_id": workflow_id,
+            "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+        }
+    }
+    writes: Sequence[tuple[str, Any]] = [("status", status)]
+
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
+
+    http_client.apatch.assert_not_called()
+    assert gitlab_workflow._pending_finish is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,expected_event",
+    [
+        (WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEventEnum.REQUIRE_INPUT),
+        (
+            WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+        ),
+        (
+            WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+        ),
+        (WorkflowStatusEnum.PAUSED, WorkflowStatusEventEnum.PAUSE),
+    ],
+    ids=["input_required", "tool_call_approval", "plan_approval", "paused"],
+)
+async def test_aput_writes_reports_a_blocked_session_from_a_nested_lineage(
+    gitlab_workflow, http_client, workflow_id, status, expected_event
+):
+    """Being blocked awaiting the user is a fact about the whole session, whichever lineage discovered it: suppressing
+    it would hang the flow instead of prompting."""
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+    config: RunnableConfig = {
+        "configurable": {
+            "checkpoint_id": "test-id",
+            "thread_id": workflow_id,
+            "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+        }
+    }
+    writes: Sequence[tuple[str, Any]] = [("status", status)]
+
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
+
+    http_client.apatch.assert_called_once_with(
+        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
+        body=json.dumps({"status_event": expected_event.value}),
+        parse_json=True,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "configurable_ns",
+    [{}, {"checkpoint_ns": TOP_LEVEL_CHECKPOINT_NS}],
+    ids=["absent", "blank"],
+)
+async def test_aput_writes_ends_the_session_for_the_top_level_lineage(
+    gitlab_workflow, workflow_id, configurable_ns
+):
+    """The flow's own lineage is the blank namespace, and older callers omit it entirely; both still end the session."""
+    config: RunnableConfig = {
+        "configurable": {
+            "checkpoint_id": "test-id",
+            "thread_id": workflow_id,
+            **configurable_ns,
+        }
+    }
+    writes: Sequence[tuple[str, Any]] = [("status", WorkflowStatusEnum.COMPLETED)]
+
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
+
+    assert gitlab_workflow._pending_finish is True
+
+
+@pytest.mark.asyncio
+async def test_latest_checkpoint_status_ignores_nested_lineages(gitlab_workflow):
+    """Reconciliation asks about the flow's status, so only the top-level lineage's cached `status` may answer it.
+
+    Guards against a later refactor reading "any entry" and reconciling Rails to a subagent's status.
+    """
+    _incremental_state(gitlab_workflow, _NESTED_CHECKPOINT_NS).prev_channel_values = {
+        "status": WorkflowStatusEnum.COMPLETED
+    }
+
+    with patch.object(
+        gitlab_workflow, "_fetch_most_recent_checkpoint", AsyncMock(return_value=None)
+    ) as mock_fetch:
+        assert await gitlab_workflow._get_latest_checkpoint_status() is None
+
+    # Falls through to the API rather than answering from the nested entry.
+    mock_fetch.assert_awaited_once_with()

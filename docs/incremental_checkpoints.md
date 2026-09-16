@@ -164,7 +164,7 @@ The per-step deltas above describe only the channels that changed. That's enough
 
 To make each group reconstruct on its own, the **start of every group** re-seeds _all_ channels as full `compaction` snapshots via `_serialize_all_channels_full`, replacing the per-channel deltas for that one step. A group starts on:
 
-- the workflow's first checkpoint (`_prev_checkpoint_id is None`),
+- the lineage's first checkpoint (`state.prev_checkpoint_id is None`),
 
 - a stale-cache reset (`force_rewrite`), or
 
@@ -176,23 +176,47 @@ To make each group reconstruct on its own, the **start of every group** re-seeds
 
 Because the trim shrinks the channel in state, every other group start (first checkpoint, stale-cache reset, or a non-append history splice such as the cancelled-tool reorder in `ChatAgent`) snapshots at most the entries since the last compaction, about one context window.
 
-The group boundary is keyed on `_prev_checkpoint_id`, **not** on `current_thread_started_at`. The started-at marker is `None` for checkpoint IDs that aren't time-based, which would otherwise re-seed every step. Outside a group boundary, behavior is the per-channel deltas described above.
+The group boundary is keyed on `state.prev_checkpoint_id`, **not** on `current_thread_started_at`. The started-at marker is `None` for checkpoint IDs that aren't time-based, which would otherwise re-seed every step. Outside a group boundary, behavior is the per-channel deltas described above.
 
 ## State across `aput` calls
 
-To compute deltas, `GitLabWorkflow` caches `_prev_channel_values`, `_prev_checkpoint_id`, `_current_thread`, and `_current_thread_started_at` between calls. On each `aput`:
+To compute deltas, `GitLabWorkflow` caches an `_IncrementalCheckpointState` between calls — a small dataclass holding `prev_channel_values`, `prev_checkpoint_id`, and `current_thread`.
 
-1. **Stale-cache detection** — if the incoming parent `checkpoint_id` doesn't match `_prev_checkpoint_id`, a checkpoint was missed. The cache is reset and every changed channel is serialized as a full replacement (`force_rewrite`).
+One `GitLabWorkflow` instance is the checkpointer for the top-level graph **and** for every nested subgraph invocation it dispatches (e.g. a delegated subagent) — LangGraph resolves each of those under its own `checkpoint_ns`. The cache is therefore keyed by namespace: `self._incremental_state` holds one `_IncrementalCheckpointState` per lineage, reached through `self._incremental_state_for(checkpoint_ns)` (blank `checkpoint_ns` denotes the flow's own top-level lineage). This keeps a nested run's deltas from being computed against — and from clobbering — the top-level lineage's cached previous values.
+
+Each entry holds a copy of its lineage's `channel_values`, and a session can dispatch an unbounded number of nested invocations, so `_trim_nested_incremental_baselines` bounds them: past `MAX_NESTED_INCREMENTAL_BASELINES`, the least recently used nested entries have their cached values dropped. Only the cache is lost — the next write to a trimmed lineage re-seeds every channel as a full snapshot, under a new `current_thread` so it never reopens the group those values belonged to. The top-level lineage is never trimmed: it lives as long as the session, and `_get_latest_checkpoint_status` reads its cached `status`.
+
+On each `aput`, against that call's own namespace's `state`:
+
+1. **Stale-cache detection** — if the incoming parent `checkpoint_id` doesn't match `state.prev_checkpoint_id`, a checkpoint was missed. Every changed channel is serialized as a full replacement (`force_rewrite`).
 
 1. At a group start (first checkpoint, stale-cache reset, or compaction), the per-channel blobs are replaced with a full re-seed of all channels (see [Self-contained groups](#self-contained-groups)).
 
-1. If the step was a compaction (or a stale-cache rewrite), `_current_thread` is bumped. `_current_thread_started_at` is pinned to this checkpoint's start time whenever a new group starts — on compaction, a stale-cache reset, or the first checkpoint (marker still unset).
+1. If the step was a compaction (or a stale-cache rewrite), `state.current_thread` is bumped.
 
-1. The cache is updated and `channel_blobs`, `current_thread`, and `current_thread_started_at` are attached to the payload.
+1. Once the server accepts the write, the cache is updated; `channel_blobs` and `current_thread` are attached to the payload. `checkpoint_ns` is attached too, but only for nested lineages — see [Checkpoint namespaces](#checkpoint-namespaces).
 
 ## Surviving a gateway restart
 
-The cache is in-memory, so a restart (or pickup by another gateway instance) would reset it and cause a spurious rewrite or a `current_thread` mismatch. `_hydrate_incremental_state` restores the cached fields from a fetched checkpoint on every fetch path (REST, GraphQL latest, and latest-fetch). It accepts both `current_thread` (REST) and `currentThread` (GraphQL), restores `_current_thread_started_at` from the checkpoint's decoded `current_thread_started_at` so a post-restart write doesn't re-pin the marker to a mid-group time and drop the group's earlier blobs, and tolerates fields being absent (older Rails) or malformed by keeping the defaults. After a restart, a fetch followed by a write reuses the server's `current_thread` and emits a correct delta with no spurious bump.
+The cache is in-memory, so a restart (or pickup by another gateway instance) would reset it and cause a spurious rewrite or a `current_thread` mismatch. `_hydrate_incremental_state(gl_checkpoint, decoded_checkpoint, checkpoint_ns)` restores the cached fields — for that specific namespace's `_IncrementalCheckpointState` — from a fetched checkpoint on every fetch path (REST, GraphQL latest, and latest-fetch). It accepts both `current_thread` (REST) and `currentThread` (GraphQL), and tolerates fields being absent (older Rails) or malformed by keeping the defaults. After a restart, a fetch followed by a write reuses the server's `current_thread` and emits a correct delta with no spurious bump.
+
+## Checkpoint namespaces
+
+LangGraph composes a `checkpoint_ns` for every nested subgraph invocation (e.g. a delegated subagent), joining `node:task_uuid` segments with `|`; the top-level graph's own lineage is the blank namespace (`TOP_LEVEL_CHECKPOINT_NS`). `GitLabWorkflow` is the checkpointer for all of these at once, so `aget_tuple`, `aput`, and the delta cache described above key their lookups, writes, and cached state on the `checkpoint_ns` LangGraph passes in `config["configurable"]` — never assuming the top-level lineage.
+
+This matters for incremental checkpoints specifically because a lookup or write that ignored the namespace could seed a nested run with the parent's `channel_values` (duplicating `conversation_history`/`ui_chat_log` entries into the parent) or compute a nested write's delta against — and clobber — the top-level lineage's cached previous checkpoint. Concretely:
+
+- `aget_tuple` skips the session-start `latest_checkpoint` cache for nested lookups (the GraphQL `latestCheckpoint` field only ever resolves the flow's own top-level lineage) and scopes the REST fetch with a `checkpoint_ns` query parameter, sent blank rather than omitted for the top-level case — an omitted parameter asks the list endpoint for the newest checkpoint across *every* lineage. The lineage of what comes back is then verified client-side rather than assumed, because an instance that ignores the parameter answers with a row from another lineage (see below); such a row is discarded, so the nested lineage reads as empty and its subgraph starts from scratch. Fetching a checkpoint by `thread_ts` needs no such check — that names one checkpoint in the whole flow.
+
+- `aput` sends `checkpoint_ns` in the payload for nested lineages only; it's omitted for the top-level lineage so the payload stays identical to what GitLab instances predating `checkpoint_ns` already accept.
+
+- Every returned `CheckpointTuple` reports the namespace it was resolved for, in both `config` and `parent_config`. This isn't cosmetic: LangGraph's `patch_checkpoint_map` reads `configurable["checkpoint_ns"]` unconditionally whenever a checkpoint has parents (i.e. for every nested run).
+
+- `alist` and `checkpoints_reversed` stay deliberately unfiltered — they return every lineage mixed together, as before — but each returned tuple now reports its own namespace, read off the checkpoint itself.
+
+- `aput_writes` drives the Rails workflow state machine off the `status` channel, and a nested invocation writes that same top-level channel. Session-*ending* events (`TERMINAL_WORKFLOW_STATUS_EVENTS`: `finish`, `drop`, `stop`) are therefore only honoured for the flow's own top-level lineage — otherwise the first of several parallel subagents to reach its terminal node would end the session the user is still in. The filter stops there on purpose: events meaning "blocked awaiting the user" (`require_input`, `require_tool_call_approval`, `require_plan_approval`, `pause`) still propagate from nested lineages, because that is how the client learns it has to prompt — a subagent pausing on tool approval genuinely blocks the whole session.
+
+GitLab versions before 19.3 don't declare the `checkpoint_ns` parameter on the create/list checkpoint endpoints: Grape silently drops it on write, and ignores it on read, falling back to the pre-existing unfiltered behavior. Those versions also omit the field from the checkpoints they return, which is what makes the client-side lineage check above safe: their rows read as top-level, so only lookups for a *nested* namespace are refused. A nested lineage therefore cannot be resumed at all before 19.3, rather than being resumed from the wrong state; the flow's own top-level lineage is unaffected on every version.
 
 ## Monitoring which strategy is in use
 

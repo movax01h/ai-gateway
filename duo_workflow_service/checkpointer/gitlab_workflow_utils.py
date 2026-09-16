@@ -104,6 +104,16 @@ CHECKPOINT_STATUS_TO_STATUS_EVENT = {
     "TOOL_CALL_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
 }
 
+# Status events that end the session, as opposed to pausing it awaiting the user. Only
+# the top-level checkpoint lineage may send these; see `GitLabWorkflow.aput_writes`.
+TERMINAL_WORKFLOW_STATUS_EVENTS = frozenset(
+    [
+        WorkflowStatusEventEnum.FINISH,
+        WorkflowStatusEventEnum.DROP,
+        WorkflowStatusEventEnum.STOP,
+    ]
+)
+
 # Maps WorkflowStatus(status key in LangGraph's WorkflowState) to checkpoint status.
 # Checkpoint status represents status human-readable workflow status (displayed in the UI)
 WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
@@ -133,7 +143,9 @@ def add_compression_param(endpoint: str) -> str:
         URL with accept_compressed=true parameter added
     """
     parsed = urlparse(endpoint)
-    params = parse_qs(parsed.query)
+    # keep_blank_values: a blank `checkpoint_ns=` means the top-level lineage; dropping
+    # it would turn that into the list endpoint's unfiltered "every lineage" default.
+    params = parse_qs(parsed.query, keep_blank_values=True)
     params["accept_compressed"] = ["true"]
 
     new_query = urlencode(params, doseq=True)

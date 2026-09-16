@@ -31,7 +31,10 @@ from duo_workflow_service.agent_platform.v1.flows.inputs import (
 )
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.agent_platform.v1.state.base import FlowEvent, FlowEventType
-from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
+from duo_workflow_service.checkpointer.gitlab_workflow import (
+    TOP_LEVEL_CHECKPOINT_NS,
+    GitLabWorkflow,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
@@ -564,6 +567,16 @@ class Flow(AbstractWorkflow):
         boundary: Optional[CheckpointTuple] = None
         oldest: Optional[CheckpointTuple] = None
         async for candidate in checkpointer.checkpoints_reversed():
+            # `checkpoints_reversed` returns every checkpoint lineage mixed together, but
+            # the boundary is pinned into the top-level graph's own config, so only its
+            # own lineage can supply one: a nested subagent's pause is not a boundary for
+            # the flow.
+            candidate_ns = (candidate.config.get("configurable") or {}).get(
+                "checkpoint_ns", TOP_LEVEL_CHECKPOINT_NS
+            )
+            if candidate_ns != TOP_LEVEL_CHECKPOINT_NS:
+                continue
+
             status = candidate.checkpoint.get("channel_values", {}).get("status")
             if status == WorkflowStatusEnum.INPUT_REQUIRED:
                 boundary = candidate
