@@ -38,7 +38,7 @@ def validate_event_context(context: EventContext, **location) -> None:
     Args:
         context: The EventContext to validate.
         **location: Extra kwargs added to each log line
-            (e.g. ``endpoint="/v1/chat"``,
+            (e.g. ``endpoint="/v2/chat/agent"``,
             ``grpc_method="/duo_workflow.v1.DuoWorkflow/Execute"``).
     """
     for field in ALWAYS_EXPECTED_FIELDS:
