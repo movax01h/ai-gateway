@@ -82,6 +82,16 @@ cp example.env .env
 gcloud auth application-default login
 ```
 
+**Agent environment notes:**
+
+- Python dependencies (e.g. `yaml`) live in the project virtualenv, not the
+  system `python3`. Activate it first (`. ./.venv/bin/activate`) or use
+  `poetry run python ...` before importing them.
+- `jq` is provided for parsing `glab api` JSON output; if it is ever
+  unavailable, fall back to `python3 -c 'import json,sys; ...'`.
+- `make` may print `TMPDIR value /tmp/...: No such file or directory`; it
+  falls back to `/tmp` and succeeds — this warning is benign.
+
 ### Running Services
 
 ```shell
