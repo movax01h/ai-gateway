@@ -1,0 +1,13 @@
+---
+description: Tracks requests to the complete_code unit primitive
+internal_events: true
+action: request_complete_code
+product_group: dap_repository_flows
+product_categories:
+  - code_suggestions
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6798
+tiers:
+  - free
+  - premium
+  - ultimate
