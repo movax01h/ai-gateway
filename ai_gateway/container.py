@@ -85,7 +85,6 @@ class ContainerApplication(containers.DeclarativeContainer):
     chat = providers.Container(
         ContainerChat,
         prompts=pkg_prompts,
-        models=pkg_models,
         internal_event=internal_event,
         config=config,
     )

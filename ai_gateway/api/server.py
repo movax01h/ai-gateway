@@ -60,7 +60,6 @@ _SKIP_ENDPOINTS = [
     "/v1/models/definitions",
 ]
 CONTAINER_APPLICATION_MODULES = [
-    "ai_gateway.api.v1.chat.agent",
     "ai_gateway.api.v1.embeddings.code_embeddings",
     "ai_gateway.api.v1.search.docs",
     "ai_gateway.api.v2.code.completions",

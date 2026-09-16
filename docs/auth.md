@@ -38,7 +38,7 @@ Process flow:
 1. To validate the token, the AI gateway must first obtain a JWKS key set. It will cache these keys for some time.
 1. AI Gateway attempts to decode the JWT with JWKS provided by trusted OIDC providers.
 1. If AI Gateway successfully decodes the JWT, the client request is authenticated and passed to the feature endpoints
-   (for example, `POST /v1/chat/agent`). For further authorization process, see [authorization in AI Gateway](#authentication-in-ai-gateway).
+   (for example, `POST /v2/chat/agent`). For further authorization process, see [authorization in AI Gateway](#authentication-in-ai-gateway).
 1. If AI Gateway fails to decode the JWT, AI Gateway returns an error response to the client, which could happen in the following cases:
    - The client got an JWT from an OIDC provider that is not trusted by AI Gateway.
    - The client didn't include a JWT in the `Authorization` HTTP header.
