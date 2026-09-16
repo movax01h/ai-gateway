@@ -2,6 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from structlog.testing import capture_logs
 
 from duo_workflow_service.audit_events.collector import AuditEventCollector
 from tests.duo_workflow_service.audit_events.conftest import make_audit_event
@@ -245,6 +246,41 @@ class TestStartAndClose:
         await collector.close()
         # Events are dropped — no exception raised, no retry by collector
         mock_client.send_batch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_close_final_flush_cancelled_is_swallowed(self, mock_client):
+        async def _slow_send_batch(*_args, **_kwargs):
+            await asyncio.sleep(1)
+
+        mock_client.send_batch.side_effect = _slow_send_batch
+        collector = AuditEventCollector(
+            client=mock_client,
+            workflow_id="wf-123",
+            buffer_size=100,
+            flush_interval_seconds=100.0,
+        )
+        collector.capture(make_audit_event())
+
+        close_task = asyncio.create_task(collector.close())
+        await asyncio.sleep(0)  # let close() start awaiting flush()
+        close_task.cancel()
+
+        with (
+            patch(
+                "duo_workflow_service.audit_events.collector.duo_workflow_metrics"
+            ) as mock_metrics,
+            capture_logs() as cap_logs,
+        ):
+            await close_task  # must not raise CancelledError
+
+        assert any(
+            log["event"] == "Final audit event flush cancelled; events may be lost"
+            and log["workflow_id"] == "wf-123"
+            for log in cap_logs
+        )
+        mock_metrics.count_audit_events_dropped.assert_called_once_with(
+            reason="cancelled", amount=1
+        )
 
     @pytest.mark.asyncio
     async def test_intermediate_flushes_are_not_final(self, mock_client):

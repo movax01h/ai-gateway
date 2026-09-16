@@ -23,6 +23,10 @@ from sentry_sdk.tracing import TransactionSource
 from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+    AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+)
 from lib.context import (
     METADATA_LABELS,
     build_metadata_labels,
@@ -375,15 +379,27 @@ class MonitoringInterceptor(ServerInterceptor):
 
     def _handle_error(
         self,
-        _e: BaseException,
+        error: BaseException,
         grpc_type: GRPCMethodType,
         grpc_service_name: str,
         grpc_method_name: str,
         servicer_context: grpc.ServicerContext,
     ) -> None:
-        status_code = servicer_context.code()
-        if not status_code or status_code == grpc.StatusCode.OK:
-            status_code = grpc.StatusCode.UNKNOWN
+        if isinstance(error, asyncio.CancelledError) and (
+            AIO_CANCEL_STOP_WORKFLOW_REQUEST in str(error)
+            or AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST in str(error)
+        ):
+            # server.py already classified this cancellation (it's a graceful,
+            # client- or infra-initiated stop) and set the real code (OK,
+            # UNAVAILABLE, ...) before re-raising. Trust it instead of reporting
+            # CANCELLED for what is not actually a failure.
+            status_code = servicer_context.code() or grpc.StatusCode.OK
+        elif isinstance(error, asyncio.CancelledError):
+            status_code = grpc.StatusCode.CANCELLED
+        else:
+            status_code = servicer_context.code()
+            if not status_code or status_code == grpc.StatusCode.OK:
+                status_code = grpc.StatusCode.UNKNOWN
 
         self._increase_grpc_server_handled_total_counter(
             grpc_type, grpc_service_name, grpc_method_name, status_code

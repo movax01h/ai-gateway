@@ -15,6 +15,9 @@ from duo_workflow_service.interceptors.monitoring_interceptor import (
     MonitoringInterceptor,
 )
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
+from duo_workflow_service.workflows.type_definitions import (
+    AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+)
 from lib.language_server import LanguageServerVersion
 
 
@@ -710,3 +713,64 @@ async def test_interceptor_counts_cancellation_of_other_bidi_streams_without_wor
         )
         == 1.0
     )
+
+
+@pytest.mark.asyncio
+async def test_handle_error_reports_cancelled_for_cancelled_error():
+    registry = CollectorRegistry()
+    interceptor = MonitoringInterceptor(registry=registry)
+    servicer_context = Mock()
+    servicer_context.code.return_value = None
+    current_monitoring_context.set(MonitoringContext())
+
+    interceptor._handle_error(
+        asyncio.CancelledError(),
+        GRPCMethodType.BIDI_STREAMING,
+        "test.Service",
+        "ExecuteWorkflow",
+        servicer_context,
+    )
+
+    assert _handled_total(registry, "CANCELLED", "unknown") == 1.0
+
+
+@pytest.mark.asyncio
+async def test_handle_error_still_reports_unknown_for_other_exceptions():
+    registry = CollectorRegistry()
+    interceptor = MonitoringInterceptor(registry=registry)
+    servicer_context = Mock()
+    servicer_context.code.return_value = None
+    current_monitoring_context.set(MonitoringContext())
+
+    interceptor._handle_error(
+        RuntimeError("boom"),
+        GRPCMethodType.BIDI_STREAMING,
+        "test.Service",
+        "ExecuteWorkflow",
+        servicer_context,
+    )
+
+    assert _handled_total(registry, "UNKNOWN", "unknown") == 1.0
+
+
+@pytest.mark.asyncio
+async def test_handle_error_preserves_ok_for_client_initiated_stop():
+    # server.py sets OK and cancels the workflow task with this marker message
+    # before re-raising, for a graceful client-initiated stopWorkflow request.
+    # _handle_error must not clobber that back to CANCELLED.
+    registry = CollectorRegistry()
+    interceptor = MonitoringInterceptor(registry=registry)
+    servicer_context = Mock()
+    servicer_context.code.return_value = grpc.StatusCode.OK
+    current_monitoring_context.set(MonitoringContext())
+
+    interceptor._handle_error(
+        asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+        GRPCMethodType.BIDI_STREAMING,
+        "test.Service",
+        "ExecuteWorkflow",
+        servicer_context,
+    )
+
+    assert _handled_total(registry, "OK", "unknown") == 1.0
+    assert _handled_total(registry, "CANCELLED", "unknown") is None
