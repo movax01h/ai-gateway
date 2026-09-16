@@ -229,6 +229,38 @@ models:
       model: "claude-fable-5"
       max_tokens: 128_000
 
+  - name: "Claude Fable 5"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "claude_fable_5_vertex"
+    description: "For complex agentic coding and enterprise work."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: "claude-fable-5"
+      custom_llm_provider: "vertex_ai"
+      max_tokens: 128_000
+      max_retries: 1
+    prompt_params:
+      vertex_location: global
+
+  - name: "Claude Fable 5"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_fable_5_bedrock"
+    description: "For complex agentic coding and enterprise work."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-fable-5
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: bedrock/global.anthropic.claude-fable-5
+      custom_llm_provider: bedrock
+      max_tokens: 128_000
+      max_retries: 1
+
   - name: "Claude Fable 5.1"
     provider: "Anthropic"
     gitlab_identifier: "claude_fable_5_1"
@@ -242,6 +274,38 @@ models:
     params:
       model: "claude-fable-5-1"
       max_tokens: 128_000
+
+  - name: "Claude Fable 5.1"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "claude_fable_5_1_vertex"
+    description: "For complex agentic coding and enterprise work."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: "claude-fable-5-1"
+      custom_llm_provider: "vertex_ai"
+      max_tokens: 128_000
+      max_retries: 1
+    prompt_params:
+      vertex_location: global
+
+  - name: "Claude Fable 5.1"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_fable_5_1_bedrock"
+    description: "For complex agentic coding and enterprise work."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-fable-5-1
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: bedrock/global.anthropic.claude-fable-5-1
+      custom_llm_provider: bedrock
+      max_tokens: 128_000
+      max_retries: 1
 
   - name: "Claude Opus 4.7"
     provider: "Anthropic"
