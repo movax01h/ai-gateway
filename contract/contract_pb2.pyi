@@ -83,16 +83,18 @@ class WorkspaceAgent(_message.Message):
     def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., toolset: _Optional[_Iterable[str]] = ..., prompt: _Optional[str] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
-    __slots__ = ("requestID", "plainTextResponse", "httpResponse", "scheduleNotificationResponse")
+    __slots__ = ("requestID", "plainTextResponse", "httpResponse", "scheduleNotificationResponse", "imageResponse")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     PLAINTEXTRESPONSE_FIELD_NUMBER: _ClassVar[int]
     HTTPRESPONSE_FIELD_NUMBER: _ClassVar[int]
     SCHEDULENOTIFICATIONRESPONSE_FIELD_NUMBER: _ClassVar[int]
+    IMAGERESPONSE_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     plainTextResponse: PlainTextResponse
     httpResponse: HttpResponse
     scheduleNotificationResponse: ScheduleNotificationResponse
-    def __init__(self, requestID: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ..., scheduleNotificationResponse: _Optional[_Union[ScheduleNotificationResponse, _Mapping]] = ...) -> None: ...
+    imageResponse: ImageResponse
+    def __init__(self, requestID: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ..., scheduleNotificationResponse: _Optional[_Union[ScheduleNotificationResponse, _Mapping]] = ..., imageResponse: _Optional[_Union[ImageResponse, _Mapping]] = ...) -> None: ...
 
 class HeartbeatRequest(_message.Message):
     __slots__ = ("timestamp",)
@@ -142,6 +144,14 @@ class ScheduleNotificationResponse(_message.Message):
     reason: str
     fires_at: str
     def __init__(self, accepted: bool = ..., reason: _Optional[str] = ..., fires_at: _Optional[str] = ...) -> None: ...
+
+class ImageResponse(_message.Message):
+    __slots__ = ("mime_type", "data")
+    MIME_TYPE_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    mime_type: str
+    data: bytes
+    def __init__(self, mime_type: _Optional[str] = ..., data: _Optional[bytes] = ...) -> None: ...
 
 class Action(_message.Message):
     __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile", "newCheckpoint", "listDirectory", "grep", "findFiles", "runMCPTool", "mkdir", "runReadFiles", "runShellCommand", "trackLlmCallForSelfHosted", "scheduleNotification")
