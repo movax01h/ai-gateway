@@ -7,6 +7,7 @@ import json
 import os
 import time
 import zlib
+from collections import OrderedDict
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import (
@@ -25,6 +26,7 @@ from typing import (
     TypeVar,
     override,
 )
+from urllib.parse import urlencode
 
 import structlog
 from dependency_injector.wiring import Provide, inject
@@ -54,6 +56,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     INTERNAL_TO_RAILS_STATUS_EVENT,
     NOOP_WORKFLOW_STATUSES,
     STATUS_TO_EVENT_PROPERTY,
+    TERMINAL_WORKFLOW_STATUS_EVENTS,
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
     WorkflowStatusEventEnum,
     add_compression_param,
@@ -131,10 +134,43 @@ _RESPONSE_SIZE_LIMIT_ERROR_MARKER = "exceeded size limit"
 # Floor for the adaptive page-size shrink in `_iter_checkpoint_pages`.
 _MIN_CHECKPOINT_PAGE_SIZE = 1
 
+# LangGraph's checkpoint namespace for the top-level graph; every nested subgraph
+# invocation (e.g. a delegated subagent) runs under its own non-blank namespace.
+TOP_LEVEL_CHECKPOINT_NS = ""
+
+# How many nested lineages keep a delta baseline in memory at once. A session can
+# dispatch an unbounded number of them, and each baseline copies its lineage's channel
+# values, so the least recently used are trimmed.
+#
+# Nothing structurally caps concurrent dispatches (`max_delegations` counts a session's
+# delegations, not simultaneous ones), so this bound can in principle be exceeded by a
+# single supervisor turn delegating to more than 16 subagents at once. Past it, writes
+# stay correct but degrade to full snapshots — each trim is logged, so it is observable.
+MAX_NESTED_INCREMENTAL_BASELINES = 16
+
 
 def _is_response_size_limit_error(exc: BaseException) -> bool:
     """Whether `exc` is Workhorse's oversized gRPC-message guard tripping."""
     return _RESPONSE_SIZE_LIMIT_ERROR_MARKER in str(exc)
+
+
+def _requested_checkpoint_ns(config: RunnableConfig) -> str:
+    """The lineage LangGraph is resolving: blank for the top-level graph, otherwise a nested subgraph invocation.
+
+    One ``GitLabWorkflow`` is the checkpointer for all of them at once, so every lookup, write and delta baseline is
+    scoped by this — an unscoped lookup for a nested lineage is satisfied by the top-level graph's own checkpoint.
+    """
+    return (
+        config.get("configurable", {}).get("checkpoint_ns") or TOP_LEVEL_CHECKPOINT_NS
+    )
+
+
+def _checkpoint_ns_of(gl_checkpoint: Mapping[str, Any]) -> str:
+    """A fetched checkpoint's own namespace.
+
+    Rails stores the top-level lineage as ``NULL``, and instances that predate ``checkpoint_ns`` omit the field.
+    """
+    return gl_checkpoint.get("checkpoint_ns") or TOP_LEVEL_CHECKPOINT_NS
 
 
 def not_implemented_sync_method(func: T) -> T:
@@ -170,12 +206,13 @@ class Delta(NamedTuple):
 
 @dataclass
 class _IncrementalCheckpointState:
-    """Delta-encoding bookkeeping for the incremental-checkpoint write path.
+    """Delta-encoding bookkeeping for the incremental-checkpoint write path, for one checkpoint namespace.
 
-    Together these fields cache *the last checkpoint written to (or read from) the server*, which ``aput`` needs in
+    Together these fields cache *the last checkpoint written to (or read from) one lineage*, which ``aput`` needs in
     order to emit channel blobs as deltas against it rather than as full snapshots. They are only meaningful when the
     client supports ``incremental_checkpoints``; see ``_serialize_channel_blobs`` for how the cache is consumed and
-    ``_hydrate_incremental_state`` for how it is restored after a gateway restart.
+    ``_hydrate_incremental_state`` for how it is restored after a gateway restart. One instance exists per
+    ``checkpoint_ns`` (see ``GitLabWorkflow._incremental_state_for``).
     """
 
     prev_channel_values: Dict[str, Any] = field(default_factory=dict)
@@ -393,7 +430,11 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # _handle_online_mode_completion, once the answer checkpoint is persisted.
         self._pending_finish = False
         self.serde = CheckpointSerializer()
-        self._incremental_state = _IncrementalCheckpointState()
+        # Delta state per checkpoint namespace, in least-recently-used order: one
+        # checkpointer serves the top-level graph and every nested run it dispatches.
+        self._incremental_state: OrderedDict[str, _IncrementalCheckpointState] = (
+            OrderedDict()
+        )
 
     @override
     @not_implemented_sync_method
@@ -1043,16 +1084,22 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             log_exception(e, extra={"workflow_id": self._workflow_id})
         return False
 
-    async def _fetch_most_recent_checkpoint(self) -> Optional[Dict[str, Any]]:
+    async def _fetch_most_recent_checkpoint(
+        self, checkpoint_ns: str = TOP_LEVEL_CHECKPOINT_NS
+    ) -> Optional[Dict[str, Any]]:
         """Fetch the most recent checkpoint dict directly from the Rails API.
 
         Always goes to the API — does not use the ``latest_checkpoint`` cached in
         ``_workflow_config``, which is populated at session start and may be stale.
         Returns the raw checkpoint dict (with ``checkpoint["checkpoint"]`` already
         decompressed) or ``None`` when no checkpoints exist yet.
+
+        ``checkpoint_ns`` scopes the lookup to one lineage. It is always sent, blank
+        included: omitting it asks for the newest checkpoint across *every* lineage.
         """
+        query = urlencode({"per_page": 1, "checkpoint_ns": checkpoint_ns})
         endpoint = add_compression_param(
-            f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?per_page=1"
+            f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?{query}"
         )
         with duo_workflow_metrics.time_gitlab_response(
             endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints?per_page=1",
@@ -1077,6 +1124,22 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             return None
 
         checkpoint = gl_checkpoints[0]
+
+        # Instances that predate `checkpoint_ns` ignore the filter and answer with the
+        # newest checkpoint overall. Resuming a nested subgraph from that is the bleed
+        # this scoping prevents, so report the lineage as empty instead. Their rows also
+        # omit the field, so they read as top-level and only nested lookups fail.
+        returned_ns = _checkpoint_ns_of(checkpoint)
+        if returned_ns != checkpoint_ns:
+            self._logger.warning(
+                "Discarding checkpoint from another lineage; this GitLab instance "
+                "does not filter checkpoints by checkpoint_ns",
+                workflow_id=self._workflow_id,
+                requested_checkpoint_ns=checkpoint_ns,
+                returned_checkpoint_ns=returned_ns,
+            )
+            return None
+
         if "compressed_checkpoint" in checkpoint:
             checkpoint["checkpoint"] = uncompress_checkpoint(
                 checkpoint["compressed_checkpoint"]
@@ -1134,15 +1197,23 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
     async def _get_latest_checkpoint_status(self) -> Optional[WorkflowStatusEnum]:
         """Return the workflow status from the most recent checkpoint.
 
-        Primary source: the cached ``prev_channel_values["status"]``, which is kept
-        current by ``_hydrate_incremental_state`` (session start) and ``aput`` (every
-        write). Only populated when the client supports ``incremental_checkpoints``.
+        The status of interest is always the flow's own, so both sources below are scoped
+        to the top-level checkpoint lineage — never a nested subgraph invocation's.
+
+        Primary source: the top-level lineage's cached ``prev_channel_values["status"]``,
+        which is kept current by ``_hydrate_incremental_state`` (session start) and
+        ``aput`` (every write). Only populated when the client supports
+        ``incremental_checkpoints``.
 
         Fallback: ``_fetch_most_recent_checkpoint`` — fetches fresh from the Rails
         API, bypassing the stale session-start cache.
         """
+        # `.get`, not `_incremental_state_for`: a read path must not create an entry.
+        top_level_state = self._incremental_state.get(TOP_LEVEL_CHECKPOINT_NS)
         checkpoint_status_value: Optional[WorkflowStatusEnum] = (
-            self._incremental_state.prev_channel_values.get("status")
+            top_level_state.prev_channel_values.get("status")
+            if top_level_state
+            else None
         )
         if checkpoint_status_value is not None:
             return checkpoint_status_value
@@ -1243,7 +1314,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         baseline, and an arbitrary decoded checkpoint (e.g. the pre-rollback tip during
         stop-recovery) must never repoint it. Callers for whom the decoded checkpoint IS the resume
         baseline (the ``aget_tuple`` cached-latest path) must call ``_hydrate_incremental_state``
-        explicitly afterwards.
+        explicitly afterwards. The GraphQL ``firstCheckpoint``/``latestCheckpoint`` fields only ever resolve the
+        flow's own top-level lineage, so the resulting tuple is namespaced to ``TOP_LEVEL_CHECKPOINT_NS``.
         """
         if "compressedCheckpoint" in checkpoint:
             decoded_checkpoint = uncompress_checkpoint(
@@ -1265,23 +1337,65 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             }
         )
 
+    def _incremental_state_for(self, checkpoint_ns: str) -> _IncrementalCheckpointState:
+        """Return one lineage's delta baseline, creating it on first use and marking it most recently used."""
+        state = self._incremental_state.get(checkpoint_ns)
+        if state is None:
+            state = _IncrementalCheckpointState()
+            self._incremental_state[checkpoint_ns] = state
+            # Only an insert can push the map past the bound.
+            self._trim_nested_incremental_baselines()
+        elif checkpoint_ns != TOP_LEVEL_CHECKPOINT_NS:
+            self._incremental_state.move_to_end(checkpoint_ns)
+
+        return state
+
+    def _trim_nested_incremental_baselines(self) -> None:
+        """Drop the cached channel values of the least recently used nested lineages.
+
+        Only the cache is dropped: ``current_thread`` is kept and advanced, so the next write to a trimmed lineage
+        re-seeds every channel under a *new* group rather than reopening the one those values belonged to. The
+        top-level lineage is never trimmed — it lives as long as the session.
+        """
+        nested = [ns for ns in self._incremental_state if ns != TOP_LEVEL_CHECKPOINT_NS]
+        # `max(0, ...)`: a negative bound would slice from the end, trimming live entries.
+        overflow = max(0, len(nested) - MAX_NESTED_INCREMENTAL_BASELINES)
+
+        for stale_ns in nested[:overflow]:
+            stale = self._incremental_state[stale_ns]
+            if stale.prev_checkpoint_id is None and not stale.prev_channel_values:
+                continue
+            self._logger.info(
+                "Trimming cached incremental checkpoint baseline",
+                workflow_id=self._workflow_id,
+                checkpoint_ns=stale_ns,
+            )
+            stale.prev_channel_values = {}
+            stale.prev_checkpoint_id = None
+            stale.current_thread += 1
+
     def _hydrate_incremental_state(
         self,
         gl_checkpoint: Mapping[str, Any],
         decoded_checkpoint: Mapping[str, Any],
+        checkpoint_ns: str = TOP_LEVEL_CHECKPOINT_NS,
     ) -> None:
         """Restore in-memory incremental-checkpoint state from a fetched checkpoint.
 
-        On gateway restart, ``_incremental_state`` resets to its defaults. Without this, the next aput would either
+        On gateway restart, the state of every lineage resets to its defaults. Without this, the next aput would either
         trigger a stale-cache rewrite or emit a current_thread that no longer matches the server's view. Accepts both
         REST (snake_case) and GraphQL
         (camelCase) field names. Absent values are tolerated: older Rails versions don't expose current_thread, in
         which case the in-memory default is kept.
+
+        ``checkpoint_ns`` is the namespace the checkpoint was fetched *for*, not ``_checkpoint_ns_of(gl_checkpoint)``:
+        ``aput`` looks this state up by the config's ``checkpoint_ns``, so the baseline has to be filed under the same
+        namespace as the ``CheckpointTuple`` returned to LangGraph.
         """
         if not self._workflow_config.get("incremental_checkpoints_enabled", False):
             return
 
-        state = self._incremental_state
+        state = self._incremental_state_for(checkpoint_ns)
 
         current_thread = gl_checkpoint.get("current_thread")
         if current_thread is None:
@@ -1293,6 +1407,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 self._logger.warning(
                     "Unexpected current_thread value from server; keeping default",
                     current_thread=current_thread,
+                    checkpoint_ns=checkpoint_ns,
                 )
 
         state.prev_checkpoint_id = decoded_checkpoint.get("id")
@@ -1303,6 +1418,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # https://blog.langchain.dev/langgraph-v0-2/
         # thread_ts and parent_ts have been renamed to checkpoint_id and parent_checkpoint_id , respectively
         checkpoint_id = config.get("configurable", {}).get("checkpoint_id")
+        checkpoint_ns = _requested_checkpoint_ns(config)
 
         # execution path with checkpoint_id present is triggered when LangGraph needs to fetch specific checkpoint
         # (instead of a most recent one), this happens in following situations:
@@ -1342,10 +1458,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     )
                 # else: checkpoint["checkpoint"] already exists from old instance, use as-is
             if checkpoint:
-                self._hydrate_incremental_state(checkpoint, checkpoint["checkpoint"])
+                self._hydrate_incremental_state(
+                    checkpoint, checkpoint["checkpoint"], checkpoint_ns
+                )
         else:
-            # If the latest checkpoint is fetch, we don't need to refetch it on initialization
-            if self._workflow_config.get("latest_checkpoint"):
+            # If the latest checkpoint is fetch, we don't need to refetch it on initialization.
+            # The cached `latest_checkpoint` only ever describes the top-level lineage.
+            if checkpoint_ns == TOP_LEVEL_CHECKPOINT_NS and self._workflow_config.get(
+                "latest_checkpoint"
+            ):
                 checkpoint = self._workflow_config["latest_checkpoint"]
                 if checkpoint:
                     checkpoint_tuple = self.decode_graphql_checkpoint(checkpoint)
@@ -1358,18 +1479,24 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                         )
                     return checkpoint_tuple
 
-            # If the first checkpoint is None, it means that a flow just started and checkpoints are empty anyway
+            # If the first checkpoint is None, it means that a flow just started and checkpoints are empty anyway —
+            # for any namespace, since nested lineages only branch off an already-checkpointed flow.
             if self._workflow_config.get("first_checkpoint") is None:
                 return None
 
-            # If a flow is resumed and the latest checkpoint couldn't be fetched (<18.8 version of GitLab), fetch it
-            checkpoint = await self._fetch_most_recent_checkpoint()
+            # If a flow is resumed and the latest checkpoint couldn't be fetched (<18.8 version of GitLab), fetch it.
+            # This is also the only way to resolve a nested namespace's own latest checkpoint.
+            checkpoint = await self._fetch_most_recent_checkpoint(checkpoint_ns)
 
             if checkpoint:
-                self._hydrate_incremental_state(checkpoint, checkpoint["checkpoint"])
+                self._hydrate_incremental_state(
+                    checkpoint, checkpoint["checkpoint"], checkpoint_ns
+                )
 
         if checkpoint:
-            return self._convert_gitlab_checkpoint_to_checkpoint_tuple(checkpoint)
+            return self._convert_gitlab_checkpoint_to_checkpoint_tuple(
+                checkpoint, checkpoint_ns
+            )
         return None
 
     @override
@@ -1409,7 +1536,11 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     )
                 # else: gl_checkpoint["checkpoint"] already exists from old instance, use as-is
 
-                yield self._convert_gitlab_checkpoint_to_checkpoint_tuple(gl_checkpoint)
+                # Deliberately unfiltered by checkpoint_ns, as before: every lineage
+                # mixed together, each tuple reporting its own namespace.
+                yield self._convert_gitlab_checkpoint_to_checkpoint_tuple(
+                    gl_checkpoint, _checkpoint_ns_of(gl_checkpoint)
+                )
             except ValueError as e:
                 log_exception(e, extra={"context": "Skipping malformed checkpoint"})
                 continue
@@ -1529,9 +1660,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                         gl_checkpoint["checkpoint"] = uncompress_checkpoint(
                             gl_checkpoint["compressed_checkpoint"]
                         )
+                    # Unfiltered by checkpoint_ns, as before; see `alist`.
                     checkpoint_tuple = (
                         self._convert_gitlab_checkpoint_to_checkpoint_tuple(
-                            gl_checkpoint
+                            gl_checkpoint, _checkpoint_ns_of(gl_checkpoint)
                         )
                     )
                 except ValueError as e:
@@ -1554,6 +1686,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
         configurable = config.get("configurable", {})
+        checkpoint_ns = _requested_checkpoint_ns(config)
 
         if not self._orbit_called:
             self._orbit_called = _get_orbit_tool_calls(checkpoint)
@@ -1586,6 +1719,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             "parent_ts": configurable.get("checkpoint_id"),
             "metadata": metadata,
         }
+        # Omitted rather than sent blank for the top-level lineage, keeping the common
+        # path's payload identical to what instances predating `checkpoint_ns` accept.
+        if checkpoint_ns != TOP_LEVEL_CHECKPOINT_NS:
+            payload["checkpoint_ns"] = checkpoint_ns
 
         if incremental_only:
             # The skeleton (id, ts, v, channel_versions, versions_seen,
@@ -1603,7 +1740,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             payload["compressed_checkpoint"] = compress_checkpoint(checkpoint)
 
         if incremental_enabled:
-            state = self._incremental_state
+            state = self._incremental_state_for(checkpoint_ns)
             parent_checkpoint_id = configurable.get("checkpoint_id")
             stale_cache = (
                 state.prev_checkpoint_id is not None
@@ -1616,6 +1753,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     "Stale incremental checkpoint cache detected; writing all channels as a full group",
                     expected_prev_checkpoint_id=parent_checkpoint_id,
                     cached_prev_checkpoint_id=state.prev_checkpoint_id,
+                    checkpoint_ns=checkpoint_ns,
                 )
 
             channel_blobs, is_compaction = _serialize_channel_blobs(
@@ -1643,6 +1781,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 "Incremental checkpoint sizes",
                 thread_ts=checkpoint["id"],
                 current_thread=next_current_thread,
+                checkpoint_ns=checkpoint_ns,
                 compressed_checkpoint_bytes=(
                     len(payload["compressed_checkpoint"])
                     if "compressed_checkpoint" in payload
@@ -1695,7 +1834,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             # Advance the delta bookkeeping only for a checkpoint the server
             # accepted; state pointing past an unsaved checkpoint corrupts every
             # later delta and desyncs current_thread from what the server has.
-            state = self._incremental_state
             state.prev_channel_values = dict(checkpoint.get("channel_values", {}))
             state.prev_checkpoint_id = checkpoint["id"]
             state.current_thread = next_current_thread
@@ -1711,6 +1849,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             "configurable": {
                 "thread_id": self._workflow_id,
                 "checkpoint_id": checkpoint["id"],
+                # Required: LangGraph's `patch_checkpoint_map` reads it for any
+                # checkpoint with parents, i.e. for every nested run.
+                "checkpoint_ns": checkpoint_ns,
             }
         }
 
@@ -1723,7 +1864,27 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         task_path: str = "",
         # We are ignoring this parameter for now since we don't care for the order the pending writes are fetched in
     ) -> None:
+        configurable = config.get("configurable", {})
+        checkpoint_ns = _requested_checkpoint_ns(config)
+
         status = self._get_workflow_status_event(writes)
+
+        # A nested run writes the same top-level `status` channel as the flow, so reaching
+        # its terminal node must not end the session the user is still in. Only the
+        # session-ending events are filtered: "blocked awaiting the user" is true of the
+        # whole session whichever lineage discovered it, and suppressing it would hang the
+        # flow instead of prompting.
+        if (
+            status in TERMINAL_WORKFLOW_STATUS_EVENTS
+            and checkpoint_ns != TOP_LEVEL_CHECKPOINT_NS
+        ):
+            self._logger.debug(
+                "Ignoring session-ending status write from a nested checkpoint lineage",
+                status_event=status,
+                checkpoint_ns=checkpoint_ns,
+            )
+            status = None
+
         if status == WorkflowStatusEventEnum.FINISH:
             # aput_writes runs before this super-step's checkpoint is saved, so
             # firing FINISH here would race the answer checkpoint POST; defer it
@@ -1735,7 +1896,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             )
             await self._update_workflow_status(status)
 
-        configurable = config.get("configurable", {})
         checkpoint_id = configurable.get("checkpoint_id")
         workflow_id = configurable.get("thread_id")
 
@@ -1783,8 +1943,13 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
     def _convert_gitlab_checkpoint_to_checkpoint_tuple(
         self,
         gl_checkpoint: Dict[str, Any],
+        checkpoint_ns: str = TOP_LEVEL_CHECKPOINT_NS,
     ) -> CheckpointTuple:
+        """Convert a fetched checkpoint (REST- or GraphQL-shaped) into a ``CheckpointTuple``.
 
+        ``checkpoint_ns`` is echoed into both ``config`` and ``parent_config``: a parent checkpoint always belongs to
+        the same lineage as its child.
+        """
         pending_writes = None
         if "checkpoint_writes" in gl_checkpoint:
             pending_writes = [
@@ -1803,6 +1968,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 "configurable": {
                     "thread_id": self._workflow_id,
                     "checkpoint_id": gl_checkpoint["thread_ts"],
+                    "checkpoint_ns": checkpoint_ns,
                 }
             },
             checkpoint=gl_checkpoint["checkpoint"],
@@ -1812,6 +1978,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 "configurable": {
                     "thread_id": self._workflow_id,
                     "checkpoint_id": gl_checkpoint["parent_ts"],
+                    "checkpoint_ns": checkpoint_ns,
                 }
             },
         )

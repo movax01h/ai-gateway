@@ -2057,7 +2057,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
 
     @staticmethod
-    def _checkpoint_tuple_with_status(checkpoint_id, status):
+    def _checkpoint_tuple_with_status(checkpoint_id, status, checkpoint_ns=""):
         # Deliberately unannotated: langgraph's Checkpoint TypedDict requires
         # many keys irrelevant to these tests, and existing checkpoint-building
         # test fixtures follow the same partial-dict convention.
@@ -2066,6 +2066,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 "configurable": {
                     "thread_id": "test-workflow-123",
                     "checkpoint_id": checkpoint_id,
+                    "checkpoint_ns": checkpoint_ns,
                 }
             },
             checkpoint={
@@ -2220,6 +2221,52 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         else:
             inputs = graph_input["context"]["inputs"]
         assert inputs[CANCELLED_TURN_CATEGORY] == fake_cancelled_turn
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_flow_resolve_stop_recovery_skips_nested_lineages(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+    ):
+        """The boundary is pinned into the top-level graph's config, so only its own lineage can supply one.
+
+        ``checkpoints_reversed`` returns every lineage mixed together, and a delegated subagent that paused on
+        ``require_input`` writes INPUT_REQUIRED into the shared ``status`` channel — resuming the top-level graph from
+        that checkpoint would restore a subagent's state.
+        """
+        goal = "test goal"
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+
+        checkpoint_tuples = [
+            self._checkpoint_tuple_with_status(
+                "cp-nested",
+                WorkflowStatusEnum.INPUT_REQUIRED.value,
+                checkpoint_ns="delegation:task-1",
+            ),
+            self._checkpoint_tuple_with_status(
+                "cp-top", WorkflowStatusEnum.INPUT_REQUIRED.value
+            ),
+        ]
+
+        async def fake_checkpoints_reversed(*, matches=lambda _: True, per_page=20):  # pylint: disable=unused-argument
+            for checkpoint_tuple in checkpoint_tuples:
+                if matches(checkpoint_tuple.checkpoint.get("channel_values", {})):
+                    yield checkpoint_tuple
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.cancelled_turn_context",
+            return_value=[],
+        ):
+            await flow_instance.run(goal)
+
+        call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        assert call_kwargs["config"]["configurable"]["checkpoint_id"] == "cp-top", (
+            "the newer nested pause must not become the top-level graph's resume pin"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
