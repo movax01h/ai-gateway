@@ -77,4 +77,15 @@ class AuditEventCollector:
                 await self._flush_task
             except asyncio.CancelledError:
                 pass
-        await self.flush(is_final=self._sequence > 0)
+        pending = len(self._buffer)
+        try:
+            await self.flush(is_final=self._sequence > 0)
+        except asyncio.CancelledError:
+            if pending:
+                duo_workflow_metrics.count_audit_events_dropped(
+                    reason="cancelled", amount=pending
+                )
+            logger.warning(
+                "Final audit event flush cancelled; events may be lost",
+                workflow_id=self._workflow_id,
+            )
