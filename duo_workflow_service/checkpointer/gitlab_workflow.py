@@ -111,7 +111,6 @@ from lib.context import (
 )
 from lib.context.tool_executions import get_tool_executions, init_tool_executions
 from lib.events import GLReportingEventContext
-from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
@@ -1313,17 +1312,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # in both case grahp_config looks like: {'configurable': {'thread_id': '1', 'checkpoint_id': 'xyz'}}
         if checkpoint_id:
             checkpoint: Any = None
-            # Double-gated: the general kill switch disables the blob read for every
-            # consumer at once; dw_read_blobs_api is this consumer's own flag. When
-            # either is off, fall back to the full-checkpoint read below (no state loss).
-            read_incremental = (
-                is_feature_enabled(
-                    FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS
-                )
-                and is_feature_enabled(FeatureFlag.DW_READ_BLOBS_API)
-                and self._workflow_config.get("incremental_checkpoints_enabled", False)
-            )
-            if read_incremental:
+            # Rails only sets the column on instances that serve by_thread_ts, so
+            # it is the single gate for the blob read.
+            if self._workflow_config.get("incremental_checkpoints_enabled", False):
                 # The workflow has blobs, so Rails serves the reconstructed
                 # checkpoint or 404s when the thread_ts is absent. A 404 means the
                 # checkpoint does not exist, so return None instead of listing.

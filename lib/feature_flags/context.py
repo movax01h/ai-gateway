@@ -34,14 +34,6 @@ class FeatureFlag(StrEnum):
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
     DUO_CHAT_GENERATIVE_UI = "duo_chat_generative_ui"
     DUO_DEVELOPER_MODEL_ROUTING = "duo_developer_model_routing"
-    # Definition:
-    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/dw_read_blobs_api.yml
-    DW_READ_BLOBS_API = "dw_read_blobs_api"
-    # Definition:
-    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/duo_workflow_read_incremental_checkpoints.yml
-    DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS = (
-        "duo_workflow_read_incremental_checkpoints"
-    )
     AI_MODEL_RELEASE = "ai_model_release"
 
 

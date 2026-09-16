@@ -71,7 +71,6 @@ from lib.context.tool_loop import (
     record_tool_calls,
     tool_loop_stats,
 )
-from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
@@ -1502,7 +1501,7 @@ async def test_aget_tuple(
 
 
 @pytest.mark.asyncio
-async def test_aget_tuple_uses_by_thread_ts_when_flag_and_column_enabled(
+async def test_aget_tuple_uses_by_thread_ts_when_column_enabled(
     incremental_enabled,
     gitlab_workflow,
     http_client,
@@ -1511,12 +1510,6 @@ async def test_aget_tuple_uses_by_thread_ts_when_flag_and_column_enabled(
     checkpoint_data,
     compressed_checkpoint_data,
 ):
-    current_feature_flag_context.set(
-        {
-            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
-            FeatureFlag.DW_READ_BLOBS_API.value,
-        }
-    )
     http_client.aget.return_value = GitLabHttpResponse(
         status_code=200,
         body=compressed_checkpoint_data[0],
@@ -1547,12 +1540,6 @@ async def test_aget_tuple_returns_none_on_404_when_reading_incremental(
     http_client,
     config,
 ):
-    current_feature_flag_context.set(
-        {
-            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
-            FeatureFlag.DW_READ_BLOBS_API.value,
-        }
-    )
     http_client.aget.return_value = GitLabHttpResponse(status_code=404, body={})
 
     result = await gitlab_workflow.aget_tuple(config)
@@ -1569,12 +1556,6 @@ async def test_aget_tuple_raises_on_non_404_when_reading_incremental(
     http_client,
     config,
 ):
-    current_feature_flag_context.set(
-        {
-            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
-            FeatureFlag.DW_READ_BLOBS_API.value,
-        }
-    )
     http_client.aget.return_value = GitLabHttpResponse(
         status_code=500, body={"error": "server error"}
     )
@@ -1593,12 +1574,6 @@ async def test_aget_tuple_returns_none_on_empty_body_when_reading_incremental(
     http_client,
     config,
 ):
-    current_feature_flag_context.set(
-        {
-            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
-            FeatureFlag.DW_READ_BLOBS_API.value,
-        }
-    )
     http_client.aget.return_value = GitLabHttpResponse(status_code=200, body={})
 
     result = await gitlab_workflow.aget_tuple(config)
@@ -1617,56 +1592,6 @@ async def test_aget_tuple_uses_list_when_column_disabled(
     compressed_checkpoint_data,
 ):
     # incremental_checkpoints_enabled defaults to False in workflow_config.
-    current_feature_flag_context.set({FeatureFlag.DW_READ_BLOBS_API.value})
-    http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200,
-        body=compressed_checkpoint_data,
-    )
-
-    result = await gitlab_workflow.aget_tuple(config)
-
-    assert result is not None
-    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
-
-    http_client.aget.assert_called_once()
-    assert "by_thread_ts" not in http_client.aget.call_args[1]["path"]
-
-
-@pytest.mark.asyncio
-async def test_aget_tuple_uses_list_when_flag_disabled(
-    incremental_enabled,
-    gitlab_workflow,
-    http_client,
-    config,
-    checkpoint_data,
-    compressed_checkpoint_data,
-):
-    http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200,
-        body=compressed_checkpoint_data,
-    )
-
-    result = await gitlab_workflow.aget_tuple(config)
-
-    assert result is not None
-    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
-
-    http_client.aget.assert_called_once()
-    assert "by_thread_ts" not in http_client.aget.call_args[1]["path"]
-
-
-@pytest.mark.asyncio
-async def test_aget_tuple_uses_list_when_kill_switch_disabled(
-    incremental_enabled,
-    gitlab_workflow,
-    http_client,
-    config,
-    checkpoint_data,
-    compressed_checkpoint_data,
-):
-    # dw_read_blobs_api and the column are on, but the kill switch is off, so the
-    # blob read is disabled and aget_tuple falls back to the list read.
-    current_feature_flag_context.set({FeatureFlag.DW_READ_BLOBS_API.value})
     http_client.aget.return_value = GitLabHttpResponse(
         status_code=200,
         body=compressed_checkpoint_data,
@@ -1683,12 +1608,11 @@ async def test_aget_tuple_uses_list_when_kill_switch_disabled(
 
 @pytest.mark.asyncio
 async def test_aget_tuple_logs_error_when_list_scan_returns_non_success(
-    incremental_enabled,
     gitlab_workflow,
     http_client,
     config,
 ):
-    # Flag disabled, so aget_tuple takes the paginated list-and-scan path.
+    # Column disabled, so aget_tuple takes the paginated list-and-scan path.
     # A failed page fetch must raise, not be reported as "checkpoint absent".
     gitlab_workflow._logger = Mock()
     http_client.aget.return_value = GitLabHttpResponse(
@@ -4566,7 +4490,7 @@ async def test_aget_tuple_hydrates_current_thread_from_response(
     """On resume, current_thread must be restored from the server so subsequent aput emits the same thread."""
     compressed_checkpoint_data[0]["current_thread"] = 3
     http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200, body=compressed_checkpoint_data
+        status_code=200, body=compressed_checkpoint_data[0]
     )
 
     config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
@@ -4640,7 +4564,7 @@ async def test_aget_tuple_hydration_tolerates_missing_current_thread(
     """Older Rails versions don't return current_thread; hydration must still seed prev_* without raising."""
     assert "current_thread" not in compressed_checkpoint_data[0]
     http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200, body=compressed_checkpoint_data
+        status_code=200, body=compressed_checkpoint_data[0]
     )
 
     config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
@@ -4662,7 +4586,7 @@ async def test_aget_tuple_hydration_tolerates_malformed_current_thread(
     """Malformed current_thread values must not raise; default is kept and hydration of other fields continues."""
     compressed_checkpoint_data[0]["current_thread"] = "not-a-number"
     http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200, body=compressed_checkpoint_data
+        status_code=200, body=compressed_checkpoint_data[0]
     )
 
     config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
@@ -4707,7 +4631,7 @@ async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
 
     compressed_checkpoint_data[0]["current_thread"] = 2
     http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200, body=compressed_checkpoint_data
+        status_code=200, body=compressed_checkpoint_data[0]
     )
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
 
