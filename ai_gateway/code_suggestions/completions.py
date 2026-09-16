@@ -151,7 +151,7 @@ class CodeCompletions:
             if lang:
                 params = {
                     "prefix": prompt.prefix,
-                    "suffix": prompt.suffix,
+                    "suffix": prompt.suffix or "",
                     "file_name": file_name,
                     "language": lang.lower(),
                 }

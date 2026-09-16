@@ -1150,3 +1150,43 @@ class TestCodeCompletions:
 
             # Model.generate should not be called when language is unknown
             agent_model.generate.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_agent_model_empty_suffix_is_not_none(self):
+        agent_model = Mock(spec=AgentModel)
+        agent_model.input_token_limit = 16
+        agent_model.generate = AsyncMock(
+            return_value=TextGenModelOutput(
+                text="world()",
+                score=0,
+                safety_attributes=SafetyAttributes(),
+                metadata=Mock(output_tokens=10, spec_set=["output_tokens"]),
+            )
+        )
+
+        use_case = CodeCompletions(
+            agent_model,
+            Mock(spec=TokenStrategyBase),
+            Mock(spec=BillingEventService),
+        )
+
+        use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
+        use_case.prompt_builder.build.return_value = Prompt(
+            prefix="def hello",
+            suffix=None,
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prefix": MetadataCodeContent(length=10, length_tokens=2),
+                }
+            ),
+        )
+
+        await use_case.execute(
+            prefix="def hello",
+            suffix="",
+            file_name="test.py",
+            editor_lang="python",
+            stream=False,
+        )
+
+        assert agent_model.generate.call_args.args[0]["suffix"] == ""

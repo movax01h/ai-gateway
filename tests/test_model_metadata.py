@@ -191,6 +191,24 @@ def test_create_regular_model_metadata():
     assert result.identifier == "openai/gpt-4"
 
 
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        ("openai", True),
+        ("litellm", True),
+        ("gitlab", False),
+        ("mistral", False),
+        ("fireworks_ai", False),
+        ("vertex-ai", False),
+        ("anthropic", False),
+    ],
+)
+def test_is_custom_model(provider, expected):
+    metadata = create_model_metadata({"name": "gitlab_model1", "provider": provider})
+
+    assert metadata.is_custom_model is expected
+
+
 class TestCreateModelMetadata:
     def test_create_gitlab_model_metadata_with_identifier(self, gitlab_model1):
         data = {

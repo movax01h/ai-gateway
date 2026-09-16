@@ -86,6 +86,7 @@ async def test_code_completion_applies_model_driven_behavior(
     reports the resolved model under metadata.model (the shared response shape)."""
     model_metadata = MagicMock()
     model_metadata.provider = "fireworks_ai"
+    model_metadata.is_custom_model = False
 
     prompt = MagicMock()
     prompt_registry.get_on_behalf.return_value = prompt
@@ -303,3 +304,42 @@ async def test_code_generation_skips_event_when_unauthorized(
         )
 
     snowplow_instrumentator.watch.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("model_metadata_provider", "is_custom_model"), [("openai", True)]
+)
+@pytest.mark.asyncio
+async def test_code_completion_passes_llm_definition_for_self_hosted(
+    payload, agent_factory, prompt_registry, model_metadata
+):
+    with (
+        patch.object(
+            handler_module,
+            "create_post_processor_for_model_metadata",
+            return_value=None,
+        ),
+        patch.object(
+            handler_module,
+            "completion_context_max_percent_for_model_metadata",
+            return_value=None,
+        ),
+    ):
+        await code_completion(
+            payload=payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=MagicMock(),
+            completions_agent_factory=agent_factory,
+            completions_amazon_q_factory=MagicMock(),
+            model_metadata=model_metadata,
+            config=MagicMock(),
+        )
+
+    agent_factory.assert_called_once_with(
+        model__prompt=prompt_registry.get_on_behalf.return_value,
+        post_processor=None,
+        model_metadata=model_metadata,
+        model__llm_definition=model_metadata.llm_definition,
+    )

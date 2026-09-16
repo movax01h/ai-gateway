@@ -310,6 +310,11 @@ def usage_metadata_fixture():
     return None
 
 
+@pytest.fixture(name="model_max_tokens")
+def model_max_tokens_fixture():
+    return None
+
+
 @pytest.fixture(name="model_disable_streaming")
 def model_disable_streaming_fixture():
     return False
@@ -320,6 +325,7 @@ class FakeModel(FakeListChatModel):
     model_name: str
     model_error: Optional[Exception] = None
     usage_metadata: Optional[UsageMetadata] = None
+    max_tokens: Optional[int] = None
 
     @property
     def _llm_type(self) -> str:
@@ -376,6 +382,7 @@ def model_fixture(
     model_error: Exception,
     usage_metadata: Optional[UsageMetadata],
     model_disable_streaming: Union[bool, Literal["tool_calling"]],
+    model_max_tokens: Optional[int],
 ):
     # our default Assistant prompt template already contains "Thought: "
     if isinstance(model_response, str):
@@ -390,6 +397,7 @@ def model_fixture(
         model_error=model_error,
         usage_metadata=usage_metadata,
         disable_streaming=model_disable_streaming,
+        max_tokens=model_max_tokens,
     )
 
 
@@ -461,13 +469,26 @@ def llm_definition_fixture():
     )
 
 
+@pytest.fixture(name="model_metadata_provider")
+def model_metadata_provider_fixture():
+    return "gitlab"
+
+
+@pytest.fixture(name="is_custom_model")
+def is_custom_model_fixture():
+    return False
+
+
 @pytest.fixture(name="model_metadata")
-def model_metadata_fixture(llm_definition: LLMDefinition):
+def model_metadata_fixture(
+    llm_definition: LLMDefinition, model_metadata_provider: str, is_custom_model: bool
+):
     return ModelMetadata(
-        provider="gitlab",
+        provider=model_metadata_provider,
         name="mistral",
         llm_definition=llm_definition,
         friendly_name="Mistral",
+        is_custom_model=is_custom_model,
     )
 
 

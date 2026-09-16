@@ -87,6 +87,11 @@ class KindModelProvider(StrEnum):
     AMAZON_Q = "amazon_q"
     GITLAB = "gitlab"
 
+    @property
+    def is_custom_provider(self) -> bool:
+        """Only custom-model (GitLab Duo Self-Hosted) traffic sends "litellm" or "codestral"."""
+        return self in (KindModelProvider.LITELLM, KindModelProvider.MISTRALAI)
+
     @classmethod
     def from_definition_provider(cls, provider: Optional[str]) -> "KindModelProvider":
         if provider == "Anthropic":

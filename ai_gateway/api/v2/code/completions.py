@@ -50,8 +50,9 @@ from ai_gateway.code_suggestions.processing.ops import lang_from_filename
 from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessor,
     PostProcessorOperation,
+    create_custom_model_post_processor,
 )
-from ai_gateway.model_metadata import create_model_metadata
+from ai_gateway.model_metadata import TypeModelMetadata, create_model_metadata
 from ai_gateway.models import KindLiteLlmModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import BasePromptRegistry
@@ -455,9 +456,9 @@ def _resolve_agent_code_completions(
 
     # Create post processor based on model provider and name
     post_processor = _create_post_processor_for_model(
-        payload.model_provider,
         payload.model_name,
         config,
+        model_metadata,
     )
 
     try:
@@ -492,9 +493,9 @@ def _get_gitlab_identifier(
 
 
 def _create_post_processor_for_model(
-    model_provider: Optional[KindModelProvider],
     model_name: Optional[str],
     config: Configuration,
+    model_metadata: TypeModelMetadata,
 ) -> Optional[Factory]:
     """Create the appropriate post processor factory based on model provider and name."""
 
@@ -504,7 +505,7 @@ def _create_post_processor_for_model(
         KindLiteLlmModel.CODESTRAL_2508,
     ]
     if (
-        model_provider == KindModelProvider.VERTEX_AI
+        model_metadata.provider == KindModelProvider.VERTEX_AI
         and model_name in vertex_codestral_models
     ):
         return Factory(
@@ -514,7 +515,7 @@ def _create_post_processor_for_model(
         )
 
     # Fireworks: apply FILTER_SCORE and FIX_TRUNCATION
-    if model_provider == KindModelProvider.FIREWORKS:
+    if model_metadata.provider == KindModelProvider.FIREWORKS:
         return Factory(
             PostProcessor,
             exclude=config.feature_flags.excl_post_process(),
@@ -525,6 +526,11 @@ def _create_post_processor_for_model(
             score_threshold=config.feature_flags.fireworks_score_threshold().get(
                 model_name, None
             ),
+        )
+
+    if model_metadata.is_custom_model:
+        return create_custom_model_post_processor(
+            config.feature_flags.excl_post_process()
         )
 
     return None

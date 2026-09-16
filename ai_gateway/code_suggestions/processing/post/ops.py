@@ -366,6 +366,24 @@ def strip_code_block_markdown(text: str) -> str:
     return text
 
 
+_RE_FENCED_CODE_BLOCK = re.compile(
+    r"\A(?:[^\n]*\r?\n){0,2}?```[^\s`{}]*[ \t]*\r?\n(.*?)(?:^`{1,3}[ \t]*$|\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def extract_fenced_code(text: str) -> str:
+    """Return the contents of a leading fenced code block, dropping the prose around it.
+
+    Chat-tuned models wrap completions in markdown fences, usually after a short preamble. Extraction applies only when
+    a fence opens within the first lines of the reply; completions that merely contain backticks stay intact.
+    """
+    match = _RE_FENCED_CODE_BLOCK.match(text)
+    if match:
+        return match.group(1).rstrip("\r\n")
+    return text
+
+
 def prepend_new_line(code_context: str, completion: str) -> str:
     if (
         len(completion)
