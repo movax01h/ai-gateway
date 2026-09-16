@@ -1,0 +1,13 @@
+---
+description: Tracks requests to the include_agent_user_environment_context unit primitive
+internal_events: true
+action: request_include_agent_user_environment_context
+product_group: agent_execution
+product_categories:
+  - duo_workflow
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6798
+tiers:
+  - free
+  - premium
+  - ultimate

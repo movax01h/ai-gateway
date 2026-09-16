@@ -1,0 +1,12 @@
+---
+description: Tracks requests to the glab_ask_git_command unit primitive
+internal_events: true
+action: request_glab_ask_git_command
+product_group: code_review
+product_categories:
+  - code_review_workflow
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6798
+tiers:
+  - premium
+  - ultimate
