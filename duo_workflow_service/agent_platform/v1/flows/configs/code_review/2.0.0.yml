@@ -1,10 +1,3 @@
-# Temporary alias of 2.0.0.yml, identical below this comment.
-#
-# GitLab pins the exact string "2.0.0-dev" for this flow, and resolve_version
-# raises when no version matches. Deleting this file before GitLab switches to
-# "^2.0.0" would fail every review behind the
-# duo_code_review_previous_discussions flag, so the two sides can ship in
-# either order. Delete this file once that switch is deployed.
 version: "v1"
 environment: ambient
 components:

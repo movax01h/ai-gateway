@@ -11,7 +11,7 @@ import pytest
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 
 
-@pytest.mark.parametrize("version", ["1.0.0", "2.0.0-dev"])
+@pytest.mark.parametrize("version", ["1.0.0", "2.0.0", "2.0.0-dev"])
 class TestCodeReviewAbortsOnUnresolvedMergeRequest:
     def _build_review_context_router(self, config: FlowConfig) -> dict:
         return next(
