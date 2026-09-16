@@ -22,6 +22,14 @@ REFERENCE = {"source": "workspace", "item_type": "agent_template", "item_id": "*
 # a flow. Spelled out rather than imported: it is the contract a flow relies on.
 PROMPT_ID = "workspace_agent_template_prompt"
 
+# A second servable reference, so a component can be made to claim two.
+AI_CATALOG_REFERENCE = {
+    "source": "ai-catalog",
+    "item_type": "agent",
+    "item_id": "42",
+    "version": "1.0.0",
+}
+
 
 def _catalog_name(name: str) -> str:
     """The graph name an item ends up with, once namespaced.
@@ -340,6 +348,24 @@ class TestBindCatalogItems:
         """
         with pytest.raises(CatalogItemConfigError, match="does not declare them"):
             expand(_components(), None, items)
+
+    def test_a_component_claiming_two_references_raises(self, expand):
+        """Binding serves one claim and strips the rest, so a second would go unnoticed.
+
+        The items the request carried belong to the reference that would be stripped, so without this they are dropped
+        with neither an error nor a log.
+        """
+        components = [
+            {
+                "name": "developer_agent",
+                "type": "AgentComponent",
+                "subagents": [dict(AI_CATALOG_REFERENCE), dict(REFERENCE)],
+            }
+        ]
+        include = _include() + [CatalogItemRef.model_validate(AI_CATALOG_REFERENCE)]
+
+        with pytest.raises(CatalogItemConfigError, match="can claim only one entry"):
+            expand(components, include, _items({"name": "tester"}))
 
     def test_a_claim_differing_only_by_version_is_not_satisfied(self, expand):
         """A claim repeats a declared entry exactly, so a stray version is a mismatch."""
