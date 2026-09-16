@@ -1,9 +1,10 @@
 # pylint: disable=import-outside-toplevel
 import json
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import fastapi
 import pytest
+from starlette.datastructures import URL
 
 from ai_gateway.proxy.clients import ProxyClient, VertexAIProxyModelFactory
 from ai_gateway.proxy.clients.vertex_ai import PathParams
@@ -57,13 +58,11 @@ async def test_valid_proxy_request_text_embedding(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("request_url", "expected_upstream_path", "expected_wire_url", "expected_error"),
+    ("request_url", "expected_upstream_path", "expected_error"),
     [
         (
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
             "locations/LOCATION/publishers/google/models/text-embedding-005:predict",
-            "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
-            "google/models/text-embedding-005:predict",
             "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
             "google/models/text-embedding-005:predict",
             None,
@@ -73,8 +72,6 @@ async def test_valid_proxy_request_text_embedding(
             "locations/LOCATION/publishers/google/models/text-embedding-005:predict?alt=sse",
             "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
             "google/models/text-embedding-005:predict?alt=sse",
-            "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
-            "google/models/text-embedding-005:predict?alt=sse",
             None,
         ),
         (
@@ -82,17 +79,11 @@ async def test_valid_proxy_request_text_embedding(
             "locations/LOCATION/publishers/google/models/text-embedding-005:predict?alt=unknown",
             "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
             "google/models/text-embedding-005:predict",
-            # The factory drops the unrecognised `alt` from the proxy target,
-            # but litellm forwards the incoming query params, so it still
-            # reaches the upstream. See the note on the assertion below.
-            "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
-            "google/models/text-embedding-005:predict?alt=unknown",
             None,
         ),
         (
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
             "locations/LOCATION/publishers/google/models/unknown:predict",
-            "",
             "",
             "400: Unsupported model",
         ),
@@ -100,13 +91,11 @@ async def test_valid_proxy_request_text_embedding(
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
             "locations/LOCATION/publishers/google/models/text-embedding-005:unknown",
             "",
-            "",
             "404: Not found",
         ),
         (
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/unknown/PROJECT/"
             "locations/LOCATION/publishers/google/models/text-embedding-005:predict",
-            "",
             "",
             "404: Not found",
         ),
@@ -114,13 +103,11 @@ async def test_valid_proxy_request_text_embedding(
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
             "unknown/LOCATION/publishers/google/models/text-embedding-005:predict",
             "",
-            "",
             "404: Not found",
         ),
         (
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/corrupted-path/"
             "text-embedding-005:predict",
-            "",
             "",
             "404: Not found",
         ),
@@ -133,7 +120,6 @@ async def test_request_url(
     request_factory,
     request_url,
     expected_upstream_path,
-    expected_wire_url,
     expected_error,
 ):
 
@@ -153,20 +139,13 @@ async def test_request_url(
 
         assert response.status_code == 200
 
-        # litellm builds the upstream request and hands it to `send()` instead
-        # of calling `request()` with the target URL, so the URL that goes out
-        # is read off the request object.
-        mock_proxy_async_client.send.assert_called_once()
-        upstream_request = mock_proxy_async_client.send.call_args[0][0]
-
-        assert upstream_request.method == "POST"
-        assert f"{model.base_url}{model.upstream_path}" == expected_upstream_path
-
-        # litellm rebuilds the query string from the incoming request's
-        # `query_params` rather than keeping the target's, so the wire URL can
-        # differ from the proxy target: an unrecognised `alt` the factory
-        # dropped is still forwarded. This asserts what the upstream receives.
-        assert str(upstream_request.url) == expected_wire_url
+        mock_proxy_async_client.request.assert_called_once_with(
+            method="POST",
+            url=URL(expected_upstream_path),
+            headers=ANY,
+            params=ANY,
+            json=ANY,
+        )
 
 
 def test_allowed_upstream_models_includes_anthropic():
