@@ -1,6 +1,7 @@
 <push_retry>
   If the push fails, read the error message and fix the cause before retrying.
-  Common causes include invalid commit messages and rejected branch names — adjust whichever the error indicates.
-  You may attempt a maximum of 5 retries. If all attempts fail, report the failure.
+{% if branch_rename_allowed | default(true) %}  Common causes include invalid commit messages and rejected branch names — adjust whichever the error indicates.
+{% else %}  The commit message is the only cause you can fix: the branch is already pushed, so report a rejected branch name as a failure instead of retrying it.
+{% endif %}  You may attempt a maximum of 5 retries. If all attempts fail, report the failure.
   Do not proceed to subsequent steps until the push succeeds or all retries are exhausted.
 </push_retry>
