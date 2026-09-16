@@ -9,6 +9,9 @@ import yaml
 from pydantic import ValidationError
 
 from ai_gateway.prompts.registry import LocalPromptRegistry
+from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
+    FlowConfig as ExperimentalFlowConfig,
+)
 from duo_workflow_service.agent_platform.utils.validation import (
     ExtraInputVariablesError,
     FlowValidator,
@@ -57,6 +60,100 @@ V1_CATALOG_ITEM_CONFIGS = [
 ]
 
 TOOL_NAME_PATTERN = re.compile(r"[a-z0-9_]+")
+
+EXPERIMENTAL_CONFIGS = sorted(ExperimentalFlowConfig.DIRECTORY_PATH.glob("**/*.yml"))
+ALL_CONFIGS = V1_CONFIGS + EXPERIMENTAL_CONFIGS
+
+# The implicit terminal component. ``Flow._build_components`` seeds the component dict
+# with it, so routers may target it without it being declared in the config.
+TERMINAL_COMPONENT = "end"
+
+# Any shell reference to a credential-bearing variable, e.g.
+# ``${DUO_WORKFLOW_GIT_HTTP_PASSWORD}`` or ``$CI_JOB_TOKEN``.
+CREDENTIAL_VAR_PATTERN = re.compile(r"\$\{?\w*(?:PASSWORD|TOKEN|SECRET)\w*")
+
+# A credential-bearing variable in the *userinfo* half of a URL, i.e. the token-in-URL
+# pattern #2778 exists to remove:
+# ``https://oauth:${DUO_WORKFLOW_GIT_HTTP_PASSWORD:?... }@host/path.git``.
+# Spaces are permitted between ``://`` and ``@`` because the shell default-value form
+# ``${VAR:?VAR is not set}`` puts them inside the userinfo half — a naive
+# ``://[^@]*:[^@]*@`` would miss the real payload. Quotes are excluded so a match cannot
+# run past the end of the URL and swallow the rest of the command.
+CREDENTIAL_IN_URL_PATTERN = re.compile(
+    r"://[^@\"\']*(?:PASSWORD|TOKEN|SECRET)[^@\"\']*@"
+)
+
+# The one construct allowed to name a credential: a git credential helper. It stores the
+# variable *reference*, so the value never lands in ``.git/config``.
+CREDENTIAL_HELPER_PATTERN = re.compile(r"credential\.[^\s\"\']*\.helper")
+
+
+def _qualified_config_id(config_path: Path) -> str:
+    """``<schema_version>/<flow>/<version>`` — e.g. ``experimental/fix_pipeline/1.0.0``.
+
+    Distinct from :func:`_config_id`, which yields ``<flow>/<version>``. Both ``v1`` and
+    ``experimental`` ship a ``fix_pipeline/1.0.0``, so the shorter id is ambiguous for any
+    sweep spanning both generations.
+    """
+    return f"{config_path.parents[3].name}/{config_path.parent.name}/{config_path.stem}"
+
+
+def _component_names(config: dict) -> set[str]:
+    return {
+        component["name"]
+        for component in config.get("components") or []
+        if isinstance(component, dict) and "name" in component
+    }
+
+
+def _router_targets(router: dict) -> list[str]:
+    """Every component a router can hand control to.
+
+    Two shapes are in use::
+
+        - from: "a"          # unconditional
+          to: "b"
+
+        - from: "a"          # conditional
+          condition:
+            input: "status"
+            routes:
+              "Execution": "agent"
+              "default_route": "end"
+
+    ``default_route`` is a key *inside* ``routes``, not a sibling of it; see
+    ``TestShippedConfigRouterIndentation`` in ``v1/flows/test_flow_config.py``.
+    """
+    if "to" in router:
+        return [router["to"]]
+
+    routes = (router.get("condition") or {}).get("routes") or {}
+    return [target for target in routes.values() if isinstance(target, str)]
+
+
+def _deterministic_step_commands(config: dict) -> list[tuple[str, str]]:
+    """``(component_name, value)`` for every string a DeterministicStepComponent passes a tool.
+
+    Deliberately scoped to these components rather than the whole config: prompt bodies
+    legitimately mention ``$API_KEY``, ``$DB_PASSWORD`` and ``$DEPLOY_TOKEN`` when instructing
+    the agent about CI/CD variable references (see ``v1/flows/configs/flow_creator/1.0.0.yml``),
+    and ``support_assistant`` prompts discuss tokens at length, so scanning the full YAML
+    false-positives on documentation.
+    """
+    commands: list[tuple[str, str]] = []
+
+    for component in config.get("components") or []:
+        if not isinstance(component, dict):
+            continue
+        if component.get("type") != "DeterministicStepComponent":
+            continue
+
+        for entry in component.get("inputs") or []:
+            if isinstance(entry, dict) and isinstance(entry.get("from"), str):
+                commands.append((component.get("name", "?"), entry["from"]))
+
+    return commands
+
 
 MCP_TOOL_NAME_PREFIXES = ("orbit_",)
 
@@ -481,6 +578,182 @@ class TestRuntimeInjectedToolExemption:
     )
     def test_is_runtime_injected(self, tool_name: str, expected: bool):
         assert _is_runtime_injected(tool_name) is expected
+
+
+class TestExperimentalFlowConfigGraphs:
+    """Structural checks for the ``experimental`` configs, which nothing else covers.
+
+    ``TestValidateFlowConfigs`` sweeps ``v1`` only — ``V1_CONFIGS`` globs the v1
+    ``DIRECTORY_PATH``, and ``experimental`` has its own. It also cannot simply be pointed at
+    ``experimental``: ``FlowValidator.validate_dict`` dispatches the dry run on
+    ``case V1FlowConfig()``, and ``experimental.FlowConfig`` is a *sibling* of that class
+    (both extend ``BaseFlowConfig``), not a subclass, so every experimental config would take
+    ``case _`` and raise ``NotImplementedError``.
+
+    Experimental configs therefore get Pydantic validation plus ``flow_factory``'s
+    prompt-security scan and nothing more. ``components`` is typed ``list[dict]`` with no
+    per-entry schema, so neither invariant below is checked anywhere:
+
+    * ``flow.entry_point`` naming a component that exists — ``Flow._compile`` does
+      ``components[self._config.flow.entry_point]``
+    * routers naming components that exist — ``Flow._build_routers`` does
+      ``components[router_config["from"]]``
+
+    Both are a ``KeyError`` at flow-compile time, which in production means the flow fails when
+    a user triggers it.
+    """
+
+    @pytest.mark.parametrize(
+        "config_path",
+        EXPERIMENTAL_CONFIGS,
+        ids=lambda p: f"{p.parent.name}/{p.stem}",
+    )
+    def test_entry_point_names_a_declared_component(self, config_path: Path):
+        config = yaml.safe_load(config_path.read_text()) or {}
+        entry_point = (config.get("flow") or {}).get("entry_point")
+        declared = _component_names(config)
+
+        assert entry_point in declared, (
+            f"{config_path.parent.name}/{config_path.stem} has entry_point "
+            f"{entry_point!r}, which is not a declared component. Declared: "
+            f"{sorted(declared)}."
+        )
+
+    @pytest.mark.parametrize(
+        "config_path",
+        EXPERIMENTAL_CONFIGS,
+        ids=lambda p: f"{p.parent.name}/{p.stem}",
+    )
+    def test_routers_reference_declared_components(self, config_path: Path):
+        config = yaml.safe_load(config_path.read_text()) or {}
+        declared = _component_names(config)
+        reachable = declared | {TERMINAL_COMPONENT}
+
+        dangling: list[str] = []
+        for router in config.get("routers") or []:
+            if router.get("from") not in declared:
+                dangling.append(f"from={router.get('from')!r}")
+            dangling.extend(
+                f"to={target!r}"
+                for target in _router_targets(router)
+                if target not in reachable
+            )
+
+        assert not dangling, (
+            f"{config_path.parent.name}/{config_path.stem} has routers referencing "
+            f"unknown components: {dangling}. Valid targets: {sorted(reachable)}."
+        )
+
+
+class TestNoCredentialsInFlowCommands:
+    """Regression guard for #2778 — a credential must never reach a shell command as data.
+
+    Three configs carried a ``git_setup`` step that built
+    ``https://oauth:${DUO_WORKFLOW_GIT_HTTP_PASSWORD}@host/path.git`` and ran
+    ``git remote set-url origin`` with it, writing the DAP OAuth token into ``.git/config``
+    and surfacing it in ``git remote -v``.
+
+    The fix keeps ``git_setup`` but hands the token over through a host-scoped
+    ``credential.<url>.helper`` instead, which stores the variable *reference*. So the rule is
+    not "never name a credential" — it is "never put one in a URL, and name one nowhere except
+    a credential helper".
+    """
+
+    @pytest.mark.parametrize("config_path", ALL_CONFIGS, ids=_qualified_config_id)
+    def test_no_credential_in_a_url(self, config_path: Path):
+        offenders = [
+            f"{name}: {value}"
+            for name, value in _deterministic_step_commands(
+                yaml.safe_load(config_path.read_text()) or {}
+            )
+            if CREDENTIAL_IN_URL_PATTERN.search(value)
+        ]
+
+        assert not offenders, (
+            f"{_qualified_config_id(config_path)} interpolates a credential into a URL: "
+            f"{offenders}. This writes the token into .git/config. Set a credential-free "
+            f"remote and install a credential.<url>.helper instead."
+        )
+
+    @pytest.mark.parametrize("config_path", ALL_CONFIGS, ids=_qualified_config_id)
+    def test_credentials_are_named_only_inside_a_credential_helper(
+        self, config_path: Path
+    ):
+        offenders = [
+            f"{name}: {value}"
+            for name, value in _deterministic_step_commands(
+                yaml.safe_load(config_path.read_text()) or {}
+            )
+            if CREDENTIAL_VAR_PATTERN.search(value)
+            and not CREDENTIAL_HELPER_PATTERN.search(value)
+        ]
+
+        assert not offenders, (
+            f"{_qualified_config_id(config_path)} names a credential outside a credential "
+            f"helper: {offenders}. Let git fetch it via credential.<url>.helper rather than "
+            f"handling the value in the command."
+        )
+
+
+class TestCredentialPatterns:
+    """Direct coverage for the two regexes above.
+
+    The sweeps only ever see what ships today, so once the configs are clean both would keep passing if a pattern
+    stopped matching anything at all. These pin them against the actual pre-fix payload, which is the case that matters.
+    """
+
+    # Verbatim from ``git_setup`` before #2778 was fixed.
+    PRE_FIX_COMMAND = (
+        'proto="${DUO_WORKFLOW_GIT_HTTP_BASE_URL:?DUO_WORKFLOW_GIT_HTTP_BASE_URL is not set}"; '
+        'proto="${proto%%://*}"; host="${DUO_WORKFLOW_GIT_HTTP_BASE_URL#*://}"; '
+        'repo_url="${proto}://oauth:${DUO_WORKFLOW_GIT_HTTP_PASSWORD:?DUO_WORKFLOW_GIT_HTTP_PASSWORD is not set}'
+        '@${host%/}/${GITLAB_PROJECT_PATH:?GITLAB_PROJECT_PATH is not set}.git"; '
+        'git remote set-url origin "${repo_url}"'
+    )
+
+    # The replacement: credential-free remote plus a host-scoped helper.
+    POST_FIX_COMMAND = (
+        'base="${DUO_WORKFLOW_GIT_HTTP_BASE_URL:?DUO_WORKFLOW_GIT_HTTP_BASE_URL is not set}"; '
+        'base="${base%/}"; '
+        'git remote set-url origin "${base}/${GITLAB_PROJECT_PATH:?GITLAB_PROJECT_PATH is not set}.git"; '
+        'git config "credential.${base}.helper" '
+        '\'!f() { [ "$1" = get ] || exit 0; '
+        '[ -n "${DUO_WORKFLOW_GIT_HTTP_PASSWORD}" ] || exit 1; '
+        'echo username=oauth; echo "password=${DUO_WORKFLOW_GIT_HTTP_PASSWORD}"; }; f\''
+    )
+
+    def test_pre_fix_payload_is_caught(self):
+        """The spaces in ``${VAR:?VAR is not set}`` sit inside the userinfo half, so a naive ``://[^@]*:[^@]*@`` shape
+        match is not enough."""
+        assert CREDENTIAL_IN_URL_PATTERN.search(self.PRE_FIX_COMMAND)
+
+    def test_post_fix_command_is_clean(self):
+        assert not CREDENTIAL_IN_URL_PATTERN.search(self.POST_FIX_COMMAND)
+
+    def test_post_fix_command_names_its_credential_inside_a_helper(self):
+        assert CREDENTIAL_VAR_PATTERN.search(self.POST_FIX_COMMAND)
+        assert CREDENTIAL_HELPER_PATTERN.search(self.POST_FIX_COMMAND)
+
+    def test_pre_fix_payload_has_no_helper_to_excuse_it(self):
+        assert CREDENTIAL_VAR_PATTERN.search(self.PRE_FIX_COMMAND)
+        assert not CREDENTIAL_HELPER_PATTERN.search(self.PRE_FIX_COMMAND)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            pytest.param('curl -H "PRIVATE-TOKEN: $GITLAB_TOKEN" "$url"', id="header"),
+            pytest.param("export SECRET_KEY=${MY_SECRET}", id="export"),
+        ],
+    )
+    def test_credential_outside_a_helper_is_flagged(self, command: str):
+        """The helper exemption must not become a blanket licence to name a credential."""
+        assert CREDENTIAL_VAR_PATTERN.search(command)
+        assert not CREDENTIAL_HELPER_PATTERN.search(command)
+
+    def test_ordinary_url_is_not_flagged(self):
+        assert not CREDENTIAL_IN_URL_PATTERN.search(
+            'git clone "https://gitlab.com/${GITLAB_PROJECT_PATH}.git"'
+        )
 
 
 def _component(config: FlowConfig, name: str) -> dict:
