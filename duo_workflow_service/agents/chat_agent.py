@@ -32,9 +32,9 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
 )
 from duo_workflow_service.entities.server_tool_blocks import (
     AgentTextSegment,
-    build_anthropic_tool_ui_chat_log,
-    is_anthropic_server_tool_result_block,
+    ServerToolResults,
     split_content_around_server_tools,
+    warn_unmatched_server_tool_results,
 )
 from duo_workflow_service.entities.state import (
     TIER_ACCESS_DENIED_SUB_TYPE,
@@ -325,11 +325,9 @@ class ChatAgent:
             return
 
         tier_payload = self._extract_tier_access_denied(state)
-        results_by_use_id = {
-            block["tool_use_id"]: block
-            for block in content
-            if is_anthropic_server_tool_result_block(block) and block.get("tool_use_id")
-        }
+        # Final message: complete enough for unmatched results to mean a shape change.
+        warn_unmatched_server_tool_results(content)
+        results = ServerToolResults(content)
 
         entries: list[UiChatLog] = []
         for segment in split_content_around_server_tools(content, agent_response.id):
@@ -340,11 +338,7 @@ class ChatAgent:
                     self._make_agent_entry(segment.text, segment.key, seg_tier)
                 )
             else:
-                entries.append(
-                    build_anthropic_tool_ui_chat_log(
-                        segment.block, results_by_use_id.get(segment.block.get("id"))
-                    )
-                )
+                entries.append(results.build_ui_chat_log(segment.block))
 
         result["ui_chat_log"] = entries
 

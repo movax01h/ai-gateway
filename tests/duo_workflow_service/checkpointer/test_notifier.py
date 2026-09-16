@@ -1852,7 +1852,9 @@ class TestStreamingToolCallUiChatLog:
         assert not checkpoint_notifier.ui_chat_log
 
 
-def _server_tool_use_chunk(msg_id="resp_1", tool_id="srvtu_1", name="web_search"):
+def _server_tool_use_chunk(
+    msg_id="resp_1", tool_id="srvtu_1", name="web_search", index=1
+):
     return AIMessageChunk(
         id=msg_id,
         content=[
@@ -1861,13 +1863,13 @@ def _server_tool_use_chunk(msg_id="resp_1", tool_id="srvtu_1", name="web_search"
                 "id": tool_id,
                 "name": name,
                 "input": {"query": "latest AI research"},
-                "index": 1,
+                "index": index,
             }
         ],
     )
 
 
-def _server_tool_result_chunk(msg_id="resp_1", tool_id="srvtu_1"):
+def _server_tool_result_chunk(msg_id="resp_1", tool_id="srvtu_1", index=2):
     return AIMessageChunk(
         id=msg_id,
         content=[
@@ -1875,7 +1877,7 @@ def _server_tool_result_chunk(msg_id="resp_1", tool_id="srvtu_1"):
                 "type": "web_search_tool_result",
                 "tool_use_id": tool_id,
                 "content": [{"type": "web_search_result", "url": "https://x"}],
-                "index": 2,
+                "index": index,
             }
         ],
     )
@@ -1983,16 +1985,16 @@ def test_text_around_server_tool_splits_into_separate_agent_entries(
 
 def test_multiple_server_tools_match_their_results(checkpoint_notifier):
     checkpoint_notifier._append_chunk_to_ui_chat_log(
-        _server_tool_use_chunk(tool_id="srvtu_1", name="web_search")
+        _server_tool_use_chunk(tool_id="srvtu_1", name="web_search", index=0)
     )
     checkpoint_notifier._append_chunk_to_ui_chat_log(
-        _server_tool_use_chunk(tool_id="srvtu_2", name="web_fetch")
+        _server_tool_result_chunk(tool_id="srvtu_1", index=1)
     )
     checkpoint_notifier._append_chunk_to_ui_chat_log(
-        _server_tool_result_chunk(tool_id="srvtu_2")
+        _server_tool_use_chunk(tool_id="srvtu_2", name="web_fetch", index=2)
     )
     checkpoint_notifier._append_chunk_to_ui_chat_log(
-        _server_tool_result_chunk(tool_id="srvtu_1")
+        _server_tool_result_chunk(tool_id="srvtu_2", index=3)
     )
 
     tool_entries = _tool_entries(checkpoint_notifier)
@@ -2020,18 +2022,63 @@ def test_client_tool_use_block_creates_no_server_card(checkpoint_notifier):
     assert _tool_entries(checkpoint_notifier) == []
 
 
-def test_server_tool_result_without_matching_use_logs_warning(checkpoint_notifier):
-    with patch("duo_workflow_service.checkpointer.notifier.log") as mock_log:
-        checkpoint_notifier._append_chunk_to_ui_chat_log(
-            _server_tool_result_chunk(tool_id="orphan")
-        )
+def test_server_tool_result_without_matching_use_creates_no_card(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        _server_tool_result_chunk(tool_id="orphan")
+    )
 
     assert _tool_entries(checkpoint_notifier) == []
-    mock_log.warning.assert_called_once_with(
-        "Received server tool result with no matching server_tool_use entry",
-        tool_use_id="orphan",
-        block_type="web_search_tool_result",
+
+
+def _openai_web_search_chunk(msg_id="resp_1", call_id="ws_1", query="q", index=0):
+    return AIMessageChunk(
+        id=msg_id,
+        content=[
+            {
+                "type": "web_search_call",
+                "id": call_id,
+                "status": "completed",
+                "action": {"type": "search", "query": query},
+                "index": index,
+            }
+        ],
     )
+
+
+def test_openai_web_search_card_gains_citations_as_text_streams(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(_openai_web_search_chunk())
+
+    entry = _tool_entries(checkpoint_notifier)[0]
+    assert "tool_response" not in entry["tool_info"]
+
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        AIMessageChunk(
+            id="resp_1",
+            content=[
+                {
+                    "type": "text",
+                    "text": "Answer.",
+                    "annotations": [
+                        {
+                            "type": "url_citation",
+                            "url": "https://a",
+                            "title": "A",
+                            "start_index": 0,
+                            "end_index": 1,
+                        }
+                    ],
+                    "index": 1,
+                }
+            ],
+        )
+    )
+
+    tool_entries = _tool_entries(checkpoint_notifier)
+    assert len(tool_entries) == 1
+    assert tool_entries[0]["tool_info"]["tool_response"] == [
+        {"type": "web_search_result", "url": "https://a", "title": "A"}
+    ]
+    assert checkpoint_notifier.ui_chat_log[-1]["content"] == "Answer."
 
 
 def _values_state(status=WorkflowStatusEnum.INPUT_REQUIRED.value, interrupted=False):

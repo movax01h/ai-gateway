@@ -2197,6 +2197,45 @@ class TestServerToolResponse:
         assert len(result["ui_chat_log"]) == 1
         assert result["ui_chat_log"][0]["status"] == ToolStatus.PENDING
 
+    def test_openai_web_search_call_splits_text_and_carries_citations(self, chat_agent):
+        msg = AIMessage(
+            content=[
+                {"type": "text", "text": "Let me look that up."},
+                {
+                    "type": "web_search_call",
+                    "id": "ws_1",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "gitlab duo"},
+                },
+                {
+                    "type": "text",
+                    "text": " Here is what I found.",
+                    "annotations": [
+                        {
+                            "type": "url_citation",
+                            "url": "https://x",
+                            "title": "X",
+                            "start_index": 0,
+                            "end_index": 1,
+                        }
+                    ],
+                },
+            ],
+            id="resp_1",
+        )
+        result = {}
+
+        chat_agent._build_ui_chat_log(msg, {"conversation_history": {}}, result)
+
+        pre, tool, summary = result["ui_chat_log"]
+        assert pre["content"] == "Let me look that up."
+        assert tool["message_type"] == MessageTypeEnum.TOOL
+        assert tool["tool_info"]["tool_response"] == [
+            {"type": "web_search_result", "url": "https://x", "title": "X"}
+        ]
+        assert summary["message_id"] == "resp_1:seg1"
+        assert summary["content"] == " Here is what I found."
+
     def test_plain_string_produces_single_agent_entry(self, chat_agent):
         result = {}
         chat_agent._build_ui_chat_log(
