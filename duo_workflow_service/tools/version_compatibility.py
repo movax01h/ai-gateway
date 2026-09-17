@@ -23,6 +23,7 @@ SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.2.0")
 GLQL_SCHEMA_ENDPOINT_VERSION = Version("19.3.0")
 AGENT_PLAN_READINESS_SCORE_VERSION = Version("19.4.0")
 LABELS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
+SUGGESTED_REVIEWERS_ENDPOINT_VERSION = Version("19.4.0")
 
 # Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
 # parse, such as a GDK's `19.3.0-pre-g1234abcd`.
@@ -180,4 +181,23 @@ def supports_glql_schema_endpoint() -> bool:
     # Padded, because a two-component header like "19.3" releases as (19, 3).
     return _padded_release(get_gitlab_version()) >= _padded_release(
         GLQL_SCHEMA_ENDPOINT_VERSION
+    )
+
+
+def supports_suggested_reviewers_endpoint() -> bool:
+    """Check if the GitLab instance serves the merge request suggested_reviewers endpoint.
+
+    An instance that reports no version is treated as supported, for the same reason
+    as supports_set_reviewers_mutation: the fallback version predates the endpoint,
+    so gating on it would disable the tool on instances that do serve it.
+
+    Returns:
+        True if the endpoint is available, False otherwise.
+    """
+    if not gitlab_version.get():
+        return True
+
+    # Compare .release so GitLab.com's 19.4.0-pre passes the 19.4.0 floor.
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        SUGGESTED_REVIEWERS_ENDPOINT_VERSION
     )

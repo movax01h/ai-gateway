@@ -1147,6 +1147,25 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `recommend_reviewers 3.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> suggest_reviewers;
+    suggest_reviewers(suggest_reviewers<br>#91;OneOffComponent#93;);
+    suggest_reviewers --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `resolve_sast_vulnerability 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
