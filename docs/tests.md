@@ -221,14 +221,29 @@ Tracking the false-failure rate is a prerequisite for making the job blocking (P
 
 ### `CEF_SERVICE_ACCOUNT_PAT`
 
-Authentication uses a GitLab PAT stored as a masked CI/CD variable named `CEF_SERVICE_ACCOUNT_PAT`.
+Authentication uses a GitLab PAT read from Vault at job runtime via JWT (OIDC) auth: the job
+requests a `VAULT_ID_TOKEN` for `https://vault.gitlab.net` and exposes the secret as
+`CEF_SERVICE_ACCOUNT_PAT`. The secret lives at the canonical project's shared path:
+
+```plaintext
+gitlab-com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/shared/cef-service-account
+```
+
+with the PAT in the `personal_access_token` field (browse the enclosing
+[`shared/` directory in Vault](https://vault.gitlab.net/ui/vault/secrets/ci/kv/list/gitlab-com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/shared/)).
+
+That path is written out in full in `.gitlab/ci/sanity-check.gitlab-ci.yml` on purpose. Building it
+from the `VAULT_SECRETS_PATH`/`VAULT_SECRETS_SHARED_PATH` variables provisioned for the job does not
+work, because those are derived from `CI_PROJECT_PATH`: pipelines in the
+[security mirror](https://gitlab.com/gitlab-org/security/modelops/applied-ml/code-suggestions/ai-assist)
+would resolve `gitlab-com/gitlab-org/security/modelops/.../shared/cef-service-account`, where no
+such secret exists. Both projects share the one canonical secret, so keep the path literal.
 
 - **How to rotate**: from the
   [AI Evaluation](https://gitlab.com/groups/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/-/settings/service_accounts)
   group's service account settings, open `cef-service-prod` and generate a new access token
-  (`read_api` scope), then replace the `CEF_SERVICE_ACCOUNT_PAT` value under this project's
-  **Settings > CI/CD > Variables** (keep it masked). Revoke the old token once the new one is confirmed
-  working.
+  (`read_api` scope), then update the `personal_access_token` field of the Vault secret above.
+  Revoke the old token once the new one is confirmed working.
 - **Who/cadence**: managed by the AI Core Infra group. The token belongs to the `cef-service-prod`
   service account in the
   [AI Evaluation](https://gitlab.com/groups/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/)
