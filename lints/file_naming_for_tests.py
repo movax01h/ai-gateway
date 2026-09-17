@@ -19,6 +19,7 @@ EXCLUDED_FILES = {
     "/tests/duo_workflow_service/agent_platform/v1/flows/test_code_review_config.py",
     "/tests/duo_workflow_service/agent_platform/v1/flows/test_deep_code_review_config.py",
     "/tests/duo_workflow_service/agent_platform/v1/flows/test_readiness_score_config.py",
+    "/tests/duo_workflow_service/agent_platform/experimental/components/for_each/test_docs_example.py",
 }
 
 # Folders to scan for implementation files

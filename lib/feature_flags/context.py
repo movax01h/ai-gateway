@@ -11,6 +11,12 @@ class FeatureFlag(StrEnum):
     USE_GENERIC_GITLAB_API_TOOLS = "use_generic_gitlab_api_tools"
     AI_PROMPT_SCANNING = "ai_prompt_scanning"
     DAP_WEB_SEARCH = "dap_web_search"
+    # Gates the experimental `for_each` fan-out, which runs a component's body
+    # once per item of a list, see
+    # duo_workflow_service/agent_platform/experimental/components/for_each. Not
+    # yet defined in gitlab/config/feature_flags -- to be added alongside the
+    # first flow config that opts in.
+    DAP_FOR_EACH = "dap_for_each"
     # Gates SupervisorAgentComponentV2 (parallel subagent delegation via native
     # LangGraph Send tasks) on top of the per-component `parallel_subagents: true`
     # flow config flag, see
