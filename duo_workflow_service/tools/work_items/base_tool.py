@@ -414,22 +414,22 @@ class WorkItemBaseTool(DuoBaseTool):
         """Build agentPlanWidget input from the plan content and/or its readiness score.
 
         The two fields are independent inputs to the same widget: a plan-drafting
-        flow writes ``content``, while a scoring flow writes only ``readinessScore``
-        against a plan it did not author. Sending the absent field as ``null`` would
+        flow writes `content`, while a scoring flow writes only `readinessScore`
+        against a plan it did not author. Sending the absent field as `null` would
         clear it, so each key is included only when supplied.
 
         The fields are also gated independently by GitLab version: the widget type
-        and its ``content`` field exist from 19.0, while ``readinessScore`` was only
-        added to the widget input in 19.4. On a 19.0-19.3 instance ``content`` goes
-        out without ``readinessScore``; before 19.0 neither does, because sending an
+        and its `content` field exist from 19.0, while `readinessScore` was only
+        added to the widget input in 19.4. On a 19.0-19.3 instance `content` goes
+        out without `readinessScore`; before 19.0 neither does, because sending an
         unknown argument fails the mutation with a schema error.
 
         Args:
-            kwargs: Input parameters that may contain ``agent_plan`` and/or
-                ``readiness_score``.
+            kwargs: Input parameters that may contain `agent_plan` and/or
+                `readiness_score`.
 
         Returns:
-            Dictionary with the agentPlanWidget input, or ``None`` when neither field
+            Dictionary with the agentPlanWidget input, or `None` when neither field
             was supplied or neither survived the version gates.
         """
         widget: Dict[str, Any] = {}
@@ -452,15 +452,15 @@ class WorkItemBaseTool(DuoBaseTool):
         """Build weightWidget input for work item create/update.
 
         Args:
-            kwargs: Input parameters that may contain ``weight`` and/or
-                ``clear_weight``.
+            kwargs: Input parameters that may contain `weight` and/or
+                `clear_weight`.
             warnings: List to collect validation warnings.
 
         Returns:
-            Dictionary with ``{"weight": <int|None>}`` or ``None`` if neither
-            ``weight`` nor ``clear_weight`` is provided. ``clear_weight=True``
-            sends ``null`` to clear the value and takes precedence over
-            ``weight``.
+            Dictionary with `{"weight": <int|None>}` or `None` if neither
+            `weight` nor `clear_weight` is provided. `clear_weight=True`
+            sends `null` to clear the value and takes precedence over
+            `weight`.
         """
         clear_weight = kwargs.get("clear_weight")
         weight = kwargs.get("weight")
@@ -628,13 +628,13 @@ class WorkItemBaseTool(DuoBaseTool):
         """Build statusWidget input for work item create/update.
 
         Args:
-            kwargs: Input parameters that may contain ``status_id``.
+            kwargs: Input parameters that may contain `status_id`.
             warnings: List to collect validation warnings.
 
         Returns:
-            Dictionary with ``{"status": <gid>}`` or ``None`` if ``status_id`` is
-            not provided. ``status_id`` must be the global ID of an existing
-            status, which can be looked up with the ``get_work_item_statuses``
+            Dictionary with `{"status": <gid>}` or `None` if `status_id` is
+            not provided. `status_id` must be the global ID of an existing
+            status, which can be looked up with the `get_work_item_statuses`
             tool.
         """
         status_id = kwargs.get("status_id")
@@ -837,8 +837,8 @@ class WorkItemBaseTool(DuoBaseTool):
             mr_page_size: Number of related MRs to return per page (1–100).
                 Defaults to None (server default).
             mr_pagination_cursor: Cursor for paginating related MRs.
-                Use ``endCursor`` from the DEVELOPMENT widget's
-                ``relatedMergeRequests.pageInfo`` in a previous response.
+                Use `endCursor` from the DEVELOPMENT widget's
+                `relatedMergeRequests.pageInfo` in a previous response.
 
         Returns:
             Work item dict or None if not found.

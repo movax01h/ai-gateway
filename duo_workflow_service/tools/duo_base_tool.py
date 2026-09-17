@@ -359,13 +359,13 @@ class DuoBaseTool(BaseTool):
     ) -> list[Any]:
         """Fetch all pages from a paginated GitLab REST endpoint.
 
-        Iterates through pages using the ``X-Next-Page`` response header until
-        no further pages are available or ``max_pages`` is reached.  The safety
-        cap on ``max_pages`` guards against infinite loops caused by a
+        Iterates through pages using the `X-Next-Page` response header until
+        no further pages are available or `max_pages` is reached.  The safety
+        cap on `max_pages` guards against infinite loops caused by a
         misbehaving server that keeps returning a next-page header.
 
         Args:
-            endpoint: The API path to GET (e.g. ``/api/v4/projects/1/issues/2/notes``).
+            endpoint: The API path to GET (e.g. `/api/v4/projects/1/issues/2/notes`).
             per_page: Number of items to request per page (default 100, GitLab max).
             max_pages: Maximum number of pages to fetch before stopping (default 100).
             extra_params: Additional query parameters merged into every request.

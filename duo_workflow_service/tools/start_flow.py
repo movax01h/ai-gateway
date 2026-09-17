@@ -150,7 +150,7 @@ def _failure_detail(status_code: int, flow_name: str) -> str:
 class StartFlowError(ToolException):
     """Raised when starting a flow fails.
 
-    ``response`` is read by ToolsExecutor._handle_tool_error to surface the
+    `response` is read by ToolsExecutor._handle_tool_error to surface the
     failure reason in the UI chat log, not just the LLM-facing message.
 
     Args:
@@ -405,14 +405,14 @@ class StartFlow(DuoBaseTool):
     async def _start_catalog_flow(self, flow_data: dict) -> str:
         """Start a custom AI Catalog flow by item consumer ID.
 
-        Rails treats ``ai_catalog_item_consumer_id`` and ``workflow_definition``
+        Rails treats `ai_catalog_item_consumer_id` and `workflow_definition`
         as mutually exclusive branches, routing the former to
-        ``Ai::Catalog::Flows::ExecuteService``. That service falls back to the
+        `Ai::Catalog::Flows::ExecuteService`. That service falls back to the
         flow's own description when no goal is given, so an absent goal is
         omitted rather than sent as null.
 
         Args:
-            flow_data: The validated ``StartCatalogFlowInput`` as a dict.
+            flow_data: The validated `StartCatalogFlowInput` as a dict.
 
         Returns:
             The same JSON payload shape as the foundational flows.
@@ -446,8 +446,8 @@ class StartFlow(DuoBaseTool):
                 to label the session card.
 
         Returns:
-            A JSON string carrying ``status``, ``workflow_id``, ``session_url``
-            and ``flow_name``.
+            A JSON string carrying `status`, `workflow_id`, `session_url`
+            and `flow_name`.
         """
         response = await self.gitlab_client.apost(
             path="/api/v4/ai/duo_workflows/agent_workflows",
@@ -499,21 +499,21 @@ class StartFlow(DuoBaseTool):
         is extracted from the URL so the workflow runs against the correct
         project — even when it differs from the current chat context.
         For security flows (sast_fp_detection, resolve_sast_vulnerability,
-        secrets_fp_detection), the project falls back to ``self.project``
+        secrets_fp_detection), the project falls back to `self.project`
         when available, since the vulnerability ID already encodes the
         resource identity.
 
         Args:
-            flow_name: The flow identifier (e.g. ``"developer"``).
+            flow_name: The flow identifier (e.g. `"developer"`).
             flow_data: The full flow input as a dict.
 
         Returns:
-            A tuple of ``(goal_string, project_id_or_path, linkable_ids)``.
-            ``linkable_ids`` is a dict that may contain ``"issue_id"`` and/or
-            ``"merge_request_id"`` as IIDs (integers) when the flow input
+            A tuple of `(goal_string, project_id_or_path, linkable_ids)`.
+            `linkable_ids` is a dict that may contain `"issue_id"` and/or
+            `"merge_request_id"` as IIDs (integers) when the flow input
             provides enough information to resolve them.
 
-        Pydantic validation on ``StartFlowInput`` guarantees that all
+        Pydantic validation on `StartFlowInput` guarantees that all
         required fields are present before this method is reached.
         """
         linkable_ids: dict[str, int] = {}
@@ -590,8 +590,8 @@ class StartFlow(DuoBaseTool):
     def _parse_merge_request_url(self, url: str) -> tuple[str, int]:
         """Parse a merge request URL into (project_path, iid).
 
-        Returns the decoded project path (e.g. ``group/project``) so it
-        can be used directly with the Rails ``find_project!`` helper.
+        Returns the decoded project path (e.g. `group/project`) so it can be used directly with the Rails
+        `find_project!` helper.
         """
         try:
             encoded_path, iid = GitLabUrlParser.parse_merge_request_url(
@@ -606,9 +606,9 @@ class StartFlow(DuoBaseTool):
     def _parse_issue_url(self, url: str) -> tuple[str, int]:
         """Parse an issue or work-item URL into (project_path, iid).
 
-        Accepts both ``/-/issues/<iid>`` and ``/-/work_items/<iid>`` URL
+        Accepts both `/-/issues/<iid>` and `/-/work_items/<iid>` URL
         formats.  Returns the decoded project path so it can serve as a
-        fallback ``project_id`` when no other project context is available.
+        fallback `project_id` when no other project context is available.
         """
         try:
             encoded_path, iid = GitLabUrlParser.parse_issue_url(url, self.gitlab_host)
@@ -619,8 +619,8 @@ class StartFlow(DuoBaseTool):
     def _parse_pipeline_url(self, url: str) -> tuple[str, int]:
         """Parse a pipeline URL into (project_path, iid).
 
-        Returns the decoded project path (e.g. ``group/project``) so it
-        can be used directly with the Rails ``find_project!`` helper.
+        Returns the decoded project path (e.g. `group/project`) so it can be used directly with the Rails
+        `find_project!` helper.
         """
         try:
             encoded_path, iid = GitLabUrlParser.parse_pipeline_url(

@@ -3,7 +3,7 @@
 The advanced code review flow ends in pure code: the confidence gate, severity ordering, per-severity counts, the
 summary and the custom-instruction attribution are all decided here, never by a model. Posting to a merge request and
 returning the result to a local session are two terminal steps over this one module, so the operating point set by
-``min_confidence`` is the same wherever the review runs.
+`min_confidence` is the same wherever the review runs.
 """
 
 from collections import Counter
@@ -48,7 +48,7 @@ def select_findings(
 ) -> tuple[List[Dict[str, Any]], int]:
     """Choose and order the findings that will be published.
 
-    Drops a finding below ``min_confidence`` (only when it carries a score, so a schema slip degrades to publishing)
+    Drops a finding below `min_confidence` (only when it carries a score, so a schema slip degrades to publishing)
     and logs the drop. The survivors are ordered by severity, reviewer order within a severity, so the same input
     always publishes in the same order.
 
@@ -149,7 +149,7 @@ def _previous_finding_rank(status: Any) -> int:
 def render_previous_findings(items: List[Dict[str, Any]]) -> Optional[str]:
     """Render the reviewer's reconciliation of earlier threads as a status-first bullet list.
 
-    Returns ``None`` unless at least one thread still needs the author's attention: a list made only of fixed and
+    Returns `None` unless at least one thread still needs the author's attention: a list made only of fixed and
     verified items reads as if there were something left to do, so a re-review that closed everything is published as
     a clean review instead.
     """

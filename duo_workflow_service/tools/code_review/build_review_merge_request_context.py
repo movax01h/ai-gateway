@@ -269,12 +269,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
     ) -> tuple[Optional[str], set]:
         """Work out which lines arrived since the previous review.
 
-        Returns the scope state and the ``(new_path, new_line)`` pairs added since
-        ``baseline_sha``. Only ``delta`` carries pairs; every other state returns an
+        Returns the scope state and the `(new_path, new_line)` pairs added since
+        `baseline_sha`. Only `delta` carries pairs; every other state returns an
         empty set and means the whole diff still needs a full-priority review.
 
-        Both diffs are taken against the current head, so ``new_line`` means the same
-        thing in each. ``old_line`` does not, because the bases differ.
+        Both diffs are taken against the current head, so `new_line` means the same
+        thing in each. `old_line` does not, because the bases differ.
         """
         if not baseline_sha:
             return None, set()
@@ -355,7 +355,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
     def _has_collapsed_diff(diffs: List[Dict[str, Any]]) -> bool:
         """Report whether any file came back without its patch.
 
-        GitLab returns an empty ``diff`` when a patch exceeds the size limit. A pure
+        GitLab returns an empty `diff` when a patch exceeds the size limit. A pure
         rename and a deletion are patchless by design and have no added line to lose.
         A new file is all added lines, so a patchless one is a dropped patch.
 
@@ -377,9 +377,9 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         Failure is ordinary here: a force push orphans the baseline and 404s, a
         private fork 403s. Neither deserves an error-level log, so this avoids
-        ``_process_http_response``, which logs every non-2xx as an error.
+        `_process_http_response`, which logs every non-2xx as an error.
 
-        ``straight=true`` compares the two commits directly. The merge base default
+        `straight=true` compares the two commits directly. The merge base default
         would, after a rebase, fall back to the original fork point and return the
         whole merge request, marking every line as new.
         """
@@ -410,7 +410,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             return None
 
     def _added_line_keys(self, pairs: Iterable[tuple]) -> set:
-        """Collect ``(path, new_line)`` for every added line in ``(path, raw_diff)`` pairs."""
+        """Collect `(path, new_line)` for every added line in `(path, raw_diff)` pairs."""
         return {
             (path, line_new)
             for path, raw_diff in pairs
@@ -821,15 +821,15 @@ IMPORTANT: Only apply each custom instruction to files that match its specified 
 
     @staticmethod
     def _walk_diff_lines(raw_diff: str) -> Iterator[tuple[str, int, int, str]]:
-        """Walk a unified diff, yielding ``(kind, old_line, new_line, text)`` per line.
+        """Walk a unified diff, yielding `(kind, old_line, new_line, text)` per line.
 
-        ``kind`` is one of ``chunk_header``, ``nonewline``, ``added``, ``deleted`` or
-        ``context``. The line numbers belong to the yielded line, not the running
+        `kind` is one of `chunk_header`, `nonewline`, `added`, `deleted` or
+        `context`. The line numbers belong to the yielded line, not the running
         counters. File metadata lines are skipped.
 
-        Metadata is only skipped before the first hunk header. Inside a hunk a ``+++``
-        is an added line whose own text starts with ``++``, and a ``---`` is a deleted
-        line starting ``--``. Skipping those would drop the line and leave every later
+        Metadata is only skipped before the first hunk header. Inside a hunk a `+++`
+        is an added line whose own text starts with `++`, and a `---` is a deleted
+        line starting `--`. Skipping those would drop the line and leave every later
         counter in the hunk one short, which misplaces the rendered line number and
         stops the incremental-diff collector matching the same line across two diffs.
         """
@@ -852,7 +852,7 @@ IMPORTANT: Only apply each custom instruction to files that match its specified 
                 continue
 
             # A new file section closes the hunk that came before it, so its own
-            # ``---``/``+++`` headers are metadata again.
+            # `---`/`+++` headers are metadata again.
             if line.startswith("diff --git"):
                 in_hunk = False
                 continue
@@ -890,8 +890,8 @@ IMPORTANT: Only apply each custom instruction to files that match its specified 
     ) -> str:
         """Parse raw diff and format each line with type and line numbers.
 
-        Added lines listed in ``changed_lines`` are marked with
-        ``since_last_review="true"``.
+        Added lines listed in `changed_lines` are marked with
+        `since_last_review="true"`.
         """
         if not raw_diff.strip() or "Binary files" in raw_diff:
             return ""
@@ -946,12 +946,12 @@ IMPORTANT: Only apply each custom instruction to files that match its specified 
         """Build a diff_links block mapping each changed file to a blob permalink.
 
         Links are pinned to the immutable commit that was reviewed
-        (``diff_refs.head_sha``), so they keep pointing at the reviewed version
+        (`diff_refs.head_sha`), so they keep pointing at the reviewed version
         even after new commits are pushed to the merge request:
 
             {project_web_url}/-/blob/{head_sha}/{file_path}
 
-        Downstream prompts append ``#L{line}`` to anchor a specific line. Using a
+        Downstream prompts append `#L{line}` to anchor a specific line. Using a
         blob permalink built from data already returned by the API avoids
         replicating the monolith's internal diff-anchor hashing, which would
         couple this tool to monolith implementation details.

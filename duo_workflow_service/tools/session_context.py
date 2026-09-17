@@ -105,7 +105,7 @@ class GetSessionContext(DuoBaseTool):
         ).get("goal")
 
         # These fields live on the workflow record, not the checkpoint state.
-        # Note: ``title`` currently defaults to ``workflow_definition`` (Rails
+        # Note: `title` currently defaults to `workflow_definition` (Rails
         # set_title_from_workflow_definition), so the two often match; it is still
         # surfaced as the canonical user-facing name and can diverge once titles
         # are customised.
@@ -116,7 +116,7 @@ class GetSessionContext(DuoBaseTool):
         raw_log: list[dict] = channel_values.get("ui_chat_log") or []
         recent_activity = self._build_recent_activity(raw_log)
         # Derived from the last agent entry in the chat log; distinct from the
-        # record-level ``summary``.
+        # record-level `summary`.
         last_message = self._extract_last_message(raw_log)
 
         return {

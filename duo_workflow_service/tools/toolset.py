@@ -162,8 +162,8 @@ class Toolset(collections.abc.Mapping):
 
         Returns:
             None if the tool call requires human approval; otherwise the source
-            of the skip: ``ApprovalSource.PREAPPROVED_CONFIG`` for a
-            privilege-level pre-approval, or ``ApprovalSource.SESSION_APPROVAL``
+            of the skip: `ApprovalSource.PREAPPROVED_CONFIG` for a
+            privilege-level pre-approval, or `ApprovalSource.SESSION_APPROVAL`
             when the approval policy (a session approval persisted on the
             GitLab instance) grants it.
 
