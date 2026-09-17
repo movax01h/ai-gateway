@@ -14,11 +14,41 @@ from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
     CatalogItemRef,
     CatalogItemSource,
     CatalogItemType,
+    looks_like_ref,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 
-__all__ = ["BindRequest", "CatalogSource"]
+__all__ = ["BindRequest", "CatalogSource", "without_claim"]
+
+
+def without_claim(claimant_config: dict) -> dict:
+    """Remove a claiming component's catalog references, and change nothing else.
+
+    Every source has to do this much, because the graph builder would read a reference left in a ``subagents`` list
+    as a subagent named after nothing. What a source does in addition is its own, so this is defined here rather than
+    in one source and reused by another.
+
+    Args:
+        claimant_config: The claiming component's authored config.
+
+    Returns:
+        A new config; the authored one is left untouched. Statically named subagents stay. With none left the
+        ``subagents`` key is dropped, so the factory builds a plain agent rather than a supervisor over nothing.
+    """
+    rewritten = dict(claimant_config)
+    static_entries = [
+        entry
+        for entry in claimant_config.get("subagents") or []
+        if not looks_like_ref(entry)
+    ]
+
+    if static_entries:
+        rewritten["subagents"] = static_entries
+    else:
+        rewritten.pop("subagents", None)
+
+    return rewritten
 
 
 class BindRequest(NamedTuple):

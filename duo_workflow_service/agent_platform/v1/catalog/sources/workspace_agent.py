@@ -24,12 +24,12 @@ from duo_workflow_service.agent_platform.v1.catalog.items import (
 from duo_workflow_service.agent_platform.v1.catalog.sources.base import (
     BindRequest,
     CatalogSource,
+    without_claim,
 )
 from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
     CatalogItemRef,
     CatalogItemSource,
     CatalogItemType,
-    looks_like_ref,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponent,
@@ -177,7 +177,7 @@ def _rewrite_claimant(claimant_config: dict, agents: list[WorkspaceAgent]) -> di
     Returns:
         A new config; the authored one is left untouched.
     """
-    rewritten = dict(claimant_config)
+    rewritten = without_claim(claimant_config)
     # Optional, because every claimant gets the flag, including prompts with no
     # delegation guidance to gate.
     rewritten["inputs"] = list(claimant_config.get("inputs", [])) + [
@@ -188,21 +188,12 @@ def _rewrite_claimant(claimant_config: dict, agents: list[WorkspaceAgent]) -> di
         )
     ]
 
-    static_entries = [
-        entry
-        for entry in claimant_config.get("subagents") or []
-        if not looks_like_ref(entry)
-    ]
-    subagents = static_entries + [{"name": agent.name} for agent in agents]
-
-    if subagents:
-        rewritten["subagents"] = subagents
-    else:
-        # Nothing to supervise: drop the key so the factory builds a plain agent.
-        rewritten.pop("subagents", None)
-
     if not agents:
         return rewritten
+
+    rewritten["subagents"] = list(rewritten.get("subagents") or []) + [
+        {"name": agent.name} for agent in agents
+    ]
 
     # str() keeps the config dict plain: YAML-declared events arrive as strings, and
     # the component re-validates either form.

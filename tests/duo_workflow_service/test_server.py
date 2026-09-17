@@ -4367,6 +4367,7 @@ _AI_CATALOG_AGENT_REF: dict[str, Any] = {
 _AI_CATALOG_UNVERSIONED: dict[str, Any] = {
     key: value for key, value in _AI_CATALOG_AGENT_REF.items() if key != "version"
 }
+_AI_CATALOG_UNIDENTIFIED: dict[str, Any] = {**_AI_CATALOG_AGENT_REF, "item_id": ""}
 
 
 @pytest.mark.asyncio
@@ -4377,17 +4378,22 @@ _AI_CATALOG_UNVERSIONED: dict[str, Any] = {
         (_AI_CATALOG_AGENT_REF, _AI_CATALOG_AGENT_REF, None),
         (_AI_CATALOG_UNVERSIONED, _AI_CATALOG_UNVERSIONED, "must declare a version"),
         (
+            _AI_CATALOG_UNIDENTIFIED,
+            _AI_CATALOG_UNIDENTIFIED,
+            "must name an agent",
+        ),
+        (
             _AI_CATALOG_AGENT_REF,
             {**_AI_CATALOG_AGENT_REF, "version": "2.0.0"},
             "'include' section does not declare them",
         ),
     ],
-    ids=["declared_and_claimed", "no_version", "claim_not_declared"],
+    ids=["declared_and_claimed", "no_version", "no_item_id", "claim_not_declared"],
 )
 async def test_validate_flow_config_with_an_ai_catalog_agent_reference(
     entry, include, expected_error
 ):
-    """Runs the real validator: an `ai-catalog` entry binds through the registry at save time."""
+    """Runs the real validator, so an `ai-catalog` entry is checked end to end rather than against a mock."""
     service = DuoWorkflowService()
 
     request = contract_pb2.ValidateFlowConfigRequest(
