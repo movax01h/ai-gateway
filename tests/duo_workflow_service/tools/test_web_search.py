@@ -25,6 +25,13 @@ GATEWAY_URL = (
     "https://gw-abcdefghij.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
 )
 
+VERTEX_LITELLM_MODEL = (ModelClassProvider.LITE_LLM, "claude-sonnet-4-6", "vertex_ai")
+BEDROCK_LITELLM_MODEL = (
+    ModelClassProvider.LITE_LLM,
+    "bedrock/global.anthropic.claude-sonnet-4-6",
+    "bedrock",
+)
+
 
 @pytest.fixture(name="isolate_web_search_env", autouse=True)
 def isolate_web_search_env_fixture(monkeypatch):
@@ -305,17 +312,23 @@ class TestDisplayMessage:
         assert message == "Searched the web for: urllib3 CVE"
 
 
-@pytest.fixture(name="model_class_provider")
-def model_class_provider_fixture(request):
-    """Set the resolved model's class provider, or None for no resolved model."""
-    provider = getattr(request, "param", None)
-    if provider is None:
+@pytest.fixture(name="resolved_model")
+def resolved_model_fixture(request):
+    """Set the resolved model, as `(model_class_provider, model, custom_llm_provider)`, or None for no resolved model.
+
+    Litellm routes are decided per model rather than per provider, so the params matter here.
+    """
+    param = getattr(request, "param", None)
+    if param is None:
         token = current_model_metadata_context.set(None)
     else:
+        provider, model, custom_llm_provider = param
         metadata = MagicMock()
         metadata.llm_definition.model_class_provider = provider
+        metadata.llm_definition.params.model = model
+        metadata.llm_definition.params.custom_llm_provider = custom_llm_provider
         token = current_model_metadata_context.set(metadata)
-    yield provider
+    yield param
     current_model_metadata_context.reset(token)
 
 
@@ -330,21 +343,47 @@ def web_search_flag_fixture(request):
 
 class TestNativeWebSearchAvailable:
     @pytest.mark.parametrize(
-        "model_class_provider,expected",
+        "resolved_model,expected",
         [
-            (ModelClassProvider.ANTHROPIC, True),
-            (ModelClassProvider.OPENAI, True),
-            (ModelClassProvider.LITE_LLM, False),
-            (ModelClassProvider.GOOGLE_GENAI, False),
-            (ModelClassProvider.AMAZON_Q, False),
+            pytest.param(
+                (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None),
+                True,
+                id="anthropic",
+            ),
+            pytest.param(
+                (ModelClassProvider.OPENAI, "gpt-5.2", None), True, id="openai"
+            ),
+            pytest.param(
+                (ModelClassProvider.GOOGLE_GENAI, "gemini-2.5-pro", None),
+                False,
+                id="google-genai",
+            ),
+            pytest.param(
+                (ModelClassProvider.AMAZON_Q, None, None), False, id="amazon-q"
+            ),
+            # Litellm is per-model: Vertex runs Anthropic's server-side tools, Bedrock does not.
+            pytest.param(
+                (ModelClassProvider.LITE_LLM, "claude-sonnet-4-6", "vertex_ai"),
+                True,
+                id="litellm-vertex",
+            ),
+            pytest.param(
+                (
+                    ModelClassProvider.LITE_LLM,
+                    "bedrock/global.anthropic.claude-sonnet-4-6",
+                    "bedrock",
+                ),
+                False,
+                id="litellm-bedrock",
+            ),
         ],
-        indirect=["model_class_provider"],
+        indirect=["resolved_model"],
     )
-    def test_provider_determines_native_support(self, model_class_provider, expected):
+    def test_model_determines_native_support(self, resolved_model, expected):
         assert native_web_search_available() is expected
 
-    @pytest.mark.parametrize("model_class_provider", [None], indirect=True)
-    def test_assumes_native_when_no_model_resolved(self, model_class_provider):
+    @pytest.mark.parametrize("resolved_model", [None], indirect=True)
+    def test_assumes_native_when_no_model_resolved(self, resolved_model):
         """Conservative default: risk no search rather than a duplicated, billable one."""
         assert native_web_search_available() is True
 
@@ -451,21 +490,23 @@ class TestBotoSession:
 
 class TestIsAvailable:
     @pytest.mark.parametrize(
-        "web_search_flag,model_class_provider,expected",
+        "web_search_flag,resolved_model,expected",
         [
             # Flag on and native unavailable: this tool is the fallback.
-            (True, ModelClassProvider.LITE_LLM, True),
-            (True, ModelClassProvider.GOOGLE_GENAI, True),
+            (True, BEDROCK_LITELLM_MODEL, True),
+            (True, (ModelClassProvider.GOOGLE_GENAI, "gemini-2.5-pro", None), True),
             # Native handles it, so the fallback stays out of the toolset.
-            (True, ModelClassProvider.ANTHROPIC, False),
-            (True, ModelClassProvider.OPENAI, False),
+            (True, (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None), False),
+            (True, (ModelClassProvider.OPENAI, "gpt-5.2", None), False),
+            # Vertex runs the search itself even though it is litellm-routed.
+            (True, VERTEX_LITELLM_MODEL, False),
             # Flag off: never enabled, regardless of model.
-            (False, ModelClassProvider.LITE_LLM, False),
-            (False, ModelClassProvider.ANTHROPIC, False),
+            (False, BEDROCK_LITELLM_MODEL, False),
+            (False, (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None), False),
         ],
-        indirect=["web_search_flag", "model_class_provider"],
+        indirect=["web_search_flag", "resolved_model"],
     )
-    def test_gating(self, web_search_flag, model_class_provider, expected, monkeypatch):
+    def test_gating(self, web_search_flag, resolved_model, expected, monkeypatch):
         monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__ENABLED", "true")
         monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__GATEWAY_URL", GATEWAY_URL)
         monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__TARGET_NAME", "websearch")
@@ -500,11 +541,9 @@ class TestIsAvailable:
         ],
         ids=["configured", "unset", "disabled", "no_gateway_url", "no_target_name"],
     )
-    @pytest.mark.parametrize(
-        "model_class_provider", [ModelClassProvider.LITE_LLM], indirect=True
-    )
+    @pytest.mark.parametrize("resolved_model", [BEDROCK_LITELLM_MODEL], indirect=True)
     def test_requires_configured_gateway(
-        self, web_search_flag, model_class_provider, env, expected, monkeypatch
+        self, web_search_flag, resolved_model, env, expected, monkeypatch
     ):
         """An unconfigured deployment must not advertise the tool.
 
