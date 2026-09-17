@@ -361,6 +361,12 @@ def mock_app_dependencies():
 
 Use `glab` for MR/issue CLI operations (or the GitLab MCP tools, if available).
 
+### Agent Environment Notes
+
+- Worktrees usually check out a single branch, so local `main` may not exist.
+  Diff against `origin/main` (for example `git fetch origin main`, then
+  `git diff origin/main...HEAD`), and never assume `main` resolves locally.
+
 ### Branch Naming
 
 No strict convention enforced, but descriptive names recommended:
