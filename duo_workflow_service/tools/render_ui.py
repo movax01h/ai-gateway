@@ -23,7 +23,7 @@ UI_TREE_JSON_SCHEMA: Dict[str, Any] = json.loads(_UI_TREE_SCHEMA_PATH.read_text(
 
 
 class RenderUiInput(BaseModel):
-    """Input schema for ``RenderUiTool``: a declarative ``ui_tree``."""
+    """Input schema for `RenderUiTool`: a declarative `ui_tree`."""
 
     tree: Dict[str, Any] = Field(
         description=(
@@ -37,7 +37,7 @@ class RenderUiInput(BaseModel):
 
 
 class RenderUiTool(DuoBaseTool):
-    """Render a declarative UI (a ``ui_tree`` of catalog components) to the user."""
+    """Render a declarative UI (a `ui_tree` of catalog components) to the user."""
 
     name: str = "render_ui"
     description: str = """Render a declarative UI by composing gen-UI catalog components into a ui_tree.

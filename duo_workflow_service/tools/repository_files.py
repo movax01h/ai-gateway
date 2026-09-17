@@ -377,7 +377,7 @@ def _is_glob_pattern(path: str) -> bool:
         path: A file path or glob pattern string.
 
     Returns:
-        True when the path contains ``*``, ``?``, ``[``, or ``]``; False otherwise.
+        True when the path contains `*`, `?`, `[`, or `]`; False otherwise.
     """
     return bool(_GLOB_METACHARACTERS.intersection(path))
 
@@ -414,7 +414,7 @@ class GetRepositoryFiles(RepositoryFileBaseTool):
     patterns trigger a recursive tree listing to discover matching blobs;
     explicit paths are fetched directly without any tree call.  Content
     fetches are parallelised with a concurrency cap of
-    ``DEFAULT_REPOSITORY_FILES_CONCURRENCY``.
+    `DEFAULT_REPOSITORY_FILES_CONCURRENCY`.
     """
 
     name: str = "get_repository_files"
@@ -574,7 +574,7 @@ class GetRepositoryFiles(RepositoryFileBaseTool):
             file_path: The path of the file to fetch.
 
         Returns:
-            Dict with ``"content"`` key on success, or ``"error"`` key on failure.
+            Dict with `"content"` key on success, or `"error"` key on failure.
         """
         encoded_path = quote(file_path, safe="")
         try:

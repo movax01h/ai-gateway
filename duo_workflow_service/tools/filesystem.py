@@ -94,10 +94,10 @@ DEFAULT_CONTEXT_EXCLUSIONS = gitmatch.compile(
 
 
 def _contains_path_traversal(file_path: str) -> bool:
-    """Return ``True`` if *file_path* contains any known path-traversal pattern.
+    """Return `True` if *file_path* contains any known path-traversal pattern.
 
-    Shared by ``_is_trusted_absolute_path`` (which fails closed) and
-    ``validate_duo_context_exclusions`` (which raises) so the traversal denylist lives in
+    Shared by `_is_trusted_absolute_path` (which fails closed) and
+    `validate_duo_context_exclusions` (which raises) so the traversal denylist lives in
     one place and the two security-critical checks cannot drift apart.
     """
     return any(pattern in file_path for pattern in PATH_TRAVERSAL_PATTERNS)
@@ -107,10 +107,10 @@ def _is_trusted_absolute_path(file_path: str) -> bool:
     """Return True if *file_path* is absolute, traversal-free, and contains a trusted segment sequence.
 
     Traversal patterns are checked here so this helper is safe to call standalone — a path
-    like ``/home/u/.agents/skills/../../etc/passwd`` is never reported as trusted.
+    like `/home/u/.agents/skills/../../etc/passwd` is never reported as trusted.
 
     Args:
-        file_path: File path to check (backslashes are normalised to ``/`` internally).
+        file_path: File path to check (backslashes are normalised to `/` internally).
 
     Returns:
         True when the path is absolute, traversal-free, and contains a trusted segment
@@ -142,12 +142,12 @@ def validate_duo_context_exclusions(
 
     Args:
         file_path: The file path to check.
-        allow_trusted_absolute: When ``True``, absolute paths whose segments include one
-            of the entries in ``TRUSTED_ABSOLUTE_PATH_SEGMENTS`` are allowed through
-            without hitting the ``gitmatch`` denylist (which rejects all absolute paths).
-            Should only be set to ``True`` for read-only tools (``ReadFile``,
-            ``ReadFileChunked``, ``ReadFiles``).  Write/edit/list tools keep the default
-            ``False`` so they continue to reject absolute paths.
+        allow_trusted_absolute: When `True`, absolute paths whose segments include one
+            of the entries in `TRUSTED_ABSOLUTE_PATH_SEGMENTS` are allowed through
+            without hitting the `gitmatch` denylist (which rejects all absolute paths).
+            Should only be set to `True` for read-only tools (`ReadFile`,
+            `ReadFileChunked`, `ReadFiles`).  Write/edit/list tools keep the default
+            `False` so they continue to reject absolute paths.
 
     Raises:
         ToolException: If the path is in the denylist or an invalid path.

@@ -355,10 +355,10 @@ For example:
 
     @staticmethod
     def _extract_suggestion_blocks(body: str) -> list[tuple[int, int, list[str]]]:
-        """Parse every ``suggestion:-X+Y`` block in the body.
+        """Parse every `suggestion:-X+Y` block in the body.
 
-        Returns one ``(before, after, replacement_lines)`` tuple per block, or an
-        empty list if the body contains no suggestion blocks.
+        Returns one `(before, after, replacement_lines)` tuple per block, or an empty list if the body contains no
+        suggestion blocks.
         """
         return [
             (int(before or 0), int(after or 0), content.split("\n"))
@@ -394,7 +394,7 @@ For example:
         old_path: str,
         new_path: str,
     ) -> Optional[str]:
-        """Return the unified diff for ``old_path``/``new_path``, paginating through /diffs."""
+        """Return the unified diff for `old_path`/`new_path`, paginating through /diffs."""
         path = (
             f"{MERGE_REQUESTS_API_PATH.format(project_id=project_id)}/"
             f"{merge_request_iid}/diffs"
@@ -420,9 +420,9 @@ For example:
         before: int,
         after: int,
     ) -> Optional[list[str]]:
-        """Extract ``before + 1 + after`` consecutive lines around the target from a unified diff.
+        """Extract `before + 1 + after` consecutive lines around the target from a unified diff.
 
-        ``target_new`` takes precedence when both are set. Returns None if the
+        `target_new` takes precedence when both are set. Returns None if the
         target is undefined or any line in the range is outside the diff's
         context window.
         """
