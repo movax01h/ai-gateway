@@ -3,6 +3,7 @@ from functools import partial
 from unittest.mock import Mock, patch
 
 import pytest
+import yaml
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from pydantic import ValidationError
@@ -11,6 +12,10 @@ from duo_workflow_service.agent_platform import experimental, v1
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig as ExperimentalFlowConfig,
 )
+from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
+    PartialFlowConfig as ExperimentalPartialFlowConfig,
+)
+from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     PartialFlowConfig,
@@ -25,11 +30,13 @@ from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
     CHAT_AGENT_COMPONENT_ENVIRONMENT,
+    ENGINE_OWNED_CONFIG_VERSIONS,
     ResolvedFlow,
     _convert_struct_to_flow_config,
     _load_flow_from_inline_config,
     _load_flow_from_registry,
     _normalize_prompt_template_order,
+    flow_factory,
     list_configs,
     resolve_flow,
 )
@@ -925,3 +932,140 @@ class TestNormalizePromptTemplateOrder:
             )
 
         assert list(loaded.prompts[0].prompt_template.keys()) == ["system", "user"]
+
+
+ENGINE_TABLE = "duo_workflow_service.workflows.registry.ENGINE_OWNED_CONFIG_VERSIONS"
+
+
+def shipped_chat_partial_configs():
+    for config_file in FlowConfig.DIRECTORY_PATH.glob("*/*.yml"):
+        environment = yaml.safe_load(config_file.read_text()).get("environment")
+        if environment == CHAT_AGENT_COMPONENT_ENVIRONMENT:
+            yield config_file.parent.name, config_file.stem
+
+
+def engine_owned_chat_partial_config(**overrides):
+    config = {
+        "version": "v1",
+        "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
+        "components": [{"name": "chat_agent", "type": "AgentComponent", "toolset": []}],
+    }
+    config.update(overrides)
+    return PartialFlowConfig(**config)
+
+
+def engine_owned_factory(config):
+    with patch(ENGINE_TABLE, frozenset({("assistant", "1.0.0")})):
+        return flow_factory(
+            Mock(), config, config_id="assistant", resolved_version="1.0.0"
+        )
+
+
+def test_engine_table_ships_empty():
+    assert ENGINE_OWNED_CONFIG_VERSIONS == frozenset()
+
+
+def test_every_shipped_chat_partial_config_stays_on_legacy_chat():
+    configs = list(shipped_chat_partial_configs())
+    assert configs
+
+    for config_id, version in configs:
+        factory = _load_flow_from_registry(config_id, "v1", version).factory
+
+        assert factory.func is chat.Workflow, f"{config_id}/{version}"
+
+
+def test_listed_config_version_builds_chat_flow():
+    with patch(ENGINE_TABLE, frozenset({("support_assistant", "1.0.0")})):
+        factory = _load_flow_from_registry("support_assistant", "v1", "1.0.0").factory
+
+    assert factory.func is ChatFlow
+    config = factory.keywords["config"]
+    assert config.resolved_version == "1.0.0"
+    assert config.components[0]["require_tool_approval"] is True
+
+
+def test_engine_table_keys_on_the_resolved_version():
+    with patch(ENGINE_TABLE, frozenset({("support_assistant", "1.0.0")})):
+        resolved = _load_flow_from_registry("support_assistant", "v1", "^1.0.0")
+    assert resolved.factory.func is ChatFlow
+
+    with patch(ENGINE_TABLE, frozenset({("support_assistant", "^1.0.0")})):
+        resolved = _load_flow_from_registry("support_assistant", "v1", "^1.0.0")
+    assert resolved.factory.func is chat.Workflow
+
+
+def test_inline_chat_partial_config_is_never_engine_owned():
+    mocks = build_chat_flow_config(is_partial=True)
+
+    with (
+        patch(ENGINE_TABLE, frozenset({("chat_agent", "1.0.0")})),
+        patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {
+                "v1": (
+                    mocks["flow_config_cls"],
+                    mocks["partial_flow_config_cls"],
+                    mocks["flow_cls"],
+                )
+            },
+        ),
+        patch(
+            "duo_workflow_service.workflows.registry.MessageToDict",
+            return_value=mocks["expected_dict"],
+        ),
+    ):
+        factory = _load_flow_from_inline_config(mocks["struct"], "v1")
+
+    assert factory.func is chat.Workflow
+
+
+def test_engine_owned_config_is_normalized_before_it_reaches_chat_flow():
+    factory = engine_owned_factory(engine_owned_chat_partial_config())
+
+    assert factory.func is ChatFlow
+    config = factory.keywords["config"]
+    assert config.routers == []
+    assert config.flow.entry_point == "chat_agent"
+    assert config.components[0]["ui_log_events"]
+
+
+def test_engine_owned_config_rejects_declared_routers():
+    config = engine_owned_chat_partial_config(
+        routers=[{"from": "chat_agent", "to": "end"}]
+    )
+
+    with pytest.raises(ValueError, match="reject declared routers"):
+        engine_owned_factory(config)
+
+
+def test_engine_owned_config_requires_a_component_name():
+    config = engine_owned_chat_partial_config(
+        components=[{"type": "AgentComponent", "toolset": []}]
+    )
+
+    with pytest.raises(ValueError, match="declare a name"):
+        engine_owned_factory(config)
+
+
+def test_engine_owned_config_keeps_the_chat_partial_validations():
+    config = engine_owned_chat_partial_config(
+        components=[
+            {"name": "one", "type": "AgentComponent", "toolset": []},
+            {"name": "two", "type": "AgentComponent", "toolset": []},
+        ]
+    )
+
+    with pytest.raises(ValueError, match="exactly one component"):
+        engine_owned_factory(config)
+
+
+def test_engine_owned_config_requires_the_v1_schema():
+    config = ExperimentalPartialFlowConfig(
+        version="experimental",
+        environment=CHAT_AGENT_COMPONENT_ENVIRONMENT,
+        components=[{"name": "chat_agent", "type": "AgentComponent", "toolset": []}],
+    )
+
+    with pytest.raises(ValueError, match="v1 config schema"):
+        engine_owned_factory(config)
