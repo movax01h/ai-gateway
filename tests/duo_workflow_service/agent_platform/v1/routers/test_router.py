@@ -57,13 +57,17 @@ def test_router_is_importable_while_the_components_package_initializes():
     """
     v1_root = Path(v1.__file__).parent
 
-    result = subprocess.run(
-        [sys.executable, "-c", _IMPORT_MID_COMPONENTS_INIT, str(v1_root)],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=v1_root.parents[2],
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", _IMPORT_MID_COMPONENTS_INIT, str(v1_root)],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=v1_root.parents[2],
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(f"Import hung instead of failing fast: {exc}")
 
     assert result.returncode == 0, result.stderr
 
