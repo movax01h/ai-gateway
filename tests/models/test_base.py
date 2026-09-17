@@ -11,6 +11,7 @@ from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models import ModelMetadata
 from ai_gateway.models.base import (
     _TRUSTED_PROVIDERS,
+    KindModelProvider,
     init_anthropic_client,
     log_request,
     validate_custom_endpoint,
@@ -358,3 +359,12 @@ class TestModelMetadataToParamsBedrockGuardrail:
             "guardrailIdentifier": "abc123",
             "trace": "disabled",
         }
+
+
+def test_kind_model_provider_custom_partition():
+    custom = {p for p in KindModelProvider if p.is_custom_provider}
+
+    assert custom == {
+        KindModelProvider.LITELLM,
+        KindModelProvider.MISTRALAI,
+    }

@@ -118,6 +118,7 @@ class TestPrompt:
                             ),
                         ),
                         friendly_name="Mistral",
+                        is_custom_model=True,
                     ),
                     None,
                 ),

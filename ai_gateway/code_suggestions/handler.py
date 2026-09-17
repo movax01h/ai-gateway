@@ -265,10 +265,15 @@ async def code_completion(
             config.feature_flags.excl_post_process(),
             config.feature_flags.fireworks_score_threshold(),
         )
+        engine_kwargs: dict[str, Any] = {}
+        if model_metadata.is_custom_model:
+            engine_kwargs["model__llm_definition"] = model_metadata.llm_definition
+
         engine = completions_agent_factory(
             model__prompt=prompt,
             post_processor=post_processor,
             model_metadata=model_metadata,
+            **engine_kwargs,
         )
 
         context_max_percent = completion_context_max_percent_for_model_metadata(

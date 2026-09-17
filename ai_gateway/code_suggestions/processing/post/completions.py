@@ -11,6 +11,7 @@ from ai_gateway.code_suggestions.processing.post.base import PostProcessorBase
 from ai_gateway.code_suggestions.processing.post.ops import (
     clean_irrelevant_keywords,
     clean_model_reflection,
+    extract_fenced_code,
     filter_score,
     fix_end_block_errors,
     fix_end_block_errors_legacy,
@@ -26,6 +27,7 @@ from ai_gateway.structured_logging import get_request_logger
 __all__ = [
     "PostProcessor",
     "PostProcessorOperation",
+    "create_custom_model_post_processor",
     "create_post_processor_for_model_metadata",
 ]
 
@@ -45,6 +47,7 @@ class PostProcessorOperation(StrEnum):
     FILTER_SCORE = "filter_score"
     FIX_TRUNCATION = "fix_truncation"
     CLEAN_IRRELEVANT_KEYWORDS = "clean_irrelevant_keywords"
+    EXTRACT_FENCED_CODE = "extract_fenced_code"
 
 
 # This is the ordered list of prost-processing functions
@@ -58,7 +61,9 @@ ORDERED_POST_PROCESSORS = [
     PostProcessorOperation.STRIP_WHITESPACES,
 ]
 
-# Ops that invoke the tree-sitter parser and need a lang_id to do anything useful.
+# Ops that need a known language: most invoke the tree-sitter parser, and
+# EXTRACT_FENCED_CODE must not strip fences from markdown or unknown files,
+# where a fence is real content.
 OPS_REQUIRING_LANG_ID = frozenset(
     {
         PostProcessorOperation.REMOVE_COMMENTS,
@@ -66,6 +71,7 @@ OPS_REQUIRING_LANG_ID = frozenset(
         PostProcessorOperation.FIX_END_BLOCK_ERRORS,
         PostProcessorOperation.FIX_END_BLOCK_ERRORS_LEGACY,
         PostProcessorOperation.FIX_TRUNCATION,
+        PostProcessorOperation.EXTRACT_FENCED_CODE,
     }
 )
 
@@ -81,6 +87,7 @@ class PostProcessor(PostProcessorBase):
         ] = None,
         exclude: Optional[list] = None,
         extras: Optional[list] = None,
+        pre_extras: Optional[list] = None,
         score_threshold: Optional[float] = None,
     ):
         self.code_context = code_context
@@ -89,6 +96,7 @@ class PostProcessor(PostProcessorBase):
         self.overrides = overrides if overrides else {}
         self.exclude = set(exclude) if exclude else []
         self.extras = extras if extras else []
+        self.pre_extras = pre_extras if pre_extras else []
         self.score_threshold = score_threshold or None
 
     @property
@@ -127,6 +135,7 @@ class PostProcessor(PostProcessorBase):
                 clean_model_reflection, self.code_context
             ),
             PostProcessorOperation.STRIP_WHITESPACES: strip_whitespaces,
+            PostProcessorOperation.EXTRACT_FENCED_CODE: extract_fenced_code,
             PostProcessorOperation.STRIP_ASTERISKS: strip_asterisks,
             PostProcessorOperation.CLEAN_IRRELEVANT_KEYWORDS: clean_irrelevant_keywords,
         }
@@ -148,10 +157,13 @@ class PostProcessor(PostProcessorBase):
             if completion == "":
                 return ""
 
+            if processor in self.pre_extras:
+                raw_completion = completion
+
         return completion
 
     def _ordered_post_processors(self):
-        return ORDERED_POST_PROCESSORS + self.extras
+        return self.pre_extras + ORDERED_POST_PROCESSORS + self.extras
 
     async def _apply_post_processor(self, processor_key, completion, **kwargs: Any):
         # Override post-processor if present in `overrides`, else use the given processor
@@ -197,7 +209,8 @@ def create_post_processor_for_model_metadata(
 
     - Fireworks: filter low-confidence scores and fix truncated output.
     - Vertex Codestral: strip leading asterisks.
-    - Any other provider (Anthropic, self-hosted, ...): no post-processing.
+    - Self-hosted: extract fenced code, default chain, truncation repair.
+    - Any other provider (Anthropic, ...): no post-processing.
     """
     llm_definition = model_metadata.llm_definition
     custom_llm_provider = getattr(llm_definition.params, "custom_llm_provider", None)
@@ -224,4 +237,17 @@ def create_post_processor_for_model_metadata(
             score_threshold=score_threshold,
         )
 
+    if getattr(model_metadata, "is_custom_model", False):
+        return create_custom_model_post_processor(excl_post_process)
+
     return None
+
+
+def create_custom_model_post_processor(excl_post_process: list[str]) -> Factory:
+    """Build the completion post-processor for customer-configured models."""
+    return Factory(
+        PostProcessor,
+        exclude=excl_post_process,
+        pre_extras=[PostProcessorOperation.EXTRACT_FENCED_CODE],
+        extras=[PostProcessorOperation.FIX_TRUNCATION],
+    )

@@ -23,6 +23,14 @@ PROVIDERS_WITHOUT_API_BASE = frozenset({"bedrock", "vertex_ai"})
 class BaseModelMetadata(BaseModel):
     llm_definition: LLMDefinition
     friendly_name: Optional[Annotated[str, StringConstraints(max_length=255)]] = None
+    is_custom_model: bool = Field(
+        default=False,
+        exclude=True,
+        description=(
+            "The request supplies its own endpoint and credentials "
+            "(GitLab Duo Self-Hosted), instead of GitLab-managed ones."
+        ),
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -315,6 +323,16 @@ def _create_mistral_metadata(data: dict[str, Any]) -> ModelMetadata:
     )
 
 
+def _is_custom_wire_provider(provider: str) -> bool:
+    # Imported lazily: ai_gateway.models pulls in this module at package init.
+    from ai_gateway.models.base import KindModelProvider
+
+    try:
+        return KindModelProvider(provider).is_custom_provider
+    except ValueError:
+        return True
+
+
 def _create_gitlab_metadata(data: dict[str, Any]) -> ModelMetadata:
     configs = ModelSelectionConfig.instance()
 
@@ -342,6 +360,7 @@ def _create_gitlab_metadata(data: dict[str, Any]) -> ModelMetadata:
     return ModelMetadata(
         llm_definition=llm_definition,
         friendly_name=llm_definition.name,
+        is_custom_model=_is_custom_wire_provider(data["provider"]),
         **data,
     )
 
@@ -395,6 +414,7 @@ def create_model_metadata(
         raise ValueError("Argument error: provider must be present.")
 
     configs = ModelSelectionConfig.instance()
+    data.pop("is_custom_model", None)
     provider = data["provider"]
 
     if provider == "amazon_q":

@@ -76,3 +76,35 @@ async def test_remove_comment_only_completion(
     actual = await remove_comment_only_completion(completion, lang_id)
 
     assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_value"),
+    [
+        ("first line\nsecond line", "first line\nsecond line"),
+        ("```python\nreturn a + b\n```", "return a + b"),
+        (
+            "Here is the code:\n```python\nreturn a + b\n```\nThis adds numbers.",
+            "return a + b",
+        ),
+        ("```python\nreturn a + b", "return a + b"),
+        ("```python\nreturn x\n``", "return x"),
+        ("Here it is:\r\n```python\r\nreturn a\r\n```", "return a"),
+        ("```\nreturn a + b\n```", "return a + b"),
+        ("prose only, no code", "prose only, no code"),
+        ("const s = ```\nnot a fence`;\nmore", "const s = ```\nnot a fence`;\nmore"),
+        (
+            "l1\nl2\nl3\n```python\nlate fence\n```",
+            "l1\nl2\nl3\n```python\nlate fence\n```",
+        ),
+        ("```python\nfirst\n```\n```python\nsecond\n```", "first"),
+        ("```c#\nvar x = 1;\n```", "var x = 1;"),
+        ("```{lang}\ncode\n```", "```{lang}\ncode\n```"),
+        ("```python \nreturn a\n```", "return a"),
+        ("```js\nconst t = `a`;\n`b` + c\n```", "const t = `a`;\n`b` + c"),
+    ],
+)
+def test_extract_fenced_code(text: str, expected_value: str):
+    actual_value = ops.extract_fenced_code(text)
+
+    assert actual_value == expected_value
