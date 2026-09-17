@@ -1,0 +1,13 @@
+name: fix_pipeline_create_branch
+model:
+  params:
+    max_tokens: 32_768
+    max_retries: 1
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'fix_pipeline_create_branch/system/2.0.0.jinja' %}
+  user: |
+    {% include 'fix_pipeline_create_branch/user/2.0.0.jinja' %}
+params:
+  timeout: 60

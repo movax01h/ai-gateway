@@ -1,11 +1,14 @@
 # pylint: disable=file-naming-for-tests
-"""Regression tests for the ``fix_pipeline_create_branch`` prompt definition.
+"""Regression tests for the 1.x ``fix_pipeline_create_branch`` prompt definition.
 
-The Fix Pipeline flow creates a branch and later pushes it from a
+Flow configs 1.0.0–1.0.3 pin this prompt with ``^1.0.0`` and push the commits from a later
 ``DeterministicStepComponent``. A deterministic step cannot re-plan, so the branch name has to be
-validated against the remote *while* an agent is still driving — otherwise a branch name rejected by
-a project push rule is only discovered later, when ``create_merge_request`` fails with
+validated against the remote *while* this agent is still driving — otherwise a branch name rejected
+by a project push rule is only discovered later, when ``create_merge_request`` fails with
 ``HTTP 400: source branch does not exist``.
+
+Flow 1.0.4 pins ``^2.0.0``, where one agent creates the branch, commits and pushes; see
+``test_fix_pipeline_create_branch_v2_prompt.py``.
 """
 
 from pathlib import Path
@@ -22,8 +25,8 @@ _PROMPTS_DEFINITIONS_DIR = (
 )
 _PROMPT_DIR = _PROMPTS_DEFINITIONS_DIR / "fix_pipeline_create_branch"
 
-# The flow configs pin this prompt with the caret constraint "^1.0.0", so the highest 1.x version is
-# what actually runs for every fix_pipeline flow version.
+# Flow configs 1.0.0–1.0.3 pin this prompt with the caret constraint "^1.0.0", so the highest 1.x
+# version is what actually runs for them.
 _FLOW_CONSTRAINT = "^1.0.0"
 
 # Mirrors the inputs the fix_pipeline flow configs wire into this component. `agents_dot_md` is
