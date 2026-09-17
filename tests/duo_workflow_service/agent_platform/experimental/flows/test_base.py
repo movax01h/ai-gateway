@@ -8,12 +8,16 @@ from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.types import Command
+from pydantic import Field
 
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     EndComponent,
+)
+from duo_workflow_service.agent_platform.experimental.components.for_each import (
+    ForEachComponent,
 )
 from duo_workflow_service.agent_platform.experimental.flows.base import (
     Flow,
@@ -39,6 +43,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
@@ -1306,3 +1311,116 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             == "The workflow reached its maximum step limit and could not complete. "
             "Please try again with a more focused goal, or break the task into smaller steps."
         )
+
+    class _SupervisorLike(EndComponent):
+        """A component that consumed subagents while it was being built."""
+
+        subagent_components: dict = Field(default_factory=dict)
+
+    @pytest.fixture(name="dap_for_each_flag")
+    def dap_for_each_flag_fixture(self):
+        """Enable ``dap_for_each`` for one test, then restore the previous context.
+
+        Additive, so a context an outer fixture already populated survives.
+        """
+        token = current_feature_flag_context.set(
+            current_feature_flag_context.get() | {FeatureFlag.DAP_FOR_EACH.value}
+        )
+        yield
+        current_feature_flag_context.reset(token)
+
+    @pytest.fixture(name="fannable")
+    def fannable_fixture(self, user, flow_type):
+        return EndComponent(
+            name="review_one", flow_id="flow-1", flow_type=flow_type, user=user
+        )
+
+    @staticmethod
+    def instantiate(flow_instance, component, comp_params):
+        """Build one component through ``Flow`` and return the dict it landed in."""
+        components: dict[str, BaseComponent] = {}
+        comp_class = MagicMock(return_value=component)
+        with patch(
+            "duo_workflow_service.agent_platform.experimental.flows.base.load_component_class",
+            return_value=comp_class,
+        ):
+            flow_instance._instantiate_component(
+                {"name": "review_one", "type": "SomeComponent"},
+                {"name": "review_one", **comp_params},
+                components,
+            )
+        return components, comp_class
+
+    FOR_EACH = {"items": "context:discover.files", "as": "context:item"}
+
+    @pytest.mark.usefixtures("dap_for_each_flag")
+    def test_for_each_is_not_passed_to_the_component_it_wraps(
+        self, flow_instance, fannable
+    ):
+        _, comp_class = self.instantiate(
+            flow_instance, fannable, {"for_each": self.FOR_EACH}
+        )
+
+        assert "for_each" not in comp_class.call_args.kwargs
+
+    @pytest.mark.usefixtures("dap_for_each_flag")
+    def test_a_component_declaring_for_each_is_replaced_by_the_wrapper(
+        self, flow_instance, fannable
+    ):
+        components, _ = self.instantiate(
+            flow_instance, fannable, {"for_each": self.FOR_EACH}
+        )
+
+        wrapper = components["review_one"]
+        assert isinstance(wrapper, ForEachComponent)
+        assert wrapper.component is fannable
+        assert wrapper.for_each.items == "context:discover.files"
+
+    def test_for_each_is_ignored_while_the_feature_flag_is_off(
+        self, flow_instance, fannable
+    ):
+        with patch.object(flow_instance, "log") as log:
+            components, _ = self.instantiate(
+                flow_instance, fannable, {"for_each": self.FOR_EACH}
+            )
+
+        assert components["review_one"] is fannable
+        assert log.warning.call_args.kwargs == {
+            "component": "review_one",
+            "feature_flag": "dap_for_each",
+        }
+
+    @pytest.mark.usefixtures("dap_for_each_flag")
+    def test_a_component_without_for_each_is_left_alone(self, flow_instance, fannable):
+        components, _ = self.instantiate(flow_instance, fannable, {})
+
+        assert components["review_one"] is fannable
+
+    @pytest.mark.usefixtures("dap_for_each_flag")
+    def test_wrapping_still_lets_flow_claim_the_subagents_the_component_consumed(
+        self, flow_instance, user, flow_type
+    ):
+        """The wrapper hides ``subagent_components``, so it is read first."""
+        supervisor = self._SupervisorLike(
+            name="review_one",
+            flow_id="flow-1",
+            flow_type=flow_type,
+            user=user,
+            subagent_components={"developer": MagicMock(spec=BaseComponent)},
+        )
+        components: dict[str, BaseComponent] = {
+            "developer": MagicMock(spec=BaseComponent)
+        }
+        comp_class = MagicMock(return_value=supervisor)
+        with patch(
+            "duo_workflow_service.agent_platform.experimental.flows.base.load_component_class",
+            return_value=comp_class,
+        ):
+            flow_instance._instantiate_component(
+                {"name": "review_one", "type": "SomeComponent"},
+                {"name": "review_one", "for_each": self.FOR_EACH},
+                components,
+            )
+
+        assert "developer" not in components
+        assert isinstance(components["review_one"], ForEachComponent)
