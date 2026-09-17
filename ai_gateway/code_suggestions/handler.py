@@ -42,7 +42,11 @@ from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
 from ai_gateway.tracking.errors import log_exception
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.context import StarletteUser, current_model_metadata_context
-from lib.feature_flags.context import current_feature_flag_context
+from lib.feature_flags.context import (
+    FeatureFlag,
+    current_feature_flag_context,
+    is_feature_enabled,
+)
 from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
 
 __all__ = [
@@ -152,6 +156,11 @@ async def code_suggestions(
         language=component.payload.language_identifier,
         global_user_id=current_user.global_user_id,
         region=config.google_cloud_platform.location(),
+        is_context_cap_enabled=(
+            is_feature_enabled(FeatureFlag.CAP_CODE_COMPLETION_CONTEXT)
+            if component.type == CodeEditorComponents.COMPLETION
+            else None
+        ),
     )
 
     if component.type == CodeEditorComponents.COMPLETION:

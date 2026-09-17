@@ -21,6 +21,7 @@ def get_snowplow_code_suggestion_context(
     language: Optional[str] = "",
     global_user_id: Optional[str] = "",
     suggestion_source: Optional[str] = "network",
+    is_context_cap_enabled: Optional[bool] = None,
 ) -> SnowplowEventContext:
     language = language.lower() if language else ""
     # gitlab-rails 16.3+ sends an X-Gitlab-Realm header
@@ -56,4 +57,5 @@ def get_snowplow_code_suggestion_context(
         suggestion_source=suggestion_source,
         is_direct_connection=is_direct_connection,
         region=region,
+        is_context_cap_enabled=is_context_cap_enabled,
     )

@@ -26,7 +26,7 @@ from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
 from lib.billing_events import BillingEvent, ExecutionEnvironment
-from lib.feature_flags.context import current_feature_flag_context
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -1040,6 +1040,7 @@ class TestCodeCompletions:
                 language=expected_language,
                 gitlab_realm=request_headers.get("X-Gitlab-Realm", ""),
                 is_direct_connection=True,
+                is_context_cap_enabled=False,
                 suggestion_source="network",
                 region="us-central1",
                 gitlab_instance_id=request_headers.get("X-Gitlab-Instance-Id", ""),
@@ -1093,6 +1094,68 @@ class TestCodeCompletions:
         args = snowplow_instrumentator_mock.watch.call_args[0]
         assert len(args) == 1
         assert args[0] == expected_event
+
+    @pytest.mark.parametrize(
+        "auth_user",
+        [
+            CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(
+                    scopes=["complete_code"],
+                    subject="1234",
+                    gitlab_realm="self-managed",
+                    issuer="gitlab-ai-gateway",
+                ),
+            )
+        ],
+    )
+    @pytest.mark.usefixtures("mock_completions", "auth_user")
+    def test_snowplow_tracking_is_context_cap_enabled(
+        self,
+        mock_client: TestClient,
+        mock_ai_gateway_container: containers.Container,
+    ):
+        snowplow_instrumentator_mock = Mock(spec=SnowplowInstrumentator)
+        snowplow_container_mock = Mock(spec=ContainerTracking)
+        snowplow_container_mock.instrumentator = Mock(
+            return_value=snowplow_instrumentator_mock
+        )
+
+        with (
+            patch.object(
+                mock_ai_gateway_container, "snowplow", snowplow_container_mock
+            ),
+            patch(
+                "ai_gateway.api.v2.code.completions.is_feature_enabled",
+                return_value=True,
+            ) as mock_is_feature_enabled,
+        ):
+            mock_client.post(
+                "/completions",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-Gitlab-Global-User-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 1,
+                    "project_path": "gitlab-org/gitlab",
+                    "project_id": 278964,
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "# Create a fast binary search\n",
+                        "content_below_cursor": "\n",
+                    },
+                },
+            )
+
+        mock_is_feature_enabled.assert_called_with(
+            FeatureFlag.CAP_CODE_COMPLETION_CONTEXT
+        )
+        (event,), _ = snowplow_instrumentator_mock.watch.call_args
+        assert event.context.is_context_cap_enabled is True
 
     @pytest.mark.parametrize(
         ("auth_user", "extra_headers", "expected_status_code"),
