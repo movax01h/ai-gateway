@@ -848,6 +848,15 @@ class TestCreateModelMetadataByTag:
                 default_models=["gitlab_model1"],
                 models_for_tags={"fast": "kimi_k2_6_fireworks"},
             ),
+            "multi_model_tag_feature": UnitPrimitiveConfig(
+                feature_setting="multi_model_tag_feature",
+                unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                default_models=["gitlab_model1"],
+                models_for_tags={
+                    "large": {"models": ["gitlab_model1", "gitlab_model2"]},
+                    "small": {"models": ["gitlab_model2"]},
+                },
+            ),
         }
 
         def _get_model(name):
@@ -926,6 +935,44 @@ class TestCreateModelMetadataByTag:
         params = tag_metadata.to_params()
         assert params["api_key"] == "fw"
         assert params["api_base"] == "https://api.fireworks.ai/inference/v1"
+
+    @pytest.fixture(name="tag_request")
+    def tag_request_fixture(self):
+        """Fresh dict per call, because create_model_metadata pops feature_setting."""
+
+        def _build(feature_setting: str = "multi_model_tag_feature") -> dict:
+            return {"provider": "gitlab", "feature_setting": feature_setting}
+
+        return _build
+
+    def test_single_model_tag_resolves_like_a_bare_model_id(
+        self, tag_request, gitlab_model2
+    ):
+        result = create_model_metadata_by_tag(tag_request())
+
+        assert result.by_tag["small"].llm_definition == gitlab_model2
+
+    @pytest.mark.parametrize(
+        ("pick", "expected_model"),
+        [
+            pytest.param(lambda models: models[0], "gitlab_model1", id="first-variant"),
+            pytest.param(lambda models: models[-1], "gitlab_model2", id="last-variant"),
+        ],
+    )
+    def test_multi_model_tag_resolves_through_random_choice(
+        self, request, tag_request, pick, expected_model
+    ):
+        with mock.patch(
+            "ai_gateway.model_metadata.random.choice", side_effect=pick
+        ) as choice:
+            result = create_model_metadata_by_tag(tag_request())
+
+        assert result.by_tag["large"].llm_definition == request.getfixturevalue(
+            expected_model
+        )
+        assert ["gitlab_model1", "gitlab_model2"] in [
+            call.args[0] for call in choice.call_args_list
+        ]
 
 
 class TestModelMetadataByTagGet:

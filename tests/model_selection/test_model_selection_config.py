@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import structlog.testing
+import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import SecretStr, ValidationError
 from pyfakefs.fake_filesystem import FakeFilesystem
@@ -16,6 +17,7 @@ from ai_gateway.model_selection.model_selection_config import (
     CompletionLiteLLMDefinition,
     EmbeddingLiteLLMDefinition,
     ModelSelectionConfig,
+    ModelTagEntry,
     UnitPrimitiveConfig,
 )
 from ai_gateway.model_selection.types import DefaultModelEntry
@@ -1131,6 +1133,96 @@ def test_validate_tags_models_not_required_in_selectable(
     # editorconfig-checker-enable
 
     selection_config.validate()  # must not raise
+
+
+@pytest.fixture(name="write_tag_policy")
+def write_tag_policy_fixture(size_preference_model_dir: Path, fs: FakeFilesystem):
+    """Write a unit_primitives.yml whose feature settings carry the given tag entries."""
+
+    def _write(**tags_by_feature: dict) -> None:
+        fs.create_file(
+            size_preference_model_dir / "unit_primitives.yml",
+            contents=yaml.safe_dump(
+                {
+                    "configurable_unit_primitives": [
+                        {
+                            "feature_setting": feature_setting,
+                            "unit_primitives": ["ask_commit"],
+                            "default_models": ["large-model"],
+                            "models_for_tags": tags,
+                        }
+                        for feature_setting, tags in tags_by_feature.items()
+                    ]
+                }
+            ),
+        )
+
+    return _write
+
+
+@pytest.mark.parametrize(
+    ("tag_entry", "expected"),
+    [
+        pytest.param(
+            "small-model",
+            ModelTagEntry(models=["small-model"], keywords=[]),
+            id="bare-model-id",
+        ),
+        pytest.param(
+            {"models": ["small-model"]},
+            ModelTagEntry(models=["small-model"], keywords=[]),
+            id="mapping-without-keywords",
+        ),
+        pytest.param(
+            {"models": ["small-model"], "keywords": ["typo", "readme"]},
+            ModelTagEntry(models=["small-model"], keywords=["typo", "readme"]),
+            id="mapping-with-keywords",
+        ),
+        pytest.param(
+            {"models": ["small-model", "large-model"]},
+            ModelTagEntry(models=["small-model", "large-model"], keywords=[]),
+            id="mapping-with-several-models",
+        ),
+    ],
+)
+def test_tag_entry_spellings_load_to_one_shape(
+    selection_config, write_tag_policy, tag_entry, expected
+):
+    """Every spelling normalises to the same ModelTagEntry."""
+    write_tag_policy(test_model_size={"small": tag_entry})
+
+    tags = selection_config.get_unit_primitive_config_map()[
+        "test_model_size"
+    ].models_for_tags
+
+    assert tags["small"] == expected
+    selection_config.validate()  # must not raise
+
+
+@pytest.mark.parametrize(
+    "tag_entry",
+    [
+        pytest.param("model-that-does-not-exist", id="bare-model-id"),
+        pytest.param(
+            {"models": ["small-model", "model-that-does-not-exist"]}, id="mapping"
+        ),
+    ],
+)
+def test_validate_rejects_tag_models_missing_from_models_yml(
+    selection_config, write_tag_policy, tag_entry
+):
+    write_tag_policy(test_model_size={"small": tag_entry})
+
+    with pytest.raises(ValueError, match="model-that-does-not-exist"):
+        selection_config.validate()
+
+
+def test_tag_entry_rejects_an_empty_model_list(selection_config, write_tag_policy):
+    """A tag serving no models is a config error, not a silent no-op."""
+    write_tag_policy(test_model_size={"small": {"models": []}})
+
+    with pytest.raises(ValueError):
+        selection_config.get_unit_primitive_config_map()
 
 
 def test_get_unit_primitive_config_map_with_deprecated_models(

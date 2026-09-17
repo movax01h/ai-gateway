@@ -1,3 +1,4 @@
+import random
 from abc import abstractmethod
 from typing import Annotated, Any, Dict, Literal, Optional, override
 
@@ -197,7 +198,10 @@ def build_model_metadata_by_tag(
     configs = ModelSelectionConfig.instance()
     unit_primitive_config = configs.get_unit_primitive_config_map().get(feature_setting)
     if unit_primitive_config:
-        for tag, model_id in unit_primitive_config.models_for_tags.items():
+        for tag, entry in unit_primitive_config.models_for_tags.items():
+            # The interceptor builds this once per gRPC call, so a tag's model
+            # stays stable for the whole flow.
+            model_id = random.choice(entry.models)
             try:
                 llm_def = configs.get_model(model_id)
                 by_tag[tag] = resolve_provider_aware_metadata(
