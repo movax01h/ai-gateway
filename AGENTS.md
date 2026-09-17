@@ -162,6 +162,14 @@ Always run these `make` targets rather than invoking `pytest`, `mypy`,
 `MYPY_LINT_TODO_DIR` in the Makefile) that a bare `mypy` invocation would
 silently skip, causing local results to disagree with CI.
 
+The `install-*-deps` steps run `poetry install`, which needs network
+access. In network-restricted environments (e.g. agent sandboxes) with a
+pre-installed `.venv`, prefix the make target with `CI=true` (e.g.
+`CI=true make check-mypy ...`) — the Makefile skips the install step when
+`CI=true` and `.venv` exists. The same prefix fixes lefthook hooks that
+fail in the install step (`CI=true git commit ...`); prefer it over
+`LEFTHOOK=0`, which skips the checks entirely.
+
 ### Pre-commit Hooks
 
 ```shell
