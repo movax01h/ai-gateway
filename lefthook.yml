@@ -16,7 +16,9 @@ pre-commit:
         export STAGED_FILES="$(echo '{staged_files}' | tr ' ' '\n' | grep -v 'contract_pb2\.py' | tr '\n' ' ')"
 
         # Run mypy separately with filtered files
-        if [[ -n "$MYPY_SAFE_FILES" ]]; then
+        # Note: lefthook executes this script with sh, so keep it POSIX —
+        # [[ ... ]] is a bashism and silently skips the branch under dash.
+        if [ -n "$MYPY_SAFE_FILES" ]; then
           make check-mypy LINT_WORKING_DIR="$MYPY_SAFE_FILES"
         fi
 
