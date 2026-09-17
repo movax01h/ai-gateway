@@ -4,7 +4,7 @@ import structlog
 from langgraph.graph import StateGraph
 from pydantic import model_validator
 
-from duo_workflow_service.agent_platform.v1.components import BaseComponent
+from duo_workflow_service.agent_platform.v1.components.base import BaseComponent
 from duo_workflow_service.agent_platform.v1.routers.base import BaseRouter
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.monitoring import duo_workflow_metrics
