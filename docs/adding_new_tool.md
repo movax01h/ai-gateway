@@ -355,6 +355,7 @@ CONTEXT_BUILDER_TOOLS = [
    - Use descriptive names for your tool and input classes
    - Use snake_case for tool names (e.g., `get_file_content`, `update_issue`)
    - Use PascalCase for classes (e.g., `GetFileContent`, `UpdateIssue`)
+   - **Note**: if you need to re-name a tool view the dedicated guide: [Renaming a tool](../docs/renaming_a_tool.md)
 
 1. **Write Clear Documentation**:
    - Documentation is read by the LLM to determine when and how to call a tool
