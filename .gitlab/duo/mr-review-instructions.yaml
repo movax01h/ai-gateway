@@ -111,6 +111,25 @@ instructions:
       1. Reusability: prefer the design that stays useful with a different goal. Specifics belong in
         the goal and the inputs rather than baked into the persona.
 
+  - name: Duo Developer design principles
+    fileFilters:
+      - "duo_workflow_service/agent_platform/*/flows/configs/developer/**/*"
+      - "ai_gateway/prompts/definitions/common/developer/**/*"
+      - "ai_gateway/prompts/definitions/developer_*/**/*"
+    instructions: |
+      These files define Duo Developer, a shared general-purpose coding agent used by
+      many surfaces (mentions, assignments, CLI, Slack). Changes have platform-wide
+      blast radius. Before reviewing, read
+      duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md
+      in the checked-out repository and review against it. In particular, flag:
+      1. Use-case-specific content added to the shared system prompt or flow config —
+        that belongs in the client's goal, not in the shared building block.
+      1. Procedural instructions (step-by-step scripts, per-incident rules) added to
+        prompts — the prompt states principles and priorities.
+      1. New flow versions created for a use case rather than for compatibility.
+      1. Changes without evidence: the MR should link a session trace pointing at the
+        exact failing step, or a baseline-vs-variant eval run for bigger changes.
+
   - name: Dependency Injection
     fileFilters:
       - "**/*.py"
