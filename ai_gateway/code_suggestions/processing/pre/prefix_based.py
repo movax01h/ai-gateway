@@ -10,6 +10,7 @@ from ai_gateway.code_suggestions.processing.typing import (
     Prompt,
     TokenStrategyBase,
 )
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 __all__ = [
     "PromptBuilderPrefixBased",
@@ -28,6 +29,7 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
     DEFAULT_SUFFIX_RESERVED_PERCENT = 0
     DEFAULT_CONTEXT_MAX_PERCENT = 1
     DEFAULT_MAX_PROMPT_TOKENS = None
+    CODE_CONTEXT_MAX_TOKENS = 4_096
 
     def __init__(self, total_max_len: int, tkn_strategy: TokenStrategyBase):
         super().__init__(total_max_len, tkn_strategy)
@@ -87,7 +89,14 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
         max_length_code_context = math.floor(
             min(max_length_code_context, max_length * context_max_percent)
         )
-        code_context_info = self._build_code_context(max_length_code_context)
+        capped = is_feature_enabled(FeatureFlag.CAP_CODE_COMPLETION_CONTEXT)
+        if capped:
+            max_length_code_context = min(
+                max_length_code_context, self.CODE_CONTEXT_MAX_TOKENS
+            )
+        code_context_info = self._build_code_context(
+            max_length_code_context, line_boundary=capped
+        )
 
         if code_context_info and max_length_code_context > 0:
             _, truncated = code_context_info
@@ -145,7 +154,7 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
         return truncated
 
     def _build_code_context(
-        self, max_length: int
+        self, max_length: int, line_boundary: bool = False
     ) -> Optional[tuple[CodeContent, CodeContent]]:
         if not self.code_context:
             return None
@@ -157,7 +166,10 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
         )
 
         truncated = self.tkn_strategy.truncate_content(
-            original.text, max_length, truncation_side="right"
+            original.text,
+            max_length,
+            truncation_side="right",
+            line_boundary=line_boundary,
         )
 
         return original, truncated

@@ -61,7 +61,11 @@ from ai_gateway.tracking.errors import log_exception
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.context import StarletteUser, get_current_user
 from lib.events import FeatureQualifiedNameStatic
-from lib.feature_flags.context import current_feature_flag_context
+from lib.feature_flags.context import (
+    FeatureFlag,
+    current_feature_flag_context,
+    is_feature_enabled,
+)
 from lib.internal_events import InternalEventsClient
 from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
 from lib.usage_quota import UsageQuotaEvent
@@ -164,6 +168,9 @@ async def completions(
             language=language_name,
             global_user_id=current_user.global_user_id,
             region=region,
+            is_context_cap_enabled=is_feature_enabled(
+                FeatureFlag.CAP_CODE_COMPLETION_CONTEXT
+            ),
         )
         snowplow_instrumentator.watch(SnowplowEvent(context=snowplow_event_context))
     except Exception as e:

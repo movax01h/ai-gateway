@@ -35,6 +35,7 @@ class FeatureFlag(StrEnum):
     DUO_CHAT_GENERATIVE_UI = "duo_chat_generative_ui"
     DUO_DEVELOPER_MODEL_ROUTING = "duo_developer_model_routing"
     AI_MODEL_RELEASE = "ai_model_release"
+    CAP_CODE_COMPLETION_CONTEXT = "cap_code_completion_context"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

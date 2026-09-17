@@ -153,7 +153,11 @@ class Prompt(NamedTuple):
 class TokenStrategyBase(ABC):
     @abstractmethod
     def truncate_content(
-        self, text: str, max_length: int, truncation_side: str = "left"
+        self,
+        text: str,
+        max_length: int,
+        truncation_side: str = "left",
+        line_boundary: bool = False,
     ) -> CodeContent:
         pass
 
