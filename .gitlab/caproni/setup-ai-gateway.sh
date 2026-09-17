@@ -57,23 +57,13 @@ override_env() {
   awk -v k="$key" -v v="$value" 'BEGIN{FS=OFS="="} $1==k {$0=k"="v} 1' .env > .env.tmp && mv .env.tmp .env
 }
 
-# GitLab answers on port 80 unless the k3d loadbalancer is published elsewhere
-# (rootless podman cannot bind <1024, so those rigs remap to e.g. 8080:80).
-# Discover the host port from the resolved caproni config so these URLs follow
-# cluster.k3d.port_mappings; CAPRONI_GITLAB_HTTP_PORT overrides it. Empty
-# means portless, which keeps the default (Colima, port 80) path unchanged.
-# yq is pinned in gitlab-caproni's .tool-versions, so its absence is a broken
-# rig rather than a reason to guess.
+# These URLs are consumed by ai-gateway and duo-workflow-service, both of which
+# run under mirrord in edit mode: DNS and outgoing TCP resolve in the ai-gateway
+# pod's network, not the host's. In there the hostname must reach the cluster
+# ingress on its in-cluster port, which is 80 regardless of what host port the
+# k3d loadbalancer is published on. Keep them portless.
 gitlab_host="${CAPRONI_PRIMARY_HOSTNAME:-gitlab.caproni.test}"
-gitlab_port="${CAPRONI_GITLAB_HTTP_PORT:-}"
-if [[ -z "$gitlab_port" ]]; then
-  command -v yq >/dev/null 2>&1 || { error "yq not found; it is pinned in gitlab-caproni's .tool-versions (mise install)"; exit 1; }
-  gitlab_port="$(caproni config print 2>/dev/null | yq -r '
-    .cluster.k3d.port_mappings[]?
-    | select(test("^([0-9.]+:)?[0-9]+:80(/tcp)?@loadbalancer$"))
-    | sub("^([0-9.]+:)?([0-9]+):.*$"; "${2}")' | head -1)"
-fi
-gitlab_base_url="http://${gitlab_host}${gitlab_port:+:$gitlab_port}"
+gitlab_base_url="http://${gitlab_host}"
 
 override_env AIGW_GITLAB_URL                    "$gitlab_base_url/"
 override_env AIGW_GITLAB_API_URL                "${gitlab_base_url}/api/v4/"
