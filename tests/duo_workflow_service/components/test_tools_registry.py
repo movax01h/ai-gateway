@@ -225,6 +225,7 @@ _outbox = MagicMock(spec=Outbox)
                 "list_all_merge_request_notes",
                 "update_merge_request",
                 "add_merge_request_reviewers",
+                "post_suggested_reviewers",
                 "get_pipeline_failing_jobs",
                 "get_downstream_pipelines",
                 "get_failing_bridge_jobs",
@@ -453,6 +454,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "update_merge_request": tools.UpdateMergeRequest(metadata=tool_metadata),
         "add_merge_request_reviewers": tools.AddMergeRequestReviewers(
+            metadata=tool_metadata
+        ),
+        "post_suggested_reviewers": tools.PostSuggestedReviewers(
             metadata=tool_metadata
         ),
         "get_pipeline_failing_jobs": tools.GetPipelineFailingJobs(
