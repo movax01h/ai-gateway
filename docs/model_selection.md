@@ -259,7 +259,7 @@ Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives
 - `unit_primitives`: the list of unit primitives that belong to this group, as defined in
   the [cloud_connector](https://gitlab.com/gitlab-org/cloud-connector/gitlab-cloud-connector/-/blob/main/src/python/gitlab_cloud_connector/gitlab_features.py#L19)
 - `default_model`: (required) the `gitlab_identifier` of the model used when no tag matches or no tag is specified.
-- `models_for_tags`: (optional) a map of tag strings to `gitlab_identifier` values, enabling per-task model routing (see [Model tag configuration](#model-tag-configuration)). `small` and `large` are conventional tags but any string is valid.
+- `models_for_tags`: (optional) a map of tag strings to a `gitlab_identifier` value, or to an object with `models` and `keywords`, enabling per-task model routing (see [Model tag configuration](#model-tag-configuration)). `small` and `large` are conventional tags but any string is valid.
 - `selectable_models`: a list of `gitlab_identifier` for the models that the user can select from
 - `beta_models`: a list of models that are not fully supported but users can select from
 - `dev`: optional nested configuration for developer-only models with the following fields:
@@ -310,6 +310,31 @@ configurable_unit_primitives:
       claude: claude_sonnet_4_6_vertex
       reasoning: claude_opus_4_7_vertex
 ```
+
+A tag can also be written as an object, which is the schema that per-request routing will use once it lands. `models` accepts more than one entry and load-balances across provider variants of the same model, the way `default_models` does. `keywords` is meant to be matched against the request goal to select the tag, but nothing reads it yet: it has no effect until [this issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627658) wires up the consumer. Both spellings can appear in the same file:
+
+```yaml
+configurable_unit_primitives:
+  - feature_setting: "duo_developer"
+    unit_primitives: []
+    default_models:
+      - claude_sonnet_4_6_vertex
+    models_for_tags:
+      large:
+        models:
+          - claude_sonnet_4_6_vertex
+        keywords:
+          - refactor
+          - concurrency
+      small:
+        models:
+          - claude_haiku_4_5_20251001_vertex
+        keywords:
+          - typo
+          - docstring
+```
+
+Keyword rules are routing hints and never a security boundary: they are sensitive to wording and can be triggered deliberately. `/v1/models/definitions` reports one model per tag, so a tag listing several models shows its first.
 
 ### How tag resolution works
 

@@ -8,6 +8,7 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from ai_gateway.api.v1.models.get_definitions import router
 from ai_gateway.model_selection import UnitPrimitiveConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
+from ai_gateway.model_selection.types import DefaultModelEntry
 
 
 @pytest.fixture(name="client")
@@ -303,3 +304,74 @@ class TestGetModelsEnvRelease:
         identifiers = [m["identifier"] for m in response.json()["models"]]
         assert "env-model-vertex" not in identifiers
         assert "yaml-model" in identifiers
+
+
+@pytest.fixture(name="definitions_for_tags")
+def definitions_for_tags_fixture(client):
+    """Serve /definitions for one feature setting carrying the given tag entries."""
+    models = {
+        identifier: ChatLiteLLMDefinition(
+            name=identifier,
+            gitlab_identifier=identifier,
+            max_context_tokens=200000,
+            params={},
+        )
+        for identifier in ("tag-model", "other-model")
+    }
+
+    def _unit_primitive(models_for_tags: dict) -> dict:
+        with patch(
+            "ai_gateway.api.v1.models.get_definitions.ModelSelectionConfig",
+        ) as mock_cls:
+            mock_cfg = MagicMock()
+            mock_cls.instance.return_value = mock_cfg
+            mock_cfg.get_resolved_llm_definitions.return_value = models
+            mock_cfg.get_resolved_unit_primitive_config_map.return_value = {
+                "tagged": UnitPrimitiveConfig(
+                    feature_setting="tagged",
+                    unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                    default_models=[DefaultModelEntry(identifier="tag-model")],
+                    selectable_models=["tag-model"],
+                    models_for_tags=models_for_tags,
+                )
+            }
+            response = client.get("/definitions")
+
+        assert response.status_code == 200
+        return response.json()["unit_primitives"][0]
+
+    return _unit_primitive
+
+
+@pytest.mark.parametrize(
+    ("models_for_tags", "expected"),
+    [
+        pytest.param(
+            {"small": "tag-model"}, {"small": "tag-model"}, id="bare-model-id"
+        ),
+        pytest.param(
+            {"small": {"models": ["tag-model"]}},
+            {"small": "tag-model"},
+            id="mapping-single-model",
+        ),
+        pytest.param(
+            {"small": {"models": ["other-model", "tag-model"]}},
+            {"small": "other-model"},
+            id="several-models-report-the-first",
+        ),
+        pytest.param(
+            {"small": {"models": ["tag-model"], "keywords": ["typo"]}},
+            {"small": "tag-model"},
+            id="keywords-stay-internal",
+        ),
+    ],
+)
+def test_models_for_tags_is_emitted_as_a_flat_mapping(
+    definitions_for_tags, models_for_tags, expected
+):
+    """Every spelling serialises to `dict[str, str]`; an unflattened entry 500s it."""
+    primitive = definitions_for_tags(models_for_tags)
+
+    assert primitive["models_for_tags"] == expected
+    assert primitive["models_for_size_preference"] == expected
+    assert "keywords" not in str(primitive)

@@ -43,6 +43,8 @@ class _GetModelResponseUnitPrimitive(BaseModel):
     feature_setting: str
     default_model: str  # deprecated, maintained for backward compatibility
     default_models: list[str]
+    # Display only; inference never reads this. The field is `dict[str, str]`,
+    # so a tag with several models reports its first.
     models_for_tags: dict[str, str]
     models_for_size_preference: dict[
         str, str
@@ -109,6 +111,9 @@ async def get_models():
         else:
             values["default_model"] = default_models[0]
 
+        values["models_for_tags"] = {
+            tag: entry["models"][0] for tag, entry in values["models_for_tags"].items()
+        }
         # Expose models_for_size_preference as a deprecated alias for models_for_tags
         # so existing consumers are not broken by the rename.
         values["models_for_size_preference"] = values["models_for_tags"]

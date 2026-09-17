@@ -328,9 +328,32 @@ configurable_unit_primitives:
     unit_primitives: []
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
+    # Routing hints, not a security boundary. Placeholders until
+    # gitlab-org/gitlab#627660 tunes them.
     models_for_tags:
-      small: claude_haiku_4_5_20251001_vertex
-      large: claude_sonnet_4_6_vertex
+      large:
+        models:
+          - claude_sonnet_4_6_vertex
+        keywords:
+          - refactor
+          - migration
+          - race condition
+          - concurrency
+          - architecture
+          - security
+      small:
+        models:
+          - claude_haiku_4_5_20251001_vertex
+        keywords:
+          - typo
+          - readme
+          - documentation
+          - docstring
+          - comment
+          - bump
+          - rename
+          - unused
+          - deprecate
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"

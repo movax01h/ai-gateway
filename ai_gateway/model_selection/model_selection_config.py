@@ -175,11 +175,31 @@ LLMDefinition = Annotated[
 ]
 
 
+class ModelTagEntry(BaseModel):
+    """Which models serve a tag, and the goal keywords that select it.
+
+    `small: <id>` and `small: {models: [<id>], keywords: [...]}` build the same object.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    models: list[str] = Field(min_length=1)
+    keywords: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_bare_model_id(cls, data: Any) -> Any:
+        """Wrap the `tag: model_id` spelling into `{"models": [model_id]}`."""
+        if isinstance(data, str):
+            return {"models": [data]}
+        return data
+
+
 class UnitPrimitiveConfig(BaseModel):
     feature_setting: str
     unit_primitives: list[GitLabUnitPrimitive]
     default_models: list[DefaultModelEntry] = Field(min_length=1)
-    models_for_tags: dict[str, str] = Field(default_factory=dict)
+    models_for_tags: dict[str, ModelTagEntry] = Field(default_factory=dict)
     selectable_models: list[str] = Field(default_factory=list)
     beta_models: list[str] = Field(default_factory=list)
     deprecated_models: list[FeatureDeprecatedModel] = Field(default_factory=list)
@@ -442,7 +462,10 @@ class ModelSelectionConfig:
         for unit_primitive_config in unit_primitive_configs:
             ids = chain(
                 unit_primitive_config.default_model_identifiers,
-                unit_primitive_config.models_for_tags.values(),
+                chain.from_iterable(
+                    entry.models
+                    for entry in unit_primitive_config.models_for_tags.values()
+                ),
                 unit_primitive_config.selectable_models,
                 unit_primitive_config.beta_models,
                 (dm.identifier for dm in unit_primitive_config.deprecated_models),
