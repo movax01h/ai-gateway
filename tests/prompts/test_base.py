@@ -316,6 +316,39 @@ configurable_unit_primitives:
             template_format="jinja2",
         )
 
+    @pytest.mark.parametrize("tool_output_security", [False])
+    def test_build_prompt_template_skips_security_when_opted_out(
+        self, prompt_config: PromptConfig
+    ):
+        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config)
+
+        assert prompt_template == ChatPromptTemplate.from_messages(
+            [
+                ("system", "{% include 'system.jinja' %}"),
+                ("user", "{{content}}"),
+                MessagesPlaceholder("history", optional=True),
+            ],
+            template_format="jinja2",
+        )
+
+    @pytest.mark.parametrize("tool_output_security", [False])
+    def test_build_prompt_template_keeps_security_when_tools_are_bound(
+        self, prompt_config: PromptConfig, tools: list[BaseTool]
+    ):
+        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config, tools)
+
+        assert prompt_template == ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    render_security_block() + "{% include 'system.jinja' %}",
+                ),
+                ("user", "{{content}}"),
+                MessagesPlaceholder("history", optional=True),
+            ],
+            template_format="jinja2",
+        )
+
     @pytest.mark.parametrize(
         ("template", "kwargs", "should_raise"),
         [

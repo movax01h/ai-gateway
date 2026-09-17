@@ -70,6 +70,7 @@ def render_security_block() -> str:
 
 def prompt_template_to_messages(
     tpl: dict[str, str | list[str]],
+    tool_output_security: bool = True,
 ) -> Sequence[MessageLikeRepresentation]:
     """Convert a prompt template dictionary to a sequence of message representations.
 
@@ -83,6 +84,9 @@ def prompt_template_to_messages(
             role is "placeholder", it creates a MessagesPlaceholder instead of a tuple. When
             a role maps to a list of strings, each item becomes a separate message with that
             role, enabling multiple system messages for prompt caching purposes.
+        tool_output_security: When True, prepend the tool-output security block to the first
+            system message. Set False for prompts without tool output, such as code
+            completion.
 
     Returns:
         A sequence of message-like representations suitable for ChatPromptTemplate.
@@ -97,16 +101,16 @@ def prompt_template_to_messages(
         >>> Returns: [("system", "<security>Static part"), ("system", "Dynamic part"), ("user", "Hello"), ...]
     """
     messages: list[MessageLikeRepresentation] = []
-    security_injected = False
+    block_added = not tool_output_security
     for role, content in tpl.items():
         if role == "placeholder":
             messages.append(MessagesPlaceholder(cast(str, content)))
         else:
             msgs = [content] if isinstance(content, str) else content
             for msg in msgs:
-                if not security_injected and role.startswith("system"):
+                if not block_added and role.startswith("system"):
                     msg = render_security_block() + msg
-                    security_injected = True
+                    block_added = True
                 messages.append((role, msg))
 
     # Automatically add optional history placeholder if not present to prevent

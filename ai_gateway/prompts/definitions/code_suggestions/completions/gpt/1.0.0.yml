@@ -1,8 +1,12 @@
 name: GPT Code Completions
 model:
   params:
-    max_tokens: 64
+    max_tokens: 512
+  provider_params:
+    litellm:
+      reasoning_effort: low
 unit_primitive: complete_code
+tool_output_security: false
 prompt_template:
   system: |
     {% include 'code_suggestions/completions/gpt_system/1.0.0.jinja' %}

@@ -815,7 +815,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             prompt_template_factory(model_provider, config)
             if prompt_template_factory
             else bind_model_variables(
-                self._build_prompt_template(config), model_provider, model_metadata
+                self._build_prompt_template(config, tools),
+                model_provider,
+                model_metadata,
             )
         )
         prompt = self._chain_cache_control_injection_points_converter(
@@ -1174,8 +1176,13 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             )
 
     @classmethod
-    def _build_prompt_template(cls, config: PromptConfig) -> ChatPromptTemplate:
-        messages = prompt_template_to_messages(config.prompt_template)
+    def _build_prompt_template(
+        cls, config: PromptConfig, tools: Optional[List[BaseTool]] = None
+    ) -> ChatPromptTemplate:
+        messages = prompt_template_to_messages(
+            config.prompt_template,
+            tool_output_security=config.tool_output_security or bool(tools),
+        )
 
         return ChatPromptTemplate.from_messages(messages, template_format="jinja2")
 
