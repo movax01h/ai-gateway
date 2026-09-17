@@ -484,6 +484,11 @@ prompts/definitions/
 
 **Updating prompts**: Use `scripts/update_prompt_version.sh` to create new versions.
 
+**Duo Developer**: Before changing the Duo Developer flow
+(`duo_workflow_service/agent_platform/v1/flows/configs/developer/`) or its shared
+system prompt (`ai_gateway/prompts/definitions/common/developer/`), read and follow
+[`duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md`](duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md).
+
 ### Model Selection
 
 Model configuration in `ai_gateway/model_selection/models.yml`:
