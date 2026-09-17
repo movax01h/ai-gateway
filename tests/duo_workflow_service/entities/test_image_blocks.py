@@ -2,12 +2,16 @@ import base64
 import json
 
 import pytest
+from langchain_core.messages import ToolMessage
 
 from duo_workflow_service.entities.image_blocks import (
     IMAGE_BLOCK_TOKEN_ESTIMATE,
+    block_text,
+    content_as_text,
     image_content_block,
     is_image_content_block,
     strip_image_payloads,
+    with_block_text,
 )
 
 PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\npixels").decode()
@@ -112,3 +116,180 @@ class TestStripImagePayloads:
 def test_image_token_estimate_is_a_sane_constant():
     """Guards against a regression to tiktoken-encoding base64 as prose."""
     assert 0 < IMAGE_BLOCK_TOKEN_ESTIMATE < 10_000
+
+
+class TestContentAsText:
+    """One string out, whatever came in.
+
+    The ui_chat_log tool card is the hard constraint: the CLI and the IDE validate `tool_response` as a string (or a
+    message whose `content` is one) and discard the whole checkpoint's chat log otherwise. Base64 must not ride it,
+    and nothing may leave a block list without a trace.
+    """
+
+    IMAGE_BLOCK = {
+        "type": "image",
+        "base64": "A" * 4096,
+        "mime_type": "image/png",
+    }
+
+    def test_text_and_image_collapse_without_the_payload(self):
+        content = [
+            {"type": "text", "text": "Read image file: ./a.png (image/png, 3 KB)."},
+            self.IMAGE_BLOCK,
+        ]
+
+        result = content_as_text(content)
+
+        assert result == (
+            "Read image file: ./a.png (image/png, 3 KB).\n"
+            "[image/png omitted from history]"
+        )
+        assert "AAAA" not in result
+
+    def test_image_placeholder_is_the_one_history_uses(self):
+        # One voice for a lost image: the card, the summarizer and a resumed
+        # session all say the same thing, because they all go through
+        # strip_image_payloads.
+        (placeholder,) = strip_image_payloads([self.IMAGE_BLOCK])
+
+        assert content_as_text([self.IMAGE_BLOCK]) == placeholder["text"]
+
+    def test_text_only_list_flattens(self):
+        # The case the image gate used to miss: no image, still a list, still
+        # rejected by the client. Thomas's reproduction on !6863.
+        assert content_as_text([{"type": "text", "text": "x"}]) == "x"
+        assert content_as_text([{"type": "text", "text": "a"}, "b"]) == "a\nb"
+
+    def test_unrenderable_blocks_leave_a_marker(self):
+        # A block type this helper does not know about must still be visible;
+        # silently dropping it loses that the tool returned it. This is the
+        # property BaseMessage.text does not have.
+        content = [
+            self.IMAGE_BLOCK,
+            {"type": "audio", "base64": "B" * 32},
+            {"no_type_key": True},
+        ]
+
+        result = content_as_text(content)
+
+        assert result == (
+            "[image/png omitted from history]\n[audio omitted]\n[dict omitted]"
+        )
+        assert "BBBB" not in result
+
+    def test_a_block_naming_a_source_renders_title_and_url(self):
+        """Web search results are the live case: they carry `url` and usually `title`, and no text.
+
+        Only those two fields are shown. The snippet and the encrypted payload a provider adds stay off the card.
+        """
+        content = [
+            {
+                "type": "web_search_result",
+                "url": "https://a.example/x",
+                "title": "A doc",
+                "encrypted_content": "Z" * 32,
+                "page_age": "2026",
+            },
+            {"type": "web_search_result", "url": "https://b.example/y", "title": ""},
+            {"type": "web_search_result", "snippet": "no url here"},
+        ]
+
+        result = content_as_text(content)
+
+        assert result == (
+            "A doc: https://a.example/x\nhttps://b.example/y\n[web_search_result omitted]"
+        )
+        assert "ZZZZ" not in result
+        assert "no url here" not in result
+
+    def test_dict_renders_as_a_single_block(self):
+        assert content_as_text({"type": "text", "text": "hello"}) == "hello"
+        assert content_as_text({"key": "value"}) == "[dict omitted]"
+        assert content_as_text(self.IMAGE_BLOCK) == "[image/png omitted from history]"
+
+    def test_string_passes_through_by_identity(self):
+        content = "a plain string"
+
+        assert content_as_text(content) is content
+
+    def test_object_carrying_content_renders_by_it(self):
+        """Not just messages: the redactor accepts any object with `content`, so this must too.
+
+        Falling through to `str()` would put the object's repr, payload included, on the card.
+        """
+
+        # A stand-in for the duck-typed objects the redactor accepts.
+        class Wrapper:
+            def __init__(self, content):
+                self.content = content
+
+        result = content_as_text(
+            Wrapper([{"type": "text", "text": "hi"}, self.IMAGE_BLOCK])
+        )
+
+        assert result == "hi\n[image/png omitted from history]"
+        assert "AAAA" not in result
+
+    def test_tuple_content_is_treated_as_a_block_list(self):
+        assert content_as_text(({"type": "text", "text": "a"}, "b")) == "a\nb"
+
+    def test_whole_message_renders_by_its_content(self):
+        # Passing the message instead of message.content must not fall through
+        # to str(message), which would put the payload's repr on the card.
+        message = ToolMessage(
+            content=[{"type": "text", "text": "Read"}, self.IMAGE_BLOCK],
+            tool_call_id="c1",
+        )
+
+        result = content_as_text(message)
+
+        assert result == "Read\n[image/png omitted from history]"
+        assert "AAAA" not in result
+
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            (None, ""),
+            (42, "42"),
+            (True, "True"),
+        ],
+    )
+    def test_scalars_become_strings(self, content, expected):
+        assert content_as_text(content) == expected
+
+
+class TestBlockText:
+    """The one reader of the block shape, shared by the card renderer and truncation."""
+
+    def test_string_is_its_own_text(self):
+        assert block_text("plain") == "plain"
+
+    def test_text_block_yields_its_text(self):
+        assert block_text({"type": "text", "text": "hello"}) == "hello"
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {"type": "image", "base64": "QUFB", "mime_type": "image/png"},
+            {"type": "audio", "data": "QUFB"},
+            {"type": "text", "text": 42},
+            {"no_type": True},
+            42,
+            None,
+        ],
+    )
+    def test_blocks_without_text_yield_none(self, block):
+        assert block_text(block) is None
+
+    def test_with_block_text_keeps_the_shape(self):
+        assert with_block_text("old", "new") == "new"
+
+        block = {"type": "text", "text": "old", "cache_control": {"type": "ephemeral"}}
+        replaced = with_block_text(block, "new")
+
+        assert replaced == {
+            "type": "text",
+            "text": "new",
+            "cache_control": {"type": "ephemeral"},
+        }
+        assert block["text"] == "old"

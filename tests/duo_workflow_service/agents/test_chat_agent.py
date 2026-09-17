@@ -53,6 +53,9 @@ from duo_workflow_service.tools import MalformedToolCallError, Toolset
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
+)
 
 
 @pytest.fixture(name="mock_datetime")
@@ -2172,9 +2175,10 @@ class TestServerToolResponse:
         assert tool["status"] == ToolStatus.SUCCESS
         assert tool["message_id"] == "srvtu_1"
         assert tool["tool_info"]["args"] == {"query": "gitlab duo"}
-        assert tool["tool_info"]["tool_response"] == [
-            {"type": "web_search_result", "url": "https://x"}
-        ]
+        # Rendered as a string: the CLI and IDE validate tool_response as one
+        # and drop the whole chat log otherwise.
+        assert tool["tool_info"]["tool_response"] == "https://x"
+        assert_client_valid_tool_info(tool["tool_info"])
         assert summary["message_id"] == "agent-msg-id:seg1"
         assert summary["content"] == " Here is what I found."
 
@@ -2230,9 +2234,10 @@ class TestServerToolResponse:
         pre, tool, summary = result["ui_chat_log"]
         assert pre["content"] == "Let me look that up."
         assert tool["message_type"] == MessageTypeEnum.TOOL
-        assert tool["tool_info"]["tool_response"] == [
-            {"type": "web_search_result", "url": "https://x", "title": "X"}
-        ]
+        # Rendered as a string: the CLI and IDE validate tool_response as one
+        # and drop the whole chat log otherwise (same as the Anthropic path).
+        assert tool["tool_info"]["tool_response"] == "X: https://x"
+        assert_client_valid_tool_info(tool["tool_info"])
         assert summary["message_id"] == "resp_1:seg1"
         assert summary["content"] == " Here is what I found."
 

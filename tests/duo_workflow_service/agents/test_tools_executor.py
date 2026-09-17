@@ -23,12 +23,14 @@ from pydantic import BaseModel, Field, ValidationError
 from contract import contract_pb2
 from duo_workflow_service.agents import ToolsExecutor
 from duo_workflow_service.entities.state import (
+    TOOL_RESPONSE_MAX_DISPLAY_MSG,
     MessageTypeEnum,
     TaskStatus,
     ToolInfo,
     ToolStatus,
     WorkflowState,
     WorkflowStatusEnum,
+    render_for_display,
 )
 from duo_workflow_service.errors.typing import TierAccessDeniedException
 from duo_workflow_service.executor.outbox import Outbox
@@ -49,6 +51,9 @@ from lib.context.tool_executions import init_tool_executions, tool_executions
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
+)
 
 
 def mock_tool(
@@ -1248,6 +1253,63 @@ def test_get_tool_display_message_unknown_tool(tools_executor: ToolsExecutor):
         }
     ],
 )
+async def test_run_command_card_is_rendered_redacted_and_capped(
+    workflow_state, tools_executor, mock_client_event
+):
+    """The command-output branch overwrites the card built a moment earlier, so it has to redo the same three steps.
+
+    Without them the raw response reached the client uncapped and unscanned by the UI-only entropy detectors.
+    """
+    token = "glpat-AAAAABBBBCCCCDDDDEEEE"
+    mock_client_event.actionResponse.plainTextResponse.response = (
+        f'token "{token}"\n' + "x" * (TOOL_RESPONSE_MAX_DISPLAY_MSG * 2)
+    )
+    outbox_mock = tools_executor._toolset["run_command"].metadata["outbox"]
+    outbox_mock.put_action_and_wait_for_response = AsyncMock(
+        return_value=mock_client_event
+    )
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content="testing",
+            tool_calls=[
+                {
+                    "id": "run-command-secret",
+                    "name": "run_command",
+                    "args": {"program": "echo", "arguments": ["hi"], "flags": []},
+                }
+            ],
+            id="ai-msg-run-command-secret",
+        )
+    ]
+
+    result = await tools_executor.run(workflow_state)
+
+    chat_log = cast(Command, result[-1]).update["ui_chat_log"][-1]
+    assert chat_log["message_sub_type"] == "command_output"
+    tool_info = chat_log["tool_info"]
+    response = tool_info["tool_response"]
+    assert isinstance(response.content, str)
+    assert "[... display truncated:" in response.content
+    assert len(response.content) <= TOOL_RESPONSE_MAX_DISPLAY_MSG + 80
+    assert token not in response.content
+    assert "[REDACTED]" in response.content
+    assert response.status == "success"
+    assert_client_valid_tool_info(tool_info)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "all_tools",
+    [
+        {
+            "run_command": RunCommand(
+                metadata={
+                    "outbox": MagicMock(spec=Outbox),
+                }
+            )
+        }
+    ],
+)
 async def test_run_command_output(workflow_state, tools_executor, mock_client_event):
     # Configure the inbox mock to return the mock ClientEvent
     outbox_mock = tools_executor._toolset["run_command"].metadata["outbox"]
@@ -1367,6 +1429,11 @@ async def test_run_command_output_status_detection(
     command_log = ui_chat_logs[-1]
     assert command_log["message_sub_type"] == "command_output"
     assert command_log["status"] == expected_status
+    # The web frontend switches on this, not on the entry status, so a
+    # failed command must not carry a card that says "success".
+    assert command_log["tool_info"]["tool_response"].status == (
+        "success" if expected_status == ToolStatus.SUCCESS else "error"
+    )
 
 
 @pytest.mark.asyncio
@@ -1427,7 +1494,9 @@ async def test_multiple_tool_calls(workflow_state, graph):
                 "name": "a",
                 "args": {"a1": 1},
                 "tool_response": ToolMessage(
-                    content="a" * 4096, name="a", tool_call_id="fake-call-1"
+                    content=render_for_display("a" * 10000, tool_name="a"),
+                    name="a",
+                    tool_call_id="fake-call-1",
                 ),
             },
             "correlation_id": None,
@@ -1482,21 +1551,16 @@ async def test_run_with_missing_plan_key(tools_executor):
     [{"secret_tool": mock_tool(name="secret_tool", content="original content")}],
 )
 @pytest.mark.usefixtures("mock_datetime")
-@patch("duo_workflow_service.agents.tools_executor.redact_secrets_for_ui")
+@patch("duo_workflow_service.entities.state.redact_secrets_for_ui")
 async def test_tool_response_is_passed_to_redact_secrets_for_ui(
     mock_redact, workflow_state, graph
 ):
-    """redact_secrets_for_ui must receive the full ToolMessage, not just its .content.
+    """The card's content goes through redact_secrets_for_ui as rendered text.
 
-    Regression test: an earlier fix incorrectly extracted tool_response.content before
-    calling redact_secrets_for_ui, bypassing the redactor's own ToolMessage handling.
-    The redactor is now responsible for unwrapping objects with a 'content' attribute,
-    so tools_executor must pass the ToolMessage directly.
+    The result is rendered to a string before redaction, same order as build_tool_info. The redactor must receive that
+    string and the tool's name.
     """
-    tool_message = ToolMessage(
-        content="original content", name="secret_tool", tool_call_id="fake-call-1"
-    )
-    mock_redact.return_value = tool_message
+    mock_redact.return_value = "original content"
 
     workflow_state["conversation_history"]["planner"] = [
         AIMessage(
@@ -1508,9 +1572,8 @@ async def test_tool_response_is_passed_to_redact_secrets_for_ui(
 
     await graph.ainvoke(workflow_state)
 
-    # redact_secrets_for_ui must receive the ToolMessage object, not a bare string
     call_args = mock_redact.call_args
-    assert isinstance(call_args.args[0], ToolMessage)
+    assert call_args.args[0] == "original content"
     assert call_args.kwargs["tool_name"] == "secret_tool"
 
 
@@ -2230,3 +2293,127 @@ async def test_unknown_tool_call_does_not_track_block_event(
         result[0]["conversation_history"]["planner"][0].content
         == "Tool hallucinated_tool not found"
     )
+
+
+class TestStructuredContentInToolCard:
+    """The legacy engine's tool card renders structured content as a string, the same way build_tool_info does on the v1
+    path, and keeps the ToolMessage wrapper the agentic-chat client reads .content/.status off."""
+
+    async def _card(
+        self,
+        workflow_state,
+        flow_type,
+        content,
+        name="read_file",
+        tool_call_id="call_1",
+    ):
+        """Run one read_file call whose tool returns *content* and return the card the executor built for it."""
+        tool = mock_tool(name="read_file")
+        tool.ainvoke.return_value = ToolMessage(
+            content=content, name=name, tool_call_id=tool_call_id
+        )
+        executor = ToolsExecutor(
+            tools_agent_name="planner",
+            toolset=Toolset(pre_approved=set(), all_tools={"read_file": tool}),
+            workflow_id="123",
+            workflow_type=flow_type,
+        )
+        workflow_state["conversation_history"]["planner"] = [
+            AIMessage(
+                content="reading",
+                tool_calls=[
+                    {
+                        "id": tool_call_id,
+                        "name": "read_file",
+                        "args": {"file_path": "./f"},
+                    }
+                ],
+                id="ai-msg-card",
+            )
+        ]
+
+        result = await executor.run(workflow_state)
+
+        tool_log = cast(Command, result[-1]).update["ui_chat_log"][-1]
+        assert tool_log["message_type"] == MessageTypeEnum.TOOL
+        tool_info = tool_log["tool_info"]
+        assert tool_info is not None
+        assert_client_valid_tool_info(tool_info)
+        return tool_info["tool_response"]
+
+    @pytest.mark.asyncio
+    async def test_image_block_list_becomes_placeholder_string(
+        self, workflow_state, flow_type
+    ):
+        payload = "C" * 8192
+        response = await self._card(
+            workflow_state,
+            flow_type,
+            [
+                {
+                    "type": "text",
+                    "text": "Read image file: ./shot.png (image/png, 6 KB).",
+                },
+                {"type": "image", "base64": payload, "mime_type": "image/png"},
+            ],
+        )
+
+        assert response.content == (
+            "Read image file: ./shot.png (image/png, 6 KB).\n"
+            "[image/png omitted from history]"
+        )
+        assert payload not in response.content
+
+    @pytest.mark.asyncio
+    async def test_text_only_list_becomes_string(self, workflow_state, flow_type):
+        # Without flattening, `[:TOOL_RESPONSE_MAX_DISPLAY_MSG]` sliced a
+        # *list*, so up to 4096 dicts landed in a field the client validates
+        # as a string.
+        response = await self._card(
+            workflow_state, flow_type, [{"type": "text", "text": "x"}]
+        )
+
+        assert response.content == "x"
+
+    @pytest.mark.asyncio
+    async def test_flattened_list_is_capped(self, workflow_state, flow_type):
+        blocks = [{"type": "text", "text": "y" * TOOL_RESPONSE_MAX_DISPLAY_MSG}] * 2
+
+        response = await self._card(workflow_state, flow_type, blocks)
+
+        assert response.content.startswith("y" * TOOL_RESPONSE_MAX_DISPLAY_MSG)
+        assert "[... display truncated:" in response.content
+
+    @pytest.mark.asyncio
+    async def test_flattened_list_is_redacted(self, workflow_state, flow_type):
+        token = "glpat-AAAAABBBBCCCCDDDDEEEE"
+
+        response = await self._card(
+            workflow_state, flow_type, [{"type": "text", "text": f"token {token}"}]
+        )
+
+        assert token not in response.content
+        assert "[REDACTED]" in response.content
+
+    @pytest.mark.asyncio
+    async def test_string_tool_response_unchanged(self, workflow_state, flow_type):
+        response = await self._card(
+            workflow_state, flow_type, "ordinary output", tool_call_id="call_2"
+        )
+
+        assert response.content == "ordinary output"
+
+    @pytest.mark.asyncio
+    async def test_card_name_falls_back_to_the_tool_name(
+        self, workflow_state, flow_type
+    ):
+        """The client validates `name` as a string, and langchain leaves it unset when a tool returns its own
+        ToolMessage rather than a raw value."""
+        assert ToolMessage(content="out", tool_call_id="call_3").name is None
+
+        card = await self._card(
+            workflow_state, flow_type, "out", name=None, tool_call_id="call_3"
+        )
+
+        assert isinstance(card, ToolMessage)
+        assert card.name == "read_file"
