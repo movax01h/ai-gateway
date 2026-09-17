@@ -7,7 +7,7 @@ from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
 
 @pytest.fixture(name="ref")
 def ref_fixture():
-    """Build the one reference a source serves today: every workspace agent template.
+    """Build a workspace reference: every workspace agent template.
 
     A factory rather than a value, because most tests here change one field and that
     difference is what they are about.

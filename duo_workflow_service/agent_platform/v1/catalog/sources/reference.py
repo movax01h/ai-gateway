@@ -49,7 +49,7 @@ class CatalogItemType(StrEnum):
     """What kind of item is included.
 
     What a customer authors in their workspace is an agent *template*, which its source builds into a component. An
-    agent published to the AI Catalog is a bare ``agent``: a finished item, addressed by id and version.
+    agent published to the AI Catalog is an ``agent``: a finished item, addressed by id and version.
     """
 
     AGENT_TEMPLATE = "agent_template"

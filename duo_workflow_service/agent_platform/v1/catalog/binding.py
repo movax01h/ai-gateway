@@ -77,8 +77,9 @@ def _claims(components_config: list[dict]) -> list[tuple[dict, CatalogItemRef]]:
         counted once.
 
     Raises:
-        CatalogItemConfigError: If one component claims two different references. Only one is served, and binding
-            strips every claim from the claimant, so the others would go without an error.
+        CatalogItemConfigError: If one component claims two different references. Only one of them is served.
+            Binding removes every reference from the claiming component, so the others would be ignored and
+            nothing would report it.
     """
     found: list[tuple[dict, CatalogItemRef]] = []
     for comp_config in components_config:
@@ -90,10 +91,9 @@ def _claims(components_config: list[dict]) -> list[tuple[dict, CatalogItemRef]]:
 
         if len(claimed) > 1:
             raise CatalogItemConfigError(
-                f"Component '{comp_config.get('name')}' claims catalog items "
+                f"Component '{comp_config.get('name')}' claims catalog entries "
                 f"{[str(ref) for ref in claimed]}, but a component can claim only "
-                f"one entry. Binding serves one claim and strips the rest, so the "
-                f"others would be ignored without an error."
+                f"one entry. Keep one and remove the others."
             )
 
         if claimed:
@@ -178,8 +178,9 @@ def bind_catalog_items(
 
     Raises:
         CatalogItemConfigError: If the flow declares a reference no source can serve, if
-            a component claims one the flow does not declare, if one component claims
-            more than one, or if more than one component claims one.
+            a component claims a reference the flow does not declare, if one component
+            claims more than one reference, or if more than one component claims a
+            reference.
         CatalogItemsError: If the items themselves cannot be used with this flow.
     """
     # Every declared entry, not just the claimed one: a flow declaring something no

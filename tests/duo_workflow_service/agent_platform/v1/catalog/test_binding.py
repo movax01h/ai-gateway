@@ -22,7 +22,7 @@ REFERENCE = {"source": "workspace", "item_type": "agent_template", "item_id": "*
 # a flow. Spelled out rather than imported: it is the contract a flow relies on.
 PROMPT_ID = "workspace_agent_template_prompt"
 
-# A second servable reference, so a component can be made to claim two.
+# A second reference that a source serves, so a component can claim two.
 AI_CATALOG_REFERENCE = {
     "source": "ai-catalog",
     "item_type": "agent",
@@ -350,10 +350,10 @@ class TestBindCatalogItems:
             expand(_components(), None, items)
 
     def test_a_component_claiming_two_references_raises(self, expand):
-        """Binding serves one claim and strips the rest, so a second would go unnoticed.
+        """Binding serves one claim and removes the rest, so a second would go unnoticed.
 
-        The items the request carried belong to the reference that would be stripped, so without this they are dropped
-        with neither an error nor a log.
+        Here the first claim is the AI Catalog entry, so the workspace reference is the one removed. The workspace items
+        in the request are then dropped with neither an error nor a log.
         """
         components = [
             {
