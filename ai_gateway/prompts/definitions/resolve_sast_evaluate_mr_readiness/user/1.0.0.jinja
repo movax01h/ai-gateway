@@ -2,15 +2,11 @@ Assess the vulnerability fix and output final results with quality metrics.
 
 <assessment_steps>
 1. **Extract Merge Request URL**
-  Search git_operations_result for the MR URL.
-  Common patterns:
-  - "remote: https://gitlab.com/.../merge_requests/123"
-  - "remote: View merge request for..."
-  - "To create a merge request for..."
+  git_operations_result holds the `create_merge_request` response. Read the URL
+  from `created_merge_request.web_url` in that value.
 
-  If not found, construct fallback using the repository_url and workflow_id
-  provided in the input context:
-  [repository_url]/-/merge_requests/security%2Fsast-fix-<ID>-<WORKFLOW_ID>
+  If it is absent, the merge request was not created: return an empty string
+  rather than guessing a URL.
 
 2. **Optional: Fetch MR Details**
   Once you have the URL, you MAY use get_merge_request to retrieve
@@ -54,7 +50,7 @@ Assess the vulnerability fix and output final results with quality metrics.
 <output_requirements>
 Return ONLY this JSON structure:
 {
-  "merge_request_url": "<extracted_or_constructed_url>",
+  "merge_request_url": "<merge_request_web_url>",
   "readiness_detection_score": "<decimal_score_as_string>"
 }
 

@@ -1219,3 +1219,69 @@ class TestSastFixValidationIsDeterministic:
             assert set(routes) == {self.PROCEED_ROUTE, BaseRouter.DEFAULT_ROUTE}, (
                 f"{version}: only an exact clean-exit 'proceed' may reach commit_changes"
             )
+
+
+class TestSastPushPrecedesMergeRequestCreation:
+    """Regression guard for https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2814.
+
+    ``push_and_create_mr`` used to push and call ``create_merge_request`` in one response,
+    so a push rejected by a server-side push rule still produced a merge request — one
+    pointing at a branch that never received the commit. The push now owns a step of its
+    own, and only its reported success reaches the merge request step.
+    """
+
+    FLOW = "resolve_sast_vulnerability"
+    PUSH = "push_commits"
+    CREATE_MR = "push_and_create_mr"
+    # Anything that can run a command can push, which is what has to stay out of the
+    # merge request step.
+    COMMAND_TOOLS = {"run_command", "run_git_command"}
+
+    def _shipped_versions(self):
+        config_dir = FlowConfig.DIRECTORY_PATH / self.FLOW
+        return sorted(path.stem for path in config_dir.glob("*.yml"))
+
+    def _config(self, version):
+        return FlowConfig.from_yaml_config(self.FLOW, version)
+
+    def _component(self, version, name):
+        return next(c for c in self._config(version).components if c["name"] == name)
+
+    def test_every_shipped_version_pushes_in_its_own_agent_step(self):
+        assert self._shipped_versions(), "no shipped configs found for the flow"
+
+        for version in self._shipped_versions():
+            component = self._component(version, self.PUSH)
+
+            # An agent, not a deterministic step: recovering from a rejected push means
+            # reading the remote's error and amending the commit message.
+            assert component["type"] == "AgentComponent", version
+            assert component["prompt_id"] == "resolve_sast_vulnerability_push", version
+            assert self.COMMAND_TOOLS & set(component["toolset"]), version
+
+    def test_every_shipped_version_creates_the_mr_only_after_a_successful_push(self):
+        for version in self._shipped_versions():
+            config = self._config(version)
+            routers = {r["from"]: r for r in config.routers}
+
+            assert (
+                routers["commit_changes"]["condition"]["routes"]["success"] == self.PUSH
+            ), version
+
+            push_router = routers[self.PUSH]["condition"]
+            assert push_router["input"] == f"context:{self.PUSH}.final_answer.status", (
+                version
+            )
+            assert push_router["routes"]["success"] == self.CREATE_MR, version
+            assert push_router["routes"][BaseRouter.DEFAULT_ROUTE] == "end", version
+
+    def test_every_shipped_version_cannot_push_from_the_mr_step(self):
+        """Left in the toolset, the prompt's own history of pushing there would repeat itself."""
+        for version in self._shipped_versions():
+            toolset = set(self._component(version, self.CREATE_MR)["toolset"])
+
+            assert "create_merge_request" in toolset, version
+            assert not self.COMMAND_TOOLS & toolset, (
+                f"{version}: {self.CREATE_MR} can still run git, so it can still push "
+                "a branch the flow has not confirmed"
+            )
