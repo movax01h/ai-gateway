@@ -289,6 +289,17 @@ def _collapse_message_patterns(raw: str) -> str | None:
         # and keep only the stable "GraphQL errors" label. Any leading prefix (e.g.
         # "Invalid workflow ID: ") is preserved.
         return raw[: graphql_match.start()] + "GraphQL errors"
+    if openai_match := re.search(
+        r"An error occurred while processing your request\.", raw
+    ):
+        # OpenAI APIError messages append retry/help-center guidance and a per-request
+        # ID, e.g. "An error occurred while processing your request. You can retry your
+        # request, or contact us through our help center at help.openai.com if the
+        # error persists. Please include the request ID req_0003666c... in your
+        # message." The request ID varies per request and fragments SLO grouping, so
+        # keep only the stable leading sentence. Any leading prefix (e.g. a LiteLLM
+        # wrapper) is preserved.
+        return raw[: openai_match.end()]
     return None
 
 
