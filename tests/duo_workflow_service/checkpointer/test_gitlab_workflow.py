@@ -2259,9 +2259,7 @@ async def test_aput_writes_defers_finish(gitlab_workflow, workflow_id):
 
 
 @pytest.mark.asyncio
-async def test_handle_online_mode_completion_fires_deferred_finish(
-    gitlab_workflow, workflow_id
-):
+async def test_handle_completion_fires_deferred_finish(gitlab_workflow, workflow_id):
     """A deferred FINISH is fired on completion, after the graph loop (and its terminal checkpoint) has drained."""
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
@@ -2271,7 +2269,7 @@ async def test_handle_online_mode_completion_fires_deferred_finish(
     # Patch _track_workflow_completion to isolate the deferred-FINISH behaviour
     # from the billing/internal-event path (which swallows exceptions).
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
-        await gitlab_workflow._handle_online_mode_completion()
+        await gitlab_workflow._handle_completion()
 
     status_handler.update_workflow_status.assert_awaited_once_with(
         workflow_id, WorkflowStatusEventEnum.FINISH
@@ -2280,9 +2278,7 @@ async def test_handle_online_mode_completion_fires_deferred_finish(
 
 
 @pytest.mark.asyncio
-async def test_handle_online_mode_completion_without_deferred_finish(
-    gitlab_workflow, workflow_id
-):
+async def test_handle_completion_without_deferred_finish(gitlab_workflow, workflow_id):
     """No spurious FINISH when the workflow did not complete (e.g. interrupt)."""
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "input_required"
@@ -2290,13 +2286,13 @@ async def test_handle_online_mode_completion_without_deferred_finish(
     gitlab_workflow._pending_finish = False
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
-        await gitlab_workflow._handle_online_mode_completion()
+        await gitlab_workflow._handle_completion()
 
     status_handler.update_workflow_status.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_handle_online_mode_completion_finish_error_propagates(
+async def test_handle_completion_finish_error_propagates(
     gitlab_workflow,
 ):
     """If the deferred FINISH PATCH raises, the error propagates (not swallowed)."""
@@ -2307,7 +2303,88 @@ async def test_handle_online_mode_completion_finish_error_propagates(
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         with pytest.raises(RuntimeError, match="boom"):
-            await gitlab_workflow._handle_online_mode_completion()
+            await gitlab_workflow._handle_completion()
+
+
+@pytest.mark.asyncio
+async def test_handle_completion_finish_error_swallowed_when_not_reraising(
+    gitlab_workflow, workflow_id
+):
+    """With reraise_errors=False the completion error is logged and swallowed."""
+    status_handler = AsyncMock()
+    status_handler.update_workflow_status.side_effect = RuntimeError("boom")
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+
+    with (
+        patch.object(gitlab_workflow, "_track_workflow_completion"),
+        patch(
+            "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
+        ) as mock_log_exception,
+    ):
+        await gitlab_workflow._handle_completion(reraise_errors=False)
+
+    mock_log_exception.assert_called_once()
+    assert isinstance(mock_log_exception.call_args[0][0], RuntimeError)
+    assert mock_log_exception.call_args[1]["extra"]["workflow_id"] == workflow_id
+
+
+@pytest.mark.asyncio
+async def test_aexit_clean_exit_propagates_completion_error(gitlab_workflow):
+    """On a clean exit there is no original exception to preserve, so a completion failure must surface rather than
+    silently leaving Rails out of sync."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.side_effect = RuntimeError("status fetch failed")
+    gitlab_workflow._status_handler = status_handler
+
+    with pytest.raises(RuntimeError, match="status fetch failed"):
+        await gitlab_workflow.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_aexit_exception_exit_swallows_completion_error(gitlab_workflow):
+    """On a failure exit the completion error must not replace the original teardown exception: __aexit__ returns
+    without raising (so the original propagates) after the DROP transition."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.side_effect = RuntimeError("status fetch failed")
+    gitlab_workflow._status_handler = status_handler
+
+    with patch(
+        "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
+    ) as mock_log_exception:
+        suppressed = await gitlab_workflow.__aexit__(
+            ValueError, ValueError("graph blew up"), None
+        )
+
+    assert not suppressed
+    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
+    assert WorkflowStatusEventEnum.DROP in calls
+    logged = [c[0][0] for c in mock_log_exception.call_args_list]
+    assert any(
+        isinstance(e, RuntimeError) and str(e) == "status fetch failed" for e in logged
+    )
+
+
+@pytest.mark.asyncio
+async def test_aexit_teardown_error_branch_swallows_completion_error(gitlab_workflow):
+    """A completed workflow whose deferred FINISH also fails still suppresses the benign teardown error instead of
+    surfacing the FINISH failure in its place."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    status_handler.update_workflow_status.side_effect = RuntimeError("PATCH failed")
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+
+    with patch(
+        "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
+    ) as mock_log_exception:
+        suppressed = await gitlab_workflow.__aexit__(
+            RuntimeError, RuntimeError("stream closed"), None
+        )
+
+    assert suppressed is True
+    logged = [c[0][0] for c in mock_log_exception.call_args_list]
+    assert any(isinstance(e, RuntimeError) and str(e) == "PATCH failed" for e in logged)
 
 
 @pytest.mark.asyncio
@@ -2320,13 +2397,33 @@ async def test_aexit_clean_success_fires_deferred_finish(gitlab_workflow, workfl
     gitlab_workflow._pending_finish = True
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
-        result = await gitlab_workflow.__aexit__(None, None, None)
+        await gitlab_workflow.__aexit__(None, None, None)
 
-    assert result is True
     status_handler.update_workflow_status.assert_awaited_once_with(
         workflow_id, WorkflowStatusEventEnum.FINISH
     )
     assert gitlab_workflow._pending_finish is False
+
+
+@pytest.mark.asyncio
+async def test_aexit_with_checkpoint_error_does_not_fire_deferred_finish(
+    gitlab_workflow, workflow_id
+):
+    """A completion with checkpoint error does not fires the deferred FINISH."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = True
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        await gitlab_workflow.__aexit__(
+            CheckpointSaveError, CheckpointSaveError("Failed to save checkpoint"), None
+        )
+
+    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
+    assert WorkflowStatusEventEnum.DROP in calls
+    assert WorkflowStatusEventEnum.FINISH not in calls
+    assert gitlab_workflow._pending_finish is True
 
 
 @pytest.mark.asyncio
@@ -2365,10 +2462,11 @@ async def test_aexit_pending_finish_oversized_save_fails_loudly(
     with (
         patch.object(gitlab_workflow, "_track_workflow_completion") as mock_completion,
         patch.object(gitlab_workflow, "_handle_workflow_exception") as mock_exception,
+        patch.object(gitlab_workflow, "_handle_completion"),
     ):
         suppressed = await gitlab_workflow.__aexit__(type(error), error, None)
 
-    assert suppressed is False
+    assert not suppressed
     mock_completion.assert_not_called()
     mock_exception.assert_awaited_once()
     calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
@@ -2430,9 +2528,10 @@ async def test_aexit_drops_when_answer_checkpoint_save_failed(
     gitlab_workflow._pending_finish = True
 
     error = CheckpointSaveError("Failed to save checkpoint")
-    suppressed = await gitlab_workflow.__aexit__(CheckpointSaveError, error, None)
+    with patch.object(gitlab_workflow, "_handle_completion"):
+        suppressed = await gitlab_workflow.__aexit__(CheckpointSaveError, error, None)
 
-    assert suppressed is False
+    assert not suppressed
     calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
     assert WorkflowStatusEventEnum.DROP in calls
     assert WorkflowStatusEventEnum.FINISH not in calls
@@ -3307,46 +3406,114 @@ async def test_track_workflow_completion_skips_tool_loop_summary(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("exc_type", "exc_value", "expected_ending"),
+    "status",
+    [
+        pytest.param("failed", id="failed"),
+        # A non-resumable exception can leave Rails on a status that is not itself
+        # terminal (the DROP PATCH can race or fail); the exception is what makes
+        # the session over, so it must still be summarised.
+        pytest.param("running", id="running"),
+        pytest.param(WorkflowStatusEnum.INPUT_REQUIRED, id="input-required"),
+    ],
+)
+async def test_track_workflow_completion_fires_summaries_when_exception_ended_session(
+    gitlab_workflow,
+    internal_event_client,
+    workflow_id,
+    status,
+):
+    """`exc_type` opens the summary gate on its own: a non-resumable exception ends the session no matter which status
+    Rails is left on, and only these paths can report a tool loop that died of recursion or a stuck agent."""
+    from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    orbit_tool_call_count.set(2)
+    total_tool_call_count.set(5)
+    init_tool_loop_counters()
+    record_tool_calls([("run_command", {"cmd": "git fetch"}, "fatal")] * 2)
+
+    await gitlab_workflow._track_workflow_completion(
+        status, GraphRecursionError, GraphRecursionError("recursion limit exceeded")
+    )
+
+    summary_calls = {
+        c[1]["event_name"]: c[1]["additional_properties"]
+        for c in internal_event_client.track_event.call_args_list
+        if c[1]["event_name"]
+        in (
+            EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value,
+            EventEnum.ORBIT_DAP_SESSION_SUMMARY.value,
+        )
+    }
+    assert set(summary_calls) == {
+        EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value,
+        EventEnum.ORBIT_DAP_SESSION_SUMMARY.value,
+    }
+
+    tool_loop_props = summary_calls[EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value]
+    assert tool_loop_props.value == workflow_id
+    assert tool_loop_props.extra["total_tool_calls"] == 2
+    assert tool_loop_props.extra["session_ending"] == "failure"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc_type", "exc_value", "rails_status", "expected_ending"),
     [
         pytest.param(
             GraphRecursionError,
             GraphRecursionError("recursion limit of 600 exceeded"),
+            "failed",
             "failure",
             id="recursion-limit",
         ),
         pytest.param(
-            RuntimeError, RuntimeError("agent stuck"), "failure", id="generic-failure"
+            RuntimeError,
+            RuntimeError("agent stuck"),
+            "failed",
+            "failure",
+            id="generic-failure",
         ),
+        # A user stop persists STOP to Rails, so the status the summary is gated
+        # on comes back terminal *and* an exception is in flight -- the case that
+        # used to emit the summary twice.
         pytest.param(
             asyncio.CancelledError,
             asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+            "stopped",
             "stopped",
             id="user-stop",
         ),
         pytest.param(
             asyncio.CancelledError,
             asyncio.CancelledError(),
+            "failed",
             "aborted",
             id="task-abort",
         ),
     ],
 )
-async def test_aexit_fires_tool_loop_summary_on_terminal_failures(
+async def test_aexit_fires_tool_loop_summary_once_on_terminal_failures(
     gitlab_workflow,
     internal_event_client,
     workflow_id,
     exc_type,
     exc_value,
+    rails_status,
     expected_ending,
 ):
-    """The endings a tool loop actually produces never reach _track_workflow_completion.
+    """The endings a tool loop actually produces must be reported exactly once.
 
-    A recursion-limit death or a stuck agent returns from the exc_type branch in __aexit__, so gating the summary on the
-    Rails status alone made the sessions this metric exists to measure the only ones it could not see.
+    A recursion-limit death or a stuck agent lands on a non-terminal Rails status, so gating the summary on that status
+    alone made the sessions this metric exists to measure the only ones it could not see. The exception info is instead
+    threaded into `_track_workflow_completion`, which both widens the gate and keeps the emission single: the earlier
+    `__aexit__`-side call doubled up whenever the status was terminal too (user stop).
     """
     gitlab_workflow._internal_event_client = internal_event_client
-    gitlab_workflow._status_handler = AsyncMock()
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = rails_status
+    gitlab_workflow._status_handler = status_handler
 
     init_tool_loop_counters()
     record_tool_calls([("run_command", {"cmd": "git fetch"}, "fatal")] * 3)
@@ -3459,6 +3626,118 @@ async def test_aexit_fires_tool_loop_summary_once_despite_teardown_error(
         if c[1]["event_name"] == EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value
     ]
     assert len(summary_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# _handle_completion called after every workflow exit (including exceptions)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc_type", "exc_value"),
+    [
+        pytest.param(
+            RuntimeError,
+            RuntimeError("something went wrong"),
+            id="generic-failure",
+        ),
+        pytest.param(
+            asyncio.CancelledError,
+            asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+            id="user-stop",
+        ),
+        pytest.param(
+            asyncio.CancelledError,
+            asyncio.CancelledError("task aborted"),
+            id="task-abort",
+        ),
+    ],
+)
+async def test_aexit_calls_handle_completion_after_terminal_exception(
+    gitlab_workflow,
+    exc_type,
+    exc_value,
+):
+    """_handle_completion must be called even when __aexit__ receives a terminal exception (DROP or STOP path), so that
+    billing and tracking always fire on workflow exit regardless of how the session ended."""
+    gitlab_workflow._status_handler = AsyncMock()
+
+    with patch.object(
+        gitlab_workflow,
+        "_handle_completion",
+        new_callable=AsyncMock,
+    ) as mock_completion:
+        await gitlab_workflow.__aexit__(exc_type, exc_value, None)
+
+    mock_completion.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_aexit_does_not_call_handle_completion_for_infra_stop(
+    gitlab_workflow,
+):
+    """Infrastructure-initiated stops return early before reaching _handle_completion — the session stays running for
+    reconnect."""
+    gitlab_workflow._status_handler = AsyncMock()
+
+    with patch.object(
+        gitlab_workflow,
+        "_handle_completion",
+        new_callable=AsyncMock,
+    ) as mock_completion:
+        await gitlab_workflow.__aexit__(
+            asyncio.CancelledError,
+            asyncio.CancelledError(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST),
+            None,
+        )
+
+    mock_completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_aexit_does_not_call_handle_completion_for_invalid_request(
+    gitlab_workflow,
+):
+    """InvalidRequestException returns early (session stays resumable) so _handle_completion must not be called."""
+    gitlab_workflow._status_handler = AsyncMock()
+
+    with (
+        patch.object(gitlab_workflow, "_reconcile_session_status", AsyncMock()),
+        patch.object(
+            gitlab_workflow,
+            "_handle_completion",
+            new_callable=AsyncMock,
+        ) as mock_completion,
+    ):
+        await gitlab_workflow.__aexit__(
+            InvalidRequestException,
+            InvalidRequestException("empty goal"),
+            None,
+        )
+
+    mock_completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_aexit_does_not_call_track_workflow_completion_in_offline_mode(
+    gitlab_workflow,
+):
+    """In offline mode (USE_MEMSAVER set) _track_workflow_completion must never be called, even when an exception
+    occurred."""
+    gitlab_workflow._offline_mode = True
+    gitlab_workflow._status_handler = AsyncMock()
+
+    with patch.object(
+        gitlab_workflow,
+        "_track_workflow_completion",
+        new_callable=AsyncMock,
+    ) as mock_completion:
+        await gitlab_workflow.__aexit__(
+            RuntimeError, RuntimeError("offline failure"), None
+        )
+
+    mock_completion.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

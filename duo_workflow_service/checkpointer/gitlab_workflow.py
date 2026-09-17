@@ -427,7 +427,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._billing_event_service = billing_event_service
         self._orbit_called = False
         # Set when a checkpoint carries FINISH; fired later by
-        # _handle_online_mode_completion, once the answer checkpoint is persisted.
+        # _handle_completion, once the answer checkpoint is persisted.
         self._pending_finish = False
         self.serde = CheckpointSerializer()
         # Delta state per checkpoint namespace, in least-recently-used order: one
@@ -775,14 +775,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
     ) -> None:
         """Emit the repeated-tool-call summary for a session that has ended.
 
-        Called from ``__aexit__`` so the failure endings are covered too: a
-        ``GraphRecursionError`` or ``AgentStuckError`` returns before
-        ``_track_workflow_completion`` is ever reached, and those are exactly the
-        endings a tool loop produces. Safe to call at any of those points -- the
-        counters are only written by ``ToolNode`` during the graph stream, which
-        has fully unwound by the time ``__aexit__`` runs.
+        Called once from ``_track_workflow_completion``, which is reached on every
+        non-resumable ending and therefore covers the failure endings a tool loop
+        actually produces (``GraphRecursionError``, ``AgentStuckError``) as well
+        as a clean finish. Safe to call there -- the counters are only written by
+        ``ToolNode`` during the graph stream, which has fully unwound by the time
+        ``__aexit__`` runs.
 
-        Deliberately not called for endings that leave the session resumable
+        Deliberately not reached for endings that leave the session resumable
         (infrastructure stop, ``InvalidRequestException``): the counters reset on
         resume, so emitting there would report a fragment of the session and
         double-count once the client reconnects.
@@ -835,21 +835,13 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 error=str(exc_value),
             )
             self._capture_audit_session_ended(None, None)
-            if not self._offline_mode:
-                try:
-                    # Emits the tool-loop summary via _track_workflow_completion:
-                    # the answer is already checkpointed, so this is a clean
-                    # ending despite the teardown error.
-                    await self._handle_online_mode_completion()
-                except Exception as finish_error:
-                    # The deferred FINISH itself failed (e.g. the PATCH to Rails
-                    # errored). Log it and fall through to the return below so we
-                    # preserve the original teardown exception's handling rather
-                    # than surfacing the FINISH failure in its place.
-                    log_exception(
-                        finish_error,
-                        extra={"workflow_id": self._workflow_id, "source": __name__},
-                    )
+
+            # Emits the tool-loop summary via _track_workflow_completion:
+            # the answer is already checkpointed, so this is a clean
+            # ending despite the teardown error -- hence the exception
+            # info is deliberately not forwarded.
+            await self._handle_completion(reraise_errors=False)
+
             # Suppress a benign teardown error, but never swallow task
             # cancellation -- re-raise it after finishing.
             return not isinstance(exc_value, asyncio.exceptions.CancelledError)
@@ -907,9 +899,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 )
                 return False
 
-            # Past the two resumable endings above, so this session is over.
-            self._track_tool_loop_session_summary(exc_type, exc_value)
-
             if str(exc_value) == AIO_CANCEL_STOP_WORKFLOW_REQUEST:
                 status = WorkflowStatusEventEnum.STOP
             else:
@@ -929,26 +918,40 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 await self._handle_workflow_exception(exc_value, event)
 
             await self._update_workflow_status_safely(status)
-            return False
 
-        if not self._offline_mode:
-            return await self._handle_online_mode_completion()
-
-    async def _handle_online_mode_completion(self) -> bool:
-        """Handle workflow completion in online mode."""
-        # Fire the deferred FINISH now that the graph loop has drained and its
-        # terminal checkpoint (the final answer) is persisted, so listeners on
-        # the finished transition see the answer in Rails.
-        if self._pending_finish:
-            self._logger.debug("Firing deferred FINISH workflow status")
-            await self._update_workflow_status(WorkflowStatusEventEnum.FINISH)
-            self._pending_finish = False
-
-        status = await self._status_handler.get_workflow_status(
-            workflow_id=self._workflow_id
+        # If we're handling a "clean" exit (no `exc_type`), reraise any completion handling errors. Otherwise
+        # swallow them so they don't override the original teardown exception
+        await self._handle_completion(
+            exc_type, exc_value, reraise_errors=exc_type is None
         )
-        await self._track_workflow_completion(status)
-        return True
+
+    async def _handle_completion(
+        self, exc_type=None, exc_value=None, reraise_errors=True
+    ) -> None:
+        if self._offline_mode:
+            return
+
+        try:
+            # Fire the deferred FINISH now that the graph loop has drained and its
+            # terminal checkpoint (the final answer) is persisted, so listeners on
+            # the finished transition see the answer in Rails.
+            if self._pending_finish and exc_type is None:
+                self._logger.debug("Firing deferred FINISH workflow status")
+                await self._update_workflow_status(WorkflowStatusEventEnum.FINISH)
+                self._pending_finish = False
+
+            status = await self._status_handler.get_workflow_status(
+                workflow_id=self._workflow_id
+            )
+            await self._track_workflow_completion(status, exc_type, exc_value)
+        except Exception as finish_error:
+            if reraise_errors:
+                raise
+
+            log_exception(
+                finish_error,
+                extra={"workflow_id": self._workflow_id, "source": __name__},
+            )
 
     async def _handle_workflow_exception(
         self, exc_value: Any, event: EventEnum = EventEnum.WORKFLOW_FINISH_FAILURE
@@ -966,7 +969,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             additional_properties=properties,
         )
 
-    async def _track_workflow_completion(self, status: str) -> None:
+    async def _track_workflow_completion(
+        self, status: str, exc_type=None, exc_value=None
+    ) -> None:
         """Track successful workflow completion based on status."""
 
         # Track billing event for workflow completion
@@ -1000,6 +1005,26 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             self._logger.info(
                 f"Billing Status '{status}' does not match billing event conditions"
             )
+
+        # Only fire session summaries on terminal statuses. Pause statuses
+        # (INPUT_REQUIRED, PLAN_APPROVAL_REQUIRED) would produce partial summaries
+        # because the counters are reset on each resume.
+        # Non-resumable terminations (indicated by the presence of `exc_type`) also trigger a summary.
+        if status in ("finished", "stopped") or exc_type:
+            # label/property are intentionally omitted: they are validator-required
+            # placeholders that will be dropped once the schema is published. See
+            # orbit_dap_session_summary.yml and
+            # https://gitlab.com/gitlab-org/gitlab/-/work_items/596959
+            orbit_extras = build_orbit_session_summary_extras(
+                self._workflow_id, self._workflow_type.value
+            )
+            if orbit_extras is not None:
+                self._track_internal_event(
+                    EventEnum.ORBIT_DAP_SESSION_SUMMARY,
+                    InternalEventAdditionalProperties(**orbit_extras),
+                )
+
+            self._track_tool_loop_session_summary(exc_type, exc_value, status=status)
 
         if status == WorkflowStatusEnum.INPUT_REQUIRED:
             event = EventEnum.WORKFLOW_PAUSE
@@ -1045,30 +1070,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 label=label, property=prop, value=self._workflow_id, **extra_kwargs
             ),
         )
-
-        # Only fire session summaries on terminal statuses. Pause statuses
-        # (INPUT_REQUIRED, PLAN_APPROVAL_REQUIRED) would produce partial summaries
-        # because the counters are reset on each resume.
-        #
-        # The tool-loop summary is gated here, on the Rails status, rather than in
-        # `__aexit__` alongside its failure-path counterpart: a pause reaches
-        # `__aexit__` with no exception at all, so it is indistinguishable there
-        # from a clean finish, and only this status tells the two apart.
-        if status in ("finished", "stopped"):
-            # label/property are intentionally omitted: they are validator-required
-            # placeholders that will be dropped once the schema is published. See
-            # orbit_dap_session_summary.yml and
-            # https://gitlab.com/gitlab-org/gitlab/-/work_items/596959
-            orbit_extras = build_orbit_session_summary_extras(
-                self._workflow_id, self._workflow_type.value
-            )
-            if orbit_extras is not None:
-                self._track_internal_event(
-                    EventEnum.ORBIT_DAP_SESSION_SUMMARY,
-                    InternalEventAdditionalProperties(**orbit_extras),
-                )
-
-            self._track_tool_loop_session_summary(status=status)
 
     async def _update_workflow_status_safely(
         self, status: WorkflowStatusEventEnum = WorkflowStatusEventEnum.DROP
@@ -1888,7 +1889,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if status == WorkflowStatusEventEnum.FINISH:
             # aput_writes runs before this super-step's checkpoint is saved, so
             # firing FINISH here would race the answer checkpoint POST; defer it
-            # to _handle_online_mode_completion.
+            # to _handle_completion.
             self._pending_finish = True
         elif status:
             self._logger.debug(
