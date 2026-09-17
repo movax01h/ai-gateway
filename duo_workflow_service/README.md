@@ -321,6 +321,16 @@ improvements in Duo Workflow's problem-solving capabilities.
 For comprehensive instructions on adding a new tool to the Duo Workflow Service, refer to the dedicated
 guide: [Adding New Tool](../docs/adding_new_tool.md).
 
+## Renaming a tool
+
+For renaming an existing tool's name on both the AI Gateway and Rails (AI Catalog) sides, refer to the dedicated
+guide: [Renaming a tool](../docs/renaming_a_tool.md).
+
+## Tool supersession
+
+For keeping a tool name the same but updating its implementation in a backwards compatible way, please refer to the
+dedicated guide: [Tool Supersession](../docs/adding_new_tool.md#4-tool-supersession-optional).
+
 ## JWK Signing Key and Validation Key
 
 The Duo Workflow Service uses its own pair of self-signed JWT keys, separate from the AI Gateway keys, to validate incoming JWTs from the Duo Workflow Executor:
