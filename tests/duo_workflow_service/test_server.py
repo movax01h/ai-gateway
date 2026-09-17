@@ -4881,6 +4881,35 @@ def test_extract_error_message_graphql_errors_collapse(message, expected):
     assert _extract_error_message(Exception(message)) == expected
 
 
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        pytest.param(
+            "An error occurred while processing your request. You can retry your "
+            "request, or contact us through our help center at help.openai.com if the "
+            "error persists. Please include the request ID "
+            "req_some_id in your message.",
+            "An error occurred while processing your request.",
+            id="plain_openai_api_error",
+        ),
+        pytest.param(
+            "litellm.APIError: OpenAIException - An error occurred while processing "
+            "your request. You can retry your request, or contact us through our help "
+            "center at help.openai.com if the error persists. Please include the "
+            "request ID req_some_id in your message.",
+            "litellm.APIError: OpenAIException - An error occurred while processing "
+            "your request.",
+            id="prefixed_openai_api_error",
+        ),
+    ],
+)
+def test_extract_error_message_openai_api_error_collapse(message, expected):
+    # OpenAI APIError messages append retry guidance and a per-request ID that
+    # fragments SLO grouping; only the stable leading sentence (with any leading
+    # prefix preserved) should be surfaced.
+    assert _extract_error_message(Exception(message)) == expected
+
+
 class _ComponentLike(BaseModel):
     """Stand-in for a component model whose validator rejects the config."""
 
