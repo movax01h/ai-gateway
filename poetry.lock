@@ -2587,14 +2587,14 @@ tests = ["pytest"]
 
 [[package]]
 name = "hiddenlayer-sdk"
-version = "3.9.0"
+version = "3.10.0"
 description = "The official Python library for the hiddenlayer API"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "hiddenlayer_sdk-3.9.0-py3-none-any.whl", hash = "sha256:6bed90652d66283687bd162268e3bea739702b4538675adb90c849de70949b5c"},
-    {file = "hiddenlayer_sdk-3.9.0.tar.gz", hash = "sha256:6057be46685a6d3fd26a78e690659b4f08e3dcec4d1b4d41ac5c821d79773ba0"},
+    {file = "hiddenlayer_sdk-3.10.0-py3-none-any.whl", hash = "sha256:16d11a1d0b2219b04a6bbda233c444e261c7cb2ff35c683f8449e25f054f984a"},
+    {file = "hiddenlayer_sdk-3.10.0.tar.gz", hash = "sha256:655c423c12b03ffb1fe8de95288e8659ad3af4fa0c76d6ffc1c89c1d272b7097"},
 ]
 
 [package.dependencies]
