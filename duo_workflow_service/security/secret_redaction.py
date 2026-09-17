@@ -33,7 +33,11 @@ Both public functions accept any of the following via duck typing, and
 recurse into nested structures automatically:
 
 - ``str`` -- redacted in place.
-- ``dict`` -- values are redacted recursively; keys are left unchanged.
+- ``dict`` -- values are redacted recursively; keys are left unchanged. One
+    exception: the ``base64`` value of an image block *this service built* is
+    left unscanned when it is a large string (see ``_should_skip_redaction`` and
+    ``entities.image_blocks.is_internal_image_block``). A dict that merely looks
+    like an image block is scanned like any other.
 - ``list`` -- each element is redacted recursively.
 - Objects with an ``update`` field (e.g. ``langgraph.types.Command``) --
     ``update`` is redacted recursively; a shallow copy is returned when the field changed.
@@ -58,7 +62,7 @@ Usage::
 """
 
 import copy
-from typing import Any, List
+from typing import Any, Callable, List
 
 import structlog
 from detect_secrets.plugins.artifactory import ArtifactoryDetector
@@ -211,6 +215,71 @@ def _shallow_copy_with(obj: Any, field: str, value: Any) -> Any:
     return cloned
 
 
+_MIN_PAYLOAD_CHARS_TO_SKIP = 4 * 1024
+
+
+def _should_skip_redaction(payload: Any) -> bool:
+    """Whether *payload* is pixel data worth skipping: a string of at least ``_MIN_PAYLOAD_CHARS_TO_SKIP``.
+
+    Anything shorter is scanned like everything else, because a credential is far smaller than any real image. A dict or
+    list is scanned too, since skipping one would skip a whole subtree.
+    """
+    return isinstance(payload, str) and len(payload) >= _MIN_PAYLOAD_CHARS_TO_SKIP
+
+
+def _is_internal_image_block() -> Callable[[Any], bool]:
+    """The "this service built that block" predicate, imported lazily.
+
+    A module-level import cycles: ``entities.__init__`` pulls in ``entities.state``, which imports
+    ``redact_secrets_for_ui`` from here.
+
+    Deliberately not cached. ``sys.modules`` already makes the repeat import a dict lookup, measured at ~85ns against
+    the ~870ms scan the exemption exists to avoid, and a process-global cache cannot be stubbed: a test that patches
+    the predicate to check what the exemption lets through would pass while exercising the real one.
+    """
+    from duo_workflow_service.entities.image_blocks import is_internal_image_block
+
+    return is_internal_image_block
+
+
+def _redact_dict(
+    response: dict[Any, Any], detectors: List[BasePlugin], tool_name: str
+) -> dict[Any, Any]:
+    """Redact every value of *response*, with one exemption.
+
+    The ``base64`` payload of a block this service built is left unscanned when it is a large string. Pattern
+    detectors cannot match inside pixel data and scanning megabytes of it is pure overhead.
+
+    Provenance, not shape. Any dict can claim ``type: image`` and a ``base64`` key, so keying on appearance would let
+    a secret earn the exemption by wearing one. Only the single constructor can mark a block, and the mark is the
+    block's type, which no data format and no copy can produce, so a block that arrived as JSON, or was rebuilt on the
+    way, is scanned: the test is "did we make it". Every sibling key, and every shorter or structured value, is still
+    scanned.
+
+    This is also why the exemption no longer rests on the checkpoint stripper and the card renderer replacing image
+    blocks before they reach a checkpoint or a person. Both still do, and both are worth keeping, but a future path
+    that skips them cannot reopen this.
+
+    The skip is logged, at debug, so a payload that went unscanned can be told apart from one that was scanned and
+    matched nothing; in the output the two are identical.
+    """
+    is_internal_image = _is_internal_image_block()(response)
+    redacted: dict[Any, Any] = {}
+    for key, value in response.items():
+        if is_internal_image and key == "base64" and _should_skip_redaction(value):
+            log.debug(
+                "Skipped secret scan for an internal image payload",
+                tool_name=tool_name,
+                key=key,
+                mime_type=response.get("mime_type"),
+                payload_len=len(value),
+            )
+            redacted[key] = value
+        else:
+            redacted[key] = _redact_recursive(value, detectors, tool_name)
+    return redacted
+
+
 def _redact_recursive(  # noqa: PLR0911  # branchy recursive redaction over value types
     response: Any, detectors: List[BasePlugin], tool_name: str
 ) -> Any:
@@ -239,9 +308,7 @@ def _redact_recursive(  # noqa: PLR0911  # branchy recursive redaction over valu
         return redacted
 
     if isinstance(response, dict):
-        return {
-            k: _redact_recursive(v, detectors, tool_name) for k, v in response.items()
-        }
+        return _redact_dict(response, detectors, tool_name)
 
     if isinstance(response, list):
         return [_redact_recursive(item, detectors, tool_name) for item in response]

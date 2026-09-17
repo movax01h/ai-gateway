@@ -63,9 +63,26 @@ __all__ = [
     "image_content_block",
     "is_image_block",
     "is_image_content_block",
+    "is_internal_image_block",
     "strip_image_payloads",
     "with_block_text",
 ]
+
+
+class _InternalImageBlock(dict[str, Any]):
+    """An image block built by :func:`image_content_block`, and nothing else.
+
+    The type is the provenance mark. It adds no key, so the block is the standard LangChain shape byte for byte,
+    serialises as a plain dict and survives ``deepcopy``. JSON cannot produce an instance, and neither can a copy
+    through ``dict()``, a spread or a pydantic message model: those are plain dicts again, which is the safe
+    direction, because a plain dict is scanned. The mark is read once, on the raw tool result right after
+    construction, and that is the only place redaction sees a block.
+
+    Only one consumer asks for it: the redaction exemption, where skipping a scan is the single decision for which
+    "looks like an image block" is not good enough. Everything else keeps the loose shape check on purpose, because
+    stripping or token-charging a lookalike is protective rather than harmful.
+    """
+
 
 # Flat per-image token cost charged wherever a conversation is budgeted.
 #
@@ -89,7 +106,7 @@ def image_content_block(base64: str, mime_type: str) -> dict[str, Any]:
     provider integration knows how to translate; a hand-rolled provider-specific block would reach exactly one provider
     intact.
     """
-    return dict(create_image_block(base64=base64, mime_type=mime_type))
+    return _InternalImageBlock(create_image_block(base64=base64, mime_type=mime_type))
 
 
 def is_image_block(block: Any) -> bool:
@@ -114,6 +131,17 @@ def is_image_content_block(block: Any) -> bool:
     a remote ``url`` costs nothing to keep.
     """
     return is_image_block(block) and bool(block.get("base64"))
+
+
+def is_internal_image_block(block: Any) -> bool:
+    """Return whether *block* is an image block this module built.
+
+    Provenance, where :func:`is_image_content_block` reports shape. Any dict can claim ``type: image`` and a ``base64``
+    key, but only the constructor above produces the marker type, and no data format can. This answers "did we make
+    it, from bytes a producer checked" rather than "does it look right". Use it wherever getting it wrong is unsafe,
+    and the shape check wherever getting it wrong is merely wasteful.
+    """
+    return isinstance(block, _InternalImageBlock) and is_image_content_block(block)
 
 
 def strip_image_payloads(content: Any) -> Any:
