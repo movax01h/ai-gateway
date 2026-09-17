@@ -10,6 +10,7 @@ from typing import (
     List,
     MutableMapping,
     NamedTuple,
+    NoReturn,
     Optional,
     cast,
     override,
@@ -26,8 +27,23 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     WrongUnitPrimitives,
 )
-from jinja2 import BaseLoader, ChoiceLoader, Environment, PackageLoader, meta
+from jinja2 import (
+    BaseLoader,
+    ChoiceLoader,
+    Environment,
+    PackageLoader,
+    meta,
+    nodes,
+    pass_environment,
+)
+from jinja2.compiler import CodeGenerator
+from jinja2.compiler import Frame as JinjaFrame
 from jinja2.exceptions import SecurityError, TemplateNotFound
+from jinja2.filters import FILTERS as _JINJA_DEFAULT_FILTERS
+from jinja2.filters import do_indent as _jinja_do_indent
+from jinja2.filters import do_last as _jinja_do_last
+from jinja2.filters import do_mark_safe as _jinja_do_mark_safe
+from jinja2.filters import do_wordwrap as _jinja_do_wordwrap
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.callbacks.usage import UsageMetadataCallbackHandler
@@ -280,9 +296,52 @@ async def _ainvoke_with_retry(
     return await invoke()
 
 
-# cspell:ignore binops, binop, Sandboxed
+# cspell:ignore binops, binop, Sandboxed, NSRef, nsref
+class _NamespaceCheckedCodeGenerator(CodeGenerator):
+    """Close a gap in Jinja2's ``{% set ns.attr %}`` handling.
+
+    ``CodeGenerator.visit_Assign`` (the plain form, ``{% set ns.attr = value %}``)
+    checks ``ns`` is a ``Namespace`` before allowing the write.
+    ``visit_AssignBlock`` (the block form, ``{% set ns.attr %}...{% endset %}``)
+    never emits that check, so it can write an arbitrary key/attribute onto
+    *any* object exposed to the template, not just ``namespace()`` objects.
+    No sandbox hook sees this either way -- the assignment compiles straight
+    into the rendered template's exec'd code.
+    """
+
+    def visit_AssignBlock(self, node: nodes.AssignBlock, frame: JinjaFrame) -> None:
+        # `node.target` isn't always a bare NSRef -- it can be a tuple
+        # containing one, e.g. `{% set junk, ns.attr %}`. Collect all NSRefs
+        # in it (deduped), same idea as `visit_Assign`'s `find_all`, but
+        # rooted at `target` rather than the whole node: `node.body` can
+        # contain nested block-sets, and checking their targets too would
+        # crash on a name the outer frame never learned about. `find_all`
+        # only checks descendants, not the node itself, so a bare `NSRef`
+        # target needs a separate check.
+        target = node.target
+        candidate_refs = ([target] if isinstance(target, nodes.NSRef) else []) + list(
+            target.find_all(nodes.NSRef)
+        )
+        seen_refs: set[str] = set()
+        for nsref in candidate_refs:
+            if nsref.name in seen_refs:
+                continue
+            seen_refs.add(nsref.name)
+            ref = frame.symbols.ref(nsref.name)
+            self.writeline(f"if not isinstance({ref}, Namespace):")
+            self.indent()
+            self.writeline(
+                "raise TemplateRuntimeError"
+                '("cannot assign attribute on non-namespace object")'
+            )
+            self.outdent()
+        super().visit_AssignBlock(node, frame)
+
+
 class PromptSandboxedEnvironment(ImmutableSandboxedEnvironment):
     """Sandboxed environment that forbids method access on bound objects."""
+
+    code_generator_class = _NamespaceCheckedCodeGenerator
 
     intercepted_binops = frozenset(["*", "**"])
 
@@ -375,6 +434,152 @@ def parse_json(value: Any) -> Any:
         return json.loads(str_value)
     except Exception as e:
         raise SecurityError("Invalid json value") from e
+
+
+def _make_blocked_filter(name: str) -> Callable[..., NoReturn]:
+    """Build a filter that unconditionally blocks a built-in Jinja2 filter.
+
+    Used for filters that call a named method directly on their argument
+    without checking its type (e.g. ``reverse``'s ``reversed()``,
+    ``escape``'s ``s.__html__()``, ``dictsort``'s ``value.items()``).
+    Filter calls skip every sandbox check, so a template can pass any live
+    object it holds and have that method invoked, including one resolved
+    through an object's own ``__getattr__`` fallback (e.g. Pydantic's
+    ``model_extra``). None of these have a legitimate use here, so each is
+    blocked outright rather than sanitised.
+
+    Raises:
+        SecurityError: Always, when the returned filter is called.
+    """
+
+    def blocked_filter(*_args: Any, **_kwargs: Any) -> NoReturn:
+        log.warning(f"Blocked use of {name} filter in prompt template")
+        raise SecurityError(f"The '{name}' filter is not allowed in prompt templates")
+
+    blocked_filter.__name__ = f"blocked_{name}_filter"
+    return blocked_filter
+
+
+def guarded_indent_filter(value: Any, *args: Any, **kwargs: Any) -> Any:
+    """Block the built-in ``indent`` filter on non-string values.
+
+    ``do_indent`` runs ``s += newline`` before calling ``s.splitlines()``.
+    On a mutable non-string such as a list, that ``+=`` mutates the
+    caller's live object in place before ``.splitlines()`` raises. Strings
+    are immutable, so this is only a risk for non-strings, which
+    ``do_indent`` doesn't support anyway.
+
+    Raises:
+        SecurityError: If ``value`` is not a string.
+    """
+    if not isinstance(value, str):
+        log.warning("Blocked use of 'indent' filter on a non-string value")
+        raise SecurityError(
+            "The 'indent' filter is not allowed on non-string values in prompt templates"
+        )
+    return _jinja_do_indent(value, *args, **kwargs)
+
+
+def guarded_safe_filter(value: Any) -> Any:
+    """Block the built-in ``safe`` filter on non-string values.
+
+    ``do_mark_safe`` calls ``Markup(value)``, whose ``__new__`` calls
+    ``value.__html__()`` if present -- the same gadget as the
+    already-blocked ``escape``/``e``/``forceescape``/``striptags``, and
+    invocable the same way via an object's ``__getattr__`` fallback (e.g.
+    Pydantic's ``model_extra``).
+
+    Raises:
+        SecurityError: If ``value`` is not a string.
+    """
+    if not isinstance(value, str):
+        log.warning("Blocked use of 'safe' filter on a non-string value")
+        raise SecurityError(
+            "The 'safe' filter is not allowed on non-string values in prompt templates"
+        )
+    return _jinja_do_mark_safe(value)
+
+
+@pass_environment
+def guarded_last_filter(environment: Environment, seq: Any) -> Any:
+    """Block the built-in ``last`` filter on mapping values.
+
+    ``last`` also calls ``reversed()``, same as the blocked ``reverse``
+    filter, so it's just as risky on a mapping. Unlike ``reverse``, ``last``
+    has a legitimate use on lists and strings (e.g. ``goal | split(...) |
+    last``), so only mapping input is blocked.
+
+    Raises:
+        SecurityError: If ``seq`` is a mapping.
+    """
+    if isinstance(seq, MutableMapping):
+        log.warning("Blocked use of 'last' filter on a mapping in prompt template")
+        raise SecurityError(
+            "The 'last' filter is not allowed on mapping values in prompt templates"
+        )
+    return _jinja_do_last(environment, seq)
+
+
+@pass_environment
+def guarded_wordwrap_filter(
+    environment: Environment,
+    s: Any,
+    width: int = 79,
+    break_long_words: bool = True,
+    wrapstring: Any = None,
+    break_on_hyphens: bool = True,
+) -> Any:
+    """Block non-string ``s``, and coerce ``wordwrap``'s separator to a string.
+
+    ``do_wordwrap`` calls ``s.splitlines()`` on the text being wrapped, and
+    ``wrapstring.join(...)`` on the separator -- both call a named method
+    on the raw value instead of coercing it first (unlike the built-in
+    ``join`` filter, which does ``str(d).join(...)``). Either can invoke
+    an attacker-controlled method via an object's ``__getattr__`` fallback
+    (e.g. Pydantic's ``model_extra``). ``s`` has no legitimate non-string
+    use, so it's rejected; ``wrapstring`` does (a custom separator), so
+    it's coerced via ``str()`` instead, which resolves ``__str__`` on the
+    type directly and so can't be hijacked the same way.
+
+    Raises:
+        SecurityError: If ``s`` is not a string.
+    """
+    if not isinstance(s, str):
+        log.warning("Blocked use of 'wordwrap' filter on a non-string value")
+        raise SecurityError(
+            "The 'wordwrap' filter is not allowed on non-string values in prompt templates"
+        )
+    if wrapstring is not None and not isinstance(wrapstring, str):
+        log.warning("Coerced a non-string 'wordwrap' separator in prompt template")
+        wrapstring = str(wrapstring)
+    return _jinja_do_wordwrap(
+        environment, s, width, break_long_words, wrapstring, break_on_hyphens
+    )
+
+
+# Patch Jinja2's own filter table, not just this module's `jinja_env` instance
+# below, so that every Environment built anywhere in this process - including
+# duo_workflow_service's own separate `PromptSandboxedEnvironment(...)`
+# instances - copies these blocks too. `Environment.__init__` does
+# `self.filters = DEFAULT_FILTERS.copy()`, and `DEFAULT_FILTERS` is this exact
+# dict object, so patching it here, before any Environment is constructed,
+# applies process-wide. `jinja_env` below inherits it automatically.
+for _blocked_name in (
+    "reverse",
+    "escape",
+    "e",
+    "forceescape",
+    "striptags",
+    "dictsort",
+    "xmlattr",
+    "urlize",
+):
+    _JINJA_DEFAULT_FILTERS[_blocked_name] = _make_blocked_filter(_blocked_name)
+
+_JINJA_DEFAULT_FILTERS["last"] = guarded_last_filter
+_JINJA_DEFAULT_FILTERS["indent"] = guarded_indent_filter
+_JINJA_DEFAULT_FILTERS["safe"] = guarded_safe_filter
+_JINJA_DEFAULT_FILTERS["wordwrap"] = guarded_wordwrap_filter
 
 
 class FeatureRootLoader(BaseLoader):
