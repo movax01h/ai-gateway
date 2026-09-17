@@ -1,9 +1,14 @@
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from langgraph.graph import StateGraph
 from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform import v1
 from duo_workflow_service.agent_platform.v1.components.base import BaseComponent
 from duo_workflow_service.agent_platform.v1.routers.router import BaseRouter, Router
 from duo_workflow_service.agent_platform.v1.state import FlowState, IOKey
@@ -11,6 +16,60 @@ from lib.events import GLReportingEventContext
 from lib.internal_events.ai_context import AIContext
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
+
+# Imports `routers.router` with the components package in the state a module loaded *by*
+# that package sees: present in `sys.modules`, but with nothing bound on it yet. `v1` is
+# stubbed for the same reason -- so that importing a router does not first pull in
+# `v1.flows`, which imports the components package eagerly.
+_IMPORT_MID_COMPONENTS_INIT = textwrap.dedent(
+    """
+    import importlib
+    import sys
+    import types
+    from pathlib import Path
+
+    V1 = "duo_workflow_service.agent_platform.v1"
+    v1_root = Path(sys.argv[1])
+
+    for name, path in ((V1, v1_root), (f"{V1}.components", v1_root / "components")):
+        stub = types.ModuleType(name)
+        stub.__path__ = [str(path)]
+        sys.modules[name] = stub
+
+    importlib.import_module(f"{V1}.routers.router")
+    """
+)
+
+
+def test_router_is_importable_while_the_components_package_initializes():
+    """`Router` must resolve `BaseComponent` without that package's ``__init__`` having run.
+
+    `components/__init__.py` star-imports `.agent.component` before `.base`, so a component
+    that imports `Router` reaches `routers.router` while the components package is still
+    empty. Resolving `BaseComponent` through the package therefore failed outright::
+
+        ImportError: cannot import name 'BaseComponent' from partially initialized module
+        'duo_workflow_service.agent_platform.v1.components'
+
+    Importing it from `components.base` works instead because that module is a leaf: it
+    depends on `v1.state` and nothing in `v1.routers`. This runs in a subprocess because it
+    asserts on `sys.modules` state the test session has long since moved past.
+    """
+    v1_root = Path(v1.__file__).parent
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", _IMPORT_MID_COMPONENTS_INIT, str(v1_root)],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=v1_root.parents[2],
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(f"Import hung instead of failing fast: {exc}")
+
+    assert result.returncode == 0, result.stderr
 
 
 class TestRouter:
