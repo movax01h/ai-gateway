@@ -9,8 +9,14 @@ import logging
 from typing import Any, AsyncIterator, Dict, Iterator, Mapping, Optional, override
 
 import litellm
+from langchain_core.callbacks import (
+    AsyncCallbackManager,
+    AsyncCallbackManagerForLLMRun,
+)
 from langchain_core.messages import AIMessage, AIMessageChunk, UsageMetadata
+from langchain_core.outputs import ChatGeneration, LLMResult
 from langchain_core.runnables import Runnable, RunnableConfig, RunnableSerializable
+from langchain_core.runnables.config import ensure_config
 
 from ai_gateway.models.base import validate_custom_endpoint
 from ai_gateway.models.user_identity_header import inject_user_identity_header
@@ -143,7 +149,7 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
     async def ainvoke(
         self,
         input: Dict[str, Any],
-        config: Optional[RunnableConfig] = None,  # pylint: disable=unused-argument
+        config: Optional[RunnableConfig] = None,
         **kwargs: Any,
     ) -> AIMessage:
         """Invoke the embedding model.
@@ -167,21 +173,64 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
             **kwargs,
         )
 
+        run_manager = await self._start_llm_run(ensure_config(config))
+
         try:
             response = await litellm.aembedding(**embedding_args)
-        except litellm.BadRequestError as e:
-            raise EmbeddingBadRequestError(str(e)) from e
-        except litellm.RateLimitError as e:
-            raise EmbeddingRateLimitError(str(e)) from e
-        except litellm.AuthenticationError as e:
-            raise EmbeddingAuthenticationError(str(e)) from e
-        except litellm.Timeout as e:
-            raise EmbeddingTimeoutError(str(e)) from e
 
-        predictions = self._extract_predictions(response)
-        usage_metadata = self._extract_usage_metadata(response)
+            predictions = self._extract_predictions(response)
+            usage_metadata = self._extract_usage_metadata(response)
+        except Exception as e:
+            await run_manager.on_llm_error(e)
 
-        return AIMessage(content=predictions, usage_metadata=usage_metadata)
+            if isinstance(e, litellm.BadRequestError):
+                raise EmbeddingBadRequestError(str(e)) from e
+            if isinstance(e, litellm.RateLimitError):
+                raise EmbeddingRateLimitError(str(e)) from e
+            if isinstance(e, litellm.AuthenticationError):
+                raise EmbeddingAuthenticationError(str(e)) from e
+            if isinstance(e, litellm.Timeout):
+                raise EmbeddingTimeoutError(str(e)) from e
+
+            raise
+
+        message = AIMessage(
+            content=predictions,
+            response_metadata=self._extract_response_metadata(
+                response, embedding_args["model"]
+            ),
+            usage_metadata=usage_metadata,
+        )
+
+        await run_manager.on_llm_end(
+            LLMResult(generations=[[ChatGeneration(message=message)]])
+        )
+
+        return message
+
+    async def _start_llm_run(
+        self, config: RunnableConfig
+    ) -> AsyncCallbackManagerForLLMRun:
+        """Open an LLM run for the handlers in `config`.
+
+        A plain Runnable gets no run manager from LangChain, so nothing downstream (token usage instrumentation,
+        tracing) would otherwise observe this call.
+        """
+        callback_manager = AsyncCallbackManager.configure(
+            inheritable_callbacks=config.get("callbacks"),
+            inheritable_tags=config.get("tags"),
+            inheritable_metadata=config.get("metadata"),
+        )
+
+        run_managers = await callback_manager.on_llm_start(
+            {},
+            [""],  # drop the contents to keep out of traces
+            invocation_params=self._identifying_params,
+            name=self._llm_type,
+        )
+
+        # There is only 1 returned run manager since only 1 prompt is sent
+        return run_managers[0]
 
     @override
     def bind(self, **kwargs: Any) -> "Runnable[Dict[str, Any], AIMessage]":
@@ -215,6 +264,13 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
             }
             for data in response.data
         ]
+
+    def _extract_response_metadata(
+        self, response: Any, requested_model: str
+    ) -> dict[str, Any]:
+        # UsageMetadataCallbackHandler keys usage by `model_name`
+        # and drops the usage entirely when it is missing.
+        return {"model_name": getattr(response, "model", None) or requested_model}
 
     def _extract_usage_metadata(self, response: Any) -> UsageMetadata:
         usage = getattr(response, "usage", None)

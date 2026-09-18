@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
 from ai_gateway.api.v1 import api_router
+from ai_gateway.prompts.base import Prompt
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -209,6 +210,33 @@ class BaseTestCodeEmbeddings:
             "identifier": model_identifier,
         }
         assert response_json["predictions"] == mock_litellm_aembedding_response.data
+
+    def test_usage_metadata_collected_by_usage_callback(
+        self,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+        mock_litellm_aembedding_response: AsyncMock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+
+        with patch.object(Prompt, "handle_usage_metadata") as mock_handle_usage:
+            response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        mock_handle_usage.assert_called_once()
+
+        _watcher, usage_metadata = mock_handle_usage.call_args.args
+        assert usage_metadata == {
+            mock_litellm_aembedding_response.model: {
+                "input_tokens": 12,
+                "output_tokens": 0,
+                "total_tokens": 12,
+                "input_token_details": {"cache_read": 4},
+            }
+        }
 
     @pytest.mark.parametrize(
         ("model_provider", "model_identifier", "model_name", "endpoint"),
