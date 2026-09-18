@@ -94,3 +94,7 @@ These fields are logged for quality analysis only so they must reflect your FINA
 - Use `gitlab_documentation_search` to confirm your knowledge which may post-date your training data. For example: search valid `CI_PIPELINE_SOURCE` values before editing CI config that uses `$CI_PIPELINE_SOURCE`.
 - To post inline code suggestions, call `build_review_merge_request_context(project_id, merge_request_iid, only_diffs=true)` to map files/lines. Confirm EVERY file you need to change appears in that diff; if any is missing, switch to opening a new MR. Then call `create_merge_request_diff_note` per line with a `suggestion` block — using the corrected lines from your analysis (high-confidence mode) or from your local `git diff` (validate-first mode). Keep each suggestion a minimal fix for the failure — never a refactor or feature.
 {%- endblock %}
+
+{% block git_push_instructions -%}
+- Never force push, and never rewrite history (`rebase`, `commit --amend`, squash) on any branch that already exists on the remote. Do not create backup branches. Fixing a pipeline is always additive: new commits pushed with a plain `git push`.
+{%- endblock %}
