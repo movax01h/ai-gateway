@@ -5,6 +5,7 @@ model:
     temperature: 0.95
     max_tokens: 48
 unit_primitive: complete_code
+tool_output_security: false
 prompt_template:
   system: |
     {% include 'code_suggestions/completions/codestral_system/1.0.0.jinja' %}

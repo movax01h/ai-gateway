@@ -145,6 +145,7 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             ),
             prompt_template=prompt_template,
             params=raw_data.get("params"),
+            tool_output_security=raw_data.get("tool_output_security", True),
         )
 
         return self.shared_registry._build_prompt(

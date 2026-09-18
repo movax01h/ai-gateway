@@ -1772,3 +1772,29 @@ class TestStreamStateIsolation:
         assert server_stream.tool_calls == []
         assert [call["name"] for call in client_stream.tool_calls] == ["get_issue"]
         assert client_stream.tool_calls[0]["args"] == {"id": 5}
+
+
+class TestReasoningEffort:
+    def test_merges_reasoning_effort_into_model_kwargs(self):
+        model = ChatLiteLLM(model="gpt-oss", reasoning_effort="low")
+
+        assert model.model_kwargs["reasoning_effort"] == "low"
+        assert model.model_kwargs["allowed_openai_params"] == ["reasoning_effort"]
+
+    def test_no_reasoning_effort_leaves_model_kwargs_untouched(self):
+        model = ChatLiteLLM(model="gpt-oss")
+
+        assert "reasoning_effort" not in model.model_kwargs
+        assert "allowed_openai_params" not in model.model_kwargs
+
+    def test_preserves_existing_allowed_openai_params(self):
+        model = ChatLiteLLM(
+            model="gpt-oss",
+            reasoning_effort="low",
+            model_kwargs={"allowed_openai_params": ["foo"]},
+        )
+
+        assert model.model_kwargs["allowed_openai_params"] == [
+            "foo",
+            "reasoning_effort",
+        ]

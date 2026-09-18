@@ -397,6 +397,11 @@
           ],
           "title": "Operation Type",
           "type": "string"
+        },
+        "tool_output_security": {
+          "default": true,
+          "title": "Tool Output Security",
+          "type": "boolean"
         }
       },
       "required": [
@@ -434,6 +439,26 @@
         "definition"
       ],
       "title": "InlineResponseSchemaConfig",
+      "type": "object"
+    },
+    "LiteLLMProviderParams": {
+      "additionalProperties": false,
+      "description": "LiteLLM-only params, declared once so the models.yml layer (ChatLiteLLMParams) and the prompt layer\n(PromptProviderParams.litellm) cannot drift apart.",
+      "properties": {
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Effort"
+        }
+      },
+      "title": "LiteLLMProviderParams",
       "type": "object"
     },
     "ModelConfig": {
@@ -627,6 +652,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/OpenAIProviderParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "litellm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiteLLMProviderParams"
             },
             {
               "type": "null"

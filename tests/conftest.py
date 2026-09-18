@@ -442,6 +442,11 @@ def prompt_name_fixture():
     return "test_prompt"
 
 
+@pytest.fixture(name="tool_output_security")
+def tool_output_security_fixture(request):
+    return getattr(request, "param", True)
+
+
 @pytest.fixture(name="prompt_config")
 def prompt_config_fixture(
     prompt_name: str,
@@ -449,6 +454,7 @@ def prompt_config_fixture(
     unit_primitive: GitLabUnitPrimitive,
     prompt_template: dict[str, str | list[str]],
     prompt_params: PromptParams,
+    tool_output_security: bool,
 ):
     return PromptConfig(
         name=prompt_name,
@@ -456,6 +462,7 @@ def prompt_config_fixture(
         unit_primitive=unit_primitive,
         prompt_template=prompt_template,
         params=prompt_params,
+        tool_output_security=tool_output_security,
     )
 
 

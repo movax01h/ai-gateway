@@ -4,6 +4,7 @@ model:
   params:
     max_tokens: 16
 unit_primitive: complete_code
+tool_output_security: false
 prompt_template:
   system: |
     {% include 'model_configuration/check/system/1.0.0.jinja' %}

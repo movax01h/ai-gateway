@@ -333,6 +333,18 @@ class TestInMemoryPromptRegistry:
             tools=None,
         )
 
+    def test_tool_output_security_forwarded_to_prompt_config(
+        self, in_memory_registry, mock_shared_registry, sample_prompt_data
+    ):
+        in_memory_registry.register_prompt(
+            "test_prompt", {**sample_prompt_data, "tool_output_security": False}
+        )
+
+        in_memory_registry.get("test_prompt", prompt_version=None)
+
+        config = mock_shared_registry._build_prompt.call_args.kwargs["config"]
+        assert config.tool_output_security is False
+
     @pytest.mark.parametrize(
         "unit_primitives,expected_unit_primitive",
         [

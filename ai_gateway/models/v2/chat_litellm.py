@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from litellm import AnthropicConfig, OpenAIGPT5Config
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models.base import validate_custom_endpoint
@@ -238,6 +238,20 @@ class ChatLiteLLM(_LChatLiteLLM):
     custom_models_enabled: bool = False
     allowed_api_bases: frozenset[str] = frozenset()
     user_id_header: Optional[str] = None
+    reasoning_effort: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _apply_reasoning_effort(self) -> "ChatLiteLLM":
+        if self.reasoning_effort:
+            allowed = self.model_kwargs.get("allowed_openai_params", [])
+            self.model_kwargs = {
+                **self.model_kwargs,
+                "reasoning_effort": self.reasoning_effort,
+                # litellm rejects the param for openai-compatible providers
+                # unless it is explicitly allowed through.
+                "allowed_openai_params": sorted({*allowed, "reasoning_effort"}),
+            }
+        return self
 
     def validate_endpoint_kwargs(self, kwargs: dict[str, Any]) -> None:
         validate_custom_endpoint(
