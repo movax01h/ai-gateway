@@ -1,6 +1,12 @@
 import uvicorn
 from structlog import get_logger
 
+# pylint: disable=unused-import
+# Importing this early patches Jinja2's default filter table to block
+# reversed()-on-dict, a CPython memory-safety bug (python/cpython#154709).
+# This is a critical security measure to prevent remote arbitrary code
+# execution, so it must run before anything constructs a jinja2 Environment.
+import ai_gateway.prompts.base  # noqa: F401
 from ai_gateway.config import get_config
 
 logger = get_logger("run_app")

@@ -19,7 +19,7 @@ from anthropic import (
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic._exceptions import OverloadedError as AnthropicOverloadedError
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
-from jinja2.exceptions import SecurityError
+from jinja2.exceptions import SecurityError, TemplateRuntimeError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
@@ -331,6 +331,24 @@ configurable_unit_primitives:
             ),
             ("{{ json_str|parse_json }}", {"json_str": "x" * 1_000_001}, True),
             ("{{ json_str|parse_json }}", {"json_str": b"abc"}, True),
+            ("{{ items|reverse|list }}", {"items": [1, 2, 3]}, True),
+            ("{{ mapping|reverse|list }}", {"mapping": {"a": 1}}, True),
+            ("{{ items|map('reverse')|list }}", {"items": [{"a": 1}]}, True),
+            ("{{ items|last }}", {"items": [1, 2, 3]}, False),
+            ("{{ mapping|last }}", {"mapping": {"a": 1}}, True),
+            ("{{ text|indent }}", {"text": "a\nb"}, False),
+            ("{{ items|indent }}", {"items": [1, 2, 3]}, True),
+            ("{{ text|wordwrap(5) }}", {"text": "hello world"}, False),
+            ("{{ items|wordwrap(5) }}", {"items": [1, 2, 3]}, True),
+            ("{{ text|safe }}", {"text": "<b>hi</b>"}, False),
+            ("{{ items|safe }}", {"items": [1, 2, 3]}, True),
+            ("{{ text|urlize }}", {"text": "hi"}, True),
+            ("{{ text|escape }}", {"text": "<b>hi</b>"}, True),
+            ("{{ text|e }}", {"text": "<b>hi</b>"}, True),
+            ("{{ text|forceescape }}", {"text": "<b>hi</b>"}, True),
+            ("{{ text|striptags }}", {"text": "<b>hi</b>"}, True),
+            ("{{ mapping|dictsort }}", {"mapping": {"a": 1}}, True),
+            ("{{ mapping|xmlattr }}", {"mapping": {"a": 1}}, True),
         ],
     )
     def test_jinja2_formatter_security_constraints(
@@ -350,6 +368,223 @@ configurable_unit_primitives:
                 jinja2_formatter(template, **kwargs)
         else:
             jinja2_formatter(template, **kwargs)
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "{%- set obj.injected | default(true, true) %}{% endset -%}",
+            "{%- set obj.injected %}payload{% endset -%}",
+            "{%- set _junk, obj.injected %}xy{% endset -%}",
+            "{%- set obj.x, obj.y %}ab{% endset -%}",
+        ],
+    )
+    def test_jinja2_formatter_blocks_assign_block_nsref_on_non_namespace(
+        self, template: str
+    ):
+        """The block-set form must check its target is a Namespace too, like the plain form does."""
+        target: dict[str, Any] = {}
+
+        with pytest.raises(TemplateRuntimeError):
+            jinja2_formatter(template, obj=target)
+
+        assert target == {}
+
+    def test_jinja2_formatter_allows_assign_block_nsref_on_namespace(self):
+        # Sanity check: legitimate namespace() block-set usage still parses.
+        # (namespace() calls are blocked in this sandbox by is_safe_callable,
+        # so we exercise the compiler path directly via a real Namespace.)
+        from jinja2.utils import Namespace
+
+        from ai_gateway.prompts.base import jinja_env
+
+        ns = Namespace(count=0)
+        template = jinja_env.from_string(
+            "{%- set ns.count %}5{% endset -%}{{ ns.count }}"
+        )
+        assert template.render(ns=ns) == "5"
+
+    def test_jinja2_formatter_allows_assign_block_nsref_tuple_on_namespaces(self):
+        # Sanity check: a tuple target where every NSRef is a real namespace still works.
+        from jinja2.utils import Namespace
+
+        from ai_gateway.prompts.base import jinja_env
+
+        ns_a = Namespace()
+        ns_b = Namespace()
+        template = jinja_env.from_string(
+            "{%- set ns_a.x, ns_b.y %}56{% endset -%}{{ ns_a.x }}|{{ ns_b.y }}"
+        )
+        assert template.render(ns_a=ns_a, ns_b=ns_b) == "5|6"
+
+        # Same namespace referenced twice in the tuple -- the check must be
+        # deduped (not re-emitted), not skipped.
+        ns = Namespace()
+        template = jinja_env.from_string(
+            "{%- set ns.a, ns.b %}12{% endset -%}{{ ns.a }}|{{ ns.b }}"
+        )
+        assert template.render(ns=ns) == "1|2"
+
+    def test_jinja2_formatter_allows_nested_assign_block_with_local_namespace(self):
+        """A nested block-set with a locally-scoped namespace must not crash the outer check.
+
+        (Can't use ``namespace()`` directly -- it's blocked by
+        ``is_safe_callable`` -- so the local name comes from aliasing an
+        existing one instead. Either way it's a name the outer frame's
+        symbol table never analysed.)
+        """
+        from jinja2.utils import Namespace
+
+        from ai_gateway.prompts.base import jinja_env
+
+        ns = Namespace()
+        ns_src = Namespace()
+        template = jinja_env.from_string(
+            "{%- set ns.a %}"
+            "{%- set ns2 = ns_src -%}"
+            "{%- set ns2.b %}5{% endset -%}"
+            "{{- ns2.b -}}"
+            "{% endset -%}"
+            "{{ ns.a }}"
+        )
+        assert template.render(ns=ns, ns_src=ns_src) == "5"
+
+    def test_jinja2_formatter_blocks_filter_table_injection_chain(self):
+        """Two-step chain: leak `environment.filters` via `reverse`/`last`, then
+        install a callable into it via the NSRef write bypass. Both steps
+        must be blocked independently.
+        """
+        marker = "injected_filter"
+        assert marker not in jinja_env.filters
+
+        def harmless_stand_in(*_args, **_kwargs):
+            return "INJECTED"
+
+        # Step 1: the leak primitive itself.
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ d | reverse | list }}").render(d={"a": 1})
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ d | last }}").render(d={"a": 1})
+
+        # Step 2: writing into a (here, directly passed-in) leaked dict.
+        template = (
+            "{%- set f = the_filters -%}"
+            "{%- set e = the_callable -%}"
+            f"{{%- set f.{marker} | default(e, true) %}}{{% endset -%}}"
+        )
+        with pytest.raises(TemplateRuntimeError):
+            jinja_env.from_string(template).render(
+                the_filters=jinja_env.filters, the_callable=harmless_stand_in
+            )
+
+        assert marker not in jinja_env.filters
+
+    def test_jinja2_formatter_blocks_tuple_target_nsref_injection_chain(self):
+        """Same chain as the test above, but step 2 uses a tuple target (``{% set junk, f.NAME %}``) instead of a bare
+        NSRef target."""
+        marker = "injected_filter_via_tuple"
+        assert marker not in jinja_env.filters
+
+        def harmless_stand_in(*_args, **_kwargs):
+            return "INJECTED"
+
+        # Tuple target unpacks the filtered result: junk gets payload[0],
+        # f.marker gets payload[1].
+        payload = ["_", harmless_stand_in]
+        template = (
+            "{%- set f = the_filters -%}"
+            "{%- set p = the_payload -%}"
+            f"{{%- set junk, f.{marker} | default(p, true) %}}{{% endset -%}}"
+        )
+        with pytest.raises(TemplateRuntimeError):
+            jinja_env.from_string(template).render(
+                the_filters=jinja_env.filters, the_payload=payload
+            )
+
+        assert marker not in jinja_env.filters
+
+    def test_jinja2_formatter_blocks_indent_live_list_mutation(self):
+        """`do_indent`'s `s += newline` mutates a live list in place before `.splitlines()` raises; must be blocked
+        before that happens."""
+        history = [{"role": "user", "content": "hi"}]
+
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ seed_history|indent }}").render(
+                seed_history=history
+            )
+
+        assert history == [{"role": "user", "content": "hi"}]
+
+    def test_jinja2_formatter_allows_indent_on_string(self):
+        # Sanity check: the legitimate string use still works.
+        result = jinja_env.from_string("{{ text|indent(2) }}").render(text="a\nb")
+        assert result == "a\n  b"
+
+    def test_jinja2_formatter_wordwrap_does_not_invoke_attacker_controlled_join(self):
+        """`do_wordwrap` calls `wrapstring.join(...)` on the raw separator; must be coerced to `str` first, not called
+        on directly."""
+        msg = AIMessage(content="hello")
+
+        def harmless_stand_in(_lines):
+            return "INJECTED"
+
+        msg.model_extra["join"] = harmless_stand_in
+
+        result = jinja_env.from_string(
+            "{{ text | wordwrap(2, true, carrier) }}"
+        ).render(text="hello world", carrier=msg)
+
+        assert "INJECTED" not in result
+
+    def test_jinja2_formatter_blocks_wordwrap_on_non_string_splitlines_hijack(self):
+        """Same shape as the test above, but on `s` (the text) via `.splitlines()`."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["splitlines"] = lambda: "INJECTED"
+
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ obj | wordwrap(5) }}").render(obj=msg)
+
+    def test_jinja2_formatter_blocks_escape_family_html_hijack(self):
+        """`markupsafe.escape()` calls `s.__html__()` if present, invocable via an object's `__getattr__` fallback (e.g.
+        Pydantic's `model_extra`)."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["__html__"] = lambda: "INJECTED"
+
+        for name in ("escape", "e", "forceescape", "striptags"):
+            with pytest.raises(SecurityError):
+                jinja_env.from_string("{{ obj | " + name + " }}").render(obj=msg)
+
+    def test_jinja2_formatter_blocks_safe_html_hijack(self):
+        """`safe` triggers the same `__html__` gadget as the blocked escape family."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["__html__"] = lambda: "INJECTED"
+
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ obj | safe }}").render(obj=msg)
+
+    def test_jinja2_formatter_blocks_urlize_hijack(self):
+        """`urlize` triggers the same `__html__` gadget on its subject, and calls `.split()` directly on its raw `rel`
+        argument."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["__html__"] = lambda: "INJECTED"
+
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ obj | urlize }}").render(obj=msg)
+
+        msg.model_extra["split"] = lambda: ["INJECTED"]
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ url | urlize(rel=obj) }}").render(
+                url="http://x.com", obj=msg
+            )
+
+    def test_jinja2_formatter_blocks_dictsort_and_xmlattr_items_hijack(self):
+        """`dictsort`/`xmlattr` call `.items()` on the raw argument with no `isinstance` check, invocable via
+        `__getattr__` fallback."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["items"] = lambda: [("INJECTED", "1")]
+
+        for name in ("dictsort", "xmlattr"):
+            with pytest.raises(SecurityError):
+                jinja_env.from_string("{{ obj | " + name + " }}").render(obj=msg)
 
     @pytest.mark.parametrize(
         "prompt_template", [{"with_messages_placeholder": True}], indirect=True

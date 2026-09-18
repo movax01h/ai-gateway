@@ -20,9 +20,13 @@ sanity-tests:
     VAULT_ID_TOKEN:
       aud: https://vault.gitlab.net
   secrets:
+    # Pinned to the canonical project's shared path rather than built from
+    # ${VAULT_SECRETS_PATH}/${VAULT_SECRETS_SHARED_PATH}: those are derived from
+    # CI_PROJECT_PATH, so in the security mirror they resolve under
+    # gitlab-com/gitlab-org/security/... and the secret does not exist there.
     CEF_SERVICE_ACCOUNT_PAT:
       file: false
-      vault: ${VAULT_SECRETS_PATH}/${VAULT_SECRETS_SHARED_PATH}/cef-service-account/personal_access_token@ci
+      vault: gitlab-com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/shared/cef-service-account/personal_access_token@ci
       token: $VAULT_ID_TOKEN
   variables:
     CEF_SERVICE_URL: "https://cef.runway.gitlab.net"
