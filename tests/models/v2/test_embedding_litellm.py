@@ -2,7 +2,9 @@ from unittest.mock import AsyncMock
 
 import litellm
 import pytest
+from langchain_core.callbacks.usage import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 from litellm.types.utils import (
     CacheCreationTokenDetails,
     PromptTokensDetailsWrapper,
@@ -523,3 +525,179 @@ class TestEmbeddingLiteLLMUserIdentityHeader:
 
         call_kwargs = mock_litellm_aembedding.call_args[1]
         assert "extra_headers" not in call_kwargs
+
+
+class TestEmbeddingLiteLLMCallbacks:
+    @pytest.fixture(name="embedding_model")
+    def embedding_model_fixture(self):
+        return EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+    @pytest.fixture(name="mock_callback_handler")
+    def mock_callback_handler_fixture(self):
+        # LangChain skips an event when the handler's matching `ignore_` flag is truthy,
+        # and every auto-created AsyncMock attribute is truthy
+        return AsyncMock(ignore_llm=False, ignore_chat_model=False)
+
+    @pytest.mark.asyncio
+    async def test_llm_run(
+        self,
+        embedding_model,
+        mock_callback_handler,
+        mock_litellm_aembedding,
+        mock_litellm_aembedding_response,
+    ):
+        ainvoke_result = await embedding_model.ainvoke(
+            input={"contents": ["test text 1", "test text 2"]},
+            config={"callbacks": [mock_callback_handler]},
+        )
+
+        mock_callback_handler.on_llm_start.assert_called_once()
+        mock_callback_handler.on_chat_model_start.assert_not_called()
+
+        serialized, prompts = mock_callback_handler.on_llm_start.call_args.args
+        call_kwargs = mock_callback_handler.on_llm_start.call_args.kwargs
+        assert serialized == {}
+        assert prompts == [""]
+        assert call_kwargs["invocation_params"] == {"model": "test-embedding-model"}
+        assert call_kwargs["name"] == "litellm-embedding"
+
+        mock_callback_handler.on_llm_end.assert_called_once()
+        mock_callback_handler.on_llm_error.assert_not_called()
+
+        (llm_result,) = mock_callback_handler.on_llm_end.call_args.args
+        assert isinstance(llm_result, LLMResult)
+
+        generation = llm_result.generations[0][0]
+        assert isinstance(generation, ChatGeneration)
+        assert generation.message is ainvoke_result
+        assert generation.message.usage_metadata == {
+            "input_tokens": mock_litellm_aembedding_response.usage.prompt_tokens,
+            "output_tokens": mock_litellm_aembedding_response.usage.completion_tokens,
+            "total_tokens": mock_litellm_aembedding_response.usage.total_tokens,
+            "input_token_details": {"cache_read": 4},
+        }
+
+    @pytest.mark.asyncio
+    async def test_usage_metadata_callback(
+        self,
+        embedding_model,
+        mock_litellm_aembedding,
+        mock_litellm_aembedding_response,
+    ):
+        usage_cb = UsageMetadataCallbackHandler()
+
+        await embedding_model.ainvoke(
+            input={"contents": ["test text 1"]},
+            config={"callbacks": [usage_cb]},
+        )
+
+        assert usage_cb.usage_metadata == {
+            mock_litellm_aembedding_response.model: {
+                "input_tokens": 12,
+                "output_tokens": 0,
+                "total_tokens": 12,
+                "input_token_details": {"cache_read": 4},
+            }
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model_attribute_missing", [False, True])
+    async def test_usage_metadata_callback_without_model_in_response(
+        self,
+        model_attribute_missing,
+        embedding_model,
+        mock_litellm_aembedding,
+        mock_litellm_aembedding_response,
+    ):
+        if model_attribute_missing:
+            del mock_litellm_aembedding_response.model
+        else:
+            mock_litellm_aembedding_response.model = None
+
+        usage_cb = UsageMetadataCallbackHandler()
+
+        await embedding_model.ainvoke(
+            input={"contents": ["test text 1"]},
+            config={"callbacks": [usage_cb]},
+        )
+
+        assert list(usage_cb.usage_metadata) == [embedding_model.model]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("litellm_call_error", "expected_result_error"),
+        [
+            (
+                litellm.BadRequestError(
+                    message="Bad request error from litellm",
+                    model="test-embedding-model",
+                    llm_provider="openai",
+                ),
+                EmbeddingBadRequestError,
+            ),
+            (
+                litellm.RateLimitError(
+                    message="Resource exhausted, please try again later",
+                    model="test-embedding-model",
+                    llm_provider="openai",
+                ),
+                EmbeddingRateLimitError,
+            ),
+            (
+                litellm.AuthenticationError(
+                    message="Authentication error",
+                    model="test-embedding-model",
+                    llm_provider="openai",
+                ),
+                EmbeddingAuthenticationError,
+            ),
+            (
+                litellm.Timeout(
+                    message="Request timed out",
+                    model="test-embedding-model",
+                    llm_provider="openai",
+                ),
+                EmbeddingTimeoutError,
+            ),
+            (RuntimeError("Unexpected failure"), RuntimeError),
+        ],
+    )
+    async def test_error_encountered(
+        self,
+        embedding_model,
+        mock_callback_handler,
+        mock_litellm_aembedding,
+        litellm_call_error,
+        expected_result_error,
+    ):
+        mock_litellm_aembedding.side_effect = litellm_call_error
+
+        with pytest.raises(expected_result_error):
+            await embedding_model.ainvoke(
+                input={"contents": ["test text"]},
+                config={"callbacks": [mock_callback_handler]},
+            )
+
+        mock_callback_handler.on_llm_start.assert_called_once()
+        mock_callback_handler.on_llm_error.assert_called_once()
+        mock_callback_handler.on_llm_end.assert_not_called()
+
+        (reported_error,) = mock_callback_handler.on_llm_error.call_args.args
+        assert reported_error is litellm_call_error
+
+    @pytest.mark.asyncio
+    async def test_reports_response_extraction_error(
+        self, embedding_model, mock_callback_handler, mock_litellm_aembedding
+    ):
+        mock_litellm_aembedding.return_value = AsyncMock(data=[])
+
+        with pytest.raises(ValueError):
+            await embedding_model.ainvoke(
+                input={"contents": ["test text"]},
+                config={"callbacks": [mock_callback_handler]},
+            )
+
+        mock_callback_handler.on_llm_error.assert_called_once()
+        mock_callback_handler.on_llm_end.assert_not_called()

@@ -260,6 +260,7 @@ def mock_litellm_acompletion_fixture():
 @pytest.fixture(name="mock_litellm_aembedding_response")
 def mock_litellm_aembedding_response_fixture():
     return AsyncMock(
+        model="test-embedding-model-from-response",
         data=[
             {"embedding": [0.1, 0.2, 0.3], "index": 0},
             {"embedding": [0.4, 0.5, 0.6], "index": 1},
