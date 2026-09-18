@@ -99,7 +99,10 @@ tests:agents:analytics:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
-        - duo_workflow_service/agent_platform/v1/flows/configs/analytics_agent/**/*
+        # Config and tools define agent behavior (tool names/schemas steer the
+        # model); tests/ stays out — it runs in tests:unit on every MR.
+        - ai/features/insights/analytics_agent/config/**/*
+        - ai/features/insights/analytics_agent/components/**/*
         - agent_tests/analytics_agent/**/*
         - agent_tests/*.py
       when: on_success
@@ -301,5 +304,6 @@ check-duo-workflow-docs:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         - duo_workflow_service/**/*
+        - ai/features/*/*/config/**/*
         - scripts/generate_graph_docs.py
         - docs/duo_workflow_service_graphs.md

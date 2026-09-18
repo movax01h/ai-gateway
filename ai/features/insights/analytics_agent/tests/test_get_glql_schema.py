@@ -5,7 +5,11 @@ import json
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.tools.get_glql_schema import _SCHEMAS, GetGlqlSchema
+from ai.features.insights.analytics_agent.components.get_glql_schema import (
+    _SCHEMAS,
+    GetGlqlSchema,
+    GetGlqlSchemaInput,
+)
 
 
 @pytest.fixture
@@ -88,3 +92,10 @@ def test_analytics_field_structure():
                     assert "name" in parameter
                     assert "values" in parameter or "range" in parameter
                     assert "default" in parameter
+
+
+def test_format_display_message(schema_tool):
+    message = schema_tool.format_display_message(
+        GetGlqlSchemaInput(data_source="Pipeline")
+    )
+    assert message == "Looking up GLQL schema for Pipeline"

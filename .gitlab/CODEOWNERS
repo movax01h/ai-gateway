@@ -17,6 +17,9 @@
 /duo_workflow_service/agent_platform/v1/flows/configs/developer/*-orbit.yml @gitlab-org/orbit
 /lib/context/orbit.py @gitlab-org/orbit
 
+# Insights features under ai/features/ are co-owned by Platform Insights
+/ai/features/insights/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/analytics-section/platform-insights/engineers
+
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/duo-workflow-service
@@ -32,6 +35,9 @@
 # Orbit-specific flow configs
 /duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
 /duo_workflow_service/agent_platform/v1/flows/configs/developer/*-orbit.yml @gitlab-org/orbit
+
+# Insights features under ai/features/
+/ai/features/insights/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/analytics-section/platform-insights/engineers
 
 # Fix Pipeline prompts and response schemas
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
