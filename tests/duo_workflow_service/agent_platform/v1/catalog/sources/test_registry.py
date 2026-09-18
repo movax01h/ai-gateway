@@ -29,7 +29,7 @@ class TestSourceFor:
     @pytest.mark.parametrize(
         "overrides",
         [{"source": "ai-catalog"}, {"item_type": "flow"}],
-        ids=["source_with_no_strategy", "kind_with_no_strategy"],
+        ids=["kind_not_of_that_source", "kind_with_no_strategy"],
     )
     def test_a_pair_with_no_strategy_is_rejected(self, overrides, ref):
         """Rejected here rather than reaching a strategy that would have to disown it."""
@@ -38,7 +38,8 @@ class TestSourceFor:
 
     def test_the_error_names_every_pair_that_would_work(self, ref):
         with pytest.raises(
-            CatalogItemConfigError, match=r"Supported: workspace/agent_template\."
+            CatalogItemConfigError,
+            match=r"Supported: ai-catalog/agent, workspace/agent_template\.",
         ):
             registry.source_for(ref(source="ai-catalog"))
 
@@ -78,7 +79,10 @@ class TestAddingAKind:
         """The message is derived from what is registered, so it cannot drift from it."""
         with pytest.raises(
             CatalogItemConfigError,
-            match=r"Supported: workspace/agent_template, workspace/flow\.",
+            match=(
+                r"Supported: ai-catalog/agent, workspace/agent_template, "
+                r"workspace/flow\."
+            ),
         ):
             registry.source_for(ref(source="ai-catalog"))
 

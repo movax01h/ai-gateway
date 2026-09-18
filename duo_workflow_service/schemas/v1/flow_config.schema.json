@@ -140,9 +140,10 @@
       "type": "string"
     },
     "CatalogItemType": {
-      "description": "What kind of item is included.\n\nThere is no bare ``agent``: what a customer authors in their workspace is an agent *template*, which its source\nbuilds into a component.",
+      "description": "What kind of item is included.\n\nWhat a customer authors in their workspace is an agent *template*, which its source builds into a component. An\nagent published to the AI Catalog is an ``agent``: a finished item, addressed by id and version.",
       "enum": [
         "agent_template",
+        "agent",
         "flow"
       ],
       "title": "CatalogItemType",
