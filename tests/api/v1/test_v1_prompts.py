@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
+from langchain_core.messages.ai import AIMessage, AIMessageChunk
 from pydantic import AnyUrl
 
 from ai_gateway.api.v1 import api_router
@@ -18,6 +19,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
 )
 from ai_gateway.model_selection.models import ChatAmazonQParams, ChatLiteLLMParams
+from tests.conftest import FakeModel
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -298,3 +300,99 @@ class TestMisdirectedRequest:
         )
         assert response.status_code == 421
         assert response.json() == {"detail": "401: Unauthorized"}
+
+
+class TestContentBlockResponse:
+    """Some providers (e.g. `google_genai`) return message content as a list of blocks rather than a plain string."""
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self):
+        return lambda *args, **kwargs: FakeModel(
+            model_engine="fake-engine",
+            model_name="fake-model",
+            responses=[AIMessage(content=[{"type": "text", "text": "Hi John!"}])],
+        )
+
+    def test_flattens_content_blocks_to_text(self, mock_client, mock_registry_get):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == "Hi John!"
+
+
+class TestContentBlockResponseWithNonTextBlocks:
+    """Non-text blocks (e.g. thinking/tool blocks) are skipped when flattening."""
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self):
+        return lambda *args, **kwargs: FakeModel(
+            model_engine="fake-engine",
+            model_name="fake-model",
+            responses=[
+                AIMessage(
+                    content=[
+                        {"type": "thinking", "thinking": "Let me think..."},
+                        {"type": "text", "text": "Hi "},
+                        {"type": "text", "text": "John!"},
+                    ]
+                )
+            ],
+        )
+
+    def test_skips_non_text_blocks(self, mock_client, mock_registry_get):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == "Hi John!"
+
+
+class TestStreamingContentBlockResponse:
+    """Block content is flattened on the streaming path too.
+
+    `StreamingResponse` can only yield `str`/`bytes`, so before flattening a list-valued `chunk.content` raised
+    rather than streaming. `FakeModel` streams by iterating the response string, so the chunks are produced by
+    patching `Prompt.astream` directly.
+    """
+
+    @pytest.fixture(name="mock_astream_content_blocks")
+    def mock_astream_content_blocks_fixture(self):
+        async def _astream(*_args: Any, **_kwargs: Any):
+            yield AIMessageChunk(content=[{"type": "text", "text": "Hi "}])
+            yield AIMessageChunk(
+                content=[{"type": "thinking", "thinking": "Let me think..."}]
+            )
+            yield AIMessageChunk(content=[{"type": "text", "text": "John!"}])
+
+        with patch(
+            "ai_gateway.prompts.base.Prompt.astream", side_effect=_astream
+        ) as mock:
+            yield mock
+
+    @pytest.mark.usefixtures("mock_astream_content_blocks")
+    def test_streams_flattened_text(self, mock_client, mock_registry_get):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}, "stream": True},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+        assert response.text == "Hi John!"
