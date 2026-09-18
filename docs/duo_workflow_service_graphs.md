@@ -188,90 +188,6 @@ graph TD;
     classDef last fill:#bfb6fc
 ```
 
-## Graph: `business_context_security_guidelines 1.0.0 (experimental)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> business_context_security_guidelines_agent;
-    business_context_security_guidelines_agent(business_context_security_guidelines_agent<br>#91;AgentComponent#93;);
-    business_context_security_guidelines_agent --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
-## Graph: `developer 1.0.0 (experimental)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> git_setup;
-    git_setup(git_setup<br>#91;DeterministicStepComponent#93;);
-    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
-    developer_agent(developer_agent<br>#91;AgentComponent#93;);
-    git_setup --> git_unshallow;
-    git_unshallow --> developer_agent;
-    developer_agent --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
-## Graph: `fix_pipeline 1.0.0 (experimental)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> git_setup;
-    git_setup(git_setup<br>#91;DeterministicStepComponent#93;);
-    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
-    fix_pipeline_agent(fix_pipeline_agent<br>#91;AgentComponent#93;);
-    git_setup --> git_unshallow;
-    git_unshallow --> fix_pipeline_agent;
-    fix_pipeline_agent --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
-## Graph: `resolve_dependency_bump 1.0.0 (experimental)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> resolve_dep_bump_pipeline_fix;
-    resolve_dep_bump_pipeline_fix(resolve_dep_bump_pipeline_fix<br>#91;AgentComponent#93;);
-    resolve_dep_bump_pipeline_fix --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
 ## Graph: `agentic_chat 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -329,6 +245,25 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `business_context_security_guidelines 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> business_context_security_guidelines_agent;
+    business_context_security_guidelines_agent(business_context_security_guidelines_agent<br>#91;AgentComponent#93;);
+    business_context_security_guidelines_agent --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `code_review 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -361,7 +296,7 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `code_review 2.0.0-dev (v1)` (Flow Registry)
+## Graph: `code_review 2.0.0 (v1)` (Flow Registry)
 
 ```mermaid
 ---
@@ -397,7 +332,7 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `code_review 2.0.0 (v1)` (Flow Registry)
+## Graph: `code_review 2.0.0-dev (v1)` (Flow Registry)
 
 ```mermaid
 ---
@@ -515,6 +450,29 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `developer 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> git_setup;
+    git_setup(git_setup<br>#91;DeterministicStepComponent#93;);
+    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
+    developer_agent(developer_agent<br>#91;AgentComponent#93;);
+    git_setup --> git_unshallow;
+    git_unshallow --> developer_agent;
+    developer_agent --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `developer 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -531,6 +489,27 @@ graph TD;
     git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
     developer_agent(developer_agent<br>#91;AgentComponent#93;);
     git_setup --> git_unshallow;
+    git_unshallow --> developer_agent;
+    developer_agent --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `developer 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> git_unshallow;
+    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
+    developer_agent(developer_agent<br>#91;AgentComponent#93;);
     git_unshallow --> developer_agent;
     developer_agent --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
@@ -584,27 +563,6 @@ graph TD;
 ```
 
 ## Graph: `developer 2.0.0-orbit (v1)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> git_unshallow;
-    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
-    developer_agent(developer_agent<br>#91;AgentComponent#93;);
-    git_unshallow --> developer_agent;
-    developer_agent --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
-## Graph: `developer 2.0.0 (v1)` (Flow Registry)
 
 ```mermaid
 ---
@@ -699,6 +657,29 @@ graph TD;
     __end__(__end__):::last;
     __start__ --> duo_permissions_assistant;
     duo_permissions_assistant(duo_permissions_assistant<br>#91;AgentComponent#93;);
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `fix_pipeline 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> git_setup;
+    git_setup(git_setup<br>#91;DeterministicStepComponent#93;);
+    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
+    fix_pipeline_agent(fix_pipeline_agent<br>#91;AgentComponent#93;);
+    git_setup --> git_unshallow;
+    git_unshallow --> fix_pipeline_agent;
+    fix_pipeline_agent --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
@@ -1192,6 +1173,25 @@ graph TD;
     __start__ --> suggest_reviewers;
     suggest_reviewers(suggest_reviewers<br>#91;OneOffComponent#93;);
     suggest_reviewers --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `resolve_dependency_bump 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> resolve_dep_bump_pipeline_fix;
+    resolve_dep_bump_pipeline_fix(resolve_dep_bump_pipeline_fix<br>#91;AgentComponent#93;);
+    resolve_dep_bump_pipeline_fix --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
