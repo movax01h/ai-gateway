@@ -24,8 +24,9 @@ appropriate definitions is abstracted via the `create_model_metadata` method, ac
 
 - If `name` is provided, the model definition with the matching `gitlab_identifier` is fetched. This logic is used
 primarily by model metadata requesting a custom model.
-- If `feature_setting` is provided, the `default_model` from the matching entry from `configurable_unit_primitives`
-is fetched. This is the case applicable to users selecting "GitLab default model" in the UI
+- If `feature_setting` is provided, one of the `default_models` from the matching entry from
+`configurable_unit_primitives` is picked (see [Traffic splitting between default models](#traffic-splitting-between-default-models)).
+This is the case applicable to users selecting "GitLab default model" in the UI
 - If `identifier` is provided, the model definition with the matching `gitlab_identifier` is fetched. This is triggered
 when the user has selected a GitLab-provided model other than "GitLab default model" in the UI
 
@@ -62,7 +63,8 @@ configurable_unit_primitives:
   - feature_setting: "code_suggestions"
     unit_primitives:
       - "code_suggestions"
-    default_model: "codestral"
+    default_models:
+      - "codestral"
     selectable_models:
       - "codestral"
 ```
@@ -89,7 +91,8 @@ Assume `code_suggestions/completions` is given as the `prompt_id`, and `1.0.0` a
 If the model metadata from the request is `{"provider": "gitlab", "feature_setting": "code_suggestions"}`, the following
 steps will occur:
 
-- `unit_primitives.yml` will be searched for  `feature_setting: "code_suggestions"`, and its `default_model` retrieved
+- `unit_primitives.yml` will be searched for  `feature_setting: "code_suggestions"`, and one of its `default_models`
+  picked (with a single entry, `codestral` is always selected)
 - `models.yml` will be searched for `gitlab_identifier: codestral`, and its `family` and parameters retrieved
 - Each `value` from `family` will be checked in order for a corresponding prompt definition folder, so first the path
 `ai_gateway/prompts/definitions/code_suggestions/completions/codestral` is checked. Assuming it doesn't exist, next
@@ -258,7 +261,10 @@ Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives
 - `feature_setting`: An identifier used to refer to the feature name
 - `unit_primitives`: the list of unit primitives that belong to this group, as defined in
   the [cloud_connector](https://gitlab.com/gitlab-org/cloud-connector/gitlab-cloud-connector/-/blob/main/src/python/gitlab_cloud_connector/gitlab_features.py#L19)
-- `default_model`: (required) the `gitlab_identifier` of the model used when no tag matches or no tag is specified.
+- `default_models`: (required) the model(s) used when no tag matches or no tag is specified. Each entry is either a
+  plain `gitlab_identifier` string or an object with `identifier` and an optional `weight`. When several models are
+  listed, traffic is distributed across them (see
+  [Traffic splitting between default models](#traffic-splitting-between-default-models)).
 - `models_for_tags`: (optional) a map of tag strings to a `gitlab_identifier` value, or to an object with `models` and `keywords`, enabling per-task model routing (see [Model tag configuration](#model-tag-configuration)). `small` and `large` are conventional tags but any string is valid.
 - `selectable_models`: a list of `gitlab_identifier` for the models that the user can select from
 - `beta_models`: a list of models that are not fully supported but users can select from
@@ -280,7 +286,8 @@ configurable_unit_primitives:
     unit_primitives:
       - "ask_build"
       - "ask_commit"
-    default_model: "claude_sonnet_4_5_20250929"
+    default_models:
+      - "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_20250514"
@@ -290,20 +297,53 @@ configurable_unit_primitives:
         - "claude_haiku_4_5_20251001"
   ```
 
+## Traffic splitting between default models
+
+`default_models` accepts more than one entry, distributing traffic for the feature across the listed models. Each
+entry can carry an optional `weight` controlling what percentage of traffic is routed to it. This is typically used
+to split traffic between vendors for the same model (for example, Anthropic API and Vertex AI variants of the same
+Claude model) or to ramp up a new model gradually.
+
+```yaml
+configurable_unit_primitives:
+  - feature_setting: "duo_chat"
+    unit_primitives:
+      - "duo_chat"
+    default_models:
+      - identifier: "claude_sonnet_4_6_vertex"
+        weight: 70
+      - identifier: "claude_sonnet_4_6"
+        weight: 30
+```
+
+Rules:
+
+- Weights are relative — they are passed directly to `random.choices`, so they don't need to sum to 100. In the
+  example above, `claude_sonnet_4_6_vertex` serves roughly 70% of requests and `claude_sonnet_4_6` the remaining 30%.
+- Weights are all-or-nothing within a feature: if any entry has a `weight`, **every** entry in that feature's
+  `default_models` must have one. A mix of weighted and unweighted entries fails validation at startup.
+- When no entry has a `weight`, traffic is distributed uniformly across all listed models (equivalent to giving every
+  entry the same weight).
+- Plain strings are still accepted and behave the same as an unweighted entry, so `- "claude_sonnet_4_6_vertex"` is
+  equivalent to `- identifier: "claude_sonnet_4_6_vertex"`.
+- The selection is made per request, so the observed split converges to the configured ratio only over a sufficiently
+  large volume of requests.
+
 ## Model tag configuration
 
-Features that route different tasks to different models (for example, a lightweight model for simple subtasks and a powerful model for complex ones) can declare this in `unit_primitives.yml` using `models_for_tags` alongside the required `default_model`.
+Features that route different tasks to different models (for example, a lightweight model for simple subtasks and a powerful model for complex ones) can declare this in `unit_primitives.yml` using `models_for_tags` alongside the required `default_models`.
 
 ### Configuring tags in `unit_primitives.yml`
 
-Use `models_for_tags` to map tag strings to `gitlab_identifier` values. `default_model` is always required and is used when no tag matches or no tag is specified. `small` and `large` are conventional tags that preserve the previous two-bucket semantics, but any string is valid. No changes to `models.yml` are required — model resolution is driven entirely by `models_for_tags` in `unit_primitives.yml`:
+Use `models_for_tags` to map tag strings to `gitlab_identifier` values. `default_models` is always required and is used when no tag matches or no tag is specified. `small` and `large` are conventional tags that preserve the previous two-bucket semantics, but any string is valid. No changes to `models.yml` are required — model resolution is driven entirely by `models_for_tags` in `unit_primitives.yml`:
 
 ```yaml
 configurable_unit_primitives:
   - feature_setting: "duo_agent_platform"
     unit_primitives:
       - "duo_agent_platform"
-    default_model: claude_sonnet_4_6_vertex
+    default_models:
+      - claude_sonnet_4_6_vertex
     models_for_tags:
       small: claude_haiku_4_5_20251001_vertex
       large: claude_sonnet_4_6_vertex
@@ -346,7 +386,7 @@ The `ModelMetadataByTag` class wraps one or more `ModelMetadata` instances and e
 
 ### Expressing tag preference in components
 
-Components in `duo_workflow_service` declare their preferred model via the `model_tags` field on `BaseComponent`. It defaults to `None`, which resolves to the feature's `default_model`.
+Components in `duo_workflow_service` declare their preferred model via the `model_tags` field on `BaseComponent`. It defaults to `None`, which resolves to one of the feature's `default_models`.
 
 In flow YAML configs:
 
