@@ -15,7 +15,7 @@ from graphql import parse as parse_graphql
 from graphql.language.ast import DocumentNode, OperationDefinitionNode, OperationType
 from graphql.language.printer import print_ast
 from langchain_core.tools import ToolException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
@@ -32,13 +32,40 @@ class GitLabApiGetInput(BaseModel):
             "Must start with '/api/v4/'."
         ),
     )
-    params: Optional[Dict[str, Any]] = Field(
-        default=None,
+    params: Dict[str, Any] = Field(
+        default_factory=dict,
         description=(
             "Optional query parameters as a dictionary. "
             "Example: {'state': 'opened', 'per_page': 20, 'page': 1}"
         ),
     )
+
+    @field_validator("params", mode="before")
+    @classmethod
+    def _coerce_params_from_json_string(cls, value: Any) -> Any:
+        """Coerce a JSON-encoded string into a dict before validation.
+
+        Some LLMs (notably Qwen-based models) occasionally double-serialize
+        nested dict parameters in their tool-call output, so the model emits
+        `params` as a JSON-encoded string like `'{"ref":"main"}'` instead of
+        a real object `{"ref": "main"}`. The outer `arguments` JSON is
+        parsed correctly by LangChain, but the inner `params` arrives as a
+        `str`, which would fail Pydantic's `Dict[str, Any]` validation.
+
+        To tolerate this, if the model passes a string we attempt to
+        `json.loads` it. If parsing succeeds and the result is a dict, we
+        substitute it for the string so downstream code can iterate it
+        normally. Non-JSON strings are passed through unchanged so that
+        Pydantic can raise its normal validation error.
+        """
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                return value
+            if isinstance(parsed, dict):
+                return parsed
+        return value
 
 
 class GitLabGraphQLInput(BaseModel):
@@ -51,10 +78,33 @@ class GitLabGraphQLInput(BaseModel):
             "Example: 'query GetProject($projectPath: ID!) { project(fullPath: $projectPath) { name description } }'"
         )
     )
-    variables: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Optional variables for the GraphQL query as a dictionary.",
+    variables: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Optional variables for the GraphQL query as a dictionary. "
+            "Example: {'projectPath': 'namespace/project', 'iid': '42'}"
+        ),
     )
+
+    @field_validator("variables", mode="before")
+    @classmethod
+    def _coerce_variables_from_json_string(cls, value: Any) -> Any:
+        """Coerce a JSON-encoded string into a dict before validation.
+
+        Mirrors the behaviour of ``GitLabApiGetInput._coerce_params_from_json_string``:
+        some LLMs double-serialize nested dict parameters, so ``variables``
+        may arrive as a JSON-encoded string instead of a dict. Parsing the
+        string up front avoids spurious Pydantic validation errors and lets
+        downstream code treat the field as a plain dict.
+        """
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                return value
+            if isinstance(parsed, dict):
+                return parsed
+        return value
 
 
 def validate_api_endpoint(endpoint: str) -> str:
@@ -150,14 +200,14 @@ class GitLabApiGet(DuoBaseTool):
     async def _execute(
         self,
         endpoint: Optional[str] = None,
-        params: Optional[Dict[str, Any]] = None,
+        params: Dict[str, Any] = {},
         **kwargs: Any,
     ) -> str:
         """Execute the generic GitLab API GET request.
 
         Args:
             endpoint: The API endpoint path (must always start with /api/v4/, don't add the full URL)
-            params: Optional query parameters
+            params: Query parameters as a dictionary (defaults to empty dict)
             **kwargs: Additional keyword arguments (ignored)
 
         Returns:
@@ -376,13 +426,13 @@ class GitLabGraphQL(DuoBaseTool):
         return False
 
     async def _execute(
-        self, query: str, variables: Optional[Dict[str, Any]] = None, **kwargs: Any
+        self, query: str, variables: Dict[str, Any] = {}, **kwargs: Any
     ) -> str:
         """Execute a GraphQL query against the GitLab GraphQL API.
 
         Args:
             query: The GraphQL query string
-            variables: Optional variables for the query
+            variables: Variables for the query as a dictionary (defaults to empty dict)
             **kwargs: Additional keyword arguments (ignored)
 
         Returns:

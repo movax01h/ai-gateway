@@ -299,6 +299,67 @@ class TestGitLabApiGet:
         message = gitlab_api_get_tool.format_display_message(args)
         assert "/api/v4/projects/13/merge_requests/42" in message
 
+    def test_params_default_is_empty_dict(self):
+        """Test that GitLabApiGetInput.params defaults to an empty dict (not None).
+
+        The default_factory=dict pattern avoids Pydantic validation issues that
+        arise when LangChain/tool callers receive None for a dict-typed field.
+        """
+        args = GitLabApiGetInput(endpoint="/api/v4/projects/13")
+        assert args.params == {}
+        assert isinstance(args.params, dict)
+
+    def test_params_accepts_dict(self):
+        """Test that GitLabApiGetInput.params accepts an explicit dict."""
+        args = GitLabApiGetInput(
+            endpoint="/api/v4/projects/13/issues",
+            params={"state": "opened", "per_page": 20},
+        )
+        assert args.params == {"state": "opened", "per_page": 20}
+
+    def test_params_rejects_none(self):
+        """Test that GitLabApiGetInput.params no longer accepts None.
+
+        With default_factory=dict, the field is non-optional and rejects None.
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GitLabApiGetInput(
+                endpoint="/api/v4/projects/13/issues", params=None
+            )
+
+    def test_params_coerces_json_string(self):
+        """Test that JSON-encoded string params are coerced to a dict.
+
+        Some LLMs (notably Qwen variants) double-serialize nested dict
+        parameters in tool calls, so params arrives as a JSON-encoded
+        string like '{"ref":"main"}' instead of a real dict. The
+        before-validator parses the string so downstream code can
+        iterate it as a normal dict.
+        """
+        args = GitLabApiGetInput(
+            endpoint="/api/v4/projects/13/repository/files/src%2Flib%2Ffile.py",
+            params='{"ref": "main"}',
+        )
+        assert args.params == {"ref": "main"}
+        assert isinstance(args.params, dict)
+
+    def test_params_invalid_json_string_still_rejected(self):
+        """Test that a non-JSON string falls through to Pydantic's default error.
+
+        The before-validator only coerces strings that successfully parse as
+        JSON. Anything else is passed through unchanged so Pydantic raises
+        its normal dict-type validation error rather than silently dropping
+        the value.
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GitLabApiGetInput(
+                endpoint="/api/v4/projects/13/issues", params="not-a-json-string"
+            )
+
 
 class TestValidateApiEndpoint:
     """Tests for the validate_api_endpoint function."""
@@ -748,3 +809,54 @@ class TestGitLabGraphQL:
         args = GitLabGraphQLInput(query="query { currentUser { username } }")
         message = gitlab_graphql_tool.format_display_message(args)
         assert "GraphQL query" in message
+
+    def test_variables_default_is_empty_dict(self):
+        """Test that GitLabGraphQLInput.variables defaults to an empty dict (not None).
+
+        The default_factory=dict pattern avoids Pydantic validation issues that
+        arise when LangChain/tool callers receive None for a dict-typed field.
+        """
+        args = GitLabGraphQLInput(query="query { currentUser { username } }")
+        assert args.variables == {}
+        assert isinstance(args.variables, dict)
+
+    def test_variables_accepts_dict(self):
+        """Test that GitLabGraphQLInput.variables accepts an explicit dict."""
+        args = GitLabGraphQLInput(
+            query="query GetProject($projectPath: ID!) { project(fullPath: $projectPath) { name } }",
+            variables={"projectPath": "namespace/project"},
+        )
+        assert args.variables == {"projectPath": "namespace/project"}
+
+    def test_variables_rejects_none(self):
+        """Test that GitLabGraphQLInput.variables no longer accepts None.
+
+        With default_factory=dict, the field is non-optional and rejects None.
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GitLabGraphQLInput(query="query { currentUser { username } }", variables=None)
+
+    def test_variables_coerces_json_string(self):
+        """Test that JSON-encoded string variables are coerced to a dict.
+
+        Mirrors GitLabApiGetInput: a model that double-serializes `variables`
+        should not fail validation.
+        """
+        args = GitLabGraphQLInput(
+            query="query GetProject($projectPath: ID!) { project(fullPath: $projectPath) { name } }",
+            variables='{"projectPath": "namespace/project", "iid": "42"}',
+        )
+        assert args.variables == {"projectPath": "namespace/project", "iid": "42"}
+        assert isinstance(args.variables, dict)
+
+    def test_variables_invalid_json_string_still_rejected(self):
+        """Test that a non-JSON string falls through to Pydantic's default error."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GitLabGraphQLInput(
+                query="query { currentUser { username } }",
+                variables="not-a-json-string",
+            )
