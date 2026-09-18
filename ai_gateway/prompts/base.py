@@ -41,8 +41,12 @@ from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 from langchain_core.runnables.config import merge_configs
 from langchain_core.tools import BaseTool
 from langsmith import tracing_context
+from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import ServiceUnavailableError as LiteLLMServiceUnavailableError
+from openai import APIConnectionError as OpenAIAPIConnectionError
+from openai import APIError as OpenAIAPIError
+from openai import InternalServerError as OpenAIInternalServerError
 from tenacity import (
     RetryCallState,
     retry,
@@ -118,6 +122,8 @@ _RETRYABLE_NETWORK_ERRORS = (
     AnthropicAPIConnectionError,
     AnthropicInternalServerError,
     AnthropicOverloadedError,
+    OpenAIAPIConnectionError,
+    OpenAIInternalServerError,
     LiteLLMInternalServerError,
     LiteLLMServiceUnavailableError,
 )
@@ -133,10 +139,50 @@ _RETRYABLE_ANTHROPIC_STATUS_CODES = {500, 529}
 # match on status_code.  Instead we inspect the body's error type string.
 _RETRYABLE_ANTHROPIC_STREAM_ERROR_TYPES = {"api_error", "overloaded_error"}
 
+# OpenAI's equivalent: the stream opens with HTTP 200 and the error arrives as an
+# `error` event, which the SDK raises as the bare APIError with the event payload as
+# `body`. Only server-side failures are worth another attempt -- a content-policy or
+# invalid-request rejection fails identically however many times it is sent.
+# Deliberately limited to the two types observed in production. Rate limiting is left
+# out: we don't retry HTTP 429 either, or honour Retry-After, so retrying would add
+# load to an already-throttled provider.
+_RETRYABLE_OPENAI_STREAM_ERROR_TYPES = {"server_error", "overloaded_error"}
+
+
+def _is_retryable_openai_stream_error(exc: OpenAIAPIError) -> bool:
+    # OpenAI reports stream failures as an `error` event after the HTTP response
+    # has already returned 200, and the SDK raises the bare `APIError` for those
+    # (its streaming decoder is the only place that does). There is no status code
+    # to match on, and every subclass carries one, so an exact type check at the
+    # call site identifies the mid-stream case without swallowing classified errors.
+    #
+    # The class alone says nothing about whether the failure is transient. In one
+    # production day these arrived as a generic server error (109), a content-policy
+    # rejection (33) and an overload notice (2), so classify on the body's error
+    # type the way the Anthropic branch in `_is_retryable` does: a policy rejection
+    # should fail fast rather than burn the full backoff.
+    body = exc.body
+    if isinstance(body, dict) and isinstance(body.get("type"), str):
+        return body["type"] in _RETRYABLE_OPENAI_STREAM_ERROR_TYPES
+    # An unclassified body means the stream broke without saying why, which is the
+    # shape of the generic server error above. Retrying is the better bet, and the
+    # bounded attempt count caps the cost when it isn't.
+    return True
+
 
 def _is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, LiteLLMAPIConnectionError):
+        # litellm.exceptions.APIConnectionError subclasses openai.APIConnectionError
+        # (litellm's whole exception hierarchy mirrors openai's for compatibility),
+        # so without this guard the OpenAIAPIConnectionError entry below would also
+        # match litellm's own connection error, which litellm's client already
+        # retries internally (max_retries=3). Retrying it again here would
+        # multiply attempts (4 outer x 4 inner) instead of adding a bounded retry.
+        return False
     if isinstance(exc, _RETRYABLE_NETWORK_ERRORS):
         return True
+    if type(exc) is OpenAIAPIError:  # pylint: disable=unidiomatic-typecheck
+        return _is_retryable_openai_stream_error(exc)
     if isinstance(exc, AnthropicAPIStatusError):
         if exc.status_code in _RETRYABLE_ANTHROPIC_STATUS_CODES:
             return True

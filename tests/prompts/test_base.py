@@ -26,8 +26,13 @@ from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
+from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import MidStreamFallbackError, Timeout
+from openai import APIConnectionError as OpenAIAPIConnectionError
+from openai import APIError as OpenAIAPIError
+from openai import BadRequestError as OpenAIBadRequestError
+from openai import InternalServerError as OpenAIInternalServerError
 from pydantic import AnyUrl, SecretStr, ValidationError
 from pyfakefs.fake_filesystem import FakeFilesystem
 from structlog.testing import capture_logs
@@ -66,6 +71,7 @@ from ai_gateway.prompts import (
 )
 from ai_gateway.prompts.base import (
     _PARSE_JSON_MAX_INPUT_LENGTH,
+    _RETRYABLE_OPENAI_STREAM_ERROR_TYPES,
     TemplateNotFoundError,
     _attempt_failure_log_fields,
     _is_timeout_error,
@@ -1000,6 +1006,160 @@ configurable_unit_primitives:
         assert call_count == 3
 
     @pytest.mark.asyncio
+    async def test_ainvoke_retries_on_openai_api_connection_error(self, prompt: Prompt):
+        """Test that ainvoke retries on openai.APIConnectionError."""
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise OpenAIAPIConnectionError(request=request)
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body",
+        # Every member of the set gets a case, so a type added to it cannot go
+        # untested. `server_error` is pinned separately below: it is the type behind
+        # the production failures, so removing it from the set has to fail a test
+        # rather than quietly shrink this list.
+        [
+            pytest.param(
+                {"type": error_type, "message": "An error occurred"}, id=error_type
+            )
+            for error_type in sorted(_RETRYABLE_OPENAI_STREAM_ERROR_TYPES)
+        ]
+        + [
+            pytest.param(
+                {"type": "server_error", "message": "An error occurred"},
+                id="server_error_seen_in_production",
+            ),
+            pytest.param(
+                {"message": "An error occurred"}, id="body_without_error_type"
+            ),
+            pytest.param(None, id="no_body"),
+        ],
+    )
+    async def test_ainvoke_retries_on_openai_mid_stream_api_error(
+        self, prompt: Prompt, body
+    ):
+        """Test that ainvoke retries the bare openai.APIError raised for stream errors.
+
+        OpenAI answers with HTTP 200 and then emits an `error` event in the SSE stream.
+        The SDK raises the bare `APIError` for that (openai/_streaming.py), carrying the
+        stream's error payload as `body` and no status code at all -- so it matches
+        neither `_RETRYABLE_NETWORK_ERRORS` nor any status-code check. A body that does
+        not classify itself is retried too, since the generic server error is the shape
+        that arrives that way.
+        """
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+        request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        mid_stream_error = OpenAIAPIError(
+            "An error occurred while processing your request.",
+            request=request,
+            body=body,
+        )
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise mid_stream_error
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param(
+                {
+                    "type": "invalid_request_error",
+                    "message": "This content was flagged",
+                },
+                id="content_policy_rejection",
+            ),
+            pytest.param(
+                {"type": "invalid_prompt", "message": "Bad prompt"},
+                id="invalid_prompt",
+            ),
+        ],
+    )
+    async def test_ainvoke_does_not_retry_non_transient_openai_mid_stream_error(
+        self, prompt: Prompt, body
+    ):
+        """Test that a mid-stream error the provider has classified is not retried.
+
+        The SDK raises the same bare `APIError` for every `error` event in the stream,
+        including rejections that will fail identically on a second attempt, so the
+        body's error type decides. Retrying those would only delay the failure the
+        caller is going to see.
+        """
+        call_count = 0
+        request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        rejection = OpenAIAPIError(
+            "This content was flagged", request=request, body=body
+        )
+
+        async def always_fails(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise rejection
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=always_fails):
+            with mock.patch("asyncio.sleep"):
+                with pytest.raises(OpenAIAPIError):
+                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_does_not_double_retry_litellm_api_connection_error(
+        self, prompt: Prompt
+    ):
+        """litellm.exceptions.APIConnectionError subclasses openai.APIConnectionError, so it must not also be retried by
+        this module's own retry wrapper — litellm's client already retries it internally.
+
+        Double-retrying here would multiply attempts instead of adding a bounded outer retry.
+        """
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        call_count = 0
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise LiteLLMAPIConnectionError(
+                message="connection error",
+                llm_provider="openai",
+                model="gpt-6-astra",
+                request=request,
+            )
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                with pytest.raises(LiteLLMAPIConnectionError):
+                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert call_count == 1
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "error",
         [
@@ -1039,6 +1199,19 @@ configurable_unit_primitives:
                     llm_provider="vertex_ai",
                 ),
                 id="litellm_internal_server_error",
+            ),
+            pytest.param(
+                OpenAIInternalServerError(
+                    "Internal server error",
+                    response=httpx.Response(
+                        500,
+                        request=httpx.Request(
+                            "POST", "https://api.openai.com/v1/chat/completions"
+                        ),
+                    ),
+                    body=None,
+                ),
+                id="openai_internal_server_error",
             ),
         ],
     )
@@ -1163,6 +1336,33 @@ configurable_unit_primitives:
         self, prompt: Prompt, error: Exception
     ):
         """Test that ainvoke does not retry on non-retryable Anthropic errors."""
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=error):
+            with pytest.raises(type(error)):
+                await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                OpenAIBadRequestError(
+                    "Bad request",
+                    response=httpx.Response(
+                        400,
+                        request=httpx.Request(
+                            "POST", "https://api.openai.com/v1/chat/completions"
+                        ),
+                    ),
+                    body=None,
+                ),
+                id="openai_bad_request_error",
+            ),
+        ],
+    )
+    async def test_ainvoke_does_not_retry_on_openai_non_retryable_status(
+        self, prompt: Prompt, error: Exception
+    ):
+        """Test that ainvoke does not retry on non-retryable OpenAI errors."""
         with mock.patch.object(FakeModel, "ainvoke", side_effect=error):
             with pytest.raises(type(error)):
                 await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
