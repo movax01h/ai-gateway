@@ -108,3 +108,73 @@ def test_extract_fenced_code(text: str, expected_value: str):
     actual_value = ops.extract_fenced_code(text)
 
     assert actual_value == expected_value
+
+
+@pytest.mark.parametrize(
+    ("completion", "suffix", "expected_value"),
+    [
+        (
+            '            retry_after = original_error.response.headers.get("retry-after")',
+            '\n\n            retry_after = original_error.response.headers.get("retry-after")\n\n    return retry_after\n',
+            "",
+        ),
+        (
+            "provider = request.app.state.cloud_connector_auth_provider\n    return cloud_connector_ready(provider)",
+            "\n    \n\n    provider = request.app.state.cloud_connector_auth_provider\n    return cloud_connector_ready(provider)\n",
+            "",
+        ),
+        (
+            "provider = request.app.state.cloud_connector_auth_provider\n    return cloud_connector_ready(provider",
+            ")\n    \n\n    provider = request.app.state.cloud_connector_auth_provider\n    return cloud_connector_ready(provider)\n",
+            "",
+        ),
+        (
+            "res = await self.model.generate(\n    prompt.prefix,\n    stream,\n)\nelse:\n    res = other(\n        a, b\n    )\n\nif res",
+            "\n    res = await self.model.generate(\n        prompt.prefix,\n        prompt.suffix,\n        stream,\n    )\nelif x:\n    pass\nelse:\n    res = other(\n        a, b\n    )\n\nif res:\n    return res\n",
+            "",
+        ),
+        (
+            "    return retry_after\n\n\ndef next_function():\n    pass",
+            "\n    return retry_after\n\n\ndef unrelated():\n    pass\n",
+            "    return retry_after\n\n\ndef next_function():\n    pass",
+        ),
+        (
+            "    result = a + b\n    return result",
+            "\nprint(add(1, 2))\n",
+            "    result = a + b\n    return result",
+        ),
+        (")", ")\n    return x\n", ")"),
+        ("}\n}", "}\n}\n}\n", "}\n}"),
+        ("    return x", "\n    return x\n", "    return x"),
+        (
+            "    return None\n    else:",
+            "\n    else:\n        return None\n",
+            "    return None\n    else:",
+        ),
+        (
+            "    return result",
+            "def other():\n    pass\n    return result\n",
+            "    return result",
+        ),
+        (
+            "    result = a + b\n    return result",
+            "",
+            "    result = a + b\n    return result",
+        ),
+        ("", "\n    return x\n", ""),
+        (
+            "repeated_statement = compute_value(16)",
+            "\n".join(f"line_{i} = compute_value({i})" for i in range(1, 16))
+            + "\nrepeated_statement = compute_value(16)\n",
+            "",
+        ),
+        (
+            "repeated_statement = compute_value(17)",
+            "\n".join(f"line_{i} = compute_value({i})" for i in range(1, 17))
+            + "\nrepeated_statement = compute_value(17)\n",
+            "repeated_statement = compute_value(17)",
+        ),
+    ],
+)
+def test_drop_suffix_repeat(completion: str, suffix: str, expected_value: str):
+    assert ops.drop_suffix_repeat(completion, suffix) == expected_value

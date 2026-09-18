@@ -102,6 +102,16 @@ def mock_fix_truncation_fixture():
         yield mock
 
 
+@pytest.fixture(name="mock_drop_suffix_repeat")
+def mock_drop_suffix_repeat_fixture():
+    with patch(
+        "ai_gateway.code_suggestions.processing.post.completions.drop_suffix_repeat"
+    ) as mock:
+        mock.return_value = "processed completion"
+
+        yield mock
+
+
 @pytest.fixture(name="mock_clean_irrelevant_keywords")
 def mock_clean_irrelevant_keywords_fixture():
     with patch(
@@ -125,6 +135,7 @@ class TestPostProcessorCompletions:
         mock_filter_score: Mock,
         mock_fix_truncation: Mock,
         mock_clean_irrelevant_keywords: Mock,
+        mock_drop_suffix_repeat: Mock,
     ):
         code_context = "test code context"
         lang_id = LanguageId.RUBY
@@ -140,6 +151,7 @@ class TestPostProcessorCompletions:
         mock_fix_end_block_errors.assert_called_once()
         mock_fix_end_block_errors_legacy.assert_not_called()
         mock_clean_irrelevant_keywords.assert_called_once()
+        mock_drop_suffix_repeat.assert_called_once()
 
         mock_clean_model_reflection.assert_called_once()
         mock_strip_whitespaces.assert_called_once()
@@ -155,6 +167,7 @@ class TestPostProcessorCompletions:
         mock_clean_model_reflection: Mock,
         mock_strip_whitespaces: Mock,
         mock_clean_irrelevant_keywords: Mock,
+        mock_drop_suffix_repeat: Mock,
     ):
         post_processor = PostProcessorCompletions("ctx", lang_id=None, suffix="s")
         await post_processor.process("test completion")
@@ -164,6 +177,7 @@ class TestPostProcessorCompletions:
         mock_fix_end_block_errors.assert_not_called()
 
         mock_clean_irrelevant_keywords.assert_called_once()
+        mock_drop_suffix_repeat.assert_called_once()
         mock_clean_model_reflection.assert_called_once()
         mock_strip_whitespaces.assert_called_once()
 
@@ -180,6 +194,7 @@ class TestPostProcessorCompletions:
         mock_filter_score: Mock,
         mock_fix_truncation: Mock,
         mock_clean_irrelevant_keywords: Mock,
+        mock_drop_suffix_repeat: Mock,
     ):
         code_context = "test code context"
         lang_id = LanguageId.RUBY
@@ -205,6 +220,7 @@ class TestPostProcessorCompletions:
         mock_remove_comment_only_completion.assert_called_once()
         mock_trim_by_min_allowed_context.assert_called_once()
         mock_clean_irrelevant_keywords.assert_called_once()
+        mock_drop_suffix_repeat.assert_called_once()
 
         mock_fix_end_block_errors.assert_not_called()
         mock_fix_end_block_errors_legacy.assert_called_once()
@@ -229,6 +245,7 @@ class TestPostProcessorCompletions:
         mock_filter_score: Mock,
         mock_fix_truncation: Mock,
         mock_clean_irrelevant_keywords: Mock,
+        mock_drop_suffix_repeat: Mock,
     ):
         code_context = "test code context"
         lang_id = LanguageId.RUBY
@@ -243,6 +260,7 @@ class TestPostProcessorCompletions:
         mock_remove_comment_only_completion.assert_called_once()
         mock_trim_by_min_allowed_context.assert_called_once()
         mock_clean_irrelevant_keywords.assert_called_once()
+        mock_drop_suffix_repeat.assert_called_once()
 
         mock_fix_end_block_errors.assert_called_once()
         mock_fix_end_block_errors_legacy.assert_not_called()

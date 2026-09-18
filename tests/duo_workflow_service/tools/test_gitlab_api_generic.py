@@ -302,8 +302,8 @@ class TestGitLabApiGet:
     def test_params_default_is_empty_dict(self):
         """Test that GitLabApiGetInput.params defaults to an empty dict (not None).
 
-        The default_factory=dict pattern avoids Pydantic validation issues that
-        arise when LangChain/tool callers receive None for a dict-typed field.
+        The default_factory=dict pattern avoids Pydantic validation issues that arise when LangChain/tool callers
+        receive None for a dict-typed field.
         """
         args = GitLabApiGetInput(endpoint="/api/v4/projects/13")
         assert args.params == {}
@@ -325,18 +325,14 @@ class TestGitLabApiGet:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            GitLabApiGetInput(
-                endpoint="/api/v4/projects/13/issues", params=None
-            )
+            GitLabApiGetInput(endpoint="/api/v4/projects/13/issues", params=None)
 
     def test_params_coerces_json_string(self):
         """Test that JSON-encoded string params are coerced to a dict.
 
-        Some LLMs (notably Qwen variants) double-serialize nested dict
-        parameters in tool calls, so params arrives as a JSON-encoded
-        string like '{"ref":"main"}' instead of a real dict. The
-        before-validator parses the string so downstream code can
-        iterate it as a normal dict.
+        Some LLMs (notably Qwen variants) double-serialize nested dict parameters in tool calls, so params arrives as a
+        JSON-encoded string like '{"ref":"main"}' instead of a real dict. The before-validator parses the string so
+        downstream code can iterate it as a normal dict.
         """
         args = GitLabApiGetInput(
             endpoint="/api/v4/projects/13/repository/files/src%2Flib%2Ffile.py",
@@ -348,10 +344,8 @@ class TestGitLabApiGet:
     def test_params_invalid_json_string_still_rejected(self):
         """Test that a non-JSON string falls through to Pydantic's default error.
 
-        The before-validator only coerces strings that successfully parse as
-        JSON. Anything else is passed through unchanged so Pydantic raises
-        its normal dict-type validation error rather than silently dropping
-        the value.
+        The before-validator only coerces strings that successfully parse as JSON. Anything else is passed through
+        unchanged so Pydantic raises its normal dict-type validation error rather than silently dropping the value.
         """
         from pydantic import ValidationError
 
@@ -813,8 +807,8 @@ class TestGitLabGraphQL:
     def test_variables_default_is_empty_dict(self):
         """Test that GitLabGraphQLInput.variables defaults to an empty dict (not None).
 
-        The default_factory=dict pattern avoids Pydantic validation issues that
-        arise when LangChain/tool callers receive None for a dict-typed field.
+        The default_factory=dict pattern avoids Pydantic validation issues that arise when LangChain/tool callers
+        receive None for a dict-typed field.
         """
         args = GitLabGraphQLInput(query="query { currentUser { username } }")
         assert args.variables == {}
@@ -836,7 +830,9 @@ class TestGitLabGraphQL:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            GitLabGraphQLInput(query="query { currentUser { username } }", variables=None)
+            GitLabGraphQLInput(
+                query="query { currentUser { username } }", variables=None
+            )
 
     def test_variables_coerces_json_string(self):
         """Test that JSON-encoded string variables are coerced to a dict.

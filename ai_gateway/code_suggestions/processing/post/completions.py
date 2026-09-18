@@ -11,6 +11,7 @@ from ai_gateway.code_suggestions.processing.post.base import PostProcessorBase
 from ai_gateway.code_suggestions.processing.post.ops import (
     clean_irrelevant_keywords,
     clean_model_reflection,
+    drop_suffix_repeat,
     extract_fenced_code,
     filter_score,
     fix_end_block_errors,
@@ -48,6 +49,7 @@ class PostProcessorOperation(StrEnum):
     FIX_TRUNCATION = "fix_truncation"
     CLEAN_IRRELEVANT_KEYWORDS = "clean_irrelevant_keywords"
     EXTRACT_FENCED_CODE = "extract_fenced_code"
+    DROP_SUFFIX_REPEAT = "drop_suffix_repeat"
 
 
 # This is the ordered list of prost-processing functions
@@ -55,6 +57,7 @@ class PostProcessorOperation(StrEnum):
 ORDERED_POST_PROCESSORS = [
     PostProcessorOperation.REMOVE_COMMENTS,
     PostProcessorOperation.CLEAN_IRRELEVANT_KEYWORDS,
+    PostProcessorOperation.DROP_SUFFIX_REPEAT,
     PostProcessorOperation.TRIM_BY_MINIMUM_CONTEXT,
     PostProcessorOperation.FIX_END_BLOCK_ERRORS,
     PostProcessorOperation.CLEAN_MODEL_REFLECTION,
@@ -138,6 +141,9 @@ class PostProcessor(PostProcessorBase):
             PostProcessorOperation.EXTRACT_FENCED_CODE: extract_fenced_code,
             PostProcessorOperation.STRIP_ASTERISKS: strip_asterisks,
             PostProcessorOperation.CLEAN_IRRELEVANT_KEYWORDS: clean_irrelevant_keywords,
+            PostProcessorOperation.DROP_SUFFIX_REPEAT: partial(
+                drop_suffix_repeat, suffix=self.suffix
+            ),
         }
 
     @override
