@@ -9,6 +9,7 @@ from poetry.core.constraints.version.exceptions import ParseConstraintError
 from pydantic import BaseModel, RootModel, model_validator
 from starlette.responses import StreamingResponse
 
+from ai_gateway.api.content_utils import content_to_text
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.async_dependency_resolver import get_prompt_registry
 from ai_gateway.prompts import BasePromptRegistry, Prompt
@@ -35,7 +36,7 @@ router = APIRouter()
 
 
 def _process_chunk(chunk: BaseMessage):
-    return chunk.content
+    return content_to_text(chunk.content)
 
 
 @router.post(

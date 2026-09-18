@@ -5,6 +5,7 @@ from gitlab_cloud_connector import GitLabFeatureCategory
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
+from ai_gateway.api.content_utils import content_to_text
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v1.prompts.invoke import PromptRequest, _invoke
 from ai_gateway.async_dependency_resolver import get_prompt_registry
@@ -29,7 +30,7 @@ router = APIRouter()
 
 def _process_chunk(chunk: BaseMessage):
     return PromptResponse(
-        content=str(chunk.content),
+        content=content_to_text(chunk.content),
         # `or None` so an initialized-but-empty accumulator ({}) is omitted from the
         # response rather than serialised as an empty object
         usage=token_usage.get() or None,

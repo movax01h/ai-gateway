@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
-from langchain_core.messages.ai import UsageMetadata
+from langchain_core.messages.ai import AIMessage, UsageMetadata
 from pydantic import AnyUrl
 
 from ai_gateway.api.v2 import api_router
@@ -453,3 +453,88 @@ class TestMisdirectedRequest:
         )
         assert response.status_code == 421
         assert response.json() == {"detail": "401: Unauthorized"}
+
+
+class TestContentBlockResponse:
+    """Some providers (e.g. `google_genai`) return message content as a list of blocks rather than a plain string."""
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self):
+        return lambda *args, **kwargs: FakeModel(
+            model_engine="fake-engine",
+            model_name="fake-model",
+            responses=[AIMessage(content=[{"type": "text", "text": "Hi John!"}])],
+        )
+
+    def test_flattens_content_blocks_to_text(self, mock_client, mock_registry_get):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["content"] == "Hi John!"
+
+
+class TestContentBlockResponseWithNonTextBlocks:
+    """Non-text blocks (e.g. thinking/tool blocks) are skipped when flattening."""
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self):
+        return lambda *args, **kwargs: FakeModel(
+            model_engine="fake-engine",
+            model_name="fake-model",
+            responses=[
+                AIMessage(
+                    content=[
+                        {"type": "thinking", "thinking": "Let me think..."},
+                        {"type": "text", "text": "Hi "},
+                        {"type": "text", "text": "John!"},
+                    ]
+                )
+            ],
+        )
+
+    def test_skips_non_text_blocks(self, mock_client, mock_registry_get):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["content"] == "Hi John!"
+
+
+class TestContentBlockResponseWithOnlyNonTextBlocks:
+    """Content with no text blocks flattens to an empty string."""
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self):
+        return lambda *args, **kwargs: FakeModel(
+            model_engine="fake-engine",
+            model_name="fake-model",
+            responses=[
+                AIMessage(content=[{"type": "thinking", "thinking": "Let me think..."}])
+            ],
+        )
+
+    def test_flattens_to_empty_string(self, mock_client, mock_registry_get):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["content"] == ""
