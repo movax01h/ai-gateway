@@ -43,6 +43,7 @@ from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_fields import UpdateFormFields
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.web_search import web_search_boto_session
+from lib.feature_roots import default_features_dir
 from lib.language_server import LanguageServerVersion
 
 log = structlog.stdlib.get_logger("tools_registry")
@@ -246,22 +247,6 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
 }
 
 
-def _features_dir() -> Path:
-    """Return the ``ai/features`` dir (repo root in dev, the WORKDIR in the image).
-
-    Walks up from this file to the nearest ancestor that contains
-    ``pyproject.toml``, so a later move of this module cannot silently point
-    discovery at the wrong directory. Without a marker it falls back to the
-    fixed-depth derivation: absence of moved features must never fail the
-    caller.
-    """
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "pyproject.toml").is_file():
-            return parent / "ai" / "features"
-    return here.parents[2] / "ai" / "features"
-
-
 def discover_feature_tools(
     features_dir: Optional[Path] = None,
 ) -> dict[str, list[Type[BaseTool]]]:
@@ -279,7 +264,7 @@ def discover_feature_tools(
         A mapping of privilege name to the list of tool classes declared
         for it.
     """
-    root = features_dir or _features_dir()
+    root = features_dir or default_features_dir()
     discovered: dict[str, list[Type[BaseTool]]] = {}
     if not root.is_dir():
         return discovered

@@ -18,7 +18,6 @@ from duo_workflow_service.components.tools_registry import (
     NO_OP_TOOLS,
     Toolset,
     ToolsRegistry,
-    _features_dir,
     _merge_feature_tools,
     discover_feature_tools,
 )
@@ -70,6 +69,7 @@ from duo_workflow_service.tools.vulnerabilities.post_secret_fp_analysis_to_gitla
 from duo_workflow_service.tools.wiki import GetWikiPage
 from lib.context import current_model_metadata_context
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
+from lib.feature_roots import default_features_dir
 
 
 @pytest.fixture(name="gl_http_client")
@@ -2186,18 +2186,6 @@ class TestMergeFeatureTools:
 
         assert discover_feature_tools(features_dir=tmp_path) == {}
 
-    def test_features_dir_falls_back_without_marker(self, monkeypatch, tmp_path):
-        # No marker (wheel install, faked filesystem): fall back to the
-        # fixed-depth derivation instead of failing the caller.
-        orphan = tmp_path / "a" / "b" / "c" / "tools_registry.py"
-        orphan.parent.mkdir(parents=True)
-        monkeypatch.setattr(tools_registry, "__file__", str(orphan))
-
-        assert (
-            tools_registry._features_dir()
-            == (tmp_path / "a" / "ai" / "features").resolve()
-        )
-
     def test_missing_tree_is_silent(self, tmp_path):
         assert discover_feature_tools(features_dir=tmp_path / "does-not-exist") == {}
 
@@ -2227,7 +2215,7 @@ class TestMergeFeatureTools:
         components = tmp_path / "insights" / "real_feature" / "components"
         components.mkdir(parents=True)
         (components / "__init__.py").write_text("")
-        monkeypatch.setattr(tools_registry, "_features_dir", lambda: tmp_path)
+        monkeypatch.setattr(tools_registry, "default_features_dir", lambda: tmp_path)
 
         imported = []
 
@@ -2314,7 +2302,7 @@ class TestMergeFeatureTools:
         # No override-vs-default equivalence: the default path imports the real
         # packages, while an override executes throwaway modules whose relative
         # imports are unavailable by design.
-        root = _features_dir()
+        root = default_features_dir()
 
         assert root.parts[-2:] == ("ai", "features")
         assert root.is_dir()
