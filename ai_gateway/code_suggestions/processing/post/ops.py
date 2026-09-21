@@ -15,6 +15,7 @@ from ai_gateway.code_suggestions.prompts.parsers import CodeParser
 
 __all__ = [
     "clean_model_reflection",
+    "drop_suffix_repeat",
     "fix_end_block_errors",
     "fix_end_block_errors_legacy",
     "prepend_new_line",
@@ -30,6 +31,8 @@ _SPECIAL_CHARS = "()[];.,$%&^*@#!{}/"
 _RE_MARKDOWN_CODE_BLOCK_BEGIN = re.compile(r"^`{3}\S*\n", flags=re.MULTILINE)
 _RE_LEADING_ASTERISKS = r"^\s*\*{5,}"
 _IRRELEVANT_KEYWORDS = ["<|cursor|>"]
+_SUFFIX_HEAD_LINES = 16
+_MIN_SUFFIX_REPEAT_CHARS = 16
 
 
 async def clean_model_reflection(context: str, completion: str, **kwargs: Any) -> str:
@@ -382,6 +385,25 @@ def extract_fenced_code(text: str) -> str:
     if match:
         return match.group(1).rstrip("\r\n")
     return text
+
+
+def drop_suffix_repeat(completion: str, suffix: str) -> str:
+    """Return an empty completion when it only repeats the code that follows the cursor."""
+    lines = [line.strip() for line in completion.splitlines() if line.strip()]
+    head = [line.strip() for line in suffix.splitlines() if line.strip()]
+    head = head[:_SUFFIX_HEAD_LINES]
+    if len("".join(lines)) < _MIN_SUFFIX_REPEAT_CHARS:
+        return completion
+
+    cursor = 0
+    for line in lines:
+        position = next(
+            (i for i in range(cursor, len(head)) if head[i].startswith(line)), None
+        )
+        if position is None:
+            return completion
+        cursor = position + 1
+    return ""
 
 
 def prepend_new_line(code_context: str, completion: str) -> str:
