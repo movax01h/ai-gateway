@@ -70,24 +70,6 @@ class TestDiscovery:
         with pytest.raises(ValueError, match="Duplicate prompt feature id"):
             feature_roots.register_prompt_root("dup", tmp_path / "b")
 
-    def test_default_features_dir_anchors_on_pyproject(self):
-        features = feature_roots.default_features_dir()
-
-        assert features.name == "features"
-        assert features.parent.name == "ai"
-        assert (features.parent.parent / "pyproject.toml").is_file()
-
-    def test_default_features_dir_falls_back_without_marker(
-        self, monkeypatch, tmp_path: Path
-    ):
-        # No marker (wheel install, faked filesystem): fall back to the
-        # fixed-depth derivation instead of failing registry construction.
-        orphan = tmp_path / "a" / "b" / "feature_roots.py"
-        orphan.parent.mkdir(parents=True)
-        monkeypatch.setattr(feature_roots, "__file__", str(orphan))
-
-        assert feature_roots.default_features_dir() == tmp_path / "ai" / "features"
-
     def test_feature_without_prompts_dir_is_skipped(self, tmp_path: Path):
         features = tmp_path / "ai" / "features"
         _write_moved_feature(features, "cli", "with_prompts")

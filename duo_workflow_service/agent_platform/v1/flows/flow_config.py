@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.v1.components import (
     BaseComponent,
     ComponentRegistry,
 )
+from lib.feature_roots import default_features_dir
 from lib.version import resolve_version
 
 __all__ = [
@@ -38,22 +39,6 @@ MCP_AUTO_INJECT_ENVIRONMENTS = frozenset(("chat", "chat-partial"))
 # flow_id -> that feature's config/ dir under ai/features/<domain>/<feature>/ (Layout B).
 # Only the V1 FlowConfig uses these; the experimental subclass keeps the empty default.
 _FEATURE_FLOW_ROOTS: dict[str, Path] = {}
-
-
-def _default_features_dir() -> Path:
-    """Return the ``ai/features`` dir (repo root in dev, the WORKDIR in the image).
-
-    Walks up from this file to the nearest ancestor that contains
-    ``pyproject.toml``, so a later move of this module cannot silently point
-    discovery at the wrong directory. Without a marker (a non-editable
-    install, or a faked filesystem in tests) it falls back to the fixed-depth
-    derivation: absence of moved features must never fail the caller.
-    """
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "pyproject.toml").is_file():
-            return parent / "ai" / "features"
-    return here.parents[4] / "ai" / "features"
 
 
 def register_flow_config_root(flow_id: str, config_dir: Path) -> None:
@@ -91,7 +76,7 @@ def discover_feature_flow_configs(features_dir: Optional[Path] = None) -> None:
         ValueError: If two features register the same flow id with different
             config directories (see ``register_flow_config_root``).
     """
-    root = features_dir or _default_features_dir()
+    root = features_dir or default_features_dir()
     logger.info(
         "Discovering feature flow configs", root=str(root), exists=root.is_dir()
     )

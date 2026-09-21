@@ -13,8 +13,9 @@ Registration strips the feature-id prefix, so a self-namespaced include such as
 
 from pathlib import Path
 
+from lib.feature_roots import default_features_dir
+
 __all__ = [
-    "default_features_dir",
     "discover_feature_prompts",
     "feature_prompt_root",
     "register_prompt_root",
@@ -49,22 +50,6 @@ def register_prompt_root(feature_id: str, prompts_dir: Path) -> None:
 def feature_prompt_root(feature_id: str) -> Path | None:
     """Return the registered ``prompts/`` dir for a flat prompt id, or ``None``."""
     return _FEATURE_PROMPT_ROOTS.get(feature_id)
-
-
-def default_features_dir() -> Path:
-    """Return the ``ai/features`` dir (repo root in dev, the WORKDIR in the image).
-
-    Walks up from this file to the nearest ancestor that contains
-    ``pyproject.toml``, so a later move of this module cannot silently point
-    discovery at the wrong directory. Without a marker (a non-editable
-    install, or a faked filesystem in tests) it falls back to the fixed-depth
-    derivation: absence of moved features must never fail construction.
-    """
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "pyproject.toml").is_file():
-            return parent / "ai" / "features"
-    return here.parents[2] / "ai" / "features"
 
 
 def discover_feature_prompts(features_dir: Path | None = None) -> None:

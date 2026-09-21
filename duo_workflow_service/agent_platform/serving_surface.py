@@ -16,6 +16,8 @@ from typing import Literal, Optional, get_args
 
 import structlog
 
+from lib.feature_roots import default_features_dir
+
 logger = structlog.stdlib.get_logger(__name__)
 
 Transport = Literal["grpc", "rest"]
@@ -71,24 +73,6 @@ def _validate_declaration(declared: object, serving_file: Path) -> bool:
     return True
 
 
-def _features_dir() -> Path:
-    """Return the ``ai/features`` dir (repo root in dev, the WORKDIR in the image).
-
-    Walks up from this file to the nearest ancestor that contains
-    ``pyproject.toml``, so a later move of this module cannot silently point
-    discovery at the wrong directory.
-
-    Without a marker (a non-editable install, or a faked filesystem in tests)
-    it falls back to the fixed-depth derivation: absence of moved features
-    must never fail the caller.
-    """
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "pyproject.toml").is_file():
-            return parent / "ai" / "features"
-    return here.parents[2] / "ai" / "features"
-
-
 def collect_serving_surfaces(
     features_dir: Optional[Path] = None,
 ) -> dict[str, list[ServingSurface]]:
@@ -108,7 +92,7 @@ def collect_serving_surfaces(
     Raises:
         ValueError: If two features declare the same feature id.
     """
-    root = features_dir or _features_dir()
+    root = features_dir or default_features_dir()
     surfaces: dict[str, list[ServingSurface]] = {}
     if not root.is_dir():
         return surfaces

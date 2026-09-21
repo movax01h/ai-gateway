@@ -23,17 +23,17 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     MCP_AUTO_INJECT_ENVIRONMENTS,
     FlowConfig,
     FlowConfigMetadata,
-    _default_features_dir,
 )
 from duo_workflow_service.agent_platform.v1.flows.validation import (
     DryRunFlowValidator,
     _make_validation_tools_registry,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from lib.feature_roots import default_features_dir
 
 # Legacy root plus moved features' config/ dirs, so a moved flow keeps validation.
 # Reuse the loader's own root derivation so this sweep cannot silently diverge.
-_FEATURES_DIR = _default_features_dir()
+_FEATURES_DIR = default_features_dir()
 V1_CONFIGS = sorted(FlowConfig.DIRECTORY_PATH.glob("**/*.yml")) + sorted(
     _FEATURES_DIR.glob("*/*/config/*.yml")
 )
