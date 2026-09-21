@@ -91,6 +91,9 @@ gcloud auth application-default login
   unavailable, fall back to `python3 -c 'import json,sys; ...'`.
 - `make` may print `TMPDIR value /tmp/...: No such file or directory`; it
   falls back to `/tmp` and succeeds — this warning is benign.
+- `check-pylint` may print `Unable to create directory /root/.cache/pylint`;
+  pylint cannot persist its cache in a read-only home — the lint result is
+  unaffected.
 
 ### Running Services
 
@@ -410,7 +413,11 @@ docs: update AGENTS.md with architecture details
 MR titles follow the same `<type>(<scope>): <subject>` format, for example
 `fix(auth): resolve JWT signature validation`. MR titles are linted in CI
 (`lint:commit` job runs commitlint against `$CI_MERGE_REQUEST_TITLE`) with the
-same rules as commit messages, including a 100-character header limit.
+same rules as commit messages, including a 100-character header limit. When a
+job log shows commitlint failing on an input you never committed (e.g.
+`input: Draft: fix(...)` with `type-case`/`type-enum` errors), it is linting
+the MR title, not your commits: fix the title (mark the MR ready) and re-run
+the pipeline — no code change helps.
 
 ### Pre-commit Checklist
 
@@ -496,6 +503,13 @@ Pipelines defined in `.gitlab-ci.yml` and `.gitlab/ci/*.gitlab-ci.yml`:
 - **Test**: Unit tests with coverage, integration tests
 - **Build**: Docker images for AI Gateway and Duo Workflow Service
 - **Deploy**: Automatic deployment to staging/production via Runway
+
+Waiting for a pipeline: `glab ci get` is a point-in-time read — prefer
+`glab ci status --wait --branch <branch>` (or poll the API with backoff) over
+tight `sleep && glab ci get` loops. A parent pipeline stays `running` while a
+`strategy: depend` downstream bridge (e.g. `tests:performance`) runs even when
+all its own jobs have finished; check the bridge status before concluding the
+pipeline is stuck.
 
 ## Project-Specific Details
 
