@@ -1,3 +1,4 @@
+import functools
 import json
 from abc import ABC, abstractmethod
 from enum import StrEnum
@@ -23,6 +24,7 @@ from ai_gateway.structured_logging import can_log_request_data, get_request_logg
 config = Config()
 
 __all__ = [
+    "ANTHROPIC_FACILITATOR_KEY_HEADER",
     "KindModelProvider",
     "ModelAPICallError",
     "ModelAPIError",
@@ -248,6 +250,33 @@ async def log_request(request: httpx.Request):
             request_timeout=_request_timeout_extension(request),
             request_content_json={},
         )
+
+
+ANTHROPIC_FACILITATOR_KEY_HEADER = "anthropic-facilitator-key"
+
+
+@functools.cache
+def _warn_facilitator_key_missing() -> None:
+    # Once per process, so a half-configured deployment is visible without a line per request.
+    log.warning(
+        "ANTHROPIC_FACILITATOR_KEY is not configured; Anthropic API requests "
+        "are sent without the facilitator header"
+    )
+
+
+def anthropic_facilitator_headers() -> dict[str, str]:
+    """Return the facilitator header, or an empty dict when no key is configured.
+
+    Apply this only where the destination is guaranteed to be the Anthropic API. Do not add it to
+    Bedrock, Vertex or custom-endpoint requests, and do not bake it into the shared
+    `init_anthropic_client` singleton, since `with_options()` merges rather than replaces headers.
+    """
+    key = config.anthropic_facilitator_key
+    if not key:
+        _warn_facilitator_key_missing()
+        return {}
+
+    return {ANTHROPIC_FACILITATOR_KEY_HEADER: key.get_secret_value()}
 
 
 def init_anthropic_client() -> AsyncAnthropic:

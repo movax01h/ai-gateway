@@ -7,7 +7,7 @@ from unittest import mock
 
 import litellm
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from ai_gateway.config import (
     Config,
@@ -1468,3 +1468,29 @@ class TestConfigDuoChat:
 
         with pytest.raises(ValidationError):
             ConfigDuoChat(model_request_timeout=-1.0)
+
+
+class TestAnthropicFacilitatorKey:
+    """The field is read unprefixed, so the alias has to beat the class's `AIGW_` prefix."""
+
+    def test_reads_unprefixed_env_var(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_FACILITATOR_KEY", "fake-facilitator-key")
+        config = Config(_env_file=None)
+
+        assert isinstance(config.anthropic_facilitator_key, SecretStr)
+        assert (
+            config.anthropic_facilitator_key.get_secret_value()
+            == "fake-facilitator-key"
+        )
+
+    def test_ignores_prefixed_env_var(self, monkeypatch):
+        """The Runway secret is provisioned unprefixed; `AIGW_`-prefixed is not the name."""
+        monkeypatch.delenv("ANTHROPIC_FACILITATOR_KEY", raising=False)
+        monkeypatch.setenv("AIGW_ANTHROPIC_FACILITATOR_KEY", "fake-facilitator-key")
+
+        assert Config(_env_file=None).anthropic_facilitator_key is None
+
+    def test_defaults_to_none(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_FACILITATOR_KEY", raising=False)
+
+        assert Config(_env_file=None).anthropic_facilitator_key is None

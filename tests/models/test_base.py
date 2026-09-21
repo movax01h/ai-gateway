@@ -5,13 +5,17 @@ import httpx
 import pytest
 from anthropic import AsyncAnthropic
 from httpx import AsyncClient, Limits
+from pydantic import SecretStr
 from structlog.testing import capture_logs
 
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models import ModelMetadata
 from ai_gateway.models.base import (
     _TRUSTED_PROVIDERS,
+    ANTHROPIC_FACILITATOR_KEY_HEADER,
     KindModelProvider,
+    _warn_facilitator_key_missing,
+    anthropic_facilitator_headers,
     init_anthropic_client,
     log_request,
     validate_custom_endpoint,
@@ -36,6 +40,56 @@ async def test_init_anthropic_client():
         assert limits_arg.max_connections == 1000
         assert limits_arg.max_keepalive_connections == 100
         assert limits_arg.keepalive_expiry == 30
+
+
+@pytest.mark.parametrize(
+    ("configured_key", "expected"),
+    [
+        (
+            SecretStr("fake-facilitator-key"),
+            {ANTHROPIC_FACILITATOR_KEY_HEADER: "fake-facilitator-key"},
+        ),
+        (None, {}),
+        (SecretStr(""), {}),
+    ],
+)
+def test_anthropic_facilitator_headers(configured_key, expected):
+    """The secret is unwrapped for the header, and an unset or blank key sends nothing."""
+    with patch("ai_gateway.models.base.config") as mock_config:
+        mock_config.anthropic_facilitator_key = configured_key
+
+        assert anthropic_facilitator_headers() == expected
+
+
+def test_init_anthropic_client_does_not_carry_facilitator_header():
+    """`with_options` merges rather than replaces headers, so this must stay off the singleton."""
+    with patch("ai_gateway.models.base.config") as mock_config:
+        mock_config.anthropic_facilitator_key = SecretStr("fake-facilitator-key")
+
+        client = init_anthropic_client()
+
+    assert ANTHROPIC_FACILITATOR_KEY_HEADER not in client.default_headers
+
+    derived = client.with_options(default_headers={"anthropic-version": "2023-06-01"})
+    assert ANTHROPIC_FACILITATOR_KEY_HEADER not in derived.default_headers
+
+
+def test_missing_facilitator_key_warns_once_per_process():
+    """A half-configured deployment is visible in the logs, without a line per request."""
+    _warn_facilitator_key_missing.cache_clear()
+
+    with patch("ai_gateway.models.base.config") as mock_config:
+        mock_config.anthropic_facilitator_key = None
+
+        with capture_logs() as cap_logs:
+            assert anthropic_facilitator_headers() == {}
+            assert anthropic_facilitator_headers() == {}
+
+    _warn_facilitator_key_missing.cache_clear()
+
+    warnings = [entry for entry in cap_logs if entry["log_level"] == "warning"]
+    assert len(warnings) == 1
+    assert "ANTHROPIC_FACILITATOR_KEY" in warnings[0]["event"]
 
 
 # httpx attaches the effective per-request timeout as an extension; this is the

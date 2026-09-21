@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from anthropic import AsyncAnthropic
 from langchain_core.messages import AIMessage, HumanMessage
@@ -97,7 +99,7 @@ class TestChatAnthropic:
         else:
             assert model._async_client.default_headers.get("anthropic-beta") is None
 
-    def test_get_combined_headers_method(self):
+    def test_get_combined_headers_method(self, no_facilitator_key):
         model = ChatAnthropic(
             async_client=AsyncAnthropic(),
             model="claude-3-5-sonnet-20241022",
@@ -113,11 +115,41 @@ class TestChatAnthropic:
         )
 
         headers_with_betas = model_with_betas._get_combined_headers()
+
         expected_headers = {
             "anthropic-version": "2023-06-01",
             "anthropic-beta": "beta1,beta2",
         }
         assert headers_with_betas == expected_headers
+
+    @pytest.mark.parametrize(
+        ("anthropic_api_url", "expect_facilitator_header"),
+        [
+            (None, True),
+            ("https://api.anthropic.com", True),
+            ("https://api.anthropic.com/", True),
+            ("http://caching-proxy.test", False),
+        ],
+    )
+    def test_get_combined_headers_facilitator_key_destination_guard(
+        self, anthropic_api_url, expect_facilitator_header
+    ):
+        with patch(
+            "ai_gateway.models.v2.anthropic_claude.anthropic_facilitator_headers",
+            return_value={"anthropic-facilitator-key": "fake-facilitator-key"},
+        ):
+            model = ChatAnthropic(
+                async_client=AsyncAnthropic(),
+                model="claude-3-5-sonnet-20241022",
+                anthropic_api_url=anthropic_api_url,
+            )
+
+            headers = model._get_combined_headers()
+
+        if expect_facilitator_header:
+            assert headers["anthropic-facilitator-key"] == "fake-facilitator-key"
+        else:
+            assert "anthropic-facilitator-key" not in headers
 
     @pytest.mark.parametrize(
         ("bind_tools_params", "expected_tools"),

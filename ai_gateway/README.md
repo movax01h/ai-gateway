@@ -66,6 +66,9 @@ See [Application settings doc](../docs/application_settings.md)
    ANTHROPIC_API_KEY=<API_KEY>
    ```
 
+   `ANTHROPIC_FACILITATOR_KEY` is optional locally. Leaving it unset logs one
+   warning at startup and sends Anthropic requests without the facilitator header.
+
 1. You can enable hot reload by setting the `AIGW_FASTAPI__RELOAD` environment variable to `true` in the `.env` file.
 1. Ensure you're authenticated with the `gcloud` CLI by running `gcloud auth application-default login`.
 1. Start the model-gateway server locally: `poetry run ai_gateway`.

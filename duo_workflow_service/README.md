@@ -59,7 +59,8 @@ You can also manually set up Duo Workflow by following these steps:
 
 1. Optional: The `ai-enablement-dev-69497ba7` Google Cloud project should be available to all engineers at GitLab. If
    you do not have access to this project, unset `AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT` in `.env` and instead set
-   `ANTHROPIC_API_KEY` to a valid Anthropic API key.
+   `ANTHROPIC_API_KEY` to a valid Anthropic API key. `ANTHROPIC_FACILITATOR_KEY` is optional and only
+   affects requests that reach the Anthropic API.
 
 1. Optional: You can disable auth for local development in the `.env` file. This
    disables authentication or the gRPC connection between the Duo Workflow Service
