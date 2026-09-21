@@ -628,6 +628,16 @@ class Config(BaseSettings):
         ),
     )
     use_agentic_mock: bool = False
+    anthropic_facilitator_key: Optional[SecretStr] = Field(
+        default=None,
+        # Read unprefixed so it matches the Runway/Vault secret name directly. AI Gateway and
+        # Duo Workflow Service each hold their own value under this name.
+        validation_alias="ANTHROPIC_FACILITATOR_KEY",
+        description=(
+            "Sent as the `anthropic-facilitator-key` header on requests to the "
+            "Anthropic API. The header is omitted when this is unset."
+        ),
+    )
     bedrock_guardrail_config: Optional[Json[ConfigBedrockGuardrail]] = Field(
         default=None,
         description=(

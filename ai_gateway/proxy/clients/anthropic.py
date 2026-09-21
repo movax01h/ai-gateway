@@ -6,7 +6,7 @@ import fastapi
 from fastapi import status
 
 from ai_gateway.model_selection import ModelSelectionConfig
-from ai_gateway.models.base import KindModelProvider
+from ai_gateway.models.base import KindModelProvider, anthropic_facilitator_headers
 from ai_gateway.proxy.clients.base import (
     BaseProxyModelFactory,
     ProxyModel,
@@ -91,7 +91,7 @@ def _resolve_api_key(model_name: str) -> str:
 
 
 def _build_headers_to_upstream(api_key: str) -> dict[str, str]:
-    return {"x-api-key": api_key}
+    return {"x-api-key": api_key, **anthropic_facilitator_headers()}
 
 
 class AnthropicProxyModelFactory(BaseProxyModelFactory):
