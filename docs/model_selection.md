@@ -333,6 +333,8 @@ Rules:
 
 Features that route different tasks to different models (for example, a lightweight model for simple subtasks and a powerful model for complex ones) can declare this in `unit_primitives.yml` using `models_for_tags` alongside the required `default_models`.
 
+For how Duo Developer chooses the `small` or `large` tag per request, see the [model routing design document](model_routing/index.md).
+
 ### Configuring tags in `unit_primitives.yml`
 
 Use `models_for_tags` to map tag strings to `gitlab_identifier` values. `default_models` is always required and is used when no tag matches or no tag is specified. `small` and `large` are conventional tags that preserve the previous two-bucket semantics, but any string is valid. No changes to `models.yml` are required — model resolution is driven entirely by `models_for_tags` in `unit_primitives.yml`:
