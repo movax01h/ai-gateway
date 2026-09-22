@@ -32,6 +32,7 @@ def test_floor_applied_when_ui_log_events_absent():
     assert root(normalized)["ui_log_events"] == list(ENGINE_FLOOR_UI_LOG_EVENTS)
     assert ENGINE_FLOOR_UI_LOG_EVENTS == (
         "on_agent_final_answer",
+        "on_agent_reasoning",
         "on_tool_execution_success",
         "on_tool_execution_failed",
     )

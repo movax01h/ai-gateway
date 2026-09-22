@@ -16,10 +16,13 @@ logger = structlog.stdlib.get_logger(__name__)
 
 AGENT_COMPONENT_TYPE = "AgentComponent"
 
-# The user-facing events legacy chat emits on every turn: the final answer and
-# the tool cards. An engine-owned config that declares nothing gets this floor.
+# What legacy chat shows on every turn: the agent's text, including the text of
+# tool-calling turns, and the tool cards. Both LLM output events are here because
+# ``AgentComponent`` streams tokens only when both are declared; a floor without
+# ``ON_AGENT_REASONING`` would deliver the final answer whole.
 ENGINE_FLOOR_UI_LOG_EVENTS: tuple[str, ...] = (
     UILogEventsAgent.ON_AGENT_FINAL_ANSWER.value,
+    UILogEventsAgent.ON_AGENT_REASONING.value,
     UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS.value,
     UILogEventsAgent.ON_TOOL_EXECUTION_FAILED.value,
 )

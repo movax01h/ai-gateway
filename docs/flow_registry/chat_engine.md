@@ -31,6 +31,13 @@ The chat engine is a boundary policy over the shared executor, not a second engi
 | Entry wiring: the builder seeds the ingestion node like the terminals, sets it as the entry point, and hops to the declared entry component | What crosses the line inbound |
 | `get_graph_input`: the RECOVERY input, which rolls forward from the tip | What happens after a bad crossing |
 
+Streaming is the shared mechanism end to end. The client's `startRequest.streaming` flag reaches `ChatFlow` through
+`Flow` and decides whether the notifier forwards model chunks. `AgentComponent` streams tokens only when its
+`ui_log_events` declare both `on_agent_final_answer` and `on_agent_reasoning`, because a chunk cannot be told apart as
+one or the other while it is produced. The defaults in [Configuration](#configuration) declare both, so an engine-owned
+config streams the way legacy chat does. A declared subset that drops either one turns token streaming off for that
+component.
+
 ## Invariants
 
 1. **A turn is one invocation.** Each user message enters through ingestion as graph input, runs to `END`, and the
@@ -159,7 +166,7 @@ guarantees are applied by load-time normalization of engine-owned configs, befor
 
 | Field | When absent | When declared |
 |-------|-------------|---------------|
-| `ui_log_events` | `on_agent_final_answer`, `on_tool_execution_success`, `on_tool_execution_failed` | Declared values win. Legacy `chat.Workflow` ignores this field, so a declared subset restricts output on the engine. Owners see this change at their version swap. |
+| `ui_log_events` | `on_agent_final_answer`, `on_agent_reasoning`, `on_tool_execution_success`, `on_tool_execution_failed` | Declared values win. Legacy `chat.Workflow` ignores this field, so a declared subset restricts output on the engine, and a subset without both LLM output events turns token streaming off (see [Model](#model)). Owners see this change at their version swap. |
 | `require_tool_approval` | `true` | Declared value |
 | `pre_approved_tools` | Not applied | Not applied. Deprecated in [ai-assist#2744](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2744). |
 | `compaction` | Engine defaults | Declared values |
