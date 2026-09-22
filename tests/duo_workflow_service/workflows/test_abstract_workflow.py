@@ -2,10 +2,18 @@
 import asyncio
 import os
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
-from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from gitlab_cloud_connector import (
+    CloudConnectorUser,
+    NoServiceNameError,
+    TokenAuthority,
+    UserClaims,
+)
+from jose import jwt
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 from langgraph.errors import GraphRecursionError
 from structlog.testing import capture_logs
@@ -36,6 +44,7 @@ from duo_workflow_service.tracking import (
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     TraceableException,
+    _nothing_stamped_the_request,
 )
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
@@ -473,6 +482,7 @@ async def test_compile_and_run_graph(
         language_server_version=None,
         denied_tools=[],
         ask_tools=[],
+        allow_client_injected_mcp_tools=False,
     )
 
 
@@ -651,6 +661,49 @@ async def test_compile_and_run_graph_client_cannot_preapprove_denied_tool(
     assert "create_merge_request" not in workflow._preapproved_tools
     assert "run_command" not in workflow._preapproved_tools
     assert "create_merge_request" in workflow._denied_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config_value", "expected"),
+    [(True, True), (False, False), (None, False)],
+)
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_forwards_client_injected_setting(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+    config_value,
+    expected,
+):
+    """Rails owns the decision, so an older Rails that omits the field reads as off."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    if config_value is None:
+        workflow_config.pop("allow_client_injected_mcp_tools", None)
+    else:
+        workflow_config["allow_client_injected_mcp_tools"] = config_value
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_realm="saas", extra={})
+        ),
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert (
+        mock_tools_registry.call_args.kwargs["allow_client_injected_mcp_tools"]
+        is expected
+    )
 
 
 @pytest.mark.asyncio
@@ -2368,3 +2421,100 @@ async def test_compile_and_run_graph_starts_fresh_at_a_pre_run_input_checkpoint(
         graph.captured_config["configurable"]["checkpoint_id"]
         == "requested-checkpoint-id"
     )
+
+
+@pytest.mark.parametrize(
+    ("issuer", "expected"),
+    [
+        # Only GenerateToken mints this issuer, and only direct access calls it.
+        ("gitlab-duo-workflow-service", True),
+        # Rails signs with the instance OIDC issuer; see CloudConnector::Tokens.
+        ("https://gitlab.com", False),
+        ("https://gitlab.example.com", False),
+        ("customers.gitlab.com", False),
+    ],
+)
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_nothing_stamped_the_request_keys_on_the_token_issuer(issuer, expected):
+    user = CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
+    )
+
+    assert _nothing_stamped_the_request(user) is expected
+
+
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_nothing_stamped_the_request_is_false_without_claims():
+    assert (
+        _nothing_stamped_the_request(CloudConnectorUser(authenticated=False)) is False
+    )
+
+
+@patch.dict(os.environ, {}, clear=False)
+def test_nothing_stamped_the_request_is_false_when_no_service_name_is_configured():
+    """Unknown origin must fall back to the field rather than widening the carve-out."""
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(gitlab_realm="saas", issuer="gitlab-duo-workflow-service"),
+    )
+
+    with patch(
+        "duo_workflow_service.workflows.abstract_workflow.CloudConnectorConfig"
+    ) as config:
+        config.return_value = MagicMock()
+        type(config.return_value).service_name = PropertyMock(
+            side_effect=NoServiceNameError("not configured")
+        )
+
+        assert _nothing_stamped_the_request(user) is False
+
+
+def test_self_signed_token_carries_the_service_name_as_issuer():
+    """Pins the assumption the origin check rests on, against the real token library."""
+    with patch.dict(
+        os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"}
+    ):
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        signing_key = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+
+        user = CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_realm="saas", scopes=[])
+        )
+        token, _ = TokenAuthority(signing_key).encode(
+            "sub", "saas", user, "instance-id", []
+        )
+
+        claims = jwt.get_unverified_claims(token)
+
+    assert claims["iss"] == "gitlab-duo-workflow-service"
+
+
+@pytest.mark.parametrize(
+    ("issuer", "expected"),
+    [("gitlab-duo-workflow-service", True), ("https://gitlab.com", False)],
+)
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_client_injected_is_stamped_when_nothing_else_stamped_it(issuer, expected):
+    """A direct caller controls the field, so the service decides instead of reading it."""
+    workflow = MockWorkflow(
+        "id",
+        {},
+        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
+        ),
+        mcp_tools=[
+            contract_pb2.McpTool(
+                name="soqlQuery",
+                description="Client tool",
+                inputSchema="{}",
+                client_injected=False,
+            )
+        ],
+    )
+
+    assert workflow._mcp_tools[0]["client_injected"] is expected

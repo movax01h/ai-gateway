@@ -339,3 +339,23 @@ def test_sanitize_python_identifier(input_name, expected):
 def test_sanitize_python_identifier_invalid(input_name):
     with pytest.raises(ValueError):
         sanitize_python_identifier(input_name)
+
+
+def test_convert_mcp_tools_to_configs_carries_client_injected():
+    """Workhorse owns client_injected, so the config must mirror it verbatim."""
+    mcp_tools = [
+        contract_pb2.McpTool(
+            name="gitlab_get_issue", description="GitLab tool", inputSchema="{}"
+        ),
+        contract_pb2.McpTool(
+            name="salesforce_get_account",
+            description="Client tool",
+            inputSchema="{}",
+            client_injected=True,
+        ),
+    ]
+
+    configs = convert_mcp_tools_to_configs(mcp_tools)
+
+    assert configs[0]["client_injected"] is False
+    assert configs[1]["client_injected"] is True

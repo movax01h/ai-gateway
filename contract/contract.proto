@@ -511,6 +511,8 @@ message McpTool {
     optional ToolAnnotations annotations = 5;
     // trusted indicates whether the tool is considered trusted and may be invoked without user confirmation.
     optional bool trusted = 6;
+    // client_injected marks a tool the client supplied; Workhorse owns the field and overwrites whatever the client sent.
+    optional bool client_injected = 7;
 }
 
 // Icons is a container for a list of Icon images.

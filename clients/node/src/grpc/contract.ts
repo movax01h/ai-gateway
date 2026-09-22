@@ -608,7 +608,11 @@ export interface McpTool {
     | ToolAnnotations
     | undefined;
   /** trusted indicates whether the tool is considered trusted and may be invoked without user confirmation. */
-  trusted?: boolean | undefined;
+  trusted?:
+    | boolean
+    | undefined;
+  /** client_injected marks a tool the client supplied; Workhorse owns the field and overwrites whatever the client sent. */
+  client_injected?: boolean | undefined;
 }
 
 /** Icons is a container for a list of Icon images. */
@@ -4980,7 +4984,15 @@ export const ToolAnnotations: MessageFns<ToolAnnotations> = {
 };
 
 function createBaseMcpTool(): McpTool {
-  return { name: "", description: "", inputSchema: "", icons: undefined, annotations: undefined, trusted: undefined };
+  return {
+    name: "",
+    description: "",
+    inputSchema: "",
+    icons: undefined,
+    annotations: undefined,
+    trusted: undefined,
+    client_injected: undefined,
+  };
 }
 
 export const McpTool: MessageFns<McpTool> = {
@@ -5002,6 +5014,9 @@ export const McpTool: MessageFns<McpTool> = {
     }
     if (message.trusted !== undefined) {
       writer.uint32(48).bool(message.trusted);
+    }
+    if (message.client_injected !== undefined) {
+      writer.uint32(56).bool(message.client_injected);
     }
     return writer;
   },
@@ -5061,6 +5076,14 @@ export const McpTool: MessageFns<McpTool> = {
           message.trusted = reader.bool();
           continue;
         }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.client_injected = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -5078,6 +5101,7 @@ export const McpTool: MessageFns<McpTool> = {
       icons: isSet(object.icons) ? Icons.fromJSON(object.icons) : undefined,
       annotations: isSet(object.annotations) ? ToolAnnotations.fromJSON(object.annotations) : undefined,
       trusted: isSet(object.trusted) ? globalThis.Boolean(object.trusted) : undefined,
+      client_injected: isSet(object.client_injected) ? globalThis.Boolean(object.client_injected) : undefined,
     };
   },
 
@@ -5101,6 +5125,9 @@ export const McpTool: MessageFns<McpTool> = {
     if (message.trusted !== undefined) {
       obj.trusted = message.trusted;
     }
+    if (message.client_injected !== undefined) {
+      obj.client_injected = message.client_injected;
+    }
     return obj;
   },
 
@@ -5117,6 +5144,7 @@ export const McpTool: MessageFns<McpTool> = {
       ? ToolAnnotations.fromPartial(object.annotations)
       : undefined;
     message.trusted = object.trusted ?? undefined;
+    message.client_injected = object.client_injected ?? undefined;
     return message;
   },
 };

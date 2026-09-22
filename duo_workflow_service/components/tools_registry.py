@@ -375,6 +375,76 @@ def _merge_feature_tools(
             privileges[target] = privileges.get(target, []) + list(tool_classes)
 
 
+def _reserved_tool_names(
+    privileges: dict[str, ToolsOrConfigs],
+) -> set[str]:
+    """Names no MCP tool may take, whatever origin it claims."""
+    candidates: list[Union[Type[BaseTool], Type[BaseModel]]] = [
+        *_DEFAULT_TOOLS,
+        *NO_OP_TOOLS,
+        *_CAPABILITY_DEPENDENT_TOOLS,
+    ]
+    for privilege, entries in privileges.items():
+        if privilege == _RUN_MCP_TOOLS_PRIVILEGE:
+            continue
+        candidates.extend(e for e in entries if not isinstance(e, dict))
+
+    reserved = set()
+    for tool_cls in candidates:
+        try:
+            reserved.add(_tool_name(tool_cls))
+        except ValueError:
+            continue
+    return reserved
+
+
+def _drop_shadowing_mcp_tools(
+    mcp_tools: list[McpToolConfig], reserved: set[str], governed_names: set[str]
+) -> list[McpToolConfig]:
+    """Drop MCP tools that would answer for a tool GitLab owns.
+
+    A reserved name is refused whatever the entry claims about its origin, because
+    client_injected is only trustworthy behind Workhorse. Tools from a server GitLab
+    configured are always server-prefixed, so they never hold a reserved name anyway.
+
+    A governed name is refused only for client-injected entries: an admin rule naming a
+    GitLab MCP tool must make it prompt, not remove it.
+
+    On a name collision the non-client-injected entry wins. Workhorse already orders the
+    lists so that it does, but that contract lives in another repo, so enforce it here
+    rather than depend on it.
+    """
+    kept: dict[str, McpToolConfig] = {}
+    for config in mcp_tools:
+        incumbent = kept.get(config["llm_name"])
+        if config["llm_name"] in reserved:
+            refusal_reason = "reserved"
+        elif config["client_injected"] and config["llm_name"] in governed_names:
+            refusal_reason = "governed"
+        elif (
+            incumbent is not None
+            and config["client_injected"]
+            and not incumbent["client_injected"]
+        ):
+            refusal_reason = "collision"
+        else:
+            refusal_reason = None
+
+        if refusal_reason:
+            log.warning(
+                "Dropped MCP tool shadowing a name GitLab owns",
+                extra={
+                    "original_name": config["original_name"],
+                    "llm_name": config["llm_name"],
+                    "client_injected": config["client_injected"],
+                    "refusal_reason": refusal_reason,
+                },
+            )
+            continue
+        kept[config["llm_name"]] = config
+    return list(kept.values())
+
+
 TOOL_CALL_APPROVED_QUERY = """
 query($workflowId: AiDuoWorkflowsWorkflowID!, $toolName: String!, $toolCallArgs: String!) {
     duoWorkflowWorkflows(workflowId: $workflowId) {
@@ -404,6 +474,7 @@ class ToolsRegistry:
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
         ask_tools: Optional[list[str]] = None,
+        allow_client_injected_mcp_tools: bool = False,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -435,6 +506,7 @@ class ToolsRegistry:
             language_server_version=language_server_version,
             denied_tools=denied_tools or [],
             ask_tools=ask_tools or [],
+            allow_client_injected_mcp_tools=allow_client_injected_mcp_tools,
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
         )
@@ -450,14 +522,21 @@ class ToolsRegistry:
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
         ask_tools: Optional[list[str]] = None,
+        allow_client_injected_mcp_tools: bool = False,
     ):
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
 
         # Always enable mcp tools until it's reliably passed by clients as an agent privilege
         enabled_tools.append(_RUN_MCP_TOOLS_PRIVILEGE)
 
+        registered_mcp_tools: list[McpToolConfig] = []
         if _RUN_MCP_TOOLS_PRIVILEGE in enabled_tools:
-            tools_for_agent_privileges[_RUN_MCP_TOOLS_PRIVILEGE] = mcp_tools or []
+            registered_mcp_tools = _drop_shadowing_mcp_tools(
+                mcp_tools or [],
+                _reserved_tool_names(tools_for_agent_privileges),
+                set(ask_tools or []) | set(denied_tools or []),
+            )
+            tools_for_agent_privileges[_RUN_MCP_TOOLS_PRIVILEGE] = registered_mcp_tools
 
         self._enabled_tools = {
             **{tool_cls.tool_title: tool_cls for tool_cls in NO_OP_TOOLS},  # type: ignore
@@ -467,7 +546,7 @@ class ToolsRegistry:
         self._preapproved_tool_names = set(self._enabled_tools.keys())
         self._denied_tools: set[str] = set(denied_tools or [])
         self._ask_tool_names: set[str] = set(ask_tools or [])
-        self._mcp_tool_names = [tool["llm_name"] for tool in mcp_tools or []]
+        self._mcp_tool_names = [tool["llm_name"] for tool in registered_mcp_tools]
 
         self._gl_http_client = gl_http_client
         self._workflow_id = workflow_id
@@ -487,6 +566,7 @@ class ToolsRegistry:
                         metadata=tool_metadata,  # type: ignore[arg-type]
                     )
                     tool._original_mcp_name = tool_cls_or_config["original_name"]
+                    tool._client_injected = tool_cls_or_config["client_injected"]
                 else:
                     tool = tool_cls_or_config(metadata=tool_metadata)  # type: ignore[assignment]
 
@@ -548,8 +628,16 @@ class ToolsRegistry:
             if tool_cls in _PREAPPROVED_CAPABILITY_TOOLS:
                 self._preapproved_tool_names.add(tool_name)
 
-        # Applied last so it outranks every pre-approval source above: an admin `ask`
-        # rule must always reach the user, never be silently auto-approved.
+        if allow_client_injected_mcp_tools:
+            self._preapproved_tool_names.update(
+                name
+                for name, tool in self._enabled_tools.items()
+                if getattr(tool, "_client_injected", False)
+            )
+
+        # Applied last so it outranks every pre-approval source above. Only binds where
+        # a user can be prompted: headless sessions arrive with `ask_tools` already
+        # emptied upstream, so an ask rule cannot force a prompt there.
         self._preapproved_tool_names -= self._ask_tool_names
 
     def ask_listed_tool_names(self, tool_names: Iterable[str]) -> set[str]:
