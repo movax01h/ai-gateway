@@ -8,6 +8,7 @@ from starlette_context import request_cycle_context
 
 from ai_gateway.code_suggestions import handler as handler_module
 from ai_gateway.code_suggestions.handler import code_completion
+from ai_gateway.model_metadata import FireworksModelMetadata, create_model_metadata
 
 
 @pytest.fixture(name="suggestion")
@@ -68,6 +69,13 @@ def snowplow_instrumentator_fixture(mock_ai_gateway_container):
     )
     yield instrumentator
     mock_ai_gateway_container.snowplow.instrumentator.reset_override()
+
+
+@pytest.fixture(name="snowplow_event_context")
+def snowplow_event_context_fixture():
+    context = MagicMock()
+    context.region = "us-central1"
+    return context
 
 
 def assert_snowplow_event(instrumentator, expected_context):
@@ -173,11 +181,10 @@ async def test_code_suggestions_dispatches_completion_without_event(
 
 @pytest.mark.asyncio
 async def test_code_completion_watches_event_after_authorization(
-    payload, engine, prompt_registry, snowplow_instrumentator
+    payload, engine, prompt_registry, snowplow_instrumentator, snowplow_event_context
 ):
     model_metadata = MagicMock()
     model_metadata.provider = "openai"
-    snowplow_event_context = MagicMock()
 
     with (
         patch.object(
@@ -232,7 +239,7 @@ async def test_code_completion_skips_event_when_unauthorized(
 
 @pytest.mark.asyncio
 async def test_code_completion_swallows_snowplow_errors(
-    payload, engine, prompt_registry, snowplow_instrumentator
+    payload, engine, prompt_registry, snowplow_instrumentator, snowplow_event_context
 ):
     model_metadata = MagicMock()
     model_metadata.provider = "openai"
@@ -256,7 +263,7 @@ async def test_code_completion_swallows_snowplow_errors(
             current_user=MagicMock(),
             prompt_registry=prompt_registry,
             stream_handler=AsyncMock(),
-            snowplow_event_context=MagicMock(),
+            snowplow_event_context=snowplow_event_context,
             completions_agent_factory=MagicMock(return_value=engine),
             completions_amazon_q_factory=MagicMock(),
             model_metadata=model_metadata,
@@ -269,10 +276,12 @@ async def test_code_completion_swallows_snowplow_errors(
 
 @pytest.mark.asyncio
 async def test_code_generation_watches_event_after_authorization(
-    generation_payload, agent_factory, prompt_registry, snowplow_instrumentator
+    generation_payload,
+    agent_factory,
+    prompt_registry,
+    snowplow_instrumentator,
+    snowplow_event_context,
 ):
-    snowplow_event_context = MagicMock()
-
     await handler_module.code_generation(
         payload=generation_payload,
         current_user=MagicMock(),
@@ -292,7 +301,7 @@ async def test_code_generation_skips_event_when_unauthorized(
 ):
     prompt_registry.get_on_behalf.side_effect = WrongUnitPrimitives
 
-    with pytest.raises(WrongUnitPrimitives):
+    with pytest.raises(handler_module.HTTPException):
         await handler_module.code_generation(
             payload=generation_payload,
             current_user=MagicMock(),
@@ -311,7 +320,7 @@ async def test_code_generation_skips_event_when_unauthorized(
 )
 @pytest.mark.asyncio
 async def test_code_completion_passes_llm_definition_for_self_hosted(
-    payload, agent_factory, prompt_registry, model_metadata
+    payload, agent_factory, prompt_registry, model_metadata, snowplow_event_context
 ):
     with (
         patch.object(
@@ -330,7 +339,7 @@ async def test_code_completion_passes_llm_definition_for_self_hosted(
             current_user=MagicMock(),
             prompt_registry=prompt_registry,
             stream_handler=AsyncMock(),
-            snowplow_event_context=MagicMock(),
+            snowplow_event_context=snowplow_event_context,
             completions_agent_factory=agent_factory,
             completions_amazon_q_factory=MagicMock(),
             model_metadata=model_metadata,
@@ -343,3 +352,90 @@ async def test_code_completion_passes_llm_definition_for_self_hosted(
         model_metadata=model_metadata,
         model__llm_definition=model_metadata.llm_definition,
     )
+
+
+async def _complete_with_pinned_model(
+    identifier, payload, agent_factory, prompt_registry
+):
+    current_user = MagicMock()
+    current_user.global_user_id = "user-1"
+
+    snowplow_event_context = MagicMock()
+    snowplow_event_context.region = "us-central1"
+
+    config = MagicMock()
+    config.model_keys.return_value = {"fireworks_provider_api_key": "fw-key"}
+    config.fireworks_api_base_url.return_value = "https://api.fireworks.ai/inference/v1"
+    config.mock_model_responses = False
+
+    with (
+        patch.object(
+            handler_module,
+            "create_post_processor_for_model_metadata",
+            return_value=None,
+        ),
+        patch.object(
+            handler_module,
+            "completion_context_max_percent_for_model_metadata",
+            return_value=None,
+        ),
+    ):
+        await code_completion(
+            payload=payload,
+            current_user=current_user,
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=snowplow_event_context,
+            completions_agent_factory=agent_factory,
+            completions_amazon_q_factory=MagicMock(),
+            model_metadata=create_model_metadata(
+                {"provider": "gitlab", "identifier": identifier}
+            ),
+            config=config,
+            using_cache=True,
+        )
+
+    return agent_factory.call_args.kwargs["model_metadata"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_completion_injects_provider_key_for_pinned_fireworks_model(
+    payload, agent_factory, prompt_registry
+):
+    resolved = await _complete_with_pinned_model(
+        "codestral_2508_fireworks", payload, agent_factory, prompt_registry
+    )
+
+    assert isinstance(resolved, FireworksModelMetadata)
+    assert resolved.name == "codestral_2508_fireworks"
+    assert resolved.api_key == "fw-key"
+    assert resolved.session_id == "user-1"
+    assert resolved.using_cache is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_completion_keeps_gitlab_metadata_for_pinned_vertex_model(
+    payload, agent_factory, prompt_registry
+):
+    resolved = await _complete_with_pinned_model(
+        "codestral_2508_vertex", payload, agent_factory, prompt_registry
+    )
+
+    assert resolved.provider == "gitlab"
+    assert resolved.name == "codestral_2508_vertex"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_completion_uses_the_default_model_for_a_non_selectable_pin(
+    payload, agent_factory, prompt_registry
+):
+    resolved = await _complete_with_pinned_model(
+        "claude_opus_5", payload, agent_factory, prompt_registry
+    )
+
+    assert isinstance(resolved, FireworksModelMetadata)
+    assert resolved.name == "codestral_2508_fireworks"
+    assert resolved.api_key == "fw-key"

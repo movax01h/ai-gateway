@@ -371,6 +371,7 @@ def resolve_provider_aware_metadata(
     fireworks_api_base_url: str,
     mock_model_responses: bool = False,
     session_id: Optional[str] = None,
+    using_cache: Optional[bool] = None,
 ) -> TypeModelMetadata:
     """Build metadata for an already-resolved LLM definition, dispatching by its actual provider.
 
@@ -387,6 +388,7 @@ def resolve_provider_aware_metadata(
                 "fireworks_api_base_url": fireworks_api_base_url,
                 "provider_keys": provider_keys,
                 "session_id": session_id,
+                "using_cache": using_cache,
             },
             mock_model_responses,
         )

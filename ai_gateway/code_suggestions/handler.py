@@ -34,9 +34,11 @@ from ai_gateway.model_metadata import (
     build_default_code_completions_metadata,
     completion_context_max_percent_for_model_metadata,
     create_model_metadata,
+    resolve_provider_aware_metadata,
 )
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models import KindModelProvider
-from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
 from ai_gateway.tracking.errors import log_exception
@@ -47,6 +49,7 @@ from lib.feature_flags.context import (
     current_feature_flag_context,
     is_feature_enabled,
 )
+from lib.internal_events import InternalEventsClient
 from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
 
 __all__ = [
@@ -125,6 +128,31 @@ def _watch_code_suggestion_event(
         log_exception(e)
 
 
+def _get_prompt_on_behalf(
+    prompt_registry: BasePromptRegistry, *args: Any, **kwargs: Any
+) -> Prompt:
+    try:
+        return prompt_registry.get_on_behalf(*args, **kwargs)
+    except WrongUnitPrimitives:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized to access code suggestions",
+        )
+
+
+def _selectable_completion_models() -> set[str]:
+    completions = (
+        ModelSelectionConfig.instance().get_resolved_unit_primitive_config_map()[
+            "code_completions"
+        ]
+    )
+    return {
+        *completions.default_model_identifiers,
+        *completions.selectable_models,
+        *completions.beta_models,
+    }
+
+
 async def code_suggestions(
     request: Request,
     payload: Any,
@@ -164,10 +192,7 @@ async def code_suggestions(
     )
 
     if component.type == CodeEditorComponents.COMPLETION:
-        if not current_user.can(
-            GitLabUnitPrimitive.COMPLETE_CODE,
-            disallowed_issuers=[CloudConnectorConfig().service_name],
-        ):
+        if not current_user.can(GitLabUnitPrimitive.COMPLETE_CODE):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Unauthorized to access code suggestions",
@@ -210,6 +235,9 @@ async def code_completion(
     completions_amazon_q_factory: Factory[CodeCompletions] = Provide[
         ContainerApplication.code_suggestions.completions.amazon_q_factory.provider
     ],
+    internal_event_client: InternalEventsClient = Provide[
+        ContainerApplication.internal_event.client
+    ],
     code_context: Optional[List[Any]] = None,
     model_metadata: TypeModelMetadata = None,
     config: Config = None,
@@ -229,11 +257,26 @@ async def code_completion(
                 detail="Unauthorized to access code suggestions",
             )
 
+        internal_event_client.track_event(
+            f"request_{GitLabUnitPrimitive.AMAZON_Q_INTEGRATION}_complete_code",
+            category=__name__,
+        )
         engine = completions_amazon_q_factory(
             model__current_user=current_user,
             model__role_arn=payload.role_arn or model_metadata.role_arn,
         )
     else:
+        if (
+            model_metadata is not None
+            and model_metadata.provider == "gitlab"
+            and model_metadata.name not in _selectable_completion_models()
+        ):
+            request_log.warning(
+                "Ignoring model_metadata that is not selectable for code completions",
+                model_name=model_metadata.name,
+            )
+            model_metadata = None
+
         if model_metadata is None:
             if config is None:
                 raise ValueError(
@@ -246,19 +289,23 @@ async def code_completion(
                 using_cache=using_cache,
                 mock_model_responses=config.mock_model_responses,
             )
+        elif model_metadata.provider == "gitlab":
+            model_metadata = resolve_provider_aware_metadata(
+                model_metadata.llm_definition,
+                provider_keys=config.model_keys(),
+                fireworks_api_base_url=config.fireworks_api_base_url(),
+                mock_model_responses=config.mock_model_responses,
+                session_id=current_user.global_user_id,
+                using_cache=using_cache,
+            )
 
-        try:
-            prompt = prompt_registry.get_on_behalf(
-                current_user,
-                "code_suggestions/completions",
-                model_metadata=model_metadata,
-                internal_event_category=__name__,
-            )
-        except WrongUnitPrimitives:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Unauthorized to access code suggestions",
-            )
+        prompt = _get_prompt_on_behalf(
+            prompt_registry,
+            current_user,
+            "code_suggestions/completions",
+            model_metadata=model_metadata,
+            internal_event_category=__name__,
+        )
 
         post_processor = create_post_processor_for_model_metadata(
             model_metadata,
@@ -316,6 +363,7 @@ async def code_completion(
             timestamp=int(time()),
             model=model_meta,
             enabled_feature_flags=current_feature_flag_context.get(),
+            region=snowplow_event_context.region,
         ),
     )
 
@@ -354,6 +402,9 @@ async def code_generation(
     generations_amazon_q_factory: Factory[CodeGenerations] = Provide[
         ContainerApplication.code_suggestions.generations.amazon_q_factory.provider
     ],
+    internal_event_client: InternalEventsClient = Provide[
+        ContainerApplication.internal_event.client
+    ],
     # pylint: disable=unused-argument
     code_context: Optional[List[Any]] = None,
     model_metadata: Optional[TypeModelMetadata] = None,
@@ -372,6 +423,10 @@ async def code_generation(
                 detail="Unauthorized to access code suggestions",
             )
 
+        internal_event_client.track_event(
+            f"request_{GitLabUnitPrimitive.AMAZON_Q_INTEGRATION}_generate_code",
+            category=__name__,
+        )
         engine = generations_amazon_q_factory(
             model__current_user=current_user,
             model__role_arn=payload.role_arn or model_metadata.role_arn,
@@ -383,7 +438,8 @@ async def code_generation(
         # in case prompt_id is present, model_provider is not directly passed in from request
         model_provider = SAAS_PROMPT_MODEL_MAP[prompt_version]["model_provider"]
 
-        prompt = prompt_registry.get_on_behalf(
+        prompt = _get_prompt_on_behalf(
+            prompt_registry,
             user=current_user,
             prompt_id=payload.prompt_id,
             prompt_version=payload.prompt_version,
@@ -419,7 +475,8 @@ async def code_generation(
                     ),
                 )
 
-        prompt = prompt_registry.get_on_behalf(
+        prompt = _get_prompt_on_behalf(
+            prompt_registry,
             user=current_user,
             prompt_id="code_suggestions/generations",
             model_metadata=model_metadata,
@@ -469,6 +526,7 @@ async def code_generation(
             timestamp=int(time()),
             model=model_meta,
             enabled_feature_flags=current_feature_flag_context.get(),
+            region=snowplow_event_context.region,
         ),
     )
 
