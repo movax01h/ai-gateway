@@ -787,11 +787,7 @@ class Workflow(AbstractWorkflow):
         # foundational-flow settings, so start_flow stays available however
         # those are narrowed. The tool's own schema drops the members that are
         # not enabled.
-        flow_tools = (
-            CHAT_FLOW_TOOLS
-            if is_feature_enabled(FeatureFlag.AGENTIC_FOUNDATIONAL_FLOW_TOOL)
-            else []
-        )
+        flow_tools = CHAT_FLOW_TOOLS
 
         utility_tools = (
             CHAT_UTILITY_TOOLS

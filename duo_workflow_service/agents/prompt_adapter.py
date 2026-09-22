@@ -166,9 +166,6 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             "clarification_question_tool_enabled": is_feature_enabled(
                 FeatureFlag.DUO_CHAT_CLARIFICATION_QUESTION_TOOL
             ),
-            "foundational_flow_tool_enabled": is_feature_enabled(
-                FeatureFlag.AGENTIC_FOUNDATIONAL_FLOW_TOOL
-            ),
         }
 
     def _build_dynamic_template_context(

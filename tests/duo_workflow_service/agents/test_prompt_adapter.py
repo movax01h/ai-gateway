@@ -1255,10 +1255,6 @@ class TestFeatureFlagPropagationToStaticTemplateContext:
                 "clarification_question_tool_enabled",
                 "duo_chat_clarification_question_tool",
             ),
-            (
-                "foundational_flow_tool_enabled",
-                "agentic_foundational_flow_tool",
-            ),
         ],
     )
     @pytest.mark.parametrize(

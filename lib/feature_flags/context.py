@@ -36,7 +36,6 @@ class FeatureFlag(StrEnum):
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/dap_workspace_agents.yml
     DAP_WORKSPACE_AGENTS = "dap_workspace_agents"
     DEPENDENCY_BUMP_WEB_SEARCH = "dependency_bump_web_search"
-    AGENTIC_FOUNDATIONAL_FLOW_TOOL = "agentic_foundational_flow_tool"
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
     DUO_CHAT_GENERATIVE_UI = "duo_chat_generative_ui"
     DUO_DEVELOPER_MODEL_ROUTING = "duo_developer_model_routing"
