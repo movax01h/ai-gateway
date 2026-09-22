@@ -490,7 +490,8 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
         Args:
             reason: Why the events were dropped before delivery. Expected values:
                 ``"http_error"`` (non-retryable HTTP status), ``"retries_exhausted"``,
-                ``"version_unsupported"``.
+                ``"version_unsupported"``, ``"event_too_large"`` (a single event
+                exceeds the size cap), ``"cancelled"`` (final flush was cancelled).
             amount: Number of individual events dropped.
         """
         self.audit_events_dropped_counter.labels(reason=reason).inc(amount)
