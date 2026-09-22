@@ -86,7 +86,7 @@ Stable branches will not be receiving updates from main branch. If a bug at a ve
 
 #### How to backport a fix
 
-> **Security fixes:** If you are backporting a **security fix**, do **not** open
+> **Security fixes:** If you are backporting a **security fix**, do not open
 > backport MRs in the canonical repository. All backport MRs must be opened and
 > merged in the [security fork](https://gitlab.com/gitlab-org/security/modelops/applied-ml/code-suggestions/ai-assist)
 > first, targeting the stable branches there. Once all backports for the

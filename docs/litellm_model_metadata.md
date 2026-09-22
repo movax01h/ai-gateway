@@ -7,7 +7,7 @@ support `tool_choice`, function calling, vision, etc.). It consults that
 registry to decide which parameters can be forwarded to the upstream
 provider.
 
-When a customer uses a self-hosted or third-party model that is **not** in
+When a customer uses a self-hosted or third-party model that is not in
 LiteLLM's built-in registry (for example, a custom Fireworks AI deployment),
 LiteLLM may strip or reject parameters such as `tool_choice`, causing
 requests to fail even though the underlying provider supports them.

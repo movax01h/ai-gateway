@@ -110,7 +110,8 @@ export REQUESTS_CA_BUNDLE=/path/to/your/cacert.pem
 
 ### Ensure `CLOUD_CONNECTOR_SERVICE_NAME` is set
 
-**NOTE:** Only necessary if you don't use the Docker container.
+> [!note]
+> Only necessary if you don't use the Docker container.
 
 When validating tokens, we verify that the token `aud` claim (audience) matches the system name the token is sent to.
 

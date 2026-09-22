@@ -119,9 +119,9 @@ When the GitLab monolith changes an envelope's fields:
 
 ### Backwards compatibility guarantees
 
-- Envelopes **without** a `version` field are treated as `"1.0.0"` by DWS. This covers all GitLab instances that
+- Envelopes without a `version` field are treated as `"1.0.0"` by DWS. This covers all GitLab instances that
   predate the versioning scheme.
-- Flows **without** a `version_constraint` use an implicit `^1.0.0` constraint, accepting any `1.x.x` envelope.
+- Flows without a `version_constraint` use an implicit `^1.0.0` constraint, accepting any `1.x.x` envelope.
 - A `^1.x.x` constraint accepts any `1.x.x` envelope and ignores `2.x.x` (breaking) envelopes.
 
 ### Error handling

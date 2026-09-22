@@ -9,7 +9,7 @@ For dashboards and alerts, see the [Duo Workflow Service runbook](https://runboo
 
 `setup_monitoring` in [`duo_workflow_service/monitoring.py`](../duo_workflow_service/monitoring.py) starts a separate
 HTTP server that serves metrics; `run` calls it during startup.
-The server only starts when **both** of these environment variables are set:
+The server only starts when both of these environment variables are set:
 
 | Variable | Example | Description |
 |---|---|---|

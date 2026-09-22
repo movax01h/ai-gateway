@@ -62,7 +62,8 @@ The generated activity digest provides a comprehensive overview structured as fo
 
 ## How to Use
 
-**Note:** This workflow is intended for remote execution and will automatically create a summary issue in your project.
+> [!note]
+> This workflow is intended for remote execution and will automatically create a summary issue in your project.
 
 ### Configuration
 
