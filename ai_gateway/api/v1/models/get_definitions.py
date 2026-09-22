@@ -37,6 +37,7 @@ class _GetModelResponseModel(BaseModel):
     deprecation: DeprecationInfo | None = None
     description: str | None = None
     cost_indicator: str | None = None
+    requires_paid_credits: bool = False
 
 
 class _GetModelResponseUnitPrimitive(BaseModel):
@@ -100,6 +101,11 @@ async def get_models():
                 cost_indicator=(
                     first_definition.cost_indicator if first_definition else None
                 ),
+                requires_paid_credits=(
+                    first_definition.requires_paid_credits
+                    if first_definition
+                    else False
+                ),
             )
             values["default_model"] = pseudo_identifier
             # Surface the pseudo-model in the dropdown as the prominent default row;
@@ -133,6 +139,7 @@ async def get_models():
             deprecation=definition.deprecation,
             description=definition.description,
             cost_indicator=definition.cost_indicator,
+            requires_paid_credits=definition.requires_paid_credits,
         )
         for definition in llm_definitions.values()
     ]

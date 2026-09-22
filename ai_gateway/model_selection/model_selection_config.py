@@ -111,6 +111,9 @@ class BaseLLMDefinition(BaseModel):
     # When true, the ReAct parser strips that block before it reaches the user.
     strip_reasoning: bool = False
     requires_single_system_message: bool = False
+    # Some models are available only to accounts that have purchased GitLab credits.
+    # When true, clients show a "Requires paid credits" indicator and block chat input.
+    requires_paid_credits: bool = False
     # Some models return an empty 404 on streaming requests when max_tokens is at the
     # model's max. Opt in to use this model's max_tokens from models.yml
     use_model_max_tokens: bool = False
