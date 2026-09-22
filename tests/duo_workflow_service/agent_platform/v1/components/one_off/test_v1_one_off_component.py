@@ -214,6 +214,7 @@ class TestOneOffComponentAttachNodes:
             model_metadata=None,
             tools=mock_toolset.bindable,
             tool_choice="auto",
+            force_tool_choice=True,
             is_graph_node=True,
             internal_event_extra={
                 "agent_name": component_name,
@@ -775,6 +776,106 @@ class TestPromptVariableValidation:
                 mock_toolset,
                 strict_validation=True,
             )
+
+
+class TestOneOffComponentToolChoice:
+    """Test suite for OneOffComponent tool_choice configuration."""
+
+    def test_tool_choice_defaults_to_auto(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+    ):
+        """tool_choice defaults to 'auto' when not specified."""
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+        )
+        assert component.tool_choice == "auto"
+
+    @pytest.mark.parametrize("choice", ["auto", "any", "required"])
+    def test_tool_choice_accepts_valid_values(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        choice,
+    ):
+        """tool_choice accepts any string value.
+
+        "required" is included deliberately: the field is a bare str rather than a Literal, so nothing rejects a
+        provider wire value here. The docs warn against it and LocalPromptRegistry passes it through untouched.
+        """
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            tool_choice=choice,
+        )
+        assert component.tool_choice == choice
+
+    @pytest.mark.parametrize("choice", ["auto", "any"])
+    @pytest.mark.usefixtures("mock_tool_node_cls")
+    def test_tool_choice_passed_to_prompt_registry(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        prompt_id,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        mock_state_graph,
+        mock_router,
+        choice,
+    ):
+        """tool_choice is forwarded to prompt_registry.get_on_behalf."""
+        component = OneOffComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            prompt_id=prompt_id,
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            tool_choice=choice,
+        )
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.one_off.component.AgentNode"
+        ):
+            component.attach(mock_state_graph, mock_router)
+
+        mock_prompt_registry.get_on_behalf.assert_called_once()
+        call_kwargs = mock_prompt_registry.get_on_behalf.call_args[1]
+        assert call_kwargs["tool_choice"] == choice
+        # Without it the registry keeps the legacy translation and a configured "any"
+        # is dropped by LiteLLM, which is RFH #5210.
+        assert call_kwargs["force_tool_choice"] is True
 
 
 class TestOneOffComponentCompaction:

@@ -100,6 +100,13 @@ class OneOffComponent(BaseComponent):
     compaction: Union[CompactionConfig, bool] = True
     max_correction_attempts: int = 3
 
+    # Semantic value only — "auto" lets the model answer in prose, "any" forces it to
+    # call one of its tools. LocalPromptRegistry translates this into each client's
+    # wire format, so flow configs must never carry a provider value such as
+    # "required": direct ChatAnthropic reads that as a tool literally named
+    # "required". The field is intentionally not validated against the toolset.
+    tool_choice: str = "auto"
+
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
     ]
@@ -173,7 +180,6 @@ class OneOffComponent(BaseComponent):
     @override
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         tools = self.toolset.bindable
-        tool_choice = "auto"
 
         model_metadata = get_model_metadata(self.model_tags)
 
@@ -183,7 +189,9 @@ class OneOffComponent(BaseComponent):
             self.prompt_version,
             model_metadata=model_metadata,
             tools=tools,  # type: ignore[arg-type]
-            tool_choice=tool_choice,
+            tool_choice=self.tool_choice,
+            # The flow config set tool_choice, so honour it on the wire.
+            force_tool_choice=True,
             is_graph_node=True,
             internal_event_extra={
                 "agent_name": self.name,

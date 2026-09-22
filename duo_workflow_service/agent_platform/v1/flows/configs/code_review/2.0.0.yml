@@ -161,10 +161,18 @@ components:
     toolset:
       - "post_duo_code_review"
     max_correction_attempts: 3
+    # Force the model to call the publish tool. Without this the model is free to
+    # answer in prose, which is what caused the flow to finish having posted no
+    # comments. "any" is the semantic value; the prompt registry translates it to
+    # each provider's wire format.
+    tool_choice: "any"
     ui_log_events:
       - "on_tool_call_input"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
+      # Without this the model's prose is dropped by the UI history filter, so a turn
+      # that produced a review but no tool call leaves the user with nothing to read.
+      - "on_agent_reasoning"
 
 routers:
   - from: "build_review_context"
