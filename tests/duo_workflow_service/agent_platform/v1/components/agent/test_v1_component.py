@@ -18,6 +18,9 @@ from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.agent_platform.v1.chat_engine import (
+    ENGINE_FLOOR_UI_LOG_EVENTS,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponent,
     AgentComponentBase,
@@ -2485,8 +2488,28 @@ class TestAgentNodeInvokeConfig:
             component.attach(mock_state_graph, mock_router)
             return mock_agent_node_cls.call_args[1]["invoke_config"]
 
+    @pytest.mark.parametrize(
+        ("ui_log_events", "case"),
+        [
+            (
+                [
+                    UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+                    UILogEventsAgent.ON_AGENT_REASONING,
+                ],
+                "both streaming events",
+            ),
+            # The chat engine fills this floor into a config that declares no
+            # events, so the floor has to satisfy this component's streaming rule.
+            (
+                [UILogEventsAgent(event) for event in ENGINE_FLOOR_UI_LOG_EVENTS],
+                "chat engine floor",
+            ),
+        ],
+    )
     def test_both_events_declared_passes_streaming_enabled_config(
         self,
+        ui_log_events,
+        case,  # pylint: disable=unused-argument
         component_name,
         flow_id,
         flow_type,
@@ -2500,10 +2523,7 @@ class TestAgentNodeInvokeConfig:
     ):
         """Attach() passes STREAMING_ENABLED_CONFIG when both streaming events are declared."""
         invoke_config = self._attach_and_get_invoke_config(
-            ui_log_events=[
-                UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
-                UILogEventsAgent.ON_AGENT_REASONING,
-            ],
+            ui_log_events=ui_log_events,
             component_name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
