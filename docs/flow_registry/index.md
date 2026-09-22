@@ -40,7 +40,10 @@ The API version (v1, experimental) is already determined by the root path (`agen
 ### Syncing Flows from the AI Catalog
 
 The `fetch-foundational-agents` script (`duo_workflow_service/scripts/fetch_foundational_agents.py`) fetches a flow
-config from the GitLab AI Catalog and writes it to the correct versioned path in the flow registry.
+config from the GitLab AI Catalog and writes it as a feature under `ai/features/foundational_agents/`, so
+flow-config discovery registers it like any bundled feature. A fetched agent must not share its name with a
+bundled feature: discovery fails at boot on a duplicate flow ID. Fetched agents are gitignored; the Docker images
+run the script at build time.
 
 **Usage:**
 
@@ -65,9 +68,12 @@ poetry run fetch-foundational-agents \
 This writes:
 
 ```plaintext
-duo_workflow_service/agent_platform/v1/flows/configs/developer/1.0.0.yml
-duo_workflow_service/agent_platform/v1/flows/configs/code_review/1.0.0.yml
+ai/features/foundational_agents/developer/config/1.0.0.yml
+ai/features/foundational_agents/code_review/config/1.0.0.yml
 ```
+
+The `experimental` registry has no feature roots; the script writes those configs to
+`duo_workflow_service/agent_platform/experimental/flows/configs/<flow>/1.0.0.yml`.
 
 Use `--dry-run` to print the fetched YAML to stdout without writing any files.
 
