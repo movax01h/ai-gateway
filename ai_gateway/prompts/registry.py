@@ -310,22 +310,64 @@ class LocalPromptRegistry(BasePromptRegistry):
         )
 
     def _adjust_tool_choice_for_model(
-        self, tool_choice: Optional[str], model_metadata: Optional[TypeModelMetadata]
+        self,
+        tool_choice: Optional[str],
+        model_class_provider: ModelClassProvider,
+        model_metadata: Optional[TypeModelMetadata],
+        force_tool_choice: bool,
     ) -> Optional[str]:
-        """Adjust tool_choice based on model-specific requirements.
+        """Translate the semantic tool_choice "any" into each client's wire value.
 
-        Different model providers have different tool_choice requirements. Bedrock,
-        Bedrock Mantle and Azure models don't support 'any' as a tool_choice value,
-        so we convert it to 'required'.
+        Translates "any" to "required" for every model provider except Anthropic, so
+        flow authors write the semantic value and never a provider wire format.
+
+        Only `ChatAnthropic` takes "any" verbatim; it maps any other bare string to
+        `{"type": "tool", "name": <string>}`, so "required" would ask Anthropic for a
+        tool literally named "required". Every other client wants "required": LiteLLM
+        (self-hosted OpenAI-compatible, Bedrock, Azure, Vertex) drops or rejects a bare
+        "any", silently leaving the model free to answer in prose.
+
+        Applied only when the caller passes ``force_tool_choice``. AgentComponent and
+        both supervisors pass "any" implicitly with a bound response schema, and forcing
+        a call every turn there loops an agent to max_cycles — see
+        AgentComponent._auto_tool_choice_enabled.
 
         Args:
-            tool_choice: The original tool_choice value
-            model_metadata: The model metadata
+            tool_choice: Value from the flow config ("auto" or "any").
+            model_class_provider: Provider class for the resolved model, e.g. ANTHROPIC.
+            model_metadata: Resolved model metadata, for the legacy identifier match.
+            force_tool_choice: True when the caller set tool_choice deliberately and
+                wants it honoured on the wire.
 
         Returns:
-            The adjusted tool_choice value
+            tool_choice unchanged when it is not "any" or the provider is Anthropic,
+            otherwise "required".
+        """
+        if tool_choice != "any":
+            return tool_choice
+
+        if not force_tool_choice:
+            return self._legacy_tool_choice_for_identifier(tool_choice, model_metadata)
+
+        if model_class_provider == ModelClassProvider.ANTHROPIC:
+            return tool_choice
+
+        return "required"
+
+    def _legacy_tool_choice_for_identifier(
+        self,
+        tool_choice: Optional[str],
+        model_metadata: Optional[TypeModelMetadata],
+    ) -> Optional[str]:
+        """Pre-provider-switch translation, matched on the model identifier string.
+
+        Kept for the callers that pass "any" implicitly, so their behaviour is unchanged.
+        A `custom_openai` identifier matches none of these prefixes, which is how RFH
+        #5210 reached LiteLLM with a dropped "any"; a bound response schema stays
+        unenforced there until that path is switched deliberately.
         """
         model_identifier = getattr(model_metadata, "identifier", None)
+
         if model_identifier is None:
             # GitLab-managed models don't have an identifier field
             # use llm_definition.params.model which contains the provider-prefixed model path
@@ -333,16 +375,13 @@ class LocalPromptRegistry(BasePromptRegistry):
             params = getattr(llm_def, "params", None)
             model_identifier = getattr(params, "model", None) if params else None
 
-        if (
-            tool_choice == "any"
-            and model_identifier
-            and (
-                "bedrock/" in model_identifier
-                or "bedrock_mantle/" in model_identifier
-                or "azure/" in model_identifier
-            )
+        if model_identifier and (
+            "bedrock/" in model_identifier
+            or "bedrock_mantle/" in model_identifier
+            or "azure/" in model_identifier
         ):
             return "required"
+
         return tool_choice
 
     # prompt_version is never None when called on LocalPromptRegistry
@@ -356,6 +395,8 @@ class LocalPromptRegistry(BasePromptRegistry):
         tools: Optional[List[BaseTool]] = None,
         tool_choice: Optional[str] = None,  # auto, any, <tool name>. By default, auto.
         is_graph_node: bool = False,
+        # Trails the abstract signature so the override stays positionally compatible.
+        force_tool_choice: bool = False,
         **kwargs: Any,
     ) -> Prompt:
         try:
@@ -436,6 +477,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             config=config,
             model_metadata=model_metadata,
             tool_choice=tool_choice,
+            force_tool_choice=force_tool_choice,
             prompt_template_factory=prompt_template_factory,
             tools=tools,
             bind_tools_cache=self.bind_tools_cache,
@@ -496,6 +538,9 @@ class LocalPromptRegistry(BasePromptRegistry):
         config: PromptConfig,
         model_metadata: Optional[TypeModelMetadata],
         tool_choice: Optional[str],
+        # Declared, not left in **kwargs: those are forwarded to Prompt, which takes no
+        # such argument, and InMemoryPromptRegistry reaches this method through **kwargs.
+        force_tool_choice: bool = False,
         **kwargs,
     ) -> Prompt:
         model_factory = self.model_factories.get(model_class_provider, None)
@@ -506,7 +551,9 @@ class LocalPromptRegistry(BasePromptRegistry):
             )
 
         # Adjust tool_choice for model-specific requirements
-        tool_choice = self._adjust_tool_choice_for_model(tool_choice, model_metadata)
+        tool_choice = self._adjust_tool_choice_for_model(
+            tool_choice, model_class_provider, model_metadata, force_tool_choice
+        )
 
         return Prompt(
             model_class_provider,
