@@ -64,7 +64,8 @@ Create a comprehensive test plan.
 </response>
 ```
 
-Note: at least one tool call must be included in a response for the agent to process the next response, as expected by [the workflow graph for Agentic Chat](../duo_workflow_service_graphs.md#graph-chat). The first `<response>` without a tool call will end the simulated workflow.
+> [!note]
+> At least one tool call must be included in a response for the agent to process the next response, as expected by [the workflow graph for Agentic Chat](../duo_workflow_service_graphs.md#graph-chat). The first `<response>` without a tool call will end the simulated workflow.
 
 ## Latency simulation
 

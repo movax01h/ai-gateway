@@ -324,7 +324,7 @@ This mirrors Infrastructure's
   consumers treated as customers (the same pattern as COM's Tenant Observability
   Stack).
 
-Unlike COM, components are **not** split into separate repositories. COM separates
+Unlike COM, components are not split into separate repositories. COM separates
 repos to gain independent deployment lifecycles and self-managed portability;
 neither applies here, because AI Gateway and DWS ship in the same Docker image and
 features co-deploy with the engine. The need is *ownership* decoupling, not

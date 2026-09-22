@@ -64,7 +64,8 @@ that was used in previous load testing efforts. See [these instructions to deplo
 You can also use a [Sandbox Cloud environment](https://handbook.gitlab.com/handbook/company/infrastructure-standards/realms/sandbox/)
 to deploy and configure a GitLab test instance.
 
-**Note**: These scripts deploy each service open to the public and unauthenticated. They should not be left active while not in use, and should be destroyed as soon as testing is complete.
+> [!note]
+> These scripts deploy each service open to the public and unauthenticated. They should not be left active while not in use, and should be destroyed as soon as testing is complete.
 
 1. Deploy Pyroscope server:
 

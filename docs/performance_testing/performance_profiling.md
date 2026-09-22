@@ -10,7 +10,8 @@ See [Profiling DWS with Pyroscope and LLM caching proxy](profiling_with_llm_cach
 
 Cloud Profiler is [enabled for the Duo Workflow Service (DWS) staging deployment on Cloud Run via Runway](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/0a2d410c735457ec5715f155de564b7dbf536c45/.runway/duo-workflow-svc/env-staging.yml#L3). However, it is [disabled in production](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/0a2d410c735457ec5715f155de564b7dbf536c45/.runway/duo-workflow-svc/env-production.yml#L3) because it [caused segfaults](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/1589#note_2839024058).
 
-**Note:** If using Google Cloud Profiler in staging or test environments, be aware that it could cause segfaults.
+> [!note]
+> If using Google Cloud Profiler in staging or test environments, be aware that it could cause segfaults.
 
 For detailed information on using Cloud Profiler, see the [documentation](https://docs.cloud.google.com/profiler/docs).
 
@@ -89,7 +90,7 @@ To reproduce that test for high memory usage in the checkpoint notifier, with me
    ```
 
 1. Execute the Agentic Chat stress test with a goal that makes the agent stream a long response (in this example,
-a 50kb file):
+   a 50kb file):
 
    ```shell
    export ENVIRONMENT_URL=http://gdk.test:3000

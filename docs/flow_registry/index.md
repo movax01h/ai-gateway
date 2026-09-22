@@ -115,7 +115,7 @@ grpcurl \
 ```
 
 > **Note:** `flowConfigSchemaVersion` (`"v1"` or `"experimental"`) maps to the root directory of the flow config
-> (`agent_platform/v1/flows/configs/` vs `agent_platform/experimental/flows/configs/`). It is **not** the same as
+> (`agent_platform/v1/flows/configs/` vs `agent_platform/experimental/flows/configs/`). It is not the same as
 > `flowVersion`, which selects the specific YAML file within the flow's subdirectory.
 
 #### Deprecated `workflowDefinition` string
@@ -472,7 +472,7 @@ surfaced in the UI chat log.
 > `content` is validated against the flow's `input_schema` with **`additionalProperties: true`** and every
 > non-`optional` field marked **required**. This means:
 >
-> - An envelope whose `content` carries a field the flow's `input_schema` does **not** declare is **accepted** — extra
+> - An envelope whose `content` carries a field the flow's `input_schema` does not declare is **accepted** — extra
 >   fields are silently ignored. This makes envelope schema changes that only add new fields backwards-compatible.
 > - An envelope missing a required (non-`optional`) field fails validation.
 >

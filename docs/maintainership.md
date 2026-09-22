@@ -33,7 +33,7 @@ We generally recommend the following activities before submitting the request:
 1. **Request group membership** after the MR is merged:
    - Ask an Owner of [`@gitlab-org/maintainers/duo-workflow-service`](https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude) group to add you
    - This makes you one of the [Code Owners](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/.gitlab/CODEOWNERS?ref_type=heads) whose approval is required for an MR to be merged.
-   - Do **not** add members directly as `Owners` to the `https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/` project
+   - Do not add members directly as `Owners` to the `https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/` project
 1. **Enable dependency review notifications**: Add your username to `additionalReviewers` in [`renovate.json`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/renovate.json)
    - This includes you as a reviewer for dependency update merge requests.
 

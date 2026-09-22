@@ -6,7 +6,7 @@ The purpose of this page is to guide GitLab engineers in preparing security fixe
 
 - This process is based on [Patch release runbook for GitLab engineers: Preparing security fixes for a patch release:](https://gitlab.com/gitlab-org/release/docs/-/blob/master/general/security/engineer.md) and customized for the AI Gateway project. When in doubt, follow the original doc.
 - It's required to manually synchronize canonical and security repos such as resolving merge conflicts.
-- Backports **must** be prepared and merged in the [security fork](https://gitlab.com/gitlab-org/security/modelops/applied-ml/code-suggestions/ai-assist) **before** any canonical sync. See [Process](#process) for details.
+- Backports must be prepared and merged in the [security fork](https://gitlab.com/gitlab-org/security/modelops/applied-ml/code-suggestions/ai-assist) before any canonical sync. See [Process](#process) for details.
 - Automations such as `@gitlab-release-tools-bot` are not supported.
 
 ## Due Date
