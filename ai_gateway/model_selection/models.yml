@@ -223,6 +223,7 @@ models:
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
+    requires_paid_credits: true
     family:
       - claude
     params:
@@ -236,6 +237,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     model_class_provider: litellm
+    requires_paid_credits: true
     family:
       - claude
     params:
@@ -253,6 +255,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-fable-5
     model_class_provider: litellm
+    requires_paid_credits: true
     family:
       - claude
     params:
@@ -269,6 +272,7 @@ models:
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
+    requires_paid_credits: true
     family:
       - claude
     params:
@@ -282,6 +286,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     model_class_provider: litellm
+    requires_paid_credits: true
     family:
       - claude
     params:
@@ -299,6 +304,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-fable-5-1
     model_class_provider: litellm
+    requires_paid_credits: true
     family:
       - claude
     params:
@@ -771,6 +777,7 @@ models:
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-6-astra
     proxy_provider: openai
     model_class_provider: "openai"
+    requires_paid_credits: true
     family:
       - gpt_5
     params:

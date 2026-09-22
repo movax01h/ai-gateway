@@ -129,6 +129,7 @@ def test_get_models_returns_correct_data(client):
         "deprecation": None,
         "description": "Fast, cost-effective responses.",
         "cost_indicator": "$",
+        "requires_paid_credits": False,
     }
     assert data["models"][1] == {
         "name": "Model 2 - Gemini Enterprise Agent Platform",
@@ -137,6 +138,7 @@ def test_get_models_returns_correct_data(client):
         "deprecation": None,
         "description": "Fast, cost-effective responses.",
         "cost_indicator": "$$",
+        "requires_paid_credits": False,
     }
     # Models without a provider should not have a suffix appended.
     assert data["models"][2] == {
@@ -146,6 +148,7 @@ def test_get_models_returns_correct_data(client):
         "deprecation": {"deprecation_date": "2025-10-28", "removal_version": "18.8"},
         "description": None,
         "cost_indicator": None,
+        "requires_paid_credits": False,
     }
 
     # config1 has multiple default models:
@@ -375,3 +378,29 @@ def test_models_for_tags_is_emitted_as_a_flat_mapping(
     assert primitive["models_for_tags"] == expected
     assert primitive["models_for_size_preference"] == expected
     assert "keywords" not in str(primitive)
+
+
+def test_requires_paid_credits_is_exposed_per_model(client, mock_model_config):
+    """A model flagged in models.yml reports the flag; unflagged models stay False."""
+    definitions = mock_model_config.get_llm_definitions.return_value
+    definitions["model1"].requires_paid_credits = True
+
+    data = client.get("/definitions").json()
+    by_identifier = {m["identifier"]: m for m in data["models"]}
+
+    assert by_identifier["model1"]["requires_paid_credits"] is True
+    assert by_identifier["model2"]["requires_paid_credits"] is False
+    assert by_identifier["model3"]["requires_paid_credits"] is False
+
+
+def test_pseudo_model_inherits_requires_paid_credits(client, mock_model_config):
+    """The load-balanced pseudo-model takes the flag from its first default model."""
+    definitions = mock_model_config.get_llm_definitions.return_value
+    definitions["model1"].requires_paid_credits = True
+
+    data = client.get("/definitions").json()
+    pseudo_model = next(
+        m for m in data["models"] if m["identifier"] == "__default__config1"
+    )
+
+    assert pseudo_model["requires_paid_credits"] is True
