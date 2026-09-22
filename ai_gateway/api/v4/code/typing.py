@@ -99,7 +99,7 @@ class CodeEditorGeneration(BaseModel):
 class CodeContextPayload(BaseModel):
     type: Annotated[str, StringConstraints(max_length=1024)]
     name: Annotated[str, StringConstraints(max_length=1024)]
-    content: Annotated[str, StringConstraints(max_length=100000)]
+    content: Annotated[str, StringConstraints(max_length=500000)]
 
 
 class CodeContext(BaseModel):
