@@ -27,6 +27,9 @@ from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
 )
 from lib.context import client_capabilities, gitlab_version
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
+)
 
 
 @pytest.fixture(name="outbox")
@@ -1911,9 +1914,10 @@ def test_server_tool_result_flips_pending_card_to_success(checkpoint_notifier):
     entry = tool_entries[0]
     assert entry["status"] == ToolStatus.SUCCESS
     assert entry["message_id"] == "srvtu_1"
-    assert entry["tool_info"]["tool_response"] == [
-        {"type": "web_search_result", "url": "https://x"}
-    ]
+    # Rendered as a string: the CLI and IDE validate tool_response as one and
+    # drop the whole chat log otherwise.
+    assert entry["tool_info"]["tool_response"] == "https://x"
+    assert_client_valid_tool_info(entry["tool_info"])
 
 
 def test_duplicate_server_tool_use_block_is_idempotent(checkpoint_notifier):
@@ -2075,9 +2079,10 @@ def test_openai_web_search_card_gains_citations_as_text_streams(checkpoint_notif
 
     tool_entries = _tool_entries(checkpoint_notifier)
     assert len(tool_entries) == 1
-    assert tool_entries[0]["tool_info"]["tool_response"] == [
-        {"type": "web_search_result", "url": "https://a", "title": "A"}
-    ]
+    # Rendered as a string: the CLI and IDE validate tool_response as one and
+    # drop the whole chat log otherwise (same as the Anthropic path).
+    assert tool_entries[0]["tool_info"]["tool_response"] == "A: https://a"
+    assert_client_valid_tool_info(tool_entries[0]["tool_info"])
     assert checkpoint_notifier.ui_chat_log[-1]["content"] == "Answer."
 
 

@@ -2,12 +2,13 @@ from enum import StrEnum
 from typing import Annotated, Any, Dict, List, NotRequired, Optional, TypedDict, Union
 
 import structlog
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, ToolMessage
 from pydantic import BaseModel
 
 from contract import contract_pb2
 from duo_workflow_service.conversation.trimmer import LEGACY_MAX_CONTEXT_TOKENS
 from duo_workflow_service.entities.event import WorkflowEvent
+from duo_workflow_service.entities.image_blocks import content_as_text
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
@@ -134,6 +135,25 @@ def policy_ref_to_log_dict(
 # Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
 TOOL_RESPONSE_MAX_DISPLAY_MSG = 4 * 1024
 
+
+def render_for_display(content: Any, tool_name: str) -> str:
+    """Render *content* for a tool card: one string, redacted, then capped.
+
+    Rendering comes first because the CLI and the IDE accept `tool_response` only as a string (or a message whose
+    `content` is one). Redaction then sees the text the client will. The cap runs last and says when it cuts: the CLI
+    and the IDE show `tool_response` as the tool's output, so a silent cut would read as the whole output. The marker
+    sits after the cap, so the first `TOOL_RESPONSE_MAX_DISPLAY_MSG` characters are always the original text. Every
+    card builder calls this once.
+    """
+    text = redact_secrets_for_ui(content_as_text(content), tool_name=tool_name)
+    if len(text) <= TOOL_RESPONSE_MAX_DISPLAY_MSG:
+        return text
+    return (
+        text[:TOOL_RESPONSE_MAX_DISPLAY_MSG]
+        + f"\n[... display truncated: {TOOL_RESPONSE_MAX_DISPLAY_MSG:,} of {len(text):,} characters shown ...]"
+    )
+
+
 # Shared sub_type / JSON-payload error code used to tag tier-access-denied
 # events. Read by ChatAgent when tagging the AGENT UiChatLog and by
 # ToolsExecutor when serializing the tool_response payload.
@@ -143,7 +163,17 @@ TIER_ACCESS_DENIED_SUB_TYPE = "tier_access_denied"
 class ToolInfo(TypedDict):
     name: str
     args: dict[str, Any]
-    tool_response: NotRequired[Any]
+    # What the CLI and IDE accept: a string, or a ToolMessage whose content is
+    # one. build_tool_info stores the string; the legacy executor and
+    # compaction store the message. A list or dict here drops the whole chat
+    # log on the client.
+    #
+    # The web frontend (duo_agentic_chat in the monolith) reads only the
+    # message shape, `tool_response.content` and `.status`, and today only
+    # sees legacy executor cards. When agentic chat moves onto v1 flows
+    # (#2780), the cards build_tool_info writes must either be wrapped, with
+    # a real status, or the frontend taught the string shape.
+    tool_response: NotRequired[Union[str, ToolMessage]]
     suggested_patterns: NotRequired[list[str]]
     # Semantic version of the tool that produced this entry (from
     # ``DuoBaseTool.tool_version``). Lets the client version the tool→component
@@ -272,24 +302,17 @@ def build_tool_info(
 ) -> ToolInfo:
     """Build a ToolInfo dict for UiChatLog display.
 
-    Applies two transformations to ``tool_response`` before storing it.
-    First, ``redact_secrets_for_ui`` replaces structured secrets (GitLab tokens,
-    JWTs, AWS keys, etc.) and high-entropy strings (Azure storage keys, generic
-    API blobs) with ``[REDACTED]``, using raised entropy thresholds so that git
-    SHAs, checksums, and UUIDs are left intact.
-    Second, string responses are capped at ``TOOL_RESPONSE_MAX_DISPLAY_MSG``
-    characters to prevent bloating ui_chat_log payloads and checkpoints with
-    large tool outputs.
+    `tool_response` is stored as :func:`render_for_display` returns it: one
+    string, with structured secrets (GitLab tokens, JWTs, AWS keys) and
+    high-entropy strings replaced by `[REDACTED]`, cut at
+    `TOOL_RESPONSE_MAX_DISPLAY_MSG` characters with a marker that says so. The
+    CLI and the IDE accept `tool_response` only as a string (or a message whose
+    `content` is one) and drop the whole checkpoint's chat log otherwise;
+    rendering first also keeps base64 out of every streamed checkpoint.
     """
     info = ToolInfo(name=name, args=args)
     if tool_response is not None:
-        tool_response = redact_secrets_for_ui(tool_response, tool_name=name)
-        if (
-            isinstance(tool_response, str)
-            and len(tool_response) > TOOL_RESPONSE_MAX_DISPLAY_MSG
-        ):
-            tool_response = tool_response[:TOOL_RESPONSE_MAX_DISPLAY_MSG]
-        info["tool_response"] = tool_response
+        info["tool_response"] = render_for_display(tool_response, tool_name=name)
     return info
 
 

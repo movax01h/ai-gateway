@@ -11,6 +11,9 @@ from duo_workflow_service.entities.server_tool_blocks import (
     warn_unmatched_server_tool_results,
 )
 from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
+)
 
 
 @pytest.mark.parametrize(
@@ -90,7 +93,10 @@ def test_build_ui_chat_log_anthropic_success_with_result():
     assert entry["status"] == ToolStatus.SUCCESS
     assert entry["message_id"] == "srvtu_1"
     assert entry["component_name"] == "chat"
-    assert entry["tool_info"]["tool_response"] == result_content
+    # Rendered as a string, not stored as the result list: the CLI and IDE
+    # validate tool_response as a string and drop the chat log otherwise.
+    assert entry["tool_info"]["tool_response"] == "X: https://x"
+    assert_client_valid_tool_info(entry["tool_info"])
 
 
 def test_build_ui_chat_log_anthropic_defaults_for_missing_fields():
@@ -127,7 +133,7 @@ def test_build_ui_chat_log_omits_an_empty_tool_response(content):
     assert "tool_response" not in entry["tool_info"]
 
 
-def test_build_ui_chat_log_redacts_secrets_in_result():
+def test_build_ui_chat_log_result_never_carries_raw_content():
     leaked_token = "gh" + "p_" + "1234567890abcdefghijklmnopqrstuvwxyz"
     content = [
         {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"},
@@ -142,9 +148,37 @@ def test_build_ui_chat_log_redacts_secrets_in_result():
 
     entry = ServerToolResults(content).build_ui_chat_log(content[0])
 
-    snippet = entry["tool_info"]["tool_response"][0]["snippet"]
-    assert leaked_token not in snippet
-    assert "[REDACTED]" in snippet
+    # A web_search_result block with no text and no url renders as a marker,
+    # and nothing inside it -- a leaked token included -- reaches the card.
+    tool_response = entry["tool_info"]["tool_response"]
+    assert isinstance(tool_response, str)
+    assert leaked_token not in tool_response
+
+
+def test_build_ui_chat_log_lists_the_sources_by_title_and_url():
+    """The card the CLI and IDE show for a web search names the sources, not N identical markers."""
+    content = [
+        {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"},
+        {
+            "type": "web_search_tool_result",
+            "tool_use_id": "srvtu_1",
+            "content": [
+                {
+                    "type": "web_search_result",
+                    "url": "https://docs.example/a",
+                    "title": "A",
+                    "encrypted_content": "Q" * 40,
+                },
+                {"type": "web_search_result", "url": "https://docs.example/b"},
+            ],
+        },
+    ]
+
+    entry = ServerToolResults(content).build_ui_chat_log(content[0])
+
+    assert entry["tool_info"]["tool_response"] == (
+        "A: https://docs.example/a\nhttps://docs.example/b"
+    )
 
 
 @pytest.mark.parametrize(

@@ -1110,6 +1110,57 @@ class TestStripToolMetadata:
         cleaned = strip_tool_metadata([msg])
         assert cleaned[0] is msg
 
+    def test_tool_message_image_payload_never_reaches_the_summarizer(self):
+        """A tool-read image is stripped to its placeholder, not repr'd.
+
+        The ToolMessage branch f-strings the content, and the checkpoint encoder only strips on write/reload, so live
+        history in a session that never resumed still carries raw base64 when compaction fires. Without the strip the
+        summarizer prompt gets megabytes of base64 rendered as prose.
+        """
+        payload = "iVBORw0KGgoAAAANSUhEUg" * 64
+        msg = ToolMessage(
+            content=[
+                {"type": "text", "text": "Read image file: diagram.png"},
+                {"type": "image", "base64": payload, "mime_type": "image/png"},
+            ],
+            tool_call_id="c1",
+            name="read_file",
+        )
+
+        cleaned = strip_tool_metadata([msg])
+
+        text = cleaned[0].content
+        assert isinstance(cleaned[0], HumanMessage)
+        assert payload[:32] not in text
+        # Rendered as prose, not as the f-string's python repr of a dict list.
+        assert text == (
+            "[Tool result for 'read_file']: "
+            "Read image file: diagram.png\n[image/png omitted from history]"
+        )
+
+    def test_tool_message_list_content_renders_as_prose(self):
+        # Every list flattens, not just image-bearing ones: the summarizer
+        # used to get the python repr of a dict list here.
+        msg = ToolMessage(
+            content=[
+                {"type": "text", "text": "plain"},
+                {"type": "text", "text": "result"},
+            ],
+            tool_call_id="c1",
+            name="read_file",
+        )
+
+        cleaned = strip_tool_metadata([msg])
+
+        assert cleaned[0].content == "[Tool result for 'read_file']: plain\nresult"
+
+    def test_tool_message_string_content_is_untouched(self):
+        msg = ToolMessage(content="just text", tool_call_id="c1", name="grep")
+
+        cleaned = strip_tool_metadata([msg])
+
+        assert cleaned[0].content == "[Tool result for 'grep']: just text"
+
     def test_strip_tool_metadata_list_content_only_tool_use_becomes_empty_string(
         self,
     ):

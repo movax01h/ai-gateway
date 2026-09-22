@@ -39,6 +39,17 @@ can say something useful should emit its own text block next to the image -- the
 path a tool read it from, or the filename a user attached. That block is not an
 image block, so it survives stripping untouched and is what lets the model say
 which file it can no longer see rather than guessing.
+
+Reading and rendering
+---------------------
+:func:`block_text` and :func:`with_block_text` are the one place that knows how
+a block carries text. Every consumer that reads or rewrites block text goes
+through them and adds its own policy on top.
+
+:func:`content_as_text` turns any message content -- a string, a block list or a
+dict -- into one string, for the surfaces that cannot take a list: the ui_chat_log
+tool card and the compaction summarizer. Images become the placeholder above;
+every other block without text becomes a marker naming its type.
 """
 
 from typing import Any, Optional
@@ -47,9 +58,12 @@ from langchain_core.messages.content import create_image_block
 
 __all__ = [
     "IMAGE_BLOCK_TOKEN_ESTIMATE",
+    "block_text",
+    "content_as_text",
     "image_content_block",
     "is_image_content_block",
     "strip_image_payloads",
+    "with_block_text",
 ]
 
 # Flat per-image token cost charged wherever a conversation is budgeted.
@@ -138,3 +152,81 @@ def _placeholder(mime_type: Optional[str]) -> str:
     (which can). Naming either one would mislead the model about the other.
     """
     return f"[{mime_type or 'image'} omitted from history]"
+
+
+def block_text(block: Any) -> Optional[str]:
+    """Return the text *block* carries, or `None` if it carries none.
+
+    A bare string is its own text. A dict with a string `text` field carries
+    that. Anything else -- an image block, a provider-specific block, a stray
+    scalar -- carries none. What `None` means is up to the caller: a marker on
+    the tool card, a byte cost in truncation.
+    """
+    if isinstance(block, str):
+        return block
+    if isinstance(block, dict) and isinstance(block.get("text"), str):
+        return block["text"]
+    return None
+
+
+def with_block_text(block: Any, text: str) -> Any:
+    """Return *block* carrying *text* instead, in the shape it arrived in.
+
+    Only for blocks :func:`block_text` returned a string for, so *block* is a
+    string or a dict.
+    """
+    return text if isinstance(block, str) else {**block, "text": text}
+
+
+def content_as_text(content: Any) -> str:
+    """Render message *content* as one string.
+
+    For the two surfaces that need a string but may be handed a content-block
+    list: the ui_chat_log tool card and the compaction summarizer prompt. The
+    card is the hard constraint. The CLI and the IDE validate every ui_chat_log
+    entry, accept `tool_response` only as a string (or a message whose
+    `content` is one), and drop the whole checkpoint's chat log on the first
+    entry that fails.
+
+    Text blocks and bare strings are kept as they are, one block per line. An
+    inline image becomes the same placeholder :func:`strip_image_payloads`
+    writes into history. A block that names a source, a string `url` with an
+    optional `title`, renders as `title: url`; web search results are the
+    live case, and only those two fields are shown. Any other block becomes
+    `[<type> omitted]`, so nothing disappears silently.
+    That last rule is why this is not `BaseMessage.text`, which drops
+    non-text blocks without a trace.
+
+    A `dict` is treated as a one-block list, `None` as `""`, any other
+    scalar goes through `str`. Anything carrying a `content` attribute is
+    rendered by that content, so a caller that passes a message (or any of the
+    duck-typed objects the redactor accepts) instead of `message.content`
+    gets the same string and never a repr with the payload inside it.
+    """
+    content = getattr(content, "content", content)
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    if isinstance(content, dict):
+        content = [content]
+    if isinstance(content, tuple):
+        content = list(content)
+    if not isinstance(content, list):
+        return str(content)
+    # One block per line: the shape that reaches a card is a text lead-in
+    # followed by a placeholder or a marker, and those read as separate lines.
+    return "\n".join(_block_as_text(block) for block in strip_image_payloads(content))
+
+
+def _block_as_text(block: Any) -> str:
+    text = block_text(block)
+    if text is not None:
+        return text
+    if isinstance(block, dict) and isinstance(block.get("url"), str) and block["url"]:
+        title = block.get("title")
+        if isinstance(title, str) and title:
+            return f"{title}: {block['url']}"
+        return block["url"]
+    kind = block.get("type") if isinstance(block, dict) else None
+    return f"[{kind or type(block).__name__} omitted]"

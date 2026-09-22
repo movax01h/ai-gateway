@@ -13,6 +13,7 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
     MessageSlices,
 )
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
+from duo_workflow_service.entities.image_blocks import content_as_text
 
 
 def is_turn_complete(messages: list[BaseMessage]) -> bool:
@@ -209,10 +210,18 @@ def strip_tool_metadata(
 
             cleaned.append(AIMessage(content=content))
         elif isinstance(msg, ToolMessage):
-            # Convert tool result to a human-readable message
+            # Render the result as prose for the summarizer. A block list would
+            # otherwise land in the prompt as a Python repr, and an inline image
+            # as its base64: the checkpoint encoder strips payloads only on
+            # write, so live history still carries them here.
             tool_name = msg.name or "unknown"
             cleaned.append(
-                HumanMessage(content=f"[Tool result for '{tool_name}']: {msg.content}")
+                HumanMessage(
+                    content=(
+                        f"[Tool result for '{tool_name}']: "
+                        f"{content_as_text(msg.content)}"
+                    )
+                )
             )
         else:
             cleaned.append(msg)
