@@ -46,7 +46,7 @@ The `api_v4_duo_workflow_chat_graphql_api.js` test can be run directly with k6 (
     - Comma-separated list of `agent_name:version_id` pairs
     - Flow registry version (`v1` or `experimental`)
 
-    The fetched configurations will be used by DWS during the test. Without this step, tests using foundational agents may fail or use incorrect versions.
+    The fetched configurations land in `ai/features/foundational_agents/<agent>/config/` and DWS uses them during the test. Without this step, tests using foundational agents may fail or use incorrect versions.
 1. A project with appropriate feature flags enabled (such as one created by `rake gitlab:duo:setup` in GDK)
 1. A Personal Access Token with API scope
 

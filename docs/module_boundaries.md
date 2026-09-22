@@ -21,6 +21,7 @@ single CODEOWNERS describes ownership across them.
 ```plaintext
 ai/
   features/                   # feature consumers: each owns its full definition
+    foundational_agents/      #   catalog-fetched flows, written at image build (<flow>/config/<semver>.yml)
     pipeline/                 #   capability area (stable name, NOT a team name)
       fix_pipeline/           #     feature (flow)
       pipeline_summary/       #     feature (prompt-only)
@@ -144,6 +145,8 @@ and `components/`.
 - The **flow config loader** discovers configs across feature directories and
   resolves a flow by identifier. Cross-flow references are resolved through the
   registry by identifier, not by relative path between feature directories.
+  Flows fetched from the AI Catalog into `ai/features/foundational_agents/` are
+  discovered the same way; a fetched flow ID must not collide with a bundled one.
 - The **tool registry** discovers feature-specific tools under each feature's
   `components/`, alongside generic platform tools.
 

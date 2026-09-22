@@ -316,3 +316,6 @@ dmypy.json
 .pytype/
 cython_debug/
 .git*
+ai/features/foundational_agents/*
+!ai/features/foundational_agents/.gitkeep
+!ai/features/foundational_agents/README.md
