@@ -589,15 +589,6 @@ class TestUnauthorizedChatExecution:
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
-            + CHAT_SESSION_CONTEXT_TOOLS,
-        ),
-        (
-            ["agentic_foundational_flow_tool"],
-            {},
-            CHAT_READ_ONLY_TOOLS
-            + CHAT_MUTATION_TOOLS
-            + RUN_COMMAND_TOOLS
-            + CHAT_GITLAB_MUTATION_TOOLS
             + CHAT_FLOW_TOOLS
             + CHAT_SESSION_CONTEXT_TOOLS,
         ),
@@ -608,13 +599,13 @@ class TestUnauthorizedChatExecution:
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
+            + CHAT_FLOW_TOOLS
             + CHAT_UTILITY_TOOLS
             + CHAT_SESSION_CONTEXT_TOOLS,
         ),
     ],
     ids=[
-        "without_flow_tools_feature_flag",
-        "with_flow_tools_feature_flag",
+        "without_clarification_question_tool_feature_flag",
         "with_clarification_question_tool_feature_flag",
     ],
 )
@@ -688,18 +679,10 @@ def test_start_flow_tool_offered_whatever_the_foundational_flow_config(
     The tool's own schema narrows to the enabled members, so offering it here costs nothing when no foundational flow is
     available.
     """
-    current_feature_flag_context.set({"agentic_foundational_flow_tool"})
-
     workflow = workflow_with_project
     workflow._workflow_config = {**workflow._workflow_config, **config_overrides}
 
     assert "start_flow" in workflow._get_tools()
-
-
-def test_start_flow_tool_gated_by_feature_flag(workflow_with_project):
-    current_feature_flag_context.set(set())
-
-    assert "start_flow" not in workflow_with_project._get_tools()
 
 
 @pytest.mark.parametrize(
