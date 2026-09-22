@@ -8,7 +8,11 @@ from uuid import uuid4
 
 import structlog
 from dependency_injector.wiring import Provide, inject
-from gitlab_cloud_connector import CloudConnectorUser
+from gitlab_cloud_connector import (
+    CloudConnectorConfig,
+    CloudConnectorUser,
+    NoServiceNameError,
+)
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.runnables import RunnableConfig
 
@@ -112,6 +116,26 @@ DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 
 
+def _nothing_stamped_the_request(user: CloudConnectorUser) -> bool:
+    """Whether the caller reached this service with no Workhorse in between.
+
+    Only GenerateToken mints a token this service signs itself, and only the direct-access flow calls it, so that issuer
+    means the start request was never stamped and its client_injected fields cannot be trusted. Workhorse-mediated
+    tokens are issued by the GitLab instance and carry its issuer.
+    """
+    claims = getattr(user, "claims", None)
+    if not claims:
+        return False
+
+    try:
+        self_issued_by = CloudConnectorConfig().service_name
+    except NoServiceNameError:
+        # Unknown origin must not widen the carve-out, so fall back to the field.
+        return False
+
+    return claims.issuer == self_issued_by
+
+
 class ToolAccessPolicies(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -186,7 +210,10 @@ class AbstractWorkflow(ABC):
         self._http_client = ExecutorGitLabHttpClient(self._outbox)
         self._workflow_type = workflow_type
         self._additional_context = additional_context
-        self._mcp_tools = convert_mcp_tools_to_configs(mcp_tools=mcp_tools)
+        self._mcp_tools = convert_mcp_tools_to_configs(
+            mcp_tools=mcp_tools,
+            force_client_injected=_nothing_stamped_the_request(user),
+        )
         self._approval = approval
         if approval is not None and approval.HasField("approval"):
             approved = approval.approval
@@ -513,6 +540,9 @@ class AbstractWorkflow(ABC):
                 language_server_version=self._language_server_version,
                 denied_tools=self._denied_tools,
                 ask_tools=self._ask_tools,
+                allow_client_injected_mcp_tools=self._workflow_config.get(
+                    "allow_client_injected_mcp_tools", False
+                ),
             )
 
             def on_gitlab_status_update(status: WorkflowStatusEventEnum):

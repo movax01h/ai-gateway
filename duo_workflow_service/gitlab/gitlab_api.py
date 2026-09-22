@@ -60,6 +60,7 @@ class WorkflowConfig(TypedDict):
     workflow_id: str
     agent_privileges_names: list
     pre_approved_agent_privileges_names: list
+    allow_client_injected_mcp_tools: bool
     workflow_status: str
     mcp_enabled: bool
     incremental_checkpoints_enabled: bool
@@ -165,6 +166,9 @@ async def fetch_workflow_and_container_data(
         pre_approved_agent_privileges_names=workflow.get(
             "preApprovedAgentPrivilegesNames", []
         ),
+        allow_client_injected_mcp_tools=bool(
+            workflow.get("allowClientInjectedMcpTools", False)
+        ),
         workflow_status=workflow.get("statusName", ""),
         mcp_enabled=workflow.get("mcpEnabled", False),
         incremental_checkpoints_enabled=workflow.get(
@@ -217,6 +221,7 @@ def empty_workflow_config() -> WorkflowConfig:
         "workflow_id": "",
         "agent_privileges_names": [],
         "pre_approved_agent_privileges_names": [],
+        "allow_client_injected_mcp_tools": False,
         "allow_agent_to_request_user": False,
         "mcp_enabled": False,
         "incremental_checkpoints_enabled": False,
