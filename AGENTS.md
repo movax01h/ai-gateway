@@ -377,6 +377,10 @@ Use `glab` for MR/issue CLI operations (or the GitLab MCP tools, if available).
 - Worktrees usually check out a single branch, so local `main` may not exist.
   Diff against `origin/main` (for example `git fetch origin main`, then
   `git diff origin/main...HEAD`), and never assume `main` resolves locally.
+- Shell commands have a default timeout (often ~120s). Don't block a
+  single call with a long `sleep`. Instead, request a longer timeout if
+  your tool supports it, and poll in a bounded loop with an early break:
+  `for i in $(seq 1 5); do glab ci get ... | grep -q '^status:.*success' && break; sleep 30; done`.
 
 ### Branch Naming
 
