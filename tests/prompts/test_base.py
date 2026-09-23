@@ -1337,13 +1337,22 @@ configurable_unit_primitives:
             f"Expected model_id '{model_provider}:claude-3-haiku', got '{actual_model_id}'"
         )
 
+    _ANTHROPIC_ONLY_KWARGS_VALUES = {
+        "context_management": {
+            "edits": [
+                {
+                    "type": "clear_tool_uses_20250919",
+                    "trigger": {"type": "input_tokens", "value": 1000},
+                    "keep": {"type": "tool_uses", "value": 1},
+                }
+            ]
+        },
+        "thinking": {"type": "enabled", "budget_tokens": 1024},
+        "output_config": {"effort": "low"},
+    }
+
     @pytest.mark.parametrize(
-        (
-            "model_provider",
-            "model_params",
-            "prompt_params",
-            "expect_context_management",
-        ),
+        ("model_provider", "model_params", "expect_kwarg"),
         [
             (
                 ModelClassProvider.LITE_LLM,
@@ -1351,33 +1360,11 @@ configurable_unit_primitives:
                     model="claude-sonnet-4-5-20250929",
                     custom_llm_provider="anthropic",
                 ),
-                PromptParams(
-                    context_management={
-                        "edits": [
-                            {
-                                "type": "clear_tool_uses_20250919",
-                                "trigger": {"type": "input_tokens", "value": 1000},
-                                "keep": {"type": "tool_uses", "value": 1},
-                            }
-                        ]
-                    }
-                ),
                 True,
             ),
             (
                 ModelClassProvider.ANTHROPIC,
                 ChatAnthropicParams(),
-                PromptParams(
-                    context_management={
-                        "edits": [
-                            {
-                                "type": "clear_tool_uses_20250919",
-                                "trigger": {"type": "input_tokens", "value": 1000},
-                                "keep": {"type": "tool_uses", "value": 1},
-                            }
-                        ]
-                    }
-                ),
                 True,
             ),
             (
@@ -1386,17 +1373,6 @@ configurable_unit_primitives:
                     model="gpt-4",
                     custom_llm_provider="openai",
                 ),
-                PromptParams(
-                    context_management={
-                        "edits": [
-                            {
-                                "type": "clear_tool_uses_20250919",
-                                "trigger": {"type": "input_tokens", "value": 1000},
-                                "keep": {"type": "tool_uses", "value": 1},
-                            }
-                        ]
-                    }
-                ),
                 False,
             ),
             (
@@ -1404,30 +1380,40 @@ configurable_unit_primitives:
                 ChatLiteLLMParams(
                     model="some-model",
                 ),
-                PromptParams(
-                    context_management={
-                        "edits": [
-                            {
-                                "type": "clear_tool_uses_20250919",
-                                "trigger": {"type": "input_tokens", "value": 1000},
-                                "keep": {"type": "tool_uses", "value": 1},
-                            }
-                        ]
-                    }
-                ),
                 False,
             ),
         ],
     )
-    def test_context_management_filtered_by_provider(
+    @pytest.mark.parametrize(
+        "anthropic_only_kwarg", ["context_management", "thinking", "output_config"]
+    )
+    def test_anthropic_only_kwargs_filtered_by_provider(
         self,
         model_provider: ModelClassProvider,
-        prompt_config: PromptConfig,
+        model_config: ModelConfig,
+        prompt_name: str,
+        unit_primitive: GitLabUnitPrimitive,
+        prompt_template: dict[str, str | list[str]],
         model_metadata: TypeModelMetadata,
         model_factory: TypeModelFactory,
         model: FakeModel,
-        expect_context_management: bool,
+        anthropic_only_kwarg: str,
+        expect_kwarg: bool,
     ):
+        prompt_config = PromptConfig(
+            name=prompt_name,
+            model=model_config,
+            unit_primitive=unit_primitive,
+            prompt_template=prompt_template,
+            params=PromptParams.model_validate(
+                {
+                    anthropic_only_kwarg: self._ANTHROPIC_ONLY_KWARGS_VALUES[
+                        anthropic_only_kwarg
+                    ]
+                }
+            ),
+        )
+
         with mock.patch.object(FakeModel, "bind") as mock_bind:
             mock_bind.return_value = model
 
@@ -1439,10 +1425,10 @@ configurable_unit_primitives:
             )
 
         bind_kwargs = mock_bind.call_args.kwargs
-        if expect_context_management:
-            assert "context_management" in bind_kwargs
+        if expect_kwarg:
+            assert anthropic_only_kwarg in bind_kwargs
         else:
-            assert "context_management" not in bind_kwargs
+            assert anthropic_only_kwarg not in bind_kwargs
 
 
 @pytest.mark.skipif(

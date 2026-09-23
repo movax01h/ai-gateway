@@ -173,6 +173,33 @@ models:
       max_retries: 3
 ```
 
+### Thinking configuration for Claude models
+
+Claude models support extended thinking via the `thinking` and `output_config` fields in `prompt_params`. These are
+model-specific parameters — valid values and whether `thinking` is required at all differ between Claude versions —
+so they are configured per model entry in `models.yml` rather than per agent.
+
+```yaml
+models:
+  - name: "Claude Sonnet 4.6"
+    gitlab_identifier: "claude_sonnet_4_6"
+    model_class_provider: "anthropic"
+    params:
+      model: "claude-sonnet-4-6"
+    prompt_params:
+      thinking:
+        type: adaptive
+      output_config:
+        effort: medium
+```
+
+Both fields default to `None` and are excluded from the request when not set, leaving existing models unaffected.
+To experiment without touching `models.yml`, use the `AIGW_MODEL_SELECTION__PROMPT_PARAMS` environment variable:
+
+```shell
+AIGW_MODEL_SELECTION__PROMPT_PARAMS='{"claude_sonnet_4_6": {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}}}'
+```
+
 ### Context management in prompt_params
 
 > **Note:** Context management is currently in [Anthropic's public beta](https://platform.claude.com/docs/en/build-with-claude/context-editing).

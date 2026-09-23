@@ -589,6 +589,18 @@
           "default": null,
           "title": "Cache Control Injection Points"
         },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        },
         "context_management": {
           "anyOf": [
             {
@@ -602,17 +614,31 @@
           "default": null,
           "title": "Context Management"
         },
-        "model_id": {
+        "thinking": {
           "anyOf": [
             {
-              "type": "string"
+              "additionalProperties": true,
+              "type": "object"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Model Id"
+          "title": "Thinking"
+        },
+        "output_config": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Config"
         }
       },
       "title": "PromptParams",

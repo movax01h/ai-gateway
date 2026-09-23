@@ -79,11 +79,16 @@ class PromptParams(BaseModel):
     timeout: float | None = None
     vertex_location: str | None = None
     cache_control_injection_points: list[dict] | None = None
-    context_management: dict | None = None
     # Bedrock expects the inference profile / model ARN to be passed at
     # invocation time via model_id, not at client initialization.
     # See https://docs.litellm.ai/docs/providers/bedrock#set-via-model_id
     model_id: str | None = None
+
+    # Anthropic-only params, stripped for other providers in Prompt.__init__
+    # (see ANTHROPIC_ONLY_MODEL_KWARGS in ai_gateway/prompts/base.py).
+    context_management: dict | None = None
+    thinking: dict[str, Any] | None = None
+    output_config: dict[str, Any] | None = None
 
 
 class BaseLLMDefinition(BaseModel):
