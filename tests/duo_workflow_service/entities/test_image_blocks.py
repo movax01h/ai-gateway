@@ -9,6 +9,7 @@ from duo_workflow_service.entities.image_blocks import (
     block_text,
     content_as_text,
     image_content_block,
+    is_image_block,
     is_image_content_block,
     strip_image_payloads,
     with_block_text,
@@ -46,6 +47,45 @@ class TestIsImageContentBlock:
     )
     def test_only_inline_payloads_match(self, block, expected):
         assert is_image_content_block(block) is expected
+
+
+class TestIsImageBlock:
+    """The two standard shapes and nothing else.
+
+    ``is_image_content_block`` is the inline subset of this, so every block that carries a payload is also an image
+    block, and a ``type: image`` dict with its payload under any other key is neither.
+    """
+
+    @pytest.mark.parametrize(
+        "block,expected",
+        [
+            ({"type": "image", "base64": PNG_B64}, True),
+            ({"type": "image", "url": "https://example.com/a.png"}, True),
+            ({"type": "image", "base64": ""}, False),
+            ({"type": "image", "url": None}, False),
+            ({"type": "image", "url": ""}, False),
+            ({"type": "image", "source": {"type": "base64", "data": PNG_B64}}, False),
+            ({"type": "image"}, False),
+            ({"type": "text", "text": "hi"}, False),
+            ("plain string", False),
+            (None, False),
+        ],
+    )
+    def test_inline_or_url_and_nothing_else(self, block, expected):
+        assert is_image_block(block) is expected
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {"type": "image", "base64": PNG_B64},
+            {"type": "image", "url": "https://example.com/a.png"},
+            {"type": "image", "source": {"type": "base64", "data": PNG_B64}},
+            {"type": "text", "text": "hi"},
+        ],
+    )
+    def test_inline_blocks_are_a_subset_of_image_blocks(self, block):
+        if is_image_content_block(block):
+            assert is_image_block(block)
 
 
 class TestStripImagePayloads:

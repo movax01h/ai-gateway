@@ -1937,3 +1937,29 @@ class TestToolNodeToolLoopTracking:
         await tool_node.run(flow_state_with_tool_calls)
 
         assert tool_loop_stats.get() is None
+
+
+@pytest.mark.asyncio
+async def test_run_list_content_reaches_tool_message_as_list(
+    tool_node,
+    flow_state_with_tool_calls,
+    component_name,
+    mock_tool,
+    mock_prompt_security,
+):
+    """Multimodal tool results (content-block lists) must reach ``ToolMessage.content`` unflattened — the image path
+    depends on it."""
+    block_list = [
+        {"type": "text", "text": "Read image file: ./screenshot.png"},
+        {"type": "image", "base64": "aGVsbG8=", "mime_type": "image/png"},
+    ]
+    mock_tool.ainvoke.return_value = block_list
+    mock_prompt_security.side_effect = lambda **kwargs: kwargs["response"]
+
+    result = await tool_node.run(flow_state_with_tool_calls)
+
+    messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+    tool_message = messages[1]
+    assert isinstance(tool_message, ToolMessage)
+    assert tool_message.content == block_list
+    assert tool_message.content[1]["base64"] == "aGVsbG8="

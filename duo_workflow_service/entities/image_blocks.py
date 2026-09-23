@@ -61,6 +61,7 @@ __all__ = [
     "block_text",
     "content_as_text",
     "image_content_block",
+    "is_image_block",
     "is_image_content_block",
     "strip_image_payloads",
     "with_block_text",
@@ -91,17 +92,28 @@ def image_content_block(base64: str, mime_type: str) -> dict[str, Any]:
     return dict(create_image_block(base64=base64, mime_type=mime_type))
 
 
+def is_image_block(block: Any) -> bool:
+    """Return whether *block* is a standard image content block.
+
+    The two shapes LangChain defines: inline data under ``base64``, or a remote
+    ``url``, either one non-empty. Anything else that says ``type: image`` is
+    not one this service can recognise as an image, and nothing treats it as
+    one.
+    """
+    if not isinstance(block, dict) or block.get("type") != "image":
+        return False
+    url = block.get("url")
+    return bool(block.get("base64")) or (isinstance(url, str) and bool(url))
+
+
 def is_image_content_block(block: Any) -> bool:
     """Return whether *block* is an image content block carrying inline data.
 
-    Only inline payloads match. A block referencing a remote ``url`` costs
-    nothing to keep, so it is neither stripped nor charged the token estimate.
+    The subset of :func:`is_image_block` that has a payload. Only these are
+    stripped from history and charged the token estimate; a block referencing
+    a remote ``url`` costs nothing to keep.
     """
-    return (
-        isinstance(block, dict)
-        and block.get("type") == "image"
-        and bool(block.get("base64"))
-    )
+    return is_image_block(block) and bool(block.get("base64"))
 
 
 def strip_image_payloads(content: Any) -> Any:
