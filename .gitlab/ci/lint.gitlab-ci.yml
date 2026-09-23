@@ -105,3 +105,27 @@ lint:commit:
     - if: '$CI_MERGE_REQUEST_DIFF_BASE_SHA && $CI_MERGE_REQUEST_DRAFT == "true"'
       allow_failure: true
     - if: "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+
+lint:prompt_diff_comment:
+  # Posts (or updates) an MR comment with a unified diff between each newly
+  # added prompt version and its predecessor on the target branch, since the
+  # MR diff only shows the new file. Informational only: never blocks the MR.
+  extends: .poetry
+  stage: test
+  needs:
+    - install
+  allow_failure: true
+  variables:
+    # The project-level GITLAB_TOKEN is protected (unavailable in MR pipelines);
+    # reuse the Danger bot token, which already posts MR comments.
+    GITLAB_TOKEN: $DANGER_GITLAB_API_TOKEN
+  rules:
+    # Forks and security forks have no Danger token; skip instead of failing.
+    - if: "$DANGER_GITLAB_API_TOKEN == null"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "ai_gateway/prompts/definitions/**/*.jinja"
+        - "ai_gateway/prompts/definitions/**/*.yml"
+  script:
+    - poetry run python scripts/prompt_diff_comment.py
