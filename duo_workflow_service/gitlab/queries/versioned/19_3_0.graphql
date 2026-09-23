@@ -27,6 +27,11 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                     aiSettings {
                         promptInjectionProtectionLevel
                     }
+                    rootNamespace @gl_introduced(version: "19.4.0") {
+                        aiSettings {
+                            webSearchEnabled
+                        }
+                    }
                 }
             }
             namespaceId
@@ -37,6 +42,11 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
                 webUrl
                 aiSettings {
                     promptInjectionProtectionLevel
+                }
+                rootNamespace @gl_introduced(version: "19.4.0") {
+                    aiSettings {
+                        webSearchEnabled
+                    }
                 }
             }
             agentPrivilegesNames

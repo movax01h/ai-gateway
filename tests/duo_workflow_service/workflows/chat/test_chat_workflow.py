@@ -466,6 +466,7 @@ async def test_workflow_run(
                 agent_name_override=None,  # Default workflow has no override
                 compaction=ANY,
                 web_search_enabled=False,
+                web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
             )
 
@@ -556,6 +557,7 @@ async def test_workflow_run_with_agent_name_override(
                 agent_name_override="348/0",  # Should pass the override
                 compaction=ANY,
                 web_search_enabled=False,
+                web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
             )
 
@@ -706,10 +708,14 @@ def test_start_flow_tool_gated_by_feature_flag(workflow_with_project):
     "generic_gitlab_tools_enabled", [True, False], ids=["generic_tools", "simple_tools"]
 )
 @pytest.mark.parametrize("web_search_enabled", [True, False])
+@pytest.mark.parametrize("web_search_allowed_for_group", [True, False])
 def test_web_search_requested_when_opted_in(
-    generic_gitlab_tools_enabled, web_search_enabled, workflow_with_project
+    generic_gitlab_tools_enabled,
+    web_search_enabled,
+    web_search_allowed_for_group,
+    workflow_with_project,
 ):
-    """web_search follows the per-conversation opt-in, under either read-only tool set.
+    """web_search follows the per-conversation opt-in and the group grant, under either read-only tool set.
 
     Requesting it is necessary but not sufficient: ToolsRegistry enables it only for models without
     native web search, and `toolset` silently drops names that are not enabled. So omitting it when
@@ -722,11 +728,14 @@ def test_web_search_requested_when_opted_in(
     workflow_with_project._workflow_config = {
         **workflow_with_project._workflow_config,
         "web_search_enabled": web_search_enabled,
+        "web_search_allowed_for_group": web_search_allowed_for_group,
     }
 
     tools = workflow_with_project._get_tools()
 
-    assert ("web_search" in tools) is web_search_enabled
+    assert ("web_search" in tools) is (
+        web_search_enabled and web_search_allowed_for_group
+    )
 
 
 @pytest.mark.asyncio
@@ -2109,14 +2118,19 @@ class TestWebSearchTogglePropagation:
     """The toggle is re-read on every turn, so a mid-conversation change takes effect."""
 
     @pytest.mark.parametrize("toggle", [True, False])
+    @pytest.mark.parametrize("web_search_allowed_for_group", [True, False])
     def test_compile_passes_current_workflow_config_toggle_to_create_agent(
         self,
         workflow_with_project,
         mock_tools_registry,
         toggle,
+        web_search_allowed_for_group,
     ):
         workflow = workflow_with_project
-        workflow._workflow_config = {"web_search_enabled": toggle}
+        workflow._workflow_config = {
+            "web_search_enabled": toggle,
+            "web_search_allowed_for_group": web_search_allowed_for_group,
+        }
 
         with (
             patch("duo_workflow_service.workflows.chat.workflow.StateGraph"),
@@ -2128,6 +2142,10 @@ class TestWebSearchTogglePropagation:
             workflow._compile("Test goal", mock_tools_registry, MagicMock())
 
         assert mock_create_agent.call_args.kwargs["web_search_enabled"] is toggle
+        assert (
+            mock_create_agent.call_args.kwargs["web_search_allowed_for_group"]
+            is web_search_allowed_for_group
+        )
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\npixels"

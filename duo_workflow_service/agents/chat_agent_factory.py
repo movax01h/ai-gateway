@@ -56,12 +56,15 @@ def create_agent(
     agent_name_override: str | None = None,
     compaction: CompactionConfig | None = None,
     web_search_enabled: bool = False,
+    web_search_allowed_for_group: bool = False,
     tracker: ToolEventTracker | None = None,
 ) -> ChatAgent:
     # Use agent_name_override for chat-partial flows, default to "chat"
     agent_name = agent_name_override if agent_name_override else "chat"
 
-    web_search = WebSearchState.resolve(web_search_enabled)
+    web_search = WebSearchState.resolve(
+        user_toggle=web_search_enabled, group_allowed=web_search_allowed_for_group
+    )
 
     # Include web_search_options when the feature flag is on, the client can
     # render search results, AND the user enabled web search for this session.
