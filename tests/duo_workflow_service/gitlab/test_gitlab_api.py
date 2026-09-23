@@ -918,3 +918,62 @@ def test_extract_default_branch_from_project_repository(repository_str, expected
         }
 
     assert extract_default_branch_from_project_repository(workflow) == expected
+
+
+def _root_namespace(web_search_enabled):
+    settings = (
+        {} if web_search_enabled is None else {"webSearchEnabled": web_search_enabled}
+    )
+    return {"rootNamespace": {"aiSettings": settings}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "project_namespace, workflow_namespace, expected",
+    [
+        pytest.param(_root_namespace(True), None, True, id="group_allows"),
+        pytest.param(_root_namespace(False), None, False, id="group_forbids"),
+        pytest.param(
+            None, _root_namespace(False), False, id="falls_back_to_workflow_namespace"
+        ),
+        pytest.param(_root_namespace(None), None, False, id="field_missing"),
+        pytest.param(None, None, False, id="no_container"),
+    ],
+)
+async def test_fetch_workflow_web_search_allowed_for_group(
+    project_namespace, workflow_namespace, expected
+):
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test.git",
+                        "webUrl": "http://example.com/test",
+                        "namespace": project_namespace,
+                    },
+                    "namespaceId": None,
+                    "namespace": workflow_namespace,
+                    "webSearchEnabled": True,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    _, _, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["web_search_allowed_for_group"] is expected
+    assert workflow_config["web_search_enabled"] is True

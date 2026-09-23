@@ -17,17 +17,22 @@ class WebSearchState:
     """Supported AND the user has web search toggled on right now."""
 
     @classmethod
-    def resolve(cls, user_toggle: bool) -> "WebSearchState":
+    def resolve(
+        cls, user_toggle: bool, group_allowed: bool = False
+    ) -> "WebSearchState":
         """Resolve web-search availability for the current session.
 
         Args:
             user_toggle: Whether the user has web search toggled on for this request.
+            group_allowed: Whether the top-level group allows web search at all.
 
         Returns:
-            A state where `supported` reflects the feature flag and client capability,
-            and `active` additionally requires `user_toggle`.
+            A state where `supported` reflects the group setting, the feature flag and
+            the client capability, and `active` additionally requires `user_toggle`.
         """
-        supported = is_feature_enabled(
-            FeatureFlag.DAP_WEB_SEARCH
-        ) and is_client_capable("web_search")
+        supported = (
+            group_allowed
+            and is_feature_enabled(FeatureFlag.DAP_WEB_SEARCH)
+            and is_client_capable("web_search")
+        )
         return cls(supported=supported, active=supported and user_toggle)

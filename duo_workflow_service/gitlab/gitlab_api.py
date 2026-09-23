@@ -66,6 +66,7 @@ class WorkflowConfig(TypedDict):
     incremental_checkpoints_enabled: bool
     allow_agent_to_request_user: bool
     web_search_enabled: bool
+    web_search_allowed_for_group: bool
     gitlab_host: str
     first_checkpoint: Optional[Checkpoint]
     latest_checkpoint: Optional[Checkpoint]
@@ -73,6 +74,21 @@ class WorkflowConfig(TypedDict):
     archived: bool
     stalled: bool
     features: NotRequired[WorkflowFeatures]
+
+
+def _group_allows_web_search(project_data: dict, namespace_data: dict) -> bool:
+    """Web-search grant from the workflow's top-level group, off unless granted.
+
+    None means GitLab < 19.4, where an admin has no way to grant it at all.
+    """
+    for container in ((project_data.get("namespace") or {}), namespace_data):
+        allowed = ((container.get("rootNamespace") or {}).get("aiSettings") or {}).get(
+            "webSearchEnabled"
+        )
+        if allowed is not None:
+            return allowed
+
+    return False
 
 
 async def fetch_workflow_and_container_data(
@@ -176,6 +192,9 @@ async def fetch_workflow_and_container_data(
         ),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
         web_search_enabled=workflow.get("webSearchEnabled", False),
+        web_search_allowed_for_group=_group_allows_web_search(
+            project_data, namespace_data
+        ),
         first_checkpoint=workflow.get("firstCheckpoint", None),
         latest_checkpoint=workflow.get("latestCheckpoint", None),
         gitlab_host=gitlab_host,
@@ -233,4 +252,5 @@ def empty_workflow_config() -> WorkflowConfig:
         "archived": False,
         "stalled": False,
         "web_search_enabled": False,
+        "web_search_allowed_for_group": False,
     }

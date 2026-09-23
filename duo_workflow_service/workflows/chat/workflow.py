@@ -714,6 +714,8 @@ class Workflow(AbstractWorkflow):
 
         agents_toolset = tools_registry.toolset(tools + tools_registry.mcp_tool_names())
 
+        web_search_enabled, web_search_allowed_for_group = self._web_search_settings()
+
         self._agent: ChatAgent = create_agent(
             user=self._user,
             tools_registry=tools_registry,
@@ -725,7 +727,8 @@ class Workflow(AbstractWorkflow):
             system_template_override=self.system_template_override,
             agent_name_override=self._agent_name_override,
             compaction=CompactionConfig(trim_threshold=0.7),
-            web_search_enabled=self._workflow_config.get("web_search_enabled", False),
+            web_search_enabled=web_search_enabled,
+            web_search_allowed_for_group=web_search_allowed_for_group,
             tracker=self._tracker,
         )
 
@@ -759,6 +762,13 @@ class Workflow(AbstractWorkflow):
         graph.add_edge("run_tools", "agent")
 
         return graph.compile(checkpointer=checkpointer)
+
+    def _web_search_settings(self) -> tuple[bool, bool]:
+        """The per-conversation opt-in and the top-level group's grant, both off by default."""
+        return (
+            self._workflow_config.get("web_search_enabled", False),
+            self._workflow_config.get("web_search_allowed_for_group", False),
+        )
 
     def _get_tools(self):
         # Evaluate feature flag at runtime to determine which read-only tools to use
@@ -801,11 +811,12 @@ class Workflow(AbstractWorkflow):
             else []
         )
 
-        # The per-conversation opt-in gates the fallback tool just as it gates native
-        # `web_search_options`, so turning search off holds for every model.
+        # The opt-in and the group grant gate the fallback tool just as they gate
+        # native `web_search_options`, so turning search off holds for every model.
+        web_search_enabled, web_search_allowed_for_group = self._web_search_settings()
         web_search_tools = (
             CHAT_WEB_SEARCH_TOOLS
-            if self._workflow_config.get("web_search_enabled", False)
+            if web_search_enabled and web_search_allowed_for_group
             else []
         )
 

@@ -167,10 +167,11 @@ class TestCreateAgent:
         assert call_kwargs["bind_tools_params"] == {}
 
     @pytest.mark.parametrize(
-        "feature_enabled,client_capable,web_search_enabled,expected_params,"
-        "expected_state,test_description",
+        "feature_enabled,client_capable,web_search_enabled,web_search_allowed_for_group,"
+        "expected_params,expected_state,test_description",
         [
             (
+                True,
                 True,
                 True,
                 True,
@@ -182,12 +183,14 @@ class TestCreateAgent:
                 True,
                 True,
                 False,
+                True,
                 {},
                 WebSearchState(supported=True, active=False),
                 "feature and capability enabled but workflow toggle off",
             ),
             (
                 False,
+                True,
                 True,
                 True,
                 {},
@@ -198,6 +201,7 @@ class TestCreateAgent:
                 True,
                 False,
                 True,
+                True,
                 {},
                 WebSearchState(supported=False, active=False),
                 "client not capable",
@@ -206,9 +210,19 @@ class TestCreateAgent:
                 False,
                 False,
                 False,
+                True,
                 {},
                 WebSearchState(supported=False, active=False),
                 "all conditions disabled",
+            ),
+            (
+                True,
+                True,
+                True,
+                False,
+                {},
+                WebSearchState(supported=False, active=False),
+                "group forbids web search",
             ),
         ],
     )
@@ -230,13 +244,19 @@ class TestCreateAgent:
         feature_enabled,
         client_capable,
         web_search_enabled,
+        web_search_allowed_for_group,
         expected_params,
         expected_state,
         test_description,
     ):
         """Test that web_search_options requires feature flag, client capability, and workflow toggle."""
-        mock_is_feature_enabled.return_value = feature_enabled
-        mock_is_client_capable.return_value = client_capable
+        # Gate on the argument too, so asking for the wrong flag or capability fails here.
+        mock_is_feature_enabled.side_effect = lambda flag: (
+            feature_enabled and flag is FeatureFlag.DAP_WEB_SEARCH
+        )
+        mock_is_client_capable.side_effect = lambda capability: (
+            client_capable and capability == "web_search"
+        )
 
         agent = create_agent(
             user=user,
@@ -248,6 +268,7 @@ class TestCreateAgent:
             workflow_type=CategoryEnum.WORKFLOW_CHAT,
             system_template_override=None,
             web_search_enabled=web_search_enabled,
+            web_search_allowed_for_group=web_search_allowed_for_group,
         )
 
         assert isinstance(agent, ChatAgent)
@@ -260,14 +281,6 @@ class TestCreateAgent:
         assert agent.web_search == expected_state, (
             f"Failed for scenario: {test_description}"
         )
-
-        assert mock_is_feature_enabled.call_count == 1
-        mock_is_feature_enabled.assert_any_call(FeatureFlag.DAP_WEB_SEARCH)
-
-        if feature_enabled:
-            mock_is_client_capable.assert_called_once_with("web_search")
-        else:
-            mock_is_client_capable.assert_not_called()
 
     @pytest.mark.parametrize(
         "native_available,expected_params",
@@ -310,6 +323,7 @@ class TestCreateAgent:
             workflow_type=CategoryEnum.WORKFLOW_CHAT,
             system_template_override=None,
             web_search_enabled=True,
+            web_search_allowed_for_group=True,
         )
 
         call_kwargs = mock_local_prompt_registry.get_on_behalf.call_args.kwargs
