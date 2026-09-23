@@ -89,6 +89,9 @@ from duo_workflow_service.tools.mcp_tools import (
     McpToolConfig,
     convert_mcp_tools_to_configs,
 )
+from duo_workflow_service.tools.version_compatibility import (
+    strips_client_mcp_trust,
+)
 from duo_workflow_service.tracking import (
     MonitoringContext,
     current_monitoring_context,
@@ -100,6 +103,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
 )
+from lib.context.orbit import is_orbit_tool
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -350,6 +354,19 @@ class AbstractWorkflow(ABC):
             )
             self._first_response_metric_recorded = True
 
+    def _permitted_mcp_tools(self) -> list[McpToolConfig]:
+        if self._workflow_config.get("mcp_enabled", False):
+            return self._mcp_tools
+
+        if not strips_client_mcp_trust():
+            return []
+
+        return [
+            tool
+            for tool in self._mcp_tools
+            if tool.get("trusted", False) and is_orbit_tool(tool["llm_name"])
+        ]
+
     def _merge_jwt_governance_claims(self) -> None:
         if self._user.claims and self._user.claims.extra:
             raw = self._user.claims.extra.get("tool_access_policies")
@@ -532,11 +549,7 @@ class AbstractWorkflow(ABC):
                 gl_http_client=self._http_client,
                 project=self._project,
                 workflow_id=self._workflow_id,
-                mcp_tools=(
-                    self._mcp_tools
-                    if self._workflow_config.get("mcp_enabled", False)
-                    else []
-                ),
+                mcp_tools=self._permitted_mcp_tools(),
                 language_server_version=self._language_server_version,
                 denied_tools=self._denied_tools,
                 ask_tools=self._ask_tools,

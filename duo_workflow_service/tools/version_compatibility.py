@@ -24,6 +24,7 @@ GLQL_SCHEMA_ENDPOINT_VERSION = Version("19.3.0")
 AGENT_PLAN_READINESS_SCORE_VERSION = Version("19.4.0")
 LABELS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
 SUGGESTED_REVIEWERS_ENDPOINT_VERSION = Version("19.4.0")
+CLIENT_MCP_TRUST_STRIPPED_VERSION = Version("19.5.0")
 
 # Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
 # parse, such as a GDK's `19.3.0-pre-g1234abcd`.
@@ -55,6 +56,11 @@ def get_gitlab_version() -> Version:
         fallback_version=str(DEFAULT_FALLBACK_VERSION),
     )
     return DEFAULT_FALLBACK_VERSION
+
+
+def strips_client_mcp_trust() -> bool:
+    """Whether Workhorse clears the trusted flag on client-supplied MCP tools."""
+    return get_gitlab_version() >= CLIENT_MCP_TRUST_STRIPPED_VERSION
 
 
 def supports_hierarchy_widget() -> bool:

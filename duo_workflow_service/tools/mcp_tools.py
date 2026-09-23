@@ -131,6 +131,7 @@ class McpToolConfig(TypedDict):
     description: str
     args_schema: dict
     client_injected: bool
+    trusted: bool
 
 
 def convert_mcp_tools_to_configs(
@@ -162,7 +163,8 @@ def convert_mcp_tools_to_configs(
         except json.JSONDecodeError:
             args_schema = {}
 
-        is_trusted = getattr(tool, "trusted", False)
+        client_injected = force_client_injected or tool.client_injected
+        is_trusted = getattr(tool, "trusted", False) and not client_injected
         description = (
             tool.description
             if is_trusted
@@ -175,7 +177,8 @@ def convert_mcp_tools_to_configs(
                 llm_name=llm_name,
                 description=description,
                 args_schema=args_schema,
-                client_injected=force_client_injected or tool.client_injected,
+                client_injected=client_injected,
+                trusted=is_trusted,
             )
         )
 
