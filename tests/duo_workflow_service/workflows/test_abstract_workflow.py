@@ -430,7 +430,51 @@ async def test_set_action_response(workflow):
     )
 
 
+@pytest.mark.parametrize(
+    ("mcp_enabled", "trust_stripped", "expected_tools"),
+    [
+        (
+            True,
+            True,
+            ["orbit_invoke_command", "orbit_fake", "gitlab_search", "context7"],
+        ),
+        (
+            True,
+            False,
+            ["orbit_invoke_command", "orbit_fake", "gitlab_search", "context7"],
+        ),
+        (False, True, ["orbit_invoke_command"]),
+        (False, False, []),
+    ],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.strips_client_mcp_trust")
+def test_permitted_mcp_tools(
+    mock_strips_client_mcp_trust, user, mcp_enabled, trust_stripped, expected_tools
+):
+    mock_strips_client_mcp_trust.return_value = trust_stripped
+    mcp_tools = [
+        contract_pb2.McpTool(
+            name="orbit_invoke_command", inputSchema="{}", trusted=True
+        ),
+        contract_pb2.McpTool(name="orbit_fake", inputSchema="{}", trusted=False),
+        contract_pb2.McpTool(name="gitlab_search", inputSchema="{}", trusted=True),
+        contract_pb2.McpTool(name="context7", inputSchema="{}", trusted=False),
+    ]
+    workflow = MockWorkflow(
+        "id", {}, CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT, user, mcp_tools
+    )
+    workflow._workflow_config = {"mcp_enabled": mcp_enabled}
+
+    permitted = workflow._permitted_mcp_tools()
+
+    assert [tool["llm_name"] for tool in permitted] == expected_tools
+
+
 @pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.strips_client_mcp_trust",
+    return_value=True,
+)
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
@@ -439,6 +483,7 @@ async def test_compile_and_run_graph(
     mock_tools_registry,
     mock_gitlab_workflow,
     mock_convert_mcp_tools,
+    _mock_strips_client_mcp_trust,
     mock_fetch_workflow_and_container_data,
     project,
     mcp_enabled,
@@ -451,15 +496,35 @@ async def test_compile_and_run_graph(
     mock_checkpointer.initial_status_event = "START"
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
 
-    mcp_tool = MagicMock()
-    mock_convert_mcp_tools.return_value = [mcp_tool]
+    trusted_tool = {
+        "original_name": "orbit_invoke_command",
+        "llm_name": "orbit_invoke_command",
+        "description": "Invoke an Orbit command",
+        "args_schema": {},
+        "trusted": True,
+    }
+    gitlab_tool = {
+        "original_name": "gitlab_search",
+        "llm_name": "gitlab_search",
+        "description": "GitLab search",
+        "args_schema": {},
+        "trusted": True,
+    }
+    external_tool = {
+        "original_name": "context7_search",
+        "llm_name": "context7_search",
+        "description": "Search docs",
+        "args_schema": {},
+        "trusted": False,
+    }
+    mock_convert_mcp_tools.return_value = [trusted_tool, gitlab_tool, external_tool]
 
     workflow = MockWorkflow(
         "id",
         {},
         CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
         user,
-        [mcp_tool],
+        [MagicMock(), MagicMock(), MagicMock()],
     )
 
     # Run the method
@@ -478,7 +543,11 @@ async def test_compile_and_run_graph(
         gl_http_client=workflow._http_client,
         project=project,
         workflow_id="id",
-        mcp_tools=[mcp_tool] if mcp_enabled else [],
+        mcp_tools=(
+            [trusted_tool, gitlab_tool, external_tool]
+            if mcp_enabled
+            else [trusted_tool]
+        ),
         language_server_version=None,
         denied_tools=[],
         ask_tools=[],

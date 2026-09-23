@@ -80,12 +80,15 @@ def test_convert_mcp_tools_trusted_skips_warning():
 
     # Trusted tool should NOT have the warning
     assert result[0]["description"] == "GitLab search tool"
+    assert result[0]["trusted"] is True
 
     # Explicitly untrusted tool should have the warning
     assert result[1]["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nRandom tool"
+    assert result[1]["trusted"] is False
 
     # Default (trusted=False) should have the warning
     assert result[2]["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nDefault tool"
+    assert result[2]["trusted"] is False
 
 
 @pytest.mark.asyncio
