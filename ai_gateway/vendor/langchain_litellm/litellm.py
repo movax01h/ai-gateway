@@ -154,35 +154,138 @@ def _create_fireworks_retry_decorator(
 _SERVER_TOOL_USE_ID_PREFIX = "srvtoolu_"
 
 
-def _drop_server_tool_calls(
+def _tool_call_getter(tc: Any) -> Callable[..., Any]:
+    return tc.get if isinstance(tc, dict) else lambda a, d=None: getattr(tc, a, d)
+
+
+def _is_server_tool_call_id(tool_call_id: Any) -> bool:
+    return isinstance(tool_call_id, str) and tool_call_id.startswith(
+        _SERVER_TOOL_USE_ID_PREFIX
+    )
+
+
+def _server_tool_use_block(tool_call_id: str, name: Any, arguments: Any) -> dict:
+    try:
+        tool_input = json.loads(arguments) if arguments else {}
+    except (json.JSONDecodeError, TypeError):
+        tool_input = {}
+    return {
+        "type": "server_tool_use",
+        "id": tool_call_id,
+        "name": name or "web_search",
+        "input": tool_input if isinstance(tool_input, dict) else {},
+    }
+
+
+def _web_search_results(provider_specific_fields: Any) -> List[dict]:
+    if not isinstance(provider_specific_fields, dict):
+        return []
+    results = provider_specific_fields.get("web_search_results")
+    return [r for r in results if isinstance(r, dict)] if results else []
+
+
+def _split_server_tool_calls(
     raw_tool_calls: Sequence[Any],
-    _streamed_server_call_indices: Optional[set[int]] = None,
-) -> List[Any]:
-    """Drop tool calls the platform already ran server-side, so they are never dispatched."""
+) -> Tuple[List[Any], List[dict]]:
+    """Partition into client-dispatchable calls and Anthropic `server_tool_use` blocks."""
     client_tool_calls: List[Any] = []
+    server_blocks: List[dict] = []
 
     for tc in raw_tool_calls:
-        _get = tc.get if isinstance(tc, dict) else lambda a, d=None: getattr(tc, a, d)
+        _get = _tool_call_getter(tc)
         tool_call_id = _get("id")
-        index = _get("index")
-
-        if isinstance(tool_call_id, str) and tool_call_id.startswith(
-            _SERVER_TOOL_USE_ID_PREFIX
-        ):
-            if _streamed_server_call_indices is not None and isinstance(index, int):
-                _streamed_server_call_indices.add(index)
+        if not _is_server_tool_call_id(tool_call_id):
+            client_tool_calls.append(tc)
             continue
+        function = _get("function") or {}
+        _fget = _tool_call_getter(function)
+        server_blocks.append(
+            _server_tool_use_block(tool_call_id, _fget("name"), _fget("arguments"))
+        )
 
-        if (
-            _streamed_server_call_indices is not None
-            and isinstance(index, int)
-            and index in _streamed_server_call_indices
-        ):
+    return client_tool_calls, server_blocks
+
+
+def _server_tool_content(
+    text: Any, server_blocks: List[dict], results: List[dict]
+) -> Any:
+    """Anthropic's `(call, result)` pairs ahead of the text; LiteLLM concatenates all text, so the true position of each
+    call within it is already lost."""
+    if not server_blocks:
+        return text
+
+    results_by_use_id = {r["tool_use_id"]: r for r in results if r.get("tool_use_id")}
+    content: List[Any] = []
+    for block in server_blocks:
+        result = results_by_use_id.get(block["id"])
+        if result is None:
+            logger.warning("dropping server tool call without a result: %s", block["id"])
             continue
+        content.extend((block, result))
+    if not content:
+        return text
+    if text:
+        content.append({"type": "text", "text": text})
+    return content
 
-        client_tool_calls.append(tc)
 
-    return client_tool_calls
+class _ServerToolStream:
+    """Per-stream state: server calls arrive as tool-call chunks whose arguments are
+    split across deltas, and their results repeat in full on every later chunk."""
+
+    def __init__(self) -> None:
+        self._calls: Dict[int, dict] = {}
+        self._emitted: set[str] = set()
+
+    def split_tool_calls(self, raw_tool_calls: Sequence[Any]) -> List[Any]:
+        """Accumulate server calls into this stream's state, return the client ones."""
+        client_tool_calls: List[Any] = []
+
+        for tc in raw_tool_calls:
+            _get = _tool_call_getter(tc)
+            tool_call_id = _get("id")
+            index = _get("index")
+            known = isinstance(index, int) and index in self._calls
+
+            if not (_is_server_tool_call_id(tool_call_id) or known):
+                client_tool_calls.append(tc)
+                continue
+            if not isinstance(index, int):
+                continue
+
+            # Continuation chunks carry no id and only a slice of the arguments.
+            call = self._calls.setdefault(index, {"id": tool_call_id, "arguments": ""})
+            function = _get("function") or {}
+            _fget = _tool_call_getter(function)
+            if not call.get("name"):
+                call["name"] = _fget("name")
+            call["arguments"] += _fget("arguments") or ""
+
+        return client_tool_calls
+
+    def content_blocks(self, provider_specific_fields: Any) -> List[dict]:
+        """Emit each `(call, result)` pair once, as soon as its result shows up."""
+        results_by_use_id = {
+            r["tool_use_id"]: r
+            for r in _web_search_results(provider_specific_fields)
+            if r.get("tool_use_id")
+        }
+        blocks: List[dict] = []
+
+        for call in self._calls.values():
+            tool_call_id = call["id"]
+            result = results_by_use_id.get(tool_call_id)
+            if result is None or tool_call_id in self._emitted:
+                continue
+            self._emitted.add(tool_call_id)
+            blocks.append(
+                _server_tool_use_block(
+                    tool_call_id, call.get("name"), call["arguments"]
+                )
+            )
+            blocks.append(result)
+
+        return blocks
 
 
 def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
@@ -198,9 +301,17 @@ def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
         if _dict.get("function_call"):
             additional_kwargs["function_call"] = dict(_dict["function_call"])
 
-        client_tool_calls = _drop_server_tool_calls(_dict.get("tool_calls") or [])
+        client_tool_calls, server_blocks = _split_server_tool_calls(
+            _dict.get("tool_calls") or []
+        )
         if client_tool_calls:
             additional_kwargs["tool_calls"] = client_tool_calls
+
+        content = _server_tool_content(
+            content,
+            server_blocks,
+            _web_search_results(_dict.get("provider_specific_fields")),
+        )
 
         # Preserve reasoning_content so it survives the inbound (non-streaming)
         # conversion and remains available for subsequent turns.  Providers such
@@ -223,7 +334,7 @@ def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
 def _convert_delta_to_message_chunk(
     delta: Union[Delta, Dict[str, Any]],
     default_class: Type[BaseMessageChunk],
-    _streamed_server_call_indices: Optional[set[int]] = None,
+    server_tools: _ServerToolStream,
 ) -> BaseMessageChunk:
     # Handle both Delta objects and dicts
     if isinstance(delta, dict):
@@ -232,12 +343,14 @@ def _convert_delta_to_message_chunk(
         function_call = delta.get("function_call")
         raw_tool_calls = delta.get("tool_calls")
         reasoning_content = delta.get("reasoning_content")
+        provider_specific_fields = delta.get("provider_specific_fields")
     else:
         role = delta.role
         content = delta.content or ""
         function_call = delta.function_call
         raw_tool_calls = delta.tool_calls
         reasoning_content = getattr(delta, "reasoning_content", None)
+        provider_specific_fields = getattr(delta, "provider_specific_fields", None)
 
     additional_kwargs: Dict[str, Any]
     if function_call:
@@ -251,7 +364,11 @@ def _convert_delta_to_message_chunk(
     else:
         additional_kwargs = {}
 
-    raw_tool_calls = _drop_server_tool_calls(raw_tool_calls or [], _streamed_server_call_indices)
+    raw_tool_calls = server_tools.split_tool_calls(raw_tool_calls or [])
+    blocks = server_tools.content_blocks(provider_specific_fields)
+    if blocks:
+        # Text deltas stay bare strings; the merged list keeps both in order.
+        content = [*blocks, content] if content else blocks
 
     tool_call_chunks = []
     if raw_tool_calls:
@@ -685,7 +802,7 @@ class ChatLiteLLM(BaseChatModel):
         params = {**params, **kwargs, "stream": True}
         params["stream_options"] = self.stream_options
         default_chunk_class = AIMessageChunk
-        _streamed_server_call_indices: set[int] = set()
+        server_tools = _ServerToolStream()
         for chunk in self.completion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         ):
@@ -698,7 +815,7 @@ class ChatLiteLLM(BaseChatModel):
                 continue
             delta = chunk["choices"][0]["delta"]
             chunk = _convert_delta_to_message_chunk(
-                delta, default_chunk_class, _streamed_server_call_indices
+                delta, default_chunk_class, server_tools
             )
             if usage_metadata and isinstance(chunk, AIMessageChunk):
                 chunk.usage_metadata = usage_metadata
@@ -733,8 +850,8 @@ class ChatLiteLLM(BaseChatModel):
 
         default_chunk_class: Type[BaseMessageChunk] = AIMessageChunk
         added_model_name = False
-        # Per-stream, never shared: identifies continuation chunks, which carry no id.
-        _streamed_server_call_indices: set[int] = set()
+        # Per-stream, never shared: continuation chunks carry no id, results repeat.
+        server_tools = _ServerToolStream()
         async for raw_chunk in await self.acompletion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         ):
@@ -753,7 +870,7 @@ class ChatLiteLLM(BaseChatModel):
             delta = raw_chunk["choices"][0]["delta"]
             usage = raw_chunk.get("usage", {})
             chunk = _convert_delta_to_message_chunk(
-                delta, default_chunk_class, _streamed_server_call_indices
+                delta, default_chunk_class, server_tools
             )
             if isinstance(chunk, AIMessageChunk):
                 if not added_model_name:
