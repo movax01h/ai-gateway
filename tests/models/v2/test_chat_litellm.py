@@ -14,7 +14,7 @@ from langchain_core.messages import (
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_core.runnables import Runnable
-from litellm.types.utils import PromptTokensDetailsWrapper
+from litellm.types.utils import Delta, PromptTokensDetailsWrapper
 
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
@@ -33,8 +33,9 @@ from ai_gateway.vendor.langchain_litellm.litellm import (
     _convert_dict_to_message,
     _convert_message_to_dict,
     _create_usage_metadata,
-    _drop_server_tool_calls,
     _get_attr_or_key,
+    _ServerToolStream,
+    _split_server_tool_calls,
 )
 
 
@@ -1543,7 +1544,7 @@ class TestUserIdentityHeader:
         assert "extra_headers" not in call_kwargs
 
 
-# --- Server-side tool call filtering ---
+# --- Server-side tool calls: split off the client ones, surface as content blocks ---
 
 SERVER_TOOL_ID = "srvtoolu_01ABC"
 CLIENT_TOOL_ID = "toolu_01XYZ"
@@ -1581,48 +1582,85 @@ def continuation_chunk(index, arguments):
     }
 
 
-class TestDropServerToolCalls:
-    def test_client_tool_call_is_kept(self):
-        assert _drop_server_tool_calls([client_tool_call()]) == [client_tool_call()]
+def web_search_result(tool_use_id=SERVER_TOOL_ID, url="https://x"):
+    return {
+        "type": "web_search_tool_result",
+        "tool_use_id": tool_use_id,
+        "content": [{"type": "web_search_result", "url": url, "title": "X"}],
+    }
 
-    def test_server_tool_call_is_dropped(self):
-        assert _drop_server_tool_calls([server_tool_call()]) == []
+
+def server_tool_use_block(query="gitlab 18.9", tool_use_id=SERVER_TOOL_ID):
+    return {
+        "type": "server_tool_use",
+        "id": tool_use_id,
+        "name": "web_search",
+        "input": {"query": query},
+    }
+
+
+class TestSplitServerToolCalls:
+    def test_client_tool_call_is_kept(self):
+        assert _split_server_tool_calls([client_tool_call()]) == (
+            [client_tool_call()],
+            [],
+        )
+
+    def test_server_tool_call_becomes_a_content_block(self):
+        call = server_tool_call(arguments='{"query":"gitlab 18.9"}')
+
+        assert _split_server_tool_calls([call]) == ([], [server_tool_use_block()])
+
+    @pytest.mark.parametrize("arguments", ["", "not json", "[1,2]"])
+    def test_unusable_arguments_yield_an_empty_input(self, arguments):
+        _, blocks = _split_server_tool_calls([server_tool_call(arguments=arguments)])
+
+        assert blocks[0]["input"] == {}
 
     def test_pydantic_tool_call_objects(self):
         """Non-streaming responses carry LiteLLM pydantic objects rather than dicts."""
         server = SimpleNamespace(id=SERVER_TOOL_ID, index=0)
         client = SimpleNamespace(id=CLIENT_TOOL_ID, index=1)
 
-        assert _drop_server_tool_calls([server, client]) == [client]
+        client_calls, blocks = _split_server_tool_calls([server, client])
 
-    def test_streaming_drops_continuation_of_a_server_call(self):
-        indices: set[int] = set()
-        _drop_server_tool_calls([server_tool_call(index=1)], indices)
-
-        assert (
-            _drop_server_tool_calls([continuation_chunk(1, '{"query":"x"}')], indices)
-            == []
-        )
-
-    def test_streaming_keeps_continuation_of_a_client_call(self):
-        indices: set[int] = set()
-        _drop_server_tool_calls([server_tool_call(index=1)], indices)
-        _drop_server_tool_calls([client_tool_call(index=2)], indices)
-
-        continuation = continuation_chunk(2, '{"id":5}')
-
-        assert _drop_server_tool_calls([continuation], indices) == [continuation]
+        assert client_calls == [client]
+        assert blocks[0]["id"] == SERVER_TOOL_ID
 
 
 class TestConvertDictToMessage:
-    def test_server_tool_call_is_not_surfaced(self):
+    def test_server_tool_call_and_result_become_content_blocks(self):
         message = _convert_dict_to_message(
-            {"role": "assistant", "content": "done", "tool_calls": [server_tool_call()]}
+            {
+                "role": "assistant",
+                "content": "done",
+                "tool_calls": [server_tool_call(arguments='{"query":"gitlab 18.9"}')],
+                "provider_specific_fields": {
+                    "web_search_results": [web_search_result()]
+                },
+            }
         )
 
         assert isinstance(message, AIMessage)
         assert message.tool_calls == []
         assert "tool_calls" not in message.additional_kwargs
+        assert message.content == [
+            server_tool_use_block(),
+            web_search_result(),
+            {"type": "text", "text": "done"},
+        ]
+
+    def test_server_tool_call_without_a_result_is_dropped(self):
+        message = _convert_dict_to_message(
+            {"role": "assistant", "content": "text", "tool_calls": [server_tool_call()]}
+        )
+
+        assert message.content == "text"
+
+    def test_content_stays_a_string_without_server_tools(self):
+        message = _convert_dict_to_message({"role": "assistant", "content": "done"})
+
+        assert message.content == "done"
 
     def test_client_tool_call_is_preserved(self):
         message = _convert_dict_to_message(
@@ -1637,39 +1675,88 @@ class TestConvertDictToMessage:
         assert message.tool_calls[0]["args"] == {"id": 5}
 
 
-class TestConvertDeltaToMessageChunk:
-    def test_streamed_server_tool_call_is_suppressed_across_merge(self):
-        indices: set[int] = set()
-        deltas = [
-            {"tool_calls": [server_tool_call(index=1)]},
-            {"tool_calls": [continuation_chunk(1, '{"query":"gitlab ')]},
-            {"tool_calls": [continuation_chunk(1, '18.9"}')]},
-            {"content": "Based on my search"},
-        ]
+def _merge_deltas(deltas, server_tools=None):
+    server_tools = server_tools or _ServerToolStream()
+    merged = None
+    for delta in deltas:
+        chunk = _convert_delta_to_message_chunk(delta, AIMessageChunk, server_tools)
+        merged = chunk if merged is None else merged + chunk
+    return merged
 
-        merged = None
-        for delta in deltas:
-            chunk = _convert_delta_to_message_chunk(delta, AIMessageChunk, indices)
-            merged = chunk if merged is None else merged + chunk
+
+class TestConvertDeltaToMessageChunk:
+    def test_streamed_server_tool_call_lands_between_the_text_runs(self):
+        results = {"web_search_results": [web_search_result()]}
+        merged = _merge_deltas(
+            [
+                {"content": "Let me look."},
+                {"tool_calls": [server_tool_call(index=1)]},
+                {"tool_calls": [continuation_chunk(1, '{"query":"gitlab ')]},
+                {"tool_calls": [continuation_chunk(1, '18.9"}')]},
+                # The cumulative results repeat on every later chunk.
+                {"provider_specific_fields": results},
+                {"content": "Based on my search", "provider_specific_fields": results},
+            ]
+        )
 
         assert merged.tool_calls == []
         assert merged.additional_kwargs == {}
-        assert merged.content == "Based on my search"
-
-    def test_streamed_client_tool_call_survives_merge(self):
-        indices: set[int] = set()
-        deltas = [
-            {"tool_calls": [server_tool_call(index=1)]},
-            {"tool_calls": [continuation_chunk(1, '{"query":"x"}')]},
-            {"tool_calls": [client_tool_call(index=2)]},
-            {"tool_calls": [continuation_chunk(2, '{"id":')]},
-            {"tool_calls": [continuation_chunk(2, "5}")]},
+        assert merged.content == [
+            "Let me look.",
+            server_tool_use_block(),
+            web_search_result(),
+            "Based on my search",
         ]
 
-        merged = None
-        for delta in deltas:
-            chunk = _convert_delta_to_message_chunk(delta, AIMessageChunk, indices)
-            merged = chunk if merged is None else merged + chunk
+    def test_name_from_a_later_chunk_is_kept(self):
+        results = {"web_search_results": [web_search_result()]}
+        merged = _merge_deltas(
+            [
+                {"tool_calls": [server_tool_call(index=1, name=None)]},
+                {"tool_calls": [server_tool_call(index=1, tool_call_id=None)]},
+                {"tool_calls": [continuation_chunk(1, '{"query":"gitlab 18.9"}')]},
+                {"provider_specific_fields": results},
+            ]
+        )
+
+        assert merged.content[-2:] == [server_tool_use_block(), web_search_result()]
+
+    def test_delta_objects_are_read_like_dicts(self):
+        """Some providers stream LiteLLM `Delta` objects rather than dicts."""
+        results = {"web_search_results": [web_search_result()]}
+        merged = _merge_deltas(
+            [
+                Delta(role="assistant", content="", tool_calls=[server_tool_call()]),
+                Delta(
+                    role="assistant", content="done", provider_specific_fields=results
+                ),
+            ]
+        )
+
+        assert merged.content[-3:] == [
+            {**server_tool_use_block(), "input": {}},
+            web_search_result(),
+            "done",
+        ]
+
+    def test_server_tool_call_without_an_index_is_ignored(self):
+        stream = _ServerToolStream()
+
+        assert stream.split_tool_calls([server_tool_call(index=None)]) == []
+        assert (
+            stream.content_blocks({"web_search_results": [web_search_result()]}) == []
+        )
+
+    def test_streamed_client_tool_call_survives_merge(self):
+        merged = _merge_deltas(
+            [
+                {"tool_calls": [server_tool_call(index=1)]},
+                {"tool_calls": [continuation_chunk(1, '{"query":"x"}')]},
+                {"tool_calls": [client_tool_call(index=2)]},
+                {"tool_calls": [continuation_chunk(2, '{"id":')]},
+                {"tool_calls": [continuation_chunk(2, "5}")]},
+            ]
+        )
 
         assert [call["name"] for call in merged.tool_calls] == ["get_issue"]
         assert merged.tool_calls[0]["args"] == {"id": 5}
