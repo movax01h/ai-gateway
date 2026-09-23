@@ -733,6 +733,9 @@ class BasePromptCallbackHandler:
         """
 
 
+ANTHROPIC_ONLY_MODEL_KWARGS = ("context_management", "thinking", "output_config")
+
+
 class Prompt(RunnableBinding[Any, BaseMessage]):
     name: str
     model_provider: str
@@ -765,10 +768,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             config.params, model_metadata, config.prompt_template, model_provider
         )
 
-        if "context_management" in model_kwargs and not self._is_anthropic_provider(
-            model_provider, config.model.params
-        ):
-            model_kwargs.pop("context_management")
+        if not self._is_anthropic_provider(model_provider, config.model.params):
+            for key in ANTHROPIC_ONLY_MODEL_KWARGS:
+                model_kwargs.pop(key, None)
 
         model = self._build_model(
             model_factory,
