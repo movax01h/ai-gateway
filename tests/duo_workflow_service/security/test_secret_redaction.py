@@ -1,10 +1,14 @@
 # pylint: disable=import-outside-toplevel
 """Tests for the secret_redaction module."""
 
+import json
+from unittest.mock import patch
+
 import pytest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
+from duo_workflow_service.entities.image_blocks import image_content_block
 from duo_workflow_service.security.secret_redaction import (
     REDACTED_PLACEHOLDER,
     redact_secrets,
@@ -609,3 +613,152 @@ class TestDataclassInstances:
         assert REDACTED_PLACEHOLDER in messages[0].content
         assert messages[1].content == "clean message"
         assert REDACTED_PLACEHOLDER in messages[2].content
+
+
+class TestImageContentBlockSkip:
+    """One value is skipped: the ``base64`` payload of a block this service built, when it is a large string.
+
+    Pattern detectors cannot match inside pixel data and scanning megabytes of it is pure overhead. The test is
+    provenance rather than shape, so a secret cannot earn the exemption by wearing a ``base64`` key; everything else,
+    including every sibling key of the block itself, a shorter payload and a structured one, is still scanned.
+
+    Every assertion here uses a payload that *contains a detectable token*, because that is the only way to observe
+    the skip: a scanned payload with no match comes back as the same object, so identity alone proves nothing.
+    """
+
+    TOKEN = "glpat-AAAAABBBBCCCCDDDDEEEE"
+    # Long enough to be exempt, and carrying a token so a scan would rewrite it.
+    PAYLOAD = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" * 200 + TOKEN
+    IMAGE_BLOCK = image_content_block(base64=PAYLOAD, mime_type="image/png")
+    LOOKALIKE = {"type": "image", "base64": PAYLOAD, "mime_type": "image/png"}
+
+    def test_a_large_payload_we_built_is_not_scanned(self):
+        result = redact_secrets(self.IMAGE_BLOCK, tool_name="read_file")
+
+        assert result["base64"] == self.PAYLOAD
+        assert self.TOKEN in result["base64"]
+
+    def test_a_lookalike_block_is_scanned(self):
+        """The exemption's whole point: an identical-looking dict we did not build gets no exemption.
+
+        Without this, any value under a ``base64`` key in a dict claiming ``type: image`` skipped scanning, and the
+        only thing standing between that and a checkpoint was the stripper running on every path.
+        """
+        result = redact_secrets(self.LOOKALIKE, tool_name="read_file")
+
+        assert result["base64"] != self.PAYLOAD
+        assert self.TOKEN not in result["base64"]
+        assert REDACTED_PLACEHOLDER in result["base64"]
+
+    @pytest.mark.parametrize("mime_type", ["image/png", "image/gif", "image/avif", ""])
+    def test_the_skip_does_not_depend_on_the_declared_type(self, mime_type):
+        """A content check tied to the recogniser table made any type outside it fall back to scanning the whole
+        payload: roughly 930 ms for 1 MB on a laptop, against 0.03 ms for this check."""
+        block = image_content_block(base64=self.PAYLOAD, mime_type=mime_type)
+
+        result = redact_secrets(block, tool_name="read_file")
+
+        assert self.TOKEN in result["base64"]
+
+    def test_a_short_payload_is_scanned(self):
+        """The exemption is for megabytes of pixel data, so a value too small to be an image is scanned."""
+        block = image_content_block(base64=self.TOKEN, mime_type="image/png")
+
+        result = redact_secrets(block, tool_name="read_file")
+
+        assert result["base64"] == REDACTED_PLACEHOLDER
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"nested": f"token {TOKEN}"},
+            [f"token {TOKEN}"],
+            {"deeper": {"nested": f"token {TOKEN}"}},
+        ],
+    )
+    def test_a_structured_payload_is_scanned(self, payload):
+        # Pixel data is a string. Skipping a dict or a list here would leave a
+        # whole subtree unscanned, which is not what the exemption is for.
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+        block["base64"] = payload  # mutate, not spread: a spread is a plain dict
+
+        result = redact_secrets(block, tool_name="read_file")
+
+        assert self.TOKEN not in json.dumps(result)
+
+    def test_sibling_keys_of_an_image_block_are_still_redacted(self):
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+        block["caption"] = f"token: {self.TOKEN}"
+
+        result = redact_secrets(block, tool_name="read_file")
+
+        assert REDACTED_PLACEHOLDER in result["caption"]
+        assert self.TOKEN not in result["caption"]
+        assert result["base64"] == self.PAYLOAD
+
+    def test_sibling_text_in_same_list_still_redacted(self):
+        secret_text = {"type": "text", "text": f"token: {self.TOKEN}"}
+
+        result = redact_secrets([secret_text, self.IMAGE_BLOCK], tool_name="read_file")
+
+        assert REDACTED_PLACEHOLDER in result[0]["text"]
+        assert self.TOKEN not in result[0]["text"]
+        assert result[1]["base64"] == self.PAYLOAD
+
+    def test_ui_redaction_also_skips_image_payloads(self):
+        # The UI detector set adds entropy detectors, which is what would
+        # rewrite a base64 payload into [REDACTED] on a card.
+        result = redact_secrets_for_ui(self.IMAGE_BLOCK, tool_name="read_file")
+
+        assert result["base64"] == self.PAYLOAD
+        assert self.TOKEN in result["base64"]
+
+    @pytest.mark.parametrize("extra_keys", [{"type": "text"}, {}])
+    def test_base64_key_outside_an_image_block_is_still_scanned(self, extra_keys):
+        block = {"base64": self.PAYLOAD, **extra_keys}
+
+        result = redact_secrets(block, tool_name="read_file")
+
+        assert self.TOKEN not in result["base64"]
+
+    def test_non_image_dict_with_base64_like_value_still_scanned(self):
+        data = {"type": "config", "value": f"token: {self.TOKEN}"}
+
+        result = redact_secrets(data, tool_name="read_file")
+
+        assert REDACTED_PLACEHOLDER in result["value"]
+
+    def test_a_deserialised_copy_of_our_block_is_scanned(self):
+        """Provenance cannot be forged from data.
+
+        The mark is the block's type and JSON has no way to spell one, so a block that arrives as JSON is scanned even
+        when it equals ours field for field.
+        """
+        forged = json.loads(json.dumps(self.IMAGE_BLOCK))
+        assert forged == self.IMAGE_BLOCK
+
+        result = redact_secrets(forged, tool_name="read_file")
+
+        assert self.TOKEN not in result["base64"]
+        assert REDACTED_PLACEHOLDER in result["base64"]
+
+    def test_the_skip_is_logged(self):
+        """The one unscanned value leaves a trace, so it can be told apart from a scanned value that matched nothing."""
+        with patch("duo_workflow_service.security.secret_redaction.log") as log:
+            redact_secrets(self.IMAGE_BLOCK, tool_name="read_file")
+
+        log.debug.assert_called_once()
+        assert log.debug.call_args.kwargs == {
+            "tool_name": "read_file",
+            "key": "base64",
+            "mime_type": "image/png",
+            "payload_len": len(self.PAYLOAD),
+        }
+        log.warning.assert_not_called()
+
+    def test_a_scanned_lookalike_is_not_logged_as_skipped(self):
+        with patch("duo_workflow_service.security.secret_redaction.log") as log:
+            redact_secrets(self.LOOKALIKE, tool_name="read_file")
+
+        log.debug.assert_not_called()
+        log.warning.assert_called_once()  # the token inside it was found and redacted

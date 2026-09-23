@@ -1,4 +1,5 @@
 import base64
+import copy
 import json
 
 import pytest
@@ -11,6 +12,7 @@ from duo_workflow_service.entities.image_blocks import (
     image_content_block,
     is_image_block,
     is_image_content_block,
+    is_internal_image_block,
     strip_image_payloads,
     with_block_text,
 )
@@ -333,3 +335,90 @@ class TestBlockText:
             "cache_control": {"type": "ephemeral"},
         }
         assert block["text"] == "old"
+
+
+class TestInternalImageBlock:
+    """Provenance, where :func:`is_image_content_block` reports shape.
+
+    Only one consumer needs the difference: the redaction exemption, which skips scanning a payload and so must not be
+    satisfiable by a dict that merely looks the part.
+    """
+
+    PAYLOAD = "iVBORw0KGgo" + "A" * 64
+
+    def test_the_constructor_marks_its_own_blocks(self):
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        assert is_internal_image_block(block) is True
+
+    def test_a_hand_built_lookalike_is_not_internal(self):
+        lookalike = {
+            "type": "image",
+            "base64": self.PAYLOAD,
+            "mime_type": "image/png",
+        }
+
+        assert is_internal_image_block(lookalike) is False
+
+    @pytest.mark.parametrize("field, value", [("base64", ""), ("type", "text")])
+    def test_the_mark_without_the_shape_is_not_internal(self, field, value):
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+        block[field] = value
+
+        assert is_internal_image_block(block) is False
+
+    @pytest.mark.parametrize(
+        "copy_it", [dict, lambda b: {**b}], ids=["dict()", "spread"]
+    )
+    def test_a_copy_with_identical_contents_is_not_internal(self, copy_it):
+        """The mark is the type, not the contents.
+
+        A rebuilt dict is scanned again, which is the safe direction.
+        """
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        copied = copy_it(block)
+
+        assert copied == block
+        assert is_internal_image_block(copied) is False
+
+    def test_the_mark_survives_deepcopy(self):
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        assert is_internal_image_block(copy.deepcopy(block)) is True
+
+    def test_the_block_is_standard_shaped(self):
+        """No marker key: the block is the LangChain shape byte for byte and serialises as a plain dict."""
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        assert set(block) <= {"type", "id", "base64", "mime_type"}
+        assert json.loads(json.dumps(block)) == block
+
+    def test_a_json_round_trip_loses_the_mark(self):
+        """A block that arrives as data cannot be internal, however it was produced.
+
+        JSON has no way to spell a type, so a payload deserialised from a tool server, a file or a checkpoint is scanned
+        like any other dict even when it equals our own block field for field.
+        """
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        round_tripped = json.loads(json.dumps(block))
+
+        assert round_tripped == block
+        assert is_internal_image_block(round_tripped) is False
+
+    def test_the_shape_check_still_matches_a_lookalike(self):
+        """The stripper and the token counter keep the loose check deliberately.
+
+        Stripping a lookalike from a checkpoint, or charging it the image token estimate, is protective. Only skipping a
+        secret scan is unsafe, so only that consumer asks for provenance.
+        """
+        lookalike = {
+            "type": "image",
+            "base64": self.PAYLOAD,
+            "mime_type": "image/png",
+        }
+
+        assert is_image_content_block(lookalike) is True
+        (stripped,) = strip_image_payloads([lookalike])
+        assert stripped["text"] == "[image/png omitted from history]"
