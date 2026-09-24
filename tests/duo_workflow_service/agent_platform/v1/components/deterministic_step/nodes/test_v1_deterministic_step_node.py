@@ -201,6 +201,13 @@ class TestDeterministicStepNode:
 
         result = await deterministic_step_node.run(workflow_state)
 
+        # The scanner runs on the rendered text, so the payload never reaches
+        # HiddenLayer either: a blocking INTERRUPT scan would otherwise carry
+        # the whole image as one string.
+        scanned = mock_prompt_security.call_args.kwargs["response"]
+        assert isinstance(scanned, str)
+        assert payload not in scanned
+
         stored = result[FlowStateKeys.CONTEXT]["responses"]
         assert stored == (
             "Read image file: ./shot.png (image/png, 3 KB). The image follows.\n"

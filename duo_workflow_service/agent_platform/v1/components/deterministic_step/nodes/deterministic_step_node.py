@@ -70,9 +70,6 @@ class DeterministicStepNode:
             response = await self._execute_tool(
                 tool=self._validated_tool, tool_call_args=tool_call_args
             )
-            # This result is stored as plain state, not as a message, so the
-            # checkpoint encoder would not strip an image payload from it.
-            response = render_image_blocks_as_text(response)
 
             if not isinstance(response, (str, list, dict)):
                 raise ValueError(
@@ -129,6 +126,13 @@ class DeterministicStepNode:
             tool_name=tool.name, flow_type=self._tracker._flow_type.value
         ):
             tool_call_result = await tool.ainvoke(tool_call_args)
+
+        # This result is stored as plain state, not as a message, so the
+        # checkpoint encoder would not strip an image payload from it. Rendering
+        # before the scan also keeps the base64 out of the prompt-injection
+        # scanner: it sees the lead-in and the placeholder, which is all the
+        # text there is.
+        tool_call_result = render_image_blocks_as_text(tool_call_result)
 
         set_hidden_layer_log_context(self._tool_name, tool_call_args)
         trust_level = getattr(tool, "trust_level", None)
