@@ -19,6 +19,9 @@ MAX_BUFFER_BYTES = MAX_MESSAGE_SIZE - (256 * 1024)
 # SIGKILL window (SIGTERM, then SIGKILL ~10s later).
 DRAIN_TIMEOUT_SECONDS = 3.0
 
+# An excerpted field keeps this much of its start and of its end.
+EXCERPT_BYTES = 8 * 1024
+
 
 class AuditEventCollector:
     def __init__(
@@ -48,9 +51,12 @@ class AuditEventCollector:
         next_sequence = self._sequence + 1
         event.sequence = next_sequence
         event_bytes = self._event_bytes(event)
+        # Excerpt free text only when the event would otherwise be dropped.
+        if event_bytes > MAX_BUFFER_BYTES:
+            event_bytes = self._bound_content(event, event_bytes)
 
-        # An event over the cap can never be sent under the 4MB gRPC limit; drop
-        # it rather than fail the send.
+        # An event still over the cap can never be sent under the 4MB gRPC
+        # limit; drop it rather than fail the send.
         if event_bytes > MAX_BUFFER_BYTES:
             largest_field, largest_field_bytes = self._largest_field(event)
             logger.warning(
@@ -127,6 +133,36 @@ class AuditEventCollector:
     @staticmethod
     def _event_bytes(event: AuditEvent) -> int:
         return len(json.dumps(event.to_cloudevent()).encode("utf-8"))
+
+    def _bound_content(self, event: AuditEvent, event_bytes: int) -> int:
+        """Excerpt the event's free-text field once; return the new event size."""
+        field = event.excerpt_field
+        if field is None:
+            return event_bytes
+        # surrogatepass: a lone surrogate is valid in str but not in UTF-8.
+        encoded = getattr(event, field).encode("utf-8", "surrogatepass")
+        if len(encoded) <= 2 * EXCERPT_BYTES:
+            return event_bytes
+        head = encoded[:EXCERPT_BYTES].decode("utf-8", errors="ignore")
+        tail = encoded[-EXCERPT_BYTES:].decode("utf-8", errors="ignore")
+        omitted = len(encoded) - 2 * EXCERPT_BYTES
+        setattr(event, field, f"{head}\n...[{omitted} bytes omitted]...\n{tail}")
+        setattr(event, f"{field}_truncated", True)
+        setattr(event, f"{field}_bytes", len(encoded))
+        truncated_bytes = self._event_bytes(event)
+        logger.warning(
+            "Truncated audit event larger than the size cap",
+            workflow_id=self._workflow_id,
+            event_type=event.event_type.value,
+            field=field,
+            field_bytes=len(encoded),
+            event_bytes=event_bytes,
+            truncated_event_bytes=truncated_bytes,
+        )
+        duo_workflow_metrics.count_audit_events_truncated(
+            event_type=event.event_type.value, field=field
+        )
+        return truncated_bytes
 
     @staticmethod
     def _largest_field(event: AuditEvent) -> tuple[Optional[str], int]:

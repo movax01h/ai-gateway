@@ -5,7 +5,9 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from ai_gateway.code_suggestions import LanguageServerVersion
+from duo_workflow_service.audit_events.collector import MAX_BUFFER_BYTES
 from duo_workflow_service.tracking.duo_workflow_metrics import (
+    AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS,
     DuoWorkflowMetrics,
     SessionTypeEnum,
 )
@@ -40,6 +42,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "audit_events_captured_counter",
             "audit_events_sent_counter",
             "audit_events_dropped_counter",
+            "audit_events_truncated_counter",
             "audit_events_batch_size",
             "audit_events_payload_bytes",
             "audit_events_auto_flush_skipped_counter",
@@ -556,6 +559,25 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self.metrics.observe_audit_events_payload_bytes(1024)
 
         observe_mock.assert_called_once_with(1024)
+
+    def test_count_audit_events_truncated(self):
+        labels_mock = cast(
+            MagicMock, self.metrics.audit_events_truncated_counter.labels
+        )
+
+        self.metrics.count_audit_events_truncated(
+            event_type="ai_llm_input_sent", field="prompt_content"
+        )
+
+        labels_mock.assert_called_once_with(
+            event_type="ai_llm_input_sent", field="prompt_content"
+        )
+        labels_mock.return_value.inc.assert_called_once_with()
+
+    def test_payload_bytes_buckets_reach_the_batch_cap(self):
+        # The top bucket can fill; the next doubling would duplicate +Inf.
+        top = AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS[-1]
+        assert top < MAX_BUFFER_BYTES < 2 * AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS[-2]
 
     def test_count_oversized_outgoing_action(self):
         self.metrics.duo_workflow_oversized_outgoing_action_total = MagicMock()

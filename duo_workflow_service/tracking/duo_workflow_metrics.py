@@ -18,6 +18,7 @@ workflow_start_time: ContextVar[Optional[float]] = ContextVar(
 log = structlog.stdlib.get_logger("monitoring")
 
 AUDIT_EVENTS_BATCH_SIZE_BUCKETS = [1, 5, 10, 25, 50, 100, 200, 500]
+# The collector caps a batch near MAX_BUFFER_BYTES (~3.75 MiB); buckets stop at 3 MiB.
 AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS = [
     512,
     1_024,
@@ -26,6 +27,8 @@ AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS = [
     65_536,
     262_144,
     1_048_576,
+    2_097_152,
+    3_145_728,
 ]
 
 # Buckets for outgoing gRPC action sizes (bytes).
@@ -234,6 +237,13 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             "duo_workflow_audit_events_dropped_total",
             "Count of audit events dropped before delivery",
             ["reason"],
+            registry=registry,
+        )
+
+        self.audit_events_truncated_counter = Counter(
+            "duo_workflow_audit_events_truncated_total",
+            "Count of audit events whose content was excerpted to fit the size cap",
+            ["event_type", "field"],
             registry=registry,
         )
 
@@ -495,6 +505,19 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             amount: Number of individual events dropped.
         """
         self.audit_events_dropped_counter.labels(reason=reason).inc(amount)
+
+    def count_audit_events_truncated(
+        self, event_type: str = "unknown", field: str = "unknown"
+    ) -> None:
+        """Increment the audit events truncated counter.
+
+        Args:
+            event_type: Type of the truncated audit event.
+            field: Name of the excerpted field.
+        """
+        self.audit_events_truncated_counter.labels(
+            event_type=event_type, field=field
+        ).inc()
 
     def count_audit_events_auto_flush_skipped(self) -> None:
         """Increment the counter of buffer-full auto-flush attempts skipped because no event loop was running."""

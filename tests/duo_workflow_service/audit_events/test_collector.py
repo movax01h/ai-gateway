@@ -5,10 +5,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from structlog.testing import capture_logs
 
-from duo_workflow_service.audit_events.collector import AuditEventCollector
+from duo_workflow_service.audit_events.collector import (
+    EXCERPT_BYTES,
+    MAX_BUFFER_BYTES,
+    AuditEventCollector,
+)
 from duo_workflow_service.audit_events.event_types import (
     LlmInputSentEvent,
     ToolInvokedEvent,
+    ToolResponseReceivedEvent,
 )
 from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
 from tests.duo_workflow_service.audit_events.conftest import make_audit_event
@@ -579,6 +584,159 @@ class TestByteBasedFlush:
         collector._schedule_flush()
         await asyncio.sleep(0.01)
         mock_client.send_batch.assert_not_called()
+
+
+def _wire_bytes(event):
+    # Independent of AuditEventCollector._event_bytes, so it catches drift in it.
+    return len(json.dumps(event.to_cloudevent()).encode("utf-8"))
+
+
+def _event_at(target_bytes, text="\u00e9"):
+    """An LLM input event whose serialized size is exactly ``target_bytes``.
+
+    ``text`` is JSON-escaped (``\\u00e9`` is 6 bytes on the wire, 2 in UTF-8), so a raw-length measurement
+    would miss the boundary by a wide margin.
+    """
+    event = LlmInputSentEvent(
+        workflow_id="wf-1", model_name="m", prompt_content="", sequence=1
+    )
+    room = target_bytes - _wire_bytes(event)
+    unit = len(json.dumps(text)) - 2
+    event.prompt_content = text * (room // unit) + "x" * (room % unit)
+    assert _wire_bytes(event) == target_bytes
+    return event
+
+
+def _buffered(collector, event):
+    # Identity check: a failing `==` would diff multi-MiB reprs.
+    return len(collector._buffer) == 1 and collector._buffer[0] is event
+
+
+class TestContentBounding:
+    @pytest.fixture(name="collector")
+    def collector_fixture(self, mock_client):
+        return AuditEventCollector(
+            client=mock_client, buffer_size=1000, flush_interval_seconds=100.0
+        )
+
+    def test_event_at_cap_is_kept_unchanged(self, collector):
+        event = _event_at(MAX_BUFFER_BYTES)
+        original = event.prompt_content
+        wire = json.dumps(event.to_cloudevent())
+
+        collector.capture(event)
+
+        assert _buffered(collector, event)
+        assert event.prompt_content == original
+        assert json.dumps(event.to_cloudevent()) == wire
+        assert "prompt_content_truncated" not in event.to_cloudevent()["data"]
+
+    def test_event_over_cap_is_excerpted_to_fit(self, collector):
+        event = _event_at(MAX_BUFFER_BYTES + 1)
+        original = event.prompt_content.encode("utf-8")
+
+        collector.capture(event)
+
+        assert _buffered(collector, event)
+        assert _wire_bytes(event) <= MAX_BUFFER_BYTES
+        assert event.prompt_content_truncated is True
+        assert event.prompt_content_bytes == len(original)
+        omitted = len(original) - 2 * EXCERPT_BYTES
+        assert event.prompt_content == (
+            original[:EXCERPT_BYTES].decode("utf-8")
+            + f"\n...[{omitted} bytes omitted]...\n"
+            + original[-EXCERPT_BYTES:].decode("utf-8")
+        )
+
+    def test_split_multibyte_characters_are_dropped_not_corrupted(self, collector):
+        event = _event_at(MAX_BUFFER_BYTES + 1, text="\u20ac")  # 3 bytes in UTF-8
+
+        collector.capture(event)
+
+        assert event.prompt_content_truncated is True
+        assert "\ufffd" not in event.prompt_content
+
+    def test_event_still_over_cap_after_excerpting_is_dropped(self, collector):
+        event = LlmInputSentEvent(
+            workflow_id="wf-1",
+            model_name="m",
+            prompt_content="p" * MAX_BUFFER_BYTES,
+            tools_bound=["t" * MAX_BUFFER_BYTES],
+        )
+
+        collector.capture(event)
+
+        assert not _buffered(collector, event)
+        assert event.prompt_content_truncated is True
+
+    def test_lone_surrogate_does_not_crash_capture(self, collector):
+        event = ToolResponseReceivedEvent(
+            workflow_id="wf-1",
+            tool_name="t",
+            response_content="r" * MAX_BUFFER_BYTES + "\ud800",
+            response_length=MAX_BUFFER_BYTES + 1,
+        )
+
+        collector.capture(event)
+
+        assert _buffered(collector, event)
+        assert event.response_content_truncated is True
+        assert event.response_content_bytes == MAX_BUFFER_BYTES + 3
+        assert _wire_bytes(event) <= MAX_BUFFER_BYTES
+
+    def test_event_without_excerpt_field_is_still_dropped(self, collector):
+        event = ToolInvokedEvent(
+            workflow_id="wf-1", tool_name="t", tool_args={"a": "x" * MAX_BUFFER_BYTES}
+        )
+
+        collector.capture(event)
+
+        assert not _buffered(collector, event)
+
+    def test_truncation_logs_and_counts(self, collector):
+        event = _event_at(MAX_BUFFER_BYTES + 1)
+        field_bytes = len(event.prompt_content.encode("utf-8"))
+        mock_metrics = MagicMock()
+        with (
+            patch(
+                "duo_workflow_service.audit_events.collector.duo_workflow_metrics",
+                mock_metrics,
+            ),
+            capture_logs() as logs,
+        ):
+            collector.capture(event)
+
+        mock_metrics.count_audit_events_truncated.assert_called_once_with(
+            event_type="ai_llm_input_sent", field="prompt_content"
+        )
+        truncated = [
+            log
+            for log in logs
+            if log["event"] == "Truncated audit event larger than the size cap"
+        ]
+        assert len(truncated) == 1
+        assert truncated[0]["log_level"] == "warning"
+        assert truncated[0]["workflow_id"] == collector.workflow_id
+        assert truncated[0]["event_type"] == "ai_llm_input_sent"
+        assert truncated[0]["field"] == "prompt_content"
+        assert truncated[0]["field_bytes"] == field_bytes
+        assert truncated[0]["event_bytes"] == MAX_BUFFER_BYTES + 1
+        assert truncated[0]["truncated_event_bytes"] == _wire_bytes(event)
+
+    def test_event_that_fits_is_not_logged_or_counted(self, collector):
+        event = _event_at(MAX_BUFFER_BYTES)
+        mock_metrics = MagicMock()
+        with (
+            patch(
+                "duo_workflow_service.audit_events.collector.duo_workflow_metrics",
+                mock_metrics,
+            ),
+            capture_logs() as logs,
+        ):
+            collector.capture(event)
+
+        mock_metrics.count_audit_events_truncated.assert_not_called()
+        assert not [log for log in logs if log["log_level"] == "warning"]
 
 
 class TestLargestField:

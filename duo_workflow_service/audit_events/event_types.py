@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,11 +42,16 @@ class AuditEvent(BaseModel):
     workflow_id: str
     sequence: Optional[int] = None
 
+    # Free text the collector may excerpt so the event fits its size cap. Its
+    # `{field}_truncated` and `{field}_bytes` siblings are sent only when set.
+    excerpt_field: ClassVar[Optional[str]] = None
+
     def to_cloudevent(self) -> dict[str, Any]:
-        data = self.model_dump(
-            mode="json",
-            exclude={"id", "event_type", "timestamp", "sequence"},
-        )
+        exclude = {"id", "event_type", "timestamp", "sequence"}
+        field = self.excerpt_field
+        if field and not getattr(self, f"{field}_truncated"):
+            exclude |= {f"{field}_truncated", f"{field}_bytes"}
+        data = self.model_dump(mode="json", exclude=exclude)
         return {
             "specversion": CLOUDEVENT_SPEC_VERSION,
             "id": self.id,
@@ -82,15 +87,21 @@ class UserInputReceivedEvent(AuditEvent):
 
 class LlmInputSentEvent(AuditEvent):
     event_type: AuditEventType = AuditEventType.AI_LLM_INPUT_SENT
+    excerpt_field: ClassVar[Optional[str]] = "prompt_content"
     model_name: str
     prompt_content: str
+    prompt_content_truncated: bool = False
+    prompt_content_bytes: Optional[int] = None
     tools_bound: Optional[list[str]] = None
 
 
 class LlmResponseReceivedEvent(AuditEvent):
     event_type: AuditEventType = AuditEventType.AI_LLM_RESPONSE_RECEIVED
+    excerpt_field: ClassVar[Optional[str]] = "response_content"
     model_name: str
     response_content: str
+    response_content_truncated: bool = False
+    response_content_bytes: Optional[int] = None
     prompt_token_count: Optional[int] = None
     completion_token_count: Optional[int] = None
     finish_reason: Optional[str] = None
@@ -112,9 +123,12 @@ class ToolInvokedEvent(AuditEvent):
 
 class ToolResponseReceivedEvent(AuditEvent):
     event_type: AuditEventType = AuditEventType.AI_TOOL_RESPONSE_RECEIVED
+    excerpt_field: ClassVar[Optional[str]] = "response_content"
     tool_name: str
     response_content: str
-    response_length: int
+    response_length: int  # characters in the full response
+    response_content_truncated: bool = False
+    response_content_bytes: Optional[int] = None  # UTF-8 bytes in the full response
 
 
 class ToolExecutionFailedEvent(AuditEvent):
