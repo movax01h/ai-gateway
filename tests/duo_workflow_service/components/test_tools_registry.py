@@ -1432,6 +1432,25 @@ class TestCapabilityDependentTools:
 
         assert "run_command" not in registry._enabled_tools
 
+    @pytest.mark.parametrize(
+        ("capable", "expected_cls"), [(True, tools.GrepLiteral), (False, tools.Grep)]
+    )
+    @patch("duo_workflow_service.components.tools_registry.is_client_capable")
+    def test_grep_literal_supersedes_grep_only_with_capability(
+        self, mock_is_client_capable, capable, expected_cls, tool_metadata
+    ):
+        mock_is_client_capable.side_effect = lambda cap: (
+            capable and "grep_fixed_strings" in cap
+        )
+
+        registry = ToolsRegistry(
+            enabled_tools=["read_only_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+        )
+
+        assert type(registry._enabled_tools["grep"]) is expected_cls
+
     @patch("duo_workflow_service.components.tools_registry.is_client_capable")
     def test_notify_me_when_enabled_when_capable(
         self, mock_is_client_capable, tool_metadata

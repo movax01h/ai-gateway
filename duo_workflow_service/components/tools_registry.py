@@ -92,6 +92,7 @@ _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
     tools.ShellCommand,
     tools.AdvanceBlobSearch,
     tools.ReadFileChunked,
+    tools.GrepLiteral,
     tools.NotifyMeWhen,
     tools.AgentCoreWebSearch,
 ]
