@@ -125,6 +125,348 @@ class TestRedactSecretsStrings:
         assert redact_secrets(text, tool_name="test") == text
 
 
+class TestKeywordAssignmentRedaction:
+    """Tests for ``KeywordDetector`` matches (``password = "..."`` and friends).
+
+    These are redacted in place rather than by replacing the detected value everywhere it appears in the string.
+    Replacing globally corrupted unrelated text that happened to share the value, and only ever caught the first
+    assignment per pattern.
+    """
+
+    def test_keyword_assigned_value_redacted(self):
+        text = 'password = "hunter2correcthorse"'
+        result = redact_secrets(text, tool_name="test")
+        assert "hunter2correcthorse" not in result
+        assert REDACTED_PLACEHOLDER in result
+
+    @pytest.mark.parametrize("name", ["acme", "acme-platform-team"])
+    def test_matching_substring_elsewhere_preserved(self, name):
+        """A value assigned to a secret-named key must not be redacted elsewhere.
+
+        Reproduces the bug where a keyword assignment in an MR diff rewrote every occurrence of the value in the whole
+        tool response, including file paths, which then caused downstream tools to request paths containing '[REDACTED]'
+        and fail with 404. Parametrized over a longer name because a first attempt at this fix gated the wider rewrite
+        on length and entropy, which still corrupted the path once the name grew.
+        """
+        text = (
+            f'<file_diff filename="terraform/modules/aws-lambda-{name}/main.tf">\n'
+            f'+  SECRET_NAME = "{name}"\n'
+            f"+  role_arn = aws_iam_role.{name}_lambda.arn\n"
+            "</file_diff>"
+        )
+        result = redact_secrets(text, tool_name="test")
+
+        assert f'filename="terraform/modules/aws-lambda-{name}/main.tf"' in result
+        assert f"aws_iam_role.{name}_lambda.arn" in result
+        assert 'SECRET_NAME = "[REDACTED]"' in result
+
+    def test_every_assignment_in_string_redacted(self):
+        """All keyword assignments must be redacted, not only the first.
+
+        ``KeywordDetector.analyze_string`` stops at the first match per
+        pattern, so driving redaction from its yielded values left later
+        secrets in the same string exposed.
+        """
+        text = (
+            '+  api_key = "aaa_first_secret"\n'
+            "+  unrelated = compute()\n"
+            '+  password = "bbb_second_secret"\n'
+            '+  db_pass = "ccc_third_secret"\n'
+        )
+        result = redact_secrets(text, tool_name="test")
+
+        assert "aaa_first_secret" not in result
+        assert "bbb_second_secret" not in result
+        assert "ccc_third_secret" not in result
+        assert result.count(REDACTED_PLACEHOLDER) == 3
+
+    def test_keyword_without_assignment_unchanged(self):
+        """Prose mentioning a denylist keyword must not be redacted."""
+        text = "The password policy requires 12 characters."
+        assert redact_secrets(text, tool_name="test") == text
+
+    def test_structured_secret_in_path_still_redacted(self):
+        """Regex detectors still redact real tokens wherever they appear.
+
+        Guards the coverage that the removed global replace was incidentally providing for secrets embedded in file
+        paths.
+
+        The sample tokens are assembled at runtime so the literals do not trip secret push protection.
+        """
+        gitlab_pat = "glpat" + "-" + "ABCD1234efgh5678IJKL"
+        aws_key_id = "AKIA" + "IOSFODNN7EXAMPLE"
+
+        for secret in (gitlab_pat, aws_key_id):
+            text = f'<file_diff filename="backup/{secret}/main.tf">'
+            result = redact_secrets(text, tool_name="test")
+            assert secret not in result
+            assert REDACTED_PLACEHOLDER in result
+
+    def test_keyword_denylist_patterns_available(self):
+        """Guard the ``detect_secrets`` internals the in-place fix depends on.
+
+        ``KeywordDetector`` exposes no position information through its public
+        API, so the denylist patterns are used directly.  If a library upgrade
+        moves or reshapes them, fail here rather than silently losing keyword
+        redaction.
+        """
+        from detect_secrets.plugins.keyword import (
+            QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP,
+        )
+
+        assert QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP
+        for pattern, group_number in QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP.items():
+            assert hasattr(pattern, "finditer")
+            assert group_number <= pattern.groups
+
+    def test_keyword_denylist_groups_always_capture(self):
+        """Every target group must participate whenever its pattern matches.
+
+        A group that can match without capturing leaves a detected assignment whose value cannot be located, which
+        `_redact_keyword_assignments` treats as unredactable and raises on. That branch is unreachable on the pinned
+        version; this fails if an upgrade makes it reachable, rather than letting it surface in production.
+        """
+        from detect_secrets.plugins.keyword import (
+            DENYLIST,
+            QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP,
+        )
+
+        corpus = [
+            template.format(key=keyword.replace("_?", "_"))
+            for keyword in DENYLIST
+            for template in (
+                '{key} = "v"',
+                "{key} = 'v'",
+                '{key}="longer_value_here"',
+                "{key}: 'yaml'",
+                '{key} := "go"',
+                '{key} => "ruby"',
+                'self.{key} = "attr"',
+                '{key} = ""',
+                '{key} = "a b c"',
+            )
+        ]
+
+        examined = 0
+        for pattern, group_number in QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP.items():
+            for line in corpus:
+                for match in pattern.finditer(line):
+                    examined += 1
+                    start, end = match.span(group_number)
+                    assert start != -1 and end > start, (pattern.pattern, line)
+
+        assert examined, "corpus matched nothing; the patterns likely changed shape"
+
+
+class TestKeywordRedactionCoverage:
+    """Guards against the in-place fix redacting *less* than a global replace did.
+
+    In-place substitution deliberately stops rewriting a detected value at every offset in the response. These tests pin
+    down what that costs and what it must not cost.
+    """
+
+    def test_every_denylist_keyword_redacted(self):
+        """An assignment of every keyword in the detect-secrets denylist must be redacted.
+
+        A coverage matrix rather than a spot check, so a library upgrade or a regex-handling mistake that drops
+        individual keywords fails here.
+        """
+        from detect_secrets.plugins.keyword import DENYLIST
+
+        secret = "realsecretvalue123"
+        missed = []
+
+        for keyword in sorted(DENYLIST):
+            # Denylist entries embed an optional underscore, e.g. 'api_?key'.
+            key = keyword.replace("_?", "_")
+            result = redact_secrets(f'{key} = "{secret}"', tool_name="test")
+            if secret in result:
+                missed.append(key)
+
+        assert not missed, f"keywords no longer redacted: {missed}"
+
+    @pytest.mark.parametrize("value", ["summer", "prod-payments-db-credentials"])
+    def test_assigned_value_never_redacted_outside_its_assignment(self, value):
+        """No assigned value is rewritten elsewhere, whatever its length or entropy.
+
+        A value assigned to a secret-named key is as often the secret's name as the secret, and the two cannot be told
+        apart from the value alone. Gating a wider rewrite on length and entropy still corrupted realistic Terraform,
+        where `secret_name` values are long, descriptive, and reused as directory names.
+        """
+        text = f'password = "{value}"\nlog: deploy to {value}-cluster complete\n'
+
+        result = redact_secrets(text, tool_name="test")
+
+        assert 'password = "[REDACTED]"' in result
+        assert f"deploy to {value}-cluster complete" in result
+
+    def test_bare_echo_of_assigned_secret_is_a_known_gap(self):
+        """Document that a bare repeat of an assigned secret is left in place.
+
+        This is the accepted cost of never rewriting outside an assignment. Scrubbing the value everywhere is what
+        corrupted file paths, and no property of the value distinguishes a secret from a secret's name, so precision
+        is worth the recall here. Structured detectors still match real tokens wherever they appear.
+
+        The entropy detectors do not compensate on the UI path: they only scan quoted strings, so an unquoted repeat
+        is invisible to them too. Both paths are asserted so the gap is recorded where someone would look for it.
+
+        Asserted rather than left implicit so that reintroducing a global scrub is a deliberate decision that has to
+        change this test.
+        """
+        password = "Xq7bZ2mK9pR4tW8vY1nL6sD3fG5hJ0aC"
+        text = f'password = "{password}"\nRUN echo {password} > /tmp/p\n'
+
+        for redact in (redact_secrets, redact_secrets_for_ui):
+            result = redact(text, tool_name="test")
+
+            assert 'password = "[REDACTED]"' in result
+            assert f"RUN echo {password}" in result
+
+    def test_long_secret_name_does_not_corrupt_matching_path(self):
+        """A long descriptive secret name must not be rewritten in the file path.
+
+        Reported against this branch: the original incident reproduced with a longer project name, because the
+        length and entropy gate admitted it. Terraform `secret_name` values are normally long and descriptive.
+        """
+        text = (
+            '<file_diff filename="terraform/modules/prod-payments-db-credentials/main.tf">\n'
+            'resource "aws_secretsmanager_secret" "db" {\n'
+            "  secret_name = 'prod-payments-db-credentials'\n"
+            "}\n"
+            "</file_diff>"
+        )
+
+        result = redact_secrets(text, tool_name="test")
+
+        assert (
+            'filename="terraform/modules/prod-payments-db-credentials/main.tf"'
+            in result
+        )
+        assert "secret_name = '[REDACTED]'" in result
+
+    def test_keyword_exclude_skips_only_its_own_line(self):
+        """``keyword_exclude`` must suppress the matching line, not the whole response.
+
+        ``analyze_line`` hands one line at a time to ``analyze_string``, so a line is the library's scope for this
+        setting. Checking the whole blob would let an exclude hit on any unrelated line suppress redaction of every
+        assignment in an aggregated response. The detectors in ``_STRUCTURED_DETECTORS`` are built without the setting,
+        so the helper is exercised directly.
+        """
+        from detect_secrets.plugins.keyword import KeywordDetector
+
+        from duo_workflow_service.security.secret_redaction import (
+            _redact_keyword_assignments,
+        )
+
+        detector = KeywordDetector(keyword_exclude="allowlisted")
+
+        # Same line as the assignment: suppressed.  No trailing newline, so the
+        # line also runs to the end of the text.
+        same_line = 'password = "excluded_value" # allowlisted'
+        assert _redact_keyword_assignments(detector, same_line) == same_line
+
+        # Exclude pattern on an unrelated line: the real secret is still redacted.
+        other_line = 'password = "realsecretvalue"\n# allowlisted\n'
+        result = _redact_keyword_assignments(detector, other_line)
+        assert "realsecretvalue" not in result
+        assert "# allowlisted" in result
+
+    def test_non_capturing_group_raises_rather_than_passing_value_through(self):
+        """A denylist group that fails to capture must fail closed.
+
+        The value is known to be a secret but its position is not, so it cannot be redacted. Returning the text would
+        pass it to the model. Unreachable with the pinned patterns, whose groups are all required, so the pattern dict
+        is swapped for one with an optional group.
+        """
+        import re
+
+        from detect_secrets.plugins.keyword import KeywordDetector
+
+        from duo_workflow_service.security import secret_redaction
+        from duo_workflow_service.security.exceptions import SecurityException
+
+        optional_group = re.compile(r"(?:(never_matches))?password")
+
+        with patch.object(
+            secret_redaction,
+            "QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP",
+            {optional_group: 1},
+        ):
+            with pytest.raises(SecurityException) as excinfo:
+                secret_redaction._redact_keyword_assignments(
+                    KeywordDetector(), 'password = "realsecretvalue"'
+                )
+
+        # The message reaches the model as a ToolException, so it must not echo the value.
+        assert "realsecretvalue" not in str(excinfo.value)
+
+    def test_unknown_detector_type_warns_on_global_replace_fallback(self):
+        """An unrecognized detector reaching the global-replace branch must be observable.
+
+        That branch still rewrites every occurrence of the value, which is the path-corruption pattern this module was
+        fixed for. It is unreachable with the configured detectors, so a detector type that matches no earlier branch is
+        supplied directly.
+        """
+        from detect_secrets.plugins.base import BasePlugin
+
+        from duo_workflow_service.security import secret_redaction
+
+        class _UnknownDetector(BasePlugin):
+            secret_type = "Unknown"
+
+            def analyze_string(self, string, *args, **kwargs):
+                yield "sharedvalue"
+
+        with patch.object(secret_redaction.log, "warning") as warning:
+            result = secret_redaction._redact_string(
+                "sharedvalue appears twice: sharedvalue", [_UnknownDetector()]
+            )
+
+        assert result == "[REDACTED] appears twice: [REDACTED]"
+        warning.assert_called_once()
+        assert warning.call_args.kwargs["detector_type"] == "_UnknownDetector"
+
+    def test_detection_parity_with_analyze_string(self):
+        """The helper must detect exactly what ``KeywordDetector.analyze_string`` detects.
+
+        Applying the denylist patterns directly replaces a call to ``analyze_string``, so the two must agree on what
+        counts as a keyword assignment. Unquoted forms are included because ``analyze_string`` defaults to the
+        quotes-required patterns only and never matched them; if a library upgrade widens that default, this fails.
+        """
+        from detect_secrets.plugins.keyword import KeywordDetector
+
+        from duo_workflow_service.security.secret_redaction import (
+            _redact_keyword_assignments,
+        )
+
+        detector = KeywordDetector()
+        corpus = [
+            'password = "quoted_secret_aaa"',
+            "password = 'single_quoted_bbb'",
+            'api_key = "quoted_fff"',
+            'secret: "yaml_quoted_hhh"',
+            "password=unquoted_ccc",
+            "password: unquoted_yaml_ddd",
+            "PASSWORD=env_style_eee",
+            "ENV api_key=dockerfile_iii",
+        ]
+
+        for line in corpus:
+            detected = any(value for value in detector.analyze_string(line))
+            redacted = _redact_keyword_assignments(detector, line) != line
+
+            assert redacted == detected, line
+
+    def test_repeated_assignments_of_same_value_all_redacted(self):
+        """The same value assigned twice must be redacted at both assignments."""
+        text = 'password = "sharedvalue"\npasswd = "sharedvalue"\n'
+
+        result = redact_secrets(text, tool_name="test")
+
+        assert "sharedvalue" not in result
+        assert result.count(REDACTED_PLACEHOLDER) == 2
+
+
 class TestRedactSecretsDictAndList:
     """Tests for dict and list inputs to redact_secrets."""
 

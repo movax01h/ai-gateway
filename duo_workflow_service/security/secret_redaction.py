@@ -81,7 +81,10 @@ from detect_secrets.plugins.high_entropy_strings import (
 from detect_secrets.plugins.ibm_cloud_iam import IbmCloudIamDetector
 from detect_secrets.plugins.ibm_cos_hmac import IbmCosHmacDetector
 from detect_secrets.plugins.jwt import JwtTokenDetector
-from detect_secrets.plugins.keyword import KeywordDetector
+from detect_secrets.plugins.keyword import (
+    QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP,
+    KeywordDetector,
+)
 from detect_secrets.plugins.mailchimp import MailchimpDetector
 from detect_secrets.plugins.npm import NpmDetector
 from detect_secrets.plugins.openai import OpenAIDetector
@@ -94,6 +97,8 @@ from detect_secrets.plugins.square_oauth import SquareOAuthDetector
 from detect_secrets.plugins.stripe import StripeDetector
 from detect_secrets.plugins.telegram_token import TelegramBotTokenDetector
 from detect_secrets.plugins.twilio import TwilioKeyDetector
+
+from duo_workflow_service.security.exceptions import SecurityException
 
 log = structlog.stdlib.get_logger("security")
 
@@ -140,10 +145,67 @@ _ENTROPY_DETECTORS: List[BasePlugin] = [
 
 _UI_DETECTORS: List[BasePlugin] = _STRUCTURED_DETECTORS + _ENTROPY_DETECTORS
 
-
 # ---------------------------------------------------------------------------
 # Core redaction helpers
 # ---------------------------------------------------------------------------
+
+
+def _line_excluded(detector: KeywordDetector, text: str, start: int, end: int) -> bool:
+    """Whether ``keyword_exclude`` covers the line containing a match.
+
+    ``analyze_line`` hands one line at a time to ``analyze_string``, so the
+    library scopes this setting to a line.  Checking the whole response instead
+    would let an exclude hit on any unrelated line suppress redaction of every
+    assignment in it.
+    """
+    if not detector.keyword_exclude:
+        return False
+
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    if line_end == -1:
+        line_end = len(text)
+
+    return bool(detector.keyword_exclude.search(text[line_start:line_end]))
+
+
+def _redact_keyword_assignments(detector: KeywordDetector, text: str) -> str:
+    """Redact the captured value of each keyword-assignment match in place.
+
+    ``KeywordDetector.analyze_string`` yields bare values with no position and
+    stops at the first match per pattern, so it cannot drive a substitution.
+    The denylist patterns are applied directly instead, which both keeps the
+    replacement local to the match and reaches every assignment.
+
+    Nothing outside an assignment is rewritten.  A value assigned to a
+    secret-named key is as often the secret's *name* as the secret itself, and
+    the two are indistinguishable from the value alone: ``secret_name =
+    "prod-payments-db-credentials"`` is a name that also appears in the path
+    ``terraform/modules/prod-payments-db-credentials/main.tf``.  Redacting
+    matches only where they were found is what keeps the rest of the response
+    intact.  Secrets repeated outside an assignment are left to the
+    regex-based detectors, which match them wherever they appear.
+    """
+    for pattern, group_number in QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP.items():
+        # Replace right to left so earlier match offsets stay valid.
+        for match in reversed(list(pattern.finditer(text))):
+            start, end = match.span(group_number)
+
+            if start == -1 or end <= start:
+                # A detected assignment whose value cannot be located would
+                # otherwise pass through unredacted, so fail closed.  The
+                # message deliberately carries no matched text.
+                raise SecurityException(
+                    f"Keyword denylist group {group_number} did not capture; "
+                    "cannot locate the value to redact"
+                )
+
+            if _line_excluded(detector, text, start, end):
+                continue
+
+            text = text[:start] + REDACTED_PLACEHOLDER + text[end:]
+
+    return text
 
 
 def _redact_string(text: str, detectors: List[BasePlugin]) -> str:
@@ -156,6 +218,10 @@ def _redact_string(text: str, detectors: List[BasePlugin]) -> str:
     For ``HighEntropyStringsPlugin`` detectors ``analyze_string`` yields
     candidate values; each candidate is only replaced when its Shannon entropy
     exceeds the detector's configured limit.
+
+    ``KeywordDetector`` is handled by ``_redact_keyword_assignments``, which
+    substitutes each match in place rather than replacing the detected value
+    everywhere it appears.
 
     For any other ``BasePlugin`` detector ``analyze_string`` is used and every
     non-empty yielded value is replaced unconditionally.
@@ -179,8 +245,16 @@ def _redact_string(text: str, detectors: List[BasePlugin]) -> str:
                     > detector.entropy_limit
                 ):
                     text = text.replace(secret_value, REDACTED_PLACEHOLDER)
+        elif isinstance(detector, KeywordDetector):
+            text = _redact_keyword_assignments(detector, text)
         else:
-            # Generic BasePlugin fallback (e.g. KeywordDetector)
+            # Global replace corrupts any text sharing the value, which is the
+            # bug this module was fixed for.  A new non-regex detector should
+            # substitute at the match, as `_redact_keyword_assignments` does.
+            log.warning(
+                "Detector fell through to the global-replace fallback",
+                detector_type=type(detector).__name__,
+            )
             for secret_value in detector.analyze_string(text):
                 if secret_value:
                     text = text.replace(secret_value, REDACTED_PLACEHOLDER)
