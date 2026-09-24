@@ -13,6 +13,7 @@ from typing import AsyncIterable, AsyncIterator, Optional, cast, override
 
 import aiohttp
 import grpc
+import litellm
 import structlog
 from anthropic import APIStatusError
 from dependency_injector.wiring import Provide, inject
@@ -1348,6 +1349,16 @@ async def serve(config: Config, port: int) -> None:
 
         await server.wait_for_termination()
         log.info("Server shutdown complete")
+
+        # litellm's exit hook only closes clients in its own cache, not the one
+        # ContainerModels installs. Left open, it is collected at interpreter
+        # teardown, where logging its "Unclosed client session" warning fails.
+        # Best-effort: a failure here must not replace one shutdown traceback
+        # with another.
+        try:
+            await litellm.module_level_aclient.close()
+        except Exception:
+            log.exception("Failed to close litellm module-level client")
 
 
 def _running_workflow_tasks() -> list[asyncio.Task]:
