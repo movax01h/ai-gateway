@@ -44,6 +44,7 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 from duo_workflow_service.entities import MessageTypeEnum
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
+from lib.feature_flags import FeatureFlag
 
 
 @pytest.fixture(name="prompt_id")

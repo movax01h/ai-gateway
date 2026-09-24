@@ -327,10 +327,10 @@ class LocalPromptRegistry(BasePromptRegistry):
         (self-hosted OpenAI-compatible, Bedrock, Azure, Vertex) drops or rejects a bare
         "any", silently leaving the model free to answer in prose.
 
-        Applied only when the caller passes ``force_tool_choice``. AgentComponent and
-        both supervisors pass "any" implicitly with a bound response schema, and forcing
-        a call every turn there loops an agent to max_cycles — see
-        AgentComponent._auto_tool_choice_enabled.
+        Applied only when the caller passes ``force_tool_choice``. Both supervisors pass
+        "any" implicitly with a bound response schema, and forcing a call every turn
+        there loops an agent to max_cycles — which is why AgentComponent binds its
+        response schema with "auto".
 
         Args:
             tool_choice: Value from the flow config ("auto" or "any").

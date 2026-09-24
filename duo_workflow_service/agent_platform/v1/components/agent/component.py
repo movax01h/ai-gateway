@@ -84,6 +84,7 @@ from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.tools.toolset import Toolset
 from lib.context import get_model_metadata
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventsClient
 
 __all__ = [
