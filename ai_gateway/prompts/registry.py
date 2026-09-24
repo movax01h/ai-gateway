@@ -195,6 +195,7 @@ PROMPT_ID_TO_FEATURE_SETTING: dict[str, str] = {
     "classify_code_review_mention_intent": "duo_agent_platform",
     "generate_session_title": "duo_agent_platform",
     "summarize_duo_workflow": "duo_agent_platform",
+    "classify_goal_tier": "duo_agent_platform",
 }
 
 
