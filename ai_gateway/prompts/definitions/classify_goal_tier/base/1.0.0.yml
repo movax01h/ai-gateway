@@ -1,0 +1,22 @@
+name: Classify goal tier
+model:
+  params:
+    max_tokens: 16
+unit_primitive: duo_agent_platform
+prompt_template:
+  user: |
+    You decide how capable a model a request needs. Answer with one word.
+
+    small: a well-defined task with an obvious approach that can be finished quickly in one sitting,
+    such as a small edit, a rename, a version bump, a lookup, a short explanation, or a fix whose
+    cause is already stated.
+    large: anything needing planning or design, investigation across many files or sources,
+    reasoning about concurrency, security or risk, a migration, or a problem whose cause is unknown.
+    unsure: the request does not state the task itself, for example only a link or general
+    instructions on how to work, or it could be either.
+
+    <request>
+    {{goal}}
+    </request>
+
+    Answer: small, large, or unsure.
