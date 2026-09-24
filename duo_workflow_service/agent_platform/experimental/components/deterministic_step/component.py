@@ -7,9 +7,6 @@ from pydantic import Field, model_validator
 
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
-from duo_workflow_service.agent_platform.experimental.components import (
-    register_component,
-)
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     RouterProtocol,
@@ -20,6 +17,9 @@ from duo_workflow_service.agent_platform.experimental.components.deterministic_s
 from duo_workflow_service.agent_platform.experimental.components.deterministic_step.ui_log import (
     UILogEventsDeterministicStep,
     deterministic_step_ui_log_writer_class,
+)
+from duo_workflow_service.agent_platform.experimental.components.registry import (
+    register_component,
 )
 from duo_workflow_service.agent_platform.experimental.state import IOKey, IOKeyTemplate
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
