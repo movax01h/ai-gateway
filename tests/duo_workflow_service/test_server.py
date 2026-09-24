@@ -168,6 +168,13 @@ def setup_event_loop():
     asyncio.set_event_loop(loop)
 
 
+@pytest.fixture(name="mock_litellm_module_level_aclient")
+def mock_litellm_module_level_aclient_fixture():
+    """Serve() closes this shared client on shutdown; keep the real one open for later tests."""
+    with patch.object(litellm, "module_level_aclient", AsyncMock()) as mock_aclient:
+        yield mock_aclient
+
+
 @pytest.fixture(name="mock_duo_workflow_service_container", scope="module")
 def mock_duo_workflow_service_container_fixture():
     """Module-scoped container fixture that wires the DI container once for all tests.
@@ -2013,7 +2020,10 @@ async def test_generate_token_unauthorized_for_any_flow(
     return_value=True,
 )
 async def test_grpc_server(
-    mock_cloud_connector_ready, mock_setup_signal_handlers, reflection_enabled
+    mock_cloud_connector_ready,
+    mock_setup_signal_handlers,
+    reflection_enabled,
+    mock_litellm_module_level_aclient,
 ):
     """Test that the gRPC server starts correctly and sets up signal handlers."""
     mock_server = AsyncMock()
@@ -2059,6 +2069,43 @@ async def test_grpc_server(
         mock_enable_reflection.assert_not_called()
     mock_setup_signal_handlers.assert_called_once()
     mock_cloud_connector_ready.assert_called_once()
+    mock_litellm_module_level_aclient.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.setup_signal_handlers")
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+async def test_grpc_server_litellm_client_close_failure_does_not_propagate(
+    mock_cloud_connector_ready,
+    mock_setup_signal_handlers,
+    mock_litellm_module_level_aclient,
+):
+    """Test that a failure closing the litellm client is swallowed during shutdown."""
+    mock_litellm_module_level_aclient.close.side_effect = RuntimeError("boom")
+
+    mock_server = AsyncMock()
+    mock_server.add_insecure_port.return_value = None
+    mock_server.start.return_value = None
+    mock_server.wait_for_termination.return_value = None
+
+    with (
+        patch(
+            "duo_workflow_service.server.grpc.aio.server",
+            return_value=mock_server,
+        ),
+        patch("duo_workflow_service.server.MonitoringInterceptor"),
+        patch("duo_workflow_service.server.connection_pool") as mock_connection_pool,
+    ):
+        mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
+        mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
+        mock_config = create_mock_default_config()
+        await serve(mock_config, 50052)
+
+    mock_litellm_module_level_aclient.close.assert_awaited_once()
 
 
 @patch(
@@ -2066,6 +2113,7 @@ async def test_grpc_server(
     return_value=True,
 )
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_litellm_module_level_aclient")
 async def test_grpc_server_sets_health_status_serving(mock_cloud_connector_ready):
     """Test that serve() sets both health statuses to SERVING on startup."""
     mock_server = AsyncMock()
@@ -2418,6 +2466,7 @@ class TestServeTLS:
         "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
         return_value=True,
     )
+    @pytest.mark.usefixtures("mock_litellm_module_level_aclient")
     async def test_serve_insecure_when_tls_disabled(
         self, mock_cloud_connector_ready, _
     ):
@@ -2459,6 +2508,7 @@ class TestServeTLS:
         "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
         return_value=True,
     )
+    @pytest.mark.usefixtures("mock_litellm_module_level_aclient")
     async def test_serve_secure_when_tls_enabled(
         self, mock_cloud_connector_ready, mock_setup_signal_handlers, tmp_path
     ):
@@ -2518,6 +2568,7 @@ class TestServeTLS:
         "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
         return_value=True,
     )
+    @pytest.mark.usefixtures("mock_litellm_module_level_aclient")
     async def test_serve_tls_enabled_reads_cert_and_key_files(
         self, mock_cloud_connector_ready, mock_setup_signal_handlers, tmp_path
     ):
