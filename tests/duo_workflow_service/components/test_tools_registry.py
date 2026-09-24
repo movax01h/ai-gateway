@@ -60,6 +60,7 @@ from duo_workflow_service.tools.update_form_permissions import UpdateFormPermiss
 from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import (
     EvaluateVulnerabilityFalsePositiveStatus,
     GetVulnerabilityDetails,
+    ResolveVulnerabilityTargetBranch,
 )
 from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
     PostSastFpAnalysisToGitlab,
@@ -186,6 +187,7 @@ _outbox = MagicMock(spec=Outbox)
                 "ascp_list_components",
                 "get_vulnerability_details",
                 "evaluate_vuln_fp_status",
+                "resolve_vulnerability_target_branch",
                 "get_work_item",
                 "list_work_items",
                 "get_work_item_notes",
@@ -282,6 +284,7 @@ _outbox = MagicMock(spec=Outbox)
                 "link_vulnerability_to_merge_request",
                 "get_vulnerability_details",
                 "evaluate_vuln_fp_status",
+                "resolve_vulnerability_target_branch",
                 "update_work_item",
                 "revert_to_detected_vulnerability",
                 "create_vulnerability_issue",
@@ -532,6 +535,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "get_vulnerability_details": GetVulnerabilityDetails(metadata=tool_metadata),
         "evaluate_vuln_fp_status": EvaluateVulnerabilityFalsePositiveStatus(
+            metadata=tool_metadata
+        ),
+        "resolve_vulnerability_target_branch": ResolveVulnerabilityTargetBranch(
             metadata=tool_metadata
         ),
         "update_work_item": tools.UpdateWorkItem(metadata=tool_metadata),

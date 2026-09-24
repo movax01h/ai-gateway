@@ -1285,3 +1285,48 @@ class TestSastPushPrecedesMergeRequestCreation:
                 f"{version}: {self.CREATE_MR} can still run git, so it can still push "
                 "a branch the flow has not confirmed"
             )
+
+
+class TestSastResolvesTargetBranchBeforeGitOperations:
+    """Regression guard for tracked-ref target branch wiring in version 1.0.2."""
+
+    FLOW = "resolve_sast_vulnerability"
+    VERSION = "1.0.2"
+    COMPONENT = "resolve_target_branch"
+    BRANCH_SOURCE = f"context:{COMPONENT}.tool_responses"
+
+    def _config(self):
+        return FlowConfig.from_yaml_config(self.FLOW, self.VERSION)
+
+    def _component(self, name):
+        return next(c for c in self._config().components if c["name"] == name)
+
+    def test_target_branch_is_resolved_deterministically(self):
+        component = self._component(self.COMPONENT)
+
+        assert component["type"] == "DeterministicStepComponent"
+        assert component["tool_name"] == "resolve_vulnerability_target_branch"
+
+    def test_target_branch_resolution_must_succeed_before_git_operations(self):
+        router = next(r for r in self._config().routers if r["from"] == self.COMPONENT)
+        condition = router["condition"]
+
+        assert condition["input"] == f"context:{self.COMPONENT}.execution_result"
+        assert condition["routes"]["success"] == "ensure_clean_git_state"
+        assert condition["routes"][BaseRouter.DEFAULT_ROUTE] == "end"
+
+    @pytest.mark.parametrize(
+        "component_name,input_alias",
+        [
+            ("ensure_clean_git_state", "default_branch"),
+            ("create_repository_branch", "ref"),
+            ("push_and_create_mr", "default_branch"),
+        ],
+    )
+    def test_resolved_branch_is_used_consistently(self, component_name, input_alias):
+        component = self._component(component_name)
+
+        assert {
+            "from": self.BRANCH_SOURCE,
+            "as": input_alias,
+        } in component["inputs"]

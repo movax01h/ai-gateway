@@ -1,4 +1,11 @@
-GET_VULNERABILITY_DETAILS_QUERY = """
+_TRACKED_REF_SELECTION = """            trackedRef {
+                name
+                refType
+            }"""
+
+# ``trackedRef`` is omitted when unsupported because unknown GraphQL fields fail
+# the entire request.
+_GET_VULNERABILITY_DETAILS_QUERY_TEMPLATE = """
     fragment Url on VulnerabilityDetailUrl {
         type: __typename
         name
@@ -195,6 +202,7 @@ GET_VULNERABILITY_DETAILS_QUERY = """
                 createdAt
                 updatedAt
             }
+__TRACKED_REF_FRAGMENT__
             location {
                 __typename
                 ... on VulnerabilityLocationClusterImageScanning {
@@ -330,3 +338,23 @@ LIST_VULNERABILITIES_QUERY = """query($projectFullPath: ID!, $first: Int, $after
     }
 }
 """
+
+_TRACKED_REF_PLACEHOLDER = "\n__TRACKED_REF_FRAGMENT__"
+
+
+def build_vulnerability_details_query(include_tracked_ref: bool) -> str:
+    """Build the vulnerability details GraphQL query.
+
+    Args:
+        include_tracked_ref: Whether to select ``trackedRef { name refType }``.
+            Only true when the target GitLab instance is >= 19.5, since older
+            schemas reject the field and pre-19.5 backends return it as null for
+            the AI workflow token.
+
+    Returns:
+        The GraphQL query string.
+    """
+    replacement = "\n" + _TRACKED_REF_SELECTION if include_tracked_ref else ""
+    return _GET_VULNERABILITY_DETAILS_QUERY_TEMPLATE.replace(
+        _TRACKED_REF_PLACEHOLDER, replacement
+    )
