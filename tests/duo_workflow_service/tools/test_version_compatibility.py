@@ -16,6 +16,7 @@ from duo_workflow_service.tools.version_compatibility import (
     HIERARCHY_WIDGET_VERSION,
     LICENSED_FEATURE_AVAILABILITY_VERSION,
     NOTE_RESOLVABLE_AND_RESOLVED_FIELDS_VERSION,
+    VULNERABILITY_TRACKED_REF_VERSION,
     get_gitlab_version,
     supports_agent_plan_readiness_score,
     supports_agent_plan_widget,
@@ -27,6 +28,7 @@ from duo_workflow_service.tools.version_compatibility import (
     supports_labels_by_name,
     supports_licensed_feature_availability,
     supports_note_resolved_and_resolvable_fields,
+    supports_vulnerability_tracked_ref,
 )
 
 
@@ -141,6 +143,16 @@ class TestVersionCompatibilityFunctions:
             (supports_licensed_feature_availability, "18.11.0", True),
             (supports_licensed_feature_availability, "19.0.0", True),
             (supports_licensed_feature_availability, "18.10.0", False),
+            # supports_vulnerability_tracked_ref (threshold: 19.5.0)
+            (supports_vulnerability_tracked_ref, "19.5.0", True),
+            (supports_vulnerability_tracked_ref, "19.5.1", True),
+            (supports_vulnerability_tracked_ref, "20.0.0", True),
+            # Two components pad to (19, 5, 0), meeting the floor exactly.
+            (supports_vulnerability_tracked_ref, "19.5", True),
+            (supports_vulnerability_tracked_ref, "19.4.0", False),
+            (supports_vulnerability_tracked_ref, "19.4.9", False),
+            (supports_vulnerability_tracked_ref, "18.10.0", False),
+            (supports_vulnerability_tracked_ref, "18.6.0", False),
             # supports_group_level_custom_instructions (threshold: 19.0.0)
             (supports_group_level_custom_instructions, "19.0.0", True),
             (supports_group_level_custom_instructions, "19.1.0", True),
@@ -212,6 +224,27 @@ class TestVersionCompatibilityFunctions:
         mock_gitlab_version.get.return_value = reported
         assert supports_labels_by_name() is expected
 
+    @pytest.mark.parametrize(
+        "reported,expected",
+        [
+            ("19.5.0", True),
+            ("19.5.0-pre-g1234abcd", True),
+            ("19.4.0", False),
+            # No version: falls back to 18.6.0, below the floor, so the field is
+            # dropped and callers fall back to the default branch.
+            (None, False),
+            ("", False),
+            ("garbage", False),
+        ],
+    )
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
+    def test_vulnerability_tracked_ref_reads_raw_version_strings(
+        self, mock_gitlab_version, reported, expected
+    ):
+        """End to end from the header string, without mocking the parser."""
+        mock_gitlab_version.get.return_value = reported
+        assert supports_vulnerability_tracked_ref() is expected
+
 
 class TestVersionConstants:
     """Tests for version constants."""
@@ -251,6 +284,10 @@ class TestVersionConstants:
     def test_licensed_feature_availability_version_constant(self):
         """Test that LICENSED_FEATURE_AVAILABILITY_VERSION is set correctly."""
         assert LICENSED_FEATURE_AVAILABILITY_VERSION == Version("18.11.0")
+
+    def test_vulnerability_tracked_ref_version_constant(self):
+        """Test that VULNERABILITY_TRACKED_REF_VERSION is set correctly."""
+        assert VULNERABILITY_TRACKED_REF_VERSION == Version("19.5.0")
 
     def test_group_level_custom_instructions_version_constant(self):
         """Test that GROUP_LEVEL_CUSTOM_INSTRUCTIONS_VERSION is set correctly."""

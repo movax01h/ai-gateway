@@ -25,6 +25,7 @@ AGENT_PLAN_READINESS_SCORE_VERSION = Version("19.4.0")
 LABELS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
 SUGGESTED_REVIEWERS_ENDPOINT_VERSION = Version("19.4.0")
 CLIENT_MCP_TRUST_STRIPPED_VERSION = Version("19.5.0")
+VULNERABILITY_TRACKED_REF_VERSION = Version("19.5.0")
 
 # Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
 # parse, such as a GDK's `19.3.0-pre-g1234abcd`.
@@ -129,6 +130,25 @@ def supports_agent_plan_readiness_score() -> bool:
 def supports_licensed_feature_availability() -> bool:
     """Check if the GitLab instance exposes the licensedFeatureAvailability GraphQL field."""
     return get_gitlab_version() >= LICENSED_FEATURE_AVAILABILITY_VERSION
+
+
+def supports_vulnerability_tracked_ref() -> bool:
+    """Check if ``Vulnerability.trackedRef`` returns usable data.
+
+    The field (and its ``SecurityTrackedRef.refType``) was added as an experiment
+    in GitLab 18.10, but before 19.5 the AI workflow token lacks the permission to
+    read it, so it always resolves to ``null``. The threshold is therefore 19.5,
+    not the schema introduction milestone: below it the field is either rejected
+    (older schema) or uselessly ``null``, so it is omitted and callers fall back
+    to the project default branch. An instance that reports no version falls back
+    below the floor and is treated as unsupported.
+
+    Returns:
+        True if ``trackedRef`` is readable (GitLab >= 19.5), False otherwise.
+    """
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        VULNERABILITY_TRACKED_REF_VERSION
+    )
 
 
 def supports_group_level_custom_instructions() -> bool:

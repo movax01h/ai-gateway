@@ -1253,6 +1253,55 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `resolve_sast_vulnerability 1.0.2 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> gather_context;
+    gather_context(gather_context<br>#91;DeterministicStepComponent#93;);
+    evaluate_vuln_fp_status(evaluate_vuln_fp_status<br>#91;DeterministicStepComponent#93;);
+    resolve_target_branch(resolve_target_branch<br>#91;DeterministicStepComponent#93;);
+    ensure_clean_git_state(ensure_clean_git_state<br>#91;AgentComponent#93;);
+    create_repository_branch(create_repository_branch<br>#91;AgentComponent#93;);
+    execute_fix(execute_fix<br>#91;AgentComponent#93;);
+    validate_fix_has_changes(validate_fix_has_changes<br>#91;DeterministicStepComponent#93;);
+    commit_changes(commit_changes<br>#91;OneOffComponent#93;);
+    push_commits(push_commits<br>#91;AgentComponent#93;);
+    push_and_create_mr(push_and_create_mr<br>#91;OneOffComponent#93;);
+    link_vulnerability(link_vulnerability<br>#91;DeterministicStepComponent#93;);
+    evaluate_merge_request(evaluate_merge_request<br>#91;AgentComponent#93;);
+    gather_context --> evaluate_vuln_fp_status;
+    evaluate_vuln_fp_status -.->|"skip_false_positive"| __end__;
+    evaluate_vuln_fp_status -.->|"proceed_with_fix"| resolve_target_branch;
+    evaluate_vuln_fp_status -.->|"default_route"| resolve_target_branch;
+    resolve_target_branch -.->|"success"| ensure_clean_git_state;
+    resolve_target_branch -.->|"default_route"| __end__;
+    ensure_clean_git_state --> create_repository_branch;
+    create_repository_branch -.->|"success"| execute_fix;
+    create_repository_branch -.->|"default_route"| __end__;
+    execute_fix --> validate_fix_has_changes;
+    validate_fix_has_changes -.->|"Exit code: 0\nproceed"| commit_changes;
+    validate_fix_has_changes -.->|"default_route"| __end__;
+    commit_changes -.->|"success"| push_commits;
+    commit_changes -.->|"default_route"| __end__;
+    push_commits -.->|"success"| push_and_create_mr;
+    push_commits -.->|"default_route"| __end__;
+    push_and_create_mr -.->|"success"| evaluate_merge_request;
+    push_and_create_mr -.->|"default_route"| __end__;
+    evaluate_merge_request --> link_vulnerability;
+    link_vulnerability --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `risk_classification 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
