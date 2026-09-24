@@ -1,5 +1,5 @@
 import json
-from typing import Any, Optional, Type
+from typing import Any, ClassVar, Optional, Type
 
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field
@@ -14,13 +14,20 @@ class GrepInput(BaseModel):
     search_directory: Optional[str] = Field(
         default=".",
         description="The relative path of directory in which to search. Scope this to a specific subdirectory "
-        "(e.g. 'src/api', 'pkg/controller') whenever possible instead of '.' to reduce irrelevant results and token usage.",
+        "(e.g. 'src/api', 'pkg/controller') whenever possible instead of '.' to reduce irrelevant results and token usage."
+        " A directory that does not exist is reported as an error, but a directory that exists and does not"
+        " hold the code returns no matches, which looks the same as the code not existing.",
     )
     keywords: str = Field(
         description="A comma-separated list of keywords for searching relevant snippets."
         " Do NOT provide regex expressions."
         " Every keyword should be either camel-case or snake-case."
         " Examples: 'authentication,login,user_session' or 'LoginComponent,LogoutComponent,Dashboard'"
+    )
+    case_insensitive: bool = Field(
+        default=True,
+        description="Whether to ignore letter case. Set false when case distinguishes the thing you"
+        " are looking for, such as a constant from a local of the same name.",
     )
 
 
@@ -40,10 +47,16 @@ class Grep(DuoBaseTool):
     - Always scope `search_directory` to a specific subdirectory rather than the repository root '.' whenever known.
     - Provide 3-5 specific keywords per search to maximize precision and minimize irrelevant results.
     - Avoid long iterative trial-and-error grep chains; use `find_files` to locate relevant files or directories first.
+    - Terms in one call are pooled and ranked together, so group terms that answer the same question.
+    - Call this tool in parallel when you have several independent questions; do not spend a turn on
+        each one in sequence.
 
     **Output structure:**
-    - The tool returns snippets from the top-n files with the most matches in the specified directory
-    - Snippets include start and end line numbers for each match where lines start from 0
+    - Matches are ranked for relevance across the whole result set and the top 100 snippets are returned,
+        so a rare term outweighs a common one and results are not grouped by file
+    - At most 5 matches per file survive to ranking, so a file that uses a term heavily is represented
+        by a sample of its matches rather than all of them; read the file when the snippets do not settle it
+    - Snippets include start and end line numbers for each match, where the first line of a file is line 1
 
     **Don't use this for:**
     - Finding files by name patterns (use find_files instead)
@@ -88,6 +101,28 @@ class Grep(DuoBaseTool):
             search_dir = "directory"
         message = f"Search for '{args.keywords}' in files in '{search_dir}'"
         return message
+
+
+class GrepLiteralInput(GrepInput):
+    keywords: str = Field(
+        description="A comma-separated list of literal strings to search for. Each one is matched"
+        " literally, so punctuation is fine and no escaping is needed, but a comma cannot appear"
+        " inside a term because it separates them. Results pool every term together, so use one call"
+        " for terms you want ranked against each other and separate parallel calls for unrelated"
+        " questions. Examples: 'authentication,login,user_session' or 'LoginComponent,Dashboard'"
+    )
+
+
+class GrepLiteral(Grep):
+    """Grep for clients whose executor matches terms literally.
+
+    Older executors pass each term to ripgrep as a regex, so telling the model punctuation is safe would make a term
+    like `foo(` fail the whole call on them.
+    """
+
+    args_schema: Type[BaseModel] = GrepLiteralInput
+    supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = Grep
+    required_capability: ClassVar[frozenset[str]] = frozenset({"grep_fixed_strings"})
 
 
 class ExtractLinesFromTextInput(BaseModel):

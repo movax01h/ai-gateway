@@ -9,6 +9,8 @@ from duo_workflow_service.tools.search_system import (
     ExtractLinesFromTextInput,
     Grep,
     GrepInput,
+    GrepLiteral,
+    GrepLiteralInput,
 )
 from tests.duo_workflow_service.tools.conftest import (
     create_mock_client_event_with_response,
@@ -195,6 +197,25 @@ def test_grep_format_display_message_no_directory():
     message = tool.format_display_message(input_data)
     expected_message = "Search for 'TODO' in files in 'directory'"
     assert message == expected_message
+
+
+class TestGrepLiteral:
+    def test_supersedes_grep(self):
+        assert GrepLiteral.supersedes is Grep
+
+    def test_required_capability(self):
+        assert GrepLiteral.required_capability == frozenset({"grep_fixed_strings"})
+
+    def test_shares_tool_name_with_grep(self):
+        assert GrepLiteral.model_fields["name"].default == "grep"
+
+    def test_only_literal_variant_says_punctuation_is_fine(self):
+        literal = GrepLiteralInput.model_fields["keywords"].description
+        base = GrepInput.model_fields["keywords"].description
+
+        assert "punctuation is fine" in literal
+        assert "Do NOT provide regex expressions" in base
+        assert "punctuation" not in base
 
 
 class TestExtractLinesFromText:
