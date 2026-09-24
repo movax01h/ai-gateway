@@ -2765,3 +2765,141 @@ class TestAgentComponentMaxWrapUpRetries:
 
         call_kwargs = mock_agent_node_cls.call_args[1]
         assert call_kwargs["cycle_budget"].max_wrap_up_retries == 5
+
+
+class TestWebSearchBinding:
+    """`_build_prompt` binds the provider-native web-search tool only when the `enable_web_search` opt-in AND the
+    dependency_bump_web_search flag AND the client's `web_search` capability are all present."""
+
+    _MODULE = "duo_workflow_service.agent_platform.v1.components.agent.component"
+
+    @pytest.mark.parametrize(
+        ("enabled", "flag_on", "client_capable", "expect_bound"),
+        [
+            (True, True, True, True),  # all gates satisfied -> bound
+            (False, True, True, False),  # flow opt-in off
+            (True, False, True, False),  # dependency_bump_web_search flag off
+            (True, True, False, False),  # client lacks web_search capability
+        ],
+    )
+    def test_web_search_binding_is_gated(
+        self,
+        make_agent_component,
+        mock_prompt_registry,
+        enabled,
+        flag_on,
+        client_capable,
+        expect_bound,
+    ):
+        component = make_agent_component(enable_web_search=enabled)
+
+        with (
+            patch(
+                f"{self._MODULE}.is_feature_enabled", return_value=flag_on
+            ) as mock_is_feature_enabled,
+            patch(
+                f"{self._MODULE}.is_client_capable", return_value=client_capable
+            ) as mock_is_client_capable,
+        ):
+            component._build_prompt(tools=[], tool_choice="auto")
+
+        call_kwargs = mock_prompt_registry.get_on_behalf.call_args.kwargs
+        if expect_bound:
+            assert call_kwargs["bind_tools_params"] == {"web_search_options": {}}
+            # the gate must query the correct flag and capability identifiers
+            mock_is_feature_enabled.assert_called_once_with(
+                FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH
+            )
+            mock_is_client_capable.assert_called_once_with("web_search")
+        else:
+            assert "bind_tools_params" not in call_kwargs
+
+    def test_web_search_is_off_by_default(
+        self, make_agent_component, mock_prompt_registry
+    ):
+        """Flows that never opt in must not pay the capability/flag lookups or bind the tool."""
+        component = make_agent_component()
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled") as mock_is_feature_enabled,
+            patch(f"{self._MODULE}.is_client_capable") as mock_is_client_capable,
+        ):
+            component._build_prompt(tools=[], tool_choice="auto")
+
+        assert component.enable_web_search is False
+        assert (
+            "bind_tools_params"
+            not in mock_prompt_registry.get_on_behalf.call_args.kwargs
+        )
+        mock_is_feature_enabled.assert_not_called()
+        mock_is_client_capable.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("enabled", "flag_on", "client_capable", "expected"),
+        [
+            (True, True, True, True),  # all gates satisfied
+            (False, True, True, False),  # flow opt-in off
+            (True, False, True, False),  # dependency_bump_web_search flag off
+            (True, True, False, False),  # client lacks web_search capability
+        ],
+    )
+    def test_tools_enabled_map_reflects_gate(
+        self, make_agent_component, enabled, flag_on, client_capable, expected
+    ):
+        """`_tools_enabled()` exposes the same gate to the prompt (as `tools_enabled`) that decides whether the tool is
+        bound, so the prompt can branch its guidance."""
+        component = make_agent_component(enable_web_search=enabled)
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=flag_on),
+            patch(f"{self._MODULE}.is_client_capable", return_value=client_capable),
+        ):
+            # `run_command` is True because the mock toolset contains every key; it
+            # reflects toolset membership, not the patched flag, which this component
+            # does not consult. `..._follows_toolset_membership` covers that directly.
+            assert component._tools_enabled() == {
+                "web_search": expected,
+                "run_command": True,
+            }
+
+    @pytest.mark.parametrize("in_toolset", [True, False])
+    def test_tools_enabled_run_command_follows_toolset_membership(
+        self, make_agent_component, mock_toolset, in_toolset
+    ):
+        """`run_command` reaches the toolset only when Rails grants the `run_commands` privilege, so membership is the
+        whole answer -- it is what decides whether the prompt describes the tool or its fallback."""
+        # keyed rather than blanket-True: checking membership of the wrong tool name
+        # would answer False here and fail the assertion
+        mock_toolset.__contains__ = Mock(
+            side_effect=lambda name: in_toolset and name == "run_command"
+        )
+        component = make_agent_component()
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=False),
+            patch(f"{self._MODULE}.is_client_capable", return_value=False),
+        ):
+            assert component._tools_enabled()["run_command"] is in_toolset
+
+    @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
+    def test_attach_forwards_tools_enabled_to_agent_node(
+        self,
+        make_agent_component,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+    ):
+        """The prompt template reads `tools_enabled`, which is injected at execution time rather than declared as a
+        component input, so it has to reach AgentNode via prompt_template_inputs."""
+        component = make_agent_component(enable_web_search=True)
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=True),
+            patch(f"{self._MODULE}.is_client_capable", return_value=True),
+        ):
+            component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_agent_node_cls.call_args[1]
+        assert call_kwargs["prompt_template_inputs"] == {
+            "tools_enabled": {"web_search": True, "run_command": True}
+        }

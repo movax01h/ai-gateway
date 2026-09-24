@@ -1,0 +1,73 @@
+name: "Resolve dependency bump"
+description: |
+  Analyze breaking changes caused by dependency version bumps, commit the
+  required fixes directly to the merge request's source branch, then post a
+  short summary comment on the merge request.
+product_group: agent_foundations
+version: "v1"
+environment: ambient
+
+components:
+  - name: "resolve_dep_bump_pipeline_fix"
+    type: AgentComponent
+    prompt_id: "resolve_dep_bump_pipeline_fix"
+    prompt_version: "^1.0.0"
+    enable_web_search: true
+    inputs:
+      - from: "context:goal"
+        as: "pipeline_url"
+      - from: "context:inputs.merge_request.url"
+        as: "merge_request_url"
+        optional: true
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: true
+    toolset:
+      - get_pipeline_failing_jobs
+      - get_job_logs
+      - get_merge_request
+      - list_merge_request_diffs
+      - read_file
+      - find_files
+      - list_dir
+      - grep
+      - list_vulnerabilities
+      - get_vulnerability_details
+      - run_command
+      - create_commit
+      - create_merge_request_note
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "resolve_dep_bump_pipeline_fix"
+    to: "end"
+
+flow:
+  entry_point: "resolve_dep_bump_pipeline_fix"
+  inputs:
+    - category: merge_request
+      version_constraint: "^1.0.0"
+      input_schema:
+        url:
+          type: string
+          format: uri
+          description: The URL for the GitLab Merge Request
+    - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true
