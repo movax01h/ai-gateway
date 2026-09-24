@@ -64,6 +64,7 @@ __all__ = [
     "is_image_block",
     "is_image_content_block",
     "is_internal_image_block",
+    "render_image_blocks_as_text",
     "strip_image_payloads",
     "with_block_text",
 ]
@@ -257,6 +258,20 @@ def content_as_text(content: Any) -> str:
     # One block per line: the shape that reaches a card is a text lead-in
     # followed by a placeholder or a marker, and those read as separate lines.
     return "\n".join(_block_as_text(block) for block in strip_image_payloads(content))
+
+
+def render_image_blocks_as_text(content: Any) -> Any:
+    """Return *content* unchanged, unless it is a block list carrying an image; then render it as one string.
+
+    For a consumer that stores a tool result as plain flow state rather than as a message. The checkpoint encoder
+    strips image payloads from message content only, so an image-bearing list kept in state would ride into every
+    checkpoint from then on, and any prompt that renders that state as text would get the base64 inline. The rendered
+    string carries the lead-in and the same placeholder history uses, which is what such a prompt should see anyway.
+    A list without an image is returned by identity: other tools store structured lists on purpose.
+    """
+    if isinstance(content, list) and any(is_image_block(block) for block in content):
+        return content_as_text(content)
+    return content
 
 
 def _block_as_text(block: Any) -> str:

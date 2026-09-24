@@ -218,7 +218,7 @@ class ReadFile(DuoBaseTool):
         "Let me check if class `DuoBaseTool` exists in `./tools/base.py`",
     ]
 
-    async def _execute(self, file_path: str) -> str | list:
+    async def _execute(self, file_path: str) -> str | list[dict[str, Any]]:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
@@ -288,7 +288,7 @@ class ReadFileChunked(DuoBaseTool):
         file_path: str,
         offset: int = DEFAULT_READ_FILE_OFFSET,
         limit: int = DEFAULT_READ_FILE_LIMIT,
-    ) -> str | list:
+    ) -> str | list[dict[str, Any]]:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 

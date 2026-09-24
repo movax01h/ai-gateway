@@ -180,6 +180,41 @@ class TestDeterministicStepNode:
     """Test suite for DeterministicStepNode class focusing on the run method."""
 
     @pytest.mark.asyncio
+    async def test_an_image_result_is_stored_as_text_not_blocks(
+        self,
+        deterministic_step_node,
+        workflow_state,
+        mock_tool,
+        mock_get_vars_from_state,
+        mock_tool_monitoring,
+        mock_prompt_security,
+    ):
+        """A block list carrying an image is rendered to a string before it is stored in flow state.
+
+        This result lands in context, not in a message, so the checkpoint encoder would not strip the payload: the
+        base64 would ride into every later checkpoint and into any prompt that renders the context as text.
+        """
+        payload = "QUFBQQ==" * 512
+        mock_tool.ainvoke.return_value = [
+            {
+                "type": "text",
+                "text": "Read image file: ./shot.png (image/png, 3 KB). The image follows.",
+            },
+            {"type": "image", "base64": payload, "mime_type": "image/png"},
+        ]
+        mock_prompt_security.side_effect = lambda **kwargs: kwargs["response"]
+
+        result = await deterministic_step_node.run(workflow_state)
+
+        stored = result[FlowStateKeys.CONTEXT]["responses"]
+        assert stored == (
+            "Read image file: ./shot.png (image/png, 3 KB). The image follows.\n"
+            "[image/png omitted from history]"
+        )
+        assert payload not in str(result)
+        assert result[FlowStateKeys.CONTEXT]["status"] == "success"
+
+    @pytest.mark.asyncio
     async def test_run_success(
         self,
         deterministic_step_node,

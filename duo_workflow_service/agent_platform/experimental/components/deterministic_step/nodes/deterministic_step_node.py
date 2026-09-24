@@ -19,6 +19,7 @@ from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.entities.image_blocks import render_image_blocks_as_text
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
@@ -69,6 +70,9 @@ class DeterministicStepNode:
             response = await self._execute_tool(
                 tool=self._validated_tool, tool_call_args=tool_call_args
             )
+            # This result is stored as plain state, not as a message, so the
+            # checkpoint encoder would not strip an image payload from it.
+            response = render_image_blocks_as_text(response)
 
             if not isinstance(response, (str, list, dict)):
                 raise ValueError(
