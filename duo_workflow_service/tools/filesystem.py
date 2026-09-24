@@ -194,24 +194,15 @@ def validate_duo_context_exclusions(
         return
 
 
-# Tool-read image support is feature-flagged (see FeatureFlag.DAP_TOOL_IMAGE_INPUT):
-# the image conversion and the description lines advertising it MUST flip
-# together. Advertised-but-off would surprise the model with refusals;
-# on-but-unadvertised makes the capability undiscoverable (models refuse image
-# reads unless the tool says it can, observed live). The note constants below
-# are interpolated into the class descriptions and stripped per request by each
-# tool's model validator when the flag is off; tools are instantiated per run
-# (ToolsRegistry.configure), so the description follows the request's flag
-# state.
-#
-# The description is fixed at configure time while the behaviour below
-# re-reads the flag on every call, but both read the same request-scoped
-# context, set once per run by the feature-flag interceptor. A flip therefore
-# lands at the NEXT run, never on one already in flight: the kill switch works
-# at run granularity, which is enough because runs are short-lived. The
-# per-call re-read still matters: it keeps the gate correct if the flag
-# context ever becomes finer-grained, and it stops anyone caching the decision
-# at import time.
+# The conversion and the description lines advertising it must flip together
+# (FeatureFlag.DAP_TOOL_IMAGE_INPUT): advertised but off surprises the model
+# with refusals, and on but unadvertised makes the capability undiscoverable,
+# since models refuse image reads unless the tool says it can. Each tool's
+# model validator strips its note when the flag is off. Tools are built once
+# per run and the flag context is set once per request, so the description and
+# the per-call check below always agree within a run, and a flip takes effect
+# on the next run. The check stays per call rather than captured so it follows
+# the context if that ever gets finer-grained.
 _READ_FILE_IMAGE_NOTE = f"""Image files ({supported_image_formats_display()}) are supported: reading one returns the
     actual image so you can see its contents.
 
@@ -234,13 +225,11 @@ def _strip_image_note_if_disabled(tool: DuoBaseTool, note: str) -> None:
 
 def _image_response_to_blocks_if_enabled(
     image: ImageActionResult, file_path: str
-) -> str | list:
-    """Funnel gate for tool-read image support.
+) -> str | list[dict[str, Any]]:
+    """Convert a typed image result when the flag is on, refuse readably when off.
 
-    Flag on: typed image results convert into model-visible image blocks. Flag
-    off: the image becomes the refusal the model saw before image support
-    existed (a new client emits image responses regardless of this server-side
-    flag, so the gate has to answer them readably).
+    A new client sends image responses whatever this server-side flag says, so the off path has to answer them in words
+    the model can act on.
     """
     if is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT):
         return image_response_to_blocks(image, file_path=file_path)
