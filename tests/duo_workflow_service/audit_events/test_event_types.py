@@ -172,3 +172,26 @@ class TestCloudEventSerialization:
         assert ce["data"]["completion_token_count"] is None
         assert ce["data"]["finish_reason"] is None
         assert ce["data"]["latency_ms"] is None
+
+
+class TestBoundedFieldSiblings:
+    def test_siblings_are_omitted_when_not_truncated(self):
+        event = LlmInputSentEvent(
+            workflow_id="wf-1", model_name="m", prompt_content="p"
+        )
+        data = event.to_cloudevent()["data"]
+        assert "prompt_content_truncated" not in data
+        assert "prompt_content_bytes" not in data
+
+    def test_siblings_are_sent_when_truncated(self):
+        event = ToolResponseReceivedEvent(
+            workflow_id="wf-1",
+            tool_name="t",
+            response_content="excerpt",
+            response_length=10,
+            response_content_truncated=True,
+            response_content_bytes=10,
+        )
+        data = event.to_cloudevent()["data"]
+        assert data["response_content_truncated"] is True
+        assert data["response_content_bytes"] == 10

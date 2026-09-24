@@ -119,9 +119,10 @@ have no metadata labels.
 |---|---|---|---|
 | `duo_workflow_audit_events_captured_total` | Counter | `event_type` | The collector captures an audit event. |
 | `duo_workflow_audit_events_sent_total` | Counter | `result` | A batch POST is attempted. `result` is `success`, `http_error`, or `exception`. Incremented by the number of events in the batch. |
-| `duo_workflow_audit_events_dropped_total` | Counter | `reason` | Events are dropped before delivery. `reason` is `http_error`, `retries_exhausted`, or `version_unsupported`. Incremented by the number of events dropped. |
+| `duo_workflow_audit_events_dropped_total` | Counter | `reason` | Events are dropped before delivery. `reason` is `http_error`, `retries_exhausted`, `version_unsupported`, `event_too_large`, or `cancelled`. Incremented by the number of events dropped. `event_too_large` also logs the warning `Dropping audit event larger than the size cap`. |
+| `duo_workflow_audit_events_truncated_total` | Counter | `event_type`, `field` | An event over the size cap is kept by excerpting `field` (first and last 8 KiB). Also logs the warning `Truncated audit event larger than the size cap`. |
 | `duo_workflow_audit_events_batch_size` | Histogram | none | A batch is POSTed. Buckets: 1, 5, 10, 25, 50, 100, 200, 500. |
-| `duo_workflow_audit_events_payload_bytes` | Histogram | none | A batch is POSTed. Measures the UTF-8 serialized payload size. Buckets: 512 B to 1 MiB. |
+| `duo_workflow_audit_events_payload_bytes` | Histogram | none | A batch is POSTed. Measures the UTF-8 serialized payload size. Buckets: 512 B to 3 MiB. |
 | `duo_workflow_audit_events_auto_flush_skipped_total` | Counter | none | A buffer-full auto-flush is skipped because no event loop is running. |
 
 ## gRPC metrics
