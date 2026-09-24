@@ -702,6 +702,36 @@ models:
       thinking_level: "high"
       streaming: "true"
 
+  - name: "Gemini 3.7 Flash Medium"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "gemini_3_7_flash_medium_vertex"
+    description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
+    cost_indicator: "$"
+    max_context_tokens: 1_000_000
+    model_class_provider: google_genai
+    family:
+      - gemini
+    params:
+      model: "gemini-3.7-flash"
+      max_tokens: 65_536
+      thinking_level: "medium"
+      streaming: "true"
+
+  - name: "Gemini 3.7 Flash Low"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "gemini_3_7_flash_low_vertex"
+    description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
+    cost_indicator: "$"
+    max_context_tokens: 1_000_000
+    model_class_provider: google_genai
+    family:
+      - gemini
+    params:
+      model: "gemini-3.7-flash"
+      max_tokens: 65_536
+      thinking_level: "low"
+      streaming: "true"
+
   - name: "Gemini 3.8 Flash"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_8_flash_vertex"

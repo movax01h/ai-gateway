@@ -13,7 +13,8 @@ from duo_workflow_service.tools.filesystem import _format_no_matches_message
 class GrepInput(BaseModel):
     search_directory: Optional[str] = Field(
         default=".",
-        description="The relative path of directory in which to search. Defaults to current directory.",
+        description="The relative path of directory in which to search. Scope this to a specific subdirectory "
+        "(e.g. 'src/api', 'pkg/controller') whenever possible instead of '.' to reduce irrelevant results and token usage.",
     )
     keywords: str = Field(
         description="A comma-separated list of keywords for searching relevant snippets."
@@ -25,18 +26,20 @@ class GrepInput(BaseModel):
 
 class Grep(DuoBaseTool):
     name: str = "grep"
-    description: str = """Search code and text content within files across the entire codebase.
+    description: str = """Search code and text content within files across the codebase.
 
-    This tool uses searches, recursively, through all files in the given directory, respecting .gitignore rules.
+    This tool searches, recursively, through all files in the given directory, respecting .gitignore rules.
 
     **Primary use cases:**
-    Fastest local search: Use this as your PRIMARY search tool for finding:
+    Use this search tool for finding:
     - Function definitions, class names, variable usage
     - Code patterns, imports, API calls
     - Error messages, comments, configuration values
 
     **How to use:**
-    Always provide 3-5 specific keywords per search to maximize precision and minimize irrelevant results
+    - Always scope `search_directory` to a specific subdirectory rather than the repository root '.' whenever known.
+    - Provide 3-5 specific keywords per search to maximize precision and minimize irrelevant results.
+    - Avoid long iterative trial-and-error grep chains; use `find_files` to locate relevant files or directories first.
 
     **Output structure:**
     - The tool returns snippets from the top-n files with the most matches in the specified directory
