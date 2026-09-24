@@ -1,4 +1,6 @@
+import functools
 import random
+import re
 from itertools import chain
 from pathlib import Path
 from typing import Annotated, Any, Iterable, Literal, Optional
@@ -599,6 +601,40 @@ class ModelSelectionConfig:
             chosen = random.choices(identifiers, weights=weights, k=1)[0]
             return self.get_model(chosen)
         raise ValueError(f"Invalid feature setting: {feature_setting_name}")
+
+    def resolve_tag_for_goal(
+        self, feature_setting_name: str, goal: str
+    ) -> Optional[tuple[str, str]]:
+        """Return the first matching tag and the keyword that matched, or None.
+
+        Tags are checked in declaration order. Keywords match as whole words, ignoring case, with plain plural and
+        verb endings.
+
+        Design: https://gitlab.com/gitlab-org/gitlab/-/work_items/627658
+        """
+        unit_primitive_config = self.get_resolved_unit_primitive_config_map().get(
+            feature_setting_name
+        )
+        if unit_primitive_config is None or not goal:
+            return None
+
+        for tag, entry in unit_primitive_config.models_for_tags.items():
+            for keyword in entry.keywords:
+                if _keyword_pattern(keyword).search(goal):
+                    return tag, keyword
+        return None
+
+
+@functools.lru_cache(maxsize=256)
+def _keyword_pattern(keyword: str) -> re.Pattern[str]:
+    # Match the keyword as a whole word, allowing plain plural and verb endings
+    # (`typos`, `bumped`, `refactoring`). For keywords ending in "e" the "e" is
+    # folded into the ending so `rename` also matches `renamed` and `renaming`.
+    if keyword.endswith("e"):
+        return re.compile(
+            rf"\b{re.escape(keyword[:-1])}(?:e|es|ed|ing)\b", re.IGNORECASE
+        )
+    return re.compile(rf"\b{re.escape(keyword)}(?:s|es|ed|ing)?\b", re.IGNORECASE)
 
 
 def validate_model_selection_config():

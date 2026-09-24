@@ -353,7 +353,7 @@ configurable_unit_primitives:
       reasoning: claude_opus_4_7_vertex
 ```
 
-A tag can also be written as an object, which is the schema that per-request routing will use once it lands. `models` accepts more than one entry and load-balances across provider variants of the same model, the way `default_models` does. `keywords` is meant to be matched against the request goal to select the tag, but nothing reads it yet: it has no effect until [this issue](https://gitlab.com/gitlab-org/gitlab/-/issues/627658) wires up the consumer. Both spellings can appear in the same file:
+A tag can also be written as an object, which is the schema that per-request routing will use once it lands. `models` accepts more than one entry and load-balances across provider variants of the same model, the way `default_models` does. `keywords` selects the tag from the request goal (see [Routing the default model by goal](#routing-the-default-model-by-goal)). Both spellings can appear in the same file:
 
 ```yaml
 configurable_unit_primitives:
@@ -377,6 +377,14 @@ configurable_unit_primitives:
 ```
 
 Keyword rules are routing hints and never a security boundary: they are sensitive to wording and can be triggered deliberately. `/v1/models/definitions` reports one model per tag, so a tag listing several models shows its first.
+
+### Routing the default model by goal
+
+When the `duo_developer_model_routing` feature flag is enabled for a request, Duo Workflow Service matches the goal of a `StartWorkflowRequest` against each tag's `keywords` and makes the first matching tag's model the request's `default`. This happens once, before the flow is built, so every turn of the flow runs on the same model. Tags are checked in the order they are declared in `models_for_tags`. A keyword matches as a whole word, ignoring case and allowing plain plural and verb endings, so `typo` matches `typos` but not `typography`. A goal that matches nothing keeps the configured `default_models`, and requests that name an explicit model `identifier` are never routed.
+
+The keyword lists come from the goal templates GitLab Rails renders for assignments, review requests, and mentions (`ee/app/models/ai/catalog/goal_templates/developer/`) — that template text is the whole goal for those requests and dictates the level of effort, so keep the lists free of words it contains. This keyword matching is the v1 tier of model selection; a later tier adds a small LLM classifier for goals that match nothing (see the [model routing design document](model_routing/index.md)).
+
+Components that declare their own `model_tags` are unaffected: they keep resolving through `ModelMetadataByTag.get`.
 
 ### How tag resolution works
 
