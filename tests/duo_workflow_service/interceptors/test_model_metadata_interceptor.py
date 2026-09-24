@@ -248,7 +248,9 @@ async def test_gitlab_provider_with_feature_setting_uses_build_default(mock_user
             fireworks_api_base_url="https://fw",
         )
         mock_by_size_cls.assert_called_once_with(
-            default=fake_default, by_tag=fake_by_tag
+            default=fake_default,
+            by_tag=fake_by_tag,
+            feature_setting="duo_agent_platform_agentic_chat",
         )
         mock_context.set.assert_called_once_with(fake_default)
         mock_size_context.set.assert_called_once_with(fake_by_size)

@@ -342,8 +342,8 @@ configurable_unit_primitives:
     unit_primitives: []
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
-    # Routing hints, not a security boundary. Placeholders until
-    # gitlab-org/gitlab#627660 tunes them.
+    # Routing hints, not a security boundary. Starting lists; the classifier tier
+    # in gitlab-org/gitlab#630219 is meant to take over where they miss.
     models_for_tags:
       large:
         models:
@@ -361,13 +361,10 @@ configurable_unit_primitives:
         keywords:
           - typo
           - readme
-          - documentation
           - docstring
-          - comment
           - bump
           - rename
           - unused
-          - deprecate
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"

@@ -95,6 +95,7 @@ from duo_workflow_service.interceptors.request_metadata_log_interceptor import (
     RequestMetadataLogInterceptor,
 )
 from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
+from duo_workflow_service.model_routing import route_default_model_by_goal
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
@@ -543,6 +544,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         )
 
         goal = start_req.goal
+
+        # Route once per request, before the flow is built, so every turn uses the same model.
+        route_default_model_by_goal(goal)
 
         if start_req.additional_context:
             additional_context = [

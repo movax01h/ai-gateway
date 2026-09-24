@@ -1217,6 +1217,56 @@ def test_validate_rejects_tag_models_missing_from_models_yml(
         selection_config.validate()
 
 
+@pytest.mark.parametrize(
+    ("goal", "expected"),
+    [
+        pytest.param(
+            "Fix the typo in the README", ("small", "typo"), id="small-keyword"
+        ),
+        pytest.param(
+            "Plan the refactor of the auth module",
+            ("large", "refactor"),
+            id="large-keyword",
+        ),
+        pytest.param("REFACTOR this", ("large", "refactor"), id="case-insensitive"),
+        pytest.param(
+            "Refactor the parser and fix a typo",
+            ("large", "refactor"),
+            id="first-declared-tag-wins",
+        ),
+        pytest.param("Add pagination to the issues list", None, id="no-match"),
+        pytest.param("", None, id="empty-goal"),
+        pytest.param("Fix two typos in the docs", ("small", "typo"), id="plural-form"),
+        pytest.param("Refactoring the parser", ("large", "refactor"), id="verb-form"),
+        pytest.param(
+            "Renamed the helper for clarity",
+            ("small", "rename"),
+            id="verb-form-e-final",
+        ),
+        pytest.param(
+            "Renaming the helpers", ("small", "rename"), id="progressive-e-final"
+        ),
+        pytest.param(
+            "Improve the typography of the landing page",
+            None,
+            id="no-match-inside-word",
+        ),
+    ],
+)
+def test_resolve_tag_for_goal(selection_config, write_tag_policy, goal, expected):
+    write_tag_policy(
+        test_model_size={
+            "large": {"models": ["large-model"], "keywords": ["refactor"]},
+            "small": {
+                "models": ["small-model"],
+                "keywords": ["typo", "readme", "rename"],
+            },
+        }
+    )
+
+    assert selection_config.resolve_tag_for_goal("test_model_size", goal) == expected
+
+
 def test_tag_entry_rejects_an_empty_model_list(selection_config, write_tag_policy):
     """A tag serving no models is a config error, not a silent no-op."""
     write_tag_policy(test_model_size={"small": {"models": []}})

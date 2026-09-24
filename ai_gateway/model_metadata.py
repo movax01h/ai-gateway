@@ -145,6 +145,9 @@ class ModelMetadataByTag(BaseModel):
 
     default: TypeModelMetadata
     by_tag: Dict[str, TypeModelMetadata] = Field(default_factory=dict)
+    # Set only when `default` was resolved from the feature setting rather than a
+    # pinned `identifier`. Per-request routing may rewrite `default` in that case.
+    feature_setting: Optional[str] = None
 
     def get(self, model_tags: list[str] | str | None = None) -> TypeModelMetadata:
         """Return the model metadata matching the requested tags.
