@@ -55,15 +55,12 @@ PATH_TRAVERSAL_PATTERNS = ("../", "..\\", "%2e%2e", "%252e%252e", "\u002e\u002e"
 # restrictions.  Kept in one place so all five tools stay in sync.
 GITIGNORED_FILE_NOTE = (
     "NOTE on file-access restrictions:\n"
-    "- Gitignored files: This tool cannot access files listed in .gitignore. If the file is\n"
-    "    not sensitive, you may fall back to the `run_command` tool with a shell command\n"
-    '    (e.g. `cat <file>`, `sed -i`, `echo "content" > file`). Do NOT use `git rm --cached`\n'
-    "    as a workaround.\n"
-    "- Secrets-denylisted files: Files such as `.env`, `.env.*`, `.ssh/`, `.gnupg/`,\n"
-    "    `Dockerfile.secrets`, and similar sensitive paths are protected by the Duo security\n"
-    "    denylist. Do NOT attempt to access these files by any means, including via\n"
-    "    `run_command` or any shell command. This restriction exists to prevent accidental\n"
-    "    exposure of secrets."
+    "- Gitignored files: Cannot access files listed in .gitignore. If the file is not sensitive,\n"
+    "    you may fall back to `run_command` with a shell command (e.g. `cat <file>`).\n"
+    "    Do NOT use `git rm --cached` as a workaround.\n"
+    "- Secrets-denylisted files: Cannot access `.env`, `.env.*`, `.ssh/`, `.gnupg/`,\n"
+    "    `Dockerfile.secrets`, or similar sensitive paths.\n"
+    "- Do NOT attempt to access secrets-denylisted files via `run_command` or any other shell command workaround."
 )
 
 # Security denylist of sensitive directories and files that should not be accessed
@@ -198,9 +195,10 @@ class ReadFile(DuoBaseTool):
     name: str = "read_file"
     description: str = f"""Read the contents of a file.
 
-    IMPORTANT:
-    - When a task requires reading multiple files, include batches of tool calls in a single response
-    - Do not make separate responses for each file - group related files together
+    Batching:
+    - When multiple files need inspection, emit multiple read_file calls concurrently in a single turn.
+    - Do not make separate turns for each file - group all related file reads together.
+    - Avoid redundant re-reads of files that are unchanged since you last read them.
 
     {GITIGNORED_FILE_NOTE}
     """
@@ -254,13 +252,15 @@ class ReadFileChunked(DuoBaseTool):
     name: str = "read_file"
     description: str = f"""Read a file from the local filesystem.
 
+    Batching:
+    - When multiple files need inspection, emit multiple read_file calls concurrently in a single turn.
+    - Do not make separate turns for each file - group all related file reads together.
+    - Avoid redundant re-reads of files that are unchanged since you last read them.
+
     Usage:
-    - By default, returns up to 2000 lines from the start of the file.
-    - The offset parameter is the line number to start from (0-indexed).
-    - To read later sections, call this tool again with a larger offset.
-    - If the file is truncated, a hint is returned at the end with the next offset value — use it to continue reading.
-    - Call this tool in parallel when you need to read multiple files.
-    - Avoid tiny repeated slices; if you need more context, read a larger window.
+    - Only read files directly relevant to the current task. Do NOT speculatively read unrelated files or entire directories.
+    - Returns up to 2000 lines from offset (0-indexed).
+    - For large files (>100 lines), specify offset and limit to inspect only the relevant section.
 
     {GITIGNORED_FILE_NOTE}
     """
@@ -450,9 +450,13 @@ class FindFiles(DuoBaseTool):
     description: str = """Find files by name patterns (equivalent to 'find' command).
 
     **Primary use cases:**
+    - Discover codebase structure and locate files before searching inside them
     - Find files by filename or extension patterns
     - Locate specific files across the codebase
     - Get list of files matching naming conventions
+
+    **Best practice:**
+    Use `find_files` first to locate candidate files and understand repository layout before running `grep`.
 
     **Replaces these commands:**
     - find . -name "*.py" → find_files(name_pattern="*.py")
@@ -571,34 +575,16 @@ class EditFile(DuoBaseTool):
         f"""\
         Use this tool to edit an existing file by replacing `old_str` with `new_str`.
 
+        Batching:
+        - When a code change affects multiple files (or code and tests), dispatch independent edit_file calls concurrently in a single turn.
+        - Avoid sequential single-file edit turns and intermediate git status checks.
+
         IMPORTANT:
-        - You must read the file with read_file before editing it; editing without reading first fails.
+        - You must read the file with read_file before editing it.
         - `old_str` must match the file exactly (including whitespace) and be unique; include enough surrounding context. Only the first match is replaced.
-        - To edit multiple files, batch the tool calls in a single response rather than one response per file.
-        - Secret-like values may appear as `[REDACTED]`. This is a placeholder, not the real content, so an `old_str` containing it will never match. Anchor edits on surrounding non-secret text.
+        - Secret-like values may appear as `[REDACTED]`. Anchor edits on surrounding non-secret text.
 
-        {GITIGNORED_FILE_NOTE}
-
-        Examples:
-
-        - Single edit (change a function signature):
-            edit_file(
-                file_path="src/utils.py",
-                old_str="def process_data(data):\\n    return data.upper()",
-                new_str="def process_data(data, transform=True):\\n    return data.upper() if transform else data"
-            )
-
-        - Batch multiple files in one response (rename a function):
-            edit_file(
-                file_path="src/utils.py",
-                old_str="def get_config():",
-                new_str="def fetch_config():"
-            )
-            edit_file(
-                file_path="src/app.py",
-                old_str="config = get_config()",
-                new_str="config = fetch_config()"
-            )"""
+        {GITIGNORED_FILE_NOTE}"""
     )
     args_schema: Type[BaseModel] = EditFileInput
     handle_tool_error: bool = True
