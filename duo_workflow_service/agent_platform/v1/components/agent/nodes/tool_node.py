@@ -223,7 +223,22 @@ class ToolNode:
             with duo_workflow_metrics.time_tool_call(
                 tool_name=tool.name, flow_type=self._tracker._flow_type.value
             ):
-                tool_call_result = await tool.ainvoke(tool_call_args)
+                # A bare args dict silently yields tool_call_id=None in on_tool_start,
+                # breaking approval_source lookup in the audit callback handler; wrap as a
+                # ToolCall dict instead. That also makes ainvoke wrap the result in a
+                # ToolMessage (langchain_core's _format_output), so unwrap it back to raw
+                # content. Note: a dict/list-returning tool would come back JSON-stringified
+                # here instead of its raw shape; none does today.
+                tool_call_result = await tool.ainvoke(
+                    {
+                        "name": tool.name,
+                        "args": tool_call_args,
+                        "id": tool_call_id,
+                        "type": "tool_call",
+                    }
+                )
+                if isinstance(tool_call_result, ToolMessage):
+                    tool_call_result = tool_call_result.content
 
             self._tracker.track_internal_event(
                 event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,

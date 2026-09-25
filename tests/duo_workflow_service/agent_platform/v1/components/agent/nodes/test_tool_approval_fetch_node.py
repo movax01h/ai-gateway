@@ -26,6 +26,13 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     default_ui_log_writer_class,
 )
 from duo_workflow_service.entities import MessageTypeEnum, WorkflowStatusEnum
+from lib.context.approval_sources import (
+    approval_sources,
+    get_approval_policy_ref,
+    get_approval_source,
+    init_approval_sources,
+    record_approval_source,
+)
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum
 
@@ -141,6 +148,67 @@ class TestToolApprovalFetchNodeApprove:
 
             # Should NOT include conversation history updates
             assert "conversation_history" not in result
+
+    @pytest.mark.asyncio
+    async def test_approve_records_source_for_each_tool_call(
+        self,
+        tool_approval_fetch_node,
+        base_flow_state,
+        component_name,
+        mock_ai_message_with_tool_calls,
+    ):
+        """On APPROVE, each pending tool call is attributed (user_explicit by default) so its ToolInvokedEvent carries
+        the authorizing source."""
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {
+            component_name: [mock_ai_message_with_tool_calls]
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(
+                event_type=FlowEventType.APPROVE,
+                approval_source="user_explicit",
+                policy_ref={"origin": "policy"},
+            )
+
+            init_approval_sources()
+            try:
+                await tool_approval_fetch_node.run(state)
+                assert get_approval_source("call_123") == "user_explicit"
+                assert get_approval_source("call_456") == "user_explicit"
+                assert get_approval_policy_ref("call_123") == {"origin": "policy"}
+            finally:
+                approval_sources.set(None)
+
+    @pytest.mark.asyncio
+    async def test_approve_records_nothing_without_pending_ai_message(
+        self,
+        tool_approval_fetch_node,
+        base_flow_state,
+        component_name,
+    ):
+        """On APPROVE with no approval_requests_key configured and no pending AIMessage in history (e.g. an empty
+        conversation), there are no tool-call ids to attribute: recording is a no-op rather than raising."""
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: []}
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(
+                event_type=FlowEventType.APPROVE,
+                approval_source="user_explicit",
+            )
+
+            init_approval_sources()
+            try:
+                result = await tool_approval_fetch_node.run(state)
+                assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+                assert get_approval_source("call_123") is None
+            finally:
+                approval_sources.set(None)
 
 
 class TestToolApprovalFetchNodeReject:
@@ -619,6 +687,93 @@ class TestToolApprovalFetchNodeTracking:
         )
 
     @pytest.mark.asyncio
+    async def test_mixed_batch_records_source_only_for_requested_calls(
+        self,
+        tracking_fetch_node,
+        state_with_tool_calls,
+        component_name,
+    ):
+        """In a mixed batch, only the calls the request node persisted as needing a fresh decision get the client's
+        approval source.
+
+        A pre-approved call in the same AIMessage must keep its original source and must not be relabeled
+        user_explicit, *given* its prior attribution is still present in the registry when this runs. In production
+        it usually isn't (see test_mixed_batch_loses_preapproved_attribution_across_real_resume): this test only
+        exercises the scoping mechanism's intent, using the same registry instance to stand in for the pre-interrupt
+        one.
+        """
+        # call_123 was pre-approved and already attributed by the request node;
+        # only call_456 required a fresh decision.
+        state_with_tool_calls[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_requests": [{"id": "call_456", "name": "another_tool"}]
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(
+                event_type=FlowEventType.APPROVE,
+                approval_source="user_explicit",
+            )
+
+            init_approval_sources()
+            try:
+                # Simulate the request node's prior attribution of the skip.
+                record_approval_source("call_123", "preapproved_config")
+
+                await tracking_fetch_node.run(state_with_tool_calls)
+
+                # Pre-approved call keeps its source; only the requested call is
+                # relabeled to the client's approval source.
+                assert get_approval_source("call_123") == "preapproved_config"
+                assert get_approval_source("call_456") == "user_explicit"
+            finally:
+                approval_sources.set(None)
+
+    @pytest.mark.asyncio
+    async def test_mixed_batch_loses_preapproved_attribution_across_real_resume(
+        self,
+        tracking_fetch_node,
+        state_with_tool_calls,
+        component_name,
+    ):
+        """KNOWN GAP (https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938), not
+        fixed here: a pre-approved call's attribution does not actually survive to resume, because the
+        approval_sources registry is a per-invocation ContextVar (reset in GitLabWorkflow.__aenter__) and an approval
+        decision always arrives as a new invocation.
+
+        This reproduces that reset (unlike the sibling test above, which keeps using the same registry instance
+        throughout) and documents that the pre-approved call comes back unattributed.
+        """
+        state_with_tool_calls[FlowStateKeys.CONTEXT][component_name] = {
+            "tool_approval_requests": [{"id": "call_456", "name": "another_tool"}]
+        }
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(
+                event_type=FlowEventType.APPROVE,
+                approval_source="user_explicit",
+            )
+
+            # Pre-interrupt invocation: the request node attributes call_123's
+            # skip, then the workflow pauses.
+            init_approval_sources()
+            record_approval_source("call_123", "preapproved_config")
+            approval_sources.set(None)
+
+            # Post-interrupt invocation: a new workflow object, a fresh registry.
+            init_approval_sources()
+            try:
+                await tracking_fetch_node.run(state_with_tool_calls)
+
+                assert get_approval_source("call_123") is None
+                assert get_approval_source("call_456") == "user_explicit"
+            finally:
+                approval_sources.set(None)
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "requests_context",
         [
@@ -635,15 +790,26 @@ class TestToolApprovalFetchNodeTracking:
         mock_internal_event_client,
         requests_context,
     ):
-        """Missing or empty persisted approval-requests state tracks no events and does not crash."""
+        """Missing or empty persisted approval-requests state tracks no resolution events (deliberately: the skip-
+        tracking path only re-tracks the ids the request node itself persisted) but still falls back to attributing
+        every pending tool call from history, rather than attributing nothing."""
         state_with_tool_calls[FlowStateKeys.CONTEXT][component_name] = requests_context
 
         with patch(
             "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
         ) as mock_interrupt:
-            mock_interrupt.return_value = FlowEvent(event_type=FlowEventType.APPROVE)
+            mock_interrupt.return_value = FlowEvent(
+                event_type=FlowEventType.APPROVE, approval_source="user_explicit"
+            )
 
-            result = await tracking_fetch_node.run(state_with_tool_calls)
+            init_approval_sources()
+            try:
+                result = await tracking_fetch_node.run(state_with_tool_calls)
+
+                assert get_approval_source("call_123") == "user_explicit"
+                assert get_approval_source("call_456") == "user_explicit"
+            finally:
+                approval_sources.set(None)
 
         assert result["status"] == WorkflowStatusEnum.EXECUTION.value
         mock_internal_event_client.track_event.assert_not_called()

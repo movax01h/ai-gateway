@@ -64,33 +64,41 @@ class TestApprovalSourceFromApproval:
         )
         assert ApprovalSource.from_approval(approved) == ApprovalSource.AUTO_MODE.value
 
-    def test_defaults_to_none_when_source_unset(self):
-        # An Approved message with no approval_source field (never sent) resolves
-        # to None, matching the call site in abstract_workflow.py.
-        assert ApprovalSource.from_approval(contract_pb2.Approval.Approved()) is None
+    def test_defaults_to_user_explicit_when_source_unset(self):
+        # An Approved message with no approval_source field (never sent) defaults
+        # to user_explicit (a human clicked approve without an explicit source).
+        assert (
+            ApprovalSource.from_approval(contract_pb2.Approval.Approved())
+            == ApprovalSource.USER_EXPLICIT.value
+        )
 
-    def test_none_defaults_to_none(self):
-        assert ApprovalSource.from_approval(None) is None
+    def test_none_defaults_to_user_explicit(self):
+        assert ApprovalSource.from_approval(None) == ApprovalSource.USER_EXPLICIT.value
 
     def test_explicit_unspecified_is_distinct_from_never_sent(self):
         # Proto3 optional presence: explicitly stamping APPROVAL_SOURCE_UNSPECIFIED
         # (value 0) sets the field, so from_approval resolves it to "unspecified"
-        # rather than the None returned for the never-sent case above.
+        # rather than the user_explicit default returned for the never-sent case.
         approved = contract_pb2.Approval.Approved(
             approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_UNSPECIFIED
         )
         assert ApprovalSource.from_approval(approved) == "unspecified"
 
-    def test_client_stamped_session_approval_passes_through_unverified(self):
-        # SESSION_APPROVAL is documented as server-produced only, but there is no
-        # server-side verification today: a client that stamps
-        # APPROVAL_SOURCE_SESSION_APPROVAL has it passed through as-is. This test
-        # pins that current (unverified) behavior so a future clamp is visible.
+    def test_clamps_client_sent_session_approval_to_user_explicit(self):
+        """SESSION_APPROVAL is server-produced only; a client claiming it is untrusted."""
         approved = contract_pb2.Approval.Approved(
             approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_SESSION_APPROVAL
         )
         assert (
-            ApprovalSource.from_approval(approved)
+            ApprovalSource.from_approval(approved) == ApprovalSource.USER_EXPLICIT.value
+        )
+
+    def test_from_proto_itself_still_reports_session_approval_unclamped(self):
+        """from_proto stays a pure wire mapper; the clamp lives only in from_approval."""
+        assert (
+            ApprovalSource.from_proto(
+                contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_SESSION_APPROVAL
+            )
             == ApprovalSource.SESSION_APPROVAL.value
         )
 

@@ -35,6 +35,7 @@ from duo_workflow_service.tools import (
     UnknownToolError,
     format_tool_display_message,
 )
+from lib.context import record_approval_source
 from lib.internal_events.event_enum import EventEnum
 
 log = structlog.stdlib.get_logger(__name__)
@@ -181,6 +182,7 @@ class ToolApprovalRequestNode:
             if source is None:
                 needs_approval.append(call)
             else:
+                record_approval_source(call.get("id"), source)
                 log.info(
                     "Skipping tool call approval",
                     tool_name=call["name"],

@@ -52,6 +52,8 @@ class AuditEvent(BaseModel):
         if field and not getattr(self, f"{field}_truncated"):
             exclude |= {f"{field}_truncated", f"{field}_bytes"}
         data = self.model_dump(mode="json", exclude=exclude)
+        if data.get("policy_ref") is None:
+            data.pop("policy_ref", None)
         return {
             "specversion": CLOUDEVENT_SPEC_VERSION,
             "id": self.id,
@@ -119,6 +121,14 @@ class ToolInvokedEvent(AuditEvent):
     event_type: AuditEventType = AuditEventType.AI_TOOL_INVOKED
     tool_name: str
     tool_args: Optional[dict[str, Any]] = None
+    # Source that authorized this tool call (an ApprovalSource string value).
+    # Rails merges the CloudEvent `data` verbatim into
+    # AuditEvents::AiAuditEvent#details, so this snake_case name is what shows up
+    # in the persisted audit trail.
+    approval_source: Optional[str] = None
+    # Provenance of the policy that drove an auto/policy approval, when the
+    # client supplied it (see policy_ref provenance, ai-assist!6444).
+    policy_ref: Optional[dict[str, str]] = None
 
 
 class ToolResponseReceivedEvent(AuditEvent):

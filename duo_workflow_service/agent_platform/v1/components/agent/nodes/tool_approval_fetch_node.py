@@ -27,6 +27,7 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
+from lib.context import record_approval_policy_ref, record_approval_source
 from lib.internal_events.event_enum import EventEnum, EventPropertyEnum
 
 
@@ -102,6 +103,36 @@ class ToolApprovalFetchNode:
                 outcome=outcome.value,
             )
 
+    def _decided_tool_call_ids(
+        self, state: FlowState, existing_history: list
+    ) -> list[str]:
+        """Return the tool-call ids that required a fresh approval decision.
+
+        Prefers the set the request node persisted in ``approval_requests_key``, so the
+        client's approval source is only applied to those ids, not to pre-approved /
+        session-reused calls in the same mixed batch. Falls back to every tool call on
+        the last AIMessage when that key is unset or its persisted value is empty (e.g.
+        an older checkpoint), which can mislabel a pre-approved / session-reused call;
+        see ``Workflow._record_approved_tool_sources`` for the related KNOWN GAP
+        (https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938).
+        """
+        if self._approval_requests_key is not None:
+            requested_calls = self._approval_requests_key.value_from_state(state)
+            if requested_calls:
+                ids = (
+                    call.get("id") if isinstance(call, dict) else None
+                    for call in requested_calls
+                )
+                return [call_id for call_id in ids if call_id]
+
+        last_message = existing_history[-1] if existing_history else None
+        if isinstance(last_message, AIMessage):
+            tool_call_ids = (
+                tool_call.get("id") for tool_call in last_message.tool_calls
+            )
+            return [call_id for call_id in tool_call_ids if call_id]
+        return []
+
     @staticmethod
     def _build_rejection_messages(tool_calls: list[ToolCall]) -> list[ToolMessage]:
         """Build rejection ToolMessages for each tool call.
@@ -141,6 +172,14 @@ class ToolApprovalFetchNode:
             self._track_approval_resolved(
                 state, EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_APPROVAL
             )
+            # Scoped to _decided_tool_call_ids so this doesn't relabel any
+            # pre-approval / session-reuse calls in the same mixed batch (see that
+            # method's docstring for the related KNOWN GAP).
+            approval_source = event.get("approval_source")
+            policy_ref = event.get("policy_ref")
+            for tool_call_id in self._decided_tool_call_ids(state, existing_history):
+                record_approval_source(tool_call_id, approval_source)
+                record_approval_policy_ref(tool_call_id, policy_ref)
             return {
                 **self._status_key.to_nested_dict(WorkflowStatusEnum.EXECUTION, state),
                 **approval_decision_iokey.to_nested_dict(FlowEventType.APPROVE),

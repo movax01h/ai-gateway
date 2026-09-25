@@ -62,6 +62,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
     add_compression_param,
     compress_checkpoint,
+    decode_gitlab_checkpoint_payload,
     uncompress_checkpoint,
 )
 from duo_workflow_service.checkpointer.utils.serializer import CheckpointSerializer
@@ -113,6 +114,7 @@ from lib.context import (
     init_tool_loop_counters,
     is_orbit_tool,
 )
+from lib.context.approval_sources import init_approval_sources
 from lib.context.tool_executions import get_tool_executions, init_tool_executions
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -596,6 +598,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             response_schema_tracking_results.set({})
 
             init_tool_executions()
+
+            init_approval_sources()
 
             init_orbit_counters()
 
@@ -1391,14 +1395,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         explicitly afterwards. The GraphQL ``firstCheckpoint``/``latestCheckpoint`` fields only ever resolve the
         flow's own top-level lineage, so the resulting tuple is namespaced to ``TOP_LEVEL_CHECKPOINT_NS``.
         """
-        if "compressedCheckpoint" in checkpoint:
-            decoded_checkpoint = uncompress_checkpoint(
-                checkpoint["compressedCheckpoint"]
-            )
-        else:
-            decoded_checkpoint = json.loads(
-                checkpoint["checkpoint"], object_hook=checkpoint_decoder
-            )
+        decoded_checkpoint = decode_gitlab_checkpoint_payload(checkpoint)
         decoded_metadata = json.loads(
             checkpoint["metadata"], object_hook=checkpoint_decoder
         )

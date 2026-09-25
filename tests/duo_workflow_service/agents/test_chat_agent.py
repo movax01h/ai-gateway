@@ -35,6 +35,7 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
+    ApprovalSource,
     ChatWorkflowState,
     MessageTypeEnum,
     ToolStatus,
@@ -50,6 +51,11 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.tools import MalformedToolCallError, Toolset
+from lib.context.approval_sources import (
+    approval_sources,
+    get_approval_source,
+    init_approval_sources,
+)
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import CategoryEnum
@@ -910,14 +916,17 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input, mock_to
 
     mock_tools_registry = Mock(spec=ToolsRegistry)
 
-    # Configure approval_required to return different values for different tools
-    def approval_side_effect(tool_name, _tool_args=None):
-        # preapproved_tool: no approval needed
-        # tool_requiring_approval: approval needed
-        # another_preapproved_tool: no approval needed
-        return tool_name == "tool_requiring_approval"
+    # _get_approvals resolves the decision and its source in a single call:
+    # resolve_approval_source returns None exactly when a fresh human decision
+    # is needed, otherwise the source that authorized the skip.
+    def resolve_side_effect(tool_name, _tool_args=None):
+        # tool_requiring_approval: needs a fresh decision (None); the others are
+        # session-reused skips.
+        if tool_name == "tool_requiring_approval":
+            return None
+        return ApprovalSource.SESSION_APPROVAL
 
-    mock_tools_registry.approval_required.side_effect = approval_side_effect
+    mock_toolset.resolve_approval_source = AsyncMock(side_effect=resolve_side_effect)
 
     chat_agent = ChatAgent(
         name="Chat Agent",
@@ -974,6 +983,144 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input, mock_to
 
 
 @pytest.mark.asyncio
+async def test_silent_reuse_records_session_approval_source(input, mock_toolset):
+    """A tool call that skips approval by reusing a prior/session approval must still be attributed so its
+    ToolInvokedEvent carries the source."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    # No fresh prompt: the registry reports the call is already approved.
+    mock_tools_registry.approval_required = AsyncMock(return_value=False)
+    # The toolset attributes that skip to a reused session approval.
+    mock_toolset.resolve_approval_source = AsyncMock(
+        return_value=ApprovalSource.SESSION_APPROVAL
+    )
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    ai_message = AIMessage(
+        content="reuse",
+        tool_calls=[
+            {
+                "name": "run_command",
+                "args": {"command": "ls"},
+                "id": "call_reuse",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    init_approval_sources()
+    try:
+        result = await chat_agent.run(input)
+        assert result["status"] == WorkflowStatusEnum.EXECUTION
+        assert get_approval_source("call_reuse") == "session_approval"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_preapproved_tool_records_preapproved_source(input, mock_toolset):
+    """A component-preapproved tool call is attributed as preapproved_config."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    mock_tools_registry.approval_required = AsyncMock(return_value=False)
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    ai_message = AIMessage(
+        content="preapproved",
+        tool_calls=[
+            {
+                "name": "read_file",
+                "args": {"path": "/a"},
+                "id": "call_pre",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    init_approval_sources()
+    try:
+        await chat_agent.run({**input, "preapproved_tools": ["read_file"]})
+        assert get_approval_source("call_pre") == "preapproved_config"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_resolution_failure_requires_approval_instead_of_skipping(
+    input, mock_toolset
+):
+    """If resolving the approval source raises, the failure must degrade to requiring a fresh human decision (fail-
+    closed), not to silently skipping approval."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    # No fresh prompt, but resolving the source blows up (e.g. UnknownToolError
+    # or a transport error from the policy check).
+    mock_tools_registry.approval_required = AsyncMock(return_value=False)
+    mock_toolset.resolve_approval_source = AsyncMock(
+        side_effect=RuntimeError("policy check unavailable")
+    )
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    ai_message = AIMessage(
+        content="reuse",
+        tool_calls=[
+            {
+                "name": "run_command",
+                "args": {"command": "ls"},
+                "id": "call_raise",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    init_approval_sources()
+    try:
+        result = await chat_agent.run(input)
+        # A resolution failure must not let the call run unprompted.
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+        assert "call_raise" in result["tool_call_approval_requested"]
+        assert get_approval_source("call_raise") is None
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
 async def test_approval_enriches_tool_info_with_project_name(input):
     """Test that approval messages use resolve_project_name_for_tool to enrich tool_info args."""
     mock_model = Mock()
@@ -983,13 +1130,15 @@ async def test_approval_enriches_tool_info_with_project_name(input):
     mock_prompt_adapter.get_model.return_value = mock_model
 
     mock_tools_registry = Mock(spec=ToolsRegistry)
-    mock_tools_registry.approval_required.return_value = True
+    approval_toolset = Mock(spec=Toolset)
+    # None => a fresh human decision is required.
+    approval_toolset.resolve_approval_source = AsyncMock(return_value=None)
 
     chat_agent = ChatAgent(
         name="Chat Agent",
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
-        toolset=Mock(spec=Toolset),
+        toolset=approval_toolset,
         system_template_override=None,
         optimizer_pipeline=_make_passthrough_pipeline(),
     )
@@ -1047,7 +1196,8 @@ async def test_approval_includes_suggested_patterns_for_commands(input, mock_too
     mock_prompt_adapter.get_model.return_value = mock_model
 
     mock_tools_registry = Mock(spec=ToolsRegistry)
-    mock_tools_registry.approval_required = AsyncMock(return_value=True)
+    # None => a fresh human decision is required.
+    mock_toolset.resolve_approval_source = AsyncMock(return_value=None)
 
     chat_agent = ChatAgent(
         name="Chat Agent",
@@ -2299,7 +2449,18 @@ class TestToolApprovalRequestTracking:
         mock_prompt_adapter.get_model.return_value = mock_model
 
         mock_tools_registry = Mock(spec=ToolsRegistry)
-        mock_tools_registry.approval_required.side_effect = approval_side_effect
+
+        # _get_approvals resolves the decision and its source in a single call.
+        # Map the "needs approval" intent (approval_side_effect -> True) to a
+        # None source (fresh decision required); otherwise a session-reuse skip.
+        def resolve_side_effect(tool_name, tool_args=None):
+            if approval_side_effect(tool_name, tool_args):
+                return None
+            return ApprovalSource.SESSION_APPROVAL
+
+        mock_toolset.resolve_approval_source = AsyncMock(
+            side_effect=resolve_side_effect
+        )
 
         return ChatAgent(
             name="Chat Agent",

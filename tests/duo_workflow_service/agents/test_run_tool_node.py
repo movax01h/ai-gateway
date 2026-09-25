@@ -1,6 +1,6 @@
 """Test module for RunToolNode class."""
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.runnables import RunnableLambda
@@ -15,6 +15,7 @@ from duo_workflow_service.audit_events.context import audit_collector_context
 from duo_workflow_service.audit_events.event_types import AuditEventType
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus
 from duo_workflow_service.security.prompt_security import SecurityException
+from lib.context.approval_sources import approval_sources, init_approval_sources
 from lib.internal_events.event_enum import CategoryEnum
 
 
@@ -42,7 +43,14 @@ async def test_run_tool_node_execution():
 
     # Verify
     input_parser.assert_called_once_with(state)
-    tool.ainvoke.assert_called_once_with({"param1": "value1"})
+    tool.ainvoke.assert_called_once_with(
+        {
+            "name": "test_tool",
+            "args": {"param1": "value1"},
+            "id": ANY,
+            "type": "tool_call",
+        }
+    )
     output_parser.assert_called_once_with(["tool_output"], state)
 
     assert "ui_chat_log" in result
@@ -78,6 +86,22 @@ async def test_run_tool_node_multiple_params():
     # Verify
     input_parser.assert_called_once_with(state)
     assert tool.ainvoke.call_count == 2
+    tool.ainvoke.assert_any_call(
+        {
+            "name": "test_tool",
+            "args": {"param1": "value1"},
+            "id": ANY,
+            "type": "tool_call",
+        }
+    )
+    tool.ainvoke.assert_any_call(
+        {
+            "name": "test_tool",
+            "args": {"param1": "value2"},
+            "id": ANY,
+            "type": "tool_call",
+        }
+    )
     output_parser.assert_called_once_with(["output1", "output2"], state)
 
     assert len(result["ui_chat_log"]) == 2
@@ -153,12 +177,14 @@ async def test_run_tool_node_emits_each_tool_audit_event_once():
         flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
     )
 
+    init_approval_sources()
     token = audit_collector_context.set(collector)
     try:
         # Callbacks reach the tool through the run config, as inside a compiled graph.
         await RunnableLambda(node.run).ainvoke({}, config={"callbacks": [handler]})
     finally:
         audit_collector_context.reset(token)
+        approval_sources.set(None)
 
     events = [
         (event.event_type, event.workflow_id)
@@ -168,6 +194,11 @@ async def test_run_tool_node_emits_each_tool_audit_event_once():
         (AuditEventType.AI_TOOL_INVOKED, workflow_id),
         (AuditEventType.AI_TOOL_RESPONSE_RECEIVED, workflow_id),
     ]
+    # RunToolNode tools are deterministic and config-authorized, never routed
+    # through an approval node; the invoked event should carry that source
+    # rather than an unresolved null.
+    invoked_event = collector._buffer[0]  # pylint: disable=protected-access
+    assert invoked_event.approval_source == "preapproved_config"
 
 
 @pytest.mark.asyncio

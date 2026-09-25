@@ -55,6 +55,12 @@ class FlowEventType(StrEnum):
 class FlowEvent(TypedDict):
     event_type: FlowEventType
     message: NotRequired[str]
+    # On APPROVE, the resolved ApprovalSource string and any client-supplied policy
+    # provenance, threaded to ToolApprovalFetchNode so the executed calls'
+    # ToolInvokedEvent audit events carry the authorizing source. Absent on
+    # non-APPROVE events.
+    approval_source: NotRequired[str]
+    policy_ref: NotRequired[dict[str, str]]
 
 
 def merge_nested_dict(existing: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:

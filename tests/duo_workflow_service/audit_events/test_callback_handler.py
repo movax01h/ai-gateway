@@ -18,6 +18,12 @@ from duo_workflow_service.audit_events.event_types import (
     ToolInvokedEvent,
     ToolResponseReceivedEvent,
 )
+from lib.context.approval_sources import (
+    approval_sources,
+    init_approval_sources,
+    record_approval_policy_ref,
+    record_approval_source,
+)
 
 
 @pytest.fixture(name="collector")
@@ -180,6 +186,48 @@ class TestOnToolStart:
             run_id=run_id,
         )
         assert handler._tool_names[str(run_id)] == "write_file"
+
+    @pytest.mark.asyncio
+    async def test_captures_recorded_approval_source(self, handler, collector):
+        # Silent-reuse crux: a prior approval decision recorded the source under
+        # the tool call id; on_tool_start must attach it to the emitted event
+        # even though the callback has no other view of the approval.
+        init_approval_sources()
+        record_approval_source("call-42", "session_approval")
+        record_approval_policy_ref("call-42", {"origin": "file"})
+        try:
+            await handler.on_tool_start(
+                serialized={"name": "read_file"},
+                input_str="",
+                run_id=uuid4(),
+                inputs={"path": "/a"},
+                tool_call_id="call-42",
+            )
+        finally:
+            approval_sources.set(None)
+
+        event = collector.capture.call_args[0][0]
+        assert isinstance(event, ToolInvokedEvent)
+        assert event.approval_source == "session_approval"
+        assert event.policy_ref == {"origin": "file"}
+
+    @pytest.mark.asyncio
+    async def test_approval_source_none_when_unrecorded(self, handler, collector):
+        init_approval_sources()
+        try:
+            await handler.on_tool_start(
+                serialized={"name": "read_file"},
+                input_str="",
+                run_id=uuid4(),
+                inputs={"path": "/a"},
+                tool_call_id="unknown-call",
+            )
+        finally:
+            approval_sources.set(None)
+
+        event = collector.capture.call_args[0][0]
+        assert event.approval_source is None
+        assert event.policy_ref is None
 
 
 class TestOnToolEnd:

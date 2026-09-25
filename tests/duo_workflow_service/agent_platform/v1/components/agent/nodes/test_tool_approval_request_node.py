@@ -35,6 +35,11 @@ from duo_workflow_service.tools import (
     Toolset,
     UnknownToolError,
 )
+from lib.context.approval_sources import (
+    approval_sources,
+    get_approval_source,
+    init_approval_sources,
+)
 from lib.internal_events.event_enum import EventEnum
 
 _APPROVAL_EVENTS = [UILogEventsAgent.ON_TOOL_APPROVAL_REQUEST]
@@ -472,6 +477,48 @@ class TestToolApprovalRequestNodePreApproved:
 
             # Should NOT include ui_chat_log
             assert "ui_chat_log" not in result
+
+    @pytest.mark.asyncio
+    async def test_skipped_call_records_approval_source(
+        self,
+        conversation_history_key,
+        status_key,
+        mock_toolset,
+        ui_history,
+        base_flow_state,
+        component_name,
+    ):
+        """A silently skipped call (reused session approval) is attributed so its later ToolInvokedEvent carries the
+        authorizing source."""
+        node = ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=mock_toolset,
+            pre_approved_tools=[],
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=ui_history,
+        )
+
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [
+            {"id": "call_reuse", "name": "run_command", "args": {"command": "ls"}},
+        ]
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        mock_toolset.resolve_approval_source.return_value = (
+            ApprovalSource.SESSION_APPROVAL
+        )
+
+        init_approval_sources()
+        try:
+            result = await node.run(state)
+            assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+            assert get_approval_source("call_reuse") == "session_approval"
+        finally:
+            approval_sources.set(None)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

@@ -245,8 +245,16 @@ class TestToolNodeWithErrorCorrectionRun:
         assert isinstance(success_message, HumanMessage)
         assert SUCCESS_SENTINEL in success_message.content
 
-        # Verify tool execution was called
-        mock_tool.ainvoke.assert_called_once_with(mock_tool_call["args"])
+        # Verify tool execution was called with a ToolCall-shaped dict so
+        # tool_call_id threads through to the audit callback handler.
+        mock_tool.ainvoke.assert_called_once_with(
+            {
+                "name": mock_tool_call["name"],
+                "args": mock_tool_call["args"],
+                "id": mock_tool_call["id"],
+                "type": "tool_call",
+            }
+        )
 
         # Verify security sanitization was called
         mock_prompt_security.assert_called_once()
@@ -260,6 +268,23 @@ class TestToolNodeWithErrorCorrectionRun:
             ui_history_one_off.log.success.call_args.kwargs["message_id"]
             == mock_tool_call["id"]
         )
+
+    @pytest.mark.asyncio
+    async def test_run_unwraps_tool_message_result(
+        self,
+        tool_node_with_error_correction,
+        flow_state_with_tool_calls_one_off,
+        mock_tool,
+        mock_tool_call,
+        mock_prompt_security,
+    ):
+        mock_tool.ainvoke.return_value = ToolMessage(
+            content="raw tool output", tool_call_id=mock_tool_call["id"]
+        )
+
+        await tool_node_with_error_correction.run(flow_state_with_tool_calls_one_off)
+
+        assert mock_prompt_security.call_args.kwargs["response"] == "raw tool output"
 
     @pytest.mark.asyncio
     async def test_run_with_io_keys_storage(

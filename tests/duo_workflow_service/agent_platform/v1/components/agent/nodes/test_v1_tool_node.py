@@ -140,8 +140,16 @@ class TestToolNode:
         assert messages[1].tool_call_id == mock_tool_call["id"]
         assert messages[1].content == "Sanitized response"
 
-        # Verify tool execution was called
-        mock_tool.ainvoke.assert_called_once_with(mock_tool_call["args"])
+        # Verify tool execution was called with a ToolCall-shaped dict so
+        # tool_call_id threads through to on_tool_start for approval_source lookup
+        mock_tool.ainvoke.assert_called_once_with(
+            {
+                "name": mock_tool.name,
+                "args": mock_tool_call["args"],
+                "id": mock_tool_call["id"],
+                "type": "tool_call",
+            }
+        )
 
         # Verify security sanitization was called
         assert_security_called_with(
@@ -202,9 +210,23 @@ class TestToolNode:
         assert isinstance(messages[1], ToolMessage)
         assert isinstance(messages[2], ToolMessage)
 
-        # Verify both tools were called
-        mock_tool_1.ainvoke.assert_called_once_with({"param1": "value1"})
-        mock_tool_2.ainvoke.assert_called_once_with({"param2": "value2"})
+        # Verify both tools were called with ToolCall-shaped dicts
+        mock_tool_1.ainvoke.assert_called_once_with(
+            {
+                "name": "tool_1",
+                "args": {"param1": "value1"},
+                "id": "tool_call_id_1",
+                "type": "tool_call",
+            }
+        )
+        mock_tool_2.ainvoke.assert_called_once_with(
+            {
+                "name": "tool_2",
+                "args": {"param2": "value2"},
+                "id": "tool_call_id_2",
+                "type": "tool_call",
+            }
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_tool_call")
@@ -472,8 +494,15 @@ class TestToolNode:
 
         result = await tool_node.run(state)
 
-        # Verify tool was called with empty args
-        mock_tool.ainvoke.assert_called_once_with({})
+        # Verify tool was called with empty args, still wrapped as a ToolCall dict
+        mock_tool.ainvoke.assert_called_once_with(
+            {
+                "name": "test_tool",
+                "args": {},
+                "id": "test_tool_call_id",
+                "type": "tool_call",
+            }
+        )
 
         # Verify result structure (with replace mode: AI message + tool response)
         messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
@@ -1937,6 +1966,118 @@ class TestToolNodeToolLoopTracking:
         await tool_node.run(flow_state_with_tool_calls)
 
         assert tool_loop_stats.get() is None
+
+
+class TestToolNodeRealToolAinvoke:
+    """Regression coverage using a real BaseTool (not an AsyncMock).
+
+    ToolNode passes a ToolCall-shaped dict (with a non-None id) to
+    ``tool.ainvoke`` so tool_call_id threads through to the audit callback.
+    langchain_core's ``_format_output`` reacts to that non-None id by wrapping
+    the result in a ToolMessage instead of returning raw content. If ToolNode
+    does not unwrap it, ``_execute_one``'s ``isinstance(response, (str, list,
+    dict))`` guard rejects the ToolMessage and raises ValueError on every real
+    tool call. A mocked ``ainvoke`` returns whatever it is told and hides this,
+    so this test drives the genuine langchain_core code path.
+    """
+
+    def _build_node_with_toolset(
+        self,
+        toolset,
+        component_name,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+    ):
+        tracker = ToolEventTracker(
+            flow_id=flow_id,
+            flow_type=flow_type,
+            internal_event_client=mock_internal_event_client,
+        )
+        static_key = IOKey(
+            target="conversation_history",
+            subkeys=[component_name],
+            optional=True,
+        )
+        return ToolNode(
+            name="test_tool_node",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: static_key
+            ),
+            toolset=toolset,
+            ui_history=ui_history,
+            tracker=tracker,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_monitoring", "mock_logger")
+    async def test_real_tool_ainvoke_result_is_unwrapped_not_rejected(
+        self,
+        component_name,
+        base_flow_state,
+        flow_id,
+        flow_type,
+        ui_history,
+        mock_internal_event_client,
+    ):
+        class EchoTool(BaseTool):
+            name: str = "echo_tool"
+            description: str = "Echoes the given text."
+
+            def _run(self, text: str) -> str:
+                return f"echoed: {text}"
+
+        echo_tool = EchoTool()
+        # Sanity check: with a non-None id, real ainvoke wraps in a ToolMessage.
+        wrapped = await echo_tool.ainvoke(
+            {
+                "name": "echo_tool",
+                "args": {"text": "hi"},
+                "id": "x",
+                "type": "tool_call",
+            }
+        )
+        assert isinstance(wrapped, ToolMessage)
+
+        tools = {"echo_tool": echo_tool}
+        toolset = Mock()
+        toolset.__contains__ = Mock(return_value=True)
+        toolset.__getitem__ = Mock(side_effect=tools.__getitem__)
+        toolset.get = Mock(side_effect=tools.get)
+        toolset.denied_tools = []
+
+        node = self._build_node_with_toolset(
+            toolset,
+            component_name,
+            flow_id,
+            flow_type,
+            ui_history,
+            mock_internal_event_client,
+        )
+
+        msg = Mock(spec=AIMessage)
+        msg.tool_calls = [
+            {"name": "echo_tool", "args": {"text": "world"}, "id": "echo_call_1"}
+        ]
+        state = base_flow_state.copy()
+        state["conversation_history"] = {component_name: [msg]}
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node.apply_security_scanning",
+            side_effect=lambda response, **_: response,
+        ):
+            result = await node.run(state)
+
+        tool_messages = [
+            m
+            for m in result["conversation_history"][component_name]
+            if isinstance(m, ToolMessage)
+        ]
+        assert len(tool_messages) == 1
+        # The ToolMessage.content is the raw string, not a nested ToolMessage.
+        assert tool_messages[0].content == "echoed: world"
+        assert tool_messages[0].tool_call_id == "echo_call_1"
 
 
 @pytest.mark.asyncio

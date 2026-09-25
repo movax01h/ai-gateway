@@ -135,8 +135,16 @@ class TestToolNode:
         assert tool_message.tool_call_id == mock_tool_call["id"]
         assert tool_message.content == "Sanitized response"
 
-        # Verify tool execution was called
-        mock_tool.ainvoke.assert_called_once_with(mock_tool_call["args"])
+        # Verify tool execution was called with a ToolCall-shaped dict so
+        # tool_call_id threads through to on_tool_start for approval_source lookup
+        mock_tool.ainvoke.assert_called_once_with(
+            {
+                "name": mock_tool.name,
+                "args": mock_tool_call["args"],
+                "id": mock_tool_call["id"],
+                "type": "tool_call",
+            }
+        )
 
         # Verify security sanitization was called
         assert_security_called_with(
@@ -200,9 +208,23 @@ class TestToolNode:
         assert isinstance(result_messages[1], ToolMessage)
         assert isinstance(result_messages[2], ToolMessage)
 
-        # Verify both tools were called
-        mock_tool_1.ainvoke.assert_called_once_with({"param1": "value1"})
-        mock_tool_2.ainvoke.assert_called_once_with({"param2": "value2"})
+        # Verify both tools were called with ToolCall-shaped dicts
+        mock_tool_1.ainvoke.assert_called_once_with(
+            {
+                "name": "tool_1",
+                "args": {"param1": "value1"},
+                "id": "tool_call_id_1",
+                "type": "tool_call",
+            }
+        )
+        mock_tool_2.ainvoke.assert_called_once_with(
+            {
+                "name": "tool_2",
+                "args": {"param2": "value2"},
+                "id": "tool_call_id_2",
+                "type": "tool_call",
+            }
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_tool_call")
@@ -466,8 +488,15 @@ class TestToolNode:
 
         result = await tool_node.run(state)
 
-        # Verify tool was called with empty args
-        mock_tool.ainvoke.assert_called_once_with({})
+        # Verify tool was called with empty args, still wrapped as a ToolCall dict
+        mock_tool.ainvoke.assert_called_once_with(
+            {
+                "name": "test_tool",
+                "args": {},
+                "id": "test_tool_call_id",
+                "type": "tool_call",
+            }
+        )
 
         # Verify tool response is appended despite missing args
         result_messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
