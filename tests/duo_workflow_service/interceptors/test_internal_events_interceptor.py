@@ -11,6 +11,7 @@ from duo_workflow_service.interceptors.internal_events_interceptor import (
 )
 from lib.context import gitlab_version, language_server_version
 from lib.internal_events import current_event_context
+from lib.internal_events.context import EventContext
 from lib.language_server import LanguageServerVersion
 
 
@@ -804,14 +805,17 @@ async def test_interceptor_tracking_context_does_not_override_server_keys(
         "x-gitlab-host-name": "test-gitlab-host",
     }
 
-    # # First pass: no tracking context, capture the server-derived extra.
-    # current_user.set(mock_user)
-    # language_server_version.set(LanguageServerVersion.from_string("7.43.0"))
-    # await interceptor.intercept_service(
-    #     mock_continuation, create_handler_call_details(dict(base_metadata))
-    # )
+    # First pass: no tracking context, capture the server-derived extra.
+    # Start from a clean context so discovery cannot inherit keys leaked by a
+    # previously-run test (pytest-randomly orders tests arbitrarily).
+    current_event_context.set(EventContext())
+    current_user.set(mock_user)
+    language_server_version.set(LanguageServerVersion.from_string("7.43.0"))
+    await interceptor.intercept_service(
+        mock_continuation, create_handler_call_details(dict(base_metadata))
+    )
     server_extra = dict(current_event_context.get().extra)
-    # assert server_extra, "expected at least one server-derived extra key to guard"
+    assert server_extra, "expected at least one server-derived extra key to guard"
 
     # Second pass: tracking context tries to spoof every server-derived key.
     spoofed = {key: f"spoofed-{key}" for key in server_extra}
@@ -828,6 +832,40 @@ async def test_interceptor_tracking_context_does_not_override_server_keys(
     extra = current_event_context.get().extra
     for key, value in server_extra.items():
         assert extra[key] == value
+
+
+@pytest.mark.asyncio
+async def test_interceptor_drops_reserved_ai_context_keys_from_tracking_context(
+    interceptor, mock_continuation, mock_user
+):
+    """A tracking-context header carrying a reserved ai_context identity key (e.g. item_version) must not land in
+    EventContext.extra: those fields are server-resolved (duo_workflow_service/server.py, from the flow registry), never
+    client-supplied."""
+    metadata = {
+        "x-gitlab-realm": "test-realm",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-gitlab-host",
+        "x-gitlab-tracking-context": json.dumps(
+            {
+                "item_version": "spoofed-version",
+                "flow_name": "spoofed-flow",
+                "item_schema_version": "spoofed-schema",
+                "workflow_id": "spoofed-workflow",
+                "workflow_type": "spoofed-type",
+                "agent_name": "spoofed-agent",
+                "distribution": "glab",
+            }
+        ),
+    }
+    handler_call_details = create_handler_call_details(metadata)
+    current_user.set(mock_user)
+    language_server_version.set(None)
+
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    extra = current_event_context.get().extra
+    assert extra == {"distribution": "glab"}
 
 
 @pytest.mark.asyncio

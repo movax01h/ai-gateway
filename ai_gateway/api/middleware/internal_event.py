@@ -31,6 +31,7 @@ from ai_gateway.api.middleware.headers import (
 )
 from ai_gateway.api.middleware_utils import get_valid_namespace_ids
 from lib.internal_events import (
+    RESERVED_AI_CONTEXT_EXTRA_KEYS,
     EventContext,
     current_event_context,
     parse_tracking_context,
@@ -110,10 +111,18 @@ class InternalEventMiddleware:
 
         # Forward the optional, client-supplied tracking context into extra so it
         # is attached to Snowflake events. Best-effort: absent/malformed values are
-        # dropped by parse_tracking_context.
+        # dropped by parse_tracking_context. Reserved keys are dropped here so a
+        # client cannot spoof the server-resolved ai_context identity fields
+        # (workflow_id/workflow_type/agent_name/flow_name/item_version/
+        # item_schema_version) via this header.
         tracking_context = (
             parse_tracking_context(request.headers.get(X_GITLAB_TRACKING_CONTEXT)) or {}
         )
+        tracking_context = {
+            key: value
+            for key, value in tracking_context.items()
+            if key not in RESERVED_AI_CONTEXT_EXTRA_KEYS
+        }
 
         # EventContext uses Pydantic which coerces int and string to boolean type
         # Reference: https://docs.pydantic.dev/latest/api/standard_library_types/#booleans

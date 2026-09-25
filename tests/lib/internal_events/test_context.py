@@ -1,8 +1,12 @@
-from contextvars import ContextVar
+from contextvars import Context, ContextVar
 
 import pytest
 
-from lib.internal_events.context import EventContext, current_event_context
+from lib.internal_events.context import (
+    EventContext,
+    current_event_context,
+    merge_event_context_extra,
+)
 
 
 def test_event_context_default_values():
@@ -74,3 +78,46 @@ def test_event_context_optional_fields():
     context = EventContext(environment="test")
     assert context.environment == "test"
     assert context.source == "ai-gateway-python"
+
+
+def test_merge_event_context_extra_merges_without_clobbering():
+    token = current_event_context.set(EventContext(extra={"existing": "value"}))
+    try:
+        merge_event_context_extra(
+            flow_name="developer", item_version="2.0.0-interactive"
+        )
+
+        extra = current_event_context.get().extra
+        assert extra["existing"] == "value"
+        assert extra["flow_name"] == "developer"
+        assert extra["item_version"] == "2.0.0-interactive"
+    finally:
+        current_event_context.reset(token)
+
+
+def test_merge_event_context_extra_overwrites_existing_key():
+    token = current_event_context.set(EventContext(extra={"item_version": "1.0.0"}))
+    try:
+        merge_event_context_extra(item_version="2.0.0-interactive")
+
+        assert current_event_context.get().extra["item_version"] == "2.0.0-interactive"
+    finally:
+        current_event_context.reset(token)
+
+
+def test_merge_event_context_extra_never_mutates_shared_default():
+    """When no interceptor/middleware has called current_event_context.set()
+
+    (tests, scripts), merge_event_context_extra must not mutate the
+    ContextVar's shared default EventContext in place - that would leak
+    extras across unrelated requests/tests that also never called .set().
+
+    Each side runs in its own empty ``contextvars.Context`` so neither this
+    test nor any earlier one that called ``.set()`` in the pytest process's
+    top-level context can hide a real leak.
+    """
+    Context().run(merge_event_context_extra, item_version="2.0.0-interactive")
+
+    untouched_extra = Context().run(lambda: current_event_context.get().extra)
+
+    assert untouched_extra == {}

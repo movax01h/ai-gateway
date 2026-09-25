@@ -23,9 +23,13 @@ class InternalEventsClient:
     """Client to handle internal events using SnowplowClient."""
 
     STANDARD_CONTEXT_SCHEMA = "iglu:com.gitlab/gitlab_standard/jsonschema/1-1-8"
-    AI_CONTEXT_SCHEMA = "iglu:com.gitlab/ai_context/jsonschema/1-0-1"
+    AI_CONTEXT_SCHEMA = "iglu:com.gitlab/ai_context/jsonschema/1-0-2"
     REQUEST_TIMEOUT = (5.0, 10.0)
     MAX_VALUE_LENGTH = 1000
+    # iglu ai_context 1-0-2 constraints on the flow-registry identity fields.
+    ITEM_VERSION_MAX_LENGTH = 32
+    FLOW_NAME_MAX_LENGTH = 64
+    VALID_ITEM_SCHEMA_VERSIONS = frozenset({"experimental", "v1"})
 
     def __init__(
         self,
@@ -196,11 +200,21 @@ class InternalEventsClient:
                 cache_creation=ai_context.cache_creation,
             )
         else:
+            item_schema_version = extra.get("item_schema_version")
+            if item_schema_version not in self.VALID_ITEM_SCHEMA_VERSIONS:
+                item_schema_version = None
             resolved_ai_context = AIContext(
                 session_id=resolved_session_id,
                 workflow_id=extra.get("workflow_id"),
                 flow_type=extra.get("workflow_type"),
                 agent_name=extra.get("agent_name"),
+                flow_name=self.truncate_string(
+                    extra.get("flow_name"), max_length=self.FLOW_NAME_MAX_LENGTH
+                ),
+                item_version=self.truncate_string(
+                    extra.get("item_version"), max_length=self.ITEM_VERSION_MAX_LENGTH
+                ),
+                item_schema_version=item_schema_version,
                 input_tokens=new_context.get("input_tokens"),
                 output_tokens=new_context.get("output_tokens"),
                 total_tokens=new_context.get("total_tokens"),
@@ -219,6 +233,9 @@ class InternalEventsClient:
             workflow_id=resolved_ai_context.workflow_id,
             flow_type=resolved_ai_context.flow_type,
             agent_name=resolved_ai_context.agent_name,
+            flow_name=resolved_ai_context.flow_name,
+            item_version=resolved_ai_context.item_version,
+            item_schema_version=resolved_ai_context.item_schema_version,
             input_tokens=resolved_ai_context.input_tokens,
             input_tokens_type=type(resolved_ai_context.input_tokens).__name__,
             output_tokens=resolved_ai_context.output_tokens,
@@ -261,16 +278,24 @@ class InternalEventsClient:
         )
         tracked_internal_events.get().add(event_name)
 
-    def truncate_string(self, value: str | None) -> str | None:
-        """Truncate a string to MAX_VALUE_LENGTH, appending '...' if trimmed.
+    def truncate_string(
+        self, value: str | None, max_length: int = MAX_VALUE_LENGTH
+    ) -> str | None:
+        """Truncate a string to max_length, appending '...' if trimmed.
 
         Args:
-            value: The string to truncate, or None.
+            value: The string to truncate, or None. A non-string value (for
+                example a client-supplied JSON extra of the wrong type) is
+                treated as absent and normalises to None.
+            max_length: The maximum length to allow; defaults to
+                MAX_VALUE_LENGTH.
         Returns:
             The original string if it is within the length limit or None/empty,
-            otherwise the string truncated to MAX_VALUE_LENGTH characters (including
-            the trailing '...').
+            otherwise the string truncated to max_length characters (including
+            the trailing '...'). None when value is not a string.
         """
-        if value and len(value) > self.MAX_VALUE_LENGTH:
-            return value[: self.MAX_VALUE_LENGTH - 3] + "..."
+        if not isinstance(value, str):
+            return None
+        if len(value) > max_length:
+            return value[: max_length - 3] + "..."
         return value

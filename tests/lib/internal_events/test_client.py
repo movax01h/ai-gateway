@@ -29,14 +29,6 @@ def _find_ai_context(structured_event):
     return None
 
 
-def test_ai_context_schema_version():
-    """Verify AI_CONTEXT_SCHEMA is the expected version with cache_creation support."""
-    assert (
-        InternalEventsClient.AI_CONTEXT_SCHEMA
-        == "iglu:com.gitlab/ai_context/jsonschema/1-0-1"
-    )
-
-
 class TestInternalEventsClientAIContext:
     """Test InternalEventsClient AIContext extraction from extra."""
 
@@ -203,6 +195,65 @@ class TestInternalEventsClientAIContext:
             "workflow_id": "123",
             "shared_key": "from_event",
         }
+
+    def test_track_event_emits_item_version_on_ai_context(self, client, mock_tracker):
+        """The flow-registry identity fields mirrored into EventContext.extra by merge_event_context_extra (server.py)
+        reach the emitted ai_context payload, on the bumped 1-0-2 schema."""
+        current_event_context.set(
+            EventContext(
+                extra={
+                    "flow_name": "developer",
+                    "item_version": "2.0.0-interactive",
+                    "item_schema_version": "v1",
+                }
+            )
+        )
+
+        client.track_event("request_duo_workflow")
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+        ai_context_ctx = next(
+            ctx
+            for ctx in structured_event.context
+            if ctx.schema == InternalEventsClient.AI_CONTEXT_SCHEMA
+        )
+        assert ai_context_ctx.schema == "iglu:com.gitlab/ai_context/jsonschema/1-0-2"
+        assert ai_context_ctx.data["item_version"] == "2.0.0-interactive"
+        assert ai_context_ctx.data["flow_name"] == "developer"
+        assert ai_context_ctx.data["item_schema_version"] == "v1"
+
+    def test_track_event_normalizes_poisoned_ai_context_identity_fields(
+        self, client, mock_tracker
+    ):
+        """A client-controlled extra (e.g. from x-gitlab-tracking-context, had it
+        not already been filtered upstream) must not produce a Snowplow bad
+        event: an out-of-enum item_schema_version is nulled, an oversized
+        item_version is truncated to the schema's 32-char maxLength, and a
+        non-string value is treated as absent."""
+        current_event_context.set(
+            EventContext(
+                extra={
+                    "item_schema_version": "1.0",
+                    "item_version": "x" * 100,
+                    "flow_name": 12345,
+                }
+            )
+        )
+
+        client.track_event("some_event")
+
+        mock_tracker.track.assert_called_once()
+        structured_event = mock_tracker.track.call_args[0][0]
+        ai_context_ctx = next(
+            ctx
+            for ctx in structured_event.context
+            if ctx.schema == InternalEventsClient.AI_CONTEXT_SCHEMA
+        )
+        assert ai_context_ctx.data["item_schema_version"] is None
+        assert len(ai_context_ctx.data["item_version"]) == 32
+        assert ai_context_ctx.data["item_version"].endswith("...")
+        assert ai_context_ctx.data["flow_name"] is None
 
     def test_track_event_includes_merge_request_url_when_context_set(
         self, client, mock_tracker

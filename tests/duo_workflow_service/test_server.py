@@ -106,7 +106,10 @@ from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.context import client_capabilities
 from lib.events import GLReportingEventContext
 from lib.events.contextvar import X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED
-from lib.internal_events.context import InternalEventAdditionalProperties
+from lib.internal_events.context import (
+    InternalEventAdditionalProperties,
+    current_event_context,
+)
 from lib.internal_events.event_enum import (
     CategoryEnum,
     EventEnum,
@@ -929,7 +932,12 @@ async def test_execute_workflow_when_no_events_ends(
     mock_context,
     servicer,
 ):
-    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_resolve_flow.return_value = ResolvedFlow(
+        factory=mock_abstract_workflow_class,
+        flow_id="developer",
+        schema_version="v1",
+        flow_version="2.0.0-interactive",
+    )
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -946,6 +954,14 @@ async def test_execute_workflow_when_no_events_ends(
     assert isinstance(result, AsyncIterable)
     with pytest.raises(StopAsyncIteration):
         await anext(result)
+
+    # The resolved flow identity must be mirrored onto the event context so
+    # every internal event tracked for this session (after the resolve
+    # point) carries it, under the ai_context 1-0-2 field names.
+    extra = current_event_context.get().extra
+    assert extra["flow_name"] == "developer"
+    assert extra["item_version"] == "2.0.0-interactive"
+    assert extra["item_schema_version"] == "v1"
 
 
 @pytest.mark.asyncio
