@@ -12,6 +12,7 @@ components:
   - name: "slack_agent"
     type: AgentComponent
     prompt_id: "slack_agent_prompt"
+    require_tool_approval: true
     inputs:
       - from: "context:goal"
         as: "goal"
