@@ -451,7 +451,7 @@ For more details, refer to the [Anthropic API documentation](https://docs.anthro
 Unit tests validate prompt configurations and LLM interactions, with mock API responses simulating AI feature use cases.
 For detailed test implementations, refer to:
 
-- [tests/chat/test_agent_react.py](../tests/chat/test_agent_react.py)
+- [tests/chat/agents/test_react.py](../tests/chat/agents/test_react.py)
 - [tests/API/v2/test_v2_chat_agent.py](../tests/api/v2/test_v2_chat_agent.py)
 
 For more details, please review the AI Gateway Prompt definitions:

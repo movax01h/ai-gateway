@@ -84,7 +84,7 @@ This can be useful for testing middleware, request/response interface contracts,
 uses cases that do not require an AI model to execute.
 
 Agentic Chat can be mocked by setting the environment variables `AIGW_USE_AGENTIC_MOCK=true` and `AIGW_MOCK_MODEL_RESPONSES=true`. You can specify a sequence of responses to simulate a multi-step flow.
-See the [documentation](docs/workflows/agentic_mock.md) for details.
+See the [documentation](../docs/workflows/agentic_mock.md) for details.
 
 ### Logging requests and responses during development
 

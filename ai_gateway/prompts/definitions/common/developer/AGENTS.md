@@ -5,4 +5,4 @@ Developer flow version and environment renders it — edits here have platform-w
 blast radius.
 
 Before changing anything in this directory, read and follow
-[`duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md`](duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md).
+[`duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md`](../../../../../duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md).

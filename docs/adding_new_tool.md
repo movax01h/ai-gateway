@@ -77,7 +77,7 @@ implementation details, and best practices.
            return f"Performing action with {args.param1}"
    ```
 
-### 2. ⚠️ Tool Response Truncation
+### 2. Tool Response Truncation
 
 **All tools have automatic response truncation applied.**
 

@@ -144,7 +144,7 @@ to add internal events and test internal event collection with Snowplow locally.
 
 ## Release
 
-See [release doc](docs/release.md).
+See [release doc](docs/delivery/release.md).
 
 ## Rate limiting
 
