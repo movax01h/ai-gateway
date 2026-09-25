@@ -31,6 +31,7 @@ from duo_workflow_service.interceptors.authentication_interceptor import current
 from duo_workflow_service.interceptors.correlation_id_interceptor import correlation_id
 from lib.context import gitlab_version, language_server_version
 from lib.internal_events import (
+    RESERVED_AI_CONTEXT_EXTRA_KEYS,
     EventContext,
     current_event_context,
     parse_tracking_context,
@@ -95,11 +96,19 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
         # Forward the optional, client-supplied Duo CLI tracking context
         # (for example distribution / execution_environment) into extra so it is
         # attached to Snowflake events. Best-effort: absent/malformed values are
-        # dropped by parse_tracking_context.
+        # dropped by parse_tracking_context. Reserved keys are dropped here so a
+        # client cannot spoof the server-resolved ai_context identity fields
+        # (workflow_id/workflow_type/agent_name/flow_name/item_version/
+        # item_schema_version) via this header.
         tracking_context = parse_tracking_context(
             metadata.get(X_GITLAB_TRACKING_CONTEXT_HEADER)
         )
         if tracking_context:
+            tracking_context = {
+                key: value
+                for key, value in tracking_context.items()
+                if key not in RESERVED_AI_CONTEXT_EXTRA_KEYS
+            }
             extra = {**tracking_context, **extra}
 
         # Get GitLab instance version from context

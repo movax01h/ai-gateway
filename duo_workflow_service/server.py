@@ -148,6 +148,7 @@ from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
     InternalEventAdditionalProperties,
+    merge_event_context_extra,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 from lib.usage_quota import UsageQuotaEvent
@@ -594,6 +595,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             )
 
         monitoring_context.set_flow_identity(**resolved_flow.tracking_fields())
+
+        # Mirror the resolved flow identity onto the event context so every
+        # internal event for this session carries it, under the same names the
+        # structured logs already use (structured_logging.add_workflow_identity).
+        merge_event_context_extra(**monitoring_context.event_context_fields())
 
         # Only some request shapes can carry items; the workflow classes behind the rest
         # do not accept the argument.
