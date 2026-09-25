@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """Post a prompt version diff comment on a GitLab merge request.
 
-Prompts are versioned as separate files under ``ai_gateway/prompts/definitions``
-(e.g. ``system/1.0.0.jinja`` -> ``system/1.1.0.jinja``). Because each version is
-a new file, the MR diff shows only an addition and reviewers cannot see what
-changed. This script detects new versioned prompt files in an MR, resolves the
-immediately preceding version on the target branch, computes a unified diff and
-posts it as a single MR comment.
+Prompts and flow configs are versioned as separate files (e.g.
+``system/1.0.0.jinja`` -> ``system/1.1.0.jinja``) under the roots listed in
+``VERSIONED_ROOTS``. Because each version is a new file, the MR diff shows only
+an addition and reviewers cannot see what changed. This script detects new
+versioned files in an MR, resolves the immediately preceding version, computes a
+unified diff and posts it as a single MR comment.
 
 Idempotency: the note body embeds a sentinel HTML comment. On re-runs the
 existing note is edited rather than duplicated, and it is deleted when the MR
@@ -38,7 +38,14 @@ from poetry.core.constraints.version import Version
 # Sentinel embedded in the bot comment so re-runs can find and update it.
 SENTINEL = "<!-- prompt-diff-bot -->"
 
-PROMPTS_ROOT = "ai_gateway/prompts/definitions"
+# Keep in step with the `changes` globs of `lint:prompt_diff_comment` in
+# .gitlab/ci/lint.gitlab-ci.yml.
+VERSIONED_ROOTS = (
+    "ai_gateway/prompts/definitions",
+    "ai/features",
+    "duo_workflow_service/agent_platform/v1/flows/configs",
+    "duo_workflow_service/agent_platform/experimental/flows/configs",
+)
 
 VERSIONED_EXTENSIONS = frozenset({".jinja", ".yml"})
 
@@ -66,10 +73,18 @@ def parse_version(stem: str) -> Version | None:
         return None
 
 
+def versioned_root(path: str) -> str | None:
+    """Return the entry of ``VERSIONED_ROOTS`` that contains *path*, or ``None``."""
+    for root in VERSIONED_ROOTS:
+        if path.startswith(root + "/"):
+            return root
+    return None
+
+
 def is_versioned_prompt_file(path: str) -> bool:
-    """Return True if *path* is a versioned prompt file inside ``PROMPTS_ROOT``."""
+    """Return True if *path* is a versioned prompt file inside one of ``VERSIONED_ROOTS``."""
     p = PurePosixPath(path)
-    if not path.startswith(PROMPTS_ROOT + "/"):
+    if versioned_root(path) is None:
         return False
     if p.suffix not in VERSIONED_EXTENSIONS:
         return False
@@ -93,8 +108,17 @@ def highest_version_below(candidate_stems: list[str], new_stem: str) -> str | No
 
 
 def prompt_key(path: str) -> str:
-    """Return a human-readable key like ``chat/explain_code/system`` for a prompt path."""
-    return str(PurePosixPath(path).relative_to(PROMPTS_ROOT).parent)
+    """Return a human-readable key like ``chat/explain_code/system`` for a prompt path.
+
+    The key is the parent directory relative to the matching ``VERSIONED_ROOTS`` entry.
+
+    Raises:
+        ValueError: If *path* is outside every root.
+    """
+    root = versioned_root(path)
+    if root is None:
+        raise ValueError(f"{path} is outside VERSIONED_ROOTS")
+    return str(PurePosixPath(path).relative_to(root).parent)
 
 
 def compute_diff(old_text: str, old_label: str, new_text: str, new_label: str) -> str:

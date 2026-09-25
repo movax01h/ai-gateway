@@ -7,8 +7,8 @@ import gitlab.exceptions
 import pytest
 
 from scripts.prompt_diff_comment import (
-    PROMPTS_ROOT,
     SENTINEL,
+    VERSIONED_ROOTS,
     PromptDiff,
     build_comment_body,
     build_prompt_diff,
@@ -23,8 +23,11 @@ from scripts.prompt_diff_comment import (
     prompt_key,
     run,
     sync_comment,
+    versioned_root,
 )
 
+PROMPTS_ROOT = "ai_gateway/prompts/definitions"
+FLOWS_ROOT = "duo_workflow_service/agent_platform/v1/flows/configs"
 SYSTEM_DIR = f"{PROMPTS_ROOT}/chat/explain_code/system"
 
 
@@ -35,9 +38,18 @@ SYSTEM_DIR = f"{PROMPTS_ROOT}/chat/explain_code/system"
         (f"{PROMPTS_ROOT}/chat/explain_code/base/1.2.3.yml", True),
         (f"{PROMPTS_ROOT}/code_suggestions/f/user/2.0.0-dev.jinja", True),
         (f"{PROMPTS_ROOT}/common/developer/system/1.1.0-rc.yml", True),
+        (f"{FLOWS_ROOT}/workplan/1.1.0.yml", True),
+        (
+            "duo_workflow_service/agent_platform/experimental/flows/configs/x/1.0.0.yml",
+            True,
+        ),
+        ("ai/features/cli/glab_ask_git_command/prompts/system/1.0.0.jinja", True),
+        ("ai/features/insights/analytics_agent/config/2.0.0.yml", True),
         # Wrong root
         ("scripts/prompt_diff_comment.py", False),
         ("ai_gateway/other/1.0.0.jinja", False),
+        ("duo_workflow_service/agent_platform/v1/flows/1.0.0.yml", False),
+        ("ai/features/cli/glab_ask_git_command/tests/1.0.0.yml", True),
         # Not a version
         (f"{SYSTEM_DIR}/README.md", False),
         (f"{SYSTEM_DIR}/config.jinja", False),
@@ -48,6 +60,12 @@ SYSTEM_DIR = f"{PROMPTS_ROOT}/chat/explain_code/system"
 )
 def test_is_versioned_prompt_file(path, expected):
     assert is_versioned_prompt_file(path) is expected
+
+
+def test_versioned_roots_are_all_matched():
+    for root in VERSIONED_ROOTS:
+        assert versioned_root(f"{root}/x/1.0.0.yml") == root
+    assert versioned_root("ai_gateway/prompts/definitions_old/1.0.0.yml") is None
 
 
 @pytest.mark.parametrize(
@@ -92,10 +110,20 @@ def test_highest_version_below(stems, new_stem, expected):
     [
         (f"{SYSTEM_DIR}/1.1.0.jinja", "chat/explain_code/system"),
         (f"{PROMPTS_ROOT}/common/developer/base/1.0.0.yml", "common/developer/base"),
+        (f"{FLOWS_ROOT}/workplan/1.1.0.yml", "workplan"),
+        (
+            "ai/features/cli/glab_ask_git_command/prompts/system/1.0.0.jinja",
+            "cli/glab_ask_git_command/prompts/system",
+        ),
     ],
 )
 def test_prompt_key(path, expected):
     assert prompt_key(path) == expected
+
+
+def test_prompt_key_rejects_path_outside_roots():
+    with pytest.raises(ValueError):
+        prompt_key("scripts/1.0.0.yml")
 
 
 def test_compute_diff_produces_unified_diff_with_labels():
