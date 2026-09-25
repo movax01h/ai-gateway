@@ -4,7 +4,7 @@ This document describes the billing architecture for **Duo Self-Hosted DAP** dep
 on **cloud (online) licensing**. It covers how per-LLM-call usage is tracked, authorized, and
 reported to CustomersDot without the LLM traffic ever leaving the customer's infrastructure.
 
-For the standard Cloud AI Gateway billing flow (SaaS and self-managed), see the [Technical Overview](billable_usage_technical_overview.md).
+For the standard Cloud AI Gateway billing flow (SaaS and self-managed), see the [Technical Overview](technical_overview.md).
 
 ## Background
 

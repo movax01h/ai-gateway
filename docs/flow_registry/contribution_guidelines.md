@@ -225,7 +225,7 @@ Components are the fundamental building blocks of Flow Registry. They represent 
 
 #### Base Class
 
-All components MUST inherit from the `BaseComponent` class defined in [`duo_workflow_service/agent_platform/v1/components/base.py`](duo_workflow_service/agent_platform/v1/components/base.py). This base class defines the required interface and attributes that all components must implement.
+All components MUST inherit from the `BaseComponent` class defined in [`duo_workflow_service/agent_platform/v1/components/base.py`](../../duo_workflow_service/agent_platform/v1/components/base.py). This base class defines the required interface and attributes that all components must implement.
 
 #### Required Interface
 

@@ -99,7 +99,7 @@ async def my_workflow_handler(
 ## Test locally
 
 This setup targets the **Cloud AI Gateway** and covers SaaS and self-managed billing flows.
-For self-hosted Duo deployments, see the [Self-Hosted Usage Billing](self-hosted.md) architecture instead.
+For self-hosted Duo deployments, see the [Self-Hosted DAP Usage Billing](self-hosted-dap.md) architecture instead.
 
 1. Enable snowplow micro in GDK with [these instructions](https://docs.gitlab.com/ee/development/internal_analytics/internal_event_instrumentation/local_setup_and_debugging.html#snowplow-micro).
 1. Update [the application settings](../application_settings.md#how-to-update-application-settings):

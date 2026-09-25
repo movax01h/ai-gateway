@@ -80,5 +80,5 @@ See [Application Settings](../application_settings.md) for the full configuratio
 
 - [Technical Overview](technical_overview.md): `BillingEventsClient` and `BillingEventService` API reference, `BillingEvent` enum, event types table, local testing setup, and best practices.
 - [Self-Hosted DAP Usage Billing](self-hosted-dap.md): Architecture for billing in self-hosted Duo deployments.
-- [Usage Quota](../usage_quota.md): Per-consumer credit checks before billable operations execute, `UsageQuotaEvent` enum, and decorator usage for HTTP and gRPC.
+- [Usage Quota](usage_quota.md): Per-consumer credit checks before billable operations execute, `UsageQuotaEvent` enum, and decorator usage for HTTP and gRPC.
 - [Internal Events](../internal_events.md): `InternalEventsClient` used for `usage_billing_event` correlation tracking.

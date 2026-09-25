@@ -301,7 +301,7 @@ test-agents: install-test-deps
 		$(if $(VALIDATION_MODEL),--validation-model=$(VALIDATION_MODEL))
 
 .PHONY: lint-doc
-lint-doc: vale markdownlint
+lint-doc: vale markdownlint lychee
 
 .PHONY: vale
 vale:
@@ -312,6 +312,11 @@ vale:
 markdownlint:
 	@echo "Running markdownlint..."
 	@markdownlint-cli2 "clients/*/*.md" "docs/**/*.md" *.md
+
+.PHONY: lychee
+lychee:
+	@echo "Running lychee..."
+	@lychee --offline --include-fragments --root-dir . --exclude-path "node_modules" "**/*.md"
 
 .PHONY: ingest
 ingest:

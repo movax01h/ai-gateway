@@ -516,7 +516,7 @@ The outputs are automatically available to subsequent components when they are r
 configuration or used in router conditions.
 Refer to the documentation of every component to check what outputs it produces.
 
-> **Note:** Tool responses have automatic truncation applied. See [Tool Development Guide](../adding_new_tool.md#2-️-tool-response-truncation) for details.
+> **Note:** Tool responses have automatic truncation applied. See [Tool Development Guide](../adding_new_tool.md#2-tool-response-truncation) for details.
 
 ## UI Logs
 
