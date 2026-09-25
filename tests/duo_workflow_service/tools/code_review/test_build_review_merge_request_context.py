@@ -15,6 +15,7 @@ from duo_workflow_service.tools.code_review.build_review_merge_request_context i
     BuildReviewMergeRequestContext,
     BuildReviewMergeRequestContextInput,
 )
+from duo_workflow_service.tools.code_review.diff_format import walk_diff_lines
 
 
 @pytest.fixture(name="mr_data")
@@ -108,107 +109,6 @@ instructions:
             2. Follow Ruby naming conventions
 """
     return {"content": base64.b64encode(yaml_content.encode("utf-8")).decode("utf-8")}
-
-
-def test_parse_and_format_diff(metadata):
-    """Test that raw diffs are correctly parsed into structured format."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = """@@ -1,3 +1,4 @@ class Calculator
-def add(a, b)
--  a + b
-+  a - b
-end"""
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    # Check chunk header
-    assert "<chunk_header>@@ -1,3 +1,4 @@ class Calculator</chunk_header>" in result
-
-    # Check context line
-    assert (
-        '<line type="context" old_line="1" new_line="1">def add(a, b)</line>' in result
-    )
-
-    # Check deleted line
-    assert '<line type="deleted" old_line="2" new_line="">  a + b</line>' in result
-
-    # Check added line
-    assert '<line type="added" old_line="" new_line="2">  a - b</line>' in result
-
-    # Check context line
-    assert '<line type="context" old_line="3" new_line="3">end</line>' in result
-
-
-def test_parse_and_format_diff_with_special_characters(metadata):
-    """Test that special XML characters are properly escaped."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = """@@ -1,1 +1,1 @@
--if x < 5 && y > 3:
-+if x < 10 && y > 5:"""
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    # Check that < > & are escaped
-    assert "<" in result
-    assert ">" in result
-    assert "&&" in result
-    assert '<line type="deleted"' in result
-    assert '<line type="added"' in result
-
-
-def test_parse_and_format_diff_with_empty_lines(metadata):
-    """Test that empty lines are properly handled."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = """@@ -1,4 +1,4 @@
-class Calculator
--
-+  # New comment
-end"""
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    # Check that empty lines are included
-    assert (
-        '<line type="context" old_line="1" new_line="1">class Calculator</line>'
-        in result
-    )
-    assert '<line type="deleted" old_line="2" new_line=""></line>' in result
-    assert (
-        '<line type="added" old_line="" new_line="2">  # New comment</line>' in result
-    )
-
-
-def test_parse_and_format_diff_binary_file(metadata):
-    """Test that binary files return empty string."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = "Binary files differ"
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    assert result == ""
-
-
-def test_parse_and_format_diff_no_newline_at_end(metadata):
-    """Test handling of 'No newline at end of file' marker."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = """@@ -1,2 +1,2 @@
-line 1
--line 2
-\\ No newline at end of file
-+line 2"""
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    assert '<line type="context"' in result
-    assert '<line type="deleted"' in result
-    assert '<line type="nonewline"' in result
-    assert "No newline at end of file" in result
-    assert '<line type="added"' in result
 
 
 @pytest.mark.asyncio
@@ -528,9 +428,7 @@ async def test_build_review_context_with_custom_instructions(
         ({"include_instruction_format_hint": "false"}, False),
     ],
 )
-@patch(
-    "duo_workflow_service.tools.code_review.build_review_merge_request_context.yaml.safe_load"
-)
+@patch("yaml.safe_load")
 async def test_build_review_context_instruction_format_hint(
     mock_yaml_load,
     gitlab_client_mock,
@@ -1649,14 +1547,13 @@ def test_output_flags_are_hidden_from_the_model_but_open_to_the_flow(metadata):
     )
 
 
-def test_walk_diff_lines_keeps_metadata_skipping_outside_a_hunk(metadata):
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
+def test_walk_diff_lines_keeps_metadata_skipping_outside_a_hunk():
     raw = (
         "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
         "@@ -1,1 +1,2 @@\n ctx\n+added\n"
     )
 
-    walked = [(kind, new, text) for kind, _, new, text in tool._walk_diff_lines(raw)]
+    walked = [(kind, new, text) for kind, _, new, text in walk_diff_lines(raw)]
 
     assert walked == [
         ("chunk_header", 1, "@@ -1,1 +1,2 @@"),
