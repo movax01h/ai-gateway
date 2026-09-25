@@ -2,6 +2,7 @@ import base64
 import json
 import zlib
 from enum import StrEnum
+from typing import Any, Mapping
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from langgraph.checkpoint.base import Checkpoint
@@ -79,6 +80,18 @@ def uncompress_checkpoint(compressed_data: str) -> dict:
     decoded = base64.b64decode(compressed_data.encode("utf-8"))
     uncompressed = zlib.decompress(decoded)
     return json.loads(uncompressed.decode("utf-8"), object_hook=checkpoint_decoder)
+
+
+def decode_gitlab_checkpoint_payload(checkpoint: Mapping[str, Any]) -> dict:
+    """Decode a GraphQL-shaped GitLab checkpoint into its inner checkpoint dict.
+
+    The ``latest_checkpoint`` / ``first_checkpoint`` entries cached in ``WorkflowConfig``
+    are stored verbatim from the GraphQL response and still encoded: newer instances
+    (19.0+) send ``compressedCheckpoint``, older ones send ``checkpoint`` as a JSON string.
+    """
+    if "compressedCheckpoint" in checkpoint:
+        return uncompress_checkpoint(checkpoint["compressedCheckpoint"])
+    return json.loads(checkpoint["checkpoint"], object_hook=checkpoint_decoder)
 
 
 NOOP_WORKFLOW_STATUSES = [WorkflowStatusEnum.APPROVAL_ERROR]

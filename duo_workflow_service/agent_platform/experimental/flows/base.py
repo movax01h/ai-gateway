@@ -60,6 +60,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
+    resolve_approval_attribution,
 )
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_exception
@@ -249,6 +250,12 @@ class Flow(AbstractWorkflow):
         match self._approval.WhichOneof("user_decision"):
             case UserDecision.APPROVE:
                 event = FlowEvent(event_type=FlowEventType.APPROVE)
+                source, policy_ref = resolve_approval_attribution(
+                    self._approval.approval
+                )
+                event["approval_source"] = source
+                if policy_ref is not None:
+                    event["policy_ref"] = policy_ref
             case UserDecision.REJECT:
                 if message := self._approval.rejection.message:
                     # Rejection with feedback. The user's message is written to

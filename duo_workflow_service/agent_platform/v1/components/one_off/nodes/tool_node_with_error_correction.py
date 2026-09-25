@@ -20,10 +20,12 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.entities.state import ApprovalSource
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
+from lib.context import record_approval_source
 from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events.event_enum import EventEnum
 
@@ -405,10 +407,30 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
             tuple[str, ToolExecutionStatus]: (response_content, status)
         """
         try:
+            # The one-off component never routes tool calls through an approval node;
+            # attribute this config-authorized call before invoking, so the
+            # ToolInvokedEvent the callback handler emits carries the source. A falsy
+            # tool_call_id no-ops here, so no branch is needed.
+            record_approval_source(tool_call_id, ApprovalSource.PREAPPROVED_CONFIG)
+
             with duo_workflow_metrics.time_tool_call(
                 tool_name=tool.name, flow_type=self._tracker._flow_type.value
             ):
-                tool_call_result = await tool.ainvoke(tool_call_args)
+                # Wrap as a ToolCall dict (not bare args) so tool_call_id threads through
+                # to on_tool_start for approval_source lookup; unwrap the resulting
+                # ToolMessage back to raw content to preserve this method's str return
+                # contract. Note: a dict/list-returning tool would come back
+                # JSON-stringified here instead of its raw shape; none does today.
+                tool_call_result = await tool.ainvoke(
+                    {
+                        "name": tool.name,
+                        "args": tool_call_args,
+                        "id": tool_call_id,
+                        "type": "tool_call",
+                    }
+                )
+                if isinstance(tool_call_result, ToolMessage):
+                    tool_call_result = tool_call_result.content
 
             self._tracker.track_internal_event(
                 event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,

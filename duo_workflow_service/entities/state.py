@@ -106,13 +106,19 @@ class ApprovalSource(StrEnum):
         return member.value if member is not None else name.lower()
 
     @classmethod
-    def from_approval(
-        cls, approved: Optional[contract_pb2.Approval.Approved]
-    ) -> Optional[str]:
-        """Resolve the loggable approval source from an ``Approved`` message, or ``None`` when the source is unset."""
+    def from_approval(cls, approved: Optional[contract_pb2.Approval.Approved]) -> str:
+        """Resolve the loggable approval source from an ``Approved`` message.
+
+        Clamps a client-sent ``SESSION_APPROVAL`` to ``user_explicit``: that value is
+        server-produced only, granted exclusively by the silent-reuse path, so a client
+        cannot fabricate cache-reuse provenance on a fresh decision.
+        """
         if approved is not None and approved.HasField("approval_source"):
-            return cls.from_proto(approved.approval_source)
-        return None
+            source = cls.from_proto(approved.approval_source)
+            if source == cls.SESSION_APPROVAL.value:
+                return cls.USER_EXPLICIT.value
+            return source
+        return cls.USER_EXPLICIT.value
 
 
 def policy_ref_to_log_dict(
@@ -130,6 +136,25 @@ def policy_ref_to_log_dict(
         for name in ("origin", "file", "hash", "version")
         if policy_ref.HasField(name)
     }
+
+
+def resolve_approval_attribution(
+    approved: Optional["contract_pb2.Approval.Approved"],
+) -> tuple[str, Optional[Dict[str, str]]]:
+    """Resolve the loggable ``(approval_source, policy_ref)`` audit attribution.
+
+    Pairs ``ApprovalSource.from_approval`` with the presence-aware
+    ``policy_ref_to_log_dict`` (``None`` when the client sent no policy_ref) so
+    the audit-recording paths (chat/workflow.py, v1 flows/base.py) resolve both
+    the same way.
+    """
+    source = ApprovalSource.from_approval(approved)
+    policy_ref = (
+        policy_ref_to_log_dict(approved.policy_ref)
+        if approved is not None and approved.HasField("policy_ref")
+        else None
+    )
+    return source, policy_ref
 
 
 # Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
@@ -348,6 +373,11 @@ class ChatWorkflowState(TypedDict):
     approval: ApprovalStateRejection | None
     preapproved_tools: list[str] | None
     denied_tools: list[str] | None
+    # Tool-call ids from the pending AIMessage that required a fresh human
+    # approval decision (not pre-approved or session-reused). Persisted so the
+    # approval-resume path attributes the client's approval source to exactly
+    # those calls, leaving already-attributed skips in a mixed batch untouched.
+    tool_call_approval_requested: NotRequired[list[str] | None]
 
 
 DuoWorkflowStateType = Union[WorkflowState, ChatWorkflowState]

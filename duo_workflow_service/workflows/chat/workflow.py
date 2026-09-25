@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, List, NoReturn, Optional, override
+from typing import Any, Dict, List, Mapping, NoReturn, Optional, override
 from uuid import uuid4
 
 from dependency_injector.wiring import Provide, inject
@@ -29,6 +29,7 @@ from duo_workflow_service.agents.chat_agent_factory import create_agent
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
+    decode_gitlab_checkpoint_payload,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.schema import (
@@ -50,6 +51,7 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
+    resolve_approval_attribution,
 )
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
@@ -62,6 +64,7 @@ from duo_workflow_service.workflows.chat.commands import (
     strip_command_context,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.context import record_approval_policy_ref, record_approval_source
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
@@ -505,6 +508,7 @@ class Workflow(AbstractWorkflow):
                         self._track_tool_approval_resolved(
                             EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_APPROVAL
                         )
+                        self._record_approved_tool_sources(checkpoint_tuple)
                     case "rejection":
                         new_chat_message = self._approval.rejection.message  # type: ignore
                         state_update["approval"] = ApprovalStateRejection(
@@ -685,6 +689,60 @@ class Workflow(AbstractWorkflow):
             return resume_checkpoint_ts
 
         return (checkpoint_tuple or {}).get("threadTs")
+
+    def _record_approved_tool_sources(self, checkpoint_tuple: Any) -> None:
+        """Attribute an approval source to the tool calls the user just approved.
+
+        Only the calls persisted in ``tool_call_approval_requested`` (those that needed a
+        fresh decision) are attributed with the client's source, leaving pre-approved /
+        session-reused calls in the same mixed batch untouched. A checkpoint predating
+        that field falls back to attributing every call.
+
+        KNOWN GAP: those other calls' own attributions were recorded in the
+        *pre-interrupt* invocation, but the approval_sources registry is a per-invocation
+        ContextVar reset in ``GitLabWorkflow.__aenter__``, so they do not actually survive
+        to this point and surface as ``approval_source: null``. Tracked in
+        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938
+        (see ``test_record_approved_tool_sources_loses_preapproved_attribution_across_real_resume``).
+
+        Best-effort: any failure here (corrupt checkpoint payload, unexpected state shape)
+        is logged and swallowed rather than disturbing the already-decided approval flow.
+        """
+        if checkpoint_tuple is None or self._approval is None:
+            return
+        if not isinstance(checkpoint_tuple, Mapping):
+            return
+
+        try:
+            approved = getattr(self._approval, "approval", None)
+            source, policy_ref = resolve_approval_attribution(approved)
+
+            # Despite the name, `checkpoint_tuple` is a GitLabCheckpoint dict (the raw
+            # latest_checkpoint/first_checkpoint cached in workflow_config), not a
+            # LangGraph CheckpointTuple, so decode it before reading channel_values.
+            decoded_checkpoint = decode_gitlab_checkpoint_payload(checkpoint_tuple)
+            channel_values = decoded_checkpoint.get("channel_values") or {}
+            histories = channel_values.get("conversation_history") or {}
+            messages = histories.get(self._agent.name) or []
+            last_message = messages[-1] if messages else None
+            if not isinstance(last_message, AIMessage):
+                return
+
+            tool_calls = getattr(last_message, "tool_calls", []) or []
+            requested_ids = channel_values.get("tool_call_approval_requested")
+            for tool_call in tool_calls:
+                tool_call_id = tool_call.get("id")
+                if requested_ids is not None and tool_call_id not in requested_ids:
+                    continue
+                record_approval_source(tool_call_id, source)
+                record_approval_policy_ref(tool_call_id, policy_ref)
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.log.warning(
+                "Failed to record approval sources for approved tool calls; "
+                "their ToolInvokedEvents will carry approval_source: null",
+                exc_info=True,
+            )
+            return
 
     def _track_tool_approval_resolved(self, outcome: EventPropertyEnum) -> None:
         """Track that a pending tool approval was resolved."""

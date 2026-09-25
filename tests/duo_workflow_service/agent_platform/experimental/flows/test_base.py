@@ -396,6 +396,62 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                     or input.resume.get("message") is None  # type: ignore[union-attr]
                 )
 
+            if expected_event_type == FlowEventType.APPROVE:
+                # A human approve with no client-sent source defaults to
+                # user_explicit so the executed calls stay attributed.
+                assert input.resume["approval_source"] == "user_explicit"  # type: ignore[index]
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry")
+    async def test_resume_command_carries_client_approval_source_and_policy_ref(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """An APPROVE that carries a client-sent source and policy_ref forwards both on the resume FlowEvent, so the
+        approved calls' audit events are attributed with the client's provenance rather than the user_explicit
+        default."""
+        approval = contract_pb2.Approval(
+            approval=contract_pb2.Approval.Approved(
+                approval_source=contract_pb2.Approval.APPROVAL_SOURCE_AUTO_MODE,
+                policy_ref=contract_pb2.Approval.PolicyRef(
+                    origin="gitlab_default",
+                    file=".gitlab/duo/pretooluse.rego",
+                ),
+            )
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-client-source",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+                approval=approval,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run("test goal")
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.resume["event_type"] == FlowEventType.APPROVE  # type: ignore[index]
+            assert input.resume["approval_source"] == "auto_mode"  # type: ignore[index]
+            assert input.resume["policy_ref"] == {  # type: ignore[index]
+                "origin": "gitlab_default",
+                "file": ".gitlab/duo/pretooluse.rego",
+            }
+
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_checkpointer", "mock_tools_registry")
     async def test_graph_input_with_additional_context(

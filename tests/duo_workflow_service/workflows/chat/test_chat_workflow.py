@@ -27,6 +27,7 @@ from duo_workflow_service.agent_platform.v1.catalog import (
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
@@ -55,6 +56,13 @@ from duo_workflow_service.workflows.chat.workflow import (
     _resolve_additional_context_vars,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.context.approval_sources import (
+    approval_sources,
+    get_approval_policy_ref,
+    get_approval_source,
+    init_approval_sources,
+    record_approval_source,
+)
 from lib.events import GLReportingEventContext
 from lib.feature_flags import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
@@ -721,6 +729,253 @@ def test_web_search_requested_when_opted_in(
     )
 
 
+def _gitlab_checkpoint_with_history(
+    conversation_history: dict, requested_ids: list | None = None
+) -> dict:
+    """Build a GitLabCheckpoint dict in the real production shape.
+
+    Mirrors what the GraphQL API caches in ``WorkflowConfig["latest_checkpoint"]``:
+    the checkpoint payload is compressed/encoded (19.0+ ``compressedCheckpoint``),
+    not a plain ``channel_values`` dict reachable by attribute. Using the real
+    serializer means the test exercises the actual decode path in
+    ``_record_approved_tool_sources`` and would catch a dict-vs-attribute or
+    decode regression.
+
+    ``requested_ids`` populates the persisted ``tool_call_approval_requested``
+    channel so the mixed-batch scoping can be exercised; omit it to mimic an
+    older checkpoint that predates the field.
+    """
+    channel_values: dict = {"conversation_history": conversation_history}
+    if requested_ids is not None:
+        channel_values["tool_call_approval_requested"] = requested_ids
+    inner = {"channel_values": channel_values}
+    return {"compressedCheckpoint": compress_checkpoint(inner)}  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_defaults_to_user_explicit(
+    workflow_with_approval,
+):
+    """On approval resume, the pending tool calls are attributed user_explicit (no client-sent source) so their
+    ToolInvokedEvent stays attributed."""
+    workflow = workflow_with_approval
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+
+    pending = AIMessage(
+        content="",
+        tool_calls=[
+            {"id": "c1", "name": "run_command", "args": {"command": "ls"}},
+            {"id": "c2", "name": "read_file", "args": {"path": "/a"}},
+        ],
+    )
+    checkpoint_tuple = _gitlab_checkpoint_with_history({"test_prompt": [pending]})
+
+    init_approval_sources()
+    try:
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+        assert get_approval_source("c1") == "user_explicit"
+        assert get_approval_source("c2") == "user_explicit"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_uses_client_source(workflow_with_project):
+    """A client-sent approval source (e.g. auto_mode) overrides the default."""
+    workflow = workflow_with_project
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+    workflow._approval = contract_pb2.Approval(
+        approval=contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_AUTO_MODE,
+            policy_ref=contract_pb2.Approval.PolicyRef(origin="policy"),
+        )
+    )
+
+    pending = AIMessage(
+        content="",
+        tool_calls=[{"id": "c1", "name": "run_command", "args": {"command": "ls"}}],
+    )
+    checkpoint_tuple = _gitlab_checkpoint_with_history({"test_prompt": [pending]})
+
+    init_approval_sources()
+    try:
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+        assert get_approval_source("c1") == "auto_mode"
+        assert get_approval_policy_ref("c1") == {"origin": "policy"}
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_scopes_to_requested_calls(
+    workflow_with_project,
+):
+    """In a mixed batch, only the calls that required a fresh decision get the client's approval source.
+
+    A pre-approved / session-reused call in the same AIMessage must keep its source, not be relabeled, *given* its
+    prior attribution is still present in the registry when this runs. In production it usually isn't (see
+    test_record_approved_tool_sources_loses_preapproved_attribution_across_real_resume): this test only exercises
+    the scoping mechanism's intent, using the same registry instance to stand in for the pre-interrupt one.
+    """
+    workflow = workflow_with_project
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+    workflow._approval = contract_pb2.Approval(
+        approval=contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_USER_EXPLICIT,
+        )
+    )
+
+    pending = AIMessage(
+        content="",
+        tool_calls=[
+            {"id": "c1", "name": "run_command", "args": {"command": "ls"}},
+            {"id": "c2", "name": "read_file", "args": {"path": "/a"}},
+        ],
+    )
+    # Only c2 required a fresh decision; c1 was pre-approved.
+    checkpoint_tuple = _gitlab_checkpoint_with_history(
+        {"test_prompt": [pending]}, requested_ids=["c2"]
+    )
+
+    init_approval_sources()
+    try:
+        # Simulate the agent's prior attribution of the pre-approved skip.
+        record_approval_source("c1", "preapproved_config")
+
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+
+        assert get_approval_source("c1") == "preapproved_config"
+        assert get_approval_source("c2") == "user_explicit"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_loses_preapproved_attribution_across_real_resume(
+    workflow_with_project,
+):
+    """KNOWN GAP (https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938), not
+    fixed here: a pre-approved / session-reused call's attribution does not actually survive to resume, because the
+    approval_sources registry is a per-invocation ContextVar (reset in GitLabWorkflow.__aenter__) and an approval
+    decision always arrives as a new invocation.
+
+    This reproduces that reset (unlike the sibling test above, which keeps using the same registry instance throughout)
+    and documents that the pre-approved call comes back unattributed.
+    """
+    workflow = workflow_with_project
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+    workflow._approval = contract_pb2.Approval(
+        approval=contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_USER_EXPLICIT,
+        )
+    )
+
+    pending = AIMessage(
+        content="",
+        tool_calls=[
+            {"id": "c1", "name": "run_command", "args": {"command": "ls"}},
+            {"id": "c2", "name": "read_file", "args": {"path": "/a"}},
+        ],
+    )
+    # Only c2 required a fresh decision; c1 was pre-approved.
+    checkpoint_tuple = _gitlab_checkpoint_with_history(
+        {"test_prompt": [pending]}, requested_ids=["c2"]
+    )
+
+    # Pre-interrupt invocation: the agent attributes c1's skip, then the
+    # workflow pauses.
+    init_approval_sources()
+    record_approval_source("c1", "preapproved_config")
+    approval_sources.set(None)
+
+    # Post-interrupt invocation: a new workflow object, a fresh registry.
+    init_approval_sources()
+    try:
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+
+        assert get_approval_source("c1") is None
+        assert get_approval_source("c2") == "user_explicit"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_noops_without_checkpoint_or_approval(
+    workflow_with_approval, workflow_with_project
+):
+    """The attribution is a no-op (records nothing) when there is no checkpoint to read the pending calls from, or no
+    approval to attribute them to."""
+    workflow_with_approval._agent = Mock()
+    workflow_with_approval._agent.name = "test_prompt"
+
+    init_approval_sources()
+    try:
+        # No checkpoint tuple: nothing to read.
+        workflow_with_approval._record_approved_tool_sources(None)
+        # A non-mapping checkpoint (not the expected GitLabCheckpoint dict) is
+        # also a safe no-op rather than an error.
+        workflow_with_approval._record_approved_tool_sources("not-a-dict")
+        # No approval on the workflow: nothing to attribute (returns before any
+        # checkpoint decode).
+        workflow_with_project._approval = None
+        workflow_with_project._record_approved_tool_sources({"checkpoint": "{}"})
+        assert get_approval_source("c1") is None
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_noops_when_last_message_not_ai(
+    workflow_with_approval,
+):
+    """When the last checkpointed message is not an AIMessage (so it holds no pending tool calls), attribution records
+    nothing."""
+    workflow = workflow_with_approval
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+
+    checkpoint_tuple = _gitlab_checkpoint_with_history(
+        {"test_prompt": [HumanMessage(content="not an AI message")]}
+    )
+
+    init_approval_sources()
+    try:
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+        assert get_approval_source("c1") is None
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_swallows_corrupt_payload(
+    workflow_with_approval,
+):
+    """A corrupt compressedCheckpoint (zlib.error on decompress) must not escape:
+
+    attribution is best-effort and cannot disturb the already-decided approval flow, so the broad guard swallows it and
+    records nothing.
+    """
+    workflow = workflow_with_approval
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+
+    # Not valid zlib-compressed data, so uncompress_checkpoint -> zlib.decompress
+    # raises zlib.error, which is neither KeyError/ValueError/TypeError.
+    checkpoint_tuple = {"compressedCheckpoint": "not-valid-zlib-data"}
+
+    init_approval_sources()
+    try:
+        # Must not raise despite the zlib.error inside decode.
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+        assert get_approval_source("c1") is None
+    finally:
+        approval_sources.set(None)
+
+
 @pytest.mark.asyncio
 @patch("duo_workflow_service.workflows.chat.workflow.uuid4")
 async def test_get_graph_input_start(mock_uuid, workflow_with_project):
@@ -1143,6 +1398,10 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
     ]
 
     workflow_with_project._agent.tools_registry.approval_required.return_value = True
+    # _get_approvals resolves via the toolset now; None => a fresh decision needed.
+    workflow_with_project._agent.toolset.resolve_approval_source = AsyncMock(
+        return_value=None
+    )
 
     # Mock the model to NOT be an agentic mock model so approval is required
     mock_model = Mock()
@@ -1592,6 +1851,10 @@ async def test_agent_returns_content_and_tool_calls_with_approval_required(
     ]
 
     workflow_with_project._agent.tools_registry.approval_required.return_value = True
+    # _get_approvals resolves via the toolset now; None => a fresh decision needed.
+    workflow_with_project._agent.toolset.resolve_approval_source = AsyncMock(
+        return_value=None
+    )
 
     mock_model = Mock()
     mock_model._is_auto_approved_by_agentic_mock_model = False
