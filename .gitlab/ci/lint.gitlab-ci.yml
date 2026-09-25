@@ -124,8 +124,13 @@ lint:prompt_diff_comment:
     - if: "$DANGER_GITLAB_API_TOKEN == null"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      # Keep in step with VERSIONED_ROOTS in scripts/prompt_diff_comment.py.
       changes:
         - "ai_gateway/prompts/definitions/**/*.jinja"
         - "ai_gateway/prompts/definitions/**/*.yml"
+        - "ai/features/**/*.jinja"
+        - "ai/features/**/*.yml"
+        - "duo_workflow_service/agent_platform/v1/flows/configs/**/*.yml"
+        - "duo_workflow_service/agent_platform/experimental/flows/configs/**/*.yml"
   script:
     - poetry run python scripts/prompt_diff_comment.py
