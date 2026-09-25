@@ -1357,6 +1357,37 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `secrets_fp_detection 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> secret_vulnerability_details_component;
+    secret_vulnerability_details_component(secret_vulnerability_details_component<br>#91;DeterministicStepComponent#93;);
+    secret_vulnerability_source_file_component(secret_vulnerability_source_file_component<br>#91;OneOffComponent#93;);
+    secret_vulnerability_lines_component(secret_vulnerability_lines_component<br>#91;OneOffComponent#93;);
+    secret_vulnerability_report_component(secret_vulnerability_report_component<br>#91;AgentComponent#93;);
+    secret_fp_detection_agent(secret_fp_detection_agent<br>#91;AgentComponent#93;);
+    secret_post_results_to_gitlab_component(secret_post_results_to_gitlab_component<br>#91;OneOffComponent#93;);
+    secret_vulnerability_details_component --> secret_vulnerability_source_file_component;
+    secret_vulnerability_source_file_component -.->|"success"| secret_vulnerability_lines_component;
+    secret_vulnerability_source_file_component -.->|"default_route"| __end__;
+    secret_vulnerability_lines_component -.->|"success"| secret_vulnerability_report_component;
+    secret_vulnerability_lines_component -.->|"default_route"| __end__;
+    secret_vulnerability_report_component --> secret_fp_detection_agent;
+    secret_fp_detection_agent --> secret_post_results_to_gitlab_component;
+    secret_post_results_to_gitlab_component --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `security_review 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
