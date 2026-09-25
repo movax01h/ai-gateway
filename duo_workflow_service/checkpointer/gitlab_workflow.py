@@ -10,6 +10,7 @@ import zlib
 from collections import OrderedDict
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import (
     Any,
     AsyncIterator,
@@ -147,6 +148,29 @@ TOP_LEVEL_CHECKPOINT_NS = ""
 # single supervisor turn delegating to more than 16 subagents at once. Past it, writes
 # stay correct but degrade to full snapshots — each trim is logged, so it is observable.
 MAX_NESTED_INCREMENTAL_BASELINES = 16
+
+
+class _FlushPoint(StrEnum):
+    """When a deferred status event may be sent to Rails.
+
+    ``aput_writes`` never PATCHes a status directly: the transition must not
+    fire before the checkpoint backing it is durable, or a listener on the
+    transition reads state that is not there yet.
+
+    ``ON_NEXT_CHECKPOINT`` is released only by the ``aput`` carrying the same
+    ``checkpoint_id`` the deferring ``aput_writes`` saw — the first checkpoint
+    that can contain those writes, not merely the next save to complete.
+    """
+
+    ON_NEXT_CHECKPOINT = "on_next_checkpoint"
+    ON_COMPLETION = "on_completion"
+
+
+def _flush_point_for(status: WorkflowStatusEventEnum) -> _FlushPoint:
+    """Every status is deferred; only FINISH waits for the terminal checkpoint."""
+    if status == WorkflowStatusEventEnum.FINISH:
+        return _FlushPoint.ON_COMPLETION
+    return _FlushPoint.ON_NEXT_CHECKPOINT
 
 
 def _is_response_size_limit_error(exc: BaseException) -> bool:
@@ -426,9 +450,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._internal_event_client = internal_event_client
         self._billing_event_service = billing_event_service
         self._orbit_called = False
-        # Set when a checkpoint carries FINISH; fired later by
-        # _handle_completion, once the answer checkpoint is persisted.
-        self._pending_finish = False
+        # Statuses seen in aput_writes, held until their backing checkpoint is
+        # durable. ON_NEXT_CHECKPOINT entries also record the checkpoint_id the
+        # deferring aput_writes saw: only the aput arriving with that id builds on
+        # those writes, so only it can release the status. A None id is the first
+        # super-step (no parent checkpoint yet); the completion backstop releases it.
+        self._deferred_statuses: dict[
+            WorkflowStatusEventEnum, tuple[_FlushPoint, str | None]
+        ] = {}
         self.serde = CheckpointSerializer()
         # Delta state per checkpoint namespace, in least-recently-used order: one
         # checkpointer serves the top-level graph and every nested run it dispatches.
@@ -821,7 +850,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # is the answer checkpoint that failed to save, so drop rather than finish
         # a session whose answer is gone (issue 627533).
         if (
-            self._pending_finish
+            self._is_status_deferred(WorkflowStatusEventEnum.FINISH)
             and exc_type is not None
             and not isinstance(
                 exc_value, (OutgoingMessageTooLargeError, CheckpointSaveError)
@@ -925,6 +954,51 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             exc_type, exc_value, reraise_errors=exc_type is None
         )
 
+    def _defer_status(
+        self,
+        status: WorkflowStatusEventEnum,
+        flush_point: _FlushPoint,
+        checkpoint_id: str | None,
+    ) -> None:
+        """Park a status event whose Rails transition must wait for its checkpoint."""
+        self._logger.debug(
+            "Deferring workflow status until its checkpoint is saved",
+            status_event=status.value,
+            flush_point=flush_point.value,
+            checkpoint_id=checkpoint_id,
+        )
+        self._deferred_statuses[status] = (flush_point, checkpoint_id)
+
+    async def _flush_deferred_statuses(
+        self, flush_point: _FlushPoint, checkpoint_id: str | None = None
+    ) -> None:
+        """Send every deferred status due at ``flush_point``, clearing it on success.
+
+        With ``checkpoint_id`` set (the checkpoint just saved builds on it), only
+        statuses parked against that id are due: a save with any other parent
+        id proves nothing about the checkpoint carrying those writes. Without it
+        (the completion backstop), every status at the flush point is due.
+
+        A failed PATCH propagates (a transient Rails error surfaces like any save failure); the entry stays parked, so
+        the next matching checkpoint save retries it.
+        """
+        for status, (point, parked_id) in list(self._deferred_statuses.items()):
+            if point is not flush_point:
+                continue
+            if checkpoint_id is not None and parked_id != checkpoint_id:
+                continue
+            self._logger.debug(
+                "Firing deferred workflow status",
+                status_event=status.value,
+                flush_point=point.value,
+                checkpoint_id=parked_id,
+            )
+            await self._update_workflow_status(status)
+            del self._deferred_statuses[status]
+
+    def _is_status_deferred(self, status: WorkflowStatusEventEnum) -> bool:
+        return status in self._deferred_statuses
+
     async def _handle_completion(
         self, exc_type=None, exc_value=None, reraise_errors=True
     ) -> None:
@@ -932,13 +1006,12 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             return
 
         try:
-            # Fire the deferred FINISH now that the graph loop has drained and its
-            # terminal checkpoint (the final answer) is persisted, so listeners on
-            # the finished transition see the answer in Rails.
-            if self._pending_finish and exc_type is None:
-                self._logger.debug("Firing deferred FINISH workflow status")
-                await self._update_workflow_status(WorkflowStatusEventEnum.FINISH)
-                self._pending_finish = False
+            # The graph loop has drained and its terminal checkpoint is
+            # persisted: drain FINISH by design, the rest as a backstop so no
+            # status is lost even if its super-step saved no checkpoint.
+            if exc_type is None:
+                await self._flush_deferred_statuses(_FlushPoint.ON_COMPLETION)
+                await self._flush_deferred_statuses(_FlushPoint.ON_NEXT_CHECKPOINT)
 
             status = await self._status_handler.get_workflow_status(
                 workflow_id=self._workflow_id
@@ -1846,6 +1919,13 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             checkpoint_strategy=checkpoint_strategy,
         )
 
+        # Only the checkpoint saved on top of the id the deferring aput_writes
+        # saw can carry its payload, so only that save may release the status.
+        await self._flush_deferred_statuses(
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+            checkpoint_id=configurable.get("checkpoint_id"),
+        )
+
         return {
             "configurable": {
                 "thread_id": self._workflow_id,
@@ -1886,19 +1966,16 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             )
             status = None
 
-        if status == WorkflowStatusEventEnum.FINISH:
-            # aput_writes runs before this super-step's checkpoint is saved, so
-            # firing FINISH here would race the answer checkpoint POST; defer it
-            # to _handle_completion.
-            self._pending_finish = True
-        elif status:
-            self._logger.debug(
-                f"Updating workflow status from checkpoints, with status {status.value}"
-            )
-            await self._update_workflow_status(status)
-
         checkpoint_id = configurable.get("checkpoint_id")
         workflow_id = configurable.get("thread_id")
+
+        # Park the status until the checkpoint carrying its writes is durable:
+        # only the aput arriving with this same checkpoint id builds on them, so
+        # only it may release the status. (An __interrupt__ write never carries a
+        # status — LangGraph drops the task's channel writes on GraphInterrupt —
+        # so the path below has nothing to defer.)
+        if status:
+            self._defer_status(status, _flush_point_for(status), checkpoint_id)
 
         # for now only interrupts are stored
         if not writes or writes[0][0] != "__interrupt__":

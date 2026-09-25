@@ -27,6 +27,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
     WorkflowStatusEventEnum,
     _dict_of_list_delta,
+    _FlushPoint,
     _get_orbit_tool_calls,
     _serialize_all_channels_full,
     _serialize_channel_blobs,
@@ -79,6 +80,16 @@ from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPrope
 
 class CustomRunnableConfig(TypedDict):
     configurable: Optional[dict]
+
+
+# A nested subgraph invocation (e.g. a delegated subagent) keeps its own checkpoint
+# lineage under this namespace; the blank string is the top-level graph.
+_NESTED_CHECKPOINT_NS = "delegation:task-1"
+
+# Deferred-status dict entries in the (flush_point, checkpoint_id) shape used across
+# the aput/completion tests.
+_DEFERRED_FINISH = (_FlushPoint.ON_COMPLETION, "checkpoint-id")
+_DEFERRED_TOOL_APPROVAL = (_FlushPoint.ON_NEXT_CHECKPOINT, "checkpoint-id")
 
 
 @pytest.fixture(name="http_client_for_retry")
@@ -2136,20 +2147,13 @@ def test_aput_with_no_status_update_and_human_input(
 @pytest.mark.parametrize(
     "status,expected_event",
     [
-        # COMPLETED -> FINISH is deferred (see test_aput_writes_defers_finish),
-        # so it is intentionally excluded from this immediate-PATCH case.
+        # Every status event is deferred to its flush point: the checkpoint (which
+        # carries this same status channel) must be durable before Rails is told.
+        # FINISH waits for the terminal checkpoint; everything else fires on the
+        # next checkpoint save. See test_aput_writes_defers_status_until_checkpoint_saved.
         (WorkflowStatusEnum.ERROR, WorkflowStatusEventEnum.DROP),
         (WorkflowStatusEnum.CANCELLED, WorkflowStatusEventEnum.STOP),
         (WorkflowStatusEnum.PAUSED, WorkflowStatusEventEnum.PAUSE),
-        (
-            WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
-            WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
-        ),
-        (WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEventEnum.REQUIRE_INPUT),
-        (
-            WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
-            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
-        ),
     ],
 )
 async def test_workflow_status_events(
@@ -2168,12 +2172,12 @@ async def test_workflow_status_events(
 
     await gitlab_workflow.aput_writes(config, writes, "task_id")
 
-    http_client.apatch.assert_called_once_with(
-        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
-        body=json.dumps({"status_event": expected_event.value}),
-        parse_json=True,
+    # Not PATCHed from aput_writes; parked for the post-checkpoint flush.
+    http_client.apatch.assert_not_called()
+    assert gitlab_workflow._deferred_statuses.get(expected_event) == (
+        _FlushPoint.ON_NEXT_CHECKPOINT,
+        "test-id",
     )
-    http_client.apatch.reset_mock()
 
 
 @pytest.mark.asyncio
@@ -2243,19 +2247,195 @@ async def test_aput_writes_with_interrupt(gitlab_workflow, http_client):
 
 
 @pytest.mark.asyncio
-async def test_aput_writes_defers_finish(gitlab_workflow, workflow_id):
-    """FINISH must not PATCH inside aput_writes; it is deferred until the terminal checkpoint is persisted (see gitlab-
-    org/gitlab#605913)."""
+@pytest.mark.parametrize(
+    "checkpoint_status,expected_event,expected_flush_point",
+    [
+        # FINISH waits for the terminal (final-answer) checkpoint, so it flushes
+        # only at completion (see gitlab-org/gitlab#605913).
+        (
+            WorkflowStatusEnum.COMPLETED,
+            WorkflowStatusEventEnum.FINISH,
+            _FlushPoint.ON_COMPLETION,
+        ),
+        # The awaiting statuses back their Rails transition with the current
+        # super-step's checkpoint, so they flush on the next checkpoint save.
+        (
+            WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+        ),
+        (
+            WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+        ),
+        (
+            WorkflowStatusEnum.INPUT_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+        ),
+    ],
+)
+async def test_aput_writes_defers_status_until_checkpoint_saved(
+    gitlab_workflow,
+    workflow_id,
+    checkpoint_status,
+    expected_event,
+    expected_flush_point,
+):
+    """Statuses whose Rails transition reads the pending request/answer from the checkpoint are not PATCHed inside
+    aput_writes — that checkpoint is not saved yet.
+
+    Each is parked until its flush point.
+    """
     gitlab_workflow._status_handler = AsyncMock()
     config: RunnableConfig = {
         "configurable": {"checkpoint_id": "test-id", "thread_id": workflow_id}
     }
-    writes: Sequence[tuple[str, Any]] = [("status", WorkflowStatusEnum.COMPLETED)]
+    writes: Sequence[tuple[str, Any]] = [("status", checkpoint_status)]
 
     await gitlab_workflow.aput_writes(config, writes, "task_id")
 
     gitlab_workflow._status_handler.update_workflow_status.assert_not_called()
-    assert gitlab_workflow._pending_finish is True
+    assert gitlab_workflow._deferred_statuses == {
+        expected_event: (expected_flush_point, "test-id")
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "awaiting_event",
+    [
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+        WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+        WorkflowStatusEventEnum.REQUIRE_INPUT,
+    ],
+    ids=["tool_call_approval", "plan_approval", "input_required"],
+)
+@pytest.mark.parametrize(
+    "parked_checkpoint_id,aput_checkpoint_id,expected_fires",
+    [
+        # The aput whose checkpoint builds on the id the deferring aput_writes saw
+        # carries the payload, so it releases the status...
+        ("checkpoint-a", "checkpoint-a", True),
+        # ...but a save with any other parent id does not: it is a previous
+        # super-step still in flight, or another lineage's checkpoint.
+        ("checkpoint-a", "checkpoint-b", False),
+    ],
+    ids=["matching_checkpoint_releases", "other_checkpoint_does_not_release"],
+)
+async def test_aput_releases_only_the_deferred_status_for_its_own_checkpoint(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    workflow_id,
+    awaiting_event,
+    parked_checkpoint_id,
+    aput_checkpoint_id,
+    expected_fires,
+):
+    """A checkpoint save releases exactly the awaiting statuses parked against the checkpoint id it builds on."""
+    status_handler = AsyncMock()
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        awaiting_event: (_FlushPoint.ON_NEXT_CHECKPOINT, parked_checkpoint_id)
+    }
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    config = {"configurable": {"checkpoint_id": aput_checkpoint_id}}
+
+    await gitlab_workflow.aput(
+        config, checkpoint_data[0]["checkpoint"], checkpoint_metadata, ChannelVersions()
+    )
+
+    http_client.apost.assert_called_once()
+    if expected_fires:
+        status_handler.update_workflow_status.assert_awaited_once_with(
+            workflow_id, awaiting_event
+        )
+        assert gitlab_workflow._deferred_statuses == {}
+    else:
+        status_handler.update_workflow_status.assert_not_called()
+        assert gitlab_workflow._deferred_statuses == {
+            awaiting_event: (_FlushPoint.ON_NEXT_CHECKPOINT, parked_checkpoint_id)
+        }
+
+
+@pytest.mark.asyncio
+async def test_aput_keeps_deferred_awaiting_status_when_save_fails(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    """A failed checkpoint save must not flip Rails to an awaiting status the checkpoint cannot back."""
+    status_handler = AsyncMock()
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+    http_client.apost.return_value = GitLabHttpResponse(status_code=500, body={})
+    config = {"configurable": {"checkpoint_id": "checkpoint-id"}}
+
+    with pytest.raises(CheckpointSaveError):
+        await gitlab_workflow.aput(
+            config,
+            checkpoint_data[0]["checkpoint"],
+            checkpoint_metadata,
+            ChannelVersions(),
+        )
+
+    status_handler.update_workflow_status.assert_not_called()
+    assert gitlab_workflow._deferred_statuses == {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+
+
+@pytest.mark.asyncio
+async def test_aput_propagates_status_patch_failure_and_keeps_the_status_parked(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    """The checkpoint saved but the status PATCH failed: the error propagates (the flush is not guarded), and the
+    status stays parked so the completion backstop can retry it."""
+    status_handler = AsyncMock()
+    status_handler.update_workflow_status.side_effect = RuntimeError("rails down")
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    config = {"configurable": {"checkpoint_id": "checkpoint-id"}}
+
+    with pytest.raises(RuntimeError, match="rails down"):
+        await gitlab_workflow.aput(
+            config,
+            checkpoint_data[0]["checkpoint"],
+            checkpoint_metadata,
+            ChannelVersions(),
+        )
+
+    http_client.apost.assert_called_once()
+    assert gitlab_workflow._deferred_statuses == {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_completion_fires_deferred_awaiting_status(
+    gitlab_workflow, workflow_id
+):
+    """Backstop: an awaiting status still pending at completion reaches Rails."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "tool_call_approval_required"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        await gitlab_workflow._handle_completion()
+
+    status_handler.update_workflow_status.assert_awaited_once_with(
+        workflow_id, WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL
+    )
+    assert gitlab_workflow._deferred_statuses == {}
 
 
 @pytest.mark.asyncio
@@ -2264,7 +2444,9 @@ async def test_handle_completion_fires_deferred_finish(gitlab_workflow, workflow
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     # Patch _track_workflow_completion to isolate the deferred-FINISH behaviour
     # from the billing/internal-event path (which swallows exceptions).
@@ -2274,7 +2456,7 @@ async def test_handle_completion_fires_deferred_finish(gitlab_workflow, workflow
     status_handler.update_workflow_status.assert_awaited_once_with(
         workflow_id, WorkflowStatusEventEnum.FINISH
     )
-    assert gitlab_workflow._pending_finish is False
+    assert gitlab_workflow._deferred_statuses == {}
 
 
 @pytest.mark.asyncio
@@ -2283,7 +2465,7 @@ async def test_handle_completion_without_deferred_finish(gitlab_workflow, workfl
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "input_required"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = False
+    gitlab_workflow._deferred_statuses = {}
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         await gitlab_workflow._handle_completion()
@@ -2299,7 +2481,9 @@ async def test_handle_completion_finish_error_propagates(
     status_handler = AsyncMock()
     status_handler.update_workflow_status.side_effect = RuntimeError("boom")
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         with pytest.raises(RuntimeError, match="boom"):
@@ -2314,7 +2498,9 @@ async def test_handle_completion_finish_error_swallowed_when_not_reraising(
     status_handler = AsyncMock()
     status_handler.update_workflow_status.side_effect = RuntimeError("boom")
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with (
         patch.object(gitlab_workflow, "_track_workflow_completion"),
@@ -2373,7 +2559,9 @@ async def test_aexit_teardown_error_branch_swallows_completion_error(gitlab_work
     status_handler.get_workflow_status.return_value = "finished"
     status_handler.update_workflow_status.side_effect = RuntimeError("PATCH failed")
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch(
         "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
@@ -2394,7 +2582,9 @@ async def test_aexit_clean_success_fires_deferred_finish(gitlab_workflow, workfl
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         await gitlab_workflow.__aexit__(None, None, None)
@@ -2402,7 +2592,7 @@ async def test_aexit_clean_success_fires_deferred_finish(gitlab_workflow, workfl
     status_handler.update_workflow_status.assert_awaited_once_with(
         workflow_id, WorkflowStatusEventEnum.FINISH
     )
-    assert gitlab_workflow._pending_finish is False
+    assert WorkflowStatusEventEnum.FINISH not in gitlab_workflow._deferred_statuses
 
 
 @pytest.mark.asyncio
@@ -2413,7 +2603,9 @@ async def test_aexit_with_checkpoint_error_does_not_fire_deferred_finish(
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         await gitlab_workflow.__aexit__(
@@ -2423,7 +2615,10 @@ async def test_aexit_with_checkpoint_error_does_not_fire_deferred_finish(
     calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
     assert WorkflowStatusEventEnum.DROP in calls
     assert WorkflowStatusEventEnum.FINISH not in calls
-    assert gitlab_workflow._pending_finish is True
+    assert (
+        gitlab_workflow._deferred_statuses.get(WorkflowStatusEventEnum.FINISH)
+        == _DEFERRED_FINISH
+    )
 
 
 @pytest.mark.asyncio
@@ -2435,7 +2630,9 @@ async def test_aexit_finishes_completed_workflow_despite_teardown_error(
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         suppressed = await gitlab_workflow.__aexit__(
@@ -2456,7 +2653,9 @@ async def test_aexit_pending_finish_oversized_save_fails_loudly(
     dropped, no FINISH fires, no completion is tracked, and the exception propagates (see !6528)."""
     status_handler = AsyncMock()
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
     error = OutgoingMessageTooLargeError(OUTGOING_MESSAGE_TOO_LARGE)
 
     with (
@@ -2483,7 +2682,9 @@ async def test_aexit_teardown_error_path_survives_finish_patch_failure(
     status_handler = AsyncMock()
     status_handler.update_workflow_status.side_effect = RuntimeError("rails down")
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         result = await gitlab_workflow.__aexit__(
@@ -2502,7 +2703,9 @@ async def test_aexit_completed_workflow_reraises_cancellation(
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         suppressed = await gitlab_workflow.__aexit__(
@@ -2525,7 +2728,9 @@ async def test_aexit_drops_when_answer_checkpoint_save_failed(
     status_handler = AsyncMock()
     gitlab_workflow._status_handler = status_handler
     gitlab_workflow._internal_event_client = internal_event_client
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     error = CheckpointSaveError("Failed to save checkpoint")
     with patch.object(gitlab_workflow, "_handle_completion"):
@@ -3613,7 +3818,9 @@ async def test_aexit_fires_tool_loop_summary_once_despite_teardown_error(
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
     gitlab_workflow._internal_event_client = internal_event_client
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     init_tool_loop_counters()
     record_tool_calls([("grep", {"q": "x"}, "hit")])
@@ -5711,11 +5918,8 @@ async def test_aget_tuple_returns_none_for_an_absent_pin(
     assert await gitlab_workflow.aget_tuple(config) is None
 
 
-# A nested subgraph invocation (e.g. a delegated subagent) keeps its own checkpoint
-# lineage, separate from the flow's top-level one; `GitLabWorkflow` serves both.
-_NESTED_CHECKPOINT_NS = "delegation:task-1"
-
-
+# (see _NESTED_CHECKPOINT_NS at the top of the file) `GitLabWorkflow` serves both
+# the top-level lineage and every nested one.
 def _in_lineage(gl_checkpoints, checkpoint_ns):
     """Stamp fetched rows with the lineage a `checkpoint_ns`-aware GitLab reports.
 
@@ -6183,7 +6387,35 @@ async def test_aput_writes_ignores_session_ending_status_from_a_nested_lineage(
     await gitlab_workflow.aput_writes(config, writes, "task_id")
 
     http_client.apatch.assert_not_called()
-    assert gitlab_workflow._pending_finish is False
+    assert WorkflowStatusEventEnum.FINISH not in gitlab_workflow._deferred_statuses
+
+
+@pytest.mark.asyncio
+async def test_aput_writes_reports_a_blocked_session_from_a_nested_lineage(
+    gitlab_workflow, http_client, workflow_id
+):
+    """Being blocked awaiting the user is a fact about the whole session, whichever lineage discovered it: suppressing
+    it would hang the flow instead of prompting.
+
+    Like every status it is deferred until the backing checkpoint saves.
+    """
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+    config: RunnableConfig = {
+        "configurable": {
+            "checkpoint_id": "test-id",
+            "thread_id": workflow_id,
+            "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+        }
+    }
+    writes: Sequence[tuple[str, Any]] = [("status", WorkflowStatusEnum.PAUSED)]
+
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
+
+    http_client.apatch.assert_not_called()
+    assert gitlab_workflow._deferred_statuses.get(WorkflowStatusEventEnum.PAUSE) == (
+        _FlushPoint.ON_NEXT_CHECKPOINT,
+        "test-id",
+    )
 
 
 @pytest.mark.asyncio
@@ -6199,16 +6431,14 @@ async def test_aput_writes_ignores_session_ending_status_from_a_nested_lineage(
             WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
             WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
         ),
-        (WorkflowStatusEnum.PAUSED, WorkflowStatusEventEnum.PAUSE),
     ],
-    ids=["input_required", "tool_call_approval", "plan_approval", "paused"],
+    ids=["input_required", "tool_call_approval", "plan_approval"],
 )
-async def test_aput_writes_reports_a_blocked_session_from_a_nested_lineage(
+async def test_aput_writes_defers_an_awaiting_status_from_a_nested_lineage(
     gitlab_workflow, http_client, workflow_id, status, expected_event
 ):
-    """Being blocked awaiting the user is a fact about the whole session, whichever lineage discovered it: suppressing
-    it would hang the flow instead of prompting."""
-    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+    """A nested lineage's awaiting status is not suppressed, but like the top level it waits for the checkpoint carrying
+    the request to be saved."""
     config: RunnableConfig = {
         "configurable": {
             "checkpoint_id": "test-id",
@@ -6220,10 +6450,10 @@ async def test_aput_writes_reports_a_blocked_session_from_a_nested_lineage(
 
     await gitlab_workflow.aput_writes(config, writes, "task_id")
 
-    http_client.apatch.assert_called_once_with(
-        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
-        body=json.dumps({"status_event": expected_event.value}),
-        parse_json=True,
+    http_client.apatch.assert_not_called()
+    assert gitlab_workflow._deferred_statuses.get(expected_event) == (
+        _FlushPoint.ON_NEXT_CHECKPOINT,
+        "test-id",
     )
 
 
@@ -6248,7 +6478,10 @@ async def test_aput_writes_ends_the_session_for_the_top_level_lineage(
 
     await gitlab_workflow.aput_writes(config, writes, "task_id")
 
-    assert gitlab_workflow._pending_finish is True
+    assert gitlab_workflow._deferred_statuses.get(WorkflowStatusEventEnum.FINISH) == (
+        _FlushPoint.ON_COMPLETION,
+        "test-id",
+    )
 
 
 @pytest.mark.asyncio
