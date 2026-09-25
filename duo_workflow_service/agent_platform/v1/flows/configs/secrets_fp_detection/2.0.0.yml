@@ -1,0 +1,133 @@
+version: "v1"
+environment: ambient
+components:
+  - name: "secret_vulnerability_details_component"
+    type: DeterministicStepComponent
+    inputs:
+      - from: "context:inputs.agent_platform_resource_context.resource_id"
+        as: vulnerability_id
+    tool_name: "get_vulnerability_details"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "secret_vulnerability_source_file_component"
+    type: OneOffComponent
+    prompt_id: "secret_vulnerability_source_file_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:secret_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+    toolset:
+      - "get_repository_file"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "secret_vulnerability_lines_component"
+    type: OneOffComponent
+    prompt_id: "secret_vulnerability_lines_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:secret_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+      - from: "context:secret_vulnerability_source_file_component.tool_responses"
+        as: vulnerability_source_code
+    toolset:
+      - "extract_lines_from_text"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "secret_vulnerability_report_component"
+    type: AgentComponent
+    prompt_id: "secret_vulnerability_report_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:secret_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+      - from: "context:secret_vulnerability_lines_component.tool_responses"
+        as: vulnerable_lines
+      - from: "context:secret_vulnerability_source_file_component.tool_responses"
+        as: vulnerability_source_code
+    toolset: []
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "secret_fp_detection_agent"
+    type: AgentComponent
+    prompt_id: "secret_fp_detection_agent_prompt"
+    prompt_version: "^1.0.0"
+    response_schema_id: "secret_fp_detection"
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: "context:secret_vulnerability_report_component.final_answer"
+        as: vulnerability_details
+      - from: "context:inputs.agent_platform_secrets_fp_detection_context.secret_value"
+        as: raw_secret_value
+        optional: true
+    toolset:
+      - "read_file"
+      - "get_repository_file"
+      - "list_repository_tree"
+      - "find_files"
+      - "gitlab_blob_search"
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+  - name: "secret_post_results_to_gitlab_component"
+    type: OneOffComponent
+    prompt_id: "secret_post_results_to_gitlab_agent_prompt"
+    prompt_version: "1.0.0"
+    inputs:
+      - from: "context:secret_vulnerability_details_component.tool_responses"
+        as: vulnerability_details_json
+      - from: "context:secret_fp_detection_agent.final_answer"
+        as: secret_fp_detection_analysis
+    toolset:
+      - "post_secret_fp_analysis_to_gitlab"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+routers:
+  - from: "secret_vulnerability_details_component"
+    to: "secret_vulnerability_source_file_component"
+  - from: "secret_vulnerability_source_file_component"
+    condition:
+      input: "context:secret_vulnerability_source_file_component.execution_result"
+      routes:
+        "success": "secret_vulnerability_lines_component"
+        "default_route": "end"
+  - from: "secret_vulnerability_lines_component"
+    condition:
+      input: "context:secret_vulnerability_lines_component.execution_result"
+      routes:
+        "success": "secret_vulnerability_report_component"
+        "default_route": "end"
+  - from: "secret_vulnerability_report_component"
+    to: "secret_fp_detection_agent"
+  - from: "secret_fp_detection_agent"
+    to: "secret_post_results_to_gitlab_component"
+  - from: "secret_post_results_to_gitlab_component"
+    to: "end"
+flow:
+  entry_point: "secret_vulnerability_details_component"
+  inputs:
+    - category: agent_platform_secrets_fp_detection_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        secret_value:
+          type: string
+    - category: agent_platform_resource_context
+      version_constraint: "^1.1.0"
+      input_schema:
+        resource_id:
+          type: string
+          description: >
+            The vulnerability's plain numeric ID, as used by get_vulnerability_details.
+            For this flow's primary target (a vulnerability), resource_id is always
+            this plain form rather than a global ID.
