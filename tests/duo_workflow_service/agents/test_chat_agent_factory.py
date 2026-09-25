@@ -23,8 +23,8 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
 )
 from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
 from duo_workflow_service.tools.toolset import Toolset
+from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag
-from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="mock_tools_registry")
@@ -63,7 +63,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override="test_system_template",
             tracker=tracker,
         )
@@ -83,7 +83,7 @@ class TestCreateAgent:
             internal_event_extra={
                 "agent_name": "chat",
                 "workflow_id": "workflow_123",
-                "workflow_type": CategoryEnum.WORKFLOW_CHAT,
+                "workflow_type": "chat",
             },
         )
 
@@ -110,7 +110,9 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.AI_CATALOG_AGENT,
+            workflow_type=GLReportingEventContext.from_workflow_definition(
+                "ai_catalog_agent"
+            ),
             system_template_override=None,
             agent_name_override="348/0",
         )
@@ -129,7 +131,7 @@ class TestCreateAgent:
             internal_event_extra={
                 "agent_name": "348/0",
                 "workflow_id": "workflow_123",
-                "workflow_type": CategoryEnum.AI_CATALOG_AGENT,
+                "workflow_type": "ai_catalog_agent",
             },
         )
 
@@ -155,7 +157,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             agent_name_override=None,
         )
@@ -265,7 +267,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             web_search_enabled=web_search_enabled,
             web_search_allowed_for_group=web_search_allowed_for_group,
@@ -320,7 +322,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             web_search_enabled=True,
             web_search_allowed_for_group=True,
@@ -353,7 +355,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             compaction=cfg,
         )
@@ -396,7 +398,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             compaction=custom_config,
         )
@@ -430,7 +432,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             compaction=None,
         )

@@ -16,7 +16,8 @@ from duo_workflow_service.agent_platform.v1.components.deterministic_step.ui_log
     UILogEventsDeterministicStep,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
-from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.events import GLReportingEventContext
+from lib.internal_events.event_enum import EventEnum
 
 
 @pytest.fixture(name="mock_prompt_security")
@@ -109,7 +110,7 @@ def flow_id_fixture():
 @pytest.fixture(name="flow_type")
 def flow_type_fixture():
     """Fixture for flow type."""
-    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    return GLReportingEventContext.from_workflow_definition("software_development")
 
 
 @pytest.fixture(name="inputs")

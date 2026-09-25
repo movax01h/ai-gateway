@@ -14,7 +14,7 @@ from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 HEADER_TEXT = """
 # Duo Workflow Service Graphs
@@ -34,6 +34,14 @@ graph TD;
     __start__(__start__):::first;
     __end__(__end__):::last;
 """
+
+# Legacy (non Flow Registry) workflows, documented in this order.
+LEGACY_WORKFLOWS = [
+    "software_development",
+    "convert_to_gitlab_ci",
+    "chat",
+    "issue_to_merge_request",
+]
 
 FLOW_REGISTRY_CONFIG_DIRS = [
     "duo_workflow_service/agent_platform/experimental/flows/configs/",
@@ -83,46 +91,42 @@ def main():
     output_file_path = sys.argv[1]
     with open(output_file_path, "w") as output_file:
         output_file.write(HEADER_TEXT)
-        for graph_name in CategoryEnum:
-            if graph_name in [
-                "software_development",
-                "chat",
-                "convert_to_gitlab_ci",
-                "issue_to_merge_request",
-            ]:
-                # Dynamically import Workflow class. Equivalent to import statements in this format:
-                #     from duo_workflow_service.workflows.chat import Workflow
-                workflow_module = importlib.import_module(
-                    f"duo_workflow_service.workflows.{graph_name}"
-                )
-                Workflow = getattr(  # pylint: disable=invalid-name
-                    workflow_module, "Workflow"
-                )
+        for graph_name in LEGACY_WORKFLOWS:
+            # Dynamically import Workflow class. Equivalent to import statements in this format:
+            #     from duo_workflow_service.workflows.chat import Workflow
+            workflow_module = importlib.import_module(
+                f"duo_workflow_service.workflows.{graph_name}"
+            )
+            Workflow = getattr(  # pylint: disable=invalid-name
+                workflow_module, "Workflow"
+            )
 
-                tools_reg = MagicMock(spec=ToolsRegistry)
-                wrk = Workflow(
-                    "",
-                    {"git_branch": "test-branch"},
-                    workflow_type=graph_name,
-                    user=CloudConnectorUser(True, is_debug=True),
-                )
-                wrk._project = {
-                    "id": "",
-                    "name": "",
-                    "http_url_to_repo": "",
-                    "web_url": "http://gitlab.com/project_name",
-                    "default_branch": "main",
-                }
-                goal = ""
-                if graph_name == "issue_to_merge_request":
-                    goal = "http://gitlab.com/project_name/-/issues/1"
-                graph = wrk._compile(goal, tools_reg, MemorySaver())
+            tools_reg = MagicMock(spec=ToolsRegistry)
+            wrk = Workflow(
+                "",
+                {"git_branch": "test-branch"},
+                workflow_type=GLReportingEventContext.from_workflow_definition(
+                    graph_name
+                ),
+                user=CloudConnectorUser(True, is_debug=True),
+            )
+            wrk._project = {
+                "id": "",
+                "name": "",
+                "http_url_to_repo": "",
+                "web_url": "http://gitlab.com/project_name",
+                "default_branch": "main",
+            }
+            goal = ""
+            if graph_name == "issue_to_merge_request":
+                goal = "http://gitlab.com/project_name/-/issues/1"
+            graph = wrk._compile(goal, tools_reg, MemorySaver())
 
-                diagram = graph.get_graph().draw_mermaid()
-                diagram = diagram.replace("\t", "    ")
+            diagram = graph.get_graph().draw_mermaid()
+            diagram = diagram.replace("\t", "    ")
 
-                output_file.write(f"\n## Graph: `{graph_name}`\n\n")
-                output_file.write("```mermaid\n" + diagram + "```\n")
+            output_file.write(f"\n## Graph: `{graph_name}`\n\n")
+            output_file.write("```mermaid\n" + diagram + "```\n")
 
         for flow_name, config_file in flow_registry_entries():
             with open(config_file) as yml_contents:

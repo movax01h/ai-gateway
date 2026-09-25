@@ -16,7 +16,7 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.fixture(name="mock_prompt")
@@ -55,7 +55,9 @@ def agent_node_fixture(
     """Fixture for AgentNode instance (default, no response schema)."""
     return AgentNode(
         flow_id=flow_id,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
@@ -80,7 +82,9 @@ def agent_node_with_schema_fixture(
     """Fixture for AgentNode instance with AgentFinalOutput response schema."""
     return AgentNode(
         flow_id=flow_id,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
@@ -267,7 +271,9 @@ class TestAgentNode:
 
             agent_node = AgentNode(
                 flow_id=flow_id,
-                flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
                 name="test_agent_node",
                 prompt=mock_prompt,
                 inputs=inputs,

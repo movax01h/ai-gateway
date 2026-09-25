@@ -50,8 +50,9 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.internal_events.event_enum import EventEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
 from lib.verbose_ai_logs import extended_logging_context
 
@@ -167,7 +168,7 @@ def test_extract_trace_output_with_valid_state(user):
     workflow = MockWorkflow(
         "test-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     state = {
@@ -185,7 +186,7 @@ def test_extract_trace_output_with_empty_ui_chat_log(user):
     workflow = MockWorkflow(
         "test-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     state = {"ui_chat_log": []}
@@ -197,7 +198,7 @@ def test_extract_trace_output_with_none_state(user):
     workflow = MockWorkflow(
         "test-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     result = workflow._extract_trace_output(None)
@@ -211,7 +212,9 @@ def workflow_fixture(user):
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow_type = GLReportingEventContext.from_workflow_definition(
+        "software_development"
+    )
     return MockWorkflow(
         workflow_id,
         metadata,
@@ -265,7 +268,7 @@ async def test_init(user):
     workflow = MockWorkflow(
         workflow_id,
         metadata,
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         mcp_tools,
     )
@@ -314,7 +317,7 @@ def test_init_logs_approval_source(user, approval_source_value, expected_logged_
         MockWorkflow(
             "test-workflow-id",
             {"key": "value"},
-            CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            GLReportingEventContext.from_workflow_definition("software_development"),
             user,
             approval=approval,
         )
@@ -376,7 +379,7 @@ def test_init_logs_policy_ref(user, policy_ref, expected_logged_policy_ref):
         MockWorkflow(
             "test-workflow-id",
             {"key": "value"},
-            CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            GLReportingEventContext.from_workflow_definition("software_development"),
             user,
             approval=approval,
         )
@@ -461,7 +464,11 @@ def test_permitted_mcp_tools(
         contract_pb2.McpTool(name="context7", inputSchema="{}", trusted=False),
     ]
     workflow = MockWorkflow(
-        "id", {}, CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT, user, mcp_tools
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+        mcp_tools,
     )
     workflow._workflow_config = {"mcp_enabled": mcp_enabled}
 
@@ -522,7 +529,7 @@ async def test_compile_and_run_graph(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         [MagicMock(), MagicMock(), MagicMock()],
     )
@@ -582,7 +589,7 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -614,7 +621,7 @@ async def test_compile_and_run_graph_skips_merge_when_no_jwt_pre_approved_tools(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -647,7 +654,7 @@ async def test_compile_and_run_graph_skips_merge_when_pre_approved_tools_invalid
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -680,7 +687,7 @@ async def test_compile_and_run_graph_caps_client_preapproved_to_jwt_allow_list(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # client-supplied preapproved tool that is NOT in the JWT allow-list
@@ -719,7 +726,7 @@ async def test_compile_and_run_graph_client_cannot_preapprove_denied_tool(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # client tries to pre-approve a denied tool plus an unrelated one; governance is
@@ -762,7 +769,7 @@ async def test_compile_and_run_graph_forwards_client_injected_setting(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         CloudConnectorUser(
             authenticated=True, claims=UserClaims(gitlab_realm="saas", extra={})
         ),
@@ -805,7 +812,7 @@ async def test_compile_and_run_graph_ask_only_policy_enforces_ceiling(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # "ask everything" makes allow+deny empty; a non-empty ask list still marks
@@ -849,7 +856,7 @@ async def test_compile_and_run_graph_ask_outranks_allow(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -890,7 +897,7 @@ async def test_compile_and_run_graph_ask_is_neutralized_without_a_user_to_ask(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -934,7 +941,7 @@ async def test_compile_and_run_graph_ask_is_neutralized_when_signal_is_missing(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -974,7 +981,7 @@ async def test_compile_and_run_graph_all_ask_policy_does_not_clear_preapproved_w
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     workflow._preapproved_tools = ["read_file"]
@@ -1010,7 +1017,7 @@ async def test_compile_and_run_graph_parses_tool_access_policies_dict(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     workflow._preapproved_tools = ["read_file"]
@@ -1044,7 +1051,7 @@ async def test_compile_and_run_graph_fails_closed_on_invalid_claim(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # a present-but-unparsable claim must not leave client values in effect
@@ -1088,7 +1095,7 @@ async def test_compile_and_run_graph_keeps_client_preapproved_when_governance_in
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # empty allow+ask+deny is indistinguishable from governance-off, so client-supplied
@@ -1124,7 +1131,7 @@ async def test_compile_and_run_graph_skips_merge_when_pre_approved_tools_empty_j
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -1152,7 +1159,7 @@ async def test_compile_and_run_graph_skips_merge_when_claims_is_none(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -1204,7 +1211,9 @@ async def test_cleanup_with_exception(mock_log_exception, workflow):
 def test_track_internal_event(workflow, internal_event_client: Mock):
     # Test tracking an internal event
     event_name = EventEnum.WORKFLOW_START
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow_type = GLReportingEventContext.from_workflow_definition(
+        "software_development"
+    )
     additional_properties = InternalEventAdditionalProperties()
     workflow._internal_event_client = internal_event_client
 
@@ -1241,7 +1250,12 @@ async def test_compile_and_run_graph_flushes_notifier(
     notifier = mock_user_interface.return_value
     notifier.flush_deferred_checkpoint = AsyncMock()
 
-    workflow = MockWorkflow("id", {}, CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT, user)
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
 
     await workflow._compile_and_run_graph("Test goal")
 
@@ -1443,7 +1457,7 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
     metadata = kwargs["langsmith_extra"]["metadata"]
     assert metadata["git_url"] == "https://example.com"
     assert metadata["git_sha"] == "abc123"
-    assert metadata["workflow_type"] == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value
+    assert metadata["workflow_type"] == "software_development"
     assert metadata["thread_id"] == workflow._workflow_id
     # Flow versioning identifiers are unset for legacy flows and must not leak in.
     assert "flow_id" not in metadata
@@ -1550,7 +1564,9 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow_type = GLReportingEventContext.from_workflow_definition(
+        "software_development"
+    )
     workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
 
     token = extended_logging_context.set(extended_logging)
@@ -1605,7 +1621,9 @@ async def test_tracing_context_with_parent_trace_headers(
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow_type = GLReportingEventContext.from_workflow_definition(
+        "software_development"
+    )
     workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
 
     token = extended_logging_context.set(extended_logging)
@@ -1655,7 +1673,7 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -1665,7 +1683,7 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
 
     assert mock_metrics.record_time_to_first_response.call_count == 1
     assert mock_metrics.record_time_to_first_response.call_args.kwargs == {
-        "flow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+        "flow_type": "software_development",
     }
     assert workflow._first_response_metric_recorded is True
 
@@ -1689,7 +1707,7 @@ async def test_compile_and_run_graph_returns_final_response_content(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -1726,7 +1744,7 @@ async def test_compile_and_run_graph_returns_none_when_no_ui_chat_log(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -1780,7 +1798,7 @@ async def test_compile_and_run_graph_notifiable_exception_handling(
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         [mcp_tool],
     )
@@ -1835,7 +1853,12 @@ async def test_compile_and_run_graph_parses_tool_access_policies_object_format(
             },
         ),
     )
-    workflow = MockWorkflow("id", {}, CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT, user)
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
     await workflow._compile_and_run_graph("Test goal")
 
     assert "create_issue" in workflow._preapproved_tools
@@ -1887,7 +1910,7 @@ async def test_compile_and_run_graph_notifiable_agent_exception_handling(
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         [mcp_tool],
     )
@@ -1935,7 +1958,7 @@ async def test_handle_compile_and_run_exception_logs_warning_when_checkpoint_not
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # Simulate the theoretically-unreachable state where checkpoint_notifier is None
@@ -1971,7 +1994,7 @@ async def test_handle_graph_recursion_limit_logs_error_on_graph_recursion_error(
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     error = GraphRecursionError("Recursion limit reached")
@@ -1991,7 +2014,7 @@ async def test_handle_graph_recursion_limit_tags_langsmith(user):
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     error = GraphRecursionError("Recursion limit reached")
@@ -2018,7 +2041,7 @@ async def test_handle_graph_recursion_limit_no_langsmith_tag_when_run_tree_is_no
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     error = GraphRecursionError("Recursion limit reached")
@@ -2130,7 +2153,7 @@ async def test_compile_and_run_graph_pins_graph_config_on_stop_recovery(
     workflow = StopRecoveryMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     workflow.stop_recovery_resolution = (boundary, resolved_event)
@@ -2164,7 +2187,7 @@ async def test_compile_and_run_graph_dispatches_polymorphically(
     workflow = StopRecoveryMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     graph = ConfigCapturingGraph()
@@ -2203,7 +2226,7 @@ async def test_compile_and_run_graph_stop_recovery_default_behaves_like_retry(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     graph = ConfigCapturingGraph()
@@ -2243,7 +2266,7 @@ async def test_compile_and_run_graph_pins_requested_resume_checkpoint_ts(
     workflow = ResumingMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts=resume_checkpoint_ts,
     )
@@ -2282,7 +2305,7 @@ async def test_compile_and_run_graph_requested_resume_checkpoint_ts_wins_over_st
     workflow = ResumingStopRecoveryMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts="requested-checkpoint-id",
     )
@@ -2328,7 +2351,7 @@ async def test_compile_and_run_graph_refuses_a_requested_checkpoint_it_cannot_re
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts="requested-checkpoint-id",
     )
@@ -2374,7 +2397,7 @@ async def test_compile_and_run_graph_rejects_a_requested_checkpoint_that_was_nev
     workflow = ResumingMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts="never-written",
     )
@@ -2412,7 +2435,7 @@ async def test_compile_and_run_graph_skips_the_resume_checkpoint_check_without_a
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     workflow._compile = MagicMock(return_value=ConfigCapturingGraph())
@@ -2473,7 +2496,7 @@ async def test_compile_and_run_graph_starts_fresh_at_a_pre_run_input_checkpoint(
     workflow = ResumingMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts="requested-checkpoint-id",
     )
@@ -2572,7 +2595,7 @@ def test_client_injected_is_stamped_when_nothing_else_stamped_it(issuer, expecte
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         CloudConnectorUser(
             authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
         ),

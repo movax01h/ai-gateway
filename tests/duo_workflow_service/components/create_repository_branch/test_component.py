@@ -10,7 +10,7 @@ from duo_workflow_service.components.create_repository_branch.component import (
     Routes,
 )
 from duo_workflow_service.entities import WorkflowState, WorkflowStatusEnum
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.fixture(name="mock_build_agent")
@@ -140,7 +140,7 @@ class TestCreateRepositoryBranchComponent:
         self,
         mock_build_agent: Mock,
         create_branch_component: CreateRepositoryBranchComponent,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         project,
     ):
         """Test that Agent is created with correct parameters."""

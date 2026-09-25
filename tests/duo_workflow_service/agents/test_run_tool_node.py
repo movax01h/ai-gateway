@@ -16,7 +16,7 @@ from duo_workflow_service.audit_events.event_types import AuditEventType
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus
 from duo_workflow_service.security.prompt_security import SecurityException
 from lib.context.approval_sources import approval_sources, init_approval_sources
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.mark.asyncio
@@ -34,7 +34,9 @@ async def test_run_tool_node_execution():
         tool=tool,
         input_parser=input_parser,
         output_parser=output_parser,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
     )
 
     # Execute
@@ -76,7 +78,9 @@ async def test_run_tool_node_multiple_params():
         tool=tool,
         input_parser=input_parser,
         output_parser=output_parser,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
     )
 
     # Execute
@@ -132,7 +136,9 @@ async def test_run_tool_node_security_layer():
         tool=tool,
         input_parser=input_parser,
         output_parser=output_parser,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
     )
 
     # Execute
@@ -174,7 +180,9 @@ async def test_run_tool_node_emits_each_tool_audit_event_once():
         tool=read_file,
         input_parser=Mock(return_value=[{"file_path": "Jenkinsfile"}]),
         output_parser=Mock(return_value={}),
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
     )
 
     init_approval_sources()
@@ -219,7 +227,9 @@ async def test_run_tool_node_failure_event_carries_workflow_id():
         tool=tool,
         input_parser=Mock(return_value=[{"param1": "value1"}]),
         output_parser=Mock(return_value={}),
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
     )
 
     token = audit_collector_context.set(collector)

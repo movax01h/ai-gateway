@@ -72,20 +72,3 @@ class EventPropertyEnum(StrEnum):
     WORKFLOW_TOOL_APPROVAL_APPROVAL = "approval"
     WORKFLOW_TOOL_APPROVAL_REJECTION = "rejection"
     WORKFLOW_TOOL_APPROVAL_MODIFICATION = "modification"
-
-
-# Deprecated: Use FlowType from duo_workflow_service.entities.flow instead
-class CategoryEnum(StrEnum):
-    WORKFLOW_SOFTWARE_DEVELOPMENT = "software_development"
-    WORKFLOW_CONVERT_TO_GITLAB_CI = "convert_to_gitlab_ci"
-    WORKFLOW_CHAT = "chat"
-    WORKFLOW_ISSUE_TO_MERGE_REQUEST = "issue_to_merge_request"
-    CODE_REVIEW = "code_review"
-    FIX_PIPELINE = "fix_pipeline"
-    RESOLVE_SAST_VULNERABILITY = "resolve_sast_vulnerability"
-    SAST_FP_DETECTION = "sast_fp_detection"
-    SECRETS_FP_DETECTION = "secrets_fp_detection"
-    AI_CATALOG_AGENT = "ai_catalog_agent"
-    UNKNOWN = "unknown"
-    DEVELOPER = "developer"
-    CONVERT_TO_GITLAB_CI = "convert_to_gl_ci"

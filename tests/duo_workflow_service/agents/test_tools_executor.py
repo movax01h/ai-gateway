@@ -50,7 +50,7 @@ from lib.context import client_capabilities
 from lib.context.tool_executions import init_tool_executions, tool_executions
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum, EventEnum, EventLabelEnum
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from tests.duo_workflow_service.ui_chat_log_contract import (
     assert_client_valid_tool_info,
 )
@@ -1702,7 +1702,9 @@ async def test_security_exception_creates_failure_ui_chat_log(
         tools_agent_name="planner",
         toolset=mock_toolset,
         workflow_id="123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
     )
 
     workflow_state["conversation_history"]["planner"] = [
@@ -2137,7 +2139,9 @@ def _executor_with_toolset(toolset):
         tools_agent_name="planner",
         toolset=toolset,
         workflow_id="123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
     )
 
 
