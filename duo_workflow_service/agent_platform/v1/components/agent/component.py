@@ -107,19 +107,21 @@ RUNTIME_INJECTED_VARS = (
 # `max_cycles` form (see `AgentComponentBase.resolve_max_cycles`) and
 # `MaxCyclesConfig` resolve an omitted offset through
 # `_default_iteration_warning_offset`, which uses this for budgets of 20 or more and
-# half the budget below that.
+# half the budget below that, never dropping below one cycle.
 _DEFAULT_ITERATION_WARNING_OFFSET: int = 10
 
 
 def _default_iteration_warning_offset(threshold: int) -> Optional[int]:
     """Offset to use when the config did not set one.
 
-    Ten cycles out, or half the budget when that is smaller, so a small threshold still
-    gets a nudge with real work done before it. ``None`` when the warning would land on
-    the very first cycle, since telling an agent to wrap up before it has acted is noise.
+    Ten cycles out, or half the budget when that is smaller, floored at one cycle. A tight
+    budget is exactly where the warning earns its keep: it tells the agent up front that it
+    has very little room before tool calls are cut off, which it cannot infer otherwise.
+    ``None`` only for a single-cycle budget, where there is no cycle left to warn on and the
+    limit message covers it.
     """
-    offset = min(_DEFAULT_ITERATION_WARNING_OFFSET, threshold // 2)
-    return offset if threshold - offset > 1 else None
+    offset = min(_DEFAULT_ITERATION_WARNING_OFFSET, max(threshold // 2, 1))
+    return offset if offset < threshold else None
 
 
 # Context key under which a subagent's per-invocation subsession ID is exposed when the
@@ -149,8 +151,8 @@ class MaxCyclesConfig(BaseModel):
     default `iteration_warning_offset`.
 
     When `iteration_warning_offset` is omitted, it resolves via `_default_iteration_warning_offset`: ten cycles out,
-    or half the threshold when that is smaller (a 4-cycle budget warns on cycle 2), and disabled when the warning
-    would fall on the first cycle. When it is explicitly set to a value `>= threshold`, this is treated as a
+    or half the threshold when that is smaller (a 4-cycle budget warns on cycle 2), floored at one cycle so even a
+    2-cycle budget is warned. When it is explicitly set to a value `>= threshold`, this is treated as a
     deliberate misconfiguration and raises a `ValueError` — the caller should either lower it or set it to `null` to
     disable the warning.
     """
@@ -339,8 +341,8 @@ class AgentComponentBase(BaseComponent):
         """Resolve `max_cycles` (plain int or `MaxCyclesConfig`) into the threshold/offset used by `AgentNode`.
 
         The plain-int form warns before the threshold by default, using `_default_iteration_warning_offset` so a
-        small threshold (e.g. a 4-cycle budget) warns partway through rather than on the very first cycle. The nested
-        form allows overriding or disabling it entirely (`iteration_warning_offset: null`).
+        small threshold (e.g. a 4-cycle budget) warns partway through, and a very tight one still warns at all. The
+        nested form allows overriding or disabling it entirely (`iteration_warning_offset: null`).
         """
         if isinstance(self.max_cycles, MaxCyclesConfig):
             self._max_cycles_threshold = self.max_cycles.threshold

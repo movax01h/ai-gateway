@@ -258,7 +258,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         "You are approaching the maximum number of iterations for this task "
         "({cycles_remaining} remaining). Once you reach that limit, you will "
         "no longer be able to make any tool calls and must provide your final "
-        "answer immediately. Start wrapping up your work now."
+        "answer immediately. Plan the rest of your work around the iterations you "
+        "have left."
     )
 
     _MAX_TRUNCATION_RETRIES: int = 5
