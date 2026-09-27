@@ -9,6 +9,11 @@ tool use, the second call captures the request payload. The assertion is the
 whole point of the perception path: the tool_result reaching the SDK contains
 a real base64 image block, byte-identical to the "file" the executor served.
 
+The gate is proven from the same seat: with the flag on but no client
+capability declared, the read_file description the model receives carries no
+image lines and the served image comes back as the client refusal, never as
+pixels.
+
 The shared container fixture wires Anthropic to FakeModel under
 ``mock_model_responses``, so this module builds its own container with real
 model wiring; the SDK method itself is patched, so no network I/O happens.
@@ -302,13 +307,30 @@ def _find_tool_result(messages: list[dict[str, Any]]) -> Any:
     return None
 
 
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
-async def test_read_file_image_reaches_anthropic_as_image_block(
-    servicer: DuoWorkflowService,
-):
-    executor = ImageFakeExecutor(integration_conftest.WORKFLOW_ID)
+IMAGE_FLAG_HEADER = (
+    FeatureFlagInterceptor.X_GITLAB_ENABLED_FEATURE_FLAGS,
+    "dap_tool_image_input",
+)
+# The version header is what lets declared capabilities count at all:
+# is_client_capable ignores them below GitLab 18.7, the first Workhorse that
+# forwards them.
+VERSION_HEADER = (X_GITLAB_VERSION_HEADER, "19.5.0")
+IMAGE_CAPABILITY = "read_file_image"
 
+
+async def _run_read_file_exchange(
+    servicer: DuoWorkflowService, *, client_capabilities: tuple[str, ...]
+) -> tuple[ImageFakeExecutor, list[dict[str, Any]]]:
+    """One full exchange: the scripted model asks for ./screenshot.png and the fake executor serves the PNG.
+
+    The instance flag is always on, via the request header as production sends it. What the fake client declares is the
+    variable, so the two tests differ only in the client half of the switch.
+
+    Returns:
+        The executor (for the actions it saw) and the kwargs of every SDK call, so a test can look at what the model
+        was told (``tools``) and what it got back (``messages``).
+    """
+    executor = ImageFakeExecutor(integration_conftest.WORKFLOW_ID)
     calls: list[dict[str, Any]] = []
 
     async def scripted_model(*_args, **kwargs):
@@ -342,31 +364,44 @@ async def test_read_file_image_reaches_anthropic_as_image_block(
                 flow_config_id="developer",
                 schema_version="v1",
                 version="2.0.0-interactive",
-                # The client half of the switch: declared by a client whose
-                # executor answers read_file with an image, as the real one
-                # will in its first image-capable release.
-                client_capabilities=("read_file_image",),
+                client_capabilities=client_capabilities,
             ),
-            # The instance half: the flag arrives the way production sends it,
-            # via the request header. The version header is what lets declared
-            # capabilities count at all (is_client_capable ignores them below
-            # GitLab 18.7, the first Workhorse that forwards them).
-            extra_metadata=(
-                (
-                    FeatureFlagInterceptor.X_GITLAB_ENABLED_FEATURE_FLAGS,
-                    "dap_tool_image_input",
-                ),
-                (X_GITLAB_VERSION_HEADER, "19.5.0"),
-            ),
+            extra_metadata=(IMAGE_FLAG_HEADER, VERSION_HEADER),
         )
 
     assert exchange.code == grpc.StatusCode.OK, exchange.details
-
     assert len(calls) == 2, (
         f"expected exactly two model calls (tool use, then final answer), got "
         f"{len(calls)}; actions seen: "
         f"{[a.WhichOneof('action') for a in executor.actions]}"
     )
+    return executor, calls
+
+
+def _read_file_description(call: dict[str, Any]) -> str:
+    """The read_file tool description exactly as the model received it."""
+    tools = call.get("tools") or []
+    descriptions = [
+        tool.get("description", "") for tool in tools if tool.get("name") == "read_file"
+    ]
+    assert len(descriptions) == 1, (
+        f"read_file not offered to the model; tools: {[t.get('name') for t in tools]}"
+    )
+    return descriptions[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_read_file_image_reaches_anthropic_as_image_block(
+    servicer: DuoWorkflowService,
+):
+    _executor, calls = await _run_read_file_exchange(
+        servicer, client_capabilities=(IMAGE_CAPABILITY,)
+    )
+
+    # Both switches on: the model is told it can read images, and the served
+    # image reaches it as pixels.
+    assert "Image files" in _read_file_description(calls[0])
 
     tool_result = _find_tool_result(calls[1]["messages"])
     assert tool_result is not None, (
@@ -402,3 +437,40 @@ async def test_read_file_image_reaches_anthropic_as_image_block(
     ]
     if leaks:
         pytest.fail("the image base64 leaked into the model payload as plain text")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_without_the_client_capability_the_model_is_never_told_about_images(
+    servicer: DuoWorkflowService,
+):
+    # Flag on, capability absent: the case an older client hits on a flagged
+    # user. The description must not advertise image reads, and an image the
+    # client sends anyway must come back as the client refusal, not as pixels.
+    executor, calls = await _run_read_file_exchange(servicer, client_capabilities=())
+
+    assert "Image files" not in _read_file_description(calls[0])
+
+    # The scripted model still asked for the file and the fake executor still
+    # served the PNG, so the refusal below is the gate at work, not a skipped
+    # tool call.
+    assert any(action.HasField("runReadFile") for action in executor.actions)
+
+    tool_result = _find_tool_result(calls[1]["messages"])
+    assert tool_result is not None, (
+        f"no tool_result in: {_message_shapes(calls[1]['messages'])}"
+    )
+    texts = list(_iter_strings(tool_result))
+    assert any("did not declare image support" in text for text in texts), (
+        f"expected the client refusal in the tool result, got shapes: "
+        f"{_message_shapes(calls[1]['messages'])}"
+    )
+    assert not any(
+        isinstance(block, dict) and block.get("type") == "image"
+        for block in (
+            tool_result["content"] if isinstance(tool_result["content"], list) else []
+        )
+    ), "an image block reached the model without the client capability"
+    assert not any(
+        FAKE_PNG_BASE64 in text for text in _iter_strings(calls[1]["messages"])
+    ), "the served image reached the model payload without the client capability"
