@@ -361,7 +361,7 @@ class TestReadFile:
     UPLOAD_SECRET = "0123456789abcdef0123456789abcdef"
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_rewrites_upload_reference_to_api_path(
         self, metadata_with_project
     ):
@@ -378,7 +378,7 @@ class TestReadFile:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_percent_encodes_upload_filename(
         self, metadata_with_project
     ):
@@ -393,7 +393,7 @@ class TestReadFile:
         assert action.runReadFile.filepath.endswith("/a%20b%26c.png")
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_accepts_slashless_upload_reference(
         self, metadata_with_project
     ):
@@ -412,7 +412,7 @@ class TestReadFile:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_accepts_legacy_ten_hex_upload_secret(
         self, metadata_with_project
     ):
@@ -444,7 +444,7 @@ class TestReadFile:
             "/uploads/0123456789abcdef0123456789abcdef/..",
         ],
     )
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_denies_upload_lookalikes(
         self, path, metadata_with_project
     ):
@@ -455,7 +455,7 @@ class TestReadFile:
             await tool._arun(path)
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_slashless_short_secret_stays_a_workspace_path(
         self, metadata_with_project
     ):
@@ -474,7 +474,7 @@ class TestReadFile:
         assert action.runReadFile.filepath == path
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_legacy_short_secret_still_resolves_in_markdown_form(
         self, metadata_with_project
     ):
@@ -492,7 +492,7 @@ class TestReadFile:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_upload_read_is_logged_without_the_secret(
         self, metadata_with_project
     ):
@@ -522,7 +522,7 @@ class TestReadFile:
         assert not set(fields) & reserved
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_failed_upload_download_is_still_logged(self, metadata_with_project):
         # A failed download is still credential spend the user may need to
         # account for, so the trail records the attempt, not just successes.
@@ -545,7 +545,7 @@ class TestReadFile:
         assert self.UPLOAD_SECRET not in str(security_log.info.call_args)
 
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_denies_upload_reference_without_project(self):
         mock_outbox = MagicMock()
         mock_outbox.put_action_and_wait_for_response = AsyncMock()
@@ -559,7 +559,7 @@ class TestReadFile:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("path_prefix", ["/", ""])
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_chunked_rewrites_upload_reference(
         self, metadata_with_project, path_prefix
     ):
@@ -584,7 +584,7 @@ class TestReadFile:
     # tool name on chunked-capable clients: testing one says nothing about the
     # one the live path actually uses.
     @pytest.mark.asyncio
-    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.usefixtures("image_support_enabled")
     @pytest.mark.parametrize("tool_class", [ReadFile, ReadFileChunked])
     async def test_upload_image_response_converts_for_both_read_tools(
         self, tool_class, mock_project
@@ -1914,6 +1914,23 @@ class TestImageSupportGated:
         # Pre-feature behavior exactly: the reference is an ordinary absolute
         # path, rejected by the filesystem checks before any action is sent,
         # so a disabled instance never triggers a download.
+        tool = tool_cls()
+        tool.metadata = self.metadata_with_image(mock_project)
+
+        with pytest.raises(ToolException, match="Access denied"):
+            await tool._arun(self.UPLOAD_REF)
+
+        tool.metadata["outbox"].put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked])
+    async def test_upload_reference_is_not_rewritten_when_the_client_is_not_capable(
+        self, tool_cls, mock_project
+    ):
+        # Flag on, capability absent: an older client could not download the
+        # API path anyway, so the reference stays an ordinary path and is
+        # refused by the filesystem checks before any action is sent.
         tool = tool_cls()
         tool.metadata = self.metadata_with_image(mock_project)
 

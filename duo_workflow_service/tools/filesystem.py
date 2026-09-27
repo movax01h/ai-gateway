@@ -297,10 +297,11 @@ def _resolve_upload_reference(file_path: str, project: Optional[Project]) -> str
     the user's credential, so the shape here and the client-side check must
     stay in sync.
     """
-    # Upload reading is part of flag-gated image support: flag off means the
-    # reference stays an ordinary path (today's pre-feature behavior) and no
-    # download is ever triggered on a disabled instance.
-    if not is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT):
+    # Upload reading is part of gated image support, both switches: with the
+    # flag off or a client that has not declared the capability, the reference
+    # stays an ordinary path (today's pre-feature behavior) and no download is
+    # ever asked for. An older client could not fetch the API path anyway.
+    if not _image_support_enabled():
         return None
     match = _UPLOAD_REF_PATTERN.match(file_path)
     if not match or not project or not project.get("id"):
