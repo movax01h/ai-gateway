@@ -132,9 +132,22 @@ class FakeExecutor:
 
 
 def start_registry_flow_event(
-    goal: str, flow_config_id: str, schema_version: str, version: str
+    goal: str,
+    flow_config_id: str,
+    schema_version: str,
+    version: str,
+    client_capabilities: tuple[str, ...] = (),
 ) -> contract_pb2.ClientEvent:
-    """A start request that names a flow from the server-side registry."""
+    """A start request that names a flow from the server-side registry.
+
+    Args:
+        goal: The user's goal for the flow.
+        flow_config_id: Registry id of the flow config.
+        schema_version: Flow config schema version.
+        version: Flow version.
+        client_capabilities: Capabilities the fake client declares, as a real
+            client would in ``StartWorkflowRequest.clientCapabilities``.
+    """
     return contract_pb2.ClientEvent(
         startRequest=contract_pb2.StartWorkflowRequest(
             workflowID=WORKFLOW_ID,
@@ -142,6 +155,7 @@ def start_registry_flow_event(
             flowConfigId=flow_config_id,
             flowConfigSchemaVersion=schema_version,
             flowVersion=version,
+            clientCapabilities=list(client_capabilities),
         )
     )
 

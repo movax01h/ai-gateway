@@ -44,6 +44,7 @@ from anthropic.types.raw_message_delta_event import Delta
 
 import tests.duo_workflow_service.integration.conftest as integration_conftest
 from contract import contract_pb2
+from duo_workflow_service.interceptors import X_GITLAB_VERSION_HEADER
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     FeatureFlagInterceptor,
 )
@@ -341,14 +342,21 @@ async def test_read_file_image_reaches_anthropic_as_image_block(
                 flow_config_id="developer",
                 schema_version="v1",
                 version="2.0.0-interactive",
+                # The client half of the switch: declared by a client whose
+                # executor answers read_file with an image, as the real one
+                # will in its first image-capable release.
+                client_capabilities=("read_file_image",),
             ),
-            # Image conversion is feature-flagged (dap_tool_image_input);
-            # enable it the way production does — via the request header.
+            # The instance half: the flag arrives the way production sends it,
+            # via the request header. The version header is what lets declared
+            # capabilities count at all (is_client_capable ignores them below
+            # GitLab 18.7, the first Workhorse that forwards them).
             extra_metadata=(
                 (
                     FeatureFlagInterceptor.X_GITLAB_ENABLED_FEATURE_FLAGS,
                     "dap_tool_image_input",
                 ),
+                (X_GITLAB_VERSION_HEADER, "19.5.0"),
             ),
         )
 
