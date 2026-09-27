@@ -16,6 +16,7 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     DEFAULT_CONTEXT_EXCLUSIONS,
     DEFAULT_READ_FILE_LIMIT,
     DEFAULT_READ_FILE_OFFSET,
+    IMAGE_READ_CAPABILITY,
     TRUSTED_ABSOLUTE_PATH_SEGMENTS,
     EditFile,
     EditFileInput,
@@ -35,6 +36,7 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     _is_trusted_absolute_path,
     validate_duo_context_exclusions,
 )
+from lib.context import client_capabilities, gitlab_version
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from tests.duo_workflow_service.tools.conftest import (
     create_mock_client_event_with_image_response,
@@ -1418,13 +1420,37 @@ class TestFileExclusionPolicy:
 
 @pytest.fixture(name="image_flag_enabled")
 def image_flag_enabled_fixture():
-    """Enable the tool-read image flag for the test (fail-closed otherwise)."""
+    """Turn on the instance flag only; the client half of the switch stays off."""
     token = current_feature_flag_context.set({FeatureFlag.DAP_TOOL_IMAGE_INPUT.value})
     yield
     current_feature_flag_context.reset(token)
 
 
-@pytest.mark.usefixtures("image_flag_enabled")
+@pytest.fixture(name="image_client_capable")
+def image_client_capable_fixture():
+    """Declare the client capability only, on a GitLab version that forwards capabilities."""
+    caps_token = client_capabilities.set({IMAGE_READ_CAPABILITY})
+    version_token = gitlab_version.set("19.5.0")
+    yield
+    gitlab_version.reset(version_token)
+    client_capabilities.reset(caps_token)
+
+
+@pytest.fixture(name="image_support_enabled")
+def image_support_enabled_fixture():
+    """Both switches on: what a capable client on a flagged instance sees."""
+    flag_token = current_feature_flag_context.set(
+        {FeatureFlag.DAP_TOOL_IMAGE_INPUT.value}
+    )
+    caps_token = client_capabilities.set({IMAGE_READ_CAPABILITY})
+    version_token = gitlab_version.set("19.5.0")
+    yield
+    gitlab_version.reset(version_token)
+    client_capabilities.reset(caps_token)
+    current_feature_flag_context.reset(flag_token)
+
+
+@pytest.mark.usefixtures("image_support_enabled")
 class TestImageResponseConversion:
     """read_file tools convert typed executor image results into content blocks."""
 
@@ -1547,7 +1573,7 @@ class TestImageResponseConversion:
             await tool._arun(["./screenshot.png"])
 
 
-@pytest.mark.usefixtures("image_flag_enabled")
+@pytest.mark.usefixtures("image_support_enabled")
 class TestImageSupportAdvertised:
     """The model refuses to read images unless the tool says it can (observed live): the descriptions must advertise
     image support."""
@@ -1568,7 +1594,13 @@ class TestImageSupportAdvertised:
 
 
 class TestImageSupportGated:
-    """The flag is fail-closed: without it, tool-read image support must be invisible and inert."""
+    """Two fail-closed switches: without both, tool-read image support must be invisible and inert."""
+
+    def test_capability_name_is_the_wire_contract(self):
+        # The client declares it and Workhorse allowlists it under this exact
+        # string; renaming it here would silently turn image support off
+        # everywhere.
+        assert IMAGE_READ_CAPABILITY == "read_file_image"
 
     PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"not real pixels"
 
@@ -1615,7 +1647,57 @@ class TestImageSupportGated:
 
     @pytest.mark.usefixtures("image_flag_enabled")
     @pytest.mark.asyncio
-    async def test_image_converts_when_flag_is_on(self, mock_project):
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked])
+    async def test_image_is_refused_when_the_client_is_not_capable(
+        self, tool_cls, mock_project
+    ):
+        # Flag on, but the client never declared read_file_image (or Workhorse
+        # dropped it on the way): the refusal names the client, not the
+        # instance, so a mismatch is diagnosable from the transcript.
+        tool = tool_cls()
+        tool.metadata = self.metadata_with_image(mock_project)
+
+        response = await tool._arun("./screenshot.png")
+
+        assert response == (
+            'Cannot read file: "./screenshot.png" is an image file, and this '
+            "client did not declare image support."
+        )
+
+    @pytest.mark.usefixtures("image_flag_enabled")
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked, ReadFiles])
+    def test_descriptions_carry_no_image_lines_when_the_client_is_not_capable(
+        self, tool_cls
+    ):
+        # The flag alone must not advertise image reads: an older client would
+        # plan around vision and still refuse the binary.
+        assert "Image files" not in tool_cls().description
+
+    @pytest.mark.usefixtures("image_client_capable")
+    @pytest.mark.asyncio
+    async def test_capable_client_on_a_flag_off_instance_gets_the_instance_refusal(
+        self, mock_project
+    ):
+        tool = ReadFile()
+        tool.metadata = self.metadata_with_image(mock_project)
+
+        response = await tool._arun("./screenshot.png")
+
+        assert response == (
+            'Cannot read file: "./screenshot.png" is an image file, and image '
+            "support is not enabled on this instance."
+        )
+
+    @pytest.mark.usefixtures("image_client_capable")
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked, ReadFiles])
+    def test_descriptions_carry_no_image_lines_when_only_the_client_is_capable(
+        self, tool_cls
+    ):
+        assert "Image files" not in tool_cls().description
+
+    @pytest.mark.usefixtures("image_support_enabled")
+    @pytest.mark.asyncio
+    async def test_image_converts_when_both_switches_are_on(self, mock_project):
         tool = ReadFile()
         tool.metadata = self.metadata_with_image(mock_project)
 

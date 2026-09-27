@@ -9,6 +9,7 @@ from langchain_core.tools.base import ToolException
 from pydantic import BaseModel, Field, model_validator
 
 from contract import contract_pb2
+from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.entities.image_response import (
     image_response_to_blocks,
     supported_image_formats_display,
@@ -194,15 +195,26 @@ def validate_duo_context_exclusions(
         return
 
 
-# The conversion and the description lines advertising it must flip together
-# (FeatureFlag.DAP_TOOL_IMAGE_INPUT): advertised but off surprises the model
-# with refusals, and on but unadvertised makes the capability undiscoverable,
-# since models refuse image reads unless the tool says it can. Each tool's
-# model validator strips its note when the flag is off. Tools are built once
-# per run and the flag context is set once per request, so the description and
-# the per-call check below always agree within a run, and a flip takes effect
-# on the next run. The check stays per call rather than captured so it follows
-# the context if that ever gets finer-grained.
+# The conversion and the description lines advertising it must flip together:
+# advertised but off surprises the model with refusals, and on but unadvertised
+# makes the capability undiscoverable, since models refuse image reads unless
+# the tool says it can. Two switches, both required (_image_support_enabled):
+#
+# - FeatureFlag.DAP_TOOL_IMAGE_INPUT, the instance-side rollout flag. It is
+#   evaluated per user, not per client, so on its own it would advertise image
+#   reads to an older client that still refuses binaries.
+# - IMAGE_READ_CAPABILITY, declared by a client whose executor can answer
+#   read_file with an image. Workhorse intersects declared capabilities with
+#   its allowlist, so on an instance whose Workhorse predates the entry the
+#   capability never arrives and the tools read exactly as they do today.
+#
+# Each tool's model validator strips its note when either switch is off. Tools
+# are built once per run and both contexts are set once per request, so the
+# description and the per-call check below always agree within a run, and a
+# flip takes effect on the next run. The check stays per call rather than
+# captured so it follows the context if that ever gets finer-grained.
+IMAGE_READ_CAPABILITY = "read_file_image"
+
 _READ_FILE_IMAGE_NOTE = f"""Image files ({supported_image_formats_display()}) are supported: reading one returns the
     actual image so you can see its contents.
 
@@ -218,24 +230,37 @@ _READ_FILES_IMAGE_NOTE = """Image files are not supported here: read them indivi
     """
 
 
+def _image_support_enabled() -> bool:
+    """Whether tool-read images are on for this run: the instance flag and the client capability, both."""
+    return is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT) and is_client_capable(
+        IMAGE_READ_CAPABILITY
+    )
+
+
 def _strip_image_note_if_disabled(tool: DuoBaseTool, note: str) -> None:
-    if not is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT):
+    if not _image_support_enabled():
         tool.description = tool.description.replace(note, "")
 
 
 def _image_response_to_blocks_if_enabled(
     image: ImageActionResult, file_path: str
 ) -> str | list[dict[str, Any]]:
-    """Convert a typed image result when the flag is on, refuse readably when off.
+    """Convert a typed image result when image support is on, refuse readably when off.
 
-    A new client sends image responses whatever this server-side flag says, so the off path has to answer them in words
-    the model can act on.
+    A client sends image responses whatever the server-side switches say, so the off paths have to answer in words the
+    model can act on. The two refusals differ so a mismatch is diagnosable from the transcript alone: the instance flag
+    is off, or the client sent an image without having declared the capability.
     """
-    if is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT):
+    if _image_support_enabled():
         return image_response_to_blocks(image, file_path=file_path)
+    if not is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT):
+        return (
+            f'Cannot read file: "{file_path}" is an image file, and image '
+            "support is not enabled on this instance."
+        )
     return (
-        f'Cannot read file: "{file_path}" is an image file, and image '
-        "support is not enabled on this instance."
+        f'Cannot read file: "{file_path}" is an image file, and this client '
+        "did not declare image support."
     )
 
 
