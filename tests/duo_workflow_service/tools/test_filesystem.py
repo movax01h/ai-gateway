@@ -496,9 +496,10 @@ class TestReadFile:
     async def test_upload_read_is_logged_without_the_secret(
         self, metadata_with_project
     ):
-        # The download runs client-side under the user's own credential, so
-        # Rails logs the access itself; this records the service deciding to
-        # ask for it. The secret is a bearer token for the file and must not
+        # The download runs client-side under the user's own credential and the
+        # tool call itself reaches Rails as an audit event; this records the
+        # service deciding to ask for it, in the security logging standard's
+        # field names. The secret is part of the download URL and must not
         # appear anywhere in the event.
         tool = ReadFile(description="Read file content")
         tool.metadata = metadata_with_project
@@ -510,9 +511,14 @@ class TestReadFile:
 
         security_log.info.assert_called_once()
         _, fields = security_log.info.call_args
+        assert fields["event_type"] == "data.read.upload"
+        assert fields["target_type"] == "upload"
         assert fields["project_id"] == 1
+        assert fields["project_web_url"] == "http://example.com/repo"
         assert fields["upload_filename"] == "screenshot.png"
-        assert fields["outcome"] == "text"
+        # Standard outcome values only; the response shape has its own field.
+        assert fields["outcome"] == "success"
+        assert fields["response_type"] == "text"
         assert self.UPLOAD_SECRET not in str(security_log.info.call_args)
 
         # structlog forwards these as LogRecord extras in some configurations,
@@ -540,7 +546,8 @@ class TestReadFile:
 
         security_log.info.assert_called_once()
         _, fields = security_log.info.call_args
-        assert fields["outcome"] == "error"
+        assert fields["outcome"] == "failure"
+        assert fields["response_type"] is None
         assert fields["upload_filename"] == "screenshot.png"
         assert self.UPLOAD_SECRET not in str(security_log.info.call_args)
 

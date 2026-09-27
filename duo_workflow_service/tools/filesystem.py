@@ -29,6 +29,7 @@ from duo_workflow_service.policies.file_exclusion_policy import (
 )
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from lib.context import gitlab_user_id
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 DEFAULT_READ_FILE_OFFSET = 0
@@ -352,12 +353,22 @@ async def _read_upload_reference(
 
     # An agent pulling a project upload into model context is worth a trail,
     # and the trail must cover attempts, not just successes: a failed download
-    # is still credential spend the user may need to account for. The download
-    # itself runs client-side under the user's own credential and is
-    # authenticated and logged by the Rails API; this records the service's
-    # part, which is deciding to ask for it. The upload secret is a bearer
-    # token for the file, so it is deliberately not logged.
-    outcome = "error"
+    # is still credential spend the user may need to account for.
+    #
+    # The SIEM-bound record of this read is the Rails audit trail, not this
+    # line: every tool call reaches Rails as an `ai_tool_invoked` audit event
+    # carrying the tool arguments, upload reference included, and Rails
+    # attaches the author and the request IP on ingestion. The download itself
+    # runs client-side under the user's own credential and is authenticated by
+    # the Rails API. This line is the service's own record of deciding to ask
+    # for it, in the security logging standard's field names: `outcome` is
+    # success or failure only, the response shape lives in `response_type`.
+    # The request IP is not known at this layer (gRPC through Workhorse). The
+    # upload secret is part of the download URL, so it stays out of the
+    # service logs on principle even though the API needs project access
+    # regardless.
+    outcome = "failure"
+    response_type: Optional[str] = None
     try:
         # offset/limit are meaningless for a downloaded image and are not sent.
         response = await _execute_action_accepting_image(
@@ -371,15 +382,21 @@ async def _read_upload_reference(
             if isinstance(response, ImageActionResult)
             else response
         )
-        outcome = "image" if isinstance(converted, list) else "text"
+        response_type = "image" if isinstance(converted, list) else "text"
+        outcome = "success"
         return converted
     finally:
         _security_log.info(
             "Tool read resolved a GitLab upload reference",
+            event_type="data.read.upload",
+            target_type="upload",
             project_id=project.get("id") if project else None,
+            project_web_url=project.get("web_url") if project else None,
+            gitlab_user_id=gitlab_user_id.get(),
             # Not `filename`: stdlib LogRecord reserves that name and raises.
             upload_filename=request_path.rsplit("/", 1)[-1],
             outcome=outcome,
+            response_type=response_type,
         )
 
 
