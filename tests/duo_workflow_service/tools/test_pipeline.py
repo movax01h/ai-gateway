@@ -1473,7 +1473,9 @@ async def test_get_failing_bridge_jobs_success(gitlab_client_mock, metadata):
         },
     ]
 
-    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=json.dumps(bridges_response), headers={"X-Next-Page": ""}
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetFailingBridgeJobs(metadata=metadata)
@@ -1494,7 +1496,9 @@ async def test_get_failing_bridge_jobs_success(gitlab_client_mock, metadata):
     ]
 
     gitlab_client_mock.aget.assert_called_once_with(
-        path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges"
+        path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges",
+        params={"page": "1", "per_page": 100, "scope[]": "failed"},
+        parse_json=False,
     )
 
 
@@ -1512,7 +1516,9 @@ async def test_get_failing_bridge_jobs_no_failed(gitlab_client_mock, metadata):
         },
     ]
 
-    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=json.dumps(bridges_response), headers={"X-Next-Page": ""}
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetFailingBridgeJobs(metadata=metadata)
@@ -1526,7 +1532,9 @@ async def test_get_failing_bridge_jobs_no_failed(gitlab_client_mock, metadata):
 @pytest.mark.asyncio
 async def test_get_failing_bridge_jobs_no_bridges(gitlab_client_mock, metadata):
     """Empty list when the pipeline has no bridges at all."""
-    mock_response = GitLabHttpResponse(status_code=200, body=[])
+    mock_response = GitLabHttpResponse(
+        status_code=200, body="[]", headers={"X-Next-Page": ""}
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetFailingBridgeJobs(metadata=metadata)
@@ -1556,7 +1564,9 @@ async def test_get_failing_bridge_jobs_excludes_multi_project(
             },
         },
     ]
-    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=json.dumps(bridges_response), headers={"X-Next-Page": ""}
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetFailingBridgeJobs(metadata=metadata)
@@ -1584,7 +1594,9 @@ async def test_get_failing_bridge_jobs_no_downstream_pipeline(
             "downstream_pipeline": None,
         },
     ]
-    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=json.dumps(bridges_response), headers={"X-Next-Page": ""}
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetFailingBridgeJobs(metadata=metadata)
@@ -1615,7 +1627,9 @@ async def test_get_failing_bridge_jobs_downstream_without_web_url(
             },
         },
     ]
-    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=json.dumps(bridges_response), headers={"X-Next-Page": ""}
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetFailingBridgeJobs(metadata=metadata)
@@ -1648,7 +1662,9 @@ async def test_get_failing_bridge_jobs_invalid_downstream_url(
             },
         },
     ]
-    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
+    mock_response = GitLabHttpResponse(
+        status_code=200, body=json.dumps(bridges_response), headers={"X-Next-Page": ""}
+    )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetFailingBridgeJobs(metadata=metadata)
@@ -1664,14 +1680,14 @@ async def test_get_failing_bridge_jobs_invalid_downstream_url(
 @pytest.mark.asyncio
 async def test_get_failing_bridge_jobs_api_error(gitlab_client_mock, metadata):
     """Raises ToolException on non-success API response."""
-    mock_response = GitLabHttpResponse(status_code=500, body={"message": "boom"})
+    mock_response = GitLabHttpResponse(status_code=500, body='{"message": "boom"}')
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
     tool = GetFailingBridgeJobs(metadata=metadata)
     with pytest.raises(ToolException) as exc_info:
         await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
 
-    assert "Failed to fetch failing bridge jobs" in str(exc_info.value)
+    assert "HTTP 500" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -1692,7 +1708,8 @@ async def test_get_failing_bridge_jobs_invalid_response_format(
     """Non-list response body raises ToolException."""
     mock_response = GitLabHttpResponse(
         status_code=200,
-        body={"error": "Invalid response"},
+        body='{"error": "Invalid response"}',
+        headers={"X-Next-Page": ""},
     )
     gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
 
@@ -1701,12 +1718,74 @@ async def test_get_failing_bridge_jobs_invalid_response_format(
     with pytest.raises(ToolException) as exc_info:
         await tool._arun(url="https://gitlab.com/namespace/project/-/pipelines/123")
 
-    assert "Failed to fetch failing bridge jobs for url" in str(exc_info.value)
+    assert "expected list" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_get_failing_bridge_jobs_caps_at_max(gitlab_client_mock, metadata):
-    """Returned list is capped at MAX_JOBS_RETURNED."""
+async def test_get_failing_bridge_jobs_paginates(gitlab_client_mock, metadata):
+    """Failed bridges are collected across every page of the bridges endpoint, requesting only failed ones."""
+    page_one = [
+        {
+            "id": 1001,
+            "name": "trigger_a",
+            "status": "failed",
+            "stage": "test",
+            "failure_reason": "script_failure",
+            "downstream_pipeline": None,
+        },
+    ]
+    page_two = [
+        {
+            "id": 1002,
+            "name": "trigger_b",
+            "status": "failed",
+            "stage": "deploy",
+            "failure_reason": "downstream_pipeline_creation_failed",
+            "downstream_pipeline": None,
+        },
+    ]
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(page_one), headers={"X-Next-Page": "2"}
+            ),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(page_two), headers={"X-Next-Page": ""}
+            ),
+        ]
+    )
+
+    tool = GetFailingBridgeJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+
+    assert [bridge["id"] for bridge in json.loads(response)] == [1001, 1002]
+    assert gitlab_client_mock.aget.call_args_list == [
+        call(
+            path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges",
+            params={"page": "1", "per_page": 100, "scope[]": "failed"},
+            parse_json=False,
+        ),
+        call(
+            path="/api/v4/projects/namespace%2Fproject/pipelines/123/bridges",
+            params={"page": "2", "per_page": 100, "scope[]": "failed"},
+            parse_json=False,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bridge_count", "expect_truncated"),
+    [(20, False), (25, True)],
+    ids=["at-cap", "over-cap"],
+)
+async def test_get_failing_bridge_jobs_caps_at_max(
+    gitlab_client_mock, metadata, bridge_count, expect_truncated
+):
+    """Past MAX_JOBS_RETURNED the response becomes an object that says how many bridges were dropped; at the cap it
+    stays a plain list."""
     from duo_workflow_service.tools.pipeline import MAX_JOBS_RETURNED
 
     bridges_response = [
@@ -1718,17 +1797,35 @@ async def test_get_failing_bridge_jobs_caps_at_max(gitlab_client_mock, metadata)
             "failure_reason": "script_failure",
             "downstream_pipeline": None,
         }
-        for i in range(MAX_JOBS_RETURNED + 5)
+        for i in range(bridge_count)
     ]
-    mock_response = GitLabHttpResponse(status_code=200, body=bridges_response)
-    gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+    gitlab_client_mock.aget = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps(bridges_response),
+            headers={"X-Next-Page": ""},
+        )
+    )
 
     tool = GetFailingBridgeJobs(metadata=metadata)
     response = await tool._arun(
         url="https://gitlab.com/namespace/project/-/pipelines/123"
     )
+    response_json = json.loads(response)
 
-    assert len(json.loads(response)) == MAX_JOBS_RETURNED
+    if not expect_truncated:
+        assert isinstance(response_json, list)
+        assert len(response_json) == bridge_count
+        return
+
+    assert set(response_json) == {"__truncated__", "bridges"}
+    assert len(response_json["bridges"]) == MAX_JOBS_RETURNED
+    assert [b["id"] for b in response_json["bridges"]] == [
+        1000 + i for i in range(MAX_JOBS_RETURNED)
+    ]
+    assert response_json["__truncated__"]["total_failed_bridges"] == bridge_count
+    assert response_json["__truncated__"]["returned"] == MAX_JOBS_RETURNED
+    assert "message" in response_json["__truncated__"]
 
 
 def test_get_failing_bridge_jobs_format_display_message():
@@ -1745,3 +1842,97 @@ def test_get_failing_bridge_jobs_format_display_message():
         message
         == "Get failing bridge jobs for https://gitlab.com/namespace/project/-/pipelines/42"
     )
+
+
+def _failed_jobs_xml(response: str):
+    """Parse the XML blob inside the tool's `failed_jobs` string."""
+    from lxml import etree
+
+    failed_jobs = json.loads(response)["failed_jobs"]
+    prefix = "Failed Jobs:\n"
+    assert failed_jobs.startswith(prefix)
+    return etree.fromstring(failed_jobs[len(prefix) :])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("job_count", "expect_marker"),
+    [(20, False), (26, True)],
+    ids=["at-cap", "over-cap"],
+)
+async def test_get_pipeline_failing_jobs_marks_truncated_list(
+    gitlab_client_mock, metadata, job_count, expect_marker
+):
+    """When more than MAX_JOBS_RETURNED jobs failed, a `<truncated>` marker leads the list; at the cap there is none."""
+    from duo_workflow_service.tools.pipeline import MAX_JOBS_RETURNED
+
+    jobs_response = [
+        {"id": 1000 + i, "name": f"job_{i}", "status": "failed"}
+        for i in range(job_count)
+    ]
+    gitlab_client_mock.aget = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=200, body=json.dumps(jobs_response), headers={"X-Next-Page": ""}
+        )
+    )
+
+    tool = GetPipelineFailingJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123"
+    )
+    root = _failed_jobs_xml(response)
+
+    jobs = root.findall("job")
+    assert len(jobs) == min(job_count, MAX_JOBS_RETURNED)
+    assert [job.findtext("job_name") for job in jobs] == [
+        f"job_{i}" for i in range(min(job_count, MAX_JOBS_RETURNED))
+    ]
+
+    markers = root.findall("truncated")
+    if expect_marker:
+        assert root[0].tag == "truncated"
+        assert markers[0].attrib == {
+            "total_failed_jobs": str(job_count),
+            "returned": str(MAX_JOBS_RETURNED),
+        }
+    else:
+        assert markers == []
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_failing_jobs_truncation_total_counts_blocking_jobs_only(
+    gitlab_client_mock, metadata
+):
+    """With exclude_allow_failure the marker's total reflects the jobs that block the pipeline, not every failed job."""
+    from duo_workflow_service.tools.pipeline import MAX_JOBS_RETURNED
+
+    blocking = [
+        {"id": 1000 + i, "name": f"job_{i}", "status": "failed", "allow_failure": False}
+        for i in range(MAX_JOBS_RETURNED + 5)
+    ]
+    non_blocking = [
+        {
+            "id": 2000 + i,
+            "name": f"optional_{i}",
+            "status": "failed",
+            "allow_failure": True,
+        }
+        for i in range(5)
+    ]
+    gitlab_client_mock.aget = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps(blocking + non_blocking),
+            headers={"X-Next-Page": ""},
+        )
+    )
+
+    tool = GetPipelineFailingJobs(metadata=metadata)
+    response = await tool._arun(
+        url="https://gitlab.com/namespace/project/-/pipelines/123",
+        exclude_allow_failure=True,
+    )
+    root = _failed_jobs_xml(response)
+
+    assert root[0].attrib["total_failed_jobs"] == str(MAX_JOBS_RETURNED + 5)
+    assert len(root.findall("job")) == MAX_JOBS_RETURNED

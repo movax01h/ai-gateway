@@ -55,6 +55,10 @@ class GetPipelineFailingJobs(DuoBaseTool):
     reason string for the failure, e.g. `script_failure` or `runner_system_failure`) and `allow_failure`
     are included only when GitLab returns them for that job.
 
+    At most {MAX_JOBS_RETURNED} jobs are listed. When more jobs failed, `<jobs>` starts with a
+    `<truncated total_failed_jobs="N" returned="{MAX_JOBS_RETURNED}"/>` marker and the list is
+    incomplete: rules that must hold for every failing job cannot be verified from it.
+
     When no failing jobs are found, the response also includes `pipeline_status`,
     `pipeline_started_at`, and `yaml_errors` when GitLab recorded one. A `failed` pipeline with a
     null `pipeline_started_at` never ran a single job, which means its CI/CD configuration was
@@ -136,7 +140,8 @@ class GetPipelineFailingJobs(DuoBaseTool):
         failing_jobs = await self._get_failing_jobs(
             validation_result.project_id, pipeline_id, exclude_allow_failure
         )
-        if len(failing_jobs) > MAX_JOBS_RETURNED:
+        total_failing_jobs = len(failing_jobs)
+        if total_failing_jobs > MAX_JOBS_RETURNED:
             failing_jobs = failing_jobs[:MAX_JOBS_RETURNED]
 
         if len(failing_jobs) == 0:
@@ -158,17 +163,35 @@ class GetPipelineFailingJobs(DuoBaseTool):
 
             return json.dumps(result)
 
+        failed_jobs_str = self._format_failing_jobs(failing_jobs, total_failing_jobs)
+
+        if merge_request:
+            return json.dumps(
+                {"merge_request": merge_request, "failed_jobs": failed_jobs_str}
+            )
+
+        return json.dumps({"pipeline_id": pipeline_id, "failed_jobs": failed_jobs_str})
+
+    def _format_failing_jobs(
+        self, failing_jobs: list[dict], total_failing_jobs: int
+    ) -> str:
         xml_root = etree.Element("jobs")
+        if total_failing_jobs > MAX_JOBS_RETURNED:
+            # First child so it survives the head-keeping tool output truncation.
+            etree.SubElement(
+                xml_root,
+                "truncated",
+                total_failed_jobs=str(total_failing_jobs),
+                returned=str(MAX_JOBS_RETURNED),
+            )
         for job in failing_jobs:
             xml_job = etree.SubElement(xml_root, "job")
-            job_id = job["id"]
-            job_name = job["name"]
 
             job_name_elem = etree.SubElement(xml_job, "job_name")
-            job_name_elem.text = job_name
+            job_name_elem.text = job["name"]
 
             job_id_elem = etree.SubElement(xml_job, "job_id")
-            job_id_elem.text = str(job_id)
+            job_id_elem.text = str(job["id"])
 
             job_url = job.get("web_url")
             if job_url:
@@ -190,16 +213,9 @@ class GetPipelineFailingJobs(DuoBaseTool):
                 allow_failure_elem = etree.SubElement(xml_job, "allow_failure")
                 allow_failure_elem.text = str(allow_failure).lower()
 
-        failed_jobs_str = "Failed Jobs:\n" + etree.tostring(
+        return "Failed Jobs:\n" + etree.tostring(
             xml_root, pretty_print=True, encoding="unicode"
         )
-
-        if merge_request:
-            return json.dumps(
-                {"merge_request": merge_request, "failed_jobs": failed_jobs_str}
-            )
-
-        return json.dumps({"pipeline_id": pipeline_id, "failed_jobs": failed_jobs_str})
 
     async def _get_failing_jobs(
         self,
@@ -338,18 +354,22 @@ class GetDownstreamPipelines(DuoBaseTool):
 
 class GetFailingBridgeJobs(DuoBaseTool):
     name: str = "get_failing_bridge_jobs"
-    description: str = """Get the failed bridge jobs in a pipeline.
+    description: str = f"""Get the failed bridge jobs in a pipeline.
     A bridge job is the upstream job that triggers a downstream (child or multi-project) pipeline.
     This tool returns ONLY bridges whose own status is `failed`, with the URL of each failed
     bridge's downstream pipeline. Use this to discover nested failed pipelines without paying
     the token cost of fetching successful bridges as well.
 
-    Returns a JSON list (capped) of objects with these fields:
+    Returns a JSON list of objects with these fields:
     - id: bridge job ID
     - name: bridge job name
     - stage: pipeline stage the bridge belongs to
     - failure_reason: GitLab's reason string for the failure (may be null)
     - downstream_pipeline_url: web URL of the downstream pipeline, or null when the bridge did not trigger one (e.g., failed before triggering) or when the downstream is in a different project (multi-project triggers are not followed).
+
+    At most {MAX_JOBS_RETURNED} bridges are listed. When more failed, the response is instead an object
+    with `bridges` (the first {MAX_JOBS_RETURNED}) and `__truncated__` (`total_failed_bridges`, `returned`,
+    `message`): the list is incomplete.
 
     This tool can be used when you have a pipeline URL.
 
@@ -375,22 +395,12 @@ class GetFailingBridgeJobs(DuoBaseTool):
 
         project_id = validation_result.project_id
         pipeline_iid = validation_result.pipeline_iid
-        response = await self.gitlab_client.aget(
-            path=f"/api/v4/projects/{project_id}/pipelines/{pipeline_iid}/bridges",
+        bridges = await self._paginate_get(
+            endpoint=f"/api/v4/projects/{project_id}/pipelines/{pipeline_iid}/bridges",
+            per_page=100,
+            max_pages=MAX_LOG_PAGES_FOR_PIPELINE,
+            extra_params={"scope[]": "failed"},
         )
-
-        if not response.is_success():
-            error_str = (
-                f"Failed to fetch failing bridge jobs: status_code={response.status_code}, "
-                f"response={response.body}"
-            )
-            raise ToolException(error_str)
-
-        bridges = response.body
-        if not isinstance(bridges, list):
-            raise ToolException(
-                f"Failed to fetch failing bridge jobs for url: {url}: {bridges}"
-            )
 
         failed_bridges: list[dict] = []
         for bridge in bridges:
@@ -425,8 +435,21 @@ class GetFailingBridgeJobs(DuoBaseTool):
                 }
             )
 
-        if len(failed_bridges) > MAX_JOBS_RETURNED:
-            failed_bridges = failed_bridges[:MAX_JOBS_RETURNED]
+        total_failed_bridges = len(failed_bridges)
+        if total_failed_bridges > MAX_JOBS_RETURNED:
+            return json.dumps(
+                {
+                    "__truncated__": {
+                        "total_failed_bridges": total_failed_bridges,
+                        "returned": MAX_JOBS_RETURNED,
+                        "message": (
+                            f"Results truncated: {total_failed_bridges} bridges failed but only "
+                            f"{MAX_JOBS_RETURNED} returned. The list is incomplete."
+                        ),
+                    },
+                    "bridges": failed_bridges[:MAX_JOBS_RETURNED],
+                }
+            )
 
         return json.dumps(failed_bridges)
 
