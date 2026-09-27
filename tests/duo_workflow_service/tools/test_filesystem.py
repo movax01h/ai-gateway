@@ -2,6 +2,7 @@
 import base64
 import json
 import logging
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -37,7 +38,7 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     _is_trusted_absolute_path,
     validate_duo_context_exclusions,
 )
-from lib.context import client_capabilities, gitlab_version
+from lib.context import client_capabilities, gitlab_user_id, gitlab_version
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from tests.duo_workflow_service.tools.conftest import (
     create_mock_client_event_with_image_response,
@@ -504,21 +505,35 @@ class TestReadFile:
         tool = ReadFile(description="Read file content")
         tool.metadata = metadata_with_project
 
-        with patch(
-            "duo_workflow_service.tools.filesystem._security_log"
-        ) as security_log:
-            await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
+        user_token = gitlab_user_id.set("42")
+        try:
+            with patch(
+                "duo_workflow_service.tools.filesystem._security_log"
+            ) as security_log:
+                await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
+        finally:
+            gitlab_user_id.reset(user_token)
 
         security_log.info.assert_called_once()
         _, fields = security_log.info.call_args
+        # The security logging standard's common fields, in its names and
+        # placement: a unique event id, the actor as an integer author_id, the
+        # project as the entity, the upload as the target, and outcome inside
+        # details with standard values only.
+        uuid.UUID(fields["id"])
         assert fields["event_type"] == "data.read.upload"
+        assert fields["author_id"] == 42
+        assert fields["entity_type"] == "Project"
+        assert fields["entity_id"] == 1
+        assert fields["entity_path"] == "repo"
         assert fields["target_type"] == "upload"
-        assert fields["project_id"] == 1
-        assert fields["project_web_url"] == "http://example.com/repo"
-        assert fields["upload_filename"] == "screenshot.png"
-        # Standard outcome values only; the response shape has its own field.
-        assert fields["outcome"] == "success"
-        assert fields["response_type"] == "text"
+        assert fields["target_details"] == "screenshot.png"
+        assert fields["details"] == {
+            "outcome": "success",
+            "provider": "duo_workflow_service",
+            "response_type": "text",
+        }
+        assert fields["gitlab"] == {"data_type": "upload", "size_bytes": None}
         assert self.UPLOAD_SECRET not in str(security_log.info.call_args)
 
         # structlog forwards these as LogRecord extras in some configurations,
@@ -546,9 +561,9 @@ class TestReadFile:
 
         security_log.info.assert_called_once()
         _, fields = security_log.info.call_args
-        assert fields["outcome"] == "failure"
-        assert fields["response_type"] is None
-        assert fields["upload_filename"] == "screenshot.png"
+        assert fields["details"]["outcome"] == "failure"
+        assert fields["details"]["response_type"] is None
+        assert fields["target_details"] == "screenshot.png"
         assert self.UPLOAD_SECRET not in str(security_log.info.call_args)
 
     @pytest.mark.asyncio
@@ -606,11 +621,20 @@ class TestReadFile:
         tool = tool_class(description="Read file content")
         tool.metadata = {"outbox": mock_outbox, "project": mock_project}
 
-        response = await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            response = await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
 
         assert isinstance(response, list)
         assert response[1]["type"] == "image"
         assert base64.b64decode(response[1]["base64"]) == payload
+
+        # The data-access event records what was pulled in: an upload of this
+        # many decoded bytes, delivered as an image.
+        _, fields = security_log.info.call_args
+        assert fields["details"]["response_type"] == "image"
+        assert fields["gitlab"]["size_bytes"] == len(payload)
 
 
 class TestReadFileChunked:

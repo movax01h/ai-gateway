@@ -1,9 +1,10 @@
 import json
 import re
+import uuid
 from enum import IntEnum
 from textwrap import dedent
 from typing import Any, ClassVar, List, Optional, Type
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import gitmatch
 import structlog
@@ -326,6 +327,55 @@ def _resolve_upload_reference(file_path: str, project: Optional[Project]) -> str
     return f"/api/v4/projects/{project['id']}/uploads/{match['secret']}/{filename}"
 
 
+def _author_id() -> Optional[int]:
+    """The requesting user's instance-local id, as the standard's integer ``author_id``."""
+    raw = gitlab_user_id.get()
+    return int(raw) if raw and raw.isdigit() else None
+
+
+def _log_upload_read(
+    project: Optional[Project],
+    request_path: str,
+    *,
+    outcome: str,
+    response_type: Optional[str],
+    size_bytes: Optional[int],
+) -> None:
+    """Record the service's decision to ask for an upload, in the security logging standard's shape.
+
+    The SIEM-bound record of this read is the Rails audit trail, not this line: every tool call reaches Rails as an
+    ``ai_tool_invoked`` audit event carrying the tool arguments, upload reference included, and Rails attaches the
+    author and the request IP on ingestion. The download itself runs client-side under the user's own credential and
+    is authenticated by the Rails API. This event is the service's own part, deciding to ask for it, and it fires on
+    every attempt because a failed download is still credential spend the user may need to account for.
+
+    Standard fields this layer cannot fill, and why: ``author_name`` (only ids reach the service), ``target_id`` (the
+    uploads API addresses a file by secret and filename, there is no numeric id), ``ip_address`` (the request arrives
+    over gRPC through Workhorse) and ``details.token_type`` (the credential is held and spent by the client). The
+    upload secret is part of the download URL, so it stays out on principle even though the API needs project access
+    regardless.
+    """
+    web_url = project.get("web_url") if project else None
+    _security_log.info(
+        "Tool read resolved a GitLab upload reference",
+        id=str(uuid.uuid4()),
+        event_type="data.read.upload",
+        author_id=_author_id(),
+        entity_type="Project",
+        entity_id=project.get("id") if project else None,
+        entity_path=urlparse(web_url).path.strip("/") if web_url else None,
+        target_type="upload",
+        # Not `filename`: stdlib LogRecord reserves that name and raises.
+        target_details=request_path.rsplit("/", 1)[-1],
+        details={
+            "outcome": outcome,
+            "provider": "duo_workflow_service",
+            "response_type": response_type,
+        },
+        gitlab={"data_type": "upload", "size_bytes": size_bytes},
+    )
+
+
 async def _read_upload_reference(
     metadata: Any, project: Optional[Project], file_path: str
 ) -> str | list | None:
@@ -351,24 +401,11 @@ async def _read_upload_reference(
     if request_path is None:
         return None
 
-    # An agent pulling a project upload into model context is worth a trail,
-    # and the trail must cover attempts, not just successes: a failed download
-    # is still credential spend the user may need to account for.
-    #
-    # The SIEM-bound record of this read is the Rails audit trail, not this
-    # line: every tool call reaches Rails as an `ai_tool_invoked` audit event
-    # carrying the tool arguments, upload reference included, and Rails
-    # attaches the author and the request IP on ingestion. The download itself
-    # runs client-side under the user's own credential and is authenticated by
-    # the Rails API. This line is the service's own record of deciding to ask
-    # for it, in the security logging standard's field names: `outcome` is
-    # success or failure only, the response shape lives in `response_type`.
-    # The request IP is not known at this layer (gRPC through Workhorse). The
-    # upload secret is part of the download URL, so it stays out of the
-    # service logs on principle even though the API needs project access
-    # regardless.
+    # An agent pulling a project upload into model context is worth a trail;
+    # see _log_upload_read for what the trail is and is not.
     outcome = "failure"
     response_type: Optional[str] = None
+    size_bytes: Optional[int] = None
     try:
         # offset/limit are meaningless for a downloaded image and are not sent.
         response = await _execute_action_accepting_image(
@@ -377,26 +414,22 @@ async def _read_upload_reference(
                 runReadFile=contract_pb2.ReadFile(filepath=request_path)
             ),
         )
-        converted: str | list = (
-            _image_response_to_blocks_if_enabled(response, file_path)
-            if isinstance(response, ImageActionResult)
-            else response
-        )
+        converted: str | list
+        if isinstance(response, ImageActionResult):
+            size_bytes = len(response.data)
+            converted = _image_response_to_blocks_if_enabled(response, file_path)
+        else:
+            converted = response
         response_type = "image" if isinstance(converted, list) else "text"
         outcome = "success"
         return converted
     finally:
-        _security_log.info(
-            "Tool read resolved a GitLab upload reference",
-            event_type="data.read.upload",
-            target_type="upload",
-            project_id=project.get("id") if project else None,
-            project_web_url=project.get("web_url") if project else None,
-            gitlab_user_id=gitlab_user_id.get(),
-            # Not `filename`: stdlib LogRecord reserves that name and raises.
-            upload_filename=request_path.rsplit("/", 1)[-1],
+        _log_upload_read(
+            project,
+            request_path,
             outcome=outcome,
             response_type=response_type,
+            size_bytes=size_bytes,
         )
 
 
