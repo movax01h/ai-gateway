@@ -20,6 +20,7 @@ from ai_gateway.models.v2 import (
     litellm_empty_text_patch,  # noqa: F401  (applies the monkey-patch)
 )
 from ai_gateway.models.v2._model_compat import (
+    hoist_tool_result_images,
     normalize_image_blocks,
     remove_trailing_assistant_message,
     supports_assistant_prefill,
@@ -290,6 +291,11 @@ class ChatLiteLLM(_LChatLiteLLM):
         # form before they reach the provider.
         message_dicts = normalize_image_blocks(message_dicts)
         model_name = self.model_name or self.model
+        # After normalize, so there is one image shape to recognise, and before
+        # the prefill rewrite, since the hoist can append a user message.
+        message_dicts = hoist_tool_result_images(
+            message_dicts, self.custom_llm_provider, model_name
+        )
         if not supports_assistant_prefill(model_name):
             payload = remove_trailing_assistant_message({"messages": message_dicts})
             message_dicts = payload["messages"]
