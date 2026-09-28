@@ -1,5 +1,6 @@
+import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 import structlog
 from langchain_core.tools import ToolException
@@ -130,3 +131,110 @@ async def _execute_action(metadata: Dict[str, Any], action: contract_pb2.Action)
             request_id=actionResponse.requestID,
         )
         raise ToolException("Executor doesn't return expected response fields")
+
+
+# The Node `duo` CLI executor pages `runReadFile` responses at 50 KiB or 2,000
+# lines, cut on a whole-line boundary, and ends a truncated page with a footer:
+#   (Showing lines 1-46 of 154 total. Use offset=46 to continue reading.)
+# Resume from the offset the footer advertises rather than computing one, so
+# the executor's own indexing is always respected.
+_READ_PAGE_FOOTER_RE = re.compile(
+    r"^\s*[\[(]Showing lines \d+-\d+ of \d+ total\."
+    r"(?: Use offset=(\d+) to continue reading\.)?[\])]\s*$"
+)
+_READ_PAST_EOF_RE = re.compile(r"^\s*[\[(]\s*Offset\s+\d+\s+is beyond", re.IGNORECASE)
+
+
+def _split_read_page(page: str) -> tuple[str, Optional[int], Optional[str]]:
+    """Split one ``runReadFile`` page into (content, next_offset, footer).
+
+    ``next_offset`` is ``None`` when there is nothing to resume. ``footer`` is
+    the raw footer text when one was present, so callers can log it.
+    """
+    lines = page.split("\n")
+    idx = len(lines) - 1
+    while idx >= 0 and not lines[idx].strip():
+        idx -= 1
+    if idx < 0:
+        return page, None, None
+    last = lines[idx]
+    if _READ_PAST_EOF_RE.match(last):
+        return "", None, last
+    match = _READ_PAGE_FOOTER_RE.match(last)
+    if not match:
+        return page, None, None
+    # Drop only the blank separator line; any further blank lines are content.
+    content = "\n".join(lines[:idx]).removesuffix("\n")
+    return content, (int(match.group(1)) if match.group(1) else None), last
+
+
+async def _read_file_fully(
+    metadata: Dict[str, Any],
+    filepath: str,
+    execute: Optional[
+        Callable[[Dict[str, Any], contract_pb2.Action], Awaitable[str]]
+    ] = None,
+    max_pages: int = 256,
+) -> str:
+    """Read a file from the executor in full, following ``runReadFile`` pagination.
+
+    A paginated read succeeds with only the first page plus a footer, so a
+    single read silently returns a prefix. This follows each footer's resume
+    offset until the file is complete, and raises ``ToolException`` rather
+    than return a partial file (no resume offset, a stalled offset, a
+    non-string response, or ``max_pages`` reached).
+
+    With no footer this issues exactly one read, so it is a no-op against an
+    executor that does not paginate.
+    """
+    log = structlog.stdlib.get_logger("workflow")
+    run = execute or _execute_action
+    pages: list[str] = []
+    offset: Optional[int] = None
+    lines_read = 0
+
+    def _partial(reason: str) -> ToolException:
+        return ToolException(
+            f"Could not read {filepath} in full: {reason} "
+            f"({lines_read} lines read). A partial file was not returned."
+        )
+
+    for page_num in range(max_pages):
+        read = contract_pb2.ReadFile(filepath=filepath)
+        if offset is not None:
+            read.offset = offset
+        page = await run(metadata, contract_pb2.Action(runReadFile=read))
+        if not isinstance(page, str):
+            raise _partial(f"runReadFile returned a non-string {type(page).__name__}")
+        content, next_offset, footer = _split_read_page(page)
+        if footer and not page_num:
+            log.info(
+                "runReadFile returned a pagination footer",
+                filepath=filepath,
+                footer=footer[:200],
+                page_bytes=len(page),
+            )
+        if next_offset is not None and offset is not None and next_offset <= offset:
+            raise _partial(f"pagination stalled at offset {offset}")
+        if next_offset is not None and not content:
+            # The executor skips a single line longer than its page size with
+            # an empty page that still advances the offset.
+            raise _partial(f"empty page at offset {offset or 0}")
+        if content:
+            pages.append(content)
+            lines_read += content.count("\n") + 1
+        if next_offset is None:
+            if page_num:
+                log.info(
+                    "runReadFile completed across multiple pages",
+                    filepath=filepath,
+                    pages=page_num + 1,
+                    lines=lines_read,
+                )
+            elif footer and not _READ_PAST_EOF_RE.match(footer):
+                # Truncated on the first page with no way to continue.
+                raise _partial(f"truncated with no resume offset ({footer[:200]})")
+            return "\n".join(pages)
+        offset = next_offset
+
+    raise _partial(f"hit the {max_pages}-page limit")
