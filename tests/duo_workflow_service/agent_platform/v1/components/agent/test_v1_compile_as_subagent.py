@@ -12,12 +12,12 @@ from langgraph.graph.state import CompiledStateGraph
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     SUBSESSION_ID_CONTEXT_KEY,
     AgentComponent,
-    _TerminalRouter,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     AgentNode,
 )
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
+from duo_workflow_service.entities import WorkflowStatusEnum
 
 
 @pytest.fixture(name="make_agent_component")
@@ -103,15 +103,40 @@ class TestCompileAsSubagentGraphStructure:
         assert f"{subagent_component.name}#final_response" in compiled.nodes
         assert f"{subagent_component.name}#tools" in compiled.nodes
 
-    def test_terminal_router_route_returns_end(self):
-        """The router compile_as_subagent attaches with always routes to END."""
-        router = _TerminalRouter()
-        assert router.route({}) == END
+    def test_graph_is_terminated_by_an_end_component(self, subagent_component):
+        """The subagent graph ends the way a flow does, so a finished subsession says so in its own state.
 
-    def test_terminal_router_attach_is_a_no_op(self):
-        router = _TerminalRouter()
-        # Should not raise, and should not require a real StateGraph.
-        router.attach(graph=None)
+        ``SubagentDispatchNode`` reads that status back rather than inferring completion from ``ainvoke`` having
+        returned, so the node has to exist and has to be what ``final_response`` hands off to.
+        """
+        compiled = subagent_component.compile_as_subagent()
+
+        assert "terminate_flow" in compiled.nodes
+        # `final_response`'s conditional edge carries no path map, so the target
+        # isn't in the drawn graph -- ask the branch itself where it routes.
+        branch = next(
+            iter(
+                compiled.builder.branches[
+                    f"{subagent_component.name}#final_response"
+                ].values()
+            )
+        )
+        assert branch.path.invoke({}) == "terminate_flow"
+        assert (END, "terminate_flow") not in compiled.builder.edges
+        assert ("terminate_flow", END) in compiled.builder.edges
+
+    @pytest.mark.asyncio
+    async def test_reaching_the_terminal_node_marks_the_subsession_completed(
+        self, subagent_component
+    ):
+        """The status write itself, exercised rather than inferred from the topology."""
+        compiled = subagent_component.compile_as_subagent()
+
+        result = await compiled.nodes["terminate_flow"].ainvoke(
+            {"status": WorkflowStatusEnum.EXECUTION}
+        )
+
+        assert result == {"status": WorkflowStatusEnum.COMPLETED}
 
     def test_does_not_mutate_bind_to_supervisor_state(self, subagent_component):
         """compile_as_subagent is a distinct mechanism from bind_to_supervisor -- it must not set that flag."""

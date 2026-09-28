@@ -14,7 +14,7 @@ from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.constants import TAG_NOSTREAM
-from langgraph.graph import END, StateGraph
+from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import (
     BaseModel,
@@ -53,10 +53,12 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
 )
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
+    EndComponent,
     ExtraInputVariablesError,
     MissingInputVariablesError,
     RouterProtocol,
 )
+from duo_workflow_service.agent_platform.v1.routers.router import Router
 from duo_workflow_service.agent_platform.v1.state import (
     FlowEventType,
     FlowState,
@@ -173,23 +175,6 @@ class MaxCyclesConfig(BaseModel):
                 "instead."
             )
         return self
-
-
-class _TerminalRouter:
-    """``RouterProtocol`` implementation that always routes straight to ``END``.
-
-    Used by ``AgentComponent.compile_as_subagent`` to terminate the standalone
-    subgraph after ``final_response``: unlike a component attached to a parent
-    flow graph, a standalone subagent subgraph has no external router to hand
-    off to — its result is consumed by whoever called ``ainvoke`` on the
-    compiled graph, not by further graph routing.
-    """
-
-    def attach(self, graph: StateGraph) -> None:
-        """No-op — no additional wiring is needed for the terminal router."""
-
-    def route(self, _state: FlowState) -> Annotated[str, "Next node"]:
-        return END
 
 
 class AgentComponentBase(BaseComponent):
@@ -830,6 +815,23 @@ class AgentComponent(AgentComponentBase):
         entries so the UI can attribute them to the right subsession — is read
         from ``context[SUBSESSION_ID_CONTEXT_KEY]`` when the caller sets it.
 
+        The subgraph is terminated by its own ``EndComponent``, exactly as a
+        flow is (``GraphBuilder._build_components``), so a subsession that ran
+        to completion says so in its own state (``status ==
+        WorkflowStatusEnum.COMPLETED``) instead of leaving the caller to infer
+        it from ``ainvoke`` having returned. ``SubagentDispatchNode`` reads that
+        status back. Today every exit from this graph leads back into it and the
+        only route to ``END`` is ``final_response -> terminate_flow``, so the
+        read-back cannot disagree; it is a check on an invariant a future
+        subclass could break, not a live failure mode.
+
+        That terminal node writes ``status`` in the subgraph's own checkpoint
+        lineage, which is only safe because ``GitLabWorkflow.aput_writes``
+        suppresses session-ending status events from non-top-level lineages: the
+        write is in the same ``status`` channel the flow itself ends through, so
+        unfiltered it would make the first subagent to finish end the whole
+        session.
+
         No checkpointer is passed to ``compile()`` here — as long as the caller
         invokes the returned graph with the *same* ``RunnableConfig`` it was
         itself given, LangGraph treats the invocation as a genuinely nested
@@ -874,7 +876,18 @@ class AgentComponent(AgentComponentBase):
         # parent's, so a trim here would drop the entries before it.
         self._trim_ui_chat_log = False
         graph = StateGraph(FlowState)
-        self.attach(graph, _TerminalRouter())
+        end_component = EndComponent(
+            name="end",
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            user=self.user,
+        )
+        end_component.attach(graph)
+        # An unconditional `Router` (`input=None`): unlike a component attached
+        # to a parent flow graph, a subagent subgraph has no routing decision to
+        # make after the agent answers — the next node is always the terminal
+        # one.
+        Router(from_component=self, to_component=end_component).attach(graph)
         graph.set_entry_point(self.__entry_hook__())
         return graph.compile()
 
