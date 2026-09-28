@@ -64,6 +64,7 @@ __all__ = [
     "is_image_block",
     "is_image_content_block",
     "is_internal_image_block",
+    "render_image_blocks_as_text",
     "strip_image_payloads",
     "with_block_text",
 ]
@@ -257,6 +258,18 @@ def content_as_text(content: Any) -> str:
     # One block per line: the shape that reaches a card is a text lead-in
     # followed by a placeholder or a marker, and those read as separate lines.
     return "\n".join(_block_as_text(block) for block in strip_image_payloads(content))
+
+
+def render_image_blocks_as_text(content: Any) -> Any:
+    """Render image-bearing block lists as text; return other content unchanged.
+
+    Use before scanning a tool result or storing it as plain flow state, where the checkpoint encoder's stripping of
+    message images does not apply. Keeps image payloads out of scans, checkpoints and later text prompts, while
+    structured results carrying no image are returned unchanged.
+    """
+    if isinstance(content, list) and any(is_image_block(block) for block in content):
+        return content_as_text(content)
+    return content
 
 
 def _block_as_text(block: Any) -> str:

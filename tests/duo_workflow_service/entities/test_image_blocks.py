@@ -13,6 +13,7 @@ from duo_workflow_service.entities.image_blocks import (
     is_image_block,
     is_image_content_block,
     is_internal_image_block,
+    render_image_blocks_as_text,
     strip_image_payloads,
     with_block_text,
 )
@@ -298,6 +299,34 @@ class TestContentAsText:
     )
     def test_scalars_become_strings(self, content, expected):
         assert content_as_text(content) == expected
+
+
+class TestRenderImageBlocksAsText:
+    """Only an image-bearing list is rendered; everything else comes back untouched."""
+
+    def test_an_image_bearing_list_becomes_the_card_text(self):
+        blocks = [
+            {"type": "text", "text": "lead"},
+            {"type": "image", "base64": PNG_B64, "mime_type": "image/png"},
+        ]
+
+        assert (
+            render_image_blocks_as_text(blocks)
+            == "lead\n[image/png omitted from history]"
+        )
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "plain string",
+            [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
+            [{"path": "a.py"}, {"path": "b.py"}],
+            {"type": "image", "base64": PNG_B64, "mime_type": "image/png"},
+            None,
+        ],
+    )
+    def test_anything_else_is_returned_by_identity(self, content):
+        assert render_image_blocks_as_text(content) is content
 
 
 class TestBlockText:

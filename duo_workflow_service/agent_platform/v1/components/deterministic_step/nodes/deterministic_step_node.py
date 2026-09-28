@@ -19,6 +19,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.entities.image_blocks import render_image_blocks_as_text
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
@@ -125,6 +126,10 @@ class DeterministicStepNode:
             tool_name=tool.name, flow_type=self._tracker._flow_type.value
         ):
             tool_call_result = await tool.ainvoke(tool_call_args)
+
+        # Render before the scan and before this lands in plain flow state, to
+        # keep image payloads out of scans, checkpoints and later prompts.
+        tool_call_result = render_image_blocks_as_text(tool_call_result)
 
         set_hidden_layer_log_context(self._tool_name, tool_call_args)
         trust_level = getattr(tool, "trust_level", None)

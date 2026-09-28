@@ -82,3 +82,15 @@ def create_mock_client_event_with_response(response_text: str):
     mock_client_event = contract_pb2.ClientEvent()
     mock_client_event.actionResponse.CopyFrom(mock_action_response)
     return mock_client_event
+
+
+def create_mock_client_event_with_image_response(mime_type: str, data: bytes):
+    """Helper to create a mock ClientEvent carrying a typed image response."""
+    mock_action_response = contract_pb2.ActionResponse()
+    mock_action_response.requestID = "test-request-id"
+    mock_action_response.imageResponse.mime_type = mime_type
+    mock_action_response.imageResponse.data = data
+
+    mock_client_event = contract_pb2.ClientEvent()
+    mock_client_event.actionResponse.CopyFrom(mock_action_response)
+    return mock_client_event

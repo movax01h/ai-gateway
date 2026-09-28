@@ -34,6 +34,11 @@ class FeatureFlag(StrEnum):
     DUO_DEVELOPER_MODEL_ROUTING = "duo_developer_model_routing"
     AI_MODEL_RELEASE = "ai_model_release"
     CAP_CODE_COMPLETION_CONTEXT = "cap_code_completion_context"
+    # Gates tool-read image support, conversion and advertisement together, see
+    # duo_workflow_service/tools/filesystem.py. Definition:
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/beta/dap_tool_image_input.yml
+    # Rollout: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2806
+    DAP_TOOL_IMAGE_INPUT = "dap_tool_image_input"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

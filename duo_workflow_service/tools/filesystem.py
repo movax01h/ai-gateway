@@ -6,19 +6,27 @@ from typing import Any, ClassVar, List, Optional, Type
 import gitmatch
 import structlog
 from langchain_core.tools.base import ToolException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from contract import contract_pb2
+from duo_workflow_service.client_capabilities import is_client_capable
+from duo_workflow_service.entities.image_response import (
+    image_response_to_blocks,
+    supported_image_formats_display,
+)
 from duo_workflow_service.executor.action import (
     _execute_action,
+    _execute_action_accepting_image,
     _execute_action_and_get_action_response,
 )
+from duo_workflow_service.executor.image_result import ImageActionResult
 from duo_workflow_service.policies.file_exclusion_policy import (
     CONTEXT_EXCLUSION_MESSAGE,
     FileExclusionPolicy,
 )
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 DEFAULT_READ_FILE_OFFSET = 0
 DEFAULT_READ_FILE_LIMIT = 2000
@@ -187,6 +195,64 @@ def validate_duo_context_exclusions(
         return
 
 
+# Descriptions and conversion flip together on two switches, both required
+# (_image_support_enabled): a model refuses image reads unless the description
+# advertises them, and advertising without conversion only earns refusals. The
+# instance flag is evaluated per user rather than per client, so on its own it
+# would advertise to an older client that still refuses binaries. Tools are
+# built once per run and both contexts are set per request, so a flip lands on
+# the next run.
+IMAGE_READ_CAPABILITY = "read_file_image"
+
+_READ_FILE_IMAGE_NOTE = f"""Image files ({supported_image_formats_display()}) are supported: reading one returns the
+    actual image so you can see its contents.
+
+    """
+
+_READ_FILE_CHUNKED_IMAGE_NOTE = f"""\
+- Image files ({supported_image_formats_display()}) are supported and return the actual image so you can see its contents.
+    - Offset/limit do not apply to images.
+    """
+
+_READ_FILES_IMAGE_NOTE = """Image files are not supported here: read them individually with read_file.
+
+    """
+
+
+def _image_support_enabled() -> bool:
+    """Whether tool-read images are on for this run: the instance flag and the client capability, both."""
+    return is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT) and is_client_capable(
+        IMAGE_READ_CAPABILITY
+    )
+
+
+def _strip_image_note_if_disabled(tool: DuoBaseTool, note: str) -> None:
+    if not _image_support_enabled():
+        tool.description = tool.description.replace(note, "")
+
+
+def _image_response_to_blocks_if_enabled(
+    image: ImageActionResult, file_path: str
+) -> str | list[dict[str, Any]]:
+    """Convert a typed image result when image support is on, refuse readably when off.
+
+    A client sends image responses whatever the server-side switches say, so the off paths have to answer in words the
+    model can act on. The two refusals differ so a mismatch is diagnosable from the transcript alone: the instance flag
+    is off, or the client sent an image without having declared the capability.
+    """
+    if _image_support_enabled():
+        return image_response_to_blocks(image, file_path=file_path)
+    if not is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT):
+        return (
+            f'Cannot read file: "{file_path}" is an image file, and image '
+            "support is not enabled on this instance."
+        )
+    return (
+        f'Cannot read file: "{file_path}" is an image file, and this client '
+        "did not declare image support."
+    )
+
+
 class ReadFileInput(BaseModel):
     file_path: str = Field(description="the file_path to read the file from")
 
@@ -195,7 +261,7 @@ class ReadFile(DuoBaseTool):
     name: str = "read_file"
     description: str = f"""Read the contents of a file.
 
-    Batching:
+    {_READ_FILE_IMAGE_NOTE}Batching:
     - When multiple files need inspection, emit multiple read_file calls concurrently in a single turn.
     - Do not make separate turns for each file - group all related file reads together.
     - Avoid redundant re-reads of files that are unchanged since you last read them.
@@ -209,16 +275,24 @@ class ReadFile(DuoBaseTool):
         "Let me check if class `DuoBaseTool` exists in `./tools/base.py`",
     ]
 
-    async def _execute(self, file_path: str) -> str:
+    @model_validator(mode="after")
+    def _gate_image_support_description(self) -> "ReadFile":
+        _strip_image_note_if_disabled(self, _READ_FILE_IMAGE_NOTE)
+        return self
+
+    async def _execute(self, file_path: str) -> str | list[dict[str, Any]]:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
-        return await _execute_action(
+        response = await _execute_action_accepting_image(
             self.metadata,  # type: ignore
             contract_pb2.Action(runReadFile=contract_pb2.ReadFile(filepath=file_path)),
         )
+        if isinstance(response, ImageActionResult):
+            return _image_response_to_blocks_if_enabled(response, file_path)
+        return response
 
     def format_display_message(
         self, args: ReadFileInput, _tool_response: Any = None
@@ -261,7 +335,7 @@ class ReadFileChunked(DuoBaseTool):
     - Only read files directly relevant to the current task. Do NOT speculatively read unrelated files or entire directories.
     - Returns up to 2000 lines from offset (0-indexed).
     - For large files (>100 lines), specify offset and limit to inspect only the relevant section.
-
+    {_READ_FILE_CHUNKED_IMAGE_NOTE}
     {GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFileChunkedInput
@@ -269,18 +343,23 @@ class ReadFileChunked(DuoBaseTool):
     supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = ReadFile
     required_capability: ClassVar[frozenset[str]] = frozenset({"read_file_chunked"})
 
+    @model_validator(mode="after")
+    def _gate_image_support_description(self) -> "ReadFileChunked":
+        _strip_image_note_if_disabled(self, _READ_FILE_CHUNKED_IMAGE_NOTE)
+        return self
+
     async def _execute(
         self,
         file_path: str,
         offset: int = DEFAULT_READ_FILE_OFFSET,
         limit: int = DEFAULT_READ_FILE_LIMIT,
-    ) -> str:
+    ) -> str | list[dict[str, Any]]:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
-        return await _execute_action(
+        response = await _execute_action_accepting_image(
             self.metadata,  # type: ignore
             contract_pb2.Action(
                 runReadFile=contract_pb2.ReadFile(
@@ -288,6 +367,9 @@ class ReadFileChunked(DuoBaseTool):
                 )
             ),
         )
+        if isinstance(response, ImageActionResult):
+            return _image_response_to_blocks_if_enabled(response, file_path)
+        return response
 
     def format_display_message(
         self, args: ReadFileChunkedInput, _tool_response: Any = None
@@ -307,10 +389,15 @@ class ReadFiles(DuoBaseTool):
     name: str = "read_files"
     description: str = f"""Read one or more files in a single operation.
 
-    {GITIGNORED_FILE_NOTE}
+    {_READ_FILES_IMAGE_NOTE}{GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFilesInput
     handle_tool_error: bool = True
+
+    @model_validator(mode="after")
+    def _gate_image_support_description(self) -> "ReadFiles":
+        _strip_image_note_if_disabled(self, _READ_FILES_IMAGE_NOTE)
+        return self
 
     async def _execute(self, file_paths: list[str]) -> str:
         policy = FileExclusionPolicy(self.project)
