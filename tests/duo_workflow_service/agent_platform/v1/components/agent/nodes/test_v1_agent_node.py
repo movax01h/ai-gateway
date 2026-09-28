@@ -39,8 +39,8 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="mock_prompt")
@@ -77,7 +77,9 @@ def agent_node_fixture(
     """Fixture for AgentNode instance (default, no response schema)."""
     return AgentNode(
         flow_id=flow_id,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
@@ -102,7 +104,9 @@ def agent_node_with_schema_fixture(
     """Fixture for AgentNode instance with AgentFinalOutput response schema."""
     return AgentNode(
         flow_id=flow_id,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
@@ -223,7 +227,9 @@ class TestAgentNode:
         template can branch on them."""
         node = AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -402,7 +408,9 @@ class TestAgentNode:
 
             agent_node = AgentNode(
                 flow_id=flow_id,
-                flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
                 name="test_agent_node",
                 prompt=mock_prompt,
                 inputs=inputs,
@@ -466,7 +474,9 @@ class TestAgentNode:
 
             agent_node = AgentNode(
                 flow_id=flow_id,
-                flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
                 name="test_agent_node",
                 prompt=mock_prompt,
                 inputs=inputs,
@@ -665,7 +675,9 @@ class TestAgentNodeContextLimits:
         """AgentNode constructed with an explicit per-agent max_context_tokens."""
         return AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -928,7 +940,9 @@ class TestAgentNodeHistoryOptimization:
 
         node = AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -1149,7 +1163,9 @@ class TestAgentNodeReasoning:
         """Fixture for AgentNode with ui_history enabled."""
         return AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -1425,7 +1441,9 @@ class TestAgentNodeReasoning:
         )
         node = AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -1512,7 +1530,9 @@ class TestAgentNodeReasoning:
         schema.tool_title = "structured_response"
         node = AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -1623,7 +1643,9 @@ class TestAgentNodeInvokeConfig:
         config = {"tags": ["some tag"]}
         node = AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -1688,7 +1710,7 @@ def make_agent_node_fixture(
         }
         kwargs = {
             "flow_id": flow_id,
-            "flow_type": CategoryEnum.DEVELOPER,
+            "flow_type": GLReportingEventContext.from_workflow_definition("developer"),
             "name": "test_agent_node",
             "prompt": mock_prompt,
             "inputs": inputs,
@@ -1892,7 +1914,7 @@ class TestAgentNodeMaxCycles:
                 max_cycles=3,
                 cycle_count=3,
             ),
-            category=CategoryEnum.DEVELOPER.value,
+            category="developer",
         )
 
         state["context"][component_name]["cycle_count"] = 3

@@ -111,7 +111,6 @@ from lib.internal_events.context import (
     current_event_context,
 )
 from lib.internal_events.event_enum import (
-    CategoryEnum,
     EventEnum,
     EventLabelEnum,
     EventPropertyEnum,
@@ -3826,7 +3825,7 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
 
     # Verify the Prometheus metric was tracked
     mock_duo_workflow_metrics.count_agent_platform_receive_start_counter.assert_called_once_with(
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+        flow_type="software_development"
     )
 
     # Verify the internal event was tracked
@@ -3837,7 +3836,7 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
             property=EventPropertyEnum.WORKFLOW_ID.value,
             value=123,
         ),
-        category=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+        category="software_development",
     )
 
 

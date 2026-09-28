@@ -15,7 +15,8 @@ from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
-from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.events import GLReportingEventContext
+from lib.internal_events.event_enum import EventEnum
 
 DeterministicStepNode = dsn_module.DeterministicStepNode
 
@@ -110,7 +111,7 @@ def flow_id_fixture():
 @pytest.fixture(name="flow_type")
 def flow_type_fixture():
     """Fixture for flow type."""
-    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    return GLReportingEventContext.from_workflow_definition("software_development")
 
 
 @pytest.fixture(name="inputs")

@@ -37,7 +37,7 @@ from duo_workflow_service.security.prompt_security import SecurityException
 from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
 from lib.context.tool_loop import init_tool_loop_counters, tool_loop_stats
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.internal_events.event_enum import EventEnum
 from tests.duo_workflow_service.agent_platform.v1.components.agent.conftest import (
     assert_security_called_with,
 )
@@ -617,7 +617,7 @@ class TestToolNodeMonitoring:
         # Verify monitoring was called
         mock_tool_monitoring.time_tool_call.assert_called_once_with(
             tool_name=mock_tool.name,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+            flow_type="software_development",
         )
 
     @pytest.mark.asyncio
@@ -637,7 +637,7 @@ class TestToolNodeMonitoring:
         # Verify monitoring was still called despite error
         mock_tool_monitoring.time_tool_call.assert_called_once_with(
             tool_name=mock_tool.name,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+            flow_type="software_development",
         )
 
 
@@ -658,7 +658,7 @@ class TestToolNodeEventTracking:
         mock_internal_event_client.track_event.assert_called_once()
         call_args = mock_internal_event_client.track_event.call_args
         assert call_args[1]["event_name"] == EventEnum.WORKFLOW_TOOL_SUCCESS.value
-        assert call_args[1]["category"] == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+        assert call_args[1]["category"] == "software_development"
 
     @pytest.mark.asyncio
     async def test_run_tracks_failure_event_with_extra_data(

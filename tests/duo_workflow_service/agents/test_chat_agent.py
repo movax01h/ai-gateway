@@ -58,7 +58,6 @@ from lib.context.approval_sources import (
 )
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum
 from tests.duo_workflow_service.ui_chat_log_contract import (
     assert_client_valid_tool_info,
 )
@@ -89,7 +88,7 @@ def prompt_name_fixture():
 
 @pytest.fixture(name="workflow_type")
 def workflow_type_fixture() -> str:
-    return CategoryEnum.WORKFLOW_CHAT.value
+    return "chat"
 
 
 @pytest.fixture(name="mock_toolset")
