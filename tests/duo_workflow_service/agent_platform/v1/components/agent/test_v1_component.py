@@ -2713,6 +2713,76 @@ class TestAgentComponentMaxWrapUpRetries:
         assert call_kwargs["cycle_budget"].max_wrap_up_retries == 5
 
 
+class TestAgentComponentIdenticalToolCallLimit:
+    """Test suite for AgentComponentBase identical_tool_call_limit field and validator."""
+
+    def test_identical_tool_call_limit_default_is_zero(self, make_agent_component):
+        """identical_tool_call_limit defaults to 0, which disables the loop guard."""
+        component = make_agent_component()
+        assert component.identical_tool_call_limit == 0
+
+    @pytest.mark.parametrize("identical_tool_call_limit", [0, 3, 10])
+    def test_identical_tool_call_limit_valid_values(
+        self, make_agent_component, identical_tool_call_limit
+    ):
+        """identical_tool_call_limit accepts 0 (disabled) or any integer >= 3."""
+        component = make_agent_component(
+            identical_tool_call_limit=identical_tool_call_limit
+        )
+        assert component.identical_tool_call_limit == identical_tool_call_limit
+
+    @pytest.mark.parametrize("identical_tool_call_limit", [-1, 1, 2])
+    def test_identical_tool_call_limit_rejects_unreachable_values(
+        self, make_agent_component, identical_tool_call_limit
+    ):
+        """Below 3 the guard would trip before two results exist to compare, so those limits are rejected."""
+        with pytest.raises(
+            ValidationError,
+            match=r"identical_tool_call_limit must be 0 \(disabled\) or >= 3",
+        ):
+            make_agent_component(identical_tool_call_limit=identical_tool_call_limit)
+
+    @pytest.mark.usefixtures("mock_agent_node_cls", "mock_final_response_node_cls")
+    @pytest.mark.parametrize("identical_tool_call_limit", [0, 3])
+    def test_attach_passes_identical_tool_call_limit_to_tool_node(
+        self,
+        make_agent_component,
+        mock_tool_node_cls,
+        mock_state_graph,
+        mock_router,
+        identical_tool_call_limit,
+    ):
+        """Attach() forwards identical_tool_call_limit to ToolNode as identical_call_limit."""
+        component = make_agent_component(
+            identical_tool_call_limit=identical_tool_call_limit
+        )
+        component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_tool_node_cls.call_args[1]
+        assert call_kwargs["identical_call_limit"] == identical_tool_call_limit
+
+    @pytest.mark.usefixtures("mock_agent_node_cls", "mock_final_response_node_cls")
+    @pytest.mark.parametrize(
+        "kwargs,expected",
+        [({"max_wrap_up_retries": 5}, 5), ({}, 3)],
+    )
+    def test_attach_passes_max_wrap_up_retries_to_tool_node(
+        self,
+        make_agent_component,
+        mock_tool_node_cls,
+        mock_state_graph,
+        mock_router,
+        kwargs,
+        expected,
+    ):
+        """Attach() forwards max_wrap_up_retries to ToolNode so the loop guard shares AgentNode's stuck contract."""
+        component = make_agent_component(identical_tool_call_limit=3, **kwargs)
+        component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_tool_node_cls.call_args[1]
+        assert call_kwargs["identical_call_max_wrap_up_retries"] == expected
+
+
 class TestWebSearchBinding:
     """`_build_prompt` binds the provider-native web-search tool only when the `enable_web_search` opt-in AND the
     dependency_bump_web_search flag AND the client's `web_search` capability are all present."""

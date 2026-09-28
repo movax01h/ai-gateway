@@ -259,6 +259,7 @@ class AgentComponentBase(BaseComponent):
 
     max_cycles: Union[int, MaxCyclesConfig] = _DEFAULT_MAX_CYCLES
     max_wrap_up_retries: int = 3
+    identical_tool_call_limit: int = 0
     # Opt-in (per flow config): bind the provider-native web-search tool so the
     # agent can look up e.g. changelogs / migration guides. Still gated at runtime
     # by the dependency_bump_web_search flag and the client's "web_search"
@@ -350,6 +351,21 @@ class AgentComponentBase(BaseComponent):
         """Validate that max_wrap_up_retries is at least 1."""
         if v < 1:
             raise ValueError("max_wrap_up_retries must be at least 1.")
+        return v
+
+    @field_validator("identical_tool_call_limit")
+    @classmethod
+    def validate_identical_tool_call_limit(cls, v: int) -> int:
+        """Validate identical_tool_call_limit: 0 disables the guard, otherwise at least 3.
+
+        The guard only trips once two executed runs returned identical results, which
+        needs three repeats; 1 and 2 would be limits the guard can never reach.
+        """
+        if v != 0 and v < 3:
+            raise ValueError(
+                "identical_tool_call_limit must be 0 (disabled) or >= 3; the guard "
+                "compares the results of the two previous executions."
+            )
         return v
 
     @property
@@ -1061,6 +1077,8 @@ class AgentComponent(AgentComponentBase):
             ),
             tracker=tracker,
             session_id_key=self._session_id_key,
+            identical_call_limit=self.identical_tool_call_limit,
+            identical_call_max_wrap_up_retries=self.max_wrap_up_retries,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",

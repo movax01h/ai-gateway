@@ -491,6 +491,8 @@ class SupervisorAgentComponentV2(AgentComponentBase):
             tracker=tracker,
             # Supervisor is never a subagent — session_id is always None for its own nodes
             session_id_key=DEFAULT_SESSION_ID_KEY,
+            identical_call_limit=self.identical_tool_call_limit,
+            identical_call_max_wrap_up_retries=self.max_wrap_up_retries,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",

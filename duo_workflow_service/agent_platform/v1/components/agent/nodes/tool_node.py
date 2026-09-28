@@ -2,7 +2,7 @@ import asyncio
 from typing import Any, Optional
 
 import structlog
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from pydantic_core import ValidationError
 
@@ -10,9 +10,20 @@ from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._loop_detection import (
+    IDENTICAL_CALL_NUDGE,
+    IDENTICAL_CALL_SKIPPED_UI_MESSAGE,
+    IDENTICAL_CALL_WRAP_UP,
+    IdenticalCallChain,
+    inspect_identical_call_chain,
+    nudge_message,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes._session import (
     DEFAULT_SESSION_ID_KEY,
     resolve_session_id,
+)
+from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
+    AgentStuckError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -21,6 +32,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.agent_platform.v1.state.base import (
     BaseIOKey,
+    IOKey,
     RuntimeIOKey,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
@@ -38,6 +50,9 @@ from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events.event_enum import EventEnum
 
 __all__ = ["ToolNode"]
+
+# Unheeded loop-guard nudges before the message escalates to a wrap-up instruction.
+IDENTICAL_CALL_MAX_NUDGES = 2
 
 
 class ToolNode:
@@ -76,6 +91,8 @@ class ToolNode:
         conversation_history_key: RuntimeIOKey,
         tracker: ToolEventTracker,
         session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
+        identical_call_limit: int = 0,
+        identical_call_max_wrap_up_retries: int = 3,
     ):
         self.name = name
         self._toolset = toolset
@@ -84,6 +101,8 @@ class ToolNode:
         self._conversation_history_key = conversation_history_key
         self._tracker = tracker
         self._session_id_key = session_id_key
+        self._identical_call_limit = identical_call_limit
+        self._identical_call_max_wrap_up_retries = identical_call_max_wrap_up_retries
 
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
@@ -96,6 +115,15 @@ class ToolNode:
 
         last_message = conversation_history[-1]
         tool_calls = getattr(last_message, "tool_calls", [])
+
+        # Identical-loop guard runs before the counters below so skipped calls are
+        # not recorded as executed.
+        if tool_calls and self._identical_call_limit > 0:
+            chain = inspect_identical_call_chain(conversation_history)
+            if chain.repeats >= self._identical_call_limit and chain.results_identical:
+                return self._handle_identical_call_loop(
+                    history_iokey, conversation_history, tool_calls, chain, session_id
+                )
 
         # Counters are incremented here, in the parent task's context, because
         # asyncio.gather runs each coroutine as a Task with its own context copy:
@@ -140,6 +168,78 @@ class ToolNode:
             **self._ui_history.pop_state_updates(),
             **history_iokey.to_nested_dict(conversation_history + tools_responses),
             **context_updates,
+        }
+
+    def _handle_identical_call_loop(
+        self,
+        history_iokey: IOKey,
+        conversation_history: list[BaseMessage],
+        tool_calls: list[dict],
+        chain: IdenticalCallChain,
+        session_id: Optional[str],
+    ) -> dict:
+        """Skip execution of a repeated identical tool-call batch and nudge the agent instead.
+
+        One ToolMessage is returned per dangling tool_call_id. After
+        ``IDENTICAL_CALL_MAX_NUDGES`` unheeded nudges the content escalates to a
+        wrap-up instruction. After ``identical_call_max_wrap_up_retries`` unheeded
+        wrap-ups the run ends with ``AgentStuckError``, the same contract
+        ``AgentNode`` applies to its own wrap-up; without it the wrap-up would
+        repeat every cycle until ``max_cycles``.
+
+        A FAILURE UI entry is logged per skipped call under its tool_call_id: the
+        notifier streams a PENDING card for each call as the chunk arrives and only
+        replaces it with an entry carrying the same message_id, so without this the
+        card would spin until the session ends.
+        """
+        escalated = chain.nudges >= IDENTICAL_CALL_MAX_NUDGES
+        ignored_wrap_ups = max(chain.nudges - IDENTICAL_CALL_MAX_NUDGES, 0)
+        tool_names = ", ".join(tool_call["name"] for tool_call in tool_calls)
+        self._logger.warning(
+            "Skipping repeated identical tool calls and nudging the agent",
+            tool_names=tool_names,
+            consecutive_count=chain.repeats,
+            limit=self._identical_call_limit,
+            nudges_sent=chain.nudges,
+            escalated=escalated,
+            ignored_wrap_ups=ignored_wrap_ups,
+            max_wrap_up_retries=self._identical_call_max_wrap_up_retries,
+        )
+
+        if ignored_wrap_ups >= self._identical_call_max_wrap_up_retries:
+            raise AgentStuckError(
+                f"Agent '{self.name}' is stuck: repeated the same {tool_names} call "
+                f"{chain.repeats} times in a row and ignored the wrap-up instruction "
+                f"{ignored_wrap_ups} times, exceeding the maximum of "
+                f"{self._identical_call_max_wrap_up_retries} retries."
+            )
+
+        if escalated:
+            content = IDENTICAL_CALL_WRAP_UP
+        else:
+            content = IDENTICAL_CALL_NUDGE.format(
+                tool_name=tool_names, count=chain.repeats
+            )
+
+        for tool_call in tool_calls:
+            tool = self._toolset.get(tool_call["name"])
+            if tool is None:
+                continue
+            self._ui_history.log.error(
+                tool=tool,
+                tool_call_args=tool_call.get("args", {}),
+                message=IDENTICAL_CALL_SKIPPED_UI_MESSAGE.format(tool_name=tool.name),
+                event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+                message_id=tool_call.get("id"),
+                subsession_id=session_id,
+            )
+
+        nudge_responses = [
+            nudge_message(content, tool_call.get("id")) for tool_call in tool_calls
+        ]
+        return {
+            **self._ui_history.pop_state_updates(),
+            **history_iokey.to_nested_dict(conversation_history + nudge_responses),
         }
 
     async def _execute_tool_calls(

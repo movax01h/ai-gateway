@@ -11,6 +11,14 @@ from pydantic_core import ValidationError
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes._loop_detection import (
+    IDENTICAL_CALL_SKIPPED_UI_MESSAGE,
+    IDENTICAL_CALL_WRAP_UP,
+    is_guard_nudge,
+)
+from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
+    AgentStuckError,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_node import (
     ToolNode,
 )
@@ -75,8 +83,8 @@ def mock_tool_monitoring_fixture():
         yield mock_metrics
 
 
-@pytest.fixture(name="tool_node")
-def tool_node_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering deps
+@pytest.fixture(name="build_tool_node")
+def build_tool_node_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering deps
     component_name,
     mock_toolset,
     flow_id,
@@ -87,12 +95,8 @@ def tool_node_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture 
     mock_prompt_security,
     mock_logger,
 ):
-    """Fixture for ToolNode instance."""
-    tracker = ToolEventTracker(
-        flow_id=flow_id,
-        flow_type=flow_type,
-        internal_event_client=mock_internal_event_client,
-    )
+    """Factory for a ToolNode instance, so tests needing non-default constructor args don't have to duplicate this
+    wiring."""
     static_key = IOKey(
         target="conversation_history",
         subkeys=[component_name],
@@ -101,13 +105,28 @@ def tool_node_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture 
     conversation_history_key = RuntimeIOKey(
         alias="conversation_history", factory=lambda _: static_key
     )
-    return ToolNode(
-        name="test_tool_node",
-        conversation_history_key=conversation_history_key,
-        toolset=mock_toolset,
-        ui_history=ui_history,
-        tracker=tracker,
-    )
+
+    def _build(**kwargs):
+        return ToolNode(
+            name="test_tool_node",
+            conversation_history_key=conversation_history_key,
+            toolset=mock_toolset,
+            ui_history=ui_history,
+            tracker=ToolEventTracker(
+                flow_id=flow_id,
+                flow_type=flow_type,
+                internal_event_client=mock_internal_event_client,
+            ),
+            **kwargs,
+        )
+
+    return _build
+
+
+@pytest.fixture(name="tool_node")
+def tool_node_fixture(build_tool_node):
+    """Fixture for ToolNode instance."""
+    return build_tool_node()
 
 
 class TestToolNode:
@@ -1966,6 +1985,296 @@ class TestToolNodeToolLoopTracking:
         await tool_node.run(flow_state_with_tool_calls)
 
         assert tool_loop_stats.get() is None
+
+
+class TestToolNodeIdenticalCallGuard:
+    """Test suite for the opt-in identical tool-call loop guard.
+
+    Driven over successive node executions rather than by calling the detection helpers directly. The guard appends its
+    nudge to the conversation history, and the next execution reads that same history back as its input. A single
+    execution therefore cannot show how one nudge affects the following decision, which is exactly what these tests need
+    to observe.
+    """
+
+    IDENTICAL_CALL_LIMIT = 3
+
+    TOOL_RESULT = "TOOL RESULT"
+
+    # Tool invocations counted in a single ReAct cycle: the guard either lets the
+    # call run or skips it entirely.
+    EXECUTED = 1
+    SKIPPED = 0
+
+    # Labels for the two messages the guard can inject, so the expected sequences
+    # below read as the agent's experience rather than as message bodies.
+    NUDGE = "nudge"
+    WRAP_UP = "wrap-up"
+
+    @classmethod
+    def _guard_messages(cls, history):
+        """Return the guard's own messages from history, as NUDGE/WRAP_UP labels.
+
+        Real tool results are dropped, so the result is the sequence of messages the guard injected, in the order the
+        agent received them.
+        """
+        return [
+            cls.WRAP_UP if message.content == IDENTICAL_CALL_WRAP_UP else cls.NUDGE
+            for message in history
+            if is_guard_nudge(message)
+        ]
+
+    @pytest.fixture(name="guarded_tool_node")
+    def guarded_tool_node_fixture(self, build_tool_node):
+        """A ToolNode with the loop guard enabled."""
+        return build_tool_node(identical_call_limit=self.IDENTICAL_CALL_LIMIT)
+
+    @pytest.fixture(name="run_react_cycles")
+    def run_react_cycles_fixture(
+        self,
+        base_flow_state,
+        component_name,
+        mock_tool,
+        mock_prompt_security,
+    ):
+        """Drive a node over successive ReAct cycles, issuing one tool call each time.
+
+        Mirrors the graph edge ``tools -> agent -> tools``: the history the node
+        returns is fed back as the next execution's input, with a fresh
+        ``AIMessage`` appended in between, as a looping agent would produce.
+
+        Pass ``cycles=N`` to repeat the same call N times, or ``calls="aab"`` to
+        choose the call per cycle, where equal letters mean an identical
+        ``(tool, args)`` batch. The tool's result is derived from the args, so
+        changing the letter changes the result too, as a genuinely different call
+        would.
+
+        Returns the per-cycle count of tool invocations (so a skipped execution
+        is distinguishable from an executed one) alongside the final history.
+        """
+        # The shared fixture flattens every response to a constant, which would
+        # make a nudge and a real result compare equal and mask the bug.
+        mock_prompt_security.side_effect = lambda response, **_: response
+        # ToolNode passes a ToolCall-shaped dict, so the args live under "args".
+        mock_tool.ainvoke = AsyncMock(
+            side_effect=lambda tool_call: (
+                f"{self.TOOL_RESULT} {tool_call['args']['param']}"
+            )
+        )
+
+        async def _run(node, cycles=None, calls=None):
+            per_cycle_calls = calls if calls is not None else "a" * cycles
+            state = base_flow_state.copy()
+            history: list = []
+            executions_per_cycle = []
+
+            for cycle, call in enumerate(per_cycle_calls):
+                history = [
+                    *history,
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "test_tool",
+                                "args": {"param": call},
+                                "id": f"call_{cycle}",
+                            }
+                        ],
+                    ),
+                ]
+                state["conversation_history"] = {component_name: history}
+
+                calls_before = mock_tool.ainvoke.await_count
+                result = await node.run(state)
+                executions_per_cycle.append(
+                    mock_tool.ainvoke.await_count - calls_before
+                )
+
+                history = result["conversation_history"][component_name]
+
+            return executions_per_cycle, history
+
+        return _run
+
+    @pytest.mark.asyncio
+    async def test_guard_is_disabled_by_default(self, tool_node, run_react_cycles):
+        """Without an explicit limit every repeat still executes."""
+        executions, _ = await run_react_cycles(tool_node, cycles=6)
+
+        assert executions == [self.EXECUTED] * 6
+
+    @pytest.mark.asyncio
+    async def test_repeated_call_is_never_executed_again_after_the_limit(
+        self, guarded_tool_node, run_react_cycles
+    ):
+        """The guard's own nudge must not be mistaken for a changing tool result.
+
+        The agent repeats one identical call for all 7 cycles, and the tool
+        returns the same result every time. Each line below shows what the agent
+        gets back for that cycle, with the limit set to 3 and
+        ``IDENTICAL_CALL_MAX_NUDGES`` (2)::
+
+            cycle 1  tool result   under the limit, call runs
+            cycle 2  tool result   under the limit, call runs
+            cycle 3  nudge         limit reached, call no longer runs
+            cycle 4  nudge
+            cycle 5  wrap-up       two nudges unheeded, escalate
+            cycle 6  wrap-up
+            cycle 7  wrap-up
+
+        Cycle 8 would raise ``AgentStuckError`` (see
+        ``test_raises_agent_stuck_error_after_max_unheeded_wrap_ups``).
+
+        Before ``_NUDGE_MARKER`` was added, the guard read its own nudge as a
+        changed tool result and let the call run again on cycle 4.
+        """
+        executions, _ = await run_react_cycles(guarded_tool_node, cycles=7)
+
+        assert executions == [self.EXECUTED, self.EXECUTED] + [self.SKIPPED] * 5
+
+    @pytest.mark.asyncio
+    async def test_escalates_to_wrap_up_after_max_unheeded_nudges(
+        self, guarded_tool_node, run_react_cycles
+    ):
+        """The escalation must count nudges actually sent, not cycles elapsed.
+
+        Each line below shows what the agent gets back for that cycle, over the
+        six cycles this test drives with the limit set to 3 and the
+        ``IDENTICAL_CALL_MAX_NUDGES`` (2)::
+
+            cycle 1  tool result
+            cycle 2  tool result
+            cycle 3  nudge         first nudge
+            cycle 4  nudge         second nudge, both now unheeded
+            cycle 5  wrap-up       escalate
+            cycle 6  wrap-up
+
+        Four guard messages: two nudges, then two wrap-ups. Before
+        ``_NUDGE_MARKER`` was added, the escalation derived the nudge count from
+        elapsed cycles and could escalate after a single nudge.
+        """
+        _, history = await run_react_cycles(guarded_tool_node, cycles=6)
+
+        assert self._guard_messages(history) == [
+            self.NUDGE,
+            self.NUDGE,
+            self.WRAP_UP,
+            self.WRAP_UP,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_nudge_count_resets_when_the_agent_changes_the_call(
+        self, guarded_tool_node, run_react_cycles
+    ):
+        """A nudge the agent heeded must not count against a later, different loop.
+
+        The agent loops on call ``a``, takes the nudge and switches to call ``b``,
+        then loops on that instead. The nudge it heeded belongs to the finished
+        ``a`` chain, so the ``b`` loop must earn its own two nudges before the
+        escalation, rather than inheriting one and being cut short::
+
+            cycle 1  tool result a
+            cycle 2  tool result a
+            cycle 3  nudge           a repeated 3 times
+            cycle 4  tool result b   agent changed the call, chain resets
+            cycle 5  tool result b
+            cycle 6  nudge           b repeated 3 times, first nudge for b
+            cycle 7  nudge           second nudge for b
+            cycle 8  wrap-up         escalate
+
+        Three nudges then one wrap-up.
+        """
+        _, history = await run_react_cycles(guarded_tool_node, calls="aaabbbbb")
+
+        assert self._guard_messages(history) == [
+            self.NUDGE,
+            self.NUDGE,
+            self.NUDGE,
+            self.WRAP_UP,
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "max_wrap_up_retries,cycles_before_stuck",
+        [
+            pytest.param(1, 5, id="one-retry"),
+            pytest.param(3, 7, id="default-three-retries"),
+        ],
+    )
+    async def test_raises_agent_stuck_error_after_max_unheeded_wrap_ups(
+        self,
+        build_tool_node,
+        run_react_cycles,
+        max_wrap_up_retries,
+        cycles_before_stuck,
+    ):
+        """Ignoring the wrap-up ``max_wrap_up_retries`` times ends the run, as in ``AgentNode``.
+
+        Without this the wrap-up repeats on every cycle until ``max_cycles``,
+        which in production is hundreds of full-context LLM calls with no tool
+        running in between. With the limit set to 3 and
+        ``IDENTICAL_CALL_MAX_NUDGES`` (2), the agent gets two nudges (cycles 3-4),
+        then one wrap-up per retry (cycles 5..4+retries), and the next repeat
+        raises instead of sending yet another wrap-up.
+        """
+        node = build_tool_node(
+            identical_call_limit=self.IDENTICAL_CALL_LIMIT,
+            identical_call_max_wrap_up_retries=max_wrap_up_retries,
+        )
+
+        _, history = await run_react_cycles(node, cycles=cycles_before_stuck)
+        assert (
+            self._guard_messages(history)
+            == [self.NUDGE, self.NUDGE] + [self.WRAP_UP] * max_wrap_up_retries
+        )
+
+        with pytest.raises(AgentStuckError, match="ignored the wrap-up instruction"):
+            await run_react_cycles(node, cycles=cycles_before_stuck + 1)
+
+    @pytest.mark.asyncio
+    async def test_skipped_call_resolves_its_pending_ui_card(
+        self, guarded_tool_node, run_react_cycles, ui_history, mock_toolset, mock_tool
+    ):
+        """A skipped call still gets a UI entry under its tool_call_id.
+
+        The notifier streams a PENDING card per tool call as soon as the chunk arrives and only replaces it with an
+        entry carrying the same ``message_id``. Executed calls get that from ``_execute_tool``; skipped ones must get it
+        from the guard or the card spins until the session ends.
+        """
+        mock_toolset.get = Mock(return_value=mock_tool)
+
+        await run_react_cycles(guarded_tool_node, cycles=3)
+
+        ui_history.log.error.assert_called_once_with(
+            tool=mock_tool,
+            tool_call_args={"param": "a"},
+            message=IDENTICAL_CALL_SKIPPED_UI_MESSAGE.format(tool_name="test_tool"),
+            event=UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+            message_id="call_2",
+            subsession_id=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_skipped_call_to_unknown_tool_logs_no_ui_entry(
+        self, guarded_tool_node, run_react_cycles, ui_history, mock_toolset
+    ):
+        """A repeated call to a tool outside the toolset is skipped without a UI entry.
+
+        ``_execute_one`` answers such a call with "Tool X not found" and never logs to the UI, so there is no tool
+        object to log against here either. The guard still trips on the identical "not found" results and injects its
+        nudge; only the UI entry is left out.
+        """
+        mock_toolset.__contains__ = Mock(return_value=False)
+        mock_toolset.get = Mock(return_value=None)
+
+        _, history = await run_react_cycles(guarded_tool_node, cycles=3)
+
+        tool_messages = [m for m in history if isinstance(m, ToolMessage)]
+        assert [m.content for m in tool_messages[:2]] == [
+            "Tool test_tool not found",
+            "Tool test_tool not found",
+        ]
+        assert is_guard_nudge(tool_messages[2])
+        ui_history.log.error.assert_not_called()
 
 
 class TestToolNodeRealToolAinvoke:

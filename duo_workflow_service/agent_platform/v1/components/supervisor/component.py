@@ -690,6 +690,8 @@ class SupervisorAgentComponent(AgentComponentBase):
             # Never a subagent: its own active_subsession would mis-attribute
             # these to whichever subagent ran last.
             session_id_key=DEFAULT_SESSION_ID_KEY,
+            identical_call_limit=self.identical_tool_call_limit,
+            identical_call_max_wrap_up_retries=self.max_wrap_up_retries,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",

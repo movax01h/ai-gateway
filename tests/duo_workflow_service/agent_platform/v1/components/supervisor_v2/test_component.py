@@ -831,3 +831,59 @@ class TestSupervisorV2DelegationEventWiring:
         assert call_kwargs["additional_properties"].label == supervisor_name
         assert call_kwargs["additional_properties"].value == flow_id
         assert call_kwargs["additional_properties"].extra["parallel"] is True
+
+
+class TestSupervisorV2IdenticalToolCallLimit:
+    """Tests for identical_tool_call_limit wiring on SupervisorAgentComponentV2.
+
+    Mirrors the v1 supervisor suite: both supervisors build their own ToolNode and must forward the inherited field or
+    a YAML setting silently does nothing once the factory promotes the component.
+    """
+
+    @pytest.mark.usefixtures(
+        "mock_agent_node_cls",
+        "mock_final_response_node_cls",
+        "mock_delegation_prepare_node_cls",
+        "mock_delegation_collect_node_cls",
+    )
+    @pytest.mark.parametrize("identical_tool_call_limit", [0, 3])
+    def test_attach_passes_identical_tool_call_limit_to_tool_node(
+        self,
+        mock_tool_node_cls,
+        mock_router,
+        make_supervisor,
+        mock_state_graph,
+        identical_tool_call_limit,
+    ):
+        supervisor = make_supervisor(
+            identical_tool_call_limit=identical_tool_call_limit
+        )
+        supervisor.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_tool_node_cls.call_args[1]
+        assert call_kwargs["identical_call_limit"] == identical_tool_call_limit
+
+    @pytest.mark.usefixtures(
+        "mock_agent_node_cls",
+        "mock_final_response_node_cls",
+        "mock_delegation_prepare_node_cls",
+        "mock_delegation_collect_node_cls",
+    )
+    @pytest.mark.parametrize(
+        "kwargs,expected",
+        [({"max_wrap_up_retries": 5}, 5), ({}, 3)],
+    )
+    def test_attach_passes_max_wrap_up_retries_to_tool_node(
+        self,
+        mock_tool_node_cls,
+        mock_router,
+        make_supervisor,
+        mock_state_graph,
+        kwargs,
+        expected,
+    ):
+        supervisor = make_supervisor(identical_tool_call_limit=3, **kwargs)
+        supervisor.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_tool_node_cls.call_args[1]
+        assert call_kwargs["identical_call_max_wrap_up_retries"] == expected
