@@ -341,6 +341,10 @@ def _log_upload_read(
     the author. This line is the service's own part, and it fires on every attempt because a failed download is still
     credential spend.
 
+    ``outcome`` reports the download, not what the model received: ``success`` means the client answered the request,
+    even when the payload then failed the image checks. That case reads as ``size_bytes`` set with ``response_type``
+    ``text``, since the bytes were pulled into the service before the check refused them.
+
     Fields this layer cannot fill: ``author_name`` (only ids reach the service), ``target_id`` (uploads are addressed
     by secret and filename), ``ip_address`` (the request arrives over gRPC) and ``details.token_type`` (the client
     holds the credential). The upload secret stays out because it is part of the download URL.

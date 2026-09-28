@@ -10,6 +10,7 @@ from langchain.tools import ToolException
 
 from contract import contract_pb2
 from duo_workflow_service.entities.image_response import (
+    MAX_IMAGE_DECODED_BYTES,
     supported_image_formats_display,
 )
 from duo_workflow_service.gitlab.gitlab_api import Project
@@ -642,6 +643,37 @@ class TestReadFile:
         # many decoded bytes, delivered as an image.
         _, fields = security_log.info.call_args
         assert fields["details"]["response_type"] == "image"
+        assert fields["gitlab"]["size_bytes"] == len(payload)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    async def test_rejected_upload_image_is_logged_as_a_completed_download(
+        self, mock_project
+    ):
+        # The event reports the download, not the conversion: the client
+        # answered and the bytes came in, so the outcome is a success even
+        # though the size check then refused them and the model got text.
+        payload = b"\x89PNG\r\n\x1a\n" + b"\0" * MAX_IMAGE_DECODED_BYTES
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_image_response(
+                "image/png", payload
+            )
+        )
+        tool = ReadFile(description="Read file content")
+        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            response = await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
+
+        assert isinstance(response, str)
+        assert "too large" in response
+
+        _, fields = security_log.info.call_args
+        assert fields["details"]["outcome"] == "success"
+        assert fields["details"]["response_type"] == "text"
         assert fields["gitlab"]["size_bytes"] == len(payload)
 
 
