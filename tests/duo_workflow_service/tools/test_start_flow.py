@@ -80,11 +80,9 @@ def test_flow_identifier_map_covers_all_flow_names():
 # ---------------------------------------------------------------------------
 
 
-def test_description_does_not_contain_user_approval_sentence(tool):
-    assert (
-        "The user must approve this tool call before the flow starts"
-        not in tool.description
-    )
+def test_description_does_not_mention_approval(tool):
+    """Approvals can be switched off, so the description must not promise one."""
+    assert "approve" not in tool.description
 
 
 def test_description_mentions_async_progress(tool):
@@ -249,7 +247,14 @@ def test_start_flow_input_rejects_developer_without_goal():
 @pytest.mark.asyncio
 async def test_execute_fix_pipeline_success(tool, gitlab_client_mock):
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-123"})
+        return_value=GitLabHttpResponse(
+            status_code=201,
+            body={
+                "id": "wf-123",
+                "project_id": 123,
+                "gitlab_url": "https://gitlab.com",
+            },
+        )
     )
 
     result = await tool.arun(
@@ -285,7 +290,14 @@ async def test_execute_fix_pipeline_success(tool, gitlab_client_mock):
 async def test_execute_code_review_cross_project(tool, gitlab_client_mock):
     """code_review with a URL from a different project uses that project."""
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-xp"})
+        return_value=GitLabHttpResponse(
+            status_code=201,
+            body={
+                "id": "wf-xp",
+                "project_id": 456,
+                "gitlab_url": "https://gitlab.com",
+            },
+        )
     )
 
     result = await tool.arun(
@@ -301,6 +313,10 @@ async def test_execute_code_review_cross_project(tool, gitlab_client_mock):
 
     data = json.loads(result)
     assert data["status"] == "started"
+    # The session URL points at the flow's project, not the chat context's.
+    assert data["session_url"] == (
+        "https://gitlab.com/other-group/other-project/-/automate/agent-sessions/wf-xp"
+    )
 
     posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
     assert posted_body["goal"] == "7"
@@ -406,7 +422,7 @@ async def test_execute_string_body_response(tool, gitlab_client_mock):
     gitlab_client_mock.apost = AsyncMock(
         return_value=GitLabHttpResponse(
             status_code=201,
-            body=json.dumps({"id": "wf-str"}),
+            body=json.dumps({"id": "wf-str", "project_id": 123}),
         )
     )
 
@@ -431,7 +447,10 @@ async def test_execute_string_body_response(tool, gitlab_client_mock):
 @pytest.mark.asyncio
 async def test_execute_developer_goal_only(tool, gitlab_client_mock):
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-dev1"})
+        return_value=GitLabHttpResponse(
+            status_code=201,
+            body={"id": "wf-dev1", "project_id": 42},
+        )
     )
 
     result = await tool.arun(
@@ -445,6 +464,10 @@ async def test_execute_developer_goal_only(tool, gitlab_client_mock):
 
     data = json.loads(result)
     assert data["status"] == "started"
+    # The project came from the chat context, so its web_url is the base.
+    assert data["session_url"] == (
+        "https://gitlab.com/group/project/-/automate/agent-sessions/wf-dev1"
+    )
 
     posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
     assert posted_body["goal"] == "Add a dark mode toggle to the settings page"
@@ -454,10 +477,42 @@ async def test_execute_developer_goal_only(tool, gitlab_client_mock):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "project,body",
+    [
+        ({"id": 42}, {"id": "wf-dev2", "project_id": 42}),
+        (
+            {"id": 42, "web_url": "https://gitlab.com/group/project"},
+            {"project_id": 42},
+        ),
+    ],
+    ids=["project_without_web_url", "response_without_id"],
+)
+async def test_execute_without_url_parts_returns_no_url(
+    metadata, gitlab_client_mock, project, body
+):
+    tool = StartFlow(metadata={**metadata, "project": project})
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=201, body=body)
+    )
+
+    result = await tool.arun({"flow": {"name": "developer", "goal": "x"}})
+
+    assert json.loads(result)["session_url"] is None
+
+
+@pytest.mark.asyncio
 async def test_execute_developer_cross_project(tool, gitlab_client_mock):
     """Developer with project_url targets that project instead of self.project."""
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-dev-xp"})
+        return_value=GitLabHttpResponse(
+            status_code=201,
+            body={
+                "id": "wf-dev-xp",
+                "project_id": 789,
+                "gitlab_url": "https://gitlab.com/",
+            },
+        )
     )
 
     result = await tool.arun(
@@ -472,6 +527,10 @@ async def test_execute_developer_cross_project(tool, gitlab_client_mock):
 
     data = json.loads(result)
     assert data["status"] == "started"
+    # The trailing slash in gitlab_url must not produce a double slash.
+    assert data["session_url"] == (
+        "https://gitlab.com/other-team/other-repo/-/automate/agent-sessions/wf-dev-xp"
+    )
 
     posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
     assert posted_body["project_id"] == "other-team/other-repo"
@@ -508,12 +567,16 @@ async def test_execute_developer_does_not_add_additional_context(
 
 
 @pytest.mark.asyncio
-async def test_execute_without_project(tool_no_project, gitlab_client_mock):
+async def test_execute_namespace_level_session_returns_no_url(tool, gitlab_client_mock):
+    """A namespace-level session (no project_id in the response) has no page in Rails."""
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-789"})
+        return_value=GitLabHttpResponse(
+            status_code=201,
+            body={"id": "wf-789", "gitlab_url": "https://gitlab.com"},
+        )
     )
 
-    result = await tool_no_project.arun(
+    result = await tool.arun(
         {
             "flow": {
                 "name": "developer",
@@ -525,10 +588,70 @@ async def test_execute_without_project(tool_no_project, gitlab_client_mock):
     data = json.loads(result)
     assert data["status"] == "started"
     assert data["workflow_id"] == "wf-789"
+    # Rails has no instance-level session page, so no link beats a 404 link.
     assert data["session_url"] is None
 
-    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
-    assert "project_id" not in posted_body
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flow_input",
+    [
+        {"name": "developer", "goal": "Say hi"},
+        {"name": "sast_fp_detection", "vulnerability_id": "1"},
+        {"name": "resolve_sast_vulnerability", "vulnerability_id": "1"},
+        {"name": "secrets_fp_detection", "vulnerability_id": "1"},
+    ],
+)
+async def test_execute_without_any_project_raises_recoverable_error(
+    tool_no_project, gitlab_client_mock, flow_input
+):
+    """Rails only starts project-level workflows, so fail before the POST with a next step."""
+    gitlab_client_mock.apost = AsyncMock()
+
+    with pytest.raises(StartFlowError) as exc_info:
+        await tool_no_project.arun({"flow": flow_input})
+
+    message = str(exc_info.value)
+    assert "Ask the user which project to use" in message
+    assert "project_url" in message
+    # Security flows have no project_url field, so they need another way forward.
+    assert "can only be started from a chat opened in that project" in message
+    assert exc_info.value.response == "This agent needs a project to run in."
+    gitlab_client_mock.apost.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_without_chat_project_uses_flow_project_session_url(
+    tool_no_project, gitlab_client_mock
+):
+    """A project-level flow started from a projectless chat session still gets its URL."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=201,
+            body={
+                "id": "wf-np",
+                "project_id": 123,
+                "gitlab_url": "https://gitlab.com",
+            },
+        )
+    )
+
+    result = await tool_no_project.arun(
+        {
+            "flow": {
+                "name": "code_review",
+                "merge_request_url": (
+                    "https://gitlab.com/group/project/-/merge_requests/42"
+                ),
+            }
+        }
+    )
+
+    data = json.loads(result)
+    assert data["status"] == "started"
+    assert data["session_url"] == (
+        "https://gitlab.com/group/project/-/automate/agent-sessions/wf-np"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -643,11 +766,30 @@ async def test_execute_returns_unavailable_when_flow_is_disabled(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status_code", [400, 404, 422, 500])
-async def test_execute_http_failure_non_403(tool, gitlab_client_mock, status_code):
+@pytest.mark.parametrize(
+    "status_code,message,expected_detail",
+    [
+        (
+            400,
+            "400 Bad request - AI Catalog flows can only be executed in project context",
+            "400 Bad request - AI Catalog flows can only be executed in project context",
+        ),
+        ("404", "404 Not found", "404 Not found"),
+        (
+            422,
+            "Insufficient permissions to create a new pipeline",
+            "Insufficient permissions to create a new pipeline",
+        ),
+    ],
+)
+async def test_execute_http_failure_surfaces_rails_message(
+    tool, gitlab_client_mock, status_code, message, expected_detail
+):
+    """Client errors surface the real reason Rails returned instead of masking it."""
     gitlab_client_mock.apost = AsyncMock(
         return_value=GitLabHttpResponse(
-            status_code=status_code, body={"message": "some internal detail"}
+            status_code=int(status_code),
+            body={"message": message},
         )
     )
 
@@ -661,12 +803,104 @@ async def test_execute_http_failure_non_403(tool, gitlab_client_mock, status_cod
             ),
         )
 
-    assert str(status_code) in str(exc_info.value)
+    assert f"HTTP {status_code}" in str(exc_info.value)
+    assert expected_detail in str(exc_info.value)
+    assert exc_info.value.response == expected_detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"message": "some internal detail"},
+        {"message": {"goal": ["can't be blank", "is too short"]}},
+        {"error": "unexpected shape"},
+        "not json at all",
+        None,
+    ],
+)
+async def test_execute_http_failure_server_error_stays_generic(
+    tool, gitlab_client_mock, body
+):
+    """Server errors never surface internals, whatever the body holds."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=500, body=body)
+    )
+
+    with pytest.raises(StartFlowError) as exc_info:
+        await tool._execute(
+            flow=StartFixPipelineFlowInput(
+                name="fix_pipeline",
+                pipeline_url="https://gitlab.com/group/project/-/pipelines/99",
+                merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
+                source_branch="feature-branch",
+            ),
+        )
+
     assert "An internal error occurred while starting the flow." in str(exc_info.value)
     assert "some internal detail" not in str(exc_info.value)
     assert (
         exc_info.value.response == "An internal error occurred while starting the flow."
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [400, 404, 422])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"message": 123},
+        {"message": "   "},
+        # e.g. an HTML error page from a proxy in front of Rails
+        "<html><body>Bad Request</body></html>",
+    ],
+)
+async def test_execute_http_failure_unusable_body_stays_generic(
+    tool, gitlab_client_mock, status_code, body
+):
+    """A body without a usable message is not surfaced as-is."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=status_code, body=body)
+    )
+
+    with pytest.raises(StartFlowError) as exc_info:
+        await tool._execute(
+            flow=StartFixPipelineFlowInput(
+                name="fix_pipeline",
+                pipeline_url="https://gitlab.com/group/project/-/pipelines/99",
+                merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
+                source_branch="feature-branch",
+            ),
+        )
+
+    assert (
+        exc_info.value.response == "An internal error occurred while starting the flow."
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_http_failure_validation_error_dict_is_flattened(
+    tool, gitlab_client_mock
+):
+    """A Grape validation body ({"message": {"field": [errs]}}) is flattened."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=400,
+            body={"message": {"goal": ["can't be blank"]}},
+        )
+    )
+
+    with pytest.raises(StartFlowError) as exc_info:
+        await tool._execute(
+            flow=StartFixPipelineFlowInput(
+                name="fix_pipeline",
+                pipeline_url="https://gitlab.com/group/project/-/pipelines/99",
+                merge_request_url="https://gitlab.com/group/project/-/merge_requests/1",
+                source_branch="feature-branch",
+            ),
+        )
+
+    assert exc_info.value.response == "goal: can't be blank"
 
 
 @pytest.mark.asyncio
@@ -883,7 +1117,9 @@ async def test_execute_security_flows_success(
 ):
     vulnerability_id = "gid://gitlab/Vulnerability/42"
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-sec-1"})
+        return_value=GitLabHttpResponse(
+            status_code=201, body={"id": "wf-sec-1", "project_id": 42}
+        )
     )
 
     result = await tool.arun(
@@ -904,31 +1140,6 @@ async def test_execute_security_flows_success(
     assert "additional_context" not in posted_body
     assert "issue_id" not in posted_body
     assert "merge_request_id" not in posted_body
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "flow_name",
-    ["sast_fp_detection", "resolve_sast_vulnerability", "secrets_fp_detection"],
-)
-async def test_execute_security_flows_without_project_omits_project_id(
-    tool_no_project, gitlab_client_mock, flow_name
-):
-    gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-sec-np"})
-    )
-
-    await tool_no_project.arun(
-        {
-            "flow": {
-                "name": flow_name,
-                "vulnerability_id": "gid://gitlab/Vulnerability/1",
-            }
-        }
-    )
-
-    posted_body = json.loads(gitlab_client_mock.apost.call_args.kwargs["body"])
-    assert "project_id" not in posted_body
 
 
 # ---------------------------------------------------------------------------
@@ -1350,7 +1561,9 @@ async def test_execute_catalog_flow_success(
     tool, gitlab_client_mock, flow_input, expected_goal
 ):
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(status_code=201, body={"id": "wf-777"})
+        return_value=GitLabHttpResponse(
+            status_code=201, body={"id": "wf-777", "project_id": 42}
+        )
     )
 
     result = await tool.arun({"flow": flow_input})
@@ -1405,26 +1618,12 @@ async def test_execute_catalog_flow_without_project_raises(
 
 
 # A wrong consumer ID is the likeliest catalog-flow failure, since the ID is
-# supplied by hand, so each status Rails distinguishes gets its own wording.
+# supplied by hand. The real reason Rails returns is surfaced so the agent can
+# act on it, tagged with the catalog-flow hint rather than a masked message.
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "status_code,expected_detail",
-    [
-        (
-            400,
-            "This flow can't be started. Check that the ID is correct and that "
-            "the flow is still enabled in this project.",
-        ),
-        (
-            403,
-            "This flow isn't enabled in this project, or you don't have "
-            "sufficient permissions to start it.",
-        ),
-        (404, "No flow with that ID is enabled in this project."),
-    ],
-)
+@pytest.mark.parametrize("status_code", [400, 404, 422])
 async def test_execute_catalog_flow_http_failure_detail(
-    tool, gitlab_client_mock, status_code, expected_detail
+    tool, gitlab_client_mock, status_code
 ):
     gitlab_client_mock.apost = AsyncMock(
         return_value=GitLabHttpResponse(
@@ -1438,21 +1637,47 @@ async def test_execute_catalog_flow_http_failure_detail(
             {"flow": {"name": "catalog_flow", "ai_catalog_item_consumer_id": 755}}
         )
 
-    assert exc_info.value.response == expected_detail
+    assert exc_info.value.response == (
+        "Agent or flow is not enabled for this project "
+        "(flow ID: see ai_catalog_item_consumer_id)"
+    )
     assert str(status_code) in str(exc_info.value)
-    # The Rails message can name records the user may not be able to see.
+    # The real Rails message is surfaced, not masked.
+    assert "Agent or flow is not enabled for this project" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_execute_catalog_flow_http_failure_403_keeps_fixed_wording(
+    tool, gitlab_client_mock
+):
+    """A 403 keeps the permission-focused wording regardless of the body."""
+    gitlab_client_mock.apost = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=403,
+            body={"message": "Agent or flow is not enabled for this project"},
+        )
+    )
+
+    with pytest.raises(StartFlowError) as exc_info:
+        await tool.arun(
+            {"flow": {"name": "catalog_flow", "ai_catalog_item_consumer_id": 755}}
+        )
+
+    assert exc_info.value.response == (
+        "This flow isn't available, or you don't have sufficient permissions to start it."
+    )
+    # The 403 body can name records the caller may not be able to see.
     assert "Agent or flow is not enabled for this project" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status_code", [422, 500])
 async def test_execute_catalog_flow_http_failure_falls_back_to_generic_detail(
-    tool, gitlab_client_mock, status_code
+    tool, gitlab_client_mock
 ):
-    """Statuses Rails does not distinguish keep the generic wording."""
+    """A server error with no usable message keeps the generic wording."""
     gitlab_client_mock.apost = AsyncMock(
         return_value=GitLabHttpResponse(
-            status_code=status_code, body={"message": "some internal detail"}
+            status_code=500, body={"message": "some internal detail"}
         )
     )
 
