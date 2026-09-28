@@ -419,3 +419,135 @@ class TestUseAiPromptScanningFlag:
 
             # Verify no scanning was performed
             mock_fire_and_forget.assert_not_called()
+
+
+class TestImageBlocksAreNotScanned:
+    """Image blocks never reach the scanner.
+
+    A text scanner cannot read an injection out of base64, so sending the
+    payload finds nothing and adds megabytes to every scan: a blocking
+    HiddenLayer round trip in INTERRUPT mode, a megabyte-scale POST per image
+    in LOG_ONLY. The whole block is dropped from the scan copy, since in
+    LOG_ONLY every remaining string value (type, id, mime type) would be its
+    own call. The text that travels alongside the image must still be scanned,
+    and the caller's response must come back with its payload intact. The
+    helper itself is unit-tested in ``entities/test_image_blocks.py``.
+    """
+
+    PAYLOAD = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" * 64
+    RESPONSE = [
+        {"type": "text", "text": "Read image file: ./x.png (image/png, 1 KB)."},
+        {"type": "image", "base64": PAYLOAD, "mime_type": "image/png"},
+    ]
+
+    def _scan_with(self, level, scan_patch_target):
+        with (
+            patch(
+                "duo_workflow_service.tracking.current_monitoring_context"
+            ) as mock_context,
+            patch(scan_patch_target) as mock_scan,
+            patch(
+                "duo_workflow_service.security.prompt_security.PromptSecurity"
+            ) as mock_security,
+        ):
+            mock_context.get.return_value = MonitoringContext(
+                use_ai_prompt_scanning=True,
+                prompt_injection_protection_level=level,
+            )
+            mock_security.apply_security_to_tool_response.return_value = self.RESPONSE
+
+            from duo_workflow_service.security.scanner_factory import (
+                apply_security_scanning,
+            )
+
+            result = apply_security_scanning(
+                response=self.RESPONSE, tool_name="read_file", trust_level=None
+            )
+            return mock_scan, result
+
+    def test_interrupt_scans_the_text_without_the_payload(self):
+        mock_scan, result = self._scan_with(
+            PromptInjectionProtectionLevel.INTERRUPT,
+            "duo_workflow_service.security.scanner_factory._run_blocking_scan",
+        )
+
+        # Exactly the text block, joined the way the scanner joins: its `type`
+        # value and its text. Nothing of the image block, payload or otherwise.
+        scanned_text = mock_scan.call_args[0][0]
+        assert scanned_text == "text Read image file: ./x.png (image/png, 1 KB)."
+        # The response handed back to the model keeps its pixels.
+        assert result[1]["base64"] == self.PAYLOAD
+
+    def test_log_only_schedules_only_the_text_block(self):
+        mock_scan, result = self._scan_with(
+            PromptInjectionProtectionLevel.LOG_ONLY,
+            "duo_workflow_service.security.scanner_factory._schedule_fire_and_forget_scan",
+        )
+
+        # One block left to walk, so one scan for its text (plus the scheduler's
+        # pre-existing one for the block's `type` value), none for the image.
+        scheduled = mock_scan.call_args[0][0]
+        assert scheduled == [self.RESPONSE[0]]
+        assert result[1]["base64"] == self.PAYLOAD
+
+
+class TestImagePayloadExemptionSurvivesSanitization:
+    """The exemption keys on shape because the sanitization step erases provenance.
+
+    ``PromptSecurity.apply_security_to_tool_response`` rebuilds every dict for a
+    tool that has security functions, so the ``_InternalImageBlock`` marker the
+    producer set is a plain dict by the time the scan step sees it. Keying the
+    exemption on provenance would therefore exempt nothing for those tools. This
+    runs the real sanitizer, no mocks on it, for both kinds of tool.
+    """
+
+    PAYLOAD = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" * 64
+
+    def _response(self):
+        from duo_workflow_service.entities.image_blocks import image_content_block
+
+        return [
+            {"type": "text", "text": "Read image file: ./x.png (image/png, 1 KB)."},
+            image_content_block(base64=self.PAYLOAD, mime_type="image/png"),
+        ]
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            # Empty security-function override: the block reaches the scan step untouched.
+            "read_file",
+            # Default security functions: every dict is rebuilt, the provenance marker is lost.
+            "run_mcp_tool",
+        ],
+    )
+    def test_interrupt_never_scans_the_payload_whatever_the_tool(self, tool_name):
+        from duo_workflow_service.entities.image_blocks import is_internal_image_block
+
+        with (
+            patch(
+                "duo_workflow_service.tracking.current_monitoring_context"
+            ) as mock_context,
+            patch(
+                "duo_workflow_service.security.scanner_factory._run_blocking_scan"
+            ) as mock_scan,
+        ):
+            mock_context.get.return_value = MonitoringContext(
+                use_ai_prompt_scanning=True,
+                prompt_injection_protection_level=PromptInjectionProtectionLevel.INTERRUPT,
+            )
+
+            from duo_workflow_service.security.scanner_factory import (
+                apply_security_scanning,
+            )
+
+            result = apply_security_scanning(
+                response=self._response(), tool_name=tool_name, trust_level=None
+            )
+
+        # Exactly the text block; the image block, marker or no marker, is gone.
+        scanned_text = mock_scan.call_args[0][0]
+        assert scanned_text == "text Read image file: ./x.png (image/png, 1 KB)."
+        # The model still gets its pixels, whether or not the marker survived.
+        assert result[1]["base64"] == self.PAYLOAD
+        # Documents the fact the design rests on: only the override tool keeps provenance.
+        assert is_internal_image_block(result[1]) is (tool_name == "read_file")
