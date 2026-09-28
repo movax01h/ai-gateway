@@ -67,6 +67,7 @@ __all__ = [
     "render_image_blocks_as_text",
     "strip_image_payloads",
     "with_block_text",
+    "without_image_blocks",
 ]
 
 
@@ -193,6 +194,37 @@ def _placeholder(mime_type: Optional[str]) -> str:
     (which can). Naming either one would mislead the model about the other.
     """
     return f"[{mime_type or 'image'} omitted from history]"
+
+
+def without_image_blocks(content: Any) -> Any:
+    """Return a copy of *content* with every inline image block removed.
+
+    Walks nested dicts and lists and drops each block matching :func:`is_image_content_block`, the whole block rather
+    than only its payload. Everything else is kept, and *content* itself is not modified. If *content* is itself an
+    image block, the result is ``{}``.
+
+    Unlike :func:`strip_image_payloads`, which leaves the model a text placeholder in a flat block list, this leaves
+    no trace. Use it for copies that should never see image data.
+
+    Matches on shape, not provenance, so image blocks that were rebuilt as plain dicts are still removed. Widen
+    :func:`is_image_content_block` when the block schema grows.
+    """
+    if is_image_content_block(content):
+        # A bare image block as the whole response: nothing on it to scan.
+        return {}
+    if isinstance(content, dict):
+        return {
+            k: without_image_blocks(v)
+            for k, v in content.items()
+            if not is_image_content_block(v)
+        }
+    if isinstance(content, list):
+        return [
+            without_image_blocks(item)
+            for item in content
+            if not is_image_content_block(item)
+        ]
+    return content
 
 
 def block_text(block: Any) -> Optional[str]:

@@ -16,6 +16,7 @@ from duo_workflow_service.entities.image_blocks import (
     render_image_blocks_as_text,
     strip_image_payloads,
     with_block_text,
+    without_image_blocks,
 )
 
 PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\npixels").decode()
@@ -154,6 +155,41 @@ class TestStripImagePayloads:
         strip_image_payloads(content)
 
         assert content[0]["base64"] == PNG_B64
+
+
+class TestWithoutImageBlocks:
+    IMAGE = {"type": "image", "base64": PNG_B64, "mime_type": "image/png"}
+    TEXT = {"type": "text", "text": "keep"}
+
+    @pytest.mark.parametrize(
+        "content,expected",
+        [
+            # Image-shaped blocks without a payload have nothing to drop and
+            # reach the scanner as they are, the safe direction.
+            ([{"type": "image", "base64": None}], [{"type": "image", "base64": None}]),
+            ([{"type": "image"}], [{"type": "image"}]),
+            ([{"type": "image", "base64": ""}], [{"type": "image", "base64": ""}]),
+            # The shared predicate matches any truthy base64, not only strings,
+            # so the exemption's scope visibly follows `is_image_content_block`.
+            ([{"type": "image", "base64": 1234}], []),
+            # Whole blocks go, wherever they sit; text beside them stays.
+            ([TEXT, IMAGE], [TEXT]),
+            ({"outer": [TEXT, IMAGE], "direct": IMAGE}, {"outer": [TEXT]}),
+            # A bare image block as the whole response leaves nothing to scan.
+            (IMAGE, {}),
+            ("plain text", "plain text"),
+        ],
+    )
+    def test_removes_only_payload_bearing_image_blocks(self, content, expected):
+        assert without_image_blocks(content) == expected
+
+    def test_original_content_is_not_mutated(self):
+        content = {"outer": [self.TEXT, self.IMAGE], "direct": self.IMAGE}
+        before = copy.deepcopy(content)
+
+        without_image_blocks(content)
+
+        assert content == before
 
 
 def test_image_token_estimate_is_a_sane_constant():
