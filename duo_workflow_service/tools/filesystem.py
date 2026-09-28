@@ -273,13 +273,10 @@ def _image_response_to_blocks_if_enabled(
     )
 
 
-# A markdown upload reference as GitLab stores it in issue/MR descriptions:
-# `/uploads/<secret>/<filename>`. Secrets are 32 lowercase hex chars today;
-# 10-hex secrets exist on very old uploads (FileUploader VALID_SECRET_PATTERN
-# accepts 10-32). The filename can never contain a slash (Rails
-# NO_SLASH_URL_PART_REGEX). The leading slash is optional: models routinely
-# normalize the reference to a repo-relative-looking `uploads/...` (observed
-# live in the M3 run).
+# `/uploads/<secret>/<filename>`, as GitLab stores it in issue and MR markdown.
+# Secrets are 32 hex chars today, 10 to 32 on old uploads (FileUploader
+# VALID_SECRET_PATTERN), and a filename never contains a slash. The leading
+# slash is optional because models routinely drop it (seen live).
 _UPLOAD_REF_PATTERN = re.compile(
     r"\A(?P<leading_slash>/?)uploads/(?P<secret>[0-9a-f]{10,32})/(?P<filename>[^/]+)\Z"
 )
@@ -292,12 +289,9 @@ _UPLOAD_SECRET_LENGTH = 32
 def _resolve_upload_reference(file_path: str, project: Optional[Project]) -> str | None:
     """Map a markdown upload reference onto its REST API download path.
 
-    Returns ``None`` unless ``file_path`` is exactly an upload reference AND
-    the workflow has a project to scope the download to (the reference itself
-    carries no project, and the API lookup is parent-scoped server-side).
-    The executor pattern-matches the returned path strictly before attaching
-    the user's credential, so the shape here and the client-side check must
-    stay in sync.
+    Needs a project: the reference carries none and the API lookup is parent-scoped. The
+    executor matches the returned path strictly before attaching the user's credential, so
+    this shape and the client-side check have to stay in sync.
     """
     # Upload reading is part of gated image support, both switches: with the
     # flag off or a client that has not declared the capability, the reference
@@ -343,17 +337,13 @@ def _log_upload_read(
 ) -> None:
     """Record the service's decision to ask for an upload, in the security logging standard's shape.
 
-    The SIEM-bound record of this read is the Rails audit trail, not this line: every tool call reaches Rails as an
-    ``ai_tool_invoked`` audit event carrying the tool arguments, upload reference included, and Rails attaches the
-    author and the request IP on ingestion. The download itself runs client-side under the user's own credential and
-    is authenticated by the Rails API. This event is the service's own part, deciding to ask for it, and it fires on
-    every attempt because a failed download is still credential spend the user may need to account for.
+    The SIEM-bound record is the Rails ``ai_tool_invoked`` audit event, which already carries the tool arguments and
+    the author. This line is the service's own part, and it fires on every attempt because a failed download is still
+    credential spend.
 
-    Standard fields this layer cannot fill, and why: ``author_name`` (only ids reach the service), ``target_id`` (the
-    uploads API addresses a file by secret and filename, there is no numeric id), ``ip_address`` (the request arrives
-    over gRPC through Workhorse) and ``details.token_type`` (the credential is held and spent by the client). The
-    upload secret is part of the download URL, so it stays out on principle even though the API needs project access
-    regardless.
+    Fields this layer cannot fill: ``author_name`` (only ids reach the service), ``target_id`` (uploads are addressed
+    by secret and filename), ``ip_address`` (the request arrives over gRPC) and ``details.token_type`` (the client
+    holds the credential). The upload secret stays out because it is part of the download URL.
     """
     web_url = project.get("web_url") if project else None
     _security_log.info(
@@ -381,12 +371,9 @@ async def _read_upload_reference(
 ) -> str | list | None:
     """Download ``file_path`` as an upload, or return ``None`` if it is not one.
 
-    Both read tools funnel through here so the three steps that belong together
-    (recognising the reference, sending the download, converting the image)
-    cannot drift apart between them. That matters more than it looks:
-    ``ReadFileChunked`` supersedes ``ReadFile`` under the same tool name on
-    chunked-capable clients, so a difference between the two classes is
-    invisible to any test that exercises only one of them.
+    Both read tools funnel through here because ``ReadFileChunked`` supersedes ``ReadFile``
+    under the same tool name, so a difference between the two would be invisible to a test
+    that exercises only one.
 
     Args:
         metadata: Tool metadata carrying the executor outbox.

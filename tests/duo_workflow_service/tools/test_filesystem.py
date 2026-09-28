@@ -460,9 +460,8 @@ class TestReadFile:
     async def test_slashless_short_secret_stays_a_workspace_path(
         self, metadata_with_project
     ):
-        # `uploads/<10 hex>/logo.png` is a believable directory in a real
-        # repository; without the leading slash there is nothing else to tell
-        # them apart, so it must be read as the file it looks like.
+        # `uploads/<10 hex>/logo.png` is a believable repository directory, and
+        # without the leading slash nothing else tells them apart.
         tool = ReadFile(description="Read file content")
         tool.metadata = metadata_with_project
         path = "uploads/0123456789/logo.png"
@@ -497,11 +496,8 @@ class TestReadFile:
     async def test_upload_read_is_logged_without_the_secret(
         self, metadata_with_project
     ):
-        # The download runs client-side under the user's own credential and the
-        # tool call itself reaches Rails as an audit event; this records the
-        # service deciding to ask for it, in the security logging standard's
-        # field names. The secret is part of the download URL and must not
-        # appear anywhere in the event.
+        # Rails already audits the tool call; this records the service deciding
+        # to ask. The secret is part of the URL, so it stays out of the event.
         tool = ReadFile(description="Read file content")
         tool.metadata = metadata_with_project
 
@@ -516,10 +512,8 @@ class TestReadFile:
 
         security_log.info.assert_called_once()
         _, fields = security_log.info.call_args
-        # The security logging standard's common fields, in its names and
-        # placement: a unique event id, the actor as an integer author_id, the
-        # project as the entity, the upload as the target, and outcome inside
-        # details with standard values only.
+        # The standard's common fields, in its names and placement, with
+        # outcome inside details and standard values only.
         uuid.UUID(fields["id"])
         assert fields["event_type"] == "data.read.upload"
         assert fields["author_id"] == 42
@@ -585,9 +579,7 @@ class TestReadFile:
     async def test_read_file_chunked_rewrites_upload_reference(
         self, metadata_with_project, path_prefix
     ):
-        # ReadFileChunked replaces ReadFile under the same tool name on
-        # chunked-capable clients (all modern CLIs), so it must carry the
-        # same upload branch; this is the class the live M3 runs exercised.
+        # The class modern clients actually get, so it needs the same branch.
         tool = ReadFileChunked(description="Read file content")
         tool.metadata = metadata_with_project
 
@@ -602,9 +594,7 @@ class TestReadFile:
         assert action.runReadFile.offset == 0
         assert action.runReadFile.limit == 0
 
-    # Both classes, because ReadFileChunked supersedes ReadFile under the same
-    # tool name on chunked-capable clients: testing one says nothing about the
-    # one the live path actually uses.
+    # Both classes: one supersedes the other under the same tool name.
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("image_support_enabled")
     @pytest.mark.parametrize("tool_class", [ReadFile, ReadFileChunked])
