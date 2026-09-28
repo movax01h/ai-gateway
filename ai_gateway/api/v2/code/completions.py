@@ -152,7 +152,6 @@ async def completions(
         completions_agent_factory,
         completions_amazon_q_factory,
         internal_event_client,
-        region,
         config.model_keys(),
         config,
     )
@@ -507,13 +506,9 @@ def _create_post_processor_for_model(
     """Create the appropriate post processor factory based on model provider and name."""
 
     # Vertex Codestral: apply STRIP_ASTERISKS
-    vertex_codestral_models = [
-        KindLiteLlmModel.CODESTRAL_2501,
-        KindLiteLlmModel.CODESTRAL_2508,
-    ]
     if (
         model_metadata.provider == KindModelProvider.VERTEX_AI
-        and model_name in vertex_codestral_models
+        and "codestral" in model_metadata.llm_definition.family
     ):
         return Factory(
             PostProcessor,
@@ -545,7 +540,6 @@ def _create_post_processor_for_model(
 
 def _get_provider_config(
     provider: Optional[KindModelProvider],
-    region: str,
     payload: CompletionsRequestWithVersion,
 ) -> CompletionConfig:
     """Get the appropriate completion configuration for the given provider."""
@@ -582,7 +576,7 @@ def _get_provider_config(
             extra_kwargs=_get_context_kwargs(provider),
         )
 
-    if provider == KindModelProvider.FIREWORKS or not _allow_vertex_codestral(region):
+    if provider == KindModelProvider.FIREWORKS:
         return CompletionConfig(
             handler_class=FireworksHandler,
             requires_prompt_registry=True,
@@ -604,7 +598,6 @@ def _build_code_completions(
     completions_agent_factory: Factory[CodeCompletions],
     completions_amazon_q_factory: Factory[CodeCompletions],
     internal_event_client: InternalEventsClient,
-    region: str,
     model_keys: dict,
     config: Configuration,
 ) -> tuple[CodeCompletions, dict]:
@@ -618,6 +611,10 @@ def _build_code_completions(
     )
 
     gitlab_identifier: Optional[str] = None
+    if _is_gitlab_default(payload):
+        payload.model_provider = KindModelProvider.GITLAB
+        payload.model_name = None
+
     if payload.model_provider == KindModelProvider.GITLAB:
         model_metadata = create_model_metadata(
             {
@@ -632,8 +629,7 @@ def _build_code_completions(
         actual_provider = KindModelProvider.from_definition_provider(
             model_metadata.llm_definition.provider
         )
-        # Store the GitLab identifier for later use
-        gitlab_identifier = payload.model_name
+        gitlab_identifier = model_metadata.llm_definition.gitlab_identifier
         # Update payload with legacy model_provider/name for completions code
         payload.model_provider = actual_provider
         provider_model_name = (
@@ -650,11 +646,7 @@ def _build_code_completions(
             payload.model_name = provider_model_name
             VertexHandler(payload, request, {}).update_completion_params()
 
-    provider_config = _get_provider_config(
-        payload.model_provider,
-        region,
-        payload,
-    )
+    provider_config = _get_provider_config(payload.model_provider, payload)
 
     kwargs: dict[str, Any] = {}
 
@@ -739,8 +731,19 @@ def _generation_suggestion_choices(text: str) -> list:
     return [SuggestionsResponse.Choice(text=text)] if text else []
 
 
-def _allow_vertex_codestral(region: str):
-    return not region.startswith("asia-")
+def _is_gitlab_default(payload: CompletionsRequestWithVersion) -> bool:
+    """Whether the request asks for the GitLab default model rather than an explicit one.
+
+    Rails sends the legacy Fireworks pair for every user on "GitLab default", so that pair, a request with no model and
+    a `gitlab` request without an identifier all mean "let default_models decide". Other legacy pairs stay explicit.
+    """
+    if payload.model_provider in (None, KindModelProvider.GITLAB):
+        return payload.model_name is None
+
+    return (
+        payload.model_provider == KindModelProvider.FIREWORKS
+        and payload.model_name == KindLiteLlmModel.CODESTRAL_2508
+    )
 
 
 async def _handle_stream(

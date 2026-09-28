@@ -19,6 +19,7 @@ from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import (
     _track_code_suggestions_event,
 )
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.base_chat import Message, Role
@@ -1224,7 +1225,7 @@ class TestCodeCompletions:
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         "model_details",
-        [{"model_provider": "vertex-ai", "model_name": "codestral-2508"}, {}],
+        [{"model_provider": "vertex-ai", "model_name": "codestral-2508"}],
     )
     def test_vertex_codestral(
         self,
@@ -1263,6 +1264,55 @@ class TestCodeCompletions:
         assert "codestral" in result["model"]["name"]
 
         assert result["choices"][0]["text"] == "Post-processed completion response"
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        "model_details",
+        [
+            {},
+            {"model_provider": "gitlab"},
+            {"model_provider": "fireworks_ai", "model_name": "codestral-2508"},
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("default_identifier", "expected_engine"),
+        [
+            ("codestral_2508_vertex", "vertex-ai"),
+            ("codestral_2508_fireworks", "fireworks_ai"),
+        ],
+    )
+    def test_gitlab_default_uses_default_models(
+        self,
+        mock_client: Mock,
+        mock_prompt_ainvoke: Mock,
+        mock_post_processor: Mock,
+        model_details: Dict[str, str],
+        default_identifier: str,
+        expected_engine: str,
+    ):
+        params = {
+            "prompt_version": 2,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+        }
+        params.update(model_details)
+        default_model = ModelSelectionConfig.instance().get_model(default_identifier)
+
+        with patch(
+            "ai_gateway.model_selection.ModelSelectionConfig.get_model_for_feature",
+            return_value=default_model,
+        ) as mock_get_model_for_feature:
+            response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        mock_get_model_for_feature.assert_called_with("code_completions")
+        assert mock_prompt_ainvoke.called
+        assert response.json()["model"]["engine"] == expected_engine
 
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
@@ -1361,9 +1411,8 @@ class TestCodeCompletions:
         assert body["model"]["engine"] == expected_model_engine
         assert body["model"]["name"] == expected_model_name
         assert (
-            body["choices"][0]["text"] == expect_post_processed
-            and "Post-processed completion response"
-        ) or "whatever"
+            body["choices"][0]["text"] == "Post-processed completion response"
+        ) == expect_post_processed
 
     @pytest.mark.parametrize("mock_model_responses", [False])
     @pytest.mark.parametrize(
@@ -1419,43 +1468,24 @@ class TestCodeCompletions:
             assert "prompt_cache_max_len" not in call_kwargs
 
     @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize("gcp_location", ["asia-mock-location"])
     @pytest.mark.parametrize(
-        (
-            "gcp_location",
-            "model_details",
-            "expected_model",
-            "expected_content",
-        ),
+        ("model_details", "expected_engine"),
         [
-            # Codestral FIM models use the new fim_fireworks prompt which passes only prefix
-            # as user message. The FIM formatting is done internally by CompletionLiteLLM.
             (
-                "asia-mock-location",
                 {"model_provider": "vertex-ai", "model_name": "codestral-2508"},
-                "codestral-2508",
-                "foo",
+                "vertex-ai",
             ),
-            # Qwen models still use the chat-based prompt with system message
-            (
-                "asia-mock-location",
-                {},
-                "qwen2p5-coder-7b",
-                "<|fim_prefix|>foo<|fim_suffix|>\n<|fim_middle|>",
-            ),
+            ({}, "fireworks_ai"),
         ],
     )
-    @pytest.mark.usefixtures(
-        "mock_litellm_acompletion", "mock_litellm_atext_completion"
-    )
-    def test_code_completion_in_asia(
+    def test_code_completion_in_asia_is_not_forced_to_fireworks(
         self,
         mock_client: Mock,
-        model_details: Dict[str, str],
-        # pylint: disable-next=unused-argument
-        expected_model: str,  # parametrize-injected; not referenced in test body
-        # pylint: disable-next=unused-argument
-        expected_content: str,  # parametrize-injected; not referenced in test body
         mock_prompt_ainvoke: Mock,
+        mock_post_processor: Mock,
+        model_details: Dict[str, str],
+        expected_engine: str,
     ):
         params = {
             "prompt_version": 1,
@@ -1467,19 +1497,13 @@ class TestCodeCompletions:
                 "content_below_cursor": "\n",
             },
         }
-
         params.update(model_details)
 
-        self._send_code_completions_request(mock_client, params)
+        response = self._send_code_completions_request(mock_client, params)
 
-        expected_input = {
-            "prefix": "foo",
-            "suffix": "\n",
-            "file_name": "main.py",
-            "language": "python",
-        }
-
-        mock_prompt_ainvoke.assert_called_once_with(expected_input)
+        assert response.status_code == 200
+        assert response.json()["model"]["engine"] == expected_engine
+        mock_prompt_ainvoke.assert_called_once()
 
     @pytest.mark.parametrize("mock_model_responses", [False])
     def test_codestral_uses_text_completion_api(

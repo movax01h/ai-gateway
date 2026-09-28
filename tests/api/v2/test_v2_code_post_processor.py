@@ -10,6 +10,8 @@ from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessorOperation,
 )
 from ai_gateway.config import Config
+from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
+from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models import KindModelProvider
 
 
@@ -29,12 +31,24 @@ class TestCreatePostProcessorForModel:
     """Tests for _create_post_processor_for_model function."""
 
     @pytest.mark.parametrize("model_metadata_provider", [KindModelProvider.VERTEX_AI])
+    @pytest.mark.parametrize(
+        "llm_definition",
+        [
+            ChatLiteLLMDefinition(
+                name="Codestral 25.08",
+                gitlab_identifier="codestral_2508_vertex",
+                max_context_tokens=128000,
+                family=["completion_text", "codestral"],
+                params=ChatLiteLLMParams(model="codestral-2"),
+            )
+        ],
+    )
     def test_vertex_codestral_creates_post_processor_with_strip_asterisks(
         self, mock_config, model_metadata
     ):
         """Test that Vertex Codestral creates post processor with STRIP_ASTERISKS."""
         result = _create_post_processor_for_model(
-            model_name="codestral-2501",
+            model_name="codestral-2",
             config=mock_config,
             model_metadata=model_metadata,
         )
