@@ -8,4 +8,3 @@ prompt_template:
     {% include 'code_review_prescan/user/1.0.0.jinja' %}
 params:
   timeout: 60
-  cache_control_injection_points: []

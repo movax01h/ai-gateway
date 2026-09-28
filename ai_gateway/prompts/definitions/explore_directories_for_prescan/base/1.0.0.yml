@@ -8,4 +8,3 @@ prompt_template:
     {% include 'explore_directories_for_prescan/user/1.0.0.jinja' %}
 params:
   timeout: 60
-  cache_control_injection_points: []
