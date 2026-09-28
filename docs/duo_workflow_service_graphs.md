@@ -1568,3 +1568,53 @@ graph TD;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
 ```
+
+## Graph: `workplan 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> research;
+    research(research<br>#91;AgentComponent#93;);
+    research_gate(research_gate<br>#91;HumanInputComponent#93;);
+    planner(planner<br>#91;AgentComponent#93;);
+    plan_gate(plan_gate<br>#91;HumanInputComponent#93;);
+    score_fetch(score_fetch<br>#91;DeterministicStepComponent#93;);
+    score_fetch_notes(score_fetch_notes<br>#91;DeterministicStepComponent#93;);
+    rubric(rubric<br>#91;AgentComponent#93;):::subagent;
+    coverage(coverage<br>#91;AgentComponent#93;):::subagent;
+    falsifier(falsifier<br>#91;AgentComponent#93;):::subagent;
+    xexam_rubric(xexam_rubric<br>#91;AgentComponent#93;):::subagent;
+    xexam_coverage(xexam_coverage<br>#91;AgentComponent#93;):::subagent;
+    xexam_falsifier(xexam_falsifier<br>#91;AgentComponent#93;):::subagent;
+    readiness_supervisor(readiness_supervisor<br>#91;AgentComponent#93;<br>max_delegations: 6);
+    readiness_supervisor <-.->|"subagent"| rubric;
+    readiness_supervisor <-.->|"subagent"| coverage;
+    readiness_supervisor <-.->|"subagent"| falsifier;
+    readiness_supervisor <-.->|"subagent"| xexam_rubric;
+    readiness_supervisor <-.->|"subagent"| xexam_coverage;
+    readiness_supervisor <-.->|"subagent"| xexam_falsifier;
+    research -.->|"ready"| planner;
+    research -.->|"needs_input"| research_gate;
+    research -.->|"default_route"| research_gate;
+    research_gate --> research;
+    planner -.->|"ask_question"| plan_gate;
+    planner -.->|"plan_ready"| score_fetch;
+    planner -.->|"default_route"| plan_gate;
+    plan_gate --> planner;
+    score_fetch -.->|"success"| score_fetch_notes;
+    score_fetch -.->|"default_route"| __end__;
+    score_fetch_notes -.->|"success"| readiness_supervisor;
+    score_fetch_notes -.->|"default_route"| __end__;
+    readiness_supervisor --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;
+```
