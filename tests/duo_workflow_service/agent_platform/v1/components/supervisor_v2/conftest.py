@@ -368,8 +368,9 @@ class RoutingMockSubagentComponent:
     actually-compiled ``StateGraph`` so tests can exercise
     ``SubagentDispatchNode.run`` (via ``ainvoke``) end-to-end without needing
     a fully wired ``AgentComponent``. The single node echoes back a
-    component-scoped ``final_answer`` and conversation history, mirroring the
-    contract ``AgentComponent.compile_as_subagent`` documents.
+    component-scoped ``final_answer`` and conversation history, and marks the
+    subsession ``COMPLETED`` the way the real graph's ``EndComponent`` does,
+    mirroring the contract ``AgentComponent.compile_as_subagent`` documents.
     """
 
     def __init__(self, name: str, description: str = "A test subagent.", answer=None):
@@ -380,6 +381,7 @@ class RoutingMockSubagentComponent:
     def compile_as_subagent(self):
         def _run(state):
             return {
+                "status": WorkflowStatusEnum.COMPLETED,
                 "conversation_history": {self.name: [AIMessage(content=self._answer)]},
                 "context": {self.name: {"final_answer": self._answer}},
             }

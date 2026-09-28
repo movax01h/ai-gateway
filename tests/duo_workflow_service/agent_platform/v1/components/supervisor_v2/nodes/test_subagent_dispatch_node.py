@@ -25,6 +25,7 @@ from duo_workflow_service.agent_platform.v1.components.supervisor_v2.nodes.subag
     SubagentDispatchNode,
 )
 from duo_workflow_service.agent_platform.v1.state import IOKey
+from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.errors.typing import (
     InvalidRequestException,
@@ -81,15 +82,20 @@ def _subagent_result(
     history: list | None = None,
     context: dict | None = None,
     ui_chat_log: list | None = None,
+    status: WorkflowStatusEnum | None = WorkflowStatusEnum.COMPLETED,
 ) -> dict:
     """Build what a dispatched subagent's own ``ainvoke`` returns.
 
     Every channel is present because ``DelegationPrepareNode._build_initial_state``
     seeds all of them on the dispatched initial state, so LangGraph has a value
     for each one to return.
+
+    ``status`` defaults to what a subagent graph terminated by its own
+    ``EndComponent`` reports (see ``AgentComponent.compile_as_subagent``); pass
+    anything else to model a graph that returned without terminating.
     """
     return {
-        "status": None,
+        "status": status,
         "conversation_history": {subagent_name: history if history is not None else []},
         "ui_chat_log": ui_chat_log if ui_chat_log is not None else [],
         "context": {subagent_name: context if context is not None else {}},
@@ -209,6 +215,36 @@ class TestSubagentDispatchNodeSuccess:
         record = _run_record(result, supervisor_name)
         assert record["status"] == DelegationStatus.COMPLETED
         assert record["final_answer"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "status",
+        [WorkflowStatusEnum.EXECUTION, WorkflowStatusEnum.ERROR, None],
+        ids=["still-executing", "errored", "unset"],
+    )
+    async def test_a_run_that_did_not_reach_its_terminal_node_is_recorded_as_an_error(
+        self, dispatch_node, compiled_graph, developer_name, supervisor_name, status
+    ):
+        """The subsession reports its own outcome, and only ``COMPLETED`` counts as a completed run.
+
+        ``compile_as_subagent`` terminates the graph with an ``EndComponent``, so any other status means the graph
+        returned without terminating. Recording that as a completed run would report a half-finished subagent's partial
+        answer to the supervisor as if it were final.
+        """
+        compiled_graph.ainvoke.return_value = _subagent_result(
+            developer_name,
+            context={"final_answer": "Half of the work."},
+            status=status,
+        )
+
+        result = await dispatch_node.run(_dispatched_state(1), config={})
+
+        record = _run_record(result, supervisor_name)
+        assert record["status"] == DelegationStatus.ERROR
+        assert (
+            record["error"]
+            == f"The subagent stopped before finishing (status: {status})."
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
