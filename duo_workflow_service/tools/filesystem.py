@@ -4,7 +4,7 @@ import uuid
 from enum import IntEnum
 from textwrap import dedent
 from typing import Any, ClassVar, List, Optional, Type
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import gitmatch
 import structlog
@@ -356,7 +356,8 @@ def _log_upload_read(
         entity_path=urlparse(web_url).path.strip("/") if web_url else None,
         target_type="upload",
         # Not `filename`: stdlib LogRecord reserves that name and raises.
-        target_details=request_path.rsplit("/", 1)[-1],
+        # Decoded, so the value matches the upload's own name in a SIEM search.
+        target_details=unquote(request_path.rsplit("/", 1)[-1]),
         details={
             "outcome": outcome,
             "provider": "duo_workflow_service",

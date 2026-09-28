@@ -538,6 +538,24 @@ class TestReadFile:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("image_support_enabled")
+    async def test_logged_filename_is_the_upload_s_own_name(
+        self, metadata_with_project
+    ):
+        # The API path percent-encodes the filename; the log records the name a
+        # SIEM search would be matching against.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/a b&c.png")
+
+        _, fields = security_log.info.call_args
+        assert fields["target_details"] == "a b&c.png"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_failed_upload_download_is_still_logged(self, metadata_with_project):
         # A failed download is still credential spend the user may need to
         # account for, so the trail records the attempt, not just successes.
