@@ -1,22 +1,14 @@
 # pylint: disable=file-naming-for-tests
 """Integration test: a read_file image response becomes an Anthropic image block.
 
-Drives the CLI's own registry flow (developer/2.0.0-interactive) through the
-real gRPC server with a FakeExecutor answering ``runReadFile`` with the typed
-``ActionResponse.imageResponse`` the client executor emits for image files. The model is
-scripted at the Anthropic SDK boundary: the first call returns a read_file
-tool use, the second call captures the request payload. The assertion is the
-whole point of the perception path: the tool_result reaching the SDK contains
-a real base64 image block, byte-identical to the "file" the executor served.
+Drives the CLI's own registry flow through the real gRPC server, with a FakeExecutor
+answering ``runReadFile`` with the typed image response and the model scripted at the
+Anthropic SDK boundary. Asserts on what reaches the SDK: a base64 image block identical to
+the file the executor served, and, with the flag on but no client capability declared, the
+refusal instead.
 
-The gate is proven from the same seat: with the flag on but no client
-capability declared, the read_file description the model receives carries no
-image lines and the served image comes back as the client refusal, never as
-pixels.
-
-The shared container fixture wires Anthropic to FakeModel under
-``mock_model_responses``, so this module builds its own container with real
-model wiring; the SDK method itself is patched, so no network I/O happens.
+This module builds its own DI container because the shared fixture wires Anthropic to
+FakeModel. The SDK method is patched, so nothing touches the network.
 """
 
 import base64
@@ -63,21 +55,15 @@ from tests.duo_workflow_service.integration.conftest import (
     start_registry_flow_event,
 )
 
-# Kept deliberately tiny: this payload ends up in every assertion context and
-# CI log line on failure, so the canary carries no more bytes than the
-# assertions need.
+# Kept tiny: on failure this payload lands in assertion context and CI logs.
 FAKE_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"deterministic canary payload" * 2
 FAKE_PNG_BASE64 = base64.b64encode(FAKE_PNG_BYTES).decode()
 
 
 @pytest.fixture(name="mock_duo_workflow_service_container", scope="module")
 def real_model_container_fixture():
-    """Rebuild the DI container with real model wiring (no FakeModel).
-
-    Same construction as the shared fixture in tests/duo_workflow_service/
-    conftest.py, but with ``mock_model_responses=False`` so the Anthropic
-    provider resolves to the real ChatAnthropic factory.
-    """
+    """Rebuild the DI container with ``mock_model_responses=False``, so the Anthropic provider resolves to the real
+    ChatAnthropic factory rather than FakeModel."""
     # pylint: disable=import-outside-toplevel
     from ai_gateway.config import Config
     from ai_gateway.container import ContainerApplication
@@ -222,12 +208,10 @@ async def _tool_use_event_stream():
 
 
 async def _final_answer_event_stream():
-    """A clean end-of-turn answer, so the flow parks on its human-input interrupt and the server closes the stream
-    normally.
+    """A clean end-of-turn answer, so the flow parks on its human-input interrupt.
 
-    Erroring out of the second call instead would work, but the failed workflow's teardown logs the whole state as rich
-    tracebacks — slow enough to trip the exchange timeout on a loaded CI runner, and megabytes of captured output when
-    the test is red.
+    Erroring out of the second call would also end the exchange, but a failed workflow's teardown logs the whole state
+    as tracebacks: slow enough to trip the timeout on a loaded runner, and megabytes of output when the test is red.
     """
     yield RawMessageStartEvent(
         type="message_start",
@@ -261,11 +245,7 @@ async def _final_answer_event_stream():
 
 
 def _message_shapes(messages: list[dict[str, Any]]) -> list[tuple[Any, Any]]:
-    """Role + content-block types per message, for failure output.
-
-    Payloads (base64 image data, prompt text) stay out of assertion messages so a red run never sprays them into the CI
-    log.
-    """
+    """Role + content-block types per message, so a red run prints shapes rather than base64 and prompt text."""
     shapes: list[tuple[Any, Any]] = []
     for message in messages:
         content = message.get("content")
@@ -323,12 +303,12 @@ async def _run_read_file_exchange(
 ) -> tuple[ImageFakeExecutor, list[dict[str, Any]]]:
     """One full exchange: the scripted model asks for ./screenshot.png and the fake executor serves the PNG.
 
-    The instance flag is always on, via the request header as production sends it. What the fake client declares is the
-    variable, so the two tests differ only in the client half of the switch.
+    The instance flag is always on, through the request header as production sends it, so the two tests differ only in
+    what the fake client declares.
 
     Returns:
-        The executor (for the actions it saw) and the kwargs of every SDK call, so a test can look at what the model
-        was told (``tools``) and what it got back (``messages``).
+        The executor, for the actions it saw, and the kwargs of every SDK call, so a test can check what the model was
+        told (``tools``) and what it got back (``messages``).
     """
     executor = ImageFakeExecutor(integration_conftest.WORKFLOW_ID)
     calls: list[dict[str, Any]] = []
@@ -426,10 +406,8 @@ async def test_read_file_image_reaches_anthropic_as_image_block(
     text_blocks = [b for b in blocks if b.get("type") == "text"]
     assert any("Read image file" in b["text"] for b in text_blocks)
 
-    # The base64 payload must appear ONLY inside the image block's source.data,
-    # never as plain text anywhere else in the payload. Walk the structure
-    # rather than serializing it, so the one legitimate occurrence can be
-    # excluded precisely.
+    # The payload belongs in the image block's source.data and nowhere else, so
+    # walk the structure to exclude that one occurrence precisely.
     leaks = [
         text
         for text in _iter_strings(calls[1]["messages"])
