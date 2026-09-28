@@ -207,6 +207,56 @@ class TestFlowGraphBuilder:
         assert "terminate_flow" in attached_nodes
         assert "abort_flow" in attached_nodes
 
+    def test_terminal_component_params_carry_the_runs_identity(
+        self, builder, flow_type, user
+    ):
+        """A subclass seeding its own terminal reuses these instead of restating them."""
+        assert builder._terminal_component_params("end") == {
+            "name": "end",
+            "flow_id": "test-workflow-123",
+            "flow_type": flow_type,
+            "user": user,
+        }
+
+    def test_a_subclass_seeds_its_own_terminals_through_the_seam(
+        self,
+        mock_tools_registry,
+        mock_prompt_registry,
+        mock_schema_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_graph,
+    ):
+        """``_seed_terminal_components`` is the one override a different boundary needs."""
+        terminal = _component_stub("end")
+
+        class _OneTerminalBuilder(FlowGraphBuilder):
+            @override
+            def _seed_terminal_components(
+                self, graph: StateGraph
+            ) -> dict[str, BaseComponent]:
+                terminal.attach(graph)
+                return {"end": terminal}
+
+        builder = _OneTerminalBuilder(
+            tools_registry=mock_tools_registry,
+            prompt_registry=mock_prompt_registry,
+            schema_registry=mock_schema_registry,
+            workflow_id="test-workflow-123",
+            workflow_type=flow_type,
+            user=user,
+            internal_event_client=mock_internal_event_client,
+            catalog_items=CatalogItems(),
+        )
+        agent = _component_stub("agent")
+
+        with _component_classes({"AgentComponent": _ComponentClassStub(agent)}):
+            components = builder._build_components(_config(), mock_graph)
+
+        assert components == {"end": terminal, "agent": agent}
+        terminal.attach.assert_called_once_with(mock_graph)
+
     @pytest.mark.usefixtures("mock_graph")
     def test_component_receives_the_builders_dependencies(
         self,
