@@ -114,3 +114,123 @@ def _to_openai_image_block(block: Any) -> Any:
         "type": "image_url",
         "image_url": {"url": f"data:{mime_type};base64,{block['base64']}"},
     }
+
+
+# An empty tool slot reads like a failed tool call to the model.
+TOOL_IMAGE_PLACEHOLDER = "(see attached image)"
+TOOL_IMAGES_BANNER = "Attached image(s) from tool result:"
+
+# Providers whose litellm transform passes tool content verbatim to an
+# OpenAI-shape endpoint, where the tool role has no image slot. Anthropic
+# providers stay out: litellm converts their tool images natively, and
+# Anthropic prompt caching anchors on the final message, which a hoisted user
+# message would displace.
+IMAGE_HOIST_PROVIDERS = frozenset(
+    {"openai", "custom_openai", "fireworks_ai", "hosted_vllm"}
+)
+
+# Gemini and Claude share custom_llm_provider="vertex_ai"; only Gemini rejects
+# tool-result images ("function_response.parts is not supported"), so the
+# model name decides within these providers.
+_GEMINI_HOIST_PROVIDERS = frozenset({"vertex_ai", "gemini"})
+
+
+def hoist_tool_result_images(
+    messages: list[dict], custom_llm_provider: Optional[str], model: Optional[str]
+) -> list[dict]:
+    """Lift tool-result images into a synthetic user message, for providers whose tool role cannot carry them.
+
+    Each run of consecutive tool messages has its image blocks removed (other blocks keep their positions, an
+    images-only result gets ``TOOL_IMAGE_PLACEHOLDER``) and collected into one user message appended after the run.
+    Request-time only, never persisted.
+
+    The synthetic message can land after a user turn or before an assistant turn. Templates strict enough to reject
+    that also reject the tool role itself, so nothing reaching this path fits them anyway; merging into the adjacent
+    user turn or inserting a filler assistant message are the known fixes if a tool-capable template ever needs one.
+
+    Args:
+        messages: Message dicts from the LiteLLM converter, image blocks already in OpenAI ``image_url`` form.
+        custom_llm_provider: litellm provider tag used for the gate.
+        model: The resolved model name; decides within Gemini-hosting providers.
+
+    Returns:
+        A new list with tool-result images hoisted, or ``messages`` itself when the gate is closed or there is
+        nothing to hoist.
+    """
+    if not _should_hoist_tool_images(custom_llm_provider, model):
+        return messages
+    if not any(
+        message.get("role") == "tool"
+        and isinstance(message.get("content"), list)
+        and any(_is_openai_image_block(block) for block in message["content"])
+        for message in messages
+    ):
+        return messages
+
+    hoisted: list[dict] = []
+    pending_images: list[dict] = []
+
+    def flush() -> None:
+        if pending_images:
+            hoisted.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": TOOL_IMAGES_BANNER},
+                        *pending_images,
+                    ],
+                }
+            )
+            pending_images.clear()
+
+    for message in messages:
+        if message.get("role") == "tool":
+            content = message.get("content")
+            if isinstance(content, list):
+                kept, images = _split_tool_images(content)
+                if images:
+                    pending_images.extend(images)
+                    message = {
+                        **message,
+                        "content": kept
+                        or [{"type": "text", "text": TOOL_IMAGE_PLACEHOLDER}],
+                    }
+            # A bare-string tool result is still part of the run: no flush.
+            hoisted.append(message)
+        else:
+            flush()
+            hoisted.append(message)
+    flush()
+    return hoisted
+
+
+def _should_hoist_tool_images(
+    custom_llm_provider: Optional[str], model: Optional[str]
+) -> bool:
+    if custom_llm_provider in IMAGE_HOIST_PROVIDERS:
+        return True
+    return (
+        custom_llm_provider in _GEMINI_HOIST_PROVIDERS
+        and "gemini" in (model or "").lower()
+    )
+
+
+def _is_openai_image_block(block: Any) -> bool:
+    return (
+        isinstance(block, dict)
+        and block.get("type") == "image_url"
+        and bool(
+            isinstance(block.get("image_url"), dict) and block["image_url"].get("url")
+        )
+    )
+
+
+def _split_tool_images(content: list) -> tuple[list, list[dict]]:
+    kept: list = []
+    images: list[dict] = []
+    for block in content:
+        if _is_openai_image_block(block):
+            images.append(block)
+        else:
+            kept.append(block)
+    return kept, images
