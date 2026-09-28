@@ -99,26 +99,7 @@ class FlowGraphBuilder:
     def _build_components(
         self, flow_config: FlowConfig, graph: StateGraph
     ) -> dict[str, BaseComponent]:
-        end_component = EndComponent(
-            name="end",
-            flow_id=self._workflow_id,
-            flow_type=self._workflow_type,
-            user=self._user,
-        )
-        end_component.attach(graph)
-
-        abort_component = AbortComponent(
-            name="abort",
-            flow_id=self._workflow_id,
-            flow_type=self._workflow_type,
-            user=self._user,
-        )
-        abort_component.attach(graph)
-
-        components: dict[str, BaseComponent] = {
-            "end": end_component,
-            "abort": abort_component,
-        }
+        components = self._seed_terminal_components(graph)
 
         # Returns the authored configs unchanged when no component claims an entry.
         components_config = bind_catalog_items(
@@ -340,3 +321,31 @@ class FlowGraphBuilder:
             tool_names += self._tools_registry.mcp_tool_names()
 
         return self._tools_registry.toolset(tool_names, tool_options=tool_options)
+
+    def _terminal_component_params(self, name: str) -> dict[str, Any]:
+        """The constructor params every terminal component takes.
+
+        Not an extension point: it exists so a subclass overriding
+        ``_seed_terminal_components`` does not restate this run's identity.
+        """
+        return {
+            "name": name,
+            "flow_id": self._workflow_id,
+            "flow_type": self._workflow_type,
+            "user": self._user,
+        }
+
+    def _seed_terminal_components(self, graph: StateGraph) -> dict[str, BaseComponent]:
+        """Attach the terminal components no config declares, and seed the pool with them.
+
+        A name absent from the returned pool is not routable: v1 seeds both
+        ``end`` and ``abort``, so a router may target either. A subclass that
+        needs a different terminal overrides this and nothing else.
+        """
+        end_component = EndComponent(**self._terminal_component_params("end"))
+        end_component.attach(graph)
+
+        abort_component = AbortComponent(**self._terminal_component_params("abort"))
+        abort_component.attach(graph)
+
+        return {"end": end_component, "abort": abort_component}
