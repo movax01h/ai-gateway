@@ -9,7 +9,6 @@ from duo_workflow_service.entities.image_blocks import is_image_content_block
 from duo_workflow_service.entities.image_response import (
     _FORMAT_DISPLAY_NAMES,
     MAX_IMAGE_DECODED_BYTES,
-    SUPPORTED_IMAGE_MIME_TYPES,
     image_response_to_blocks,
     supported_image_formats_display,
 )
@@ -67,7 +66,7 @@ class TestValidImage:
         assert isinstance(result, list)
         assert result[0]["text"].startswith("Read image file (")
 
-    @pytest.mark.parametrize("mime_type", sorted(SUPPORTED_IMAGE_MIME_TYPES))
+    @pytest.mark.parametrize("mime_type", sorted(ALLOWED_IMAGE_MIME_TYPES))
     def test_all_supported_mime_types(self, mime_type):
         data = REAL_HEADERS[mime_type] + b"not real pixels"
         result = image_response_to_blocks(
@@ -78,16 +77,11 @@ class TestValidImage:
         assert result[1]["mime_type"] == mime_type
 
     def test_supported_formats_display_covers_the_allowlist(self):
-        # The display map feeds the tool descriptions; a format the allowlist
-        # carries but the map cannot name would silently never be advertised.
-        assert set(_FORMAT_DISPLAY_NAMES) == set(SUPPORTED_IMAGE_MIME_TYPES)
+        # A format the allowlist carries but the map cannot name would never be
+        # advertised, so the model would never try it.
+        assert set(_FORMAT_DISPLAY_NAMES) == set(ALLOWED_IMAGE_MIME_TYPES)
         assert supported_image_formats_display() == "PNG, JPEG, WebP"
-
-    def test_supported_set_is_the_shared_attachment_policy(self):
-        # One format policy for both image entry points; GIF and HEIC are out
-        # for the provider-intersection reasons documented in attachments.py.
-        assert SUPPORTED_IMAGE_MIME_TYPES is ALLOWED_IMAGE_MIME_TYPES
-        assert "image/gif" not in SUPPORTED_IMAGE_MIME_TYPES
+        assert "image/gif" not in ALLOWED_IMAGE_MIME_TYPES
 
 
 class TestInvalidImage:
@@ -124,8 +118,7 @@ class TestInvalidImage:
 
 
 class TestSizeCap:
-    """Oversized images are rejected at conversion so they never reach the 4 MiB gRPC egress guard (which cancels the
-    whole session)."""
+    """Images above the conversion limit return an error; images at the limit convert."""
 
     def test_over_cap_returns_readable_error(self):
         result = image_response_to_blocks(

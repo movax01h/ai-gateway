@@ -1,8 +1,7 @@
 """The typed image result surfaced from ``ActionResponse.imageResponse``.
 
-A leaf module on purpose: both the executor seam (``executor/action.py``) and
-the consumer (``entities/image_response.py``) import this type, and anything
-heavier here would recreate the action -> tools -> action import cycle.
+Kept a leaf module: ``executor/action.py`` and ``entities/image_response.py`` both import
+this type, and anything heavier here would recreate the action -> tools -> action cycle.
 """
 
 from dataclasses import dataclass
@@ -12,9 +11,8 @@ from dataclasses import dataclass
 class ImageActionResult:
     """A typed image result (``ActionResponse.imageResponse``) from the executor.
 
-    ``data`` is the encoded image file bytes exactly as the client read them;
-    validation (allowed formats, size cap, signature) belongs to the consumer,
-    see ``entities/image_response.py``.
+    ``data`` is the encoded image file as the client read it. Validating format, size and
+    signature belongs to the consumer, ``entities/image_response.py``.
     """
 
     mime_type: str

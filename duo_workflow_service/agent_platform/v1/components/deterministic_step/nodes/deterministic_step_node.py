@@ -127,11 +127,8 @@ class DeterministicStepNode:
         ):
             tool_call_result = await tool.ainvoke(tool_call_args)
 
-        # This result is stored as plain state, not as a message, so the
-        # checkpoint encoder would not strip an image payload from it. Rendering
-        # before the scan also keeps the base64 out of the prompt-injection
-        # scanner: it sees the lead-in and the placeholder, which is all the
-        # text there is.
+        # Render before the scan and before this lands in plain flow state, to
+        # keep image payloads out of scans, checkpoints and later prompts.
         tool_call_result = render_image_blocks_as_text(tool_call_result)
 
         set_hidden_layer_log_context(self._tool_name, tool_call_args)

@@ -195,24 +195,13 @@ def validate_duo_context_exclusions(
         return
 
 
-# The conversion and the description lines advertising it must flip together:
-# advertised but off surprises the model with refusals, and on but unadvertised
-# makes the capability undiscoverable, since models refuse image reads unless
-# the tool says it can. Two switches, both required (_image_support_enabled):
-#
-# - FeatureFlag.DAP_TOOL_IMAGE_INPUT, the instance-side rollout flag. It is
-#   evaluated per user, not per client, so on its own it would advertise image
-#   reads to an older client that still refuses binaries.
-# - IMAGE_READ_CAPABILITY, declared by a client whose executor can answer
-#   read_file with an image. Workhorse intersects declared capabilities with
-#   its allowlist, so on an instance whose Workhorse predates the entry the
-#   capability never arrives and the tools read exactly as they do today.
-#
-# Each tool's model validator strips its note when either switch is off. Tools
-# are built once per run and both contexts are set once per request, so the
-# description and the per-call check below always agree within a run, and a
-# flip takes effect on the next run. The check stays per call rather than
-# captured so it follows the context if that ever gets finer-grained.
+# Descriptions and conversion flip together on two switches, both required
+# (_image_support_enabled): a model refuses image reads unless the description
+# advertises them, and advertising without conversion only earns refusals. The
+# instance flag is evaluated per user rather than per client, so on its own it
+# would advertise to an older client that still refuses binaries. Tools are
+# built once per run and both contexts are set per request, so a flip lands on
+# the next run.
 IMAGE_READ_CAPABILITY = "read_file_image"
 
 _READ_FILE_IMAGE_NOTE = f"""Image files ({supported_image_formats_display()}) are supported: reading one returns the

@@ -153,11 +153,8 @@ _MAGIC_NUMBERS: dict[str, Callable[[bytes], bool]] = {
 def payload_matches_mime_type(payload: bytes, mime_type: str) -> bool:
     """Whether *payload* starts like the format *mime_type* declares.
 
-    Shared by every image entry point (the attachment path below and the
-    tool-read conversion path) so the accepted formats and their recognisers
-    stay one policy. A ``mime_type`` without a recogniser returns ``False``;
-    callers that accept only known formats gate on ``ALLOWED_IMAGE_MIME_TYPES``
-    first.
+    A ``mime_type`` with no recogniser returns ``False``, so callers that accept
+    only known formats gate on ``ALLOWED_IMAGE_MIME_TYPES`` first.
     """
     recogniser = _MAGIC_NUMBERS.get(mime_type)
     return recogniser is not None and recogniser(payload)

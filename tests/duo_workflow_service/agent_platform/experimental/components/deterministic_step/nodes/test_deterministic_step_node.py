@@ -189,11 +189,7 @@ class TestDeterministicStepNode:
         mock_tool_monitoring,
         mock_prompt_security,
     ):
-        """A block list carrying an image is rendered to a string before it is stored in flow state.
-
-        This result lands in context, not in a message, so the checkpoint encoder would not strip the payload: the
-        base64 would ride into every later checkpoint and into any prompt that renders the context as text.
-        """
+        """A block list carrying an image is rendered to a string before it is stored in flow state."""
         payload = "QUFBQQ==" * 512
         mock_tool.ainvoke.return_value = [
             {
@@ -206,9 +202,7 @@ class TestDeterministicStepNode:
 
         result = await deterministic_step_node.run(workflow_state)
 
-        # The scanner runs on the rendered text, so the payload never reaches
-        # HiddenLayer either: a blocking INTERRUPT scan would otherwise carry
-        # the whole image as one string.
+        # The scan sees the rendered text, so no image reaches HiddenLayer.
         scanned = mock_prompt_security.call_args.kwargs["response"]
         assert isinstance(scanned, str)
         assert payload not in scanned

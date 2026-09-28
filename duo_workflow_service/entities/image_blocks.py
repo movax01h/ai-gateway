@@ -261,13 +261,11 @@ def content_as_text(content: Any) -> str:
 
 
 def render_image_blocks_as_text(content: Any) -> Any:
-    """Return *content* unchanged, unless it is a block list carrying an image; then render it as one string.
+    """Render image-bearing block lists as text; return other content unchanged.
 
-    For a consumer that stores a tool result as plain flow state rather than as a message. The checkpoint encoder
-    strips image payloads from message content only, so an image-bearing list kept in state would ride into every
-    checkpoint from then on, and any prompt that renders that state as text would get the base64 inline. The rendered
-    string carries the lead-in and the same placeholder history uses, which is what such a prompt should see anyway.
-    A list without an image is returned by identity: other tools store structured lists on purpose.
+    Use before scanning a tool result or storing it as plain flow state, where the checkpoint encoder's stripping of
+    message images does not apply. Keeps image payloads out of scans, checkpoints and later text prompts, while
+    structured results carrying no image are returned unchanged.
     """
     if isinstance(content, list) and any(is_image_block(block) for block in content):
         return content_as_text(content)
