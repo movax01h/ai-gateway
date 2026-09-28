@@ -2,6 +2,7 @@
 import asyncio
 import os
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, NoReturn, Optional
 from uuid import uuid4
@@ -146,6 +147,14 @@ class ToolAccessPolicies(BaseModel):
     allow: list[str] = []
     ask: list[str] = []
     deny: list[str] = []
+
+
+@dataclass(frozen=True)
+class GraphInvocation:
+    """The input and config one run of the compiled graph streams from."""
+
+    graph_input: Any
+    graph_config: RunnableConfig
 
 
 class AbstractWorkflow(ABC):
@@ -641,12 +650,18 @@ class AbstractWorkflow(ABC):
                 compiled_graph = await asyncio.to_thread(
                     self._compile, goal, tools_registry, checkpointer
                 )
-                graph_input = await self.get_graph_input(
-                    goal, status_event, checkpoint_tuple
+                invocation = await self._resolve_graph_invocation(
+                    compiled_graph=compiled_graph,
+                    graph_config=graph_config,
+                    goal=goal,
+                    status_event=status_event,
+                    checkpoint_tuple=checkpoint_tuple,
                 )
+                # The failure handlers write through the config the graph ran with.
+                graph_config = invocation.graph_config
 
                 async for type, state in compiled_graph.astream(
-                    input=graph_input,
+                    input=invocation.graph_input,
                     config=graph_config,
                     stream_mode=["values", "messages", "updates"],
                 ):
@@ -853,6 +868,26 @@ class AbstractWorkflow(ABC):
         resolve to RESUME/START.
         """
         return None, WorkflowStatusEventEnum.RETRY
+
+    async def _resolve_graph_invocation(
+        self,
+        *,
+        compiled_graph: Any,
+        graph_config: RunnableConfig,
+        goal: str,
+        status_event: str,
+        checkpoint_tuple: Any,
+    ) -> GraphInvocation:
+        """Resolve what this run streams from, once the graph is compiled.
+
+        The default streams ``get_graph_input`` with ``graph_config`` unchanged. Override this to decide with the
+        compiled graph in hand, for example to read the checkpoint tip through ``aget_state``, or to point the run at
+        another checkpoint. An override hands the entries it does not handle to ``super()``, and derives any config it
+        returns from ``graph_config`` so the callbacks and the recursion limit carry over. The failure handlers receive
+        the returned config.
+        """
+        graph_input = await self.get_graph_input(goal, status_event, checkpoint_tuple)
+        return GraphInvocation(graph_input=graph_input, graph_config=graph_config)
 
     async def get_graph_input(
         self, goal: str, status_event: str, checkpoint_tuple: Any
