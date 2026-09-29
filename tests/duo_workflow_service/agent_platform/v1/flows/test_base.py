@@ -46,6 +46,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.errors.typing import (
+    CheckpointFetchError,
     EnvelopeVersionMismatchException,
     InvalidRequestException,
 )
@@ -2227,7 +2228,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             for checkpoint_id, status in statuses_newest_first
         ]
 
-        async def fake_checkpoints_reversed(*, matches=lambda _: True, per_page=20):  # pylint: disable=unused-argument
+        async def fake_checkpoints_reversed(*, matches=lambda _: True, **_kwargs):
             for ct in checkpoint_tuples:
                 if matches(ct.checkpoint.get("channel_values", {})):
                     yield ct
@@ -2305,7 +2306,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             ),
         ]
 
-        async def fake_checkpoints_reversed(*, matches=lambda _: True, per_page=20):  # pylint: disable=unused-argument
+        async def fake_checkpoints_reversed(*, matches=lambda _: True, **_kwargs):
             for checkpoint_tuple in checkpoint_tuples:
                 if matches(checkpoint_tuple.checkpoint.get("channel_values", {})):
                     yield checkpoint_tuple
@@ -2322,6 +2323,162 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         assert call_kwargs["config"]["configurable"]["checkpoint_id"] == "cp-top", (
             "the newer nested pause must not become the top-level graph's resume pin"
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "statuses_newest_first,expected_boundary_id,expected_input_type",
+        [
+            (
+                [
+                    ("cp-2", WorkflowStatusEnum.EXECUTION),
+                    ("cp-1", WorkflowStatusEnum.INPUT_REQUIRED),
+                    ("cp-0", WorkflowStatusEnum.NOT_STARTED),
+                ],
+                "cp-1",
+                Command,
+            ),
+            (
+                [
+                    ("cp-1", WorkflowStatusEnum.NOT_STARTED),
+                    ("cp-0", WorkflowStatusEnum.NOT_STARTED),
+                ],
+                "cp-0",
+                dict,
+            ),
+        ],
+        ids=["input_required_boundary", "oldest_checkpoint_boundary"],
+    )
+    async def test_flow_resolve_stop_recovery_pages_status_only_with_incremental_checkpoints(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+        mock_fetch_workflow_and_container_data,
+        statuses_newest_first,
+        expected_boundary_id,
+        expected_input_type,
+    ):
+        """With incremental checkpoints, the walk pages only the status channel.
+
+        A RESUME boundary is then fetched in full through by_thread_ts for the delta baseline; a START boundary needs
+        only its id, so it is not fetched.
+        """
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+        project, namespace, workflow_config = (
+            mock_fetch_workflow_and_container_data.return_value
+        )
+        mock_fetch_workflow_and_container_data.return_value = (
+            project,
+            namespace,
+            {**workflow_config, "incremental_checkpoints_enabled": True},
+        )
+        requested_channels = []
+
+        async def fake_checkpoints_reversed(*, channels=None, **_kwargs):
+            requested_channels.append(channels)
+            for checkpoint_id, status in statuses_newest_first:
+                yield self._checkpoint_tuple_with_status(checkpoint_id, status.value)
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+        full_boundary = self._checkpoint_tuple_with_status(
+            expected_boundary_id, WorkflowStatusEnum.INPUT_REQUIRED.value
+        )
+        full_boundary.checkpoint["channel_values"]["ui_chat_log"] = []
+        mock_checkpointer.fetch_checkpoint = AsyncMock(return_value=full_boundary)
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.cancelled_turn_context",
+            return_value=[],
+        ) as mock_cancelled_turn_context:
+            await flow_instance.run("test goal")
+
+        assert requested_channels == [["status"]]
+        call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        assert isinstance(call_kwargs["input"], expected_input_type)
+        assert (
+            call_kwargs["config"]["configurable"]["checkpoint_id"]
+            == expected_boundary_id
+        )
+        delta_boundary = mock_cancelled_turn_context.call_args.kwargs["boundary"]
+        if expected_input_type is Command:
+            mock_checkpointer.fetch_checkpoint.assert_awaited_once_with(
+                expected_boundary_id
+            )
+            assert delta_boundary is full_boundary
+        else:
+            mock_checkpointer.fetch_checkpoint.assert_not_awaited()
+            assert delta_boundary is None
+
+    @pytest.mark.asyncio
+    async def test_flow_resolve_stop_recovery_fails_when_the_boundary_is_missing(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+        mock_fetch_workflow_and_container_data,
+    ):
+        """A RESUME boundary that the walk listed but by_thread_ts cannot find fails the run, instead of resuming
+        without the rollback pin."""
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+        project, namespace, workflow_config = (
+            mock_fetch_workflow_and_container_data.return_value
+        )
+        mock_fetch_workflow_and_container_data.return_value = (
+            project,
+            namespace,
+            {**workflow_config, "incremental_checkpoints_enabled": True},
+        )
+
+        async def fake_checkpoints_reversed(**_kwargs):
+            yield self._checkpoint_tuple_with_status(
+                "cp-0", WorkflowStatusEnum.INPUT_REQUIRED.value
+            )
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+        mock_checkpointer.fetch_checkpoint = AsyncMock(return_value=None)
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+        ) as mock_log_exception:
+            await flow_instance.run("test goal")
+
+        mock_state_graph.compile.return_value.astream.assert_not_called()
+        mock_log_exception.assert_called_once()
+        error = mock_log_exception.call_args[0][0]
+        assert isinstance(error, CheckpointFetchError)
+        assert "cp-0" in str(error)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_flow_resolve_stop_recovery_keeps_full_pages_without_incremental_checkpoints(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+    ):
+        """Without incremental checkpoints Rails has no by_thread_ts read, so the walk pages full checkpoints and
+        resumes from the walked boundary."""
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+        requested_channels = []
+
+        async def fake_checkpoints_reversed(*, channels=None, **_kwargs):
+            requested_channels.append(channels)
+            yield self._checkpoint_tuple_with_status(
+                "cp-0", WorkflowStatusEnum.INPUT_REQUIRED.value
+            )
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.cancelled_turn_context",
+            return_value=[],
+        ):
+            await flow_instance.run("test goal")
+
+        assert requested_channels == [None]
+        mock_checkpointer.fetch_checkpoint.assert_not_awaited()
+        call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        assert call_kwargs["config"]["configurable"]["checkpoint_id"] == "cp-0"
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
@@ -2413,7 +2570,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "cp-0", WorkflowStatusEnum.INPUT_REQUIRED.value
         )
 
-        async def fake_checkpoints_reversed(*, matches=lambda _: True, per_page=20):  # pylint: disable=unused-argument
+        async def fake_checkpoints_reversed(*, matches=lambda _: True, **_kwargs):
             if matches(boundary_tuple.checkpoint.get("channel_values", {})):
                 yield boundary_tuple
 

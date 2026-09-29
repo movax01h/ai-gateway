@@ -1272,6 +1272,19 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             )
         return checkpoint
 
+    async def fetch_checkpoint(self, checkpoint_id: str) -> Optional[CheckpointTuple]:
+        """Fetch one checkpoint in full through ``by_thread_ts``, or ``None`` when it does not exist.
+
+        Needs ``incremental_checkpoints_enabled``. Unlike ``aget_tuple``, this does not touch the incremental write
+        cache (see ``decode_graphql_checkpoint``).
+        """
+        checkpoint = await self._fetch_checkpoint_by_thread_ts(checkpoint_id)
+        if checkpoint is None:
+            return None
+        return self._convert_gitlab_checkpoint_to_checkpoint_tuple(
+            checkpoint, _checkpoint_ns_of(checkpoint)
+        )
+
     async def _get_latest_checkpoint_status(self) -> Optional[WorkflowStatusEnum]:
         """Return the workflow status from the most recent checkpoint.
 
@@ -1621,6 +1634,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         *,
         per_page: int = 20,
         raise_on_error: bool = False,
+        channels: Optional[Sequence[str]] = None,
         # `List`, not `list`: inside the class body the bare name `list` resolves
         # to the `list()` checkpoint-saver method defined above, not the builtin.
     ) -> AsyncIterator[List[Dict[str, Any]]]:
@@ -1638,17 +1652,25 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         A page's byte size isn't bounded — it grows with both ``per_page`` and how much state each
         checkpoint carries — and Workhorse aborts (rather than truncates) any single action response
         that can't fit in one gRPC message (see ``_is_response_size_limit_error``). When that happens,
-        this halves ``per_page`` and retries the same page instead of treating it as a failed request,
-        since on workflows with large checkpoints even the default ``per_page=20`` can exceed the limit.
-        Only once ``per_page`` can't shrink any further does it fall through to the same
+        this halves ``per_page`` and resumes after the last checkpoint yielded instead of treating it as a
+        failed request, since on workflows with large checkpoints even the default ``per_page=20`` can exceed
+        the limit. Only once ``per_page`` can't shrink any further does it fall through to the same
         stop-or-raise handling as any other unrecoverable page fetch failure.
+
+        ``channels`` asks Rails to return only these channels in each checkpoint's ``channel_values``. Rails
+        versions without the filter ignore it and return every channel.
         """
-        page: str = "1"
+        page = 1
         current_per_page = per_page
-        while page:
+        # Checkpoints already yielded, to re-derive the page when a shrink moves page boundaries.
+        offset = 0
+        channel_params = [("channels[]", channel) for channel in channels or []]
+        while True:
+            query = urlencode(
+                [("per_page", current_per_page), ("page", page), *channel_params]
+            )
             endpoint = add_compression_param(
-                f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints"
-                f"?per_page={current_per_page}&page={page}"
+                f"/api/v4/ai/duo_workflows/workflows/{self._workflow_id}/checkpoints?{query}"
             )
             try:
                 with duo_workflow_metrics.time_gitlab_response(
@@ -1666,6 +1688,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     current_per_page = max(
                         _MIN_CHECKPOINT_PAGE_SIZE, current_per_page // 2
                     )
+                    page = offset // current_per_page + 1
                     self._logger.warning(
                         "Checkpoint page exceeded the gRPC message size limit; "
                         "retrying with a smaller page size",
@@ -1700,14 +1723,22 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             if not response.body:
                 return
 
-            yield response.body
-            page = response.headers.get("X-Next-Page", "")
+            # After a shrink the page can start before the last checkpoint yielded.
+            checkpoints = response.body[offset - (page - 1) * current_per_page :]
+            offset += len(checkpoints)
+            yield checkpoints
+
+            next_page = response.headers.get("X-Next-Page")
+            if not next_page:
+                return
+            page = int(next_page)
 
     async def checkpoints_reversed(
         self,
         *,
         matches: Callable[[Mapping[str, Any]], bool] = lambda _: True,
         per_page: int = 20,
+        channels: Optional[Sequence[str]] = None,
     ) -> AsyncIterator[CheckpointTuple]:
         """Yield checkpoints newest-first, optionally filtered, fetched page-by-page.
 
@@ -1720,11 +1751,15 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             matches: Predicate applied to each checkpoint's ``channel_values``; only checkpoints for which
                 this returns ``True`` are yielded. Defaults to accepting all checkpoints.
             per_page: Number of checkpoints to request per HTTP page. Defaults to 20.
+            channels: Only request these channels of each checkpoint's ``channel_values``. Defaults to every
+                channel. Rails versions without the filter return every channel.
 
         Yields:
             CheckpointTuple: Decompressed, converted checkpoints in newest-first order.
         """
-        async for gl_checkpoints in self._iter_checkpoint_pages(per_page=per_page):
+        async for gl_checkpoints in self._iter_checkpoint_pages(
+            per_page=per_page, channels=channels
+        ):
             for gl_checkpoint in gl_checkpoints:
                 try:
                     if "compressed_checkpoint" in gl_checkpoint:
