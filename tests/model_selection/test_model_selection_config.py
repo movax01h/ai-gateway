@@ -579,6 +579,25 @@ def test_default_model_entry_weight_all_or_none_validation():
 
 
 @pytest.mark.usefixtures("mock_fs")
+def test_default_model_entry_negative_weight_is_rejected():
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        DefaultModelEntry(identifier="gitlab-model-1", weight=-1)
+
+
+def test_default_model_entry_all_zero_weights_are_rejected():
+    with pytest.raises(
+        ValidationError, match="at least one default_models weight must be above 0"
+    ):
+        UnitPrimitiveConfig(
+            feature_setting="all_zero",
+            unit_primitives=["complete_code"],
+            default_models=[
+                DefaultModelEntry(identifier="gitlab-model-1", weight=0),
+                DefaultModelEntry(identifier="gitlab-model-2", weight=0),
+            ],
+        )
+
+
 def test_default_model_entry_no_weights_passes_validation():
     """UnitPrimitiveConfig is valid when no default_models entries have weights."""
     upc = UnitPrimitiveConfig(
