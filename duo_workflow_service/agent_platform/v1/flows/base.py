@@ -49,6 +49,7 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.errors.typing import (
     GENERIC_WORKFLOW_ERROR_MESSAGE,
+    CheckpointFetchError,
     EnvelopeVersionMismatchException,
 )
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -571,9 +572,15 @@ class Flow(AbstractWorkflow):
         if not isinstance(checkpointer, GitLabWorkflow):
             return None, WorkflowStatusEventEnum.RETRY
 
+        # When Rails can serve the boundary alone by id, the walk pages only each checkpoint's status.
+        status_only = self._workflow_config.get(
+            "incremental_checkpoints_enabled", False
+        )
         boundary: Optional[CheckpointTuple] = None
         oldest: Optional[CheckpointTuple] = None
-        async for candidate in checkpointer.checkpoints_reversed():
+        async for candidate in checkpointer.checkpoints_reversed(
+            channels=["status"] if status_only else None
+        ):
             # `checkpoints_reversed` returns every checkpoint lineage mixed together, but
             # the boundary is pinned into the top-level graph's own config, so only its
             # own lineage can supply one: a nested subagent's pause is not a boundary for
@@ -601,6 +608,15 @@ class Flow(AbstractWorkflow):
         )
         if boundary is None:
             boundary = oldest
+        elif status_only:
+            # START needs only the boundary's id, but the RESUME delta below reads its ui_chat_log.
+            boundary_id = boundary.config["configurable"]["checkpoint_id"]
+            boundary = await checkpointer.fetch_checkpoint(boundary_id)
+            if boundary is None:
+                # The list just returned it; resuming unpinned would skip the rollback.
+                raise CheckpointFetchError(
+                    f"Stop-recovery boundary checkpoint {boundary_id} was not found"
+                )
 
         tip_tuple = self._decode_tip_checkpoint(checkpointer)
         # Rollback anchor and delta baseline are two different questions: in

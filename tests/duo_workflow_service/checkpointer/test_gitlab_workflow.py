@@ -1643,7 +1643,7 @@ async def test_aget_tuple_logs_error_when_list_scan_returns_non_success(
         "Failed to fetch checkpoint page",
         workflow_id=gitlab_workflow._workflow_id,
         status_code=500,
-        page="1",
+        page=1,
     )
 
 
@@ -5317,6 +5317,7 @@ async def test_iter_checkpoint_pages_follows_next_page_header(
     assert [params["page"] for params in requested_params] == ["1", "2"]
     assert all(params["per_page"] == "2" for params in requested_params)
     assert all(params["accept_compressed"] == "true" for params in requested_params)
+    assert all("channels[]" not in params for params in requested_params)
 
 
 @pytest.mark.asyncio
@@ -5381,6 +5382,63 @@ async def test_checkpoints_reversed_stops_after_first_match_no_extra_requests(
     assert len(requested_params) == 1, (
         "no HTTP requests may be issued beyond the page containing the match"
     )
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_reversed_requests_only_the_given_channels(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    mock_aget, requested_params = _paginated_checkpoints_aget(
+        paginated_checkpoint_pages
+    )
+    http_client.aget = mock_aget
+
+    results = [
+        checkpoint_tuple
+        async for checkpoint_tuple in gitlab_workflow.checkpoints_reversed(
+            channels=["status"]
+        )
+    ]
+
+    assert len(results) == 4
+    assert [params["channels[]"] for params in requested_params] == [
+        "status",
+        "status",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_checkpoint_reads_by_thread_ts_without_touching_write_cache(
+    incremental_enabled, gitlab_workflow, http_client, workflow_id
+):
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=_make_gl_checkpoint("cp-1", WorkflowStatusEnum.INPUT_REQUIRED),
+    )
+
+    result = await gitlab_workflow.fetch_checkpoint("cp-1")
+
+    assert result is not None
+    assert result.config["configurable"] == {
+        "thread_id": workflow_id,
+        "checkpoint_id": "cp-1",
+        "checkpoint_ns": TOP_LEVEL_CHECKPOINT_NS,
+    }
+    assert result.checkpoint["channel_values"] == {
+        "status": WorkflowStatusEnum.INPUT_REQUIRED
+    }
+    assert "by_thread_ts?thread_ts=cp-1" in http_client.aget.call_args[1]["path"]
+    assert _incremental_state(gitlab_workflow).prev_checkpoint_id is None
+    assert _incremental_state(gitlab_workflow).prev_channel_values == {}
+
+
+@pytest.mark.asyncio
+async def test_fetch_checkpoint_returns_none_on_404(
+    incremental_enabled, gitlab_workflow, http_client
+):
+    http_client.aget.return_value = GitLabHttpResponse(status_code=404, body={})
+
+    assert await gitlab_workflow.fetch_checkpoint("cp-1") is None
 
 
 @pytest.mark.asyncio
@@ -5574,6 +5632,55 @@ async def test_iter_checkpoint_pages_shrinks_per_page_on_size_limit_error(
         "2",
         "1",
     ], "per_page must halve on each size-limit failure until the request succeeds"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "per_page,checkpoint_count,expected_requests",
+    [
+        (4, 6, [("1", "4"), ("2", "4"), ("3", "2")]),
+        # 5 halves to 2, so the retried page starts one checkpoint before the ones not yet yielded.
+        (5, 8, [("1", "5"), ("2", "5"), ("3", "2"), ("4", "2")]),
+    ],
+    ids=["aligned_offset", "unaligned_offset"],
+)
+async def test_iter_checkpoint_pages_does_not_repeat_checkpoints_after_shrink(
+    gitlab_workflow, http_client, per_page, checkpoint_count, expected_requests
+):
+    """A shrink after the first page must resume after the checkpoints already yielded: retrying the same page number
+    at a smaller page size would start earlier in the list and yield some checkpoints twice."""
+    checkpoints = [
+        _make_gl_checkpoint(f"cp-{index}", WorkflowStatusEnum.EXECUTION)
+        for index in reversed(range(checkpoint_count))
+    ]
+    requests: list[tuple[str, str]] = []
+
+    async def mock_aget(path, **_kwargs):
+        query = {k: v[0] for k, v in parse_qs(urlparse(path).query).items()}
+        requests.append((query["page"], query["per_page"]))
+        page, size = int(query["page"]), int(query["per_page"])
+        if page > 1 and size > 2:
+            raise ToolException(
+                "HTTP action error: response body exceeded size limit (4190208 bytes)"
+            )
+        start = (page - 1) * size
+        headers = (
+            {"X-Next-Page": str(page + 1)} if start + size < checkpoint_count else {}
+        )
+        return GitLabHttpResponse(
+            status_code=200, body=checkpoints[start : start + size], headers=headers
+        )
+
+    http_client.aget = mock_aget
+
+    collected = [
+        cp["thread_ts"]
+        async for page in gitlab_workflow._iter_checkpoint_pages(per_page=per_page)
+        for cp in page
+    ]
+
+    assert collected == [cp["thread_ts"] for cp in checkpoints]
+    assert requests == expected_requests
 
 
 @pytest.mark.asyncio
