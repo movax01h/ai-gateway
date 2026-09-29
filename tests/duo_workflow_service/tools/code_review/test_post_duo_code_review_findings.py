@@ -114,6 +114,7 @@ async def test_post_duo_code_review_findings_renders_the_comment_body(
                 "Fails open when the check errors."
             ),
             "severity": "critical",
+            "category": "fail-open",
             "confidence": 9,
         }
     ]

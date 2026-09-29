@@ -350,6 +350,7 @@ class TestBuildPayload:
                 "target_code": "  return true",
                 "message": "**[Critical] fail-open**\n\nFails open when the check errors.",
                 "severity": "critical",
+                "category": "fail-open",
                 "confidence": 9,
             }
         ]
