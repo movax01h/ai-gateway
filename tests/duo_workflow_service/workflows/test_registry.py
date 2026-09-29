@@ -1025,7 +1025,7 @@ def test_engine_owned_config_is_normalized_before_it_reaches_chat_flow():
 
     assert factory.func is ChatFlow
     config = factory.keywords["config"]
-    assert config.routers == []
+    assert config.routers == [{"from": "chat_agent", "to": "end"}]
     assert config.flow.entry_point == "chat_agent"
     assert config.components[0]["ui_log_events"]
 

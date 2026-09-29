@@ -5,7 +5,7 @@ from duo_workflow_service.agent_platform.v1.chat_engine import (
     normalize_engine_owned_config,
 )
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
-    FlowConfigMetadata,
+    FlowConfig,
     PartialFlowConfig,
 )
 
@@ -74,39 +74,11 @@ def test_pre_approved_tools_is_dropped():
     assert "pre_approved_tools" not in root(normalize_engine_owned_config(config))
 
 
-def test_routers_default_to_empty_list():
-    assert normalize_engine_owned_config(build_config()).routers == []
-
-
-def test_declared_routers_are_kept():
-    routers = [{"from": "chat_agent", "to": "end"}]
-
-    assert (
-        normalize_engine_owned_config(build_config(routers=routers)).routers == routers
-    )
-
-
-def test_entry_point_synthesized_from_the_single_component():
+def test_the_config_completes_through_to_config():
     normalized = normalize_engine_owned_config(build_config())
 
-    assert normalized.flow == FlowConfigMetadata(entry_point="chat_agent", inputs=None)
-
-
-def test_entry_point_synthesized_keeps_declared_inputs():
-    flow = FlowConfigMetadata(
-        inputs=[{"category": "file", "input_schema": {"path": {"type": "string"}}}]
-    )
-
-    normalized = normalize_engine_owned_config(build_config(flow=flow))
-
-    assert normalized.flow.entry_point == "chat_agent"
-    assert normalized.flow.inputs == flow.inputs
-
-
-def test_declared_entry_point_is_kept():
-    flow = FlowConfigMetadata(entry_point="chat_agent")
-
-    assert normalize_engine_owned_config(build_config(flow=flow)).flow is flow
+    assert type(normalized) is FlowConfig
+    assert normalized.routers == [{"from": "chat_agent", "to": "end"}]
 
 
 def test_input_config_is_not_mutated():

@@ -352,8 +352,8 @@ def _engine_owned_chat_factory(
     The engine runs the declared graph through the shared builder, so two rules
     of the chat-partial environment that legacy ``chat.Workflow`` never had to
     enforce apply here: the root component needs a name for the builder to key
-    on, and declared routers are rejected because the single component is the
-    sink and the engine synthesizes its hop to the boundary.
+    on, and declared routers are rejected because the environment completes the
+    config with the single component's route to the boundary.
     """
     if not isinstance(config, V1FlowConfig):
         raise ValueError("Engine-owned chat-partial flows require the v1 config schema")
@@ -365,8 +365,8 @@ def _engine_owned_chat_factory(
 
     if config.routers:
         raise ValueError(
-            "Engine-owned chat-partial flows reject declared routers: the single "
-            "component is the sink and the engine routes it to the boundary"
+            "Engine-owned chat-partial flows reject declared routers: the "
+            "environment routes the single component to the boundary"
         )
 
     return partial(ChatFlow, config=normalize_engine_owned_config(config))

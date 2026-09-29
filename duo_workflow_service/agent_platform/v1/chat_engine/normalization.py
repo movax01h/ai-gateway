@@ -5,10 +5,7 @@ import structlog
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
-from duo_workflow_service.agent_platform.v1.flows.flow_config import (
-    FlowConfig,
-    FlowConfigMetadata,
-)
+from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 
 __all__ = ["ENGINE_FLOOR_UI_LOG_EVENTS", "normalize_engine_owned_config"]
 
@@ -42,9 +39,9 @@ def normalize_engine_owned_config(config: FlowConfig) -> FlowConfig:
     ``pre_approved_tools`` is not applied on the engine, so a declared list is
     dropped and logged.
 
-    ``routers`` defaults to an empty list and ``flow.entry_point`` to the single
-    component. The graph builder requires both, and the chat-partial environment
-    lets authors omit them.
+    The config then completes itself through ``to_config``: a chat-partial
+    config fills in its entry point and its route to ``end``, and the chat graph
+    builder adds no routes of its own.
 
     Args:
         config: A chat-partial config. Every ``AgentComponent`` in it receives
@@ -56,18 +53,8 @@ def normalize_engine_owned_config(config: FlowConfig) -> FlowConfig:
     components = [
         _normalize_agent_component(component) for component in config.components
     ]
-    update: dict[str, Any] = {"components": components}
 
-    if config.routers is None:
-        update["routers"] = []
-
-    if config.flow is None or config.flow.entry_point is None:
-        update["flow"] = FlowConfigMetadata(
-            entry_point=components[0]["name"],
-            inputs=config.flow.inputs if config.flow else None,
-        )
-
-    return config.model_copy(update=update)
+    return config.model_copy(update={"components": components}).to_config()
 
 
 def _normalize_agent_component(component: dict[str, Any]) -> dict[str, Any]:

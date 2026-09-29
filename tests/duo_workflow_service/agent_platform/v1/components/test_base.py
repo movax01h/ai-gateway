@@ -365,6 +365,31 @@ class TestEndComponent:
         # Verify the status was set to COMPLETED
         assert result["status"] == WorkflowStatusEnum.COMPLETED.value
 
+    @pytest.mark.asyncio
+    async def test_end_component_writes_the_declared_status(self, flow_type, user):
+        """A seeded ``status`` replaces ``COMPLETED`` as the terminal write."""
+        end_component = EndComponent(
+            name="end",
+            flow_id="test-workflow",
+            flow_type=flow_type,
+            user=user,
+            status=WorkflowStatusEnum.INPUT_REQUIRED,
+        )
+        graph = StateGraph(FlowState)
+        end_component.attach(graph)
+        graph.set_entry_point(end_component.__entry_hook__())
+
+        result = await graph.compile().ainvoke(
+            FlowState(
+                status=WorkflowStatusEnum.NOT_STARTED,
+                conversation_history={},
+                ui_chat_log=[],
+                context={},
+            )
+        )
+
+        assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED.value
+
 
 class TestAbortComponent:
     """Test AbortComponent functionality."""
