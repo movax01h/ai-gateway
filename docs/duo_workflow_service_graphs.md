@@ -1569,7 +1569,7 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `workplan 2.0.0 (v1)` (Flow Registry)
+## Graph: `workplan 1.1.0 (v1)` (Flow Registry)
 
 ```mermaid
 ---
