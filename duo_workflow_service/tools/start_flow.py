@@ -30,10 +30,12 @@ CATALOG_FLOW_NAME = "catalog_flow"
 
 _DESCRIPTION_PREFIX = (
     "Delegate a task to a specialist GitLab agent that works "
-    "asynchronously over multiple steps. Always use this tool when the "
-    "user's request matches one of the agents below — specialist "
-    "agents are purpose-built for their domain and deliver better "
-    "outcomes than inline handling.\n"
+    "asynchronously over multiple steps. Prefer using this tool when the "
+    "user's request matches one of the agents below, unless the user "
+    "asks you to work directly. In that case, use your available tools "
+    "and do not refuse solely because a specialist flow exists. "
+    "Specialist agents are purpose-built for their domain and can "
+    "deliver better outcomes than inline handling.\n"
     "\n"
     "Available agents:\n"
 )
