@@ -222,4 +222,7 @@ def test_format_display_message():
     tool = NotifyMeWhen()
     args = NotifyMeWhenInput(message="hi", when={"type": "timer", "delay_minutes": 5})
 
-    assert tool.format_display_message(args) == "Schedule a notification in 5 minute(s)"
+    assert (
+        tool.format_display_message(args)
+        == "Schedule a notification in 5 minute(s): hi"
+    )
