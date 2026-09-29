@@ -1213,6 +1213,13 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             "workflow execution stopped",
         ),
         (
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+            False,
+            "WORKHORSE_WEBSOCKET_PONG_TIMEOUT",
+            grpc.StatusCode.OK,
+            "workflow execution stopped",
+        ),
+        (
             ValueError("Some error"),
             False,
             None,
@@ -5146,6 +5153,14 @@ def test_extract_error_message_api_connection_error_token_normalization_still_ap
         (
             "WORKHORSE_WEBSOCKET_PING_FAILED",
             AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+        ),
+        (
+            "WORKHORSE_WEBSOCKET_PONG_TIMEOUT",
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+        ),
+        (
+            "WORKHORSE_WEBSOCKET_CLOSE_1000",
+            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
         ),
         (
             "user_requested",
