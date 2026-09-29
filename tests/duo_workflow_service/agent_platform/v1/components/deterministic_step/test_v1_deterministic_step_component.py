@@ -281,24 +281,42 @@ class TestDeterministicStepComponentInitialization:
 class TestDeterministicStepComponentToolValidation:
     """Test suite for DeterministicStepComponent tool validation."""
 
-    def test_tool_not_found_in_toolset(self, component_name, flow_id, flow_type, user):
+    @pytest.mark.parametrize(
+        ("tool_name", "expected_message"),
+        [
+            (
+                "nonexistent_tool",
+                "Tool 'nonexistent_tool' not found in toolset. "
+                "Available tools: ['available_tool_1', 'available_tool_2'].",
+            ),
+            (
+                "run_command",
+                "Tool 'run_command' not found in toolset. "
+                "Available tools: ['available_tool_1', 'available_tool_2']. "
+                "Grant one of these agent privileges: run_commands.",
+            ),
+        ],
+    )
+    def test_tool_not_found_in_toolset(
+        self, component_name, flow_id, flow_type, user, tool_name, expected_message
+    ):
         """Test that component raises error when tool is not found in toolset."""
         mock_toolset = Mock(spec=Toolset)
         mock_toolset.__contains__ = Mock(return_value=False)
         mock_toolset.keys = Mock(return_value=["available_tool_1", "available_tool_2"])
 
-        with pytest.raises(
-            KeyError, match="Tool 'nonexistent_tool' not found in toolset"
-        ):
+        with pytest.raises(KeyError) as exc_info:
             DeterministicStepComponent(
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
                 user=user,
                 inputs=["context:user_input"],
-                tool_name="nonexistent_tool",
+                tool_name=tool_name,
                 toolset=mock_toolset,
             )
+
+        assert exc_info.value.args[0] == expected_message
 
     def test_tool_validation_with_schema_success(
         self, component_name, flow_id, flow_type, user, toolset_with_schema_tool
@@ -387,18 +405,38 @@ class TestDeterministicStepComponentToolValidation:
                 # tool_name is missing
             )
 
-    def test_missing_toolset(self, component_name, flow_id, flow_type, user):
-        """Test that validation fails when toolset is missing."""
-        with pytest.raises(ValidationError, match="toolset is required"):
+    @pytest.mark.parametrize(
+        ("tool_name", "expected_message"),
+        [
+            (
+                "test_tool",
+                "toolset is required: tool 'test_tool' for component "
+                "'test_component' is not enabled.",
+            ),
+            (
+                "run_command",
+                "toolset is required: tool 'run_command' for component "
+                "'test_component' is not enabled. "
+                "Grant one of these agent privileges: run_commands.",
+            ),
+        ],
+    )
+    def test_missing_toolset(
+        self, component_name, flow_id, flow_type, user, tool_name, expected_message
+    ):
+        """Test that validation fails when toolset is missing, naming the tool and privilege."""
+        with pytest.raises(ValidationError) as exc_info:
             DeterministicStepComponent(
                 name=component_name,
                 flow_id=flow_id,
                 flow_type=flow_type,
                 user=user,
                 inputs=["context:user_input"],
-                tool_name="test_tool",
+                tool_name=tool_name,
                 # toolset is missing
             )
+
+        assert exc_info.value.errors()[0]["msg"] == f"Value error, {expected_message}"
 
 
 class TestValidateToolArguments:
