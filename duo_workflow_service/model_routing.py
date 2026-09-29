@@ -22,9 +22,18 @@ def route_default_model_by_goal(goal: str) -> Optional[str]:
     """Rewrite the request's default model from the goal's routing tag.
 
     Runs once per request, before the flow is built. Returns the tag applied, or None when the flag is off, the request
-    pinned a model, no tag matched, or the matched tag has no resolvable model. In every None case the context is left
-    untouched and the flow runs on the configured default.
+    pinned a model, no tag matched, the matched tag has no resolvable model, or routing raised. In every None case the
+    context is left untouched and the flow runs on the configured default.
     """
+    try:
+        return _route_default_model_by_goal(goal)
+    except Exception:
+        # Routing is an optimisation; a failure must not block the workflow from starting.
+        log.warning("Model routing failed; keeping the default", exc_info=True)
+        return None
+
+
+def _route_default_model_by_goal(goal: str) -> Optional[str]:
     if not is_feature_enabled(FeatureFlag.DUO_DEVELOPER_MODEL_ROUTING):
         return None
 
