@@ -16,6 +16,8 @@ additional_properties:
     description: Number of input tokens written to the 5-minute TTL prompt cache
   ephemeral_1h_input_tokens:
     description: Number of input tokens written to the 1-hour TTL prompt cache
+  input_characters:
+    description: Number of input characters (Unicode code points, excluding whitespace) submitted to the embedding model; used to cost models billed per input characters, such as Vertex AI text-embedding-005
 milestone: '19.5'
 introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6799
 tiers:

@@ -85,6 +85,11 @@ async def _generate_code_embeddings(
             prompt_id=CODE_EMBEDDINGS_PROMPT_ID,
             model_metadata=model_metadata,
             internal_event_category=__name__,
+            # An embeddings model may bill by characters, not per token,
+            # so input_tokens alone cannot be used to cost embedding requests.
+            internal_event_extra={
+                "input_characters": _count_input_characters(payload.contents)
+            },
         )
     except ValueError as e:
         raise HTTPException(
@@ -140,6 +145,10 @@ async def _generate_code_embeddings(
             for p in predictions
         ],
     )
+
+
+def _count_input_characters(contents: list[str]) -> int:
+    return sum(len("".join(content.split())) for content in contents)
 
 
 def _validate_and_get_model_metadata(
