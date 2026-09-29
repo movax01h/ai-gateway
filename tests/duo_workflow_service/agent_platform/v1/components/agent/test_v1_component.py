@@ -2575,16 +2575,19 @@ class TestAgentComponentMaxCyclesWarningOffset:
     @pytest.mark.parametrize(
         "max_cycles, expected_offset",
         [
-            (4, 3),  # matches fix_pipeline's checkout step config
-            (1, 0),
-            (11, 10),  # boundary: last value still clamped
-            (12, 10),  # boundary: first value not clamped
+            (4, 2),  # fix_pipeline's checkout step: warns on cycle 2, not 1
+            (3, 1),
+            (2, 1),  # floored: a tight budget is warned rather than left silent
+            (1, None),  # no cycle left to warn on
+            (11, 5),  # half the budget while that is below the default
+            (19, 9),  # boundary: last threshold where half the budget still wins
+            (22, 10),  # boundary: first threshold where the 10-cycle cap wins
         ],
     )
-    def test_plain_int_form_clamps_offset_for_small_thresholds(
+    def test_plain_int_form_halves_offset_for_small_thresholds(
         self, make_agent_component, max_cycles, expected_offset
     ):
-        """The legacy plain-int form clamps the default offset to min(10, threshold - 1) for small thresholds."""
+        """Plain-int max_cycles defaults the offset to min(10, threshold // 2), floored at one cycle."""
         component = make_agent_component(max_cycles=max_cycles)
         assert component._max_cycles_threshold == max_cycles
         assert component._iteration_warning_offset == expected_offset
@@ -2595,14 +2598,27 @@ class TestAgentComponentMaxCyclesWarningOffset:
         assert component._max_cycles_threshold == 50
         assert component._iteration_warning_offset == 10
 
-    def test_nested_form_clamps_omitted_offset_for_small_threshold(
+    def test_nested_form_halves_omitted_offset_for_small_threshold(
         self, make_agent_component
     ):
-        """MaxCyclesConfig with iteration_warning_offset omitted also clamps for small thresholds, like the plain-int
-        form."""
+        """MaxCyclesConfig with the offset omitted also halves it for small thresholds, like the plain-int form."""
         component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=4))
         assert component._max_cycles_threshold == 4
-        assert component._iteration_warning_offset == 3
+        assert component._iteration_warning_offset == 2
+
+    def test_nested_form_floors_omitted_offset_for_a_tight_budget(
+        self, make_agent_component
+    ):
+        """A 2-cycle budget still warns: the constraint is what the agent most needs to know."""
+        component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=2))
+        assert component._iteration_warning_offset == 1
+
+    def test_nested_form_disables_omitted_offset_for_a_single_cycle_budget(
+        self, make_agent_component
+    ):
+        """One cycle leaves nothing to warn on, so the limit message stands alone."""
+        component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=1))
+        assert component._iteration_warning_offset is None
 
     @pytest.mark.parametrize("iteration_warning_offset", [4, 5, 10])
     def test_nested_form_rejects_explicit_offset_at_or_above_threshold(
@@ -2610,7 +2626,7 @@ class TestAgentComponentMaxCyclesWarningOffset:
     ):
         """MaxCyclesConfig raises when iteration_warning_offset is explicitly set >= threshold.
 
-        Unlike an omitted offset (auto-clamped), an explicitly chosen value that doesn't fit is treated as a deliberate
+        Unlike an omitted offset (halved to fit), an explicitly chosen value that doesn't fit is treated as a deliberate
         misconfiguration.
         """
         with pytest.raises(ValidationError, match="must be less than threshold"):
