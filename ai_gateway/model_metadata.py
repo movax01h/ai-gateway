@@ -456,25 +456,18 @@ def build_default_code_completions_metadata(
         mock_model_responses: When ``True``, allows an empty model identifier for local testing.
 
     Returns:
-        A ``FireworksModelMetadata`` when the configured default model uses the ``fireworks_ai``
-        provider, otherwise a generic ``ModelMetadata`` for the ``gitlab`` provider.
+        Metadata for the picked default model. Fireworks- and Mistral-backed models carry their
+        provider key and endpoint; any other model returns generic ``gitlab`` metadata.
     """
     llm_def = ModelSelectionConfig.instance().get_model_for_feature("code_completions")
-    if getattr(llm_def.params, "custom_llm_provider", None) == "fireworks_ai":
-        return create_model_metadata(
-            {
-                "provider": "fireworks_ai",
-                "name": llm_def.gitlab_identifier,
-                "fireworks_api_base_url": fireworks_api_base_url,
-                "provider_keys": model_keys,
-                "using_cache": using_cache,
-                "session_id": user.global_user_id,
-            },
-            mock_model_responses=mock_model_responses,
-        )
-    return create_model_metadata(
-        {"provider": "gitlab", "feature_setting": "code_completions"},
+
+    return resolve_provider_aware_metadata(
+        llm_def,
+        provider_keys=model_keys,
+        fireworks_api_base_url=fireworks_api_base_url,
         mock_model_responses=mock_model_responses,
+        session_id=user.global_user_id,
+        using_cache=using_cache,
     )
 
 

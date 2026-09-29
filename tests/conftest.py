@@ -644,6 +644,18 @@ def reset_context_vars():
 
 
 @pytest.fixture(autouse=True)
+def pin_default_model_to_first_entry():
+    def first_entry(population, weights=None, *, cum_weights=None, k=1):
+        return [population[0]] * k
+
+    with patch(
+        "ai_gateway.model_selection.model_selection_config.random.choices",
+        side_effect=first_entry,
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def reset_litellm_settings():
     # This fixture will reset the litellm settings before and after each test
     original_module_level_aclient = litellm.module_level_aclient

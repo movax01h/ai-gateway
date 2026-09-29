@@ -1152,6 +1152,24 @@ class TestBuildDefaultCodeCompletionsMetadata:
         params = metadata.to_params()
         assert "api_key" not in params or params.get("api_key") != "fw_secret"
 
+    def test_picks_the_default_model_once(
+        self, vertex_model, fireworks_codestral, mock_user
+    ):
+        with patch.object(
+            ModelSelectionConfig,
+            "get_model_for_feature",
+            side_effect=[vertex_model, fireworks_codestral],
+        ) as mock_get_model_for_feature:
+            metadata = build_default_code_completions_metadata(
+                fireworks_api_base_url="unused",
+                model_keys={"fireworks_provider_api_key": "fw_secret"},
+                user=mock_user,
+            )
+
+        mock_get_model_for_feature.assert_called_once_with("code_completions")
+        assert metadata.provider == "gitlab"
+        assert metadata.name == "vertex_codestral"
+
     def test_using_cache_false_propagates_to_params(
         self, fireworks_codestral, mock_user
     ):

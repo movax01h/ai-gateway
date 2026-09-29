@@ -241,6 +241,10 @@ class UnitPrimitiveConfig(BaseModel):
                 f"Feature '{self.feature_setting}': weight must be specified for all "
                 f"default_models entries or none. Missing weight for: {missing}"
             )
+        if all(has_weight) and sum(w for w in weights if w is not None) <= 0:
+            raise ValueError(
+                f"Feature '{self.feature_setting}': at least one default_models weight must be above 0"
+            )
         return self
 
     @property

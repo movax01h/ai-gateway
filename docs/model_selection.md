@@ -348,6 +348,7 @@ Rules:
 
 - Weights are relative — they are passed directly to `random.choices`, so they don't need to sum to 100. In the
   example above, `claude_sonnet_4_6_vertex` serves roughly 70% of requests and `claude_sonnet_4_6` the remaining 30%.
+- Weights must be 0 or more, and at least one weight in a feature must be above 0. Both checks run at startup.
 - Weights are all-or-nothing within a feature: if any entry has a `weight`, **every** entry in that feature's
   `default_models` must have one. A mix of weighted and unweighted entries fails validation at startup.
 - When no entry has a `weight`, traffic is distributed uniformly across all listed models (equivalent to giving every
