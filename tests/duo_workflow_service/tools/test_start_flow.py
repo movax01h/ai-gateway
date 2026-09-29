@@ -91,7 +91,10 @@ def test_description_mentions_async_progress(tool):
 
 
 def test_description_emphasizes_delegation(tool):
-    assert "Always use this tool" in tool.description
+    assert "Prefer using this tool" in tool.description
+    assert "unless the user asks you to work directly" in tool.description
+    assert "do not refuse solely because a specialist flow exists" in tool.description
+    assert "Always use this tool" not in tool.description
     assert "Delegate a task" in tool.description
 
 
