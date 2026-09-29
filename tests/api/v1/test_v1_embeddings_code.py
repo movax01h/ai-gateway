@@ -1,7 +1,7 @@
 # pylint: disable=file-naming-for-tests
 from json import JSONDecodeError
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import litellm
 import pytest
@@ -88,6 +88,19 @@ class BaseTestCodeEmbeddings:
 
     def _route(self):
         raise NotImplementedError("Implement in child class.")
+
+    def _token_usage_event_extra(self, mock_track_internal_event: Mock):
+        # `request_generate_embeddings_codebase` is emitted through the same mock,
+        # so the token usage event has to be picked out by name.
+        token_usage_calls = [
+            call
+            for call in mock_track_internal_event.call_args_list
+            if call.args[0] == "token_usage_generate_embeddings_codebase"
+        ]
+
+        assert len(token_usage_calls) == 1
+
+        return token_usage_calls[0].kwargs["additional_properties"].extra
 
     @pytest.mark.parametrize(
         ("model_identifier", "expected_llm_model", "expected_custom_llm_provider"),
@@ -237,6 +250,62 @@ class BaseTestCodeEmbeddings:
                 "input_token_details": {"cache_read": 4},
             }
         }
+
+    def test_input_characters_in_token_usage_event(
+        self,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+        mock_track_internal_event: Mock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        extra = self._token_usage_event_extra(mock_track_internal_event)
+
+        assert mock_litellm_aembedding.call_args[1]["input"] == [
+            "test content 1",
+            "test content 2",
+        ]
+        assert extra["input_characters"] == 24
+        # The new key coexists with the existing cache extras
+        assert extra["cache_read"] == 4
+
+    @pytest.mark.parametrize(
+        ("contents", "expected_input_characters"),
+        [
+            ([], 0),
+            ([""], 0),
+            # Counted as Unicode code points: the fox is a single character
+            (["🦊", "ab"], 3),
+            # Whitespace is excluded, including newlines, tabs and indentation
+            (["  def f():\n\treturn 1  "], 14),
+            (["   ", "\n\n"], 0),
+        ],
+    )
+    def test_input_characters_counts_non_whitespace_code_points(
+        self,
+        contents,
+        expected_input_characters,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+        mock_track_internal_event: Mock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+        params["contents"] = contents
+
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        extra = self._token_usage_event_extra(mock_track_internal_event)
+        assert extra["input_characters"] == expected_input_characters
 
     @pytest.mark.parametrize(
         ("model_provider", "model_identifier", "model_name", "endpoint"),
