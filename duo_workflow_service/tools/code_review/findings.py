@@ -232,6 +232,7 @@ def render_posted_finding(finding: Dict[str, Any]) -> Dict[str, Any]:
         "message": render_message(finding),
         "target_code": finding.get("target_code", ""),
         "severity": finding.get("severity"),
+        "category": finding.get("category"),
         "confidence": finding.get("confidence"),
         **anchor_fields(finding),
     }
@@ -257,8 +258,8 @@ def build_review_payload(
     """Shape the selected findings into the JSON document the review endpoint parses.
 
     Only the fields the endpoint anchors, renders or counts with are sent. The message is rendered here so the severity
-    header and custom-instruction attribution are decided in one place; code travels verbatim. Severity travels as a
-    field so the endpoint can count posted comments by severity.
+    header and custom-instruction attribution are decided in one place; code travels verbatim. Severity and category
+    travel as fields so the endpoint can use them without parsing the message.
 
     A rendered previous-findings list joins the summary when there are comments to post. With none, it travels on its
     own so the endpoint can introduce it as the outcome of a re-review rather than as a clean first review.
