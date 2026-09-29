@@ -2697,3 +2697,63 @@ async def test_approval_required_for_unregistered_tool_name(tool_metadata):
     )
 
     assert await registry.approval_required("never_registered")
+
+
+class TestNotifyMeWhenPreapproval:
+    """`notify_me_when` schedules the agent to wake itself; it must not prompt."""
+
+    @pytest.fixture(name="capable")
+    def capable_fixture(self):
+        with patch(
+            "duo_workflow_service.components.tools_registry.is_client_capable",
+            return_value=True,
+        ):
+            yield
+
+    def _registry(self, tool_metadata, ask_tools=None, denied_tools=None):
+        return ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            ask_tools=ask_tools,
+            denied_tools=denied_tools,
+        )
+
+    @pytest.mark.asyncio
+    async def test_is_preapproved(self, capable, tool_metadata):
+        """Without this the tool prompts on every call, which is friction with nothing behind it.
+
+        It is capability-dependent, so it reaches pre-approval only through
+        `_PREAPPROVED_CAPABILITY_TOOLS`; no privilege group grants it.
+        """
+        registry = self._registry(tool_metadata)
+
+        assert "notify_me_when" in registry._preapproved_tool_names
+        assert not await registry.approval_required("notify_me_when")
+
+    @pytest.mark.asyncio
+    async def test_admin_ask_rule_still_outranks_it(self, capable, tool_metadata):
+        """The exemption is a default, not an override.
+
+        An admin who rules the tool `ask` must still get a prompt, so the pre-approval has to
+        lose to the ask subtraction rather than survive it.
+        """
+        registry = self._registry(tool_metadata, ask_tools=["notify_me_when"])
+
+        assert "notify_me_when" not in registry._preapproved_tool_names
+        assert await registry.approval_required("notify_me_when")
+
+    @pytest.mark.asyncio
+    async def test_approval_node_path_skips_the_prompt(self, capable, tool_metadata):
+        """The prompt came from the approval node, which asks the toolset, not the registry."""
+        toolset = self._registry(tool_metadata).toolset(["notify_me_when"])
+
+        assert (
+            await toolset.resolve_approval_source("notify_me_when", {})
+            == ApprovalSource.PREAPPROVED_CONFIG
+        )
+
+    def test_admin_deny_rule_still_removes_it(self, capable, tool_metadata):
+        registry = self._registry(tool_metadata, denied_tools=["notify_me_when"])
+
+        assert "notify_me_when" not in registry.toolset(["notify_me_when"])

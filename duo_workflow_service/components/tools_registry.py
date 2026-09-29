@@ -104,11 +104,15 @@ _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
 # someone puts it here on purpose. Superseding tools are absent because they inherit the approval
 # state of the tool they replace.
 #
-# Only read-only tools with no side effects belong here.
+# Only tools with no effect outside this session belong here: a read, or a message the
+# agent sends its future self.
 _PREAPPROVED_CAPABILITY_TOOLS: list[Type[BaseTool]] = [
     # Reads public web pages and returns text. Nothing is written, and the agent is told to treat
     # results as untrusted, so prompting on each search would only add friction.
     tools.AgentCoreWebSearch,
+    # A message from the agent to its future self. Touches no file, process, network or
+    # GitLab resource, so prompting on it is friction without protection. See #2906.
+    tools.NotifyMeWhen,
 ]
 
 _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
