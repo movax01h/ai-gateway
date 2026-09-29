@@ -5,7 +5,7 @@ from typing import Any, Optional
 import structlog
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, ToolException
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,

@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.tools import BaseTool, ToolException
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
