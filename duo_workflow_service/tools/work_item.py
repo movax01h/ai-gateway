@@ -398,6 +398,16 @@ class GetWorkItem(WorkItemBaseTool):
 
 
 class GetWorkItemNotesInput(WorkItemResourceInput):
+    notes_filter: Literal["ALL_NOTES", "ONLY_COMMENTS", "ONLY_ACTIVITY"] = Field(
+        default="ALL_NOTES",
+        description=(
+            "Filter the notes returned. ALL_NOTES (default) returns all notes, "
+            "including system notes. ONLY_COMMENTS returns only user comments "
+            "and excludes system notes (e.g. assignee changes, title changes, "
+            "cross-references). ONLY_ACTIVITY returns only system notes and "
+            "excludes user comments."
+        ),
+    )
     sort: Optional[str] = Field(
         default=None,
         description="Return work item notes sorted in asc or desc order. Default is desc.",
@@ -442,6 +452,7 @@ class GetWorkItemNotes(WorkItemBaseTool):
         group_id = kwargs.pop("group_id", None)
         project_id = kwargs.pop("project_id", None)
         work_item_iid = kwargs.pop("work_item_iid", None)
+        notes_filter = kwargs.pop("notes_filter", "ALL_NOTES")
         page_size = kwargs.pop("page_size", 20)
         pagination_cursor = kwargs.pop("pagination_cursor", None)
 
@@ -454,6 +465,7 @@ class GetWorkItemNotes(WorkItemBaseTool):
         query_variables = {
             "fullPath": resolved.parent.full_path,
             "workItemIid": str(resolved.work_item_iid),
+            "filter": notes_filter,
             "first": page_size,
             "after": pagination_cursor,
             **get_query_variables_for_version(

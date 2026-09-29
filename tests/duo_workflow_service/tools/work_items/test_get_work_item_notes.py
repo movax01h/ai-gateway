@@ -433,6 +433,41 @@ async def test_get_work_item_notes_pagination_subsequent_page(
     assert query_variables["after"] == "cursor_abc123"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "input_kwargs,expected_filter",
+    [
+        ({}, "ALL_NOTES"),
+        ({"notes_filter": "ALL_NOTES"}, "ALL_NOTES"),
+        ({"notes_filter": "ONLY_COMMENTS"}, "ONLY_COMMENTS"),
+        ({"notes_filter": "ONLY_ACTIVITY"}, "ONLY_ACTIVITY"),
+    ],
+)
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_get_work_item_notes_filter(
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+    work_item_notes,
+    page_info,
+    version_variables,
+    input_kwargs,
+    expected_filter,
+):
+    """Test that notes_filter defaults to ALL_NOTES and is passed through as `filter`."""
+    mock_get_query_variables.return_value = version_variables
+    graphql_response = make_graphql_response("project", work_item_notes, page_info)
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
+
+    await tool._arun(project_id="namespace/project", work_item_iid=42, **input_kwargs)
+
+    call_args = gitlab_client_mock.graphql.call_args
+    query_variables = call_args[0][1]
+    assert query_variables["filter"] == expected_filter
+
+
 @pytest.mark.parametrize(
     "input_data,expected_message",
     [
