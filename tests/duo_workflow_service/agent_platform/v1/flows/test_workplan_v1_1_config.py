@@ -1,7 +1,7 @@
 # pylint: disable=file-naming-for-tests
-"""Guards for the workplan flow's 2.0.0 config: planning plus the readiness-score tail.
+"""Guards for the workplan flow's 1.1.0 config: planning plus the readiness-score tail.
 
-2.0.0 keeps 1.0.0's four planning components unchanged and merges the standalone
+1.1.0 keeps 1.0.0's four planning components unchanged and merges the standalone
 ``readiness_score`` flow in behind the planner: ``plan_ready`` now routes to a
 scoring tail (``score_fetch`` -> ``score_fetch_notes`` ->
 ``readiness_supervisor``) instead of ``end``. The supervisor is declared as a
@@ -44,9 +44,9 @@ from lib.feature_flags import current_feature_flag_context
 from lib.feature_flags.context import FeatureFlag
 
 FLOW_NAME = "workplan"
-FLOW_VERSION = "2.0.0"
+FLOW_VERSION = "1.1.0"
 
-# The 2.0.0 component set: 1.0.0's four planning components plus the nine of
+# The 1.1.0 component set: 1.0.0's four planning components plus the nine of
 # the scoring tail.
 EXPECTED_COMPONENTS = {
     "research",
@@ -82,7 +82,7 @@ def _router_for(config: FlowConfig, from_component: str) -> dict:
     return next(r for r in config.routers if r["from"] == from_component)
 
 
-class TestWorkplanV2ComponentSet:
+class TestWorkplanV110ComponentSet:
     """The new version adds exactly the nine scoring-tail components."""
 
     def test_component_set_is_planning_four_plus_scoring_nine(self):
@@ -131,7 +131,7 @@ class TestWorkplanV2ComponentSet:
             GetWorkItemNotesInput(page_size=101)
 
 
-class TestWorkplanV2WorkItemUrl:
+class TestWorkplanV110WorkItemUrl:
     """The scoring tail addresses the work item by a bare, parseable URL."""
 
     # Rails' goal template for this flow.
@@ -197,7 +197,7 @@ class TestWorkplanV2WorkItemUrl:
         assert declared.version_constraint == "^1.0.0"
 
 
-class TestWorkplanV2ScoringFailuresEndTheRun:
+class TestWorkplanV110ScoringFailuresEndTheRun:
     """A scoring failure must end the run, not abort it.
 
     The standalone readiness_score flow routes fetch/persist failures to
@@ -245,7 +245,7 @@ class TestWorkplanV2ScoringFailuresEndTheRun:
                 assert route != "abort"
 
 
-class TestWorkplanV2SupervisorWiring:
+class TestWorkplanV110SupervisorWiring:
     """The supervisor delegates to the six evaluators and writes only the score."""
 
     def test_supervisor_declares_all_six_subagents(self):
@@ -284,7 +284,7 @@ class TestWorkplanV2SupervisorWiring:
         assert "STOP" in system
 
 
-class TestWorkplanV2GraphBuilds:
+class TestWorkplanV110GraphBuilds:
     """The config must compile into a real graph, subagent wiring included.
 
     Parsing alone leaves the supervisor half-verified: a subagent missing its
@@ -351,7 +351,7 @@ class TestWorkplanV2GraphBuilds:
             schema_registry=InlineResponseSchemaRegistry(
                 mock_container.pkg_schemas.schema_registry()
             ),
-            workflow_id="test-workflow-workplan-2",
+            workflow_id="test-workflow-workplan-1-1-0",
             workflow_type=GLReportingEventContext.from_workflow_definition("workplan"),
             user=user,
             internal_event_client=mock_container.internal_event.client(),
@@ -426,7 +426,7 @@ class TestWorkplanV2GraphBuilds:
         assert "not an evaluator failure" in system
 
 
-class TestWorkplanV2Subagents:
+class TestWorkplanV110Subagents:
     """Every evaluator is a description-carrying, tool-less AgentComponent.
 
     ``AgentComponent.compile_as_subagent`` raises without a description, and

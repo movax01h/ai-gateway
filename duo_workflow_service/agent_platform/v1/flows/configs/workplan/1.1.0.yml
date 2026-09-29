@@ -101,7 +101,7 @@ components:
       - on_user_response
 
   # --- Scoring tail (plan_ready) -------------------------------------------
-  # 2.0.0 merges the standalone readiness_score flow in behind the planner:
+  # 1.1.0 merges the standalone readiness_score flow in behind the planner:
   # once the plan is written, the same ensemble that flow ran serially scores
   # it here. The six evaluators keep their rs_* prompts and response schemas
   # unchanged, but run under SupervisorAgentComponentV2 (the
@@ -311,7 +311,7 @@ routers:
       input: "context:planner.final_answer.decision"
       routes:
         ask_question: plan_gate
-        # 2.0.0: a written plan now continues into the scoring tail instead of
+        # 1.1.0: a written plan now continues into the scoring tail instead of
         # ending the run.
         plan_ready: score_fetch
         default_route: plan_gate
