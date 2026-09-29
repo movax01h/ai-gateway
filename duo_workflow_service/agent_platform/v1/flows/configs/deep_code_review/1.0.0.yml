@@ -83,12 +83,19 @@ components:
         as: "last_reviewed_head_sha"
         optional: true
     toolset:
-      - "gitlab_blob_search"
+      # The workload checks the repository out at this merge request's head, so
+      # these read local disk instead of a round trip per file.
+      - "grep"
+      - "read_file"
+      - "read_files"
+      - "find_files"
+      - "list_dir"
+      # The checkout holds one revision, so other refs and history stay on the API.
       - "get_repository_file"
-      - "get_repository_files"
-      - "list_repository_tree"
       - "list_commits"
       - "get_commit_diff"
+      # Cross-repo reach: the checkout is this project only, and this covers what isn't.
+      - "gitlab_api_get"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"

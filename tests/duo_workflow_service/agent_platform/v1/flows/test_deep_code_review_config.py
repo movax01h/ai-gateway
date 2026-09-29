@@ -17,12 +17,15 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 
 class TestDeepCodeReviewConfig:
     INVESTIGATION_TOOLSET = [
-        "gitlab_blob_search",
+        "grep",
+        "read_file",
+        "read_files",
+        "find_files",
+        "list_dir",
         "get_repository_file",
-        "get_repository_files",
-        "list_repository_tree",
         "list_commits",
         "get_commit_diff",
+        "gitlab_api_get",
     ]
 
     @classmethod
