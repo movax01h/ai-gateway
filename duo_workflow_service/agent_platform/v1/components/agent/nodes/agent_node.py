@@ -9,8 +9,7 @@ from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from openai import APIStatusError as OpenAIAPIStatusError
-from pydantic import ConfigDict, Field
-from pydantic_core import ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 
 from ai_gateway.prompts import Prompt
 from ai_gateway.response_schemas.base import BaseAgentOutput

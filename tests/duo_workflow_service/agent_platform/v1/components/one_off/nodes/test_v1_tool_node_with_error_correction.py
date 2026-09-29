@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,

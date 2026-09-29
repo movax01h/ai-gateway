@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools import BaseTool
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.experimental.components.deterministic_step.nodes import (
     deterministic_step_node as dsn_module,

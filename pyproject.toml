@@ -95,7 +95,6 @@ langsmith = "^0.14.0"
 openai = "^2.37.0"
 ormsgpack = "^1.12.1"
 packaging = "^24.1"
-pydantic-core = "^2.46.4"
 tenacity = "^9.0.0"
 
 [[tool.poetry.source]]
