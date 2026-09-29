@@ -26,7 +26,7 @@ The chat engine is a boundary policy over the shared executor, not a second engi
 
 | Seam | `ChatFlow` decides |
 |------|--------------------|
-| `_graph_builder`: a builder subclass that seeds the terminal component and synthesizes routers | Where a turn ends |
+| `_graph_builder`: a builder subclass that seeds the terminal component and rejects graphs that cannot reach it | Where a turn ends |
 | `_initial_entry_dispatch`: the structural dispatch strategy | Where a turn begins |
 | Entry wiring: the builder seeds the ingestion node like the terminals, sets it as the entry point, and hops to the declared entry component | What crosses the line inbound |
 | `get_graph_input`: the RECOVERY input, which rolls forward from the tip | What happens after a bad crossing |
@@ -62,17 +62,14 @@ engine and are tracked in
 The builder seeds terminal components for every flow. Authors never declare them. `ChatFlow`'s builder seeds `end`
 as a terminal that writes `INPUT_REQUIRED` instead of `COMPLETED`. `abort` is unchanged.
 
-Boundary-bound components are the sinks of the built graph:
+A turn ends when it reaches `end`. Declared routers, including conditional ones, attach exactly as they do in ambient,
+and the builder adds none of its own. Every component reachable from the entry must be able to reach `end` through
+those routes. The builder rejects a graph that breaks this when the session's graph is built, with an error that names
+the components that cannot. That covers a graph with no route to `end`, a component with no outgoing router, and a
+loop with no way out. A component consumed as a subagent is part of its supervisor and is not in the built graph.
 
-- a component with a declared `to: end` router, or
-- a component with no outgoing router.
-
-Every sink receives a synthesized stock router to `end`. Declared routers, including conditional ones, attach exactly
-as they do in ambient. A component followed by another component has a router and is not a sink. A graph with no
-sinks is a loop, and validation rejects it with an error that names this rule. A component consumed as a subagent is
-part of its supervisor and is not in the built graph.
-
-The chat-partial environment rejects declared routers. Its one component is the sink.
+The chat-partial environment rejects declared routers and completes the config instead: its one component is the
+entry point and routes to `end`.
 
 The status write is the terminal's own node update. No component's node is wrapped or altered.
 

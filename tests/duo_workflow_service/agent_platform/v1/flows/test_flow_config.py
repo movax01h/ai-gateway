@@ -16,6 +16,7 @@ from duo_workflow_service.agent_platform.v1.components import (
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     FlowConfigMetadata,
+    PartialFlowConfig,
     _safe_resolve,
     list_configs,
     load_component_class,
@@ -482,6 +483,76 @@ class TestFlowConfig:
         with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
             config = FlowConfig.from_yaml_config(safe_path)
             assert config.flow.entry_point == "test_agent"
+
+
+class TestToConfig:
+    """Test FlowConfig.to_config() and the completion PartialFlowConfig overrides it with."""
+
+    @staticmethod
+    def _make_partial_config(**overrides) -> PartialFlowConfig:
+        return PartialFlowConfig(
+            version="v1",
+            environment="chat-partial",
+            components=[{"name": "chat_agent", "type": "AgentComponent"}],
+            **overrides,
+        )
+
+    def test_a_full_config_is_already_complete(self):
+        config = FlowConfig(
+            flow=FlowConfigMetadata(entry_point="agent"),
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+        )
+
+        assert config.to_config() is config
+
+    def test_a_partial_config_completes_into_a_full_one(self):
+        assert type(self._make_partial_config().to_config()) is FlowConfig
+
+    @pytest.mark.parametrize(
+        "overrides", [{}, {"routers": []}], ids=["omitted", "declared empty"]
+    )
+    def test_routers_default_to_the_entry_component_routing_to_end(self, overrides):
+        completed = self._make_partial_config(**overrides).to_config()
+
+        assert completed.routers == [{"from": "chat_agent", "to": "end"}]
+
+    def test_declared_routers_are_kept(self):
+        routers = [{"from": "chat_agent", "to": "abort"}]
+
+        assert self._make_partial_config(routers=routers).to_config().routers == routers
+
+    def test_entry_point_defaults_to_the_single_component(self):
+        completed = self._make_partial_config().to_config()
+
+        assert completed.flow == FlowConfigMetadata(
+            entry_point="chat_agent", inputs=None
+        )
+
+    def test_entry_point_default_keeps_declared_inputs(self):
+        flow = FlowConfigMetadata(
+            inputs=[{"category": "file", "input_schema": {"path": {"type": "string"}}}]
+        )
+
+        completed = self._make_partial_config(flow=flow).to_config()
+
+        assert completed.flow.entry_point == "chat_agent"
+        assert completed.flow.inputs == flow.inputs
+
+    def test_declared_entry_point_is_kept(self):
+        flow = FlowConfigMetadata(entry_point="chat_agent")
+
+        assert self._make_partial_config(flow=flow).to_config().flow is flow
+
+    def test_the_partial_config_is_not_mutated(self):
+        config = self._make_partial_config()
+
+        config.to_config()
+
+        assert config.flow is None
+        assert config.routers is None
 
 
 class TestLoadComponentClass:

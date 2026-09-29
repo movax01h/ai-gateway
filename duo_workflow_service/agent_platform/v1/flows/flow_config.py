@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Callable, ClassVar, List, Literal, Optional, Self
+from typing import Callable, ClassVar, List, Literal, Optional, Self, override
 
 import structlog
 import yaml
@@ -394,10 +394,41 @@ class FlowConfig(BaseFlowConfig):
     def feature_config_roots(cls) -> dict[str, Path]:
         return dict(_FEATURE_FLOW_ROOTS)
 
+    def to_config(self) -> "FlowConfig":
+        """Return the complete config the graph builder reads, which a full config already is."""
+        return self
+
 
 class PartialFlowConfig(FlowConfig):
     flow: Optional[FlowConfigMetadata] = None  # type: ignore[assignment]
     routers: Optional[list[dict]] = None  # type: ignore[assignment]
+
+    @override
+    def to_config(self) -> FlowConfig:
+        """Complete the fields the chat-partial environment lets authors omit.
+
+        ``flow.entry_point`` defaults to the single component, and ``routers`` to that component's route to ``end``.
+        Declared values are kept.
+
+        Returns:
+            A ``FlowConfig``. This config is not mutated.
+        """
+        flow = self.flow
+        entry_point = flow.entry_point if flow else None
+        if entry_point is None:
+            entry_point = self.components[0]["name"]
+            flow = FlowConfigMetadata(
+                entry_point=entry_point,
+                inputs=flow.inputs if flow else None,
+            )
+
+        return FlowConfig.model_validate(
+            {
+                **dict(self),
+                "flow": flow,
+                "routers": self.routers or [{"from": entry_point, "to": "end"}],
+            }
+        )
 
 
 def load_component_class(

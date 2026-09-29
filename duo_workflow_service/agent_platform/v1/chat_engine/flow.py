@@ -1,7 +1,12 @@
-from typing import Any
+from typing import Any, override
 
+from duo_workflow_service.agent_platform.v1.chat_engine.graph_builder import (
+    ChatGraphBuilder,
+)
 from duo_workflow_service.agent_platform.v1.flows.base import Flow
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+from duo_workflow_service.agent_platform.v1.flows.graph_builder import FlowGraphBuilder
+from duo_workflow_service.components.tools_registry import ToolsRegistry
 
 __all__ = ["ChatFlow"]
 
@@ -24,3 +29,16 @@ class ChatFlow(Flow):
         # Keyword-only: the registry binds ``config`` through ``functools.partial``
         # and the server passes every other argument by keyword.
         super().__init__(config=config, **kwargs)
+
+    @override
+    def _graph_builder(self, tools_registry: ToolsRegistry) -> FlowGraphBuilder:
+        return ChatGraphBuilder(
+            tools_registry=tools_registry,
+            prompt_registry=self._flow_prompt_registry,
+            schema_registry=self._flow_schema_registry,
+            workflow_id=self._workflow_id,
+            workflow_type=self._workflow_type,
+            user=self._user,
+            internal_event_client=self._internal_event_client,
+            catalog_items=self._catalog_items,
+        )
