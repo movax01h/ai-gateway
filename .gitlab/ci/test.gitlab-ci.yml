@@ -307,3 +307,86 @@ check-duo-workflow-docs:
         - ai/features/*/*/config/**/*
         - scripts/generate_graph_docs.py
         - docs/duo_workflow_service_graphs.md
+
+.litellm-conformance:rules:
+  rules:
+    # Note: this whole file is included with `rules: *skip-when-expedited-include`,
+    # so a merge request labelled `pipeline::expedited` skips these jobs. Never
+    # merge a litellm bump expedited. See docs/litellm_upgrades.md.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - pyproject.toml
+        - poetry.lock
+        - ai_gateway/models/**/*
+        - ai_gateway/proxy/**/*
+        - ai_gateway/vendor/**/*
+        - ai_gateway/prompts/base.py
+        - ai_gateway/model_selection/unit_primitives.yml
+        - scripts/litellm_surface.py
+        - scripts/litellm_surface.json
+        - scripts/litellm_blocklist.py
+        - scripts/litellm_blocklist.yml
+        - tests/scripts/test_litellm_surface.py
+        - tests/models/**/*
+        - tests/proxy/**/*
+        - .gitlab/ci/test.gitlab-ci.yml
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Stage A (resolution and blocklist) and Stage B (private API surface).
+# Neither needs provider credentials or network access to any model provider.
+# See docs/litellm_upgrades.md for what each stage catches and why it exists.
+tests:litellm-conformance:
+  extends:
+    - .poetry
+    - .litellm-conformance:rules
+  stage: test
+  needs:
+    - install
+  script:
+    # Stage A: refuse a litellm release we already know is broken.
+    - poetry run python scripts/litellm_blocklist.py
+    # Stage B: the private API surface the repo depends on must still exist,
+    # still be callable, and still have the shape we recorded.
+    - poetry run python scripts/litellm_surface.py --check
+    - poetry run pytest tests/scripts/test_litellm_surface.py -q
+    # Stage A, informational: show which transitive pins moved, as an artifact.
+    - mkdir -p litellm-conformance-report
+    - poetry export -f requirements.txt --output litellm-conformance-report/resolved.txt --without-hashes
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - litellm-conformance-report/
+
+# Stage D: the production image installs with `poetry install --only main`,
+# while every test environment also installs the test and dev groups. An
+# import-time break can therefore exist only in the image. This is the only
+# job that would catch that.
+tests:litellm-image-smoke:
+  extends:
+    - .docker
+    - .litellm-conformance:rules
+  stage: test
+  needs:
+    - build-docker-model-gateway
+  script:
+    - docker pull "${TARGET_IMAGE}"
+    - docker run --rm "${TARGET_IMAGE}"
+        poetry run python -c "import ai_gateway.main, ai_gateway.container, ai_gateway.proxy.clients.base, ai_gateway.models.v2.container, ai_gateway.vendor.langchain_litellm.litellm; print('imports ok')"
+    # /monitoring/healthz is health([]) and makes no model calls, so this needs
+    # no credentials. /monitoring/ready does make five real provider calls and
+    # deliberately is not used here.
+    - docker run --rm --detach --name aigw-smoke -e AIGW_FASTAPI__API_PORT=5052 -p 5052:5052 "${TARGET_IMAGE}"
+    - |
+      for attempt in $(seq 1 30); do
+        if docker run --rm --network host curlimages/curl:latest -fsS http://localhost:5052/monitoring/healthz; then
+          echo "healthz ok after ${attempt} attempt(s)"
+          exit 0
+        fi
+        sleep 2
+      done
+      echo "ERROR: /monitoring/healthz never returned 200"
+      docker logs aigw-smoke
+      exit 1
+  after_script:
+    - docker rm --force aigw-smoke || true

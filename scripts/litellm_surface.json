@@ -1,0 +1,10 @@
+{
+  "_comment": "Recorded litellm API surface. Regenerate with 'poetry run python scripts/litellm_surface.py --snapshot' when a signature change is deliberate, and explain it in the MR.",
+  "litellm_version": "1.101.0",
+  "signatures": {
+    "litellm.OpenAIGPT5Config.is_model_gpt_5_model": "(model: str) -> bool",
+    "litellm.proxy.pass_through_endpoints.pass_through_endpoints.create_pass_through_route": "(endpoint, target: str, custom_headers: collections.abc.Mapping[str, object] | None = None, _forward_headers: bool | None = False, _merge_query_params: bool | None = False, dependencies: list | None = None, include_subpath: bool | None = False, cost_per_request: float | None = None, custom_llm_provider: str | None = None, is_streaming_request: bool | None = False, query_params: dict | None = None, default_query_params: dict | None = None, guardrails: dict[str, object] | None = None, config_file_path: str | None = None, timeout: float | None = None)",
+    "litellm.register_model": "(model_cost: 'str | dict', *, persist_across_reloads: 'bool' = True, warning_display_name: 'str | None' = None)",
+    "litellm.utils.get_valid_models": "(check_provider_endpoint: 'bool | None' = None, custom_llm_provider: 'str | None' = None, litellm_params: 'LiteLLM_Params | None' = None, api_key: 'str | None' = None, api_base: 'str | None' = None) -> 'list[str]'"
+  }
+}
