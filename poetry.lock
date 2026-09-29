@@ -3589,14 +3589,14 @@ websockets = ">=14,<17"
 
 [[package]]
 name = "langsmith"
-version = "0.12.6"
+version = "0.14.0"
 description = "Client library to connect to the LangSmith Observability and Evaluation Platform."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "langsmith-0.12.6-py3-none-any.whl", hash = "sha256:5782b38dd259b2a6a1933dc9ca2beba4fb2899ad05e2ab10d61568dc49ce1d35"},
-    {file = "langsmith-0.12.6.tar.gz", hash = "sha256:f16901a5be1539f8c789cd26391f1935886f4029bfaf465d82afde7f7cb464bb"},
+    {file = "langsmith-0.14.0-py3-none-any.whl", hash = "sha256:1a89e52c24edd6f4c24d8cfb32857814ceb5b9bec344a2850e86ab38475de362"},
+    {file = "langsmith-0.14.0.tar.gz", hash = "sha256:294a02addc2358fab390156b74fa942e2dd40b711f6507c5f26b5c208cc89e15"},
 ]
 
 [package.dependencies]
@@ -8381,4 +8381,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<3.13.0"
-content-hash = "9eb3e4459a0c2cb455d37cbedca90bb5c01b854c931787472cdca09fbc5429a9"
+content-hash = "cf9408c4b06d60f4dfe28dbbed3fe209a7287528103521c105ad0191839e26a1"
