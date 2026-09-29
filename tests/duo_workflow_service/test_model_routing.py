@@ -104,3 +104,24 @@ def test_logs_matched_keyword_and_from_to_models(routable_context):
     assert routed_log["keyword"] == "typo"
     assert routed_log["from_model"] == "claude_sonnet_4_6_vertex"
     assert routed_log["to_model"] == "claude_haiku_4_5_20251001_vertex"
+
+
+@pytest.mark.usefixtures("flag_on")
+def test_routing_error_keeps_default_and_logs(routable_context, monkeypatch):
+    def _raise(*_):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ModelSelectionConfig.instance(), "resolve_tag_for_goal", _raise)
+
+    with capture_logs() as cap_logs:
+        assert route_default_model_by_goal("Fix the typo") is None
+
+    assert current_model_metadata_with_size_context.get() is routable_context
+    assert current_model_metadata_context.get() is routable_context.default
+    failure_log = next(
+        entry
+        for entry in cap_logs
+        if entry["event"] == "Model routing failed; keeping the default"
+    )
+    assert failure_log["log_level"] == "warning"
+    assert failure_log["exc_info"] is True
