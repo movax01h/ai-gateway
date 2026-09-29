@@ -94,36 +94,14 @@ def real_model_container_fixture():
 
 @pytest.fixture(name="agent_privileges_names")
 def agent_privileges_names_fixture() -> list[str]:
-    # The developer flow's read_file tool is gated on this Rails-granted
-    # privilege; the shared fixture default is [].
     return ["read_only_files"]
 
 
-@pytest.fixture(name="workflow_config")
-def workflow_config_fixture(  # pylint: disable=too-many-arguments
-    workflow_id: str,
-    agent_privileges_names: list[str],
-    allow_agent_to_request_user: bool,
-    mcp_enabled: bool,
-    first_checkpoint: dict[str, Any],
-) -> dict[str, Any]:
-    # Mirrors the shared fixture, but pre-approves the read-only privilege so
-    # tool approval short-circuits before its GitLab session-approval GraphQL
-    # call (which FakeExecutor has no business answering).
-    return {
-        "workflow_id": workflow_id,
-        "project_id": 1,
-        "agent_privileges_names": agent_privileges_names,
-        "pre_approved_agent_privileges_names": ["read_only_files"],
-        "allow_agent_to_request_user": allow_agent_to_request_user,
-        "mcp_enabled": mcp_enabled,
-        "first_checkpoint": first_checkpoint,
-        "latest_checkpoint": None,
-        "workflow_status": "",
-        "gitlab_host": "gitlab.com",
-        "archived": False,
-        "stalled": False,
-    }
+@pytest.fixture(name="pre_approved_agent_privileges_names")
+def pre_approved_agent_privileges_names_fixture() -> list[str]:
+    # Pre-approved so tool approval short-circuits before its GitLab
+    # session-approval GraphQL call, which FakeExecutor cannot answer.
+    return ["read_only_files"]
 
 
 @pytest.fixture(autouse=True)
