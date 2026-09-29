@@ -30,6 +30,9 @@ from google.protobuf.struct_pb2 import Struct
 
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
+from duo_workflow_service.interceptors.feature_flag_interceptor import (
+    FeatureFlagInterceptor,
+)
 from duo_workflow_service.interceptors.metadata_context_interceptor import (
     MetadataContextInterceptor,
 )
@@ -61,10 +64,17 @@ class FakeExecutor:
     sent, so tests can assert on the conversation rather than on internal state.
     """
 
+    # Action oneof fields this executor answers; subclasses extend to serve
+    # more of the executor surface (e.g. runReadFile).
+    HANDLED_ACTIONS: tuple[str, ...] = ("runHTTPRequest",)
+
     def __init__(self, workflow_id: str):
         self._workflow_id = workflow_id
         self.actions: list[contract_pb2.Action] = []
         self.requested_paths: list[tuple[str, str]] = []
+
+    def handles(self, action: contract_pb2.Action) -> bool:
+        return any(action.HasField(field) for field in self.HANDLED_ACTIONS)
 
     def response_for(self, action: contract_pb2.Action) -> contract_pb2.ClientEvent:
         """Build the ActionResponse a real executor would return for `action`."""
@@ -122,9 +132,22 @@ class FakeExecutor:
 
 
 def start_registry_flow_event(
-    goal: str, flow_config_id: str, schema_version: str, version: str
+    goal: str,
+    flow_config_id: str,
+    schema_version: str,
+    version: str,
+    client_capabilities: tuple[str, ...] = (),
 ) -> contract_pb2.ClientEvent:
-    """A start request that names a flow from the server-side registry."""
+    """A start request that names a flow from the server-side registry.
+
+    Args:
+        goal: The user's goal for the flow.
+        flow_config_id: Registry id of the flow config.
+        schema_version: Flow config schema version.
+        version: Flow version.
+        client_capabilities: Capabilities the fake client declares, as a real
+            client would in ``StartWorkflowRequest.clientCapabilities``.
+    """
     return contract_pb2.ClientEvent(
         startRequest=contract_pb2.StartWorkflowRequest(
             workflowID=WORKFLOW_ID,
@@ -132,6 +155,7 @@ def start_registry_flow_event(
             flowConfigId=flow_config_id,
             flowConfigSchemaVersion=schema_version,
             flowVersion=version,
+            clientCapabilities=list(client_capabilities),
         )
     )
 
@@ -162,14 +186,23 @@ async def run_exchange(
     servicer: DuoWorkflowService,
     executor: FakeExecutor,
     start_event: contract_pb2.ClientEvent,
+    extra_metadata: tuple[tuple[str, str], ...] = (),
 ) -> Exchange:
     """Drive one full ExecuteWorkflow RPC against a real gRPC server.
 
     Returns the terminal status of the call, whether the server closed the stream normally or aborted it.
+
+    Args:
+        servicer: The service under test.
+        executor: The fake client executor answering the action stream.
+        start_event: The ClientEvent that opens the exchange.
+        extra_metadata: Additional gRPC metadata pairs sent with the call,
+            e.g. the ``x-gitlab-enabled-feature-flags`` header.
     """
     server = grpc.aio.server(
         interceptors=[
             MetadataContextInterceptor(MagicMock()),
+            FeatureFlagInterceptor(),
             ModelMetadataInterceptor(),
         ]
     )
@@ -189,13 +222,13 @@ async def run_exchange(
     try:
         stub = contract_pb2_grpc.DuoWorkflowStub(channel)
         call = stub.ExecuteWorkflow(
-            request_iterator(), metadata=[MODEL_METADATA_HEADER]
+            request_iterator(), metadata=[MODEL_METADATA_HEADER, *extra_metadata]
         )
 
         async def consume_actions():
             async for action in call:
                 executor.actions.append(action)
-                if action.HasField("runHTTPRequest"):
+                if executor.handles(action):
                     client_events.put_nowait(executor.response_for(action))
 
         try:

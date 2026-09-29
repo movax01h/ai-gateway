@@ -195,6 +195,11 @@ def agent_privileges_names_fixture() -> list[str]:
     return []
 
 
+@pytest.fixture(name="pre_approved_agent_privileges_names")
+def pre_approved_agent_privileges_names_fixture() -> list[str]:
+    return []
+
+
 @pytest.fixture(name="mcp_enabled")
 def mcp_enabled_fixture() -> bool:
     return False
@@ -214,6 +219,7 @@ def first_checkpoint_fixture() -> dict[str, Any] | None:
 def workflow_config_fixture(
     workflow_id: str,
     agent_privileges_names: list[str],
+    pre_approved_agent_privileges_names: list[str],
     allow_agent_to_request_user: bool,
     mcp_enabled: bool,
     first_checkpoint: dict[str, Any],
@@ -222,7 +228,7 @@ def workflow_config_fixture(
         "workflow_id": workflow_id,
         "project_id": 1,
         "agent_privileges_names": agent_privileges_names,
-        "pre_approved_agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": pre_approved_agent_privileges_names,
         "allow_agent_to_request_user": allow_agent_to_request_user,
         "mcp_enabled": mcp_enabled,
         "first_checkpoint": first_checkpoint,
