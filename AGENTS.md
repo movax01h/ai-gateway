@@ -158,7 +158,9 @@ make lint-doc  # Runs vale + markdownlint
 ```
 
 Always run these `make` targets rather than invoking `pytest`, `mypy`,
-`ruff`, or `pylint` directly. `make test`, `check-mypy`, `check-ruff`, and
+`ruff`, or `pylint` directly. Exception: `make test` always runs the full
+suite and takes no path argument, so to run specific tests use
+`poetry run pytest <path>`. `make test`, `check-mypy`, `check-ruff`, and
 `check-pylint` install required dependencies first via `install-test-deps`/
 `install-lint-deps`, and `check-mypy` also passes `--exclude` flags (for
 `scripts/vendor/*` and the known-noncompliant files listed under
@@ -172,6 +174,14 @@ pre-installed `.venv`, prefix the make target with `CI=true` (e.g.
 `CI=true` and `.venv` exists. The same prefix fixes lefthook hooks that
 fail in the install step (`CI=true git commit ...`); prefer it over
 `LEFTHOOK=0`, which skips the checks entirely.
+
+The pre-installed `.venv` matches the `poetry.lock` of the commit the session
+started on. After you check out or rebase onto another ref, run
+`git diff --stat <start-sha> HEAD -- poetry.lock`. If the lock changed, run
+`poetry install --with test,lint`. If that can't reach the network, the
+`.venv` is stale, so run the same tests on the base ref to find failures that
+come from the environment and not your change. Report those tests as
+unverified.
 
 `check-mypy` type-checks the whole repo (`LINT_WORKING_DIR`: `ai_gateway`,
 `duo_workflow_service`, `tests`, and more) and typically exceeds the ~120s
