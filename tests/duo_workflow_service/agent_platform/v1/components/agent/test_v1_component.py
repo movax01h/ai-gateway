@@ -2,7 +2,7 @@
 """Test suite for AgentComponent class."""
 
 from typing import ClassVar, Literal
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -15,6 +15,7 @@ from ai_gateway.response_schemas import (
 )
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -26,6 +27,9 @@ from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponentBase,
     MaxCyclesConfig,
     RoutingError,
+)
+from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
+    AgentStuckError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -681,6 +685,120 @@ class TestResponseSchemaDefinition:
             mock_internal_event_client,
         )
         assert component._response_schema is None
+
+    async def _run_graph_with_replies(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        replies,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        inline_schema_registry,
+        base_flow_state,
+    ):
+        """Run a schema agent (default max_cycles) in a real graph; return the prompt mock."""
+        mock_toolset.__contains__ = lambda _self, name: name != self.INLINE_SCHEMA_ID
+        prompt = mock_prompt_registry.get_on_behalf.return_value
+        prompt.ainvoke = AsyncMock(side_effect=replies)
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=["context:user_input"],
+            prompt_id="test_prompt",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            schema_registry=inline_schema_registry,
+            response_schema_id=self.INLINE_SCHEMA_ID,
+        )
+        router = Mock()
+        router.route.return_value = END
+        graph = StateGraph(FlowState)
+        component.attach(graph, router)
+        graph.set_entry_point(component.__entry_hook__())
+        await graph.compile().ainvoke(
+            base_flow_state, config={"recursion_limit": RECURSION_LIMIT}
+        )
+        return prompt
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content", ["thinking...", [], ""], ids=["text", "empty_list", "empty_string"]
+    )
+    async def test_text_only_replies_stop_the_agent_before_max_cycles(
+        self, content, request, base_flow_state
+    ):
+        """A model that only replies in text, or empty, is stopped after 4 calls, not max_cycles + 2 (282)."""
+        replies = [AIMessage(content=content) for _ in range(300)]
+        with pytest.raises(
+            AgentStuckError, match="replied in text without calling a tool 4 times"
+        ):
+            await self._run_graph_with_replies(
+                replies,
+                **self._graph_fixtures(request),
+                base_flow_state=base_flow_state,
+            )
+        prompt = request.getfixturevalue(
+            "mock_prompt_registry"
+        ).get_on_behalf.return_value
+        assert prompt.ainvoke.await_count == 4
+        request_lengths = [
+            len(call.kwargs["input"]["history"])
+            for call in prompt.ainvoke.await_args_list
+        ]
+        # The persisted nudge makes each request differ, even when an empty reply is dropped.
+        assert request_lengths == sorted(set(request_lengths))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "text_turns", [2, 3], ids=["below_the_cap", "after_the_wrap_up"]
+    )
+    async def test_text_only_replies_then_final_answer_succeed(
+        self, text_turns, request, base_flow_state
+    ):
+        """Deliberation turns, then the schema call, complete normally, including in reply to the wrap-up."""
+        final = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "final",
+                    "name": self.INLINE_SCHEMA_ID,
+                    "args": {"summary": "done", "score": 5},
+                }
+            ],
+        )
+        replies = [AIMessage(content="thinking...") for _ in range(text_turns)]
+        prompt = await self._run_graph_with_replies(
+            [*replies, final],
+            **self._graph_fixtures(request),
+            base_flow_state=base_flow_state,
+        )
+        assert prompt.ainvoke.await_count == text_turns + 1
+        last_request = prompt.ainvoke.await_args_list[-1].kwargs["input"]["history"]
+        assert ("maximum number of iterations" in last_request[-1].content) is (
+            text_turns == 3
+        )
+
+    @staticmethod
+    def _graph_fixtures(request):
+        return {
+            name: request.getfixturevalue(name)
+            for name in (
+                "component_name",
+                "flow_id",
+                "flow_type",
+                "user",
+                "mock_toolset",
+                "mock_prompt_registry",
+                "mock_internal_event_client",
+                "inline_schema_registry",
+            )
+        }
 
 
 class TestAgentComponentInitialization:
