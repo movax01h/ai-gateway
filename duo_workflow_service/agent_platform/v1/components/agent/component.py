@@ -96,6 +96,7 @@ __all__ = [
     "AgentComponentBase",
     "MaxCyclesConfig",
     "RoutingError",
+    "default_iteration_warning_offset",
 ]
 
 # Injected at execution time by the node runner, or by the AIGW prompt layer for
@@ -109,12 +110,12 @@ RUNTIME_INJECTED_VARS = (
 # is warned that it is approaching the soft limit. Both the legacy plain-int
 # `max_cycles` form (see `AgentComponentBase.resolve_max_cycles`) and
 # `MaxCyclesConfig` resolve an omitted offset through
-# `_default_iteration_warning_offset`, which uses this for budgets of 20 or more and
+# `default_iteration_warning_offset`, which uses this for budgets of 20 or more and
 # half the budget below that, never dropping below one cycle.
 _DEFAULT_ITERATION_WARNING_OFFSET: int = 10
 
 
-def _default_iteration_warning_offset(threshold: int) -> Optional[int]:
+def default_iteration_warning_offset(threshold: int) -> Optional[int]:
     """Offset to use when the config did not set one.
 
     Ten cycles out, or half the budget when that is smaller, floored at one cycle. A tight
@@ -153,7 +154,7 @@ class MaxCyclesConfig(BaseModel):
     threshold. The plain-int form (`max_cycles: 280`) remains supported and resolves to this same behavior with the
     default `iteration_warning_offset`.
 
-    When `iteration_warning_offset` is omitted, it resolves via `_default_iteration_warning_offset`: ten cycles out,
+    When `iteration_warning_offset` is omitted, it resolves via `default_iteration_warning_offset`: ten cycles out,
     or half the threshold when that is smaller (a 4-cycle budget warns on cycle 2), floored at one cycle so even a
     2-cycle budget is warned. When it is explicitly set to a value `>= threshold`, this is treated as a
     deliberate misconfiguration and raises a `ValueError` — the caller should either lower it or set it to `null` to
@@ -180,7 +181,7 @@ class MaxCyclesConfig(BaseModel):
         offset `>= threshold` is a clear misconfiguration worth a hard error rather than a silent no-op).
         """
         if "iteration_warning_offset" not in self.model_fields_set:
-            self.iteration_warning_offset = _default_iteration_warning_offset(
+            self.iteration_warning_offset = default_iteration_warning_offset(
                 self.threshold
             )
         elif (
@@ -332,7 +333,7 @@ class AgentComponentBase(BaseComponent):
     def resolve_max_cycles(self) -> Self:
         """Resolve `max_cycles` (plain int or `MaxCyclesConfig`) into the threshold/offset used by `AgentNode`.
 
-        The plain-int form warns before the threshold by default, using `_default_iteration_warning_offset` so a
+        The plain-int form warns before the threshold by default, using `default_iteration_warning_offset` so a
         small threshold (e.g. a 4-cycle budget) warns partway through, and a very tight one still warns at all. The
         nested form allows overriding or disabling it entirely (`iteration_warning_offset: null`).
         """
@@ -341,7 +342,7 @@ class AgentComponentBase(BaseComponent):
             self._iteration_warning_offset = self.max_cycles.iteration_warning_offset
         else:
             self._max_cycles_threshold = self.max_cycles
-            self._iteration_warning_offset = _default_iteration_warning_offset(
+            self._iteration_warning_offset = default_iteration_warning_offset(
                 self.max_cycles
             )
         return self
