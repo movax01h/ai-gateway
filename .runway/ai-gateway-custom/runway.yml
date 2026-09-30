@@ -29,7 +29,7 @@ spec:
     path: "/monitoring/healthz"
     timeout_seconds: 10
     period_seconds: 15
-    failure_threshold: 5
+    failure_threshold: 10
   scalability:
     min_instances: 1
     max_instances: 8
