@@ -725,6 +725,7 @@ def test_restore_message_consistency_tool_message_not_immediately_after_ai():
     [
         pytest.param("", [], True, id="empty_string_dropped"),
         pytest.param("   ", [], True, id="whitespace_only_dropped"),
+        pytest.param([], [], True, id="empty_list_dropped"),
         pytest.param("hello", [], False, id="non_empty_kept"),
         pytest.param(
             "",
