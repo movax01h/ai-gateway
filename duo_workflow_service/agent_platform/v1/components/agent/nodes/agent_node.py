@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPStatus
-from typing import Any, ClassVar, Literal, Optional, Sequence, Type, cast
+from typing import Any, ClassVar, Literal, NamedTuple, Optional, Sequence, Type, cast
 
 import structlog
 from anthropic import APIStatusError as AnthropicAPIStatusError
@@ -63,11 +63,18 @@ def _is_text_only(message: BaseMessage) -> bool:
     return isinstance(message, AIMessage) and not message.tool_calls
 
 
-class AgentStuckError(Exception):
-    """Exception raised when an agent exceeds the maximum number of truncation retries.
+class _AnswerCheck(NamedTuple):
+    """Correction messages for a rejected final answer, and a reason free of model output."""
 
-    This indicates the agent is stuck in an unrecoverable loop where the LLM repeatedly produces truncated responses
-    despite recovery attempts.
+    corrections: list
+    reason: str = ""
+
+
+class AgentStuckError(Exception):
+    """Exception raised when an agent is stuck in an unrecoverable loop within one node step.
+
+    Raised when the LLM, despite recovery attempts, repeatedly produces truncated responses, keeps making tool calls
+    after the wrap-up instruction, or keeps sending a final answer that is rejected.
     """
 
 
@@ -273,6 +280,14 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     # independent of max_cycles; a text-only reply to that wrap-up raises AgentStuckError.
     _MAX_TEXT_ONLY_TURNS: int = 3
 
+    # Rejected final answers are retried inside a single run() call, so max_cycles
+    # never sees them. Two corrections are allowed; the third rejection stops the
+    # agent (issue #2945).
+    _MAX_ANSWER_REJECTIONS: int = 3
+
+    # How much of the rejection reason to quote in logs and the AgentStuckError message.
+    _REJECTION_ERROR_PREVIEW_CHARS: int = 300
+
     @staticmethod
     def _extract_text(completion: AIMessage) -> str:
         """Extract plain text from an ``AIMessage``, handling both string and list content.
@@ -430,6 +445,61 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             )
         return True
 
+    def _count_truncation(
+        self, truncation_retries: int, finish_reason: Optional[LLMFinishReason]
+    ) -> int:
+        """Log a truncated response and return the new count.
+
+        Raises:
+            AgentStuckError: When the count reaches ``_MAX_TRUNCATION_RETRIES``.
+        """
+        truncation_retries += 1
+        log.warning(
+            "LLM response was truncated due to token limit; "
+            "injecting recovery message and retrying within AgentNode",
+            finish_reason=finish_reason,
+            truncation_retries=truncation_retries,
+            max_truncation_retries=self._MAX_TRUNCATION_RETRIES,
+        )
+        if truncation_retries >= self._MAX_TRUNCATION_RETRIES:
+            raise AgentStuckError(
+                f"Agent '{self.name}' is stuck in an unrecoverable loop: "
+                f"LLM response was truncated {truncation_retries} times in a row, "
+                f"exceeding the maximum of {self._MAX_TRUNCATION_RETRIES} retries."
+            )
+        return truncation_retries
+
+    def _count_answer_rejection(self, answer_rejections: int, reason: str) -> int:
+        """Log a rejected final answer and return the new count.
+
+        ``reason`` must not contain model output: it goes to logs and the error message.
+
+        Raises:
+            AgentStuckError: When the count reaches ``_MAX_ANSWER_REJECTIONS``.
+        """
+        answer_rejections += 1
+        last_error = reason[: self._REJECTION_ERROR_PREVIEW_CHARS]
+        stuck = answer_rejections >= self._MAX_ANSWER_REJECTIONS
+        log.warning(
+            (
+                "Final answer rejected; maximum reached, stopping the agent"
+                if stuck
+                else "Final answer rejected; returning the error to the agent and retrying within AgentNode"
+            ),
+            agent=self.name,
+            answer_rejections=answer_rejections,
+            max_answer_rejections=self._MAX_ANSWER_REJECTIONS,
+            error=last_error,
+        )
+        if stuck:
+            raise AgentStuckError(
+                f"Agent '{self.name}' is stuck: "
+                f"its final answer was rejected {answer_rejections} times, "
+                f"reaching the maximum of {self._MAX_ANSWER_REJECTIONS}. "
+                f"Last error: {last_error}"
+            )
+        return answer_rejections
+
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
         history = history_iokey.value_from_state(state) or []
@@ -481,6 +551,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
         wrap_up_retries: int = 0
         truncation_retries: int = 0
+        answer_rejections: int = 0
 
         while True:
             try:
@@ -498,20 +569,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 )
                 finish_reason = extract_finish_reason(completion.response_metadata)
                 if finish_reason in LLMFinishReason.truncation_values():
-                    truncation_retries += 1
-                    log.warning(
-                        "LLM response was truncated due to token limit; "
-                        "injecting recovery message and retrying within AgentNode",
-                        finish_reason=finish_reason,
-                        truncation_retries=truncation_retries,
-                        max_truncation_retries=self._MAX_TRUNCATION_RETRIES,
+                    truncation_retries = self._count_truncation(
+                        truncation_retries, finish_reason
                     )
-                    if truncation_retries >= self._MAX_TRUNCATION_RETRIES:
-                        raise AgentStuckError(
-                            f"Agent '{self.name}' is stuck in an unrecoverable loop: "
-                            f"LLM response was truncated {truncation_retries} times in a row, "
-                            f"exceeding the maximum of {self._MAX_TRUNCATION_RETRIES} retries."
-                        )
                     history = restore_message_consistency(
                         [
                             *history,
@@ -524,8 +584,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 if finish_reason in LLMFinishReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
-                if len(updates := self._final_answer_validate(completion)) > 0:
-                    history = [*history, *updates]
+                if (check := self._final_answer_validate(completion)).corrections:
+                    answer_rejections = self._count_answer_rejection(
+                        answer_rejections, check.reason
+                    )
+                    history = [*history, *check.corrections]
                     continue
 
                 if wrap_up_active and self._completion_has_non_final_tool_calls(
@@ -702,9 +765,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         )
         return limits_iokey.to_nested_dict(self._max_context_tokens)
 
-    def _final_answer_validate(self, completion: AIMessage) -> list:
+    def _final_answer_validate(self, completion: AIMessage) -> _AnswerCheck:
         if self._response_schema is None:
-            return []
+            return _AnswerCheck([])
 
         tool_title = self._response_schema.tool_title
 
@@ -718,25 +781,39 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         )
 
         if not final_answer:
-            return []
+            return _AnswerCheck([])
 
         if len(completion.tool_calls) > 1:
-            return [completion] + [
-                ToolMessage(
-                    content=f"{tool_title} mustn't be combined with other tool calls",
-                    tool_call_id=tool_call["id"],
-                )
-                for tool_call in completion.tool_calls
-            ]
+            combined = f"{tool_title} mustn't be combined with other tool calls"
+            return _AnswerCheck(
+                [completion]
+                + [
+                    ToolMessage(
+                        content=combined,
+                        tool_call_id=tool_call["id"],
+                    )
+                    for tool_call in completion.tool_calls
+                ],
+                combined,
+            )
 
         try:
             self._response_schema.from_ai_message(completion)
-            return []
+            return _AnswerCheck([])
         except ValidationError as ve:
-            return [
-                completion,
-                ToolMessage(
-                    content=f"{tool_title} raised validation error: {ve}",
-                    tool_call_id=final_answer["id"],
-                ),
-            ]
+            # The model sees the full error; logs only get locations and types, since
+            # str(ve) quotes the rejected input.
+            fields = "; ".join(
+                f"{'.'.join(map(str, err['loc']))}: {err['type']}"
+                for err in ve.errors(include_input=False)
+            )
+            return _AnswerCheck(
+                [
+                    completion,
+                    ToolMessage(
+                        content=f"{tool_title} raised validation error: {ve}",
+                        tool_call_id=final_answer["id"],
+                    ),
+                ],
+                f"{tool_title} raised validation error: {fields}",
+            )
