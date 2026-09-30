@@ -19,6 +19,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
     AgentNode,
     AgentStuckError,
     CycleBudget,
+    _AnswerCheck,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -1139,6 +1140,261 @@ class TestAgentNodeTruncation:
 
         result_history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
         assert result_history[-1] == normal_message
+
+
+def _invalid_final_answer(call_id: str = "bad") -> AIMessage:
+    """A final-answer tool call missing the required ``final_response`` field."""
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "final_response_tool", "id": call_id, "args": {"wrong": "x"}}
+        ],
+    )
+    message.response_metadata = {}
+    return message
+
+
+def _valid_final_answer() -> AIMessage:
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "final_response_tool",
+                "id": "good",
+                "args": {"final_response": "Done"},
+            }
+        ],
+    )
+    message.response_metadata = {}
+    return message
+
+
+def _combined_final_answer() -> AIMessage:
+    """A valid final answer sent together with another tool call, which is rejected."""
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "final_response_tool",
+                "id": "final",
+                "args": {"final_response": "Done"},
+            },
+            {"name": "read_file", "id": "other", "args": {}},
+        ],
+    )
+    message.response_metadata = {}
+    return message
+
+
+class TestAgentNodeAnswerRejections:
+    """Rejected final answers are retried inside run(), so they need their own cap."""
+
+    def test_allows_two_corrections(self):
+        # Issue #2945: two corrections, the third rejection stops the agent.
+        assert AgentNode._MAX_ANSWER_REJECTIONS == 3
+
+    @pytest.mark.asyncio
+    async def test_valid_answer_after_max_minus_one_rejections_completes(
+        self, mock_prompt, agent_node_with_schema, base_flow_state, component_name
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        valid = _valid_final_answer()
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit - 1)] + [valid]
+        )
+
+        result = await agent_node_with_schema.run(base_flow_state)
+
+        assert mock_prompt.ainvoke.call_count == limit
+        assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name][-1] == valid
+
+    @pytest.mark.asyncio
+    async def test_raises_agent_stuck_error_after_max_rejections(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        # Enough invalid answers to keep looping well past the cap, then a valid one:
+        # without the cap this completes and the pytest.raises below fails, not hangs.
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+
+        with pytest.raises(AgentStuckError) as exc_info:
+            await agent_node_with_schema.run(base_flow_state)
+
+        message = str(exc_info.value)
+        assert agent_node_with_schema.name in message
+        assert f"rejected {limit} times" in message
+        assert "final_response_tool raised validation error" in message
+        assert mock_prompt.ainvoke.call_count == limit
+
+    @pytest.mark.asyncio
+    async def test_error_message_truncates_long_validation_error(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+        long_error = "x" * 5000
+
+        with patch.object(
+            agent_node_with_schema,
+            "_final_answer_validate",
+            side_effect=lambda completion: (
+                _AnswerCheck([])
+                if completion.tool_calls[0]["id"] == "good"
+                else _AnswerCheck(
+                    [completion, ToolMessage(content="bad", tool_call_id="bad")],
+                    long_error,
+                )
+            ),
+        ):
+            with pytest.raises(AgentStuckError) as exc_info:
+                await agent_node_with_schema.run(base_flow_state)
+
+        preview = AgentNode._REJECTION_ERROR_PREVIEW_CHARS
+        assert "x" * preview in str(exc_info.value)
+        assert "x" * (preview + 1) not in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_logs_and_error_do_not_contain_model_output(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        secret = "PLANTED-SENTINEL-VALUE-7f3a91"
+        leaky = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "final_response_tool",
+                    "id": "bad",
+                    "args": {"final_response": {"token": secret}},
+                }
+            ],
+        )
+        leaky.response_metadata = {}
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[leaky for _ in range(limit + 5)] + [_valid_final_answer()]
+        )
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.log"
+        ) as mock_log:
+            with pytest.raises(AgentStuckError) as exc_info:
+                await agent_node_with_schema.run(base_flow_state)
+
+        assert secret not in str(exc_info.value)
+        assert "final_response: string_type" in str(exc_info.value)
+        rejection_logs = [
+            c
+            for c in mock_log.warning.call_args_list
+            if c.args and c.args[0].startswith("Final answer rejected")
+        ]
+        assert len(rejection_logs) == limit
+        assert all(secret not in str(c) for c in rejection_logs)
+        assert rejection_logs[-1].kwargs == {
+            "agent": agent_node_with_schema.name,
+            "answer_rejections": limit,
+            "max_answer_rejections": limit,
+            "error": "final_response_tool raised validation error: final_response: string_type",
+        }
+        # The model itself still gets the full error, input included.
+        retry_history = mock_prompt.ainvoke.call_args_list[1][1]["input"]["history"]
+        assert secret in retry_history[-1].content
+
+    @pytest.mark.asyncio
+    async def test_final_rejection_log_says_agent_is_stopped(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.log"
+        ) as mock_log:
+            with pytest.raises(AgentStuckError):
+                await agent_node_with_schema.run(base_flow_state)
+
+        messages = [
+            c.args[0]
+            for c in mock_log.warning.call_args_list
+            if c.args and c.args[0].startswith("Final answer rejected")
+        ]
+        assert len(messages) == limit
+        assert all("retrying" in m for m in messages[:-1])
+        assert "retrying" not in messages[-1]
+        assert "stopping the agent" in messages[-1]
+
+    @pytest.mark.asyncio
+    async def test_rejection_counter_resets_between_runs(
+        self, mock_prompt, agent_node_with_schema, base_flow_state, component_name
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        for _ in range(2):
+            valid = _valid_final_answer()
+            mock_prompt.ainvoke = AsyncMock(
+                side_effect=[_invalid_final_answer() for _ in range(limit - 1)]
+                + [valid]
+            )
+            result = await agent_node_with_schema.run(base_flow_state)
+            assert (
+                result[FlowStateKeys.CONVERSATION_HISTORY][component_name][-1] == valid
+            )
+
+    @pytest.mark.asyncio
+    async def test_answer_combined_with_other_tool_calls_counts_as_rejection(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_combined_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+
+        with pytest.raises(AgentStuckError) as exc_info:
+            await agent_node_with_schema.run(base_flow_state)
+
+        assert "mustn't be combined with other tool calls" in str(exc_info.value)
+        assert mock_prompt.ainvoke.call_count == limit
+
+    @pytest.mark.asyncio
+    async def test_rejections_during_wrap_up_are_capped(
+        self, mock_prompt, make_agent_node, state_at_limit
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+        # max_wrap_up_retries is 2 in the factory: rejections must not consume it.
+        node = make_agent_node(response_schema=AgentFinalOutput)
+
+        with pytest.raises(AgentStuckError) as exc_info:
+            await node.run(state_at_limit)
+
+        assert f"rejected {limit} times" in str(exc_info.value)
+        assert mock_prompt.ainvoke.call_count == limit
+
+    @pytest.mark.asyncio
+    async def test_valid_answer_after_rejections_during_wrap_up_completes(
+        self, mock_prompt, make_agent_node, state_at_limit, component_name
+    ):
+        valid = _valid_final_answer()
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer(), _invalid_final_answer(), valid]
+        )
+        node = make_agent_node(response_schema=AgentFinalOutput)
+
+        result = await node.run(state_at_limit)
+
+        assert mock_prompt.ainvoke.call_count == 3
+        assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name][-1] == valid
 
 
 class TestAgentNodeReasoning:
