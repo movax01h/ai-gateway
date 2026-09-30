@@ -173,6 +173,18 @@ pre-installed `.venv`, prefix the make target with `CI=true` (e.g.
 fail in the install step (`CI=true git commit ...`); prefer it over
 `LEFTHOOK=0`, which skips the checks entirely.
 
+`check-mypy` type-checks the whole repo (`LINT_WORKING_DIR`: `ai_gateway`,
+`duo_workflow_service`, `tests`, and more) and typically exceeds the ~120s
+per-command timeout in a sandbox. Scope it to the files you changed so it
+completes while keeping the Makefile's `--exclude` flags:
+
+```shell
+CI=true make check-mypy LINT_WORKING_DIR="path/to/changed_file.py"
+```
+
+Run the full-repo `check-mypy` only when you can allow a longer timeout;
+never weaken the check to make it pass.
+
 ### Pre-commit Hooks
 
 ```shell
