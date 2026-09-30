@@ -39,6 +39,8 @@ components:
       - "todo_write"
       - "run_command"
 
+    identical_tool_call_limit: 3
+
     ui_log_events:
       - "on_agent_reasoning"
       - "on_tool_execution_success"
