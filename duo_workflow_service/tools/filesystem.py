@@ -1,7 +1,10 @@
 import json
+import re
+import uuid
 from enum import IntEnum
 from textwrap import dedent
 from typing import Any, ClassVar, List, Optional, Type
+from urllib.parse import quote, unquote, urlparse
 
 import gitmatch
 import structlog
@@ -20,16 +23,20 @@ from duo_workflow_service.executor.action import (
     _execute_action_and_get_action_response,
 )
 from duo_workflow_service.executor.image_result import ImageActionResult
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.file_exclusion_policy import (
     CONTEXT_EXCLUSION_MESSAGE,
     FileExclusionPolicy,
 )
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from lib.context import gitlab_user_id
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 DEFAULT_READ_FILE_OFFSET = 0
 DEFAULT_READ_FILE_LIMIT = 2000
+
+_security_log = structlog.stdlib.get_logger("security")
 
 # Trusted path segments for globally-installed agent skills, Duo plugins, and Duo config.
 # Read-only tools need to access absolute paths (e.g. ~/.agents/skills/<skill>/SKILL.md or
@@ -207,11 +214,24 @@ IMAGE_READ_CAPABILITY = "read_file_image"
 _READ_FILE_IMAGE_NOTE = f"""Image files ({supported_image_formats_display()}) are supported: reading one returns the
     actual image so you can see its contents.
 
+    Images uploaded to issues or merge requests in the current project are
+    also supported: pass the upload reference exactly as it appears in the
+    markdown, e.g. `/uploads/<secret>/screenshot.png`. It is downloaded
+    using the user's own GitLab credentials. Uploads on epics or other
+    groups' items are not reachable this way.
+
     """
 
 _READ_FILE_CHUNKED_IMAGE_NOTE = f"""\
 - Image files ({supported_image_formats_display()}) are supported and return the actual image so you can see its contents.
     - Offset/limit do not apply to images.
+
+    Images uploaded to issues or merge requests in the current project are
+    also supported: pass the upload reference exactly as it appears in the
+    markdown, e.g. `/uploads/<secret>/screenshot.png`. It is downloaded
+    using the user's own GitLab credentials. Uploads on epics or other
+    groups' items are not reachable this way.
+
     """
 
 _READ_FILES_IMAGE_NOTE = """Image files are not supported here: read them individually with read_file.
@@ -253,6 +273,158 @@ def _image_response_to_blocks_if_enabled(
     )
 
 
+# `/uploads/<secret>/<filename>`, as GitLab stores it in issue and MR markdown.
+# Secrets are 32 hex chars today, 10 to 32 on old uploads (FileUploader
+# VALID_SECRET_PATTERN), and a filename never contains a slash. The leading
+# slash is optional because models routinely drop it (seen live).
+_UPLOAD_REF_PATTERN = re.compile(
+    r"\A(?P<leading_slash>/?)uploads/(?P<secret>[0-9a-f]{10,32})/(?P<filename>[^/]+)\Z"
+)
+
+# Length of the secret current GitLab mints. Only relevant for the slashless
+# form, which is indistinguishable from a repository path.
+_UPLOAD_SECRET_LENGTH = 32
+
+
+def _resolve_upload_reference(file_path: str, project: Optional[Project]) -> str | None:
+    """Map a markdown upload reference onto its REST API download path.
+
+    Needs a project: the reference carries none and the API lookup is parent-scoped. The
+    executor matches the returned path strictly before attaching the user's credential, so
+    this shape and the client-side check have to stay in sync.
+    """
+    # Upload reading is part of gated image support, both switches: with the
+    # flag off or a client that has not declared the capability, the reference
+    # stays an ordinary path (today's pre-feature behavior) and no download is
+    # ever asked for. An older client could not fetch the API path anyway.
+    if not _image_support_enabled():
+        return None
+    match = _UPLOAD_REF_PATTERN.match(file_path)
+    if not match or not project or not project.get("id"):
+        return None
+
+    # `.` and `..` match the filename group but address the upload directory
+    # rather than a file; sending either would spend the user's credential on
+    # a request that was never a file read.
+    if match["filename"] in (".", ".."):
+        return None
+
+    # Without the leading slash the reference is shaped exactly like a
+    # repository path, so accept only the secret length GitLab mints today:
+    # `uploads/<10 hex>/thing.png` is a believable directory in a real tree,
+    # and rewriting it would send a file read to the API instead. Legacy
+    # short secrets still resolve in their markdown form, with the slash.
+    if not match["leading_slash"] and len(match["secret"]) != _UPLOAD_SECRET_LENGTH:
+        return None
+
+    filename = quote(match["filename"], safe="")
+    return f"/api/v4/projects/{project['id']}/uploads/{match['secret']}/{filename}"
+
+
+def _author_id() -> Optional[int]:
+    """The requesting user's instance-local id, as the standard's integer ``author_id``."""
+    raw = gitlab_user_id.get()
+    return int(raw) if raw and raw.isdigit() else None
+
+
+def _log_upload_read(
+    project: Optional[Project],
+    request_path: str,
+    *,
+    outcome: str,
+    response_type: Optional[str],
+    size_bytes: Optional[int],
+) -> None:
+    """Record the service's decision to ask for an upload, in the security logging standard's shape.
+
+    The SIEM-bound record is the Rails ``ai_tool_invoked`` audit event, which already carries the tool arguments and
+    the author. This line is the service's own part, and it fires on every attempt because a failed download is still
+    credential spend.
+
+    ``outcome`` reports the download, not what the model received: ``success`` means the client answered the request,
+    even when the payload then failed the image checks. That case reads as ``size_bytes`` set with ``response_type``
+    ``text``, since the bytes were pulled into the service before the check refused them.
+
+    Fields this layer cannot fill: ``author_name`` (only ids reach the service), ``target_id`` (uploads are addressed
+    by secret and filename), ``ip_address`` (the request arrives over gRPC) and ``details.token_type`` (the client
+    holds the credential). The upload secret stays out because it is part of the download URL.
+    """
+    web_url = project.get("web_url") if project else None
+    _security_log.info(
+        "Tool read resolved a GitLab upload reference",
+        id=str(uuid.uuid4()),
+        event_type="data.read.upload",
+        author_id=_author_id(),
+        entity_type="Project",
+        entity_id=project.get("id") if project else None,
+        entity_path=urlparse(web_url).path.strip("/") if web_url else None,
+        target_type="upload",
+        # Not `filename`: stdlib LogRecord reserves that name and raises.
+        # Decoded, so the value matches the upload's own name in a SIEM search.
+        target_details=unquote(request_path.rsplit("/", 1)[-1]),
+        details={
+            "outcome": outcome,
+            "provider": "duo_workflow_service",
+            "response_type": response_type,
+        },
+        gitlab={"data_type": "upload", "size_bytes": size_bytes},
+    )
+
+
+async def _read_upload_reference(
+    metadata: Any, project: Optional[Project], file_path: str
+) -> str | list | None:
+    """Download ``file_path`` as an upload, or return ``None`` if it is not one.
+
+    Both read tools funnel through here because ``ReadFileChunked`` supersedes ``ReadFile``
+    under the same tool name, so a difference between the two would be invisible to a test
+    that exercises only one.
+
+    Args:
+        metadata: Tool metadata carrying the executor outbox.
+        project: The workflow's project, which scopes the download.
+        file_path: The path the model asked for.
+
+    Returns:
+        The tool response for an upload reference, or ``None`` when
+        ``file_path`` is an ordinary path the caller should handle itself.
+    """
+    request_path = _resolve_upload_reference(file_path, project)
+    if request_path is None:
+        return None
+
+    # An agent pulling a project upload into model context is worth a trail;
+    # see _log_upload_read for what the trail is and is not.
+    outcome = "failure"
+    response_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    try:
+        # offset/limit are meaningless for a downloaded image and are not sent.
+        response = await _execute_action_accepting_image(
+            metadata,
+            contract_pb2.Action(
+                runReadFile=contract_pb2.ReadFile(filepath=request_path)
+            ),
+        )
+        converted: str | list
+        if isinstance(response, ImageActionResult):
+            size_bytes = len(response.data)
+            converted = _image_response_to_blocks_if_enabled(response, file_path)
+        else:
+            converted = response
+        response_type = "image" if isinstance(converted, list) else "text"
+        outcome = "success"
+        return converted
+    finally:
+        _log_upload_read(
+            project,
+            request_path,
+            outcome=outcome,
+            response_type=response_type,
+            size_bytes=size_bytes,
+        )
+
+
 class ReadFileInput(BaseModel):
     file_path: str = Field(description="the file_path to read the file from")
 
@@ -283,6 +455,13 @@ class ReadFile(DuoBaseTool):
     async def _execute(self, file_path: str) -> str | list[dict[str, Any]]:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
+
+        # Upload references are remote GitLab content, not workspace paths, so
+        # they skip the filesystem exclusion check (which rejects all absolute
+        # paths) and go to the executor as the project-scoped API path.
+        upload = await _read_upload_reference(self.metadata, self.project, file_path)
+        if upload is not None:
+            return upload
 
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
@@ -356,6 +535,13 @@ class ReadFileChunked(DuoBaseTool):
     ) -> str | list[dict[str, Any]]:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
+
+        # Same upload branch as ReadFile: this class replaces it under the same
+        # tool name whenever the client is chunked-capable, so upload
+        # references land here on modern clients.
+        upload = await _read_upload_reference(self.metadata, self.project, file_path)
+        if upload is not None:
+            return upload
 
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
