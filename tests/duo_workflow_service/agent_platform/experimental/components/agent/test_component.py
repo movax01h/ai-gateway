@@ -1801,6 +1801,34 @@ class TestAgentComponentMaxWrapUpRetries:
         call_kwargs = mock_agent_node_cls.call_args[1]
         assert call_kwargs["cycle_budget"].max_wrap_up_retries == 5
 
+    @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
+    @pytest.mark.parametrize(
+        "max_cycles, expected_offset",
+        [
+            (280, 10),  # default budget: warned ten cycles out, as in v1
+            (22, 10),  # first threshold where the 10-cycle cap wins
+            (11, 5),  # half the budget while that is below the default
+            (2, 1),  # floored: a tight budget is still warned
+            (1, None),  # no cycle left to warn on
+        ],
+    )
+    def test_attach_passes_iteration_warning_offset_to_agent_node(
+        self,
+        make_agent_component,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+        max_cycles,
+        expected_offset,
+    ):
+        """Attach() schedules the approaching-limit warning with v1's default offset."""
+        component = make_agent_component(max_cycles=max_cycles)
+        component.attach(mock_state_graph, mock_router)
+
+        cycle_budget = mock_agent_node_cls.call_args[1]["cycle_budget"]
+        assert cycle_budget.max_cycles == max_cycles
+        assert cycle_budget.iteration_warning_offset == expected_offset
+
 
 class TestAgentComponentCompaction:
     """Test suite for AgentComponent compaction configuration."""

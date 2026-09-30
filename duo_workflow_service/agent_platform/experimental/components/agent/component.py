@@ -63,6 +63,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 # Re-export RoutingError from v1 to prevent code duplication.
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     RoutingError,
+    default_iteration_warning_offset,
 )
 from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
 from duo_workflow_service.client_capabilities import is_client_capable
@@ -662,6 +663,9 @@ class AgentComponent(AgentComponentBase):
                 max_cycles=self.max_cycles,
                 cycle_count_key=self._cycle_count_key,
                 max_wrap_up_retries=self.max_wrap_up_retries,
+                iteration_warning_offset=default_iteration_warning_offset(
+                    self.max_cycles
+                ),
             ),
             prompt_template_inputs={"tools_enabled": self._tools_enabled()},
         )
