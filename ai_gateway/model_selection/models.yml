@@ -657,6 +657,9 @@ models:
       model: "claude-sonnet-4-5-20250929"
       temperature: 0.0
       max_tokens: 64_000
+    deprecation:
+      deprecation_date: "2026-09-30"
+      removal_version: "19.6"
 
   - name: "Claude Sonnet 4.5"
     provider: "Gemini Enterprise Agent Platform"
@@ -676,6 +679,9 @@ models:
       max_retries: 1
     prompt_params:
       vertex_location: global
+    deprecation:
+      deprecation_date: "2026-09-30"
+      removal_version: "19.6"
 
   - name: "Claude Sonnet 4.5"
     provider: "Bedrock"
@@ -693,6 +699,9 @@ models:
       temperature: 0.0
       max_tokens: 64_000
       max_retries: 1
+    deprecation:
+      deprecation_date: "2026-09-30"
+      removal_version: "19.6"
 
   - name: "Claude Haiku 4.5"
     provider: "Anthropic"
