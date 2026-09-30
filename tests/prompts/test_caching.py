@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.model_selection import PromptParams
@@ -394,6 +394,33 @@ class TestCacheControlInjectionPointsConverter:
         assert original_value.to_messages() == prompt_value.to_messages(), (
             "Original list has been modified"
         )
+
+    @pytest.mark.parametrize(
+        "cache_control_injection_points",
+        [[{"location": "message", "index": 0}, {"location": "message", "index": -1}]],
+    )
+    def test_invoke_with_empty_list_content(
+        self, converter: CacheControlInjectionPointsConverter
+    ):
+        prompt_value = ChatPromptValue(
+            messages=[
+                SystemMessage(content="Hi, I'm Duo"),
+                HumanMessage(content="What's up?"),
+                AIMessage(content=[]),
+            ]
+        )
+
+        response = converter.invoke(prompt_value)
+
+        messages = response.to_messages()
+        first_message = messages[0]
+        assert isinstance(first_message.content, list)
+        assert isinstance(first_message.content[-1], dict)
+        assert first_message.content[-1]["cache_control"] == {
+            "type": "ephemeral",
+            "ttl": "5m",
+        }
+        assert messages[-1].content == []
 
     @pytest.mark.parametrize(
         "model_class_provider",
