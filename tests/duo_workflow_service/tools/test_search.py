@@ -3,12 +3,21 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain.tools import ToolException
+from pydantic import ValidationError
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.search import (
+    BLOB_SEARCH_DEFAULT_PER_PAGE,
+    BLOB_SEARCH_MAX_PER_PAGE,
+    INCOMPLETE_EXCLUDED,
+    INCOMPLETE_MORE_PAGES,
+    INCOMPLETE_TOO_LARGE,
     AdvanceBlobSearch,
+    AdvanceBlobSearchInput,
     BaseSearchInput,
     BlobSearch,
+    BlobSearchInput,
     CommitSearch,
     GroupProjectSearch,
     IssueSearch,
@@ -19,15 +28,46 @@ from duo_workflow_service.tools.search import (
     UserSearch,
     WikiBlobSearch,
 )
+from duo_workflow_service.tools.tool_output_manager import TruncationConfig
+
+BLOB_SEARCH_TOOLS = (BlobSearch, AdvanceBlobSearch)
 
 
-def create_mock_aget(response_data):
-    """Create a mock aget function that returns GitLabHttpResponse."""
+def _blob_hit(path, data="def authorize(user):"):
+    """Build one blob-search hit for `path`."""
+    return {
+        "basename": path.rsplit("/", 1)[-1].split(".")[0],
+        "data": data,
+        "path": path,
+        "filename": path,
+        "id": None,
+        "ref": "main",
+        "startline": 1,
+        "project_id": 6,
+    }
+
+
+def _blob_hits(count, data="def authorize(user):"):
+    """Build `count` blob hits on paths no exclusion rule matches."""
+    return [_blob_hit(f"src/app_{i}.py", data) for i in range(count)]
+
+
+def _excluded_log_hit():
+    """Build a hit that a `*.log` exclusion rule withholds."""
+    return _blob_hit("logs/debug.log", data="DEBUG: Application started")
+
+
+def create_mock_aget(response_data, headers=None):
+    """Create a mock aget function that returns GitLabHttpResponse.
+
+    Real search responses carry pagination headers; the header-less default exercises the fallback path.
+    """
 
     async def mock_aget(*_args, **_kwargs):
         return GitLabHttpResponse(
             status_code=200,
             body=response_data,
+            headers=headers or {},
         )
 
     return mock_aget
@@ -136,14 +176,20 @@ class TestSearch:
         all_params = {**base_params, **search_params, **optional_params}
         response = await tool._arun(**all_params)
 
-        expected_response = json.dumps({"search_results": mock_response})
-        assert response == expected_response
+        if tool_class in BLOB_SEARCH_TOOLS:
+            assert json.loads(response)["search_results"] == mock_response
+        else:
+            expected_response = json.dumps({"search_results": mock_response})
+            assert response == expected_response
 
         expected_params = {"scope": scope, **all_params}
         expected_params = {k: v for k, v in expected_params.items() if v is not None}
         expected_params.pop("id")
         if tool_class != BlobSearch:
             expected_params.pop("search_type")
+        if tool_class in BLOB_SEARCH_TOOLS:
+            expected_params["per_page"] = BLOB_SEARCH_DEFAULT_PER_PAGE
+            expected_params["page"] = 1
         if "confidential" in expected_params:
             expected_params["confidential"] = str(
                 expected_params["confidential"]
@@ -200,13 +246,19 @@ class TestSearch:
             all_params.pop("search_type")
         response = await tool._arun(**all_params)
 
-        expected_response = json.dumps({"search_results": []})
-        assert response == expected_response
+        if tool_class in BLOB_SEARCH_TOOLS:
+            assert json.loads(response)["search_results"] == []
+        else:
+            expected_response = json.dumps({"search_results": []})
+            assert response == expected_response
 
         expected_params = {"scope": scope, **all_params}
         expected_params.pop("id")
         if "search_type" in expected_params:
             expected_params.pop("search_type")
+        if tool_class in BLOB_SEARCH_TOOLS:
+            expected_params["per_page"] = BLOB_SEARCH_DEFAULT_PER_PAGE
+            expected_params["page"] = 1
         if "confidential" in expected_params:
             expected_params["confidential"] = str(
                 expected_params["confidential"]
@@ -635,7 +687,13 @@ class TestBlobSearchFileExclusion:
 
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/projects/999/search",
-            params={"scope": "blobs", "search": "test search", "ref": "main"},
+            params={
+                "scope": "blobs",
+                "search": "test search",
+                "per_page": BLOB_SEARCH_DEFAULT_PER_PAGE,
+                "page": 1,
+                "ref": "main",
+            },
             parse_json=True,
         )
 
@@ -730,7 +788,13 @@ class TestAdvanceBlobSearch:
 
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/projects/123/search",
-            params={"scope": "blobs", "search": "def main", "ref": "main"},
+            params={
+                "scope": "blobs",
+                "search": "def main",
+                "per_page": BLOB_SEARCH_DEFAULT_PER_PAGE,
+                "page": 1,
+                "ref": "main",
+            },
             parse_json=True,
         )
 
@@ -755,7 +819,12 @@ class TestAdvanceBlobSearch:
 
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/groups/456/search",
-            params={"scope": "blobs", "search": "config"},
+            params={
+                "scope": "blobs",
+                "search": "config",
+                "per_page": BLOB_SEARCH_DEFAULT_PER_PAGE,
+                "page": 1,
+            },
             parse_json=True,
         )
 
@@ -778,7 +847,12 @@ class TestAdvanceBlobSearch:
 
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/search",
-            params={"scope": "blobs", "search": "rails"},
+            params={
+                "scope": "blobs",
+                "search": "rails",
+                "per_page": BLOB_SEARCH_DEFAULT_PER_PAGE,
+                "page": 1,
+            },
             parse_json=True,
         )
 
@@ -817,7 +891,12 @@ class TestAdvanceBlobSearch:
 
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/groups/123/search",
-            params={"scope": "blobs", "search": "test"},
+            params={
+                "scope": "blobs",
+                "search": "test",
+                "per_page": BLOB_SEARCH_DEFAULT_PER_PAGE,
+                "page": 1,
+            },
             parse_json=True,
         )
 
@@ -842,6 +921,8 @@ class TestAdvanceBlobSearch:
             params={
                 "scope": "blobs",
                 "search": "test",
+                "per_page": BLOB_SEARCH_DEFAULT_PER_PAGE,
+                "page": 1,
                 "order_by": "created_at",
                 "sort": "desc",
             },
@@ -904,8 +985,7 @@ class TestAdvanceBlobSearch:
             api_url="/api/v4/projects/123/search",
         )
 
-        response_data = json.loads(response)
-        assert response_data == {"search_results": []}
+        assert json.loads(response)["search_results"] == []
 
     @pytest.mark.asyncio
     async def test_raises_exception_on_failed_response(
@@ -949,7 +1029,12 @@ class TestAdvanceBlobSearch:
 
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/projects/group%2Fsubgroup%2Fproject/search",
-            params={"scope": "blobs", "search": "test"},
+            params={
+                "scope": "blobs",
+                "search": "test",
+                "per_page": BLOB_SEARCH_DEFAULT_PER_PAGE,
+                "page": 1,
+            },
             parse_json=True,
         )
 
@@ -1018,6 +1103,279 @@ class TestAdvanceBlobSearch:
     def test_required_capability(self):
         """Test that AdvanceBlobSearch requires advanced_search capability."""
         assert AdvanceBlobSearch.required_capability == frozenset({"advanced_search"})
+
+
+class TestBlobSearchResponse:
+    """The response shape shared by both `gitlab_blob_search` tools."""
+
+    TOOL_CALLS = [
+        pytest.param(
+            BlobSearch,
+            {"id": "1", "search": "authorize", "ref": "main"},
+            id="BlobSearch",
+        ),
+        pytest.param(
+            AdvanceBlobSearch,
+            {"search": "authorize", "api_url": "/api/v4/projects/1/search"},
+            id="AdvanceBlobSearch",
+        ),
+    ]
+
+    @pytest.fixture(name="gitlab_client_mock")
+    def gitlab_client_mock_fixture(self):
+        return AsyncMock()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "hits, headers, extra_kwargs, expected",
+        [
+            pytest.param(
+                3,
+                {},
+                {},
+                {"incomplete": [], "current_page": 1, "next_page": None},
+                id="short-last-page",
+            ),
+            pytest.param(
+                3,
+                {"X-Next-Page": "2"},
+                {},
+                {
+                    "incomplete": [INCOMPLETE_MORE_PAGES],
+                    "current_page": 1,
+                    "next_page": 2,
+                },
+                id="x-next-page",
+            ),
+            pytest.param(
+                3,
+                {"x-next-page": "4"},
+                {"page": 3},
+                {
+                    "incomplete": [INCOMPLETE_MORE_PAGES],
+                    "current_page": 3,
+                    "next_page": 4,
+                },
+                id="x-next-page-lowercase",
+            ),
+            pytest.param(
+                # Basic search caps content matches at 100 + offset, so it omits X-Next-Page
+                # when per_page >= 100.
+                BLOB_SEARCH_DEFAULT_PER_PAGE,
+                {"X-Next-Page": ""},
+                {"page": 2},
+                {
+                    "incomplete": [INCOMPLETE_MORE_PAGES],
+                    "current_page": 2,
+                    "next_page": 3,
+                },
+                id="full-page-without-x-next-page",
+            ),
+            pytest.param(
+                # 20 hits fill a default page but not a requested page of 100.
+                BLOB_SEARCH_DEFAULT_PER_PAGE,
+                {},
+                {"per_page": 100},
+                {"incomplete": [], "current_page": 1, "next_page": None},
+                id="20-hits-on-a-page-of-100",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("tool_class, call_kwargs", TOOL_CALLS)
+    async def test_reports_incomplete_and_next_page(
+        self,
+        tool_class,
+        call_kwargs,
+        hits,
+        headers,
+        extra_kwargs,
+        expected,
+        gitlab_client_mock,
+    ):
+        gitlab_client_mock.aget.side_effect = create_mock_aget(
+            _blob_hits(hits), headers=headers
+        )
+
+        tool = tool_class(metadata={"gitlab_client": gitlab_client_mock})
+        payload = json.loads(await tool._arun(**call_kwargs, **extra_kwargs))
+
+        assert payload == {"search_results": _blob_hits(hits), **expected}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_class, call_kwargs", TOOL_CALLS)
+    async def test_full_page_thinned_by_file_policy_reports_both_reasons(
+        self, tool_class, call_kwargs, gitlab_client_mock
+    ):
+        """The full-page rule counts results before the file-exclusion policy."""
+        hits = _blob_hits(14) + [_excluded_log_hit()] * 6
+        gitlab_client_mock.aget.side_effect = create_mock_aget(hits)
+
+        tool = tool_class(
+            metadata={
+                "gitlab_client": gitlab_client_mock,
+                "project": {"exclusion_rules": ["*.log"]},
+            }
+        )
+        payload = json.loads(await tool._arun(**call_kwargs))
+
+        assert payload["search_results"] == _blob_hits(14)
+        assert payload["incomplete"] == [INCOMPLETE_MORE_PAGES, INCOMPLETE_EXCLUDED]
+        assert payload["next_page"] == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_class, call_kwargs", TOOL_CALLS)
+    async def test_short_page_thinned_by_file_policy_is_incomplete(
+        self, tool_class, call_kwargs, gitlab_client_mock
+    ):
+        """A withheld match means the list shown is not every match."""
+        hits = _blob_hits(3) + [_excluded_log_hit()]
+        gitlab_client_mock.aget.side_effect = create_mock_aget(hits)
+
+        tool = tool_class(
+            metadata={
+                "gitlab_client": gitlab_client_mock,
+                "project": {"exclusion_rules": ["*.log"]},
+            }
+        )
+        payload = json.loads(await tool._arun(**call_kwargs))
+
+        assert payload["search_results"] == _blob_hits(3)
+        assert payload["incomplete"] == [INCOMPLETE_EXCLUDED]
+        assert payload["next_page"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_class, call_kwargs", TOOL_CALLS)
+    async def test_oversized_page_drops_trailing_results_and_is_incomplete(
+        self, tool_class, call_kwargs, gitlab_client_mock
+    ):
+        """Whole results are dropped from the tail, so the response stays valid JSON."""
+        max_bytes = 8 * 1024
+        fat_hits = _blob_hits(12, data="a" * 500)
+        gitlab_client_mock.aget.side_effect = create_mock_aget(fat_hits)
+
+        tool = tool_class(
+            metadata={"gitlab_client": gitlab_client_mock},
+            truncation_config=TruncationConfig(
+                max_bytes=max_bytes, truncated_size=4 * 1024
+            ),
+        )
+        response = await tool._arun(**call_kwargs)
+        payload = json.loads(response)
+
+        assert len(response.encode()) < max_bytes
+        assert 0 < len(payload["search_results"]) < len(fat_hits)
+        assert payload["search_results"] == fat_hits[: len(payload["search_results"])]
+        assert payload["incomplete"] == [INCOMPLETE_TOO_LARGE]
+        assert payload["next_page"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_class, call_kwargs", TOOL_CALLS)
+    async def test_oversized_page_with_next_page_offers_no_next_page(
+        self, tool_class, call_kwargs, gitlab_client_mock
+    ):
+        """Later pages never show the dropped results, so the agent must narrow."""
+        fat_hits = _blob_hits(12, data="a" * 500)
+        gitlab_client_mock.aget.side_effect = create_mock_aget(
+            fat_hits, headers={"X-Next-Page": "2"}
+        )
+
+        tool = tool_class(
+            metadata={"gitlab_client": gitlab_client_mock},
+            truncation_config=TruncationConfig(
+                max_bytes=8 * 1024, truncated_size=4 * 1024
+            ),
+        )
+        payload = json.loads(await tool._arun(**call_kwargs))
+
+        assert len(payload["search_results"]) < len(fat_hits)
+        assert payload["incomplete"] == [INCOMPLETE_TOO_LARGE]
+        assert payload["next_page"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body", [{}, "not json", None, ["error", "details"], [{"path": "a.rb"}, "x"]]
+    )
+    @pytest.mark.parametrize("tool_class, call_kwargs", TOOL_CALLS)
+    async def test_non_list_body_raises_tool_exception(
+        self, tool_class, call_kwargs, body, gitlab_client_mock
+    ):
+        gitlab_client_mock.aget.side_effect = create_mock_aget(body)
+
+        tool = tool_class(metadata={"gitlab_client": gitlab_client_mock})
+
+        with pytest.raises(ToolException, match="not a list of results"):
+            await tool._arun(**call_kwargs)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "extra_kwargs, expected",
+        [
+            pytest.param({}, {"per_page": 20, "page": 1}, id="defaults"),
+            pytest.param(
+                {"per_page": 100, "page": 2}, {"per_page": 100, "page": 2}, id="set"
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("tool_class, call_kwargs", TOOL_CALLS)
+    async def test_requests_per_page_and_page(
+        self, tool_class, call_kwargs, extra_kwargs, expected, gitlab_client_mock
+    ):
+        gitlab_client_mock.aget.side_effect = create_mock_aget(_blob_hits(3))
+
+        tool = tool_class(metadata={"gitlab_client": gitlab_client_mock})
+        await tool._arun(**call_kwargs, **extra_kwargs)
+
+        params = gitlab_client_mock.aget.call_args.kwargs["params"]
+        assert {key: params[key] for key in expected} == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "extra_kwargs, message",
+        [
+            pytest.param({"per_page": 0}, "Invalid per_page 0", id="per-page-0"),
+            pytest.param(
+                {"per_page": BLOB_SEARCH_MAX_PER_PAGE + 1},
+                "Invalid per_page 101",
+                id="per-page-above-max",
+            ),
+            pytest.param({"page": 0}, "Invalid page 0", id="page-0"),
+        ],
+    )
+    @pytest.mark.parametrize("tool_class, call_kwargs", TOOL_CALLS)
+    async def test_out_of_range_paging_raises_tool_exception(
+        self, tool_class, call_kwargs, extra_kwargs, message, gitlab_client_mock
+    ):
+        """Flow-level tool options skip the input schema, so `_execute` checks too."""
+        tool = tool_class(metadata={"gitlab_client": gitlab_client_mock})
+
+        with pytest.raises(ToolException, match=message):
+            await tool._arun(**call_kwargs, **extra_kwargs)
+
+        gitlab_client_mock.aget.assert_not_called()
+
+
+class TestBlobSearchInputs:
+    """Input schemas of both `gitlab_blob_search` tools."""
+
+    @pytest.mark.parametrize("input_class", [BlobSearchInput, AdvanceBlobSearchInput])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {"per_page": 0},
+            {"per_page": BLOB_SEARCH_MAX_PER_PAGE + 1},
+            {"per_page": None},
+            {"page": 0},
+        ],
+    )
+    def test_rejects_out_of_range_paging(self, input_class, bad):
+        with pytest.raises(ValidationError):
+            input_class(id="1", api_url="/api/v4/projects/1/search", search="x", **bad)
+
+    def test_advanced_input_keeps_its_own_ref_description(self):
+        assert "only applicable for project searches" in (
+            AdvanceBlobSearchInput.model_fields["ref"].description
+        )
+        assert "only applicable" not in BlobSearchInput.model_fields["ref"].description
 
 
 class TestValidateAndNormalizeApiUrl:

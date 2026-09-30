@@ -1,10 +1,11 @@
 # pylint: disable=too-many-lines
+import json
 import sys
 from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.tools import BaseTool
+from langchain.tools import BaseTool, ToolException
 from pydantic import BaseModel
 
 from ai_gateway.model_selection.models import ModelClassProvider
@@ -23,7 +24,7 @@ from duo_workflow_service.components.tools_registry import (
 )
 from duo_workflow_service.entities.state import ApprovalSource
 from duo_workflow_service.executor.outbox import Outbox
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from duo_workflow_service.tools.ascp import (
     CreateAscpComponent,
     CreateAscpScan,
@@ -734,6 +735,52 @@ async def test_registry_toolset_with_tool_options(gl_http_client, project_mock):
     # Verify the tool in the toolset is a clone, not the same instance from the registry
     original_tool = registry.get("create_merge_request_note")
     assert note_tool is not original_tool
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pinned, error",
+    [
+        pytest.param(100, None, id="pinned-100"),
+        # Tool options bypass the input schema, so the tool checks the range itself.
+        pytest.param(500, "Invalid per_page 500", id="pinned-above-max"),
+        pytest.param(0, "Invalid per_page 0", id="pinned-zero"),
+    ],
+)
+async def test_blob_search_page_size_tool_option_overrides_the_model(
+    gl_http_client, project_mock, pinned, error
+):
+    """A flow that pins `per_page` for blob search wins over the model's value."""
+    registry = await ToolsRegistry.configure(
+        workflow_config={
+            "workflow_id": "test_workflow",
+            "agent_privileges_names": ["read_only_gitlab"],
+            "gitlab_host": "gitlab.example.com",
+        },
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+    )
+    toolset = registry.toolset(
+        ["gitlab_blob_search"],
+        tool_options={"gitlab_blob_search": {"per_page": pinned}},
+    )
+    gl_http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=[{"path": f"src/f{i}.py", "data": "x"} for i in range(20)],
+        headers={},
+    )
+    tool = toolset["gitlab_blob_search"]
+
+    if error:
+        with pytest.raises(ToolException, match=error):
+            await tool._arun(id="1", search="authorize", per_page=20)
+        return
+
+    result = json.loads(await tool._arun(id="1", search="authorize", per_page=20))
+
+    assert gl_http_client.aget.call_args.kwargs["params"]["per_page"] == 100
+    assert result["incomplete"] == []
 
 
 @pytest.mark.asyncio
