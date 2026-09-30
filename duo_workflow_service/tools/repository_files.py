@@ -13,7 +13,7 @@ from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import DuoBaseTool, log_failed_request
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 
 log = structlog.stdlib.get_logger(__name__)
@@ -331,10 +331,11 @@ class ListRepositoryTree(DuoBaseTool):
         )
 
         if not response.is_success():
-            log.error(
-                "List repository tree request failed with status %s: %s",
+            log_failed_request(
+                log,
+                "List repository tree request failed",
                 response.status_code,
-                response.body,
+                response_body=str(response.body)[:300],
             )
             raise ToolException(
                 f"List repository tree request failed with status {response.status_code}: {response.body}"

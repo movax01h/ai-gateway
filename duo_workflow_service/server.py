@@ -690,8 +690,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     await asyncio.wait_for(
                         workflow_task, timeout=self.TASK_CANCELLATION_TIMEOUT
                     )
-                except (asyncio.TimeoutError, asyncio.CancelledError) as ex:
+                except asyncio.TimeoutError as ex:
+                    # The task ignored the cancellation for too long.
                     log_exception(ex, extra={"source": __name__})
+                except asyncio.CancelledError as ex:
+                    # The cancellation requested above has been honoured.
+                    log.info("Workflow task cancelled", reason=str(ex))
 
         try:
             async for action in self.send_events(workflow, workflow_task):
@@ -797,7 +801,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # This exception is raised when RPC is cancelled by the client.
                 context.set_code(grpc.StatusCode.CANCELLED)
                 context.set_details("RPC cancelled by client")
-                log_exception(err, extra={"source": __name__})
+                log.info("RPC cancelled by client", reason=err_str)
 
             await abort_workflow(workflow_task, err)
             # Task cancellation must be reraised to the grpc server side so that the rpc task can be shutdown properly.
