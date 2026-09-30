@@ -6,7 +6,7 @@ from typing import Any, ClassVar, Literal, Optional, Sequence, Type, cast
 import structlog
 from anthropic import APIStatusError as AnthropicAPIStatusError
 from langchain_core.exceptions import ContextOverflowError
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from openai import APIStatusError as OpenAIAPIStatusError
 from pydantic import ConfigDict, Field, ValidationError
@@ -29,6 +29,9 @@ from duo_workflow_service.agent_platform.v1.state import (
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
 from duo_workflow_service.checkpointer.write_mode import (
     compaction_ui_chat_log_update,
+)
+from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
+    COMPACTION_CONTINUE_MESSAGE,
 )
 from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
@@ -54,6 +57,10 @@ log = structlog.stdlib.get_logger("agent_node")
 _LITELLM_EMPTY_CONTENT_PLACEHOLDER = (
     "[System: Empty message content sanitised to satisfy protocol]"
 )
+
+
+def _is_text_only(message: BaseMessage) -> bool:
+    return isinstance(message, AIMessage) and not message.tool_calls
 
 
 class AgentStuckError(Exception):
@@ -262,6 +269,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     )
 
     _MAX_TRUNCATION_RETRIES: int = 5
+    # Consecutive text-only turns in schema mode under "auto" before the wrap-up is sent,
+    # independent of max_cycles; a text-only reply to that wrap-up raises AgentStuckError.
+    _MAX_TEXT_ONLY_TURNS: int = 3
 
     @staticmethod
     def _extract_text(completion: AIMessage) -> str:
@@ -424,9 +434,13 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         history_iokey = self._conversation_history_key.to_iokey(state)
         history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)
+        # Count before the trimmer drops empty replies: each text-only turn is its own run.
+        text_only_turns = self._text_only_turns(history)
 
         history, optimization_results = await self._optimizer_pipeline.optimize(history)
-        history = restore_message_consistency(history)
+        history = self._with_continue_nudge(
+            restore_message_consistency(history), text_only_turns
+        )
 
         cycle_count, cycle_count_state_update = self._check_and_increment_cycle_count(
             state
@@ -540,6 +554,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     )
                     continue
 
+                self._check_text_only_turn(completion, text_only_turns)
+
                 # Without a schema a text-only message is itself the final answer, so
                 # emitting it would duplicate. In schema mode it is deliberation.
                 if completion.tool_calls or (
@@ -611,6 +627,64 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 )
 
                 await self._error_handler.handle_error(model_error)
+
+    def _deliberates_in_text(self) -> bool:
+        return (
+            self._response_schema is not None
+            and self._response_schema_tool_choice == "auto"
+        )
+
+    def _continue_message(self) -> str:
+        title = cast(Type[BaseAgentOutput], self._response_schema).tool_title
+        return f"Continue. When you are done, call the `{title}` tool with your final answer."
+
+    def _text_only_turns(self, history: list[BaseMessage]) -> int:
+        """Count the text-only turns in a row ending the history: the last one plus one per nudge before it.
+
+        Nudges are counted because the trimmer drops empty replies from the persisted history.
+        Compaction's own continue message after a text-only tail is skipped, not a reset.
+        """
+        if not (self._deliberates_in_text() and history and _is_text_only(history[-1])):
+            return 0
+        turns = 1
+        for msg in reversed(history[:-1]):
+            if (
+                isinstance(msg, HumanMessage)
+                and msg.content == self._continue_message()
+            ):
+                turns += 1
+            elif not _is_text_only(msg) and msg.content != COMPACTION_CONTINUE_MESSAGE:
+                break
+        return turns
+
+    def _with_continue_nudge(
+        self, history: list[BaseMessage], text_only_turns: int
+    ) -> list[BaseMessage]:
+        """After a text-only or empty turn, make the next (persisted) request differ, so it can't repeat.
+
+        At the cap, the nudge is the max_cycles wrap-up instruction: one last chance to answer.
+        """
+        if not text_only_turns:
+            return history
+        if text_only_turns >= self._MAX_TEXT_ONLY_TURNS:
+            return [*history, HumanMessage(content=self._wrap_up_message())]
+        return [*history, HumanMessage(content=self._continue_message())]
+
+    def _check_text_only_turn(self, completion: AIMessage, previous_turns: int) -> None:
+        if completion.tool_calls or not self._deliberates_in_text():
+            return
+        log.warning(
+            "Agent replied in text without calling a tool",
+            agent=self.name,
+            text_only_turns=previous_turns + 1,
+            max_text_only_turns=self._MAX_TEXT_ONLY_TURNS,
+        )
+        # At the cap, the request carried the wrap-up instruction, and this reply ignored it.
+        if previous_turns >= self._MAX_TEXT_ONLY_TURNS:
+            raise AgentStuckError(
+                f"Agent '{self.name}' is stuck: it replied in text without calling a tool "
+                f"{previous_turns + 1} times in a row, the last after the wrap-up instruction."
+            )
 
     def _agent_context_limits_update(self, history_iokey: IOKey) -> dict:
         """Stamp ``{agent_key: max_context_tokens}`` keyed off ``history_iokey``.

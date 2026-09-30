@@ -31,6 +31,9 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
+    COMPACTION_CONTINUE_MESSAGE,
+)
 from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
@@ -2339,3 +2342,317 @@ class TestAgentNodeWrapUpRetries:
             assert mock_prompt.ainvoke.call_count == 1
             # cycle_count should be 1 (first run)
             assert result["context"][component_name]["cycle_count"] == 1
+
+
+def _tool_call_completion() -> AIMessage:
+    """A completion calling a regular (non-final) tool."""
+    message = AIMessage(
+        content="",
+        tool_calls=[{"id": "tc1", "name": "read_file", "args": {}}],
+    )
+    message.response_metadata = {}
+    return message
+
+
+_NUDGE = (
+    "Continue. When you are done, call the `structured_response` tool with your "
+    "final answer."
+)
+
+
+def _nudge() -> HumanMessage:
+    return HumanMessage(content=_NUDGE)
+
+
+class TestAgentNodeTextOnlyTurns:
+    """Consecutive text-only turns in schema mode under "auto" are nudged, and bounded independently of max_cycles."""
+
+    @pytest.fixture(name="schema")
+    def schema_fixture(self):
+        schema = Mock()
+        schema.tool_title = "structured_response"
+        return schema
+
+    @pytest.fixture(name="auto_node")
+    def auto_node_fixture(self, make_agent_node, schema):
+        return make_agent_node(
+            max_cycles=None, response_schema=schema, response_schema_tool_choice="auto"
+        )
+
+    @staticmethod
+    def _state(base_flow_state, component_name, history):
+        state = copy.deepcopy(base_flow_state)
+        state["conversation_history"] = {component_name: history}
+        return state
+
+    @staticmethod
+    def _request_history(mock_prompt, call_index=-1):
+        return mock_prompt.ainvoke.call_args_list[call_index][1]["input"]["history"]
+
+    @pytest.mark.asyncio
+    async def test_text_only_reply_to_the_wrap_up_instruction_raises(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        mock_prompt,
+        auto_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """After three text-only turns the request carries the wrap-up instruction; a fourth text reply raises."""
+        mock_prompt.ainvoke = AsyncMock(return_value=_text_only_completion())
+        state = self._state(
+            base_flow_state,
+            component_name,
+            [
+                HumanMessage(content="go"),
+                _text_only_completion(),
+                _nudge(),
+                _text_only_completion(),
+                _nudge(),
+                _text_only_completion(),
+            ],
+        )
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.log"
+        ) as mock_log:
+            with pytest.raises(
+                AgentStuckError,
+                match="'test_agent_node' is stuck: it replied in text without calling a tool "
+                "4 times in a row, the last after the wrap-up instruction",
+            ):
+                await auto_node.run(state)
+
+        mock_log.warning.assert_called_once_with(
+            "Agent replied in text without calling a tool",
+            agent="test_agent_node",
+            text_only_turns=4,
+            max_text_only_turns=3,
+        )
+        assert mock_prompt.ainvoke.call_count == 1
+        assert self._request_history(mock_prompt)[-1] == HumanMessage(
+            content=auto_node._wrap_up_message()  # pylint: disable=protected-access
+        )
+
+    @pytest.mark.asyncio
+    async def test_text_only_turn_is_followed_by_a_persisted_nudge(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        mock_prompt,
+        auto_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """The request after a text-only turn no longer ends on an assistant message, and the nudge is kept."""
+        earlier = _text_only_completion()
+        completion = _text_only_completion()
+        mock_prompt.ainvoke = AsyncMock(return_value=completion)
+        go = HumanMessage(content="go")
+
+        result = await auto_node.run(
+            self._state(base_flow_state, component_name, [go, earlier])
+        )
+
+        assert self._request_history(mock_prompt) == [go, earlier, _nudge()]
+        assert result["conversation_history"][component_name] == [
+            go,
+            earlier,
+            _nudge(),
+            completion,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_compaction_continue_message_does_not_reset_the_count(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        mock_prompt,
+        auto_node,
+        optimizer_pipeline,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Compaction's continue message after a text-only tail does not reset the count."""
+        compaction_continue = HumanMessage(content=COMPACTION_CONTINUE_MESSAGE)
+
+        async def compact_once(history):
+            if optimizer_pipeline.optimize.await_count == 1:
+                return [*history, compaction_continue], []
+            return history, []
+
+        optimizer_pipeline.optimize = AsyncMock(side_effect=compact_once)
+        mock_prompt.ainvoke = AsyncMock(side_effect=lambda **_: _text_only_completion())
+        state = self._state(
+            base_flow_state,
+            component_name,
+            [
+                HumanMessage(content="go"),
+                _text_only_completion(),
+                _nudge(),
+                _text_only_completion(),
+            ],
+        )
+
+        result = await auto_node.run(state)
+        assert self._request_history(mock_prompt)[-2:] == [
+            compaction_continue,
+            _nudge(),
+        ]
+
+        with pytest.raises(AgentStuckError, match="4 times in a row"):
+            await auto_node.run(
+                self._state(
+                    base_flow_state,
+                    component_name,
+                    result["conversation_history"][component_name],
+                )
+            )
+        assert self._request_history(mock_prompt)[-1] == HumanMessage(
+            content=auto_node._wrap_up_message()  # pylint: disable=protected-access
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", [[], ""], ids=["empty_list", "empty_string"])
+    async def test_empty_replies_forever_stop_after_four_calls(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        content,
+        mock_prompt,
+        auto_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Feeding each run's history into the next, as the router's loop-back does, an empty reply that the trimmer
+        drops still changes the next request and still counts."""
+
+        def empty_reply(**_kwargs):
+            message = AIMessage(content=content)
+            message.response_metadata = {}
+            return message
+
+        mock_prompt.ainvoke = AsyncMock(side_effect=empty_reply)
+        state = self._state(
+            base_flow_state, component_name, [HumanMessage(content="go")]
+        )
+
+        with pytest.raises(AgentStuckError, match="4 times in a row"):
+            for _ in range(10):
+                result = await auto_node.run(state)
+                state = self._state(
+                    base_flow_state,
+                    component_name,
+                    result["conversation_history"][component_name],
+                )
+
+        assert mock_prompt.ainvoke.call_count == 4
+        # Each request carries one more nudge (the last: the wrap-up), so none repeats the one before.
+        request_lengths = [len(self._request_history(mock_prompt, i)) for i in range(4)]
+        assert request_lengths == sorted(set(request_lengths))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("history", "nudged"),
+        [
+            ([HumanMessage(content="go"), _text_only_completion()], True),
+            (
+                [
+                    HumanMessage(content="go"),
+                    _text_only_completion(),
+                    _nudge(),
+                    _text_only_completion(),
+                    _tool_call_completion(),
+                    ToolMessage(content="file contents", tool_call_id="tc1"),
+                ],
+                False,
+            ),
+            (
+                [
+                    HumanMessage(content="go"),
+                    _text_only_completion(),
+                    _nudge(),
+                    _text_only_completion(),
+                    _tool_call_completion(),
+                    ToolMessage(content="file contents", tool_call_id="tc1"),
+                    _text_only_completion(),
+                ],
+                True,
+            ),
+            (
+                [
+                    HumanMessage(content="go"),
+                    _text_only_completion(),
+                    _nudge(),
+                    _text_only_completion(),
+                ],
+                True,
+            ),
+        ],
+        ids=[
+            "below_limit",
+            "reset_by_tool_call",
+            "reset_then_one_text_turn",
+            "third_turn_does_not_raise",
+        ],
+    )
+    async def test_text_only_turn_below_the_limit_is_returned(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        history,
+        nudged,
+        mock_prompt,
+        auto_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """A tool call resets the count, and a text turn below the limit loops back as before."""
+        completion = _text_only_completion()
+        mock_prompt.ainvoke = AsyncMock(return_value=completion)
+
+        result = await auto_node.run(
+            self._state(base_flow_state, component_name, history)
+        )
+
+        assert result["conversation_history"][component_name][-1] == completion
+        assert (self._request_history(mock_prompt)[-1] == _nudge()) is nudged
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool_choice", "with_schema"),
+        [("auto", False), ("any", True)],
+        ids=["no_schema", "any_tool_choice"],
+    )
+    async def test_other_modes_are_unaffected(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        tool_choice,
+        with_schema,
+        mock_prompt,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        schema,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Without a schema a text reply is the final answer; under "any" the router handles it.
+
+        Neither gets a nudge or a cap.
+        """
+        node_kwargs = {"response_schema_tool_choice": tool_choice}
+        if with_schema:
+            node_kwargs["response_schema"] = schema
+        completion = _text_only_completion()
+        mock_prompt.ainvoke = AsyncMock(return_value=completion)
+        history = [HumanMessage(content="go")] + [
+            _text_only_completion() for _ in range(3)
+        ]
+
+        result = await make_agent_node(max_cycles=None, **node_kwargs).run(
+            self._state(base_flow_state, component_name, history)
+        )
+
+        assert self._request_history(mock_prompt) == history
+        assert result["conversation_history"][component_name][-1] == completion
