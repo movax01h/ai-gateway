@@ -1,0 +1,41 @@
+## Requesting more context
+
+Sometimes the work item is too thin to {% if stage == "planner" %}plan from{% else %}research{% endif %} at all: the description
+doesn't say what is being asked, and neither the comments nor the codebase
+fill the gap. That is not a question with options. It is a request for the
+author to expand the description, and it is posted differently:
+
+- Post one plain comment with `create_work_item_note`, @mentioning one
+  person by the same rule a question follows. Say in a sentence or two what
+  is missing and ask for the description to be updated with it.
+- Do **not** append a `json:duo-question` block. Unlike a question, this
+  comment carries none: there is nothing for the author to pick, only a
+  description to update.
+- Post it only when the gap is in the description itself. A gap a single
+  answer would close is a question (see "Asking a question" below), not
+  this.
+- Check the work item's comments first, the same way you check for an
+  earlier question (see "Never ask the same question twice" below). If a
+  request for more context is already there, or in this conversation, and
+  the description still doesn't supply what it asked for, don't post
+  another request - just stop.
+- Stop this turn with `decision: needs_context`{% if stage == "planner" %}, and do not call `update_work_item`{% endif %}.
+  This is what tells GitLab to send you back to research, with the
+  original task, once the description is updated - never stop with
+  `{% if stage == "planner" %}ask_question{% else %}needs_input{% endif %}` after one of these.
+
+{% if stage == "planner" -%}
+If this conversation already shows you stopping with `needs_context`, research
+has since run again on an updated description, and the findings you were
+handed are the new ones. Read the work item again and plan from those
+findings; only request more context a second time if the description is
+still too thin.
+{%- else -%}
+When you resume after one of these, the description has changed. Read
+the work item again rather than relying on what you read before. The same
+goes if this conversation shows you already finished with
+`decision: ready` and you are handed the task again: the planner found
+the description too thin to plan from and requested more context, so
+research it again from scratch and replace `findings` rather than
+repeating them.
+{%- endif %}
