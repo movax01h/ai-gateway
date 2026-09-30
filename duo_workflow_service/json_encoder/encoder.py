@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -61,3 +62,20 @@ class CustomEncoder(json.JSONEncoder):
             # `TypeError: Object of type Send is not JSON serializable`.
             return {"type": "Send", "node": o.node, "arg": o.arg}
         return super().default(o)
+
+
+# A `\u0000` escape that is not itself escaped: it must be preceded by an even
+# number of backslashes (the `(\\\\)*` group), or the backslash belongs to a
+# literal `\` in the string, e.g. the text `\u0000` is encoded as `\\u0000`.
+_NUL_ESCAPE_RE = re.compile(r"(?<!\\)((?:\\\\)*)\\u0000")
+
+
+def dumps_checkpoint(obj: Any) -> str:
+    """Encode checkpoint data as JSON that PostgreSQL can store.
+
+    Tool output can contain NUL characters, for example terminal escape sequences in a
+    command's output. `jsonb` cannot represent them, so GitLab rejects the whole
+    checkpoint with `PG::UntranslatableCharacter` and the workflow fails. They carry no
+    meaning for the model, so they are dropped.
+    """
+    return _NUL_ESCAPE_RE.sub(r"\1", json.dumps(obj, cls=CustomEncoder))

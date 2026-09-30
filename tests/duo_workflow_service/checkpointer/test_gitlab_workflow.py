@@ -32,7 +32,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     _serialize_all_channels_full,
     _serialize_channel_blobs,
 )
-from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    compress_checkpoint,
+    uncompress_checkpoint,
+)
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
     CheckpointFetchError,
@@ -1835,6 +1838,27 @@ async def test_aput(
             "checkpoint_ns": TOP_LEVEL_CHECKPOINT_NS,
         }
     }
+
+
+@pytest.mark.asyncio
+async def test_aput_drops_nul_characters(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    # PostgreSQL `jsonb` cannot store NUL, so GitLab would reject the checkpoint.
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["command_output"] = "Exit code: 0\n\x1b]633;C\x07\x00"
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+    saved = uncompress_checkpoint(post_call_body["compressed_checkpoint"])
+
+    assert saved["channel_values"]["command_output"] == "Exit code: 0\n\x1b]633;C\x07"
 
 
 def _checkpoint_saved_kwargs(logger):
