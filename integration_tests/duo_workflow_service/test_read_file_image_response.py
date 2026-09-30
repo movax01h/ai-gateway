@@ -39,7 +39,7 @@ from anthropic.types import (
 )
 from anthropic.types.raw_message_delta_event import Delta
 
-import tests.duo_workflow_service.integration.conftest as integration_conftest
+import integration_tests.duo_workflow_service.conftest as integration_conftest
 from contract import contract_pb2
 from duo_workflow_service.interceptors import X_GITLAB_VERSION_HEADER
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
@@ -49,7 +49,7 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
 )
 from duo_workflow_service.server import DuoWorkflowService
-from tests.duo_workflow_service.integration.conftest import (
+from integration_tests.duo_workflow_service.conftest import (
     FakeExecutor,
     run_exchange,
     start_registry_flow_event,

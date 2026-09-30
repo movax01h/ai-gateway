@@ -41,6 +41,61 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
 )
 from duo_workflow_service.server import DuoWorkflowService
 
+# This directory sits outside `tests/`, so pytest does not load `tests/conftest.py` or
+# `tests/duo_workflow_service/conftest.py` for it. Importing the unit-test fixtures these tests depend on
+# registers them here, scoped to this directory. The autouse ones reset the process-wide state (context vars,
+# structlog, LiteLLM, monitoring context) that unit tests rely on too.
+from tests.conftest import (
+    auth_user_fixture,
+    claims_extra_fixture,
+    disable_cached_logger,
+    issuer_fixture,
+    jwt_realm_fixture,
+    pin_default_model_to_first_entry,
+    project_fixture,
+    reset_context,
+    reset_litellm_settings,
+    user_is_debug_fixture,
+)
+from tests.duo_workflow_service.conftest import (
+    agent_privileges_names_fixture,
+    allow_agent_to_request_user_fixture,
+    first_checkpoint_fixture,
+    isolate_monitoring_context,
+    mcp_enabled_fixture,
+    mock_duo_workflow_service_container_fixture,
+    mock_fetch_workflow_and_container_data_fixture,
+    namespace_fixture,
+    pre_approved_agent_privileges_names_fixture,
+    workflow_config_fixture,
+    workflow_id_fixture,
+)
+
+# Mark the fixture imports above as intentional re-exports; pytest picks them up by attribute, never by call.
+__all__ = [
+    "agent_privileges_names_fixture",
+    "allow_agent_to_request_user_fixture",
+    "auth_user_fixture",
+    "claims_extra_fixture",
+    "disable_cached_logger",
+    "first_checkpoint_fixture",
+    "isolate_monitoring_context",
+    "issuer_fixture",
+    "jwt_realm_fixture",
+    "mcp_enabled_fixture",
+    "mock_duo_workflow_service_container_fixture",
+    "mock_fetch_workflow_and_container_data_fixture",
+    "namespace_fixture",
+    "pin_default_model_to_first_entry",
+    "pre_approved_agent_privileges_names_fixture",
+    "project_fixture",
+    "reset_context",
+    "reset_litellm_settings",
+    "user_is_debug_fixture",
+    "workflow_config_fixture",
+    "workflow_id_fixture",
+]
+
 WORKFLOW_ID = "42"
 
 # Flow configs under test declare no model of their own, so — exactly as in production — the model comes from
