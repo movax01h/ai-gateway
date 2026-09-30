@@ -18,9 +18,6 @@ from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
-from duo_workflow_service.agent_platform.v1.chat_engine import (
-    ENGINE_FLOOR_UI_LOG_EVENTS,
-)
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponent,
     AgentComponentBase,
@@ -2444,11 +2441,12 @@ class TestAgentNodeInvokeConfig:
                 ],
                 "both streaming events",
             ),
-            # The chat engine fills this floor into a config that declares no
-            # events, so the floor has to satisfy this component's streaming rule.
+            # The chat-partial environment fills this floor into a component that
+            # declares no events, so the floor has to satisfy this component's
+            # streaming rule.
             (
-                [UILogEventsAgent(event) for event in ENGINE_FLOOR_UI_LOG_EVENTS],
-                "chat engine floor",
+                list(AgentComponent.CHAT_PARTIAL_UI_LOG_EVENTS),
+                "chat-partial floor",
             ),
         ],
     )
@@ -2528,6 +2526,64 @@ class TestAgentNodeInvokeConfig:
             mock_router=mock_router,
         )
         assert invoke_config == AgentComponentBase.STREAMING_DISABLED_CONFIG
+
+
+class TestAgentComponentChatPartialDefaults:
+    """Under ``chat-partial`` the component fills the defaults the chat surface guarantees."""
+
+    def test_fills_the_ui_log_events_floor(self, make_agent_component):
+        component = make_agent_component(environment="chat-partial")
+
+        assert component.ui_log_events == list(
+            AgentComponent.CHAT_PARTIAL_UI_LOG_EVENTS
+        )
+
+    def test_requires_tool_approval(self, make_agent_component):
+        component = make_agent_component(environment="chat-partial")
+
+        assert component.require_tool_approval is True
+
+    def test_clears_pre_approved_tools(self, make_agent_component):
+        component = make_agent_component(
+            environment="chat-partial", pre_approved_tools=["read_file"]
+        )
+
+        assert component.pre_approved_tools == []
+
+    def test_the_floor_streams(self, make_agent_component):
+        component = make_agent_component(environment="chat-partial")
+
+        assert (
+            component._agent_node_invoke_config()
+            == AgentComponentBase.STREAMING_ENABLED_CONFIG
+        )
+
+    @pytest.mark.parametrize("declared", [[], [UILogEventsAgent.ON_AGENT_FINAL_ANSWER]])
+    def test_declared_ui_log_events_win(self, make_agent_component, declared):
+        component = make_agent_component(
+            environment="chat-partial", ui_log_events=declared
+        )
+
+        assert component.ui_log_events == declared
+
+    def test_declared_require_tool_approval_wins(self, make_agent_component):
+        component = make_agent_component(
+            environment="chat-partial", require_tool_approval=False
+        )
+
+        assert component.require_tool_approval is False
+
+    @pytest.mark.parametrize("environment", [None, "ambient", "chat"])
+    def test_other_environments_keep_the_component_defaults(
+        self, make_agent_component, environment
+    ):
+        component = make_agent_component(
+            environment=environment, pre_approved_tools=["read_file"]
+        )
+
+        assert component.ui_log_events == []
+        assert component.require_tool_approval is False
+        assert component.pre_approved_tools == ["read_file"]
 
 
 class TestAgentComponentMaxCycles:

@@ -1,76 +1,20 @@
-from typing import Any
-
-import structlog
-
-from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
-    UILogEventsAgent,
-)
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 
-__all__ = ["ENGINE_FLOOR_UI_LOG_EVENTS", "normalize_engine_owned_config"]
-
-logger = structlog.stdlib.get_logger(__name__)
-
-AGENT_COMPONENT_TYPE = "AgentComponent"
-
-# What legacy chat shows on every turn: the agent's text, including the text of
-# tool-calling turns, and the tool cards. Both LLM output events are here because
-# ``AgentComponent`` streams tokens only when both are declared; a floor without
-# ``ON_AGENT_REASONING`` would deliver the final answer whole.
-ENGINE_FLOOR_UI_LOG_EVENTS: tuple[str, ...] = (
-    UILogEventsAgent.ON_AGENT_FINAL_ANSWER.value,
-    UILogEventsAgent.ON_AGENT_REASONING.value,
-    UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS.value,
-    UILogEventsAgent.ON_TOOL_EXECUTION_FAILED.value,
-)
+__all__ = ["normalize_engine_owned_config"]
 
 
 def normalize_engine_owned_config(config: FlowConfig) -> FlowConfig:
-    """Fill the chat-surface defaults into an engine-owned config before it reaches the engine.
+    """Complete an engine-owned config before it reaches the engine.
 
-    Authors write the v1 config they write today. The engine adds no fields and
-    removes none from the schema; the defaults the chat surface guarantees are
-    filled here, at load time, so ``ChatFlow`` and the shared graph builder see
-    a complete config:
-
-    ``ui_log_events`` on each ``AgentComponent`` defaults to the floor legacy
-    chat emits. A declared list wins, including an empty one.
-    ``require_tool_approval`` defaults to ``True``, and a declared value wins.
-    ``pre_approved_tools`` is not applied on the engine, so a declared list is
-    dropped and logged.
-
-    The config then completes itself through ``to_config``: a chat-partial
-    config fills in its entry point and its route to ``end``, and the chat graph
-    builder adds no routes of its own.
+    The config completes itself through ``to_config``: a chat-partial config fills in its entry point and its route to
+    ``end``, which the environment lets authors omit. Component fields pass through untouched: the defaults the chat
+    surface guarantees are ``AgentComponent``'s own under the ``chat-partial`` environment, filled when the builder
+    constructs it.
 
     Args:
-        config: A chat-partial config. Every ``AgentComponent`` in it receives
-            the defaults; other component types pass through untouched.
+        config: A chat-partial config.
 
     Returns:
-        A new config. The input is not mutated.
+        A complete ``FlowConfig``. The input is not mutated.
     """
-    components = [
-        _normalize_agent_component(component) for component in config.components
-    ]
-
-    return config.model_copy(update={"components": components}).to_config()
-
-
-def _normalize_agent_component(component: dict[str, Any]) -> dict[str, Any]:
-    if component.get("type") != AGENT_COMPONENT_TYPE:
-        return component
-
-    normalized = dict(component)
-    normalized.setdefault("ui_log_events", list(ENGINE_FLOOR_UI_LOG_EVENTS))
-    normalized.setdefault("require_tool_approval", True)
-
-    if "pre_approved_tools" in normalized:
-        dropped_tools = normalized.pop("pre_approved_tools")
-        logger.info(
-            "Dropping pre_approved_tools from an engine-owned config; the engine does not apply it",
-            component=normalized.get("name"),
-            pre_approved_tools=dropped_tools,
-        )
-
-    return normalized
+    return config.to_config()

@@ -9,6 +9,9 @@ from google.protobuf.json_format import MessageToDict
 from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform import experimental, v1
+from duo_workflow_service.agent_platform.constants import (
+    CHAT_PARTIAL_ENVIRONMENT,
+)
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig as ExperimentalFlowConfig,
 )
@@ -29,7 +32,6 @@ from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.workflows import chat
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import (
-    CHAT_AGENT_COMPONENT_ENVIRONMENT,
     ENGINE_OWNED_CONFIG_VERSIONS,
     ResolvedFlow,
     _convert_struct_to_flow_config,
@@ -87,7 +89,7 @@ def build_chat_flow_config(
     routers=None,
     flow=None,
     is_partial=False,
-    environment=CHAT_AGENT_COMPONENT_ENVIRONMENT,
+    environment=CHAT_PARTIAL_ENVIRONMENT,
 ):
     mock_flow_cls = Mock()
 
@@ -940,14 +942,14 @@ ENGINE_TABLE = "duo_workflow_service.workflows.registry.ENGINE_OWNED_CONFIG_VERS
 def shipped_chat_partial_configs():
     for config_file in FlowConfig.DIRECTORY_PATH.glob("*/*.yml"):
         environment = yaml.safe_load(config_file.read_text()).get("environment")
-        if environment == CHAT_AGENT_COMPONENT_ENVIRONMENT:
+        if environment == CHAT_PARTIAL_ENVIRONMENT:
             yield config_file.parent.name, config_file.stem
 
 
 def engine_owned_chat_partial_config(**overrides):
     config = {
         "version": "v1",
-        "environment": CHAT_AGENT_COMPONENT_ENVIRONMENT,
+        "environment": CHAT_PARTIAL_ENVIRONMENT,
         "components": [{"name": "chat_agent", "type": "AgentComponent", "toolset": []}],
     }
     config.update(overrides)
@@ -980,9 +982,7 @@ def test_listed_config_version_builds_chat_flow():
         factory = _load_flow_from_registry("support_assistant", "v1", "1.0.0").factory
 
     assert factory.func is ChatFlow
-    config = factory.keywords["config"]
-    assert config.resolved_version == "1.0.0"
-    assert config.components[0]["require_tool_approval"] is True
+    assert factory.keywords["config"].resolved_version == "1.0.0"
 
 
 def test_engine_table_keys_on_the_resolved_version():
@@ -1027,7 +1027,9 @@ def test_engine_owned_config_is_normalized_before_it_reaches_chat_flow():
     config = factory.keywords["config"]
     assert config.routers == [{"from": "chat_agent", "to": "end"}]
     assert config.flow.entry_point == "chat_agent"
-    assert config.components[0]["ui_log_events"]
+    assert config.components == [
+        {"name": "chat_agent", "type": "AgentComponent", "toolset": []}
+    ]
 
 
 def test_engine_owned_config_rejects_declared_routers():
@@ -1063,7 +1065,7 @@ def test_engine_owned_config_keeps_the_chat_partial_validations():
 def test_engine_owned_config_requires_the_v1_schema():
     config = ExperimentalPartialFlowConfig(
         version="experimental",
-        environment=CHAT_AGENT_COMPONENT_ENVIRONMENT,
+        environment=CHAT_PARTIAL_ENVIRONMENT,
         components=[{"name": "chat_agent", "type": "AgentComponent", "toolset": []}],
     )
 
