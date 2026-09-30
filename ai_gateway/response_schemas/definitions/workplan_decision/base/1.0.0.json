@@ -6,9 +6,9 @@
     "properties": {
         "decision": {
             "type": "string",
-            "description": "Use 'ask_question' when you posted one or more clarifying questions this turn - or confirmed that an equivalent question you posted earlier is still unresolved, in which case you stop without posting a duplicate - and are stopping without writing a plan. Use 'plan_ready' when you called update_work_item with the finished plan and announced it in a comment.",
-            "enum": ["ask_question", "plan_ready"],
-            "examples": ["ask_question", "plan_ready"]
+            "description": "Use 'ask_question' when you posted one or more clarifying questions this turn - or confirmed that an equivalent question you posted earlier is still unresolved, in which case you stop without posting a duplicate - and are stopping without writing a plan. Use 'needs_context' when you posted a request for the work item to be given more context this turn - or confirmed that such a request you posted earlier is still waiting - and research has to run again once it is. Use 'plan_ready' when you called update_work_item with the finished plan and announced it in a comment.",
+            "enum": ["ask_question", "needs_context", "plan_ready"],
+            "examples": ["ask_question", "needs_context", "plan_ready"]
         }
     },
     "required": ["decision"]
