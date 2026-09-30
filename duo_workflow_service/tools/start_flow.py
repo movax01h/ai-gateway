@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Annotated, Any, ClassVar, Literal, Optional, Type, Union
 from urllib.parse import unquote
 
@@ -31,6 +32,8 @@ FLOW_IDENTIFIER_MAP = {
 # fixed identifier, so this name is deliberately absent from
 # FLOW_IDENTIFIER_MAP and handled on its own branch throughout.
 CATALOG_FLOW_NAME = "catalog_flow"
+
+_FORBIDDEN_BOILERPLATE_RE = re.compile(r"^403\s+forbidden\s*-?\s*", re.IGNORECASE)
 
 _DESCRIPTION_PREFIX = (
     "Delegate a task to a specialist GitLab agent that works "
@@ -168,19 +171,31 @@ def _failure_detail(status_code: int, flow_name: str, body: Any) -> str:
     Returns:
         A reason suitable for both the LLM-facing message and the UI chat log.
     """
-    if status_code == 403:
-        # A 403 can name records the caller may not be able to see, so keep the
-        # fixed, permission-focused wording regardless of the body.
-        return _FORBIDDEN_FAILURE_DETAIL
-
     if status_code < 500:
         message = _extract_rails_message(body)
+        if status_code == 403 and message:
+            message = _strip_forbidden_boilerplate(message)
         if message:
             if flow_name == CATALOG_FLOW_NAME:
                 return f"{message} (flow ID: see ai_catalog_item_consumer_id)"
             return message
+        if status_code == 403:
+            # A bare 403 carries no reason (e.g. Rails rejecting a workflow
+            # without a project), so fall back to the fixed permissions
+            # wording rather than surfacing the boilerplate status line.
+            return _FORBIDDEN_FAILURE_DETAIL
 
     return _GENERIC_FAILURE_DETAIL
+
+
+def _strip_forbidden_boilerplate(message: str) -> Optional[str]:
+    """Strip the ``403 Forbidden[ - reason]`` prefix Rails' ``forbidden!`` adds.
+
+    Returns:
+        The remaining reason text, or None if only the boilerplate status line
+        was present (a bare 403).
+    """
+    return _FORBIDDEN_BOILERPLATE_RE.sub("", message, count=1).strip() or None
 
 
 class StartFlowError(ToolException):
