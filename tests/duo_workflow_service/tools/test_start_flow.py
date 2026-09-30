@@ -904,14 +904,41 @@ async def test_execute_http_failure_validation_error_dict_is_flattened(
 
 
 @pytest.mark.asyncio
-async def test_execute_http_failure_403_returns_permission_message(
-    tool, gitlab_client_mock
+@pytest.mark.parametrize(
+    "body,expected_detail",
+    [
+        # A 403 with a reason (missing credits, identity verification, ...)
+        # surfaces it like any other 4xx — the fixed wording would mislead.
+        # Grape's forbidden!(reason) prefixes the reason with the status line.
+        (
+            {"message": "403 Forbidden - Can not execute workflow in CI"},
+            "Can not execute workflow in CI",
+        ),
+        (
+            {"message": "Can not execute workflow in CI"},
+            "Can not execute workflow in CI",
+        ),
+        (
+            {"message": "403 Forbidden"},
+            "This flow isn't available, or you don't have sufficient permissions to start it.",
+        ),
+        (
+            {"message": "403 Forbidden - "},
+            "This flow isn't available, or you don't have sufficient permissions to start it.",
+        ),
+    ],
+    ids=[
+        "prefixed_rails_message",
+        "rails_message",
+        "bare_403_falls_back",
+        "empty_reason_falls_back",
+    ],
+)
+async def test_execute_http_failure_403(
+    tool, gitlab_client_mock, body, expected_detail
 ):
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(
-            status_code=403,
-            body={"message": "Can not execute workflow in CI"},
-        )
+        return_value=GitLabHttpResponse(status_code=403, body=body)
     )
 
     with pytest.raises(StartFlowError) as exc_info:
@@ -922,11 +949,9 @@ async def test_execute_http_failure_403_returns_permission_message(
             ),
         )
 
-    assert "permissions" in str(exc_info.value)
-    assert "Can not execute workflow in CI" not in str(exc_info.value)
-    assert exc_info.value.response == (
-        "This flow isn't available, or you don't have sufficient permissions to start it."
-    )
+    assert "HTTP 403" in str(exc_info.value)
+    assert expected_detail in str(exc_info.value)
+    assert exc_info.value.response == expected_detail
 
 
 @pytest.mark.asyncio
@@ -1646,16 +1671,32 @@ async def test_execute_catalog_flow_http_failure_detail(
     assert "Agent or flow is not enabled for this project" in str(exc_info.value)
 
 
+# A wrong consumer ID is the likeliest catalog-flow failure, so a 403 with a
+# real reason surfaces it (tagged with the catalog-flow hint); only a bare
+# 403 with no reason falls back to the fixed permissions wording.
 @pytest.mark.asyncio
-async def test_execute_catalog_flow_http_failure_403_keeps_fixed_wording(
-    tool, gitlab_client_mock
+@pytest.mark.parametrize(
+    "body,expected_detail",
+    [
+        (
+            {
+                "message": "403 Forbidden - Agent or flow is not enabled for this project"
+            },
+            "Agent or flow is not enabled for this project "
+            "(flow ID: see ai_catalog_item_consumer_id)",
+        ),
+        (
+            {"message": "403 Forbidden"},
+            "This flow isn't available, or you don't have sufficient permissions to start it.",
+        ),
+    ],
+    ids=["prefixed_rails_message", "bare_403_falls_back"],
+)
+async def test_execute_catalog_flow_http_failure_403(
+    tool, gitlab_client_mock, body, expected_detail
 ):
-    """A 403 keeps the permission-focused wording regardless of the body."""
     gitlab_client_mock.apost = AsyncMock(
-        return_value=GitLabHttpResponse(
-            status_code=403,
-            body={"message": "Agent or flow is not enabled for this project"},
-        )
+        return_value=GitLabHttpResponse(status_code=403, body=body)
     )
 
     with pytest.raises(StartFlowError) as exc_info:
@@ -1663,11 +1704,8 @@ async def test_execute_catalog_flow_http_failure_403_keeps_fixed_wording(
             {"flow": {"name": "catalog_flow", "ai_catalog_item_consumer_id": 755}}
         )
 
-    assert exc_info.value.response == (
-        "This flow isn't available, or you don't have sufficient permissions to start it."
-    )
-    # The 403 body can name records the caller may not be able to see.
-    assert "Agent or flow is not enabled for this project" not in str(exc_info.value)
+    assert exc_info.value.response == expected_detail
+    assert "HTTP 403" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
