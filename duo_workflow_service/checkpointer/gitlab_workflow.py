@@ -84,7 +84,7 @@ from duo_workflow_service.gitlab.http_client import (
     checkpoint_decoder,
 )
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
-from duo_workflow_service.json_encoder.encoder import CustomEncoder
+from duo_workflow_service.json_encoder.encoder import dumps_checkpoint
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     ForbiddenStatusEvent,
@@ -371,7 +371,7 @@ def _serialize_channel_blobs(
         # as JSON via compress_checkpoint. That keeps reconstruction (which merges
         # blobs onto the JSON header) consistent and lets Rails decode without
         # reimplementing langgraph's msgpack extension types.
-        bval = json.dumps(val, cls=CustomEncoder).encode("utf-8")
+        bval = dumps_checkpoint(val).encode("utf-8")
         blobs.append(
             {
                 "channel": channel,
@@ -402,7 +402,7 @@ def _serialize_all_channels_full(
     blobs = []
 
     for channel, val in channel_values.items():
-        bval = json.dumps(val, cls=CustomEncoder).encode("utf-8")
+        bval = dumps_checkpoint(val).encode("utf-8")
         blobs.append(
             {
                 "channel": channel,
@@ -1914,7 +1914,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         ):
             response = await self._client.apost(
                 path=endpoint,
-                body=json.dumps(payload, cls=CustomEncoder),
+                body=dumps_checkpoint(payload),
             )
             duo_workflow_metrics.count_checkpoints(
                 endpoint="/api/v4/ai/duo_workflows/workflows/:id/checkpoints",

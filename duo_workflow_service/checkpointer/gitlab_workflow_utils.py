@@ -9,7 +9,7 @@ from langgraph.checkpoint.base import Checkpoint
 
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import checkpoint_decoder
-from duo_workflow_service.json_encoder.encoder import CustomEncoder
+from duo_workflow_service.json_encoder.encoder import dumps_checkpoint
 from lib.internal_events.event_enum import EventPropertyEnum
 
 STATUS_TO_EVENT_PROPERTY = {
@@ -63,7 +63,7 @@ def compress_checkpoint(data: Checkpoint) -> str:
     Returns:
         Base64-encoded compressed checkpoint string
     """
-    json_str = json.dumps(dict(data), cls=CustomEncoder)
+    json_str = dumps_checkpoint(dict(data))
     compressed = zlib.compress(json_str.encode("utf-8"))
     return base64.b64encode(compressed).decode("utf-8")
 

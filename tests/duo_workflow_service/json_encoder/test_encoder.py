@@ -9,7 +9,7 @@ from duo_workflow_service.entities.state import (
     AdditionalContext,
     ApprovalStateRejection,
 )
-from duo_workflow_service.json_encoder.encoder import CustomEncoder
+from duo_workflow_service.json_encoder.encoder import CustomEncoder, dumps_checkpoint
 
 PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\npixels").decode()
 
@@ -225,3 +225,35 @@ def test_an_interrupt_mid_turn_loses_the_image_but_keeps_its_label():
     assert {"type": "text", "text": "[attached file: screenshot.png]"} in content
     assert {"type": "text", "text": "fix the bug it shows"} in content
     assert any("omitted from history" in block.get("text", "") for block in content)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(
+            "Exit code: 0\n\x1b]633;C\x07\x00",
+            "Exit code: 0\n\x1b]633;C\x07",
+            id="nul_after_escape",
+        ),
+        pytest.param("\x00\x00a\x00", "a", id="consecutive_nuls"),
+        pytest.param("\\\x00", "\\", id="nul_after_literal_backslash"),
+        pytest.param("\\u0000", "\\u0000", id="literal_escape_text"),
+        pytest.param("\\\\u0000", "\\\\u0000", id="literal_escaped_backslashes"),
+        pytest.param("\\\\\x00", "\\\\", id="nul_after_two_literal_backslashes"),
+        pytest.param("no nul", "no nul", id="no_nul"),
+    ],
+)
+def test_dumps_checkpoint_drops_nul_characters(value, expected):
+    # Keys are covered too, and the text `\u0000` (a backslash, not a NUL) is kept.
+    encoded = dumps_checkpoint({"content": value, f"key{value}": [value]})
+
+    assert json.loads(encoded) == {"content": expected, f"key{expected}": [expected]}
+
+
+def test_dumps_checkpoint_uses_custom_encoder():
+    message = ToolMessage(content="out\x00put", tool_call_id="call-1")
+
+    reloaded = json.loads(dumps_checkpoint({"messages": [message]}))
+
+    assert reloaded["messages"][0]["content"] == "output"
+    assert reloaded["messages"][0]["type"] == "ToolMessage"
