@@ -19,6 +19,9 @@ from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
+from duo_workflow_service.agent_platform.constants import (
+    CHAT_PARTIAL_ENVIRONMENT,
+)
 from duo_workflow_service.agent_platform.experimental.flows import (
     Flow as ExperimentalFlow,
 )
@@ -79,8 +82,6 @@ _WORKFLOWS_LOOKUP = {
     f"{Path(inspect.getfile(workflow_cls)).relative_to(current_directory).parent.with_suffix('')}": workflow_cls
     for workflow_cls in _WORKFLOWS
 }
-
-CHAT_AGENT_COMPONENT_ENVIRONMENT = "chat-partial"
 
 # Engine-owned config versions. A chat-partial config listed here builds
 # ``ChatFlow``; every other chat-partial version builds legacy ``chat.Workflow``.
@@ -387,7 +388,7 @@ def flow_factory(
     # Validate all prompts for security issues before creating the flow
     _validate_flow_config_prompts(config)
 
-    if config.environment != CHAT_AGENT_COMPONENT_ENVIRONMENT:
+    if config.environment != CHAT_PARTIAL_ENVIRONMENT:
         return partial(flow_cls, config=config)
 
     if len(config.components) != 1:
@@ -452,7 +453,7 @@ def get_flow_classes(
     Any,
 ]:
 
-    if environment == CHAT_AGENT_COMPONENT_ENVIRONMENT:
+    if environment == CHAT_PARTIAL_ENVIRONMENT:
         _, partial_flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[
             flow_config_schema_version
         ]

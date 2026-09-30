@@ -19,8 +19,9 @@ class ChatFlow(Flow):
     boundary and nothing else, through four seams of the parent: the graph
     builder (where a turn ends), the entry dispatch strategy (where it begins),
     the entry wiring (what crosses the line inbound), and the graph input
-    (what happens after a bad crossing). Configs reach it already normalized
-    with the chat-surface defaults, selected by the registry's engine table.
+    (what happens after a bad crossing). The registry's engine table selects it
+    and fills the flow-level fields the builder needs; the chat-surface defaults
+    are ``AgentComponent``'s own under the ``chat-partial`` environment.
 
     See ``docs/flow_registry/chat_engine.md``.
     """

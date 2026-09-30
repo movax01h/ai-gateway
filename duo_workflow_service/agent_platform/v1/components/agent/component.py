@@ -10,6 +10,7 @@ from typing import (
     override,
 )
 
+import structlog
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig
@@ -30,7 +31,10 @@ from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.model_variables import MODEL_TEMPLATE_VARIABLES
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
-from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
+from duo_workflow_service.agent_platform.constants import (
+    CHAT_PARTIAL_ENVIRONMENT,
+    NODE_ROLE_SEPARATOR,
+)
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -88,6 +92,8 @@ from duo_workflow_service.tools.toolset import Toolset
 from lib.context import get_model_metadata
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventsClient
+
+log = structlog.stdlib.get_logger("agent_component")
 
 __all__ = [
     "RUNTIME_INJECTED_VARS",
@@ -238,7 +244,7 @@ class AgentComponentBase(BaseComponent):
     supported_environments: ClassVar[tuple[str, ...]] = (
         "ambient",
         "chat",
-        "chat-partial",
+        CHAT_PARTIAL_ENVIRONMENT,
     )
 
     prompt_id: str
@@ -743,7 +749,45 @@ class AgentComponent(AgentComponentBase):
     ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
     ui_role_as: Literal["agent", "tool"] = "agent"
 
+    # What the chat surface shows on every turn: the answer, the reasoning that
+    # precedes tool calls, and the tool cards. Both LLM output events are here so
+    # ``_agent_node_invoke_config`` streams tokens for a component on this floor.
+    CHAT_PARTIAL_UI_LOG_EVENTS: ClassVar[tuple[UILogEventsAgent, ...]] = (
+        UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+        UILogEventsAgent.ON_AGENT_REASONING,
+        UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+        UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+    )
+
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
+
+    @model_validator(mode="after")
+    def apply_chat_partial_defaults(self) -> Self:
+        """Fill the defaults the chat surface guarantees when the environment is ``chat-partial``.
+
+        ``model_fields_set`` tells a declared value from an omitted one, so a
+        declared value wins, including an empty ``ui_log_events``.
+        ``pre_approved_tools`` is not applied on this surface (ai-assist#2744),
+        so a declared list is cleared.
+        """
+        if self.environment != CHAT_PARTIAL_ENVIRONMENT:
+            return self
+
+        if "ui_log_events" not in self.model_fields_set:
+            self.ui_log_events = list(self.CHAT_PARTIAL_UI_LOG_EVENTS)
+
+        if "require_tool_approval" not in self.model_fields_set:
+            self.require_tool_approval = True
+
+        if self.pre_approved_tools:
+            log.info(
+                "Ignoring pre_approved_tools on a chat-partial component; the chat surface does not apply it",
+                component=self.name,
+                pre_approved_tools=self.pre_approved_tools,
+            )
+            self.pre_approved_tools = []
+
+        return self
 
     @override
     def _agent_node_invoke_config(self) -> RunnableConfig:
