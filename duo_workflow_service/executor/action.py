@@ -63,8 +63,9 @@ async def _execute_action_and_get_action_response(
             duration_s=duration,
         )
 
+        # Action errors are raised as ToolException and returned to the model, which can recover from them.
         if event.actionResponse.httpResponse.error:
-            log.error(
+            log.warning(
                 "Http response error",
                 request_id=event.actionResponse.requestID,
                 action_class=action_class,
@@ -74,7 +75,7 @@ async def _execute_action_and_get_action_response(
             )
 
         if event.actionResponse.plainTextResponse.error:
-            log.error(
+            log.warning(
                 "Plaintext response error",
                 request_id=event.actionResponse.requestID,
                 action_class=action_class,

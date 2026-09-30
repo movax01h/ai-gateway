@@ -1342,32 +1342,28 @@ async def test_execute_workflow_status_codes(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "cancel_error_message,expected_status,expected_detail_prefix,expected_log_count",
+    "cancel_error_message,expected_status,expected_detail_prefix",
     [
         (
             AIO_CANCEL_STOP_WORKFLOW_REQUEST,
             grpc.StatusCode.OK,
             "workflow execution stopped",
-            1,  # Only called from abort_workflow
         ),
         (
             AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
             grpc.StatusCode.OK,
             "workflow execution stopped",
-            1,  # Only called from abort_workflow
         ),
         (
             # Tuple-style error from LangGraph cleanup
             (AIO_CANCEL_STOP_WORKFLOW_REQUEST, "<Task cancelled>"),
             grpc.StatusCode.OK,
             "workflow execution stopped",
-            1,  # Only called from abort_workflow
         ),
         (
             "Some other cancellation",
             grpc.StatusCode.CANCELLED,
             "RPC cancelled by client",
-            2,  # Called from main handler AND abort_workflow
         ),
     ],
 )
@@ -1381,7 +1377,6 @@ async def test_execute_workflow_cancellation_handling(
     cancel_error_message,
     expected_status,
     expected_detail_prefix,
-    expected_log_count,
     start_request_iterator,
     mock_context,
     servicer,
@@ -1391,7 +1386,7 @@ async def test_execute_workflow_cancellation_handling(
     This test verifies that:
     1. Simple string error messages are handled correctly
     2. Tuple-style error messages (from LangGraph cleanup) are handled correctly
-    3. Unexpected cancellations are logged appropriately
+    3. Cancellations are expected and are not reported as errors
     """
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = False
@@ -1417,15 +1412,59 @@ async def test_execute_workflow_cancellation_handling(
     actual_detail = mock_context.set_details.call_args[0][0]
     assert actual_detail.startswith(expected_detail_prefix)
 
-    # Verify logging behavior
-    assert mock_log_exception.call_count == expected_log_count
+    # Neither the RPC cancellation nor the workflow task honouring it is an error
+    mock_log_exception.assert_not_called()
 
-    # For the main handler call (when expected_log_count == 2), verify the first call
-    if expected_log_count == 2:
-        # First call should be from the main exception handler
-        first_call_exception = mock_log_exception.call_args_list[0][0][0]
-        assert isinstance(first_call_exception, asyncio.CancelledError)
-        assert str(first_call_exception) == cancel_error_message
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch("duo_workflow_service.server.log_exception")
+async def test_execute_workflow_reports_task_ignoring_cancellation(
+    mock_log_exception,
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """A workflow task that outlives TASK_CANCELLATION_TIMEOUT is still reported as an error."""
+    cancellation_timeout = 0.01
+
+    async def run_ignoring_cancellation(_goal):
+        # Keep running for well past the timeout (e.g. stuck cleanup), then honour the cancellation.
+        deadline = asyncio.get_running_loop().time() + cancellation_timeout * 20
+        while asyncio.get_running_loop().time() < deadline:
+            try:
+                await asyncio.sleep(cancellation_timeout)
+            except asyncio.CancelledError:
+                pass
+        raise asyncio.CancelledError()
+
+    async def fail_after_workflow_starts():
+        await asyncio.sleep(0)
+        raise RuntimeError("send failed")
+
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = False
+    mock_workflow.run = run_ignoring_cancellation
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_gitlab_status = "running"
+    mock_workflow.get_from_outbox = fail_after_workflow_starts
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    with patch.object(servicer, "TASK_CANCELLATION_TIMEOUT", cancellation_timeout):
+        result = servicer.ExecuteWorkflow(
+            start_request_iterator,
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
+
+        with pytest.raises(StopAsyncIteration):
+            await anext(result)
+
+    logged = [c.args[0] for c in mock_log_exception.call_args_list]
+    assert [type(e) for e in logged] == [RuntimeError, TimeoutError]
 
 
 @pytest.mark.asyncio

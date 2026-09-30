@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.tools import ToolException
 from pydantic import ValidationError
+from structlog.testing import capture_logs
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParser
@@ -916,6 +917,38 @@ async def test_list_repository_tree_errors(
 
     with pytest.raises(ToolException, match=expected_error_contains):
         await tree_tool._arun(**input_params)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_level"),
+    [(404, "warning"), (500, "error")],
+)
+@pytest.mark.asyncio
+async def test_list_repository_tree_failed_request(
+    tree_tool, gitlab_client_mock, status_code, expected_level
+):
+    body = {"message": "404 invalid revision or path Not Found"}
+    gitlab_client_mock.aget.return_value = GitLabHttpResponse(
+        status_code=status_code, body=body
+    )
+
+    with (
+        capture_logs() as cap_logs,
+        pytest.raises(
+            ToolException,
+            match=f"List repository tree request failed with status {status_code}",
+        ),
+    ):
+        await tree_tool._arun(project_id=1, path="app/models/user.rb")
+
+    assert cap_logs == [
+        {
+            "event": "List repository tree request failed",
+            "log_level": expected_level,
+            "status_code": status_code,
+            "response_body": str(body),
+        }
+    ]
 
 
 @pytest.mark.asyncio
