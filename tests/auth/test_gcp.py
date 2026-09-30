@@ -55,6 +55,10 @@ class TestFetchApplicationDefaultCredentials(unittest.TestCase):
             mock_creds = MagicMock(spec=Credentials)
             mock_default.return_value = (mock_creds, None)
 
+            _fetch_application_default_credentials.cache_clear()
             _fetch_application_default_credentials()
 
+            mock_default.assert_called_once_with(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
             mock_creds.refresh.assert_called_once()
