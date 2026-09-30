@@ -185,6 +185,11 @@ def test_allowed_upstream_models_includes_anthropic():
     assert "text-embedding-005" in allowed_models
     assert "claude-sonnet-4-5@20250929" in allowed_models
 
+    # Newer Vertex model IDs carry neither an @version nor a -vertex suffix,
+    # which the previous name-shape heuristic silently excluded.
+    assert "claude-opus-4-8" in allowed_models
+    assert "claude-sonnet-4-6" in allowed_models
+
 
 class TestPathParams:
     """Test PathParams validation and extraction."""

@@ -152,6 +152,7 @@ models:
     description: "Claude's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 200000  # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
+    proxy_provider: vertex-ai
     model_class_provider: litellm
     supports_assistant_prefill: true
     family:
@@ -186,6 +187,7 @@ models:
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
+    proxy_provider: vertex-ai
     model_class_provider: litellm
     family:
       - claude
@@ -204,6 +206,7 @@ models:
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
+    proxy_provider: vertex-ai
     model_class_provider: litellm
     family:
       - claude
@@ -362,6 +365,7 @@ models:
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
+    proxy_provider: vertex-ai
     model_class_provider: litellm
     family:
       - claude
@@ -409,6 +413,7 @@ models:
     description: "For complex agentic coding and enterprise work."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
+    proxy_provider: vertex-ai
     model_class_provider: litellm
     requires_paid_credits: true
     family:
@@ -569,6 +574,7 @@ models:
     max_context_tokens: 1_000_000
     family:
       - claude
+    proxy_provider: vertex-ai
     model_class_provider: litellm
     params:
       model: "claude-sonnet-5"
@@ -616,6 +622,7 @@ models:
     max_context_tokens: 1_000_000
     family:
       - claude
+    proxy_provider: vertex-ai
     model_class_provider: litellm
     params:
       model: "claude-sonnet-4-6"
@@ -669,6 +676,7 @@ models:
     max_context_tokens: 200000  # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4-5
     family:
       - claude
+    proxy_provider: vertex-ai
     model_class_provider: litellm
     supports_assistant_prefill: true
     params:
@@ -727,6 +735,7 @@ models:
     max_context_tokens: 200000  # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-haiku-4-5
     family:
       - claude
+    proxy_provider: vertex-ai
     model_class_provider: litellm
     supports_assistant_prefill: true
     params:
