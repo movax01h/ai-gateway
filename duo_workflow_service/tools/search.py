@@ -310,10 +310,28 @@ class RefSearchInput(BaseSearchInput):
     )
 
 
-class BlobSearchInput(BaseModel):
-    id: str = Field(
-        description="The numeric ID or URL-encoded full path of the target project"
-    )
+# GitLab's search API returns 20 results per page by default and at most 100.
+BLOB_SEARCH_DEFAULT_PER_PAGE = 20
+BLOB_SEARCH_MAX_PER_PAGE = 100
+
+# Headroom kept under `truncation_config.max_bytes`. A response over that limit
+# is cut mid-result, which leaves invalid JSON, so blob search drops whole
+# trailing results itself. The margin covers the envelope and secret redaction.
+BLOB_SEARCH_SIZE_MARGIN_BYTES = 4 * 1024
+
+INCOMPLETE_MORE_PAGES = (
+    "More matches are on the next page. Fetch next_page to see them."
+)
+INCOMPLETE_TOO_LARGE = (
+    "Some matches were left out because the results are too large. "
+    "Narrow the query to see them."
+)
+INCOMPLETE_EXCLUDED = (
+    "Some matches are hidden by the project's file exclusion settings."
+)
+
+
+class BaseBlobSearchInput(BaseModel):
     search: str = Field(description="The search term")
     order_by: Optional[str] = Field(
         description="Sort results. Allowed value is created_at", default=None
@@ -325,9 +343,119 @@ class BlobSearchInput(BaseModel):
         description="The name of a repository branch or tag to search on",
         default=None,
     )
+    per_page: int = Field(
+        default=BLOB_SEARCH_DEFAULT_PER_PAGE,
+        ge=1,
+        le=BLOB_SEARCH_MAX_PER_PAGE,
+        description=(
+            f"Results per page (default: {BLOB_SEARCH_DEFAULT_PER_PAGE}, "
+            f"max: {BLOB_SEARCH_MAX_PER_PAGE})"
+        ),
+    )
+    page: int = Field(default=1, ge=1, description="Page number to fetch (default: 1)")
 
 
-class BlobSearch(GitLabSearchBase):
+class _BlobSearchBase(GitLabSearchBase):
+    """Shared by both `gitlab_blob_search` tools: paging, filtering and the response."""
+
+    def _page_params(self, per_page: int, page: int) -> dict[str, int]:
+        # Flow-level tool options are applied after the input schema, so check again.
+        if not 1 <= per_page <= BLOB_SEARCH_MAX_PER_PAGE:
+            raise ToolException(
+                f"Invalid per_page {per_page}: use a value from 1 to "
+                f"{BLOB_SEARCH_MAX_PER_PAGE}."
+            )
+        if page < 1:
+            raise ToolException(f"Invalid page {page}: pages start at 1.")
+        return {"per_page": per_page, "page": page}
+
+    def _filter_blob_results(self, results: list) -> list:
+        """Filter blob search results using FileExclusionPolicy."""
+        if not results:
+            return results
+
+        policy = FileExclusionPolicy(self.project)
+        filtered_results = []
+        for result in results:
+            file_path = result.get("path") or result.get("filename")
+            if not file_path or policy.is_allowed(file_path):
+                filtered_results.append(result)
+
+        return filtered_results
+
+    def _trim_to_budget(self, results: list) -> list:
+        """Keep the longest prefix of ``results`` whose JSON fits the size budget."""
+        budget = self.truncation_config.max_bytes - BLOB_SEARCH_SIZE_MARGIN_BYTES
+        size = len(json.dumps({"search_results": []}).encode())
+
+        kept: list = []
+        for result in results:
+            added = len(json.dumps(result).encode()) + (len(", ") if kept else 0)
+            if size + added > budget:
+                break
+            kept.append(result)
+            size += added
+
+        return kept
+
+    def _blob_search_response(
+        self, response: Any, body: Any, per_page: int, page: int
+    ) -> str:
+        """Return the allowed results with `incomplete`, `current_page` and `next_page`.
+
+        `incomplete` lists why matches are missing, one sentence per reason, and is empty when the list is complete.
+        """
+        if not isinstance(body, list) or not all(isinstance(r, dict) for r in body):
+            raise ToolException(
+                "Blob search returned a response that is not a list of results. "
+                "Retry the search."
+            )
+
+        headers = {
+            key.lower(): value
+            for key, value in getattr(response, "headers", {}).items()
+        }
+        next_page_header = str(headers.get("x-next-page", "")).strip()
+        if next_page_header.isdigit():
+            next_page: Optional[int] = int(next_page_header)
+        elif len(body) >= per_page:
+            # Basic search caps content matches at 100 + offset, so it omits X-Next-Page
+            # when per_page >= 100.
+            next_page = page + 1
+        else:
+            next_page = None
+
+        filtered = self._filter_blob_results(body)
+        results = self._trim_to_budget(filtered)
+        if len(results) < len(filtered):
+            # Later pages never show the results dropped here, so only narrowing helps.
+            next_page = None
+
+        incomplete = []
+        if next_page is not None:
+            incomplete.append(INCOMPLETE_MORE_PAGES)
+        if len(results) < len(filtered):
+            incomplete.append(INCOMPLETE_TOO_LARGE)
+        if len(filtered) < len(body):
+            incomplete.append(INCOMPLETE_EXCLUDED)
+
+        return json.dumps(
+            {
+                "search_results": results,
+                "incomplete": incomplete,
+                "current_page": page,
+                "next_page": next_page,
+            }
+        )
+
+
+class BlobSearchInput(BaseBlobSearchInput):
+    id: str = Field(
+        description="The numeric ID or URL-encoded full path of the target project"
+    )
+
+
+class BlobSearch(_BlobSearchBase):
     name: str = "gitlab_blob_search"
     description: str = dedent("""
         Search file content in remote GitLab projects.
@@ -346,21 +474,6 @@ class BlobSearch(GitLabSearchBase):
         """)
     args_schema: Type[BaseModel] = BlobSearchInput
 
-    def _filter_blob_results(self, results: list) -> list:
-        """Filter blob search results using FileExclusionPolicy."""
-        if not results:
-            return results
-
-        # Apply file exclusion policy and filter results
-        policy = FileExclusionPolicy(self.project)
-        filtered_results = []
-        for result in results:
-            file_path = result.get("path") or result.get("filename")
-            if not file_path or policy.is_allowed(file_path):
-                filtered_results.append(result)
-
-        return filtered_results
-
     async def _execute(
         self,
         *,
@@ -369,10 +482,13 @@ class BlobSearch(GitLabSearchBase):
         ref: Optional[str] = None,
         order_by: Optional[str] = None,
         sort: Optional[str] = None,
+        per_page: int = BLOB_SEARCH_DEFAULT_PER_PAGE,
+        page: int = 1,
     ) -> str:
-        params = {
+        params: dict[str, Any] = {
             "scope": "blobs",
             "search": search,
+            **self._page_params(per_page, page),
         }
         if ref:
             params["ref"] = ref
@@ -389,23 +505,14 @@ class BlobSearch(GitLabSearchBase):
 
         body = self._process_http_response("Blob search", response, log)
 
-        # Filter blob results using FileExclusionPolicy
-        filtered_response = self._filter_blob_results(body)
-        return json.dumps({"search_results": filtered_response})
+        return self._blob_search_response(response, body, per_page, page)
 
 
-class AdvanceBlobSearchInput(BaseModel):
-    search: str = Field(description="The search term")
+class AdvanceBlobSearchInput(BaseBlobSearchInput):
     api_url: str = Field(
         description=r"Search endpoint. Use '/api/v4/projects/{id}/search' for project-level search, "
         "'/api/v4/groups/{id}/search' for group-level search, or '/api/v4/search' for instance-wide search. "
         "{id} accepts the numeric ID or URL-encoded full path of the target project or group."
-    )
-    order_by: Optional[str] = Field(
-        description="Sort results. Allowed value is created_at", default=None
-    )
-    sort: Optional[str] = Field(
-        description="Sort order. Allowed values are asc or desc", default=None
     )
     ref: Optional[str] = Field(
         description="The name of a repository branch or tag to search on (only applicable for project searches)",
@@ -413,7 +520,7 @@ class AdvanceBlobSearchInput(BaseModel):
     )
 
 
-class AdvanceBlobSearch(GitLabSearchBase):
+class AdvanceBlobSearch(_BlobSearchBase):
     name: str = "gitlab_blob_search"
     description: str = dedent("""
         Search file content in remote GitLab projects.
@@ -433,21 +540,6 @@ class AdvanceBlobSearch(GitLabSearchBase):
 
     supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = BlobSearch
     required_capability: ClassVar[frozenset[str]] = frozenset({"advanced_search"})
-
-    def _filter_blob_results(self, results: list) -> list:
-        """Filter blob search results using FileExclusionPolicy."""
-        if not results:
-            return results
-
-        # Apply file exclusion policy and filter results
-        policy = FileExclusionPolicy(self.project)
-        filtered_results = []
-        for result in results:
-            file_path = result.get("path") or result.get("filename")
-            if not file_path or policy.is_allowed(file_path):
-                filtered_results.append(result)
-
-        return filtered_results
 
     def _validate_and_normalize_api_url(self, api_url: str) -> str:
         """Validate api_url matches allowed patterns and return normalized path."""
@@ -479,12 +571,15 @@ class AdvanceBlobSearch(GitLabSearchBase):
         ref: Optional[str] = None,
         order_by: Optional[str] = None,
         sort: Optional[str] = None,
+        per_page: int = BLOB_SEARCH_DEFAULT_PER_PAGE,
+        page: int = 1,
     ) -> str:
         api_url = self._validate_and_normalize_api_url(api_url)
 
-        params = {
+        params: dict[str, Any] = {
             "scope": "blobs",
             "search": search,
+            **self._page_params(per_page, page),
         }
         if ref and "projects" in api_url:
             params["ref"] = ref
@@ -499,9 +594,7 @@ class AdvanceBlobSearch(GitLabSearchBase):
 
         body = self._process_http_response("advance blob search", response, log)
 
-        # Filter blob results using FileExclusionPolicy
-        filtered_response = self._filter_blob_results(body)
-        return json.dumps({"search_results": filtered_response})
+        return self._blob_search_response(response, body, per_page, page)
 
 
 class CommitSearch(GitLabSearchBase):
