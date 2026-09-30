@@ -445,18 +445,23 @@ def _resolve_agent_code_completions(
         payload.model_provider, payload.model_name
     )
 
+    model_metadata_data: dict[str, Any] = {
+        "name": name,
+        "provider": payload.model_provider or "text-completion-openai",
+        "provider_keys": model_keys,
+        "fireworks_api_base_url": config.fireworks_api_base_url(),
+        "using_cache": using_cache,
+        "session_id": current_user.global_user_id,
+    }
+    if payload.model_provider is not None and payload.model_provider.is_custom_provider:
+        model_metadata_data.update(
+            endpoint=payload.model_endpoint,
+            api_key=payload.model_api_key,
+            identifier=payload.model_identifier,
+        )
+
     model_metadata = create_model_metadata(
-        {
-            "name": name,
-            "endpoint": payload.model_endpoint,
-            "api_key": payload.model_api_key,
-            "identifier": payload.model_identifier,
-            "provider": payload.model_provider or "text-completion-openai",
-            "provider_keys": model_keys,
-            "fireworks_api_base_url": config.fireworks_api_base_url(),
-            "using_cache": using_cache,
-            "session_id": current_user.global_user_id,
-        },
+        model_metadata_data,
         mock_model_responses=config.mock_model_responses(),
     )
 

@@ -19,6 +19,7 @@ from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import (
     _track_code_suggestions_event,
 )
+from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
@@ -1413,6 +1414,57 @@ class TestCodeCompletions:
         assert (
             body["choices"][0]["text"] == "Post-processed completion response"
         ) == expect_post_processed
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        ("model_provider", "model_name", "expect_forwarded"),
+        [
+            ("vertex-ai", "codestral-2508", False),
+            ("gitlab", "codestral_2508_vertex", False),
+            ("litellm", "codestral", True),
+        ],
+    )
+    @pytest.mark.usefixtures("mock_prompt_ainvoke")
+    def test_client_model_fields_forwarded_only_for_custom_models(
+        self,
+        mock_client: Mock,
+        model_provider: str,
+        model_name: str,
+        expect_forwarded: bool,
+    ):
+        params = {
+            "prompt_version": 2,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": model_provider,
+            "model_name": model_name,
+            "model_endpoint": "http://localhost:4000/",
+            "model_api_key": "api-key",
+            "model_identifier": "bedrock/anthropic.claude-3-5-sonnet",
+        }
+
+        with patch(
+            "ai_gateway.api.v2.code.completions.create_model_metadata",
+            wraps=create_model_metadata,
+        ) as mock_create_model_metadata:
+            response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        data = mock_create_model_metadata.call_args.args[0]
+        forwarded = {
+            key: data.get(key) for key in ("identifier", "endpoint", "api_key")
+        }
+        if expect_forwarded:
+            assert forwarded == {
+                "identifier": "bedrock/anthropic.claude-3-5-sonnet",
+                "endpoint": "http://localhost:4000/",
+                "api_key": "api-key",
+            }
+        else:
+            assert forwarded == {"identifier": None, "endpoint": None, "api_key": None}
 
     @pytest.mark.parametrize("mock_model_responses", [False])
     @pytest.mark.parametrize(
