@@ -512,13 +512,8 @@ class AgentComponent(AgentComponentBase):
 
         if not last_message.tool_calls:
             if self._response_schema is not None:
-                raise NotifiableAgentException(
-                    "An internal error occurred: the agent did not produce the expected tool call.",
-                    internal_detail=(
-                        f"Schema mode requires a tool call but got a text-only response "
-                        f"for component {self.name}"
-                    ),
-                )
+                # Text-only deliberation turn; loop back, bounded by max_cycles.
+                return self.__entry_hook__()
             return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         if self._response_schema is not None and any(
@@ -634,10 +629,13 @@ class AgentComponent(AgentComponentBase):
         # Response schema is already resolved in validate_and_resolve_response_schema()
         if self._response_schema is not None:
             tools = self.toolset.bindable + [self._response_schema]
-            tool_choice = "any"
         else:
             tools = self.toolset.bindable
-            tool_choice = "auto"
+
+        # "any" would force a tool call every turn, which is incompatible with extended
+        # thinking. The final answer stays schema-enforced because only the schema tool
+        # call ends the loop.
+        tool_choice: Literal["any", "auto"] = "auto"
 
         prompt = self._build_prompt(tools=tools, tool_choice=tool_choice)
 
@@ -663,6 +661,7 @@ class AgentComponent(AgentComponentBase):
                 cycle_count_key=self._cycle_count_key,
                 max_wrap_up_retries=self.max_wrap_up_retries,
             ),
+            response_schema_tool_choice=tool_choice,
             prompt_template_inputs={"tools_enabled": self._tools_enabled()},
         )
         tracker = ToolEventTracker(

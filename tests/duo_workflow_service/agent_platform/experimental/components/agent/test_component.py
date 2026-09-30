@@ -2,10 +2,11 @@
 
 # pylint: disable=too-many-lines
 from typing import ClassVar, Literal
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ai_gateway.response_schemas import (
@@ -19,10 +20,16 @@ from duo_workflow_service.agent_platform.experimental.components.agent.component
     AgentComponentBase,
     RoutingError,
 )
+from duo_workflow_service.agent_platform.experimental.components.agent.nodes.agent_node import (
+    AgentStuckError,
+)
 from duo_workflow_service.agent_platform.experimental.components.agent.ui_log import (
     UILogEventsAgent,
 )
-from duo_workflow_service.agent_platform.experimental.state import FlowStateKeys
+from duo_workflow_service.agent_platform.experimental.state import (
+    FlowState,
+    FlowStateKeys,
+)
 from duo_workflow_service.agent_platform.experimental.state.base import (
     IOKey,
     RuntimeIOKey,
@@ -627,6 +634,105 @@ class TestResponseSchemaDefinition:
         assert issubclass(component._response_schema, BaseAgentOutput)
         assert component._response_schema.tool_title == self.INLINE_SCHEMA_ID
 
+    @pytest.mark.asyncio
+    async def test_text_only_turn_loops_until_schema_tool_call_ends_run(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        inline_schema_registry,
+        base_flow_state,
+    ):
+        """Under "auto" a text-only turn re-enters the agent; only the schema tool call ends the run, validated."""
+        mock_toolset.__contains__ = lambda _self, name: name != self.INLINE_SCHEMA_ID
+        final_call = {
+            "id": "call_1",
+            "name": self.INLINE_SCHEMA_ID,
+            "args": {"summary": "done", "score": 7},
+        }
+        prompt = mock_prompt_registry.get_on_behalf.return_value
+        prompt.ainvoke = AsyncMock(
+            side_effect=[
+                AIMessage(content="Let me consolidate first."),
+                AIMessage(content="", tool_calls=[final_call]),
+            ]
+        )
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=["context:user_input"],
+            prompt_id="test_prompt",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            schema_registry=inline_schema_registry,
+            response_schema_id=self.INLINE_SCHEMA_ID,
+        )
+        router = Mock()
+        router.route.return_value = END
+        graph = StateGraph(FlowState)
+        component.attach(graph, router)
+        graph.set_entry_point(component.__entry_hook__())
+
+        result = await graph.compile().ainvoke(base_flow_state)
+
+        assert prompt.ainvoke.await_count == 2
+        assert result["context"][component_name]["final_answer"] == {
+            "summary": "done",
+            "score": 7,
+        }
+
+    @pytest.mark.asyncio
+    async def test_text_only_forever_raises_agent_stuck_error(
+        self,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        inline_schema_registry,
+        base_flow_state,
+    ):
+        """A model that never calls the schema tool is bounded by max_cycles plus the wrap-up retries."""
+        mock_toolset.__contains__ = lambda _self, name: name != self.INLINE_SCHEMA_ID
+        prompt = mock_prompt_registry.get_on_behalf.return_value
+        prompt.ainvoke = AsyncMock(return_value=AIMessage(content="Still thinking."))
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=["context:user_input"],
+            prompt_id="test_prompt",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            schema_registry=inline_schema_registry,
+            response_schema_id=self.INLINE_SCHEMA_ID,
+            max_cycles=2,
+        )
+        router = Mock()
+        router.route.return_value = END
+        graph = StateGraph(FlowState)
+        component.attach(graph, router)
+        graph.set_entry_point(component.__entry_hook__())
+
+        # A small recursion limit makes a regression fail fast instead of hanging.
+        with pytest.raises(AgentStuckError):
+            await graph.compile().ainvoke(
+                base_flow_state, config={"recursion_limit": 10}
+            )
+
+        assert prompt.ainvoke.await_count == 4
+
     def test_no_schema_fields_gives_none_response_schema(
         self,
         component_name,
@@ -984,7 +1090,7 @@ class TestAgentComponentAttachEdges:
             in exc_info.value.internal_detail
         )
 
-    def test_routing_with_schema_mode_and_no_tool_calls_raises_error(
+    def test_routing_with_schema_mode_loops_text_only_back_to_agent(
         self,
         agent_component_with_custom_schema,
         mock_state_graph,
@@ -992,7 +1098,7 @@ class TestAgentComponentAttachEdges:
         base_flow_state,
         component_name,
     ):
-        """Test that schema mode with no tool calls raises NotifiableAgentException."""
+        """With tool_choice "auto" a text-only turn is deliberation, not an error: it loops back to the agent."""
         mock_message = Mock(spec=AIMessage)
         mock_message.tool_calls = []
 
@@ -1009,9 +1115,23 @@ class TestAgentComponentAttachEdges:
         )
         router_function = agent_router_call[0][1]
 
-        with pytest.raises(NotifiableAgentException) as exc_info:
-            router_function(state_with_no_tools)
-        assert "Schema mode requires a tool call" in exc_info.value.internal_detail
+        assert router_function(state_with_no_tools) == f"{component_name}#agent"
+
+    def test_schema_mode_binds_auto_tool_choice(
+        self,
+        agent_component_with_custom_schema,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+    ):
+        """A response schema is bound with "auto" so the agent can still deliberate in text."""
+        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
+
+        _, kwargs = mock_prompt_registry.get_on_behalf.call_args
+        assert kwargs["tool_choice"] == "auto"
+        agent_call_kwargs = mock_agent_node_cls.call_args[1]
+        assert agent_call_kwargs.get("response_schema_tool_choice") == "auto"
 
     def test_routing_with_no_tool_calls_goes_to_final_response(
         self,
