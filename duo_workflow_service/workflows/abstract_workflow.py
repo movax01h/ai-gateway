@@ -354,8 +354,16 @@ class AbstractWorkflow(ABC):
             )
             self._first_response_metric_recorded = True
 
+    def _mcp_enabled(self) -> bool:
+        """Whether the root namespace allows MCP tools (``duo_workflow_mcp_enabled``).
+
+        When it does not, GitLab MCP server tools are withheld from the session, so callers must not assume they are
+        available even if Rails advertises them.
+        """
+        return bool(self._workflow_config.get("mcp_enabled", False))
+
     def _permitted_mcp_tools(self) -> list[McpToolConfig]:
-        if self._workflow_config.get("mcp_enabled", False):
+        if self._mcp_enabled():
             return self._mcp_tools
 
         if not strips_client_mcp_trust():
