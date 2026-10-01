@@ -5,10 +5,12 @@ from typing import Optional
 
 import sentry_sdk
 import structlog
+from langchain_core.tools import ToolException
 from sentry_sdk.integrations.asyncio import enable_asyncio_integration
 from sentry_sdk.integrations.grpc import GRPCIntegration
 from sentry_sdk.integrations.langchain import LangchainIntegration
 from sentry_sdk.integrations.langgraph import LanggraphIntegration
+from sentry_sdk.types import Event, Hint
 
 from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS
 
@@ -26,6 +28,10 @@ DEFAULT_WORKFLOW_TRACES_SAMPLE_RATE = 0.05
 
 WORKFLOW_METHOD_NAME = "ExecuteWorkflow"
 
+CLOUD_CONNECTOR_LOGGER = "cloud_connector"
+# Raised while decoding a token the client sent, e.g. "Not enough segments" for a value that is not a JWT.
+CLOUD_CONNECTOR_CLIENT_ERRORS = frozenset({"JWTError"})
+
 
 def setup_error_tracking():
     if sentry_tracking_available():
@@ -33,7 +39,7 @@ def setup_error_tracking():
             dsn=os.environ.get("SENTRY_DSN"),
             environment=os.environ.get("DUO_WORKFLOW_SERVICE_ENVIRONMENT"),
             traces_sampler=traces_sampler,
-            before_send=remove_private_info_fields,
+            before_send=before_send,
             profiles_sample_rate=0.0,
             integrations=[
                 GRPCIntegration(),
@@ -109,6 +115,54 @@ def sentry_tracking_available():
     else:
         log.debug("Sentry error tracking disabled...")
     return False
+
+
+def before_send(event: Event, hint: Hint) -> Optional[Event]:
+    """Drop expected errors, then strip private fields from the rest.
+
+    https://docs.sentry.io/platforms/python/configuration/filtering/#using-before-send
+    """
+    if is_expected_error(event, hint):
+        return None
+
+    return remove_private_info_fields(event, hint)
+
+
+def is_expected_error(event: Event, hint: Hint) -> bool:
+    """Whether the event describes a condition the service already handles.
+
+    `ToolException` means a tool failed on the model's input, for example a path that does not exist. The tools
+    executor returns the error to the model so it can recover, and tracks it with the `WORKFLOW_TOOL_FAILURE` internal
+    event. The LangChain and asyncio integrations still capture it as unhandled, and `log_exception` reports it again.
+
+    `JWTError` from Cloud Connector means the client sent a malformed token. The authentication interceptor answers
+    with `UNAUTHENTICATED`, so there is nothing for us to fix.
+
+    Both errors are still written to the application logs.
+    """
+    exc_info = hint.get("exc_info")
+    if exc_info and isinstance(exc_info[1], ToolException):
+        return True
+
+    # Logged errors (`log_exception`) arrive without `exc_info`: the structlog pipeline renders the traceback into
+    # the message before the record reaches Sentry. Both `log_exception` helpers record the class name instead.
+    extra = event.get("extra") or {}
+    exception_class = extra.get("exception_class")
+    if exception_class in _class_names(ToolException):
+        return True
+
+    return (
+        event.get("logger") == CLOUD_CONNECTOR_LOGGER
+        and exception_class in CLOUD_CONNECTOR_CLIENT_ERRORS
+    )
+
+
+def _class_names(cls: type) -> set[str]:
+    """Names of `cls` and all its subclasses, including ones defined after this module was imported."""
+    names = {cls.__name__}
+    for subclass in cls.__subclasses__():
+        names |= _class_names(subclass)
+    return names
 
 
 def remove_private_info_fields(event, hint):  # pylint: disable=unused-argument
