@@ -51,3 +51,14 @@ class TestCodeReviewAbortsOnUnresolvedMergeRequest:
         routes = self._build_review_context_router(config)["condition"]["routes"]
         assert routes["success"] == "fetch_mr_diffs"
         assert routes["default_route"] == "abort"
+
+
+@pytest.mark.parametrize("version", shipped_versions())
+def test_explore_step_reads_the_checkout(version):
+    """list_repository_tree without a ref reads the default branch, not the merge request."""
+    config = FlowConfig.from_yaml_config(FLOW, version)
+    explore = next(
+        c for c in config.components if c.get("name") == "explore_relevant_directories"
+    )
+
+    assert explore["toolset"] == ["find_files"]
