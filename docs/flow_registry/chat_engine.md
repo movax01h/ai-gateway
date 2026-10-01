@@ -160,9 +160,9 @@ templating the four flagship commands.
 
 Authors write the v1 config they write today. The engine adds no fields and removes none. Defaults the chat surface
 guarantees are `AgentComponent`'s own, keyed on the `chat-partial` environment and filled when the builder constructs
-the component, so one layer owns them and a renamed field cannot leave a dead default behind. Load-time normalization
-of an engine-owned config fills only what the builder requires and the environment lets authors omit: `routers` and
-`flow.entry_point`.
+the component, so one layer owns them and a renamed field cannot leave a dead default behind. At load time,
+`PartialFlowConfig.to_config()` fills in only what the builder requires and the environment lets authors omit:
+`routers` and `flow.entry_point`.
 
 | Field | When absent | When declared |
 |-------|-------------|---------------|
