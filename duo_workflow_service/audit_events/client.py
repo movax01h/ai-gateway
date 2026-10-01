@@ -51,7 +51,9 @@ class AuditEventClient:
                     reason="version_unsupported", amount=len(events)
                 )
             return True
-        if not events and not is_final:
+        # The Rails endpoint requires a non-empty `events` array and answers an empty one with
+        # `400 events is empty`, so an empty batch is never sent, even when it is the final one.
+        if not events:
             return True
 
         batch_id = str(uuid.uuid4())

@@ -228,25 +228,17 @@ class TestFinalBatch:
         assert "total_events_sent" not in payload
 
     @pytest.mark.asyncio
-    async def test_empty_events_with_is_final_sends_request(
-        self, _mock_supported, http_client
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{}, {"is_final": True, "total_events_sent": 10}],
+        ids=["not_final", "final"],
+    )
+    async def test_empty_events_skip_request(
+        self, _mock_supported, http_client, kwargs
     ):
-        http_client.apost.return_value = GitLabHttpResponse(status_code=200, body="")
+        # Rails rejects an empty `events` array with `400 events is empty`.
         client = _make_client(http_client)
-        result = await client.send_batch([], is_final=True, total_events_sent=10)
-        assert result is True
-        http_client.apost.assert_called_once()
-        payload = _parse_payload(http_client)
-        assert payload["events"] == []
-        assert payload["final"] is True
-        assert payload["total_events_sent"] == 10
-
-    @pytest.mark.asyncio
-    async def test_empty_events_without_is_final_skips_request(
-        self, _mock_supported, http_client
-    ):
-        client = _make_client(http_client)
-        result = await client.send_batch([])
+        result = await client.send_batch([], **kwargs)
         assert result is True
         http_client.apost.assert_not_called()
 
