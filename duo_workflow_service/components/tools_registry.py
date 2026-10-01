@@ -193,6 +193,7 @@ ToolsOrConfigs = Union[Sequence[Type[BaseTool]], Sequence[McpToolConfig]]
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "read_only_files": _READ_ONLY_FILE_TOOLS,
     "read_write_files": [
+        tools.BlPrioritizeAndCap,
         *_READ_ONLY_FILE_TOOLS,
         tools.WriteFile,
         tools.EditFile,
