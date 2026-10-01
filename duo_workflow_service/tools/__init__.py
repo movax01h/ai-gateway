@@ -16,6 +16,7 @@ from .epic import *
 from .fetch_glql_schema import *
 from .filesystem import *
 from .findings import *
+from .bl_prioritize_and_cap import *
 from .git import *
 from .handover import *
 from .issue import *
