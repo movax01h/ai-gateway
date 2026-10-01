@@ -164,6 +164,33 @@ class TestBuildSummary:
 
         assert summary == "- Well tested\n- Follows conventions"
 
+    @pytest.mark.parametrize(
+        ("narrative", "expected"),
+        [
+            (
+                r"- Pins `yq` to `v4.53.6`.\n- Explains the pin.\n- Minimal change.",
+                "- Pins `yq` to `v4.53.6`.\n- Explains the pin.\n- Minimal change.",
+            ),
+            (
+                r"A routine version bump.\n- No logic changes.\n- No tests needed.",
+                "A routine version bump.\n- No logic changes.\n- No tests needed.",
+            ),
+            (
+                r"A routine version bump.\n\n- No logic changes.",
+                "A routine version bump.\n\n- No logic changes.",
+            ),
+        ],
+    )
+    def test_escaped_newlines_between_bullets_become_line_breaks(
+        self, narrative, expected
+    ):
+        assert build_summary([], narrative) == expected
+
+    def test_escaped_newlines_outside_bullet_breaks_are_kept(self):
+        narrative = r"- Splits lines on `\n` correctly."
+
+        assert build_summary([], narrative) == narrative
+
     def test_blank_narrative_falls_back_to_the_default(self):
         assert build_summary([], "   ") == "No issues were raised in this review."
 
