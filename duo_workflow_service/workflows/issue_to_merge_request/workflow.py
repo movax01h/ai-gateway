@@ -29,7 +29,7 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tools.handover import HandoverTool
-from duo_workflow_service.tracking import log_exception
+from duo_workflow_service.tracking import log_exception, log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 
 CONTEXT_BUILDER_TOOLS = [
@@ -161,7 +161,7 @@ class Workflow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):
-        log_exception(
+        log_workflow_failure(
             error, extra={"workflow_id": self._workflow_id, "source": __name__}
         )
 

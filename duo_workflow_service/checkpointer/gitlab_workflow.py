@@ -124,6 +124,11 @@ T = TypeVar("T", bound=callable)  # type: ignore
 
 _logger = structlog.stdlib.get_logger("workflow_checkpointer")
 
+# Checkpoint save responses that reflect the user's or the session's state in GitLab rather than a problem with the
+# checkpoint we sent: an expired token, a blocked account, or a workflow that no longer exists. Any other failure,
+# for example a 400 for content Postgres cannot store or a 5xx, points at our payload or at GitLab and stays an error.
+CHECKPOINT_SAVE_EXPECTED_FAILURE_STATUSES = frozenset({401, 403, 404})
+
 # Substring of the ToolException raised when Workhorse aborts a `runHTTPRequest`
 # action because the upstream Rails response didn't fit within a single gRPC
 # message. See `ActionResponseBodyLimit` / `nullResponseWriter` in
@@ -1927,7 +1932,12 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             )
 
         if not response.is_success():
-            self._logger.error(
+            log_method = (
+                self._logger.warning
+                if response.status_code in CHECKPOINT_SAVE_EXPECTED_FAILURE_STATUSES
+                else self._logger.error
+            )
+            log_method(
                 "Failed to save checkpoint",
                 workflow_id=self._workflow_id,
                 thread_ts=checkpoint["id"],
