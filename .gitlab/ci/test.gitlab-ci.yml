@@ -308,64 +308,48 @@ check-duo-workflow-docs:
         - scripts/generate_graph_docs.py
         - docs/duo_workflow_service_graphs.md
 
-.litellm-conformance:rules:
+# Optional check for litellm bump merge requests opened by Renovate. A passed job means the new litellm version
+# builds the requests we expect for the providers on the startup probe path, and our patches still take effect.
+# The job needs no credentials, because Renovate pipelines run in a fork. See docs/litellm_upgrades.md.
+.litellm-bump:rules:
   rules:
     # Note: this whole file is included with `rules: *skip-when-expedited-include`,
-    # so a merge request labeled `pipeline::expedited` skips these jobs. Never
-    # merge a litellm bump expedited. See docs/litellm_upgrades.md.
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # so a merge request labeled `pipeline::expedited` skips these jobs.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^renovate\/litellm/
       changes:
-        - pyproject.toml
         - poetry.lock
-        - ai_gateway/models/**/*
-        - ai_gateway/proxy/**/*
-        - ai_gateway/vendor/**/*
-        - ai_gateway/prompts/base.py
-        - ai_gateway/model_selection/unit_primitives.yml
-        - scripts/litellm_surface.py
-        - scripts/litellm_surface.json
-        - scripts/litellm_blocklist.py
-        - scripts/litellm_blocklist.yml
-        - tests/scripts/test_litellm_surface.py
-        - tests/models/**/*
-        - tests/proxy/**/*
-        - .gitlab/ci/test.gitlab-ci.yml
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+        - pyproject.toml
+      allow_failure: true
+    # Anyone can run the check by hand on any merge request.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
 
-# Stage A (resolution and blocklist) and Stage B (private API surface).
-# Neither needs provider credentials or network access to any model provider.
-# See docs/litellm_upgrades.md for what each stage catches and why it exists.
-tests:litellm-conformance:
+tests:litellm-bump-check:
   extends:
     - .poetry
-    - .litellm-conformance:rules
+    - .litellm-bump:rules
   stage: test
   needs:
     - install
+  variables:
+    # Without this, litellm downloads its model cost map from GitHub on import.
+    LITELLM_LOCAL_MODEL_COST_MAP: "True"
   script:
-    # Stage A: refuse a litellm release we already know is broken.
-    - poetry run python scripts/litellm_blocklist.py
-    # Stage B: the private API surface the repo depends on must still exist,
-    # still be callable, and still have the shape we recorded.
-    - poetry run python scripts/litellm_surface.py --check
-    - poetry run pytest tests/scripts/test_litellm_surface.py -q
-    # Stage A, informational: show which transitive pins moved, as an artifact.
-    - mkdir -p litellm-conformance-report
-    - poetry export -f requirements.txt --output litellm-conformance-report/resolved.txt --without-hashes
-  artifacts:
-    when: always
-    expire_in: 1 week
-    paths:
-      - litellm-conformance-report/
+    - poetry run pip show litellm | grep -E '^(Name|Version)'
+    # Informational: which packages the bump moved. Skipped when the base lock file is not available.
+    - git show "${CI_MERGE_REQUEST_DIFF_BASE_SHA}:poetry.lock" > "${CI_PROJECT_DIR}/base-poetry.lock" || true
+    - poetry run python scripts/litellm_dep_report.py base-poetry.lock poetry.lock
+    - poetry run pytest tests/litellm_bump -v
 
-# Stage D: the production image installs with `poetry install --only main`,
+# The production image installs with `poetry install --only main`,
 # while every test environment also installs the test and dev groups. An
 # import-time break can therefore exist only in the image. This is the only
 # job that would catch that.
 tests:litellm-image-smoke:
   extends:
     - .docker
-    - .litellm-conformance:rules
+    - .litellm-bump:rules
   stage: test
   needs:
     - build-docker-model-gateway
