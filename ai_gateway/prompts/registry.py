@@ -242,8 +242,8 @@ class LocalPromptRegistry(BasePromptRegistry):
         prompt_id: str,
         family: list[str],
     ) -> Path:
-        # A moved feature owns its prompts under ai/features/<domain>/<feature>/prompts/;
-        # everything else still lives under the legacy definitions/ root.
+        # A prompt under ai/features/ or ai/shared/ resolves from its registered
+        # root; everything else still lives under the legacy definitions/ root.
         prompts_definitions_dir = feature_prompt_root(prompt_id) or (
             Path(__file__).parent / "definitions" / prompt_id
         )
