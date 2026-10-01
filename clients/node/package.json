@@ -11,7 +11,7 @@
   "author": "GitLab",
   "license": "GitLab Enterprise Edition (EE) license",
   "dependencies": {
-    "@grpc/grpc-js": "^1.13.3"
+    "@grpc/grpc-js": "^1.14.5"
   },
   "devDependencies": {
     "ts-proto": "^2.7.0",
