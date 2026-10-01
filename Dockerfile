@@ -41,6 +41,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN poetry install --compile --no-interaction --no-ansi --no-cache --only main
 
+# Remove ecdsa to avoid CVE-2024-23342 (unpatched upstream). It is only pulled in
+# unconditionally by python-jose and never imported: jose uses the cryptography
+# backend for EC keys, and cryptography is always installed here.
+RUN rm -rf /home/aigateway/app/venv/*/lib*/python3.12/site-packages/ecdsa*
+
 ##
 ## Final image copies dependencies from install-image
 ##
