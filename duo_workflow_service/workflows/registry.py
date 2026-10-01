@@ -35,10 +35,7 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs as experimental_list_configs,
 )
 from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
-from duo_workflow_service.agent_platform.v1.chat_engine import (
-    ChatFlow,
-    normalize_engine_owned_config,
-)
+from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
 from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
 from duo_workflow_service.agent_platform.v1.flows import (
@@ -370,7 +367,7 @@ def _engine_owned_chat_factory(
             "environment routes the single component to the boundary"
         )
 
-    return partial(ChatFlow, config=normalize_engine_owned_config(config))
+    return partial(ChatFlow, config=config.to_config())
 
 
 def flow_factory(

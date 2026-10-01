@@ -546,6 +546,18 @@ class TestToConfig:
 
         assert self._make_partial_config(flow=flow).to_config().flow is flow
 
+    def test_components_pass_through_untouched(self):
+        component = {
+            "name": "chat_agent",
+            "type": "AgentComponent",
+            "pre_approved_tools": ["read_file"],
+        }
+        config = PartialFlowConfig(
+            version="v1", environment="chat-partial", components=[dict(component)]
+        )
+
+        assert config.to_config().components == [component]
+
     def test_the_partial_config_is_not_mutated(self):
         config = self._make_partial_config()
 

@@ -3,10 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from duo_workflow_service.agent_platform.v1.chat_engine import (
-    ChatFlow,
-    normalize_engine_owned_config,
-)
+from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
 from duo_workflow_service.agent_platform.v1.chat_engine.graph_builder import (
     ChatGraphBuilder,
 )
@@ -20,15 +17,11 @@ from lib.events import GLReportingEventContext
 
 
 def _chat_flow(user) -> tuple[ChatFlow, FlowConfig]:
-    config = normalize_engine_owned_config(
-        PartialFlowConfig(
-            version="v1",
-            environment="chat-partial",
-            components=[
-                {"name": "chat_agent", "type": "AgentComponent", "toolset": []}
-            ],
-        )
-    )
+    config = PartialFlowConfig(
+        version="v1",
+        environment="chat-partial",
+        components=[{"name": "chat_agent", "type": "AgentComponent", "toolset": []}],
+    ).to_config()
     factory = partial(ChatFlow, config=config)
 
     flow = factory(

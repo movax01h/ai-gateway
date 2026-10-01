@@ -9,9 +9,6 @@ from langgraph.graph import StateGraph
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
 from duo_workflow_service.agent_platform.v1.catalog import CatalogItems
-from duo_workflow_service.agent_platform.v1.chat_engine import (
-    normalize_engine_owned_config,
-)
 from duo_workflow_service.agent_platform.v1.chat_engine.graph_builder import (
     ChatGraphBuilder,
 )
@@ -283,7 +280,7 @@ async def test_a_completed_chat_partial_config_builds_and_ends_its_turn(builder)
     )
 
     with _node_components():
-        graph = builder.build(normalize_engine_owned_config(authored))
+        graph = builder.build(authored.to_config())
 
     result = await graph.compile().ainvoke(
         FlowState(
