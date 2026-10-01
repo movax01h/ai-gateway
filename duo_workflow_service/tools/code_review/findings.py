@@ -143,6 +143,7 @@ PREVIOUS_FINDING_LABELS = {
     "still_outstanding": "Still outstanding",
 }
 NEEDS_ATTENTION = {"partially_fixed", "still_outstanding"}
+HIDDEN = {"disputed"}
 
 
 def _previous_finding_rank(status: Any) -> int:
@@ -159,6 +160,7 @@ def render_previous_findings(items: List[Dict[str, Any]]) -> Optional[str]:
     verified items reads as if there were something left to do, so a re-review that closed everything is published as
     a clean review instead.
     """
+    items = [item for item in items if item.get("status") not in HIDDEN]
     if not any(item.get("status") in NEEDS_ATTENTION for item in items):
         return None
 

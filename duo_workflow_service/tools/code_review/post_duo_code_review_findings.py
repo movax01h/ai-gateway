@@ -61,7 +61,7 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
         default=None,
         description=(
             "The reviewer's `previous_findings` array from a re-review. Each item "
-            "has file, status (fixed, verified, partially_fixed, still_outstanding) "
+            "has file, status (fixed, verified, partially_fixed, still_outstanding, disputed) "
             "and note. Rendered as a list only when something still needs attention."
         ),
     )

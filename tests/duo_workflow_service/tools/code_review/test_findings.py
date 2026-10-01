@@ -204,7 +204,8 @@ class TestRenderPreviousFindings:
         assert render_previous_findings([]) is None
 
     @pytest.mark.parametrize(
-        "statuses", [["fixed"], ["verified"], ["fixed", "verified"]]
+        "statuses",
+        [["fixed"], ["verified"], ["fixed", "verified"], ["fixed", "disputed"]],
     )
     def test_withheld_when_nothing_needs_attention(self, statuses):
         """A list of closed points reads as if there were something to act on, so the review is published as clean."""
@@ -233,6 +234,16 @@ class TestRenderPreviousFindings:
         )
 
         assert rendered.splitlines()[-1].startswith("- **mystery:**")
+
+    def test_disputed_items_are_left_out(self):
+        rendered = render_previous_findings(
+            [
+                previous("disputed", file="a.rb", note="Author explained."),
+                previous("still_outstanding", file="b.rb", note="Still nil."),
+            ]
+        )
+
+        assert rendered == "- **Still outstanding:** `b.rb`: Still nil."
 
 
 class TestAttributeMessage:
