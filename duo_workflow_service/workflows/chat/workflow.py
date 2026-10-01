@@ -154,6 +154,15 @@ _SEARCH_TOOLS = [
     "gitlab_merge_request_search",  # MR search
 ]
 
+# Native chat tools that a GitLab MCP server tool supersedes. Keys are MCP tool
+# names as Rails lists them in the x-gitlab-enabled-mcp-server-tools header
+# (unprefixed; Workhorse exposes them to the agent as `gitlab_<name>`). When a
+# key is enabled for a session that may use MCP tools, its native tools are left
+# out so the agent is not offered two tools for the same job.
+NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS: Mapping[str, tuple[str, ...]] = {
+    "search": tuple(_SEARCH_TOOLS),
+}
+
 # Tools with special processing that should always be included
 _SPECIAL_PROCESSING_TOOLS = [
     "list_merge_request_diffs",  # Has DiffExclusionPolicy
@@ -828,7 +837,7 @@ class Workflow(AbstractWorkflow):
             self._workflow_config.get("web_search_allowed_for_group", False),
         )
 
-    def _get_tools(self):
+    def _get_tools(self) -> list[str]:
         # Evaluate feature flag at runtime to determine which read-only tools to use
         if is_feature_enabled(FeatureFlag.USE_GENERIC_GITLAB_API_TOOLS):
             # Use generic tools instead of simple read-only tools
@@ -842,14 +851,6 @@ class Workflow(AbstractWorkflow):
                 + _SPECIAL_PROCESSING_TOOLS
                 + _NON_GITLAB_TOOLS
             )
-
-        # Check if search MCP tool is enabled
-        enabled_mcp_tools = get_enabled_mcp_server_tools()
-        if "search" in enabled_mcp_tools:
-            # Filter out all search tools when MCP search is enabled
-            read_only_tools = [
-                tool for tool in read_only_tools if tool not in _SEARCH_TOOLS
-            ]
 
         # Custom AI Catalog flows are enabled per project rather than by the
         # foundational-flow settings, so start_flow stays available however
@@ -889,7 +890,29 @@ class Workflow(AbstractWorkflow):
             + CHAT_SESSION_CONTEXT_TOOLS
             + genui_tools
         )
-        return available_tools
+
+        replaced_tools = self._native_tools_replaced_by_mcp()
+        return [tool for tool in available_tools if tool not in replaced_tools]
+
+    def _native_tools_replaced_by_mcp(self) -> set[str]:
+        """Native tools superseded by a GitLab MCP server tool available in this session.
+
+        Rails lists the GitLab MCP server tools it enables in the ``x-gitlab-enabled-mcp-server-tools`` header whenever
+        the ``mcp_client`` flag is on, but the tools only reach the agent when the root namespace allows MCP tools.
+        Without that check the native tools are dropped with no MCP replacement, leaving the agent without the
+        capability altogether.
+        """
+        if not self._mcp_enabled():
+            return set()
+
+        enabled_mcp_server_tools = get_enabled_mcp_server_tools()
+
+        return {
+            native_tool
+            for mcp_tool, native_tools in NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS.items()
+            if mcp_tool in enabled_mcp_server_tools
+            for native_tool in native_tools
+        }
 
     @override
     async def _handle_compile_and_run_exception(

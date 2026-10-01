@@ -50,6 +50,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     CHAT_READ_ONLY_TOOLS,
     CHAT_SESSION_CONTEXT_TOOLS,
     CHAT_UTILITY_TOOLS,
+    NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS,
     RUN_COMMAND_TOOLS,
     Routes,
     Workflow,
@@ -1682,79 +1683,117 @@ class TestMcpServerToolsFiltering:
         yield
         current_mcp_server_tools_context.reset(token)
 
-    @pytest.mark.asyncio
-    async def test_get_tools_without_mcp_search_enabled(self, workflow_with_project):
-        """Test that search tools are included when MCP search is not enabled."""
-        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
+    @pytest.fixture(name="set_mcp_enabled")
+    def set_mcp_enabled_fixture(self, workflow_with_project):
+        def _set(mcp_enabled: bool) -> None:
+            workflow_with_project._workflow_config = {
+                **workflow_with_project._workflow_config,
+                "mcp_enabled": mcp_enabled,
+            }
 
-        # No MCP tools enabled
-        set_enabled_mcp_server_tools(set())
+        return _set
+
+    @pytest.mark.parametrize(
+        "generic_gitlab_tools_enabled",
+        [True, False],
+        ids=["generic_tools", "simple_tools"],
+    )
+    @pytest.mark.parametrize(
+        "mcp_enabled,enabled_mcp_server_tools,native_search_kept",
+        [
+            (True, set(), True),
+            (True, {"some_other_tool"}, True),
+            (True, {"search"}, False),
+            (True, {"search", "some_other_tool"}, False),
+            # Rails advertises MCP search whenever mcp_client is on, but the
+            # namespace does not allow MCP tools, so they never reach the agent.
+            (False, {"search"}, True),
+            (False, {"search", "some_other_tool"}, True),
+            (False, set(), True),
+        ],
+        ids=[
+            "mcp_enabled_no_mcp_tools",
+            "mcp_enabled_other_mcp_tools",
+            "mcp_enabled_search",
+            "mcp_enabled_search_and_others",
+            "mcp_disabled_search",
+            "mcp_disabled_search_and_others",
+            "mcp_disabled_no_mcp_tools",
+        ],
+    )
+    def test_get_tools_native_search_tools(
+        self,
+        workflow_with_project,
+        set_mcp_enabled,
+        generic_gitlab_tools_enabled,
+        mcp_enabled,
+        enabled_mcp_server_tools,
+        native_search_kept,
+    ):
+        """Native search tools are dropped only when MCP search can reach the agent."""
+        current_feature_flag_context.set(
+            {"use_generic_gitlab_api_tools"} if generic_gitlab_tools_enabled else set()
+        )
+        set_mcp_enabled(mcp_enabled)
+        set_enabled_mcp_server_tools(enabled_mcp_server_tools)
 
         tools = workflow_with_project._get_tools()
 
-        # All search tools should be present
-        assert "gitlab_issue_search" in tools
-        assert "gitlab_blob_search" in tools
-        assert "gitlab_merge_request_search" in tools
+        for tool in [
+            "gitlab_issue_search",
+            "gitlab_blob_search",
+            "gitlab_merge_request_search",
+        ]:
+            assert (tool in tools) is native_search_kept
+
+        # Not covered by the MCP server, so always offered.
         assert "gitlab_documentation_search" in tools
-
-    @pytest.mark.asyncio
-    async def test_get_tools_with_mcp_search_enabled(self, workflow_with_project):
-        """Test that search tools are filtered when MCP search is enabled."""
-        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
-
-        # Enable search MCP tool
-        set_enabled_mcp_server_tools({"search"})
-
-        tools = workflow_with_project._get_tools()
-
-        # Search tools should be filtered out
-        assert "gitlab_issue_search" not in tools
-        assert "gitlab_blob_search" not in tools
-        assert "gitlab_merge_request_search" not in tools
-
-        # Documentation search should still be present (not covered by MCP)
-        assert "gitlab_documentation_search" in tools
-
-        # Other tools should still be present
         assert "list_merge_request_diffs" in tools
         assert "read_file" in tools
 
-    @pytest.mark.asyncio
-    async def test_get_tools_with_other_mcp_tools(self, workflow_with_project):
-        """Test that other MCP tools don't affect search tools."""
-        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
-
-        # Enable some other MCP tool (not search)
-        set_enabled_mcp_server_tools({"some_other_tool", "another_tool"})
-
-        tools = workflow_with_project._get_tools()
-
-        # All search tools should still be present
-        assert "gitlab_issue_search" in tools
-        assert "gitlab_blob_search" in tools
-        assert "gitlab_merge_request_search" in tools
-        assert "gitlab_documentation_search" in tools
-
-    @pytest.mark.asyncio
-    async def test_get_tools_with_mcp_search_and_other_tools(
-        self, workflow_with_project
+    @pytest.mark.parametrize("mcp_enabled", [True, False])
+    def test_get_tools_applies_every_replacement(
+        self, workflow_with_project, set_mcp_enabled, mcp_enabled
     ):
-        """Test filtering when multiple MCP tools are enabled including search."""
-        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
+        """Each enabled MCP server tool removes the native tools mapped to it, and only those."""
+        replacements = {
+            "search": ("gitlab_issue_search",),
+            "save_merge_request": ("create_merge_request", "update_merge_request"),
+            "get_project": ("get_project",),
+        }
+        set_mcp_enabled(mcp_enabled)
+        set_enabled_mcp_server_tools({"search", "save_merge_request"})
 
-        # Enable multiple MCP tools including search
-        set_enabled_mcp_server_tools({"search", "some_other_tool", "another_tool"})
+        with patch.dict(
+            "duo_workflow_service.workflows.chat.workflow.NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS",
+            replacements,
+            clear=True,
+        ):
+            tools = workflow_with_project._get_tools()
 
-        tools = workflow_with_project._get_tools()
+        for tool in [
+            "gitlab_issue_search",
+            "create_merge_request",
+            "update_merge_request",
+        ]:
+            assert (tool in tools) is not mcp_enabled
 
-        # Search tools should be filtered out
-        assert "gitlab_issue_search" not in tools
-        assert "gitlab_blob_search" not in tools
-        assert "gitlab_merge_request_search" not in tools
+        # Mapped, but its MCP tool is not enabled for the session.
+        assert "get_project" in tools
+        # Enabled MCP tool, but not mapped to this native tool.
+        assert "gitlab_blob_search" in tools
 
-        # Documentation search should still be present
-        assert "gitlab_documentation_search" in tools
+    def test_replacements_only_name_offered_native_tools(
+        self, workflow_with_project, set_mcp_enabled
+    ):
+        """Guards against typos: every mapped native tool is one chat would otherwise offer."""
+        set_mcp_enabled(False)
+        current_feature_flag_context.set(set())
+
+        offered = set(workflow_with_project._get_tools())
+
+        for native_tools in NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS.values():
+            assert set(native_tools) <= offered
 
     @pytest.mark.asyncio
     async def test_get_session_context_requested_regardless_of_flags(

@@ -478,6 +478,28 @@ def test_permitted_mcp_tools(
     assert [tool["llm_name"] for tool in permitted] == expected_tools
 
 
+@pytest.mark.parametrize(
+    ("workflow_config", "expected"),
+    [
+        ({"mcp_enabled": True}, True),
+        ({"mcp_enabled": False}, False),
+        ({"mcp_enabled": None}, False),
+        ({}, False),
+    ],
+    ids=["enabled", "disabled", "null", "missing"],
+)
+def test_mcp_enabled(user, workflow_config, expected):
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._workflow_config = workflow_config
+
+    assert workflow._mcp_enabled() is expected
+
+
 @pytest.mark.asyncio
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.strips_client_mcp_trust",
