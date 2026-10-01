@@ -6,6 +6,7 @@ returning the result to a local session are two terminal steps over this one mod
 `min_confidence` is the same wherever the review runs.
 """
 
+import re
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
@@ -34,6 +35,9 @@ __all__ = [
 SEVERITY_ORDER: tuple[str, ...] = ("critical", "major", "minor")
 
 _ANCHOR_KEYS = ("old_line", "suggestion", "end_line")
+
+# The reviewer sometimes double-escapes newlines in its JSON summary, which posts a literal `\n` between bullets.
+_ESCAPED_BULLET_BREAK = re.compile(r"(?:\\n)+(?=- )")
 
 
 def _severity_rank(severity: Any) -> int:
@@ -89,11 +93,13 @@ def severity_counts(findings: List[Dict[str, Any]]) -> Dict[str, int]:
 def build_summary(findings: List[Dict[str, Any]], narrative: Optional[str]) -> str:
     """Compose the reader-facing overview: the reviewer's narrative, then computed counts.
 
-    The narrative is the reviewer's own judgment, carried verbatim. Every number and the per-severity breakdown are
-    computed here from the findings that will actually be posted, so the overview cannot contradict the comments it
-    sits above.
+    The narrative is the reviewer's own judgment, carried verbatim apart from repairing escaped bullet breaks. Every
+    number and the per-severity breakdown are computed here from the findings that will actually be posted, so the
+    overview cannot contradict the comments it sits above.
     """
-    text = (narrative or "").strip()
+    text = _ESCAPED_BULLET_BREAK.sub(
+        lambda m: m.group().replace("\\n", "\n"), (narrative or "").strip()
+    )
     if not findings:
         return text or "No issues were raised in this review."
 
