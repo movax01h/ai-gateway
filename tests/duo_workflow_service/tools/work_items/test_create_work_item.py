@@ -659,6 +659,30 @@ class TestBuildWorkItemInputFields:
         assert "agentPlanWidget" not in input_data
         assert not warnings
 
+    @patch(
+        "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_widget",
+        return_value=True,
+    )
+    @patch(
+        "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_readiness",
+        return_value=True,
+    )
+    def test_build_work_item_input_fields_create_sends_no_readiness_fields(
+        self, _mock_readiness, _mock_widget
+    ):
+        """The widget builder is shared with update: a create carrying only a
+        plan must send content alone, never readiness keys it was not given."""
+        kwargs = {
+            "title": "Test Work Item",
+            "type_name": "Issue",
+            "agent_plan": "## Why\n\nReason\n\n## What\n\nSolution\n\n## How\n\nApproach",
+        }
+
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(kwargs)
+
+        assert input_data["agentPlanWidget"] == {"content": kwargs["agent_plan"]}
+        assert not warnings
+
     def test_build_work_item_input_fields_with_hierarchy_widget(self):
         """Test that _build_work_item_input_fields includes hierarchy widget."""
         kwargs = {

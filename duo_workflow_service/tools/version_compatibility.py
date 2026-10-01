@@ -21,7 +21,7 @@ AGENT_PLAN_WIDGET_VERSION = Version("19.0.0")
 GROUP_LEVEL_CUSTOM_INSTRUCTIONS_VERSION = Version("19.0.0")
 SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.2.0")
 GLQL_SCHEMA_ENDPOINT_VERSION = Version("19.3.0")
-AGENT_PLAN_READINESS_SCORE_VERSION = Version("19.4.0")
+AGENT_PLAN_READINESS_VERSION = Version("19.4.0")
 LABELS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
 SUGGESTED_REVIEWERS_ENDPOINT_VERSION = Version("19.4.0")
 CLIENT_MCP_TRUST_STRIPPED_VERSION = Version("19.5.0")
@@ -109,22 +109,25 @@ def supports_agent_plan_widget() -> bool:
     return get_gitlab_version() >= AGENT_PLAN_WIDGET_VERSION
 
 
-def supports_agent_plan_readiness_score() -> bool:
-    """Check if the agent plan widget input accepts a readiness score.
+def supports_agent_plan_readiness() -> bool:
+    """Check if the agent plan widget input accepts readiness fields.
 
-    `readinessScore` was added to the agentPlan widget input
-    (`AgentPlanInputType`) later than `content`, which has existed since the
-    widget type itself shipped in 19.0, so it needs its own floor rather than
-    riding :func:`supports_agent_plan_widget`.
+    `readinessScore` and `readinessScoreFeedback` were added to the
+    agentPlan widget input (`AgentPlanInputType`) later than `content`,
+    which has existed since the widget type itself shipped in 19.0, so they
+    need their own floor rather than riding :func:`supports_agent_plan_widget`.
 
-    The field is additionally gated at runtime by the `workplan_score` feature
-    flag on the GitLab side, which no version check can cover: a 19.4+ instance
-    with the flag disabled still rejects the argument.
+    Both ride one 19.4 floor: `readinessScore` landed after the 19.3 cut
+    (first ships in 19.4) and `readinessScoreFeedback` landed alongside it
+    in the same milestone. Both are additionally gated at runtime by the
+    `workplan_score` feature flag on the GitLab side, which no version check
+    can cover: a 19.4+ instance with the flag disabled still rejects the
+    arguments.
 
     Returns:
-        True if `readinessScore` is accepted (GitLab >= 19.4), False otherwise.
+        True if readiness fields are accepted (GitLab >= 19.4), False otherwise.
     """
-    return get_gitlab_version() >= AGENT_PLAN_READINESS_SCORE_VERSION
+    return get_gitlab_version() >= AGENT_PLAN_READINESS_VERSION
 
 
 def supports_licensed_feature_availability() -> bool:

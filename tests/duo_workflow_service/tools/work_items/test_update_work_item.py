@@ -76,7 +76,7 @@ def update_response_fixture_func():
     return_value=True,
 )
 @patch(
-    "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_readiness_score",
+    "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_readiness",
     return_value=True,
 )
 @patch(
@@ -188,6 +188,78 @@ def update_response_fixture_func():
             {"agentPlanWidget": {"content": "## Why", "readinessScore": 72}},
         ),
         (
+            {
+                "readiness_score_feedback": "## Recommendation\n\n"
+                "- **blocking**: Name the migration file\n"
+                "- **non-blocking**: Add a regression test\n"
+                "- **non-blocking**: Expand the rollback notes"
+            },
+            {
+                "agentPlanWidget": {
+                    "readinessScoreFeedback": "## Recommendation\n\n"
+                    "- **blocking**: Name the migration file\n"
+                    "- **non-blocking**: Add a regression test\n"
+                    "- **non-blocking**: Expand the rollback notes"
+                }
+            },
+        ),
+        (
+            {
+                "readiness_score": 72,
+                "readiness_score_feedback": "## Recommendation\n\n"
+                "- **blocking**: Name the migration file\n"
+                "- **non-blocking**: Add a regression test\n"
+                "- **non-blocking**: Expand the rollback notes",
+            },
+            {
+                "agentPlanWidget": {
+                    "readinessScore": 72,
+                    "readinessScoreFeedback": "## Recommendation\n\n"
+                    "- **blocking**: Name the migration file\n"
+                    "- **non-blocking**: Add a regression test\n"
+                    "- **non-blocking**: Expand the rollback notes",
+                }
+            },
+        ),
+        (
+            {
+                "agent_plan": "## Why",
+                "readiness_score_feedback": "## Recommendation\n\n"
+                "- **blocking**: Name the migration file\n"
+                "- **non-blocking**: Add a regression test\n"
+                "- **non-blocking**: Expand the rollback notes",
+            },
+            {
+                "agentPlanWidget": {
+                    "content": "## Why",
+                    "readinessScoreFeedback": "## Recommendation\n\n"
+                    "- **blocking**: Name the migration file\n"
+                    "- **non-blocking**: Add a regression test\n"
+                    "- **non-blocking**: Expand the rollback notes",
+                }
+            },
+        ),
+        (
+            {
+                "agent_plan": "## Why",
+                "readiness_score": 72,
+                "readiness_score_feedback": "## Recommendation\n\n"
+                "- **blocking**: Name the migration file\n"
+                "- **non-blocking**: Add a regression test\n"
+                "- **non-blocking**: Expand the rollback notes",
+            },
+            {
+                "agentPlanWidget": {
+                    "content": "## Why",
+                    "readinessScore": 72,
+                    "readinessScoreFeedback": "## Recommendation\n\n"
+                    "- **blocking**: Name the migration file\n"
+                    "- **non-blocking**: Add a regression test\n"
+                    "- **non-blocking**: Expand the rollback notes",
+                }
+            },
+        ),
+        (
             {"status_id": "gid://gitlab/WorkItems::Statuses::SystemDefined::Status/2"},
             {
                 "statusWidget": {
@@ -214,6 +286,10 @@ def update_response_fixture_func():
         "readiness_score_only",
         "readiness_score_zero_literal",
         "agent_plan_and_readiness_score",
+        "readiness_feedback_only",
+        "readiness_score_and_feedback",
+        "agent_plan_and_readiness_feedback",
+        "agent_plan_readiness_score_and_feedback",
         "status",
     ],
 )
@@ -289,7 +365,7 @@ async def test_update_work_item_agent_plan_unsupported_version(
     return_value=True,
 )
 @patch(
-    "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_readiness_score",
+    "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_readiness",
     return_value=False,
 )
 @patch(
@@ -299,18 +375,44 @@ async def test_update_work_item_agent_plan_unsupported_version(
 @pytest.mark.parametrize(
     "update_kwargs, expected_widget",
     [
-        # 19.0-19.3 instance: the widget and content are supported, the score is
-        # not — content goes out alone and the score is dropped.
+        # 19.0-19.3 instance: the widget and content are supported, the readiness
+        # fields are not — content goes out alone and score and feedback drop.
         (
             {"agent_plan": "## Why\n\nReason", "readiness_score": 72},
             {"content": "## Why\n\nReason"},
         ),
+        (
+            {
+                "agent_plan": "## Why\n\nReason",
+                "readiness_score": 72,
+                "readiness_score_feedback": "## Recommendation\n\n"
+                "- **blocking**: Name the migration file\n"
+                "- **non-blocking**: Add a regression test\n"
+                "- **non-blocking**: Expand the rollback notes",
+            },
+            {"content": "## Why\n\nReason"},
+        ),
         # Score only: nothing survives the gates, so no widget key is sent at all.
         ({"readiness_score": 72}, None),
+        # Feedback only: likewise, no widget key is sent at all.
+        (
+            {
+                "readiness_score_feedback": "## Recommendation\n\n"
+                "- **blocking**: Name the migration file\n"
+                "- **non-blocking**: Add a regression test\n"
+                "- **non-blocking**: Expand the rollback notes"
+            },
+            None,
+        ),
     ],
-    ids=["content_sent_score_dropped", "score_only_drops_widget"],
+    ids=[
+        "content_sent_score_dropped",
+        "content_sent_score_and_feedback_dropped",
+        "score_only_drops_widget",
+        "feedback_only_drops_widget",
+    ],
 )
-async def test_update_work_item_readiness_score_unsupported_version(
+async def test_update_work_item_readiness_unsupported_version(
     _mock_vc,
     _mock_rs,
     _mock_bt,
@@ -321,7 +423,7 @@ async def test_update_work_item_readiness_score_unsupported_version(
     update_kwargs,
     expected_widget,
 ):
-    """ReadinessScore needs GitLab >= 19.4, a higher floor than the widget itself."""
+    """Readiness fields need GitLab >= 19.4, a higher floor than the widget itself."""
     tool = UpdateWorkItem(description="update", metadata=metadata)
     tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item_fixture)
     gitlab_client_mock.graphql = AsyncMock(return_value=update_response_fixture)
@@ -338,6 +440,7 @@ async def test_update_work_item_readiness_score_unsupported_version(
     else:
         assert variables["input"]["agentPlanWidget"] == expected_widget
         assert "readinessScore" not in variables["input"]["agentPlanWidget"]
+        assert "readinessScoreFeedback" not in variables["input"]["agentPlanWidget"]
 
 
 @pytest.mark.parametrize("score", [-1, 101])
@@ -345,6 +448,71 @@ def test_update_work_item_input_rejects_out_of_range_readiness_score(score):
     """0-100 is the score's contract; a nonsense value must fail before the mutation."""
     with pytest.raises(ValidationError):
         UpdateWorkItemInput(readiness_score=score)
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_widget",
+    return_value=True,
+)
+@patch(
+    "duo_workflow_service.tools.work_items.base_tool.supports_agent_plan_readiness",
+    return_value=True,
+)
+@patch(
+    "duo_workflow_service.tools.work_items.version_compatibility.supports_agent_plan_widget",
+    return_value=True,
+)
+@pytest.mark.parametrize(
+    "update_kwargs, expected_widget",
+    [
+        ({"readiness_score": 72}, {"readinessScore": 72}),
+        (
+            {
+                "readiness_score_feedback": "## Recommendation\n\n"
+                "- **blocking**: Name the migration file\n"
+                "- **non-blocking**: Add a regression test\n"
+                "- **non-blocking**: Expand the rollback notes"
+            },
+            {
+                "readinessScoreFeedback": "## Recommendation\n\n"
+                "- **blocking**: Name the migration file\n"
+                "- **non-blocking**: Add a regression test\n"
+                "- **non-blocking**: Expand the rollback notes"
+            },
+        ),
+        ({"agent_plan": "## Why"}, {"content": "## Why"}),
+    ],
+    ids=[
+        "score_without_feedback",
+        "feedback_without_score",
+        "content_without_readiness",
+    ],
+)
+async def test_update_work_item_sends_only_supplied_widget_keys(
+    _mock_vc,
+    _mock_rs,
+    _mock_bt,
+    gitlab_client_mock,
+    metadata,
+    resolved_work_item_fixture,
+    update_response_fixture,
+    update_kwargs,
+    expected_widget,
+):
+    """An absent readiness key must never be sent as null: that would clear it."""
+    tool = UpdateWorkItem(description="update", metadata=metadata)
+    tool._resolve_work_item_data = AsyncMock(return_value=resolved_work_item_fixture)
+    gitlab_client_mock.graphql = AsyncMock(return_value=update_response_fixture)
+
+    await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        **update_kwargs,
+    )
+
+    _, variables = gitlab_client_mock.graphql.call_args[0]
+    assert variables["input"]["agentPlanWidget"] == expected_widget
 
 
 @pytest.mark.asyncio
