@@ -314,6 +314,22 @@ class IOKey(BaseIOKey):
             return self.subkeys[-1]
         return self.target
 
+    def __contains__(self, other: object) -> bool:
+        """Return ``True`` if ``other`` addresses a path nested inside this key.
+
+        ``other in key`` means ``other`` has the same target and its subkey
+        path starts with ``key``'s subkey path, so every leaf under ``key``
+        is considered to be contained by it.  A bare key (no subkeys) contains
+        every key with the same target.
+        """
+        if not isinstance(other, IOKey):
+            return False
+        if other.target != self.target:
+            return False
+        prefix = self.subkeys or []
+        path = other.subkeys or []
+        return path[: len(prefix)] == prefix
+
     def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
         return {self.template_variable_name: self.value_from_state(state)}
 

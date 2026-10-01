@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import functools
 from typing import Any, ClassVar
 from unittest.mock import patch
@@ -46,6 +47,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     IOKey,
     IOKeyTemplate,
+    RuntimeIOKey,
 )
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
@@ -116,6 +118,20 @@ class ShoutComponent(BaseComponent):
 
         graph.add_node(self.__entry_hook__(), run)
         graph.add_conditional_edges(self.__entry_hook__(), router.route)
+
+
+class AnyChannelComponent(ShoutComponent):
+    """A body that may declare inputs on any channel, as ``AgentComponent`` does.
+
+    ``ShoutComponent`` allows only ``context``. Real components are not all so
+    restricted -- ``AgentComponent`` and ``HumanInputComponent`` both set
+    ``_allowed_input_targets`` to every ``FlowState`` channel -- so a body
+    reading ``conversation_history:`` needs one that does.
+    """
+
+    _allowed_input_targets: ClassVar[tuple[str, ...]] = tuple(
+        FlowState.__annotations__.keys()
+    )
 
 
 class _DrainingNode:
@@ -633,11 +649,28 @@ class TestBranchIsolation:
         assert [state["ui_chat_log"] for state in shouter.observed] == [[], []]
 
     @pytest.mark.usefixtures("noisy_result")
-    def test_a_branch_inherits_the_parent_context(self, shouter):
-        assert all(
-            state["context"]["parent_note"] == "visible to every branch"
-            for state in shouter.observed
+    def test_a_branch_does_not_inherit_undeclared_parent_context(self, shouter):
+        assert all("parent_note" not in state["context"] for state in shouter.observed)
+
+    def test_a_branch_inherits_the_parent_context_it_declares(self, identity):
+        shouter = ShoutComponent(
+            name="review_one", inputs=["context:parent_note"], **identity
         )
+
+        run_fan_out(
+            fan_out(shouter),
+            ["a", "b"],
+            context={"parent_note": "visible to every branch", "other": "noise"},
+        )
+
+        assert [
+            {
+                k: v
+                for k, v in state["context"].items()
+                if k not in ("review_one", "branch_scribble")
+            }
+            for state in shouter.observed
+        ] == [{"parent_note": "visible to every branch", "item": item} for item in "ab"]
 
     @pytest.mark.usefixtures("noisy_result")
     def test_a_branch_does_not_inherit_the_fan_outs_own_namespace(self, shouter):
@@ -662,6 +695,332 @@ class TestBranchIsolation:
             for state in shouter.observed
         }
         assert indexes == {0, 1, 2}
+
+
+class TestWhatABranchInherits:
+    """A branch inherits what the body declares in ``inputs``, and nothing else.
+
+    Each case runs the fan-out for real and inspects the state the body was invoked with, rather than calling the state-
+    building helper directly: what is asserted is then what a body actually saw, and severing the call to that helper
+    fails these tests instead of leaving them green.
+    """
+
+    #: A parent deliberately holding more than any one body asks for, so that
+    #: "only the declared leaf crosses" is a claim with something to exclude.
+    _PARENT: ClassVar[dict[str, Any]] = {
+        "goal": "review",
+        "discover": {
+            "files": ["a"],
+            "summary": {"short": "s", "long": "l" * 50},
+            "notes": "n",
+        },
+        "unrelated": {"big": "x" * 100},
+        # A dict, so an inherited stale item would merge into the new one
+        # rather than be overwritten by it.
+        "item": {"stale": 1},
+        "review_one": {RESULTS_SUBKEY: ["stale"]},
+    }
+
+    @classmethod
+    def _parent_over(cls, item: Any) -> dict[str, Any]:
+        """The parent context, with the iterated list holding just ``item``.
+
+        ``_PARENT`` carries its own ``discover.files`` and an explicit
+        ``context=`` wins in ``run_fan_out``, so the list is set here or the
+        fan-out iterates ``_PARENT``'s copy instead of the item under test.
+        """
+        parent = copy.deepcopy(cls._PARENT)
+        parent["discover"]["files"] = [item]
+        return parent
+
+    @classmethod
+    def _whole_parent_less_fan_out_writes(cls, item: Any) -> dict[str, Any]:
+        """What a bare ``context`` input inherits: the parent, less the fan-out's own keys."""
+        return {
+            key: value
+            for key, value in cls._parent_over(item).items()
+            if key not in ("item", "review_one")
+        }
+
+    @classmethod
+    def _inherited_by(
+        cls, body: ShoutComponent, *, item: Any = "a", **state: Any
+    ) -> dict[str, Any]:
+        """Run one branch, and return the parent context that branch was invoked with.
+
+        The item and the index are written by the fan-out rather than
+        inherited, so they are asserted on and taken back out here;
+        ``branch_scribble`` is the body's own write. What is left is what
+        crossed from the parent.
+        """
+        run_fan_out(fan_out(body), [item], context=cls._parent_over(item), **state)
+
+        observed = dict(body.observed[0]["context"])
+        assert observed.pop("item") == item
+        assert observed.pop("review_one") == {ITEM_INDEX_CONTEXT_KEY: 0}
+        observed.pop("branch_scribble", None)
+        return observed
+
+    def _body(
+        self, identity, inputs: list, cls: type[ShoutComponent] = ShoutComponent
+    ) -> ShoutComponent:
+        """A body declaring ``inputs``.
+
+        A ``RuntimeIOKey`` cannot go through ``inputs=``: the base validator
+        runs ``IOKey.parse_keys`` over whatever it is handed, and that only
+        accepts strings and dicts. Runtime keys are set past validation, as a
+        component that builds its own does.
+        """
+        runtime = [key for key in inputs if isinstance(key, RuntimeIOKey)]
+        declared = [key for key in inputs if not isinstance(key, RuntimeIOKey)]
+
+        body = cls(name="review_one", inputs=declared, **identity)
+        if runtime:
+            object.__setattr__(body, "inputs", [*body.inputs, *runtime])
+        return body
+
+    def test_a_subpath_input_forwards_only_its_leaf(self, identity):
+        body = self._body(identity, ["context:discover.summary.short"])
+
+        assert self._inherited_by(body) == {"discover": {"summary": {"short": "s"}}}
+
+    def test_inputs_sharing_a_root_are_deep_merged(self, identity):
+        body = self._body(
+            identity,
+            [
+                "context:discover.summary.short",
+                "context:discover.notes",
+                {"from": "context:goal", "as": "task"},
+            ],
+        )
+
+        assert self._inherited_by(body) == {
+            "goal": "review",
+            "discover": {"summary": {"short": "s"}, "notes": "n"},
+        }
+
+    def test_a_bare_context_input_forwards_the_whole_channel(self, identity):
+        body = self._body(identity, ["context"])
+
+        assert self._inherited_by(body) == self._whole_parent_less_fan_out_writes("a")
+
+    def test_a_supervisors_subagent_inputs_are_forwarded(self, identity):
+        """A supervisor runs its subagents on the branch state, so their inputs cross too."""
+        body = self._body(identity, ["context:goal"])
+        subagent = ShoutComponent(
+            name="sub", inputs=["context:discover.notes"], **identity
+        )
+        # Stands in for a supervisor: all the fan-out looks at is the
+        # attribute a supervisor keeps its consumed subagents in.
+        object.__setattr__(body, "subagent_components", {"sub": subagent})
+
+        assert self._inherited_by(body) == {
+            "goal": "review",
+            "discover": {"notes": "n"},
+        }
+
+    def test_a_nested_supervisors_subagent_inputs_are_forwarded(self, identity):
+        """A subagent that is itself a supervisor runs its own subagents in the branch."""
+        body = self._body(identity, ["context:goal"])
+        inner = ShoutComponent(name="inner", **identity)
+        leaf = ShoutComponent(
+            name="leaf", inputs=["context:discover.notes"], **identity
+        )
+        object.__setattr__(inner, "subagent_components", {"leaf": leaf})
+        object.__setattr__(body, "subagent_components", {"inner": inner})
+
+        assert self._inherited_by(body) == {
+            "goal": "review",
+            "discover": {"notes": "n"},
+        }
+
+    def test_a_declared_ui_chat_log_input_is_not_inherited(self, identity):
+        """The fan-out adds each branch's log to the parent's; inheriting it repeats it."""
+        body = AnyChannelComponent(
+            name="review_one", inputs=["ui_chat_log", "context:item"], **identity
+        )
+        entry = {
+            "message_type": "agent",
+            "content": "parent entry",
+            "timestamp": "t",
+            "status": "success",
+            "correlation_id": None,
+            "tool_info": None,
+            "additional_context": None,
+            "message_sub_type": None,
+        }
+
+        result = run_fan_out(fan_out(body), ["a", "b", "c"], ui_chat_log=[entry])
+
+        assert [e["content"] for e in result["ui_chat_log"]].count("parent entry") == 1
+
+    def test_a_declared_conversation_history_input_is_forwarded(self, identity):
+        """A body may declare inputs on any channel, not only ``context``.
+
+        ``AgentComponent`` allows every ``FlowState`` channel, so forwarding
+        only ``context`` leaves a declared ``conversation_history:`` input
+        arriving empty in the branch.
+        """
+        body = self._body(
+            identity, ["conversation_history:developer"], cls=AnyChannelComponent
+        )
+
+        run_fan_out(
+            fan_out(body),
+            ["a"],
+            context=self._parent_over("a"),
+            conversation_history={
+                "developer": [HumanMessage("the trace the body asked for")],
+                "someone_else": [HumanMessage("noise")],
+            },
+        )
+
+        assert list(body.observed[0]["conversation_history"]) == ["developer"]
+
+    def test_a_literal_input_is_not_looked_up_in_the_parent(self, identity):
+        """A literal carries its own value, even one that happens to name a channel.
+
+        Read as a key, ``from: "context"`` would forward the whole parent context.
+        """
+        body = self._body(
+            identity, [{"from": "context", "as": "mode", "literal": True}]
+        )
+
+        run_fan_out(fan_out(body), ["a"], context=self._parent_over("a"))
+
+        assert "unrelated" not in body.observed[0]["context"]
+
+    def test_item_and_index_inputs_are_not_read_from_the_parent(self, identity):
+        """The parent's stale ``item`` and ``review_one`` never reach the branch."""
+        body = self._body(
+            identity, ["context:item", "context:review_one.for_each_index"]
+        )
+
+        assert self._inherited_by(body, item={"path": "a"}) == {}
+
+    def test_an_absent_optional_input_is_skipped(self, identity):
+        body = self._body(
+            identity,
+            [{"from": "context:discover.missing", "as": "m", "optional": True}],
+        )
+
+        assert self._inherited_by(body) == {}
+
+    def test_an_absent_required_input_is_left_to_the_body_to_raise_on(self, identity):
+        """Skipped here rather than raised on, so one bad input cannot fail the fan-out."""
+        body = self._body(identity, ["context:nowhere.at_all"])
+
+        assert self._inherited_by(body) == {}
+
+    @pytest.mark.parametrize(
+        "declared",
+        [
+            pytest.param("context:goal.deeper", id="required-through-a-string"),
+            pytest.param("context:discover.notes.x.y", id="required-past-a-leaf"),
+            pytest.param(
+                {"from": "context:goal.deeper.x", "as": "g", "optional": True},
+                id="optional-through-a-string",
+            ),
+        ],
+    )
+    def test_an_input_whose_path_hits_a_non_dict_is_skipped(self, identity, declared):
+        body = self._body(identity, [declared, "context:goal"])
+
+        assert self._inherited_by(body) == {"goal": "review"}
+
+    def test_a_runtime_input_is_resolved_against_the_parent(self, identity):
+        runtime = RuntimeIOKey(
+            alias="notes",
+            factory=lambda state: IOKey(
+                target="context", subkeys=["discover", "notes"]
+            ),
+        )
+        body = self._body(identity, [runtime])
+
+        assert self._inherited_by(body) == {"discover": {"notes": "n"}}
+
+    @pytest.mark.parametrize(
+        "error", [KeyError("sid"), TypeError("bad"), AttributeError("bad")]
+    )
+    def test_a_runtime_input_that_cannot_resolve_is_skipped(self, identity, error):
+        def factory(state):
+            raise error
+
+        body = self._body(
+            identity, [RuntimeIOKey(alias="x", factory=factory), "context:goal"]
+        )
+
+        assert self._inherited_by(body) == {"goal": "review"}
+
+    def test_a_bare_context_input_does_not_merge_the_stale_item_into_a_dict_item(
+        self, identity
+    ):
+        """The parent's stale ``item`` dict would deep-merge into the new one."""
+        body = self._body(identity, ["context"])
+
+        assert self._inherited_by(
+            body, item={"path": "a"}
+        ) == self._whole_parent_less_fan_out_writes({"path": "a"})
+
+    def test_a_bare_context_input_drops_a_stale_parent_of_a_nested_item(self, identity):
+        """With ``as: context:item.value`` the stale ``item`` dict would merge in."""
+        body = self._body(identity, ["context"])
+
+        run_fan_out(
+            fan_out(body, **{"as": "context:item.value"}),
+            [{"path": "a"}],
+            context=self._parent_over({"path": "a"}),
+        )
+
+        assert body.observed[0]["context"]["item"] == {"value": {"path": "a"}}
+
+
+class TestNestingIsRejected:
+    """``wrapping`` refuses a body that already fans out.
+
+    Separate from ``TestWhatABranchInherits``: these assert on construction,
+    not on what a branch inherits.
+    """
+
+    def test_a_for_each_cannot_wrap_another(self, identity):
+        inner = fan_out(ShoutComponent(name="inner", **identity))
+
+        with pytest.raises(ValueError, match="for_each cannot be nested: 'inner'"):
+            ForEachComponent.wrapping(
+                inner,
+                ForEachConfig.model_validate(
+                    {"items": "context:batches", "as": "context:batch"}
+                ),
+            )
+
+    def test_a_for_each_cannot_wrap_a_supervisor_of_a_fanned_out_subagent(
+        self, identity
+    ):
+        supervisor = ShoutComponent(name="supervisor", **identity)
+        # Stands in for a supervisor, as above.
+        object.__setattr__(
+            supervisor,
+            "subagent_components",
+            {"reviewer": fan_out(ShoutComponent(name="reviewer", **identity))},
+        )
+
+        with pytest.raises(ValueError, match="for_each cannot be nested: 'reviewer'"):
+            fan_out(supervisor)
+
+    def test_a_for_each_cannot_wrap_a_supervisor_of_a_supervisor_of_a_fan_out(
+        self, identity
+    ):
+        inner = ShoutComponent(name="inner", **identity)
+        object.__setattr__(
+            inner,
+            "subagent_components",
+            {"reviewer": fan_out(ShoutComponent(name="reviewer", **identity))},
+        )
+        supervisor = ShoutComponent(name="supervisor", **identity)
+        object.__setattr__(supervisor, "subagent_components", {"inner": inner})
+
+        with pytest.raises(ValueError, match="for_each cannot be nested: 'reviewer'"):
+            fan_out(supervisor)
 
 
 class TestPerBranchCompilation:
@@ -1139,7 +1498,7 @@ class TestWhatTheBarrierPublishes:
 
 class TestTheItemIndex:
     def test_the_index_is_scoped_to_the_component(self, shouter):
-        """A nested fan-out writes its own namespace, so the two cannot collide."""
+        """The index lives in the component's own namespace, not at the root."""
         run_fan_out(fan_out(shouter), ["a", "b", "c"])
 
         assert all(

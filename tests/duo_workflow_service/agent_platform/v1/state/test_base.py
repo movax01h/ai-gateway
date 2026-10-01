@@ -865,6 +865,27 @@ class TestIOKey:
             assert result == expected_value
 
 
+class TestIOKeyContains:
+    @pytest.mark.parametrize(
+        ("outer", "inner", "expected"),
+        [
+            ("context:a", "context:a", True),
+            ("context:a", "context:a.b", True),
+            ("context:a.b", "context:a", False),
+            ("context:a", "context:ab", False),
+            ("context:a", "status", False),
+        ],
+    )
+    def test_a_key_contains_the_paths_under_it(self, outer, inner, expected):
+        assert (IOKey.parse_key(inner) in IOKey.parse_key(outer)) is expected
+
+    def test_a_bare_key_contains_every_key_of_its_target(self):
+        assert IOKey(target="context", subkeys=["a", "b"]) in IOKey(target="context")
+
+    def test_only_keys_can_be_contained(self):
+        assert "context:a" not in IOKey.parse_key("context:a")
+
+
 class TestIOKeyModelValidations:
     """Test IOKey class model validations."""
 
