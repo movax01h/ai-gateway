@@ -521,7 +521,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             self.mock_components(["AgentComponent", "AnotherComponent"]),
             patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
             patch(
-                "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
             ) as mock_log_exception,
         ):
             # Create flow instance
@@ -748,7 +748,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             self.mock_components(["AgentComponent"]),
             patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
             patch(
-                "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
             ) as mock_log_exception,
         ):
             flow = Flow(
@@ -1207,7 +1207,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         config = {"configurable": {"thread_id": "test-workflow-123"}}
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ):
             await flow_instance._handle_workflow_failure(
                 RuntimeError("boom"), graph, config
@@ -1233,7 +1233,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         graph = AsyncMock()
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ):
             await flow_instance._handle_workflow_failure(
                 RuntimeError("secret internal detail"), graph, {}
@@ -1248,7 +1248,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     async def test_handle_workflow_failure_no_compiled_graph(self, flow_instance):
         """When compiled_graph is None, only log_exception runs."""
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ):
             await flow_instance._handle_workflow_failure(
                 RuntimeError("early failure"), None, {}
@@ -1267,7 +1267,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         flow_instance.log = MagicMock()
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ):
             await flow_instance._handle_workflow_failure(
                 RuntimeError("boom"), graph, {}
@@ -1295,7 +1295,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ) as mock_log_exception:
             await flow_instance._handle_workflow_failure(error, graph, {})
 
@@ -1326,7 +1326,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         error = NotifiableAgentException("Safe message only")
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ) as mock_log_exception:
             await flow_instance._handle_workflow_failure(error, graph, {})
 
@@ -1349,7 +1349,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         with (
             patch(
-                "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
             ),
             pytest.raises(TraceableException) as exc_info,
         ):

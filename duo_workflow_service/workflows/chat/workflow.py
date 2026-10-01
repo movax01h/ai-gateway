@@ -56,7 +56,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
-from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.tracking.errors import log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.chat.commands import (
     ForcedToolCall,
@@ -908,7 +908,7 @@ class Workflow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):
-        log_exception(
+        log_workflow_failure(
             error, extra={"workflow_id": self._workflow_id, "source": __name__}
         )
 

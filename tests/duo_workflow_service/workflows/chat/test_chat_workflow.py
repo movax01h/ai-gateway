@@ -1204,7 +1204,7 @@ async def test_get_graph_input_resume_with_rejected_approval(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.chat.workflow.log_exception")
+@patch("duo_workflow_service.workflows.chat.workflow.log_workflow_failure")
 async def test_handle_workflow_failure(mock_log_exception, workflow_with_project):
     error = Exception("Test error")
     compiled_graph = MagicMock()

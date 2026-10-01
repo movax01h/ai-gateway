@@ -19,6 +19,7 @@ from langgraph.checkpoint.base import (
 )
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
+from structlog.testing import capture_logs
 
 from duo_workflow_service.audit_events.event_types import SessionEndedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import (
@@ -4826,6 +4827,52 @@ async def test_aput_raises_on_failed_post(
             checkpoint_metadata,
             ChannelVersions(),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,body,expected_level",
+    [
+        (401, {"error": "invalid_token"}, "warning"),
+        (403, {"message": "403 Forbidden - Your account has been blocked."}, "warning"),
+        (404, {"message": "404 Not found"}, "warning"),
+        (400, {"message": "400 Bad request - PG::UntranslatableCharacter"}, "error"),
+        (413, {"message": "Payload too large"}, "error"),
+        (500, {}, "error"),
+    ],
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_failed_post_log_level(
+    _mock_duo_workflow_metrics,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    status_code,
+    body,
+    expected_level,
+):
+    """Failures caused by the user's or session's state are warnings; failures that point at our payload or at GitLab
+    stay errors."""
+    http_client.apost.return_value = GitLabHttpResponse(
+        status_code=status_code, body=body
+    )
+
+    with capture_logs() as cap_logs:
+        with pytest.raises(CheckpointSaveError):
+            await gitlab_workflow.aput(
+                {"configurable": {"checkpoint_id": None}},
+                checkpoint_data[0]["checkpoint"],
+                checkpoint_metadata,
+                ChannelVersions(),
+            )
+
+    failure_logs = [
+        log for log in cap_logs if log["event"] == "Failed to save checkpoint"
+    ]
+    assert len(failure_logs) == 1
+    assert failure_logs[0]["log_level"] == expected_level
+    assert failure_logs[0]["status_code"] == status_code
 
 
 @pytest.mark.asyncio

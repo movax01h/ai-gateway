@@ -23,7 +23,7 @@ from duo_workflow_service.entities import (
 )
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.token_counter.tiktoken_counter import TikTokenCounter
-from duo_workflow_service.tracking import log_exception
+from duo_workflow_service.tracking import log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
@@ -114,7 +114,7 @@ class Workflow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):
-        log_exception(
+        log_workflow_failure(
             error, extra={"workflow_id": self._workflow_id, "source": __name__}
         )
 
