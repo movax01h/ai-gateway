@@ -159,6 +159,7 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
 FLOW_CONFIG_ID_CLAIM = "flow_config_id"
 FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
+WORKFLOW_ID_CLAIM = "workflow_id"
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
@@ -1106,6 +1107,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             extra_claims[FLOW_CONFIG_DIGEST_CLAIM] = _flow_config_digest(
                 request.flow_config
             )
+
+        if request.workflowID:
+            extra_claims[WORKFLOW_ID_CLAIM] = request.workflowID
 
         scopes = []
         if user.is_debug:

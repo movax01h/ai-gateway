@@ -1653,40 +1653,51 @@ async def test_generate_token_without_inline_flow_config_has_no_digest_binding(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "claims_extra",
-    [{"flow_config_id": "secrets_fp_detection"}],
+    "field,claim,value",
+    [
+        ("flow_config_id", "flow_config_id", "developer"),
+        ("workflowID", "workflow_id", "42"),
+    ],
 )
 @patch("duo_workflow_service.server.TokenAuthority")
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-async def test_generate_token_binds_authorized_flow_config_id(
+async def test_generate_token_binds_request_claim(
     mock_token_authority,
     mock_context,
     servicer,
-    claims_extra,
+    field,
+    claim,
+    value,
 ):
     mock_token_authority.return_value.encode.return_value = ("token", 0)
 
     await servicer.GenerateToken(
-        contract_pb2.GenerateTokenRequest(flow_config_id="developer"), mock_context
+        contract_pb2.GenerateTokenRequest(**{field: value}), mock_context
     )
 
     extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
         "extra_claims"
     ]
-    assert extra_claims["flow_config_id"] == "developer"
+    assert extra_claims[claim] == value
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "claims_extra",
-    [None, {"flow_config_id": "developer"}],
+    "claim,claims_extra",
+    [
+        ("flow_config_id", None),
+        ("flow_config_id", {"flow_config_id": "developer"}),
+        ("workflow_id", None),
+        ("workflow_id", {"workflow_id": "42"}),
+    ],
 )
 @patch("duo_workflow_service.server.TokenAuthority")
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-async def test_generate_token_without_flow_config_id_has_no_flow_binding(
+async def test_generate_token_without_field_has_no_binding(
     mock_token_authority,
     mock_context,
     servicer,
+    claim,
     claims_extra,
 ):
     mock_token_authority.return_value.encode.return_value = ("token", 0)
@@ -1696,7 +1707,7 @@ async def test_generate_token_without_flow_config_id_has_no_flow_binding(
     extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
         "extra_claims"
     ]
-    assert "flow_config_id" not in extra_claims
+    assert claim not in extra_claims
 
 
 @pytest.mark.asyncio
@@ -1866,6 +1877,13 @@ async def test_generate_token_propagates_gitlab_root_namespace_id_end_to_end(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,claim,value",
+    [
+        ("flow_config_id", "flow_config_id", "developer"),
+        ("workflowID", "workflow_id", "42"),
+    ],
+)
 @patch.dict(
     os.environ,
     {
@@ -1873,7 +1891,9 @@ async def test_generate_token_propagates_gitlab_root_namespace_id_end_to_end(
         "DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY": TEST_PRIVATE_KEY,
     },
 )
-async def test_generate_token_binds_flow_config_id_end_to_end(mock_context):
+async def test_generate_token_binds_request_claim_end_to_end(
+    mock_context, field, claim, value
+):
     incoming_user = CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(scopes=["duo_agent_platform"], gitlab_instance_uid="uid-1"),
@@ -1897,12 +1917,12 @@ async def test_generate_token_binds_flow_config_id_end_to_end(mock_context):
     ]
 
     response = await DuoWorkflowService().GenerateToken(
-        contract_pb2.GenerateTokenRequest(flow_config_id="developer"), mock_context
+        contract_pb2.GenerateTokenRequest(**{field: value}), mock_context
     )
     decoded_user = provider.authenticate(response.token)
 
     assert decoded_user.authenticated
-    assert decoded_user.claims.extra["flow_config_id"] == "developer"
+    assert decoded_user.claims.extra[claim] == value
 
 
 @pytest.mark.asyncio
