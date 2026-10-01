@@ -616,8 +616,8 @@ class ModelSelectionConfig:
 
     def resolve_tag_for_goal(
         self, feature_setting_name: str, goal: str
-    ) -> Optional[tuple[str, str]]:
-        """Return the first matching tag and the keyword that matched, or None.
+    ) -> Optional[tuple[str, list[str]]]:
+        """Return the first matching tag and every one of its keywords found in the goal, or None.
 
         Tags are checked in declaration order. Keywords match as whole words, ignoring case, with plain plural and
         verb endings.
@@ -631,9 +631,13 @@ class ModelSelectionConfig:
             return None
 
         for tag, entry in unit_primitive_config.models_for_tags.items():
-            for keyword in entry.keywords:
-                if _keyword_pattern(keyword).search(goal):
-                    return tag, keyword
+            matched = [
+                keyword
+                for keyword in entry.keywords
+                if _keyword_pattern(keyword).search(goal)
+            ]
+            if matched:
+                return tag, matched
         return None
 
 

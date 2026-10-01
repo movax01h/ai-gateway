@@ -19,6 +19,7 @@ class EventEnum(StrEnum):
     WORKFLOW_TOOL_APPROVAL_RESOLVED = "resolve_duo_workflow_tool_approval"
     WORKFLOW_TOOL_BLOCKED = "block_denied_duo_workflow_tool"
     WORKFLOW_ROUTE_DECISION = "duo_workflow_flow_route_decision"
+    WORKFLOW_MODEL_ROUTING_DECISION = "duo_workflow_model_routing_decision"
     WORKFLOW_RESPONSE_SCHEMA_OUTPUT = "duo_workflow_response_schema_output"
     ORBIT_DAP_TOOL_CALLED = "orbit_dap_tool_called"
     ORBIT_DAP_TOOL_FAILED = "orbit_dap_tool_failed"

@@ -242,9 +242,10 @@ and the knobs differ per provider. They stay out of v1.
 ### Telemetry
 
 Every routed request emits one structured log line and one internal event: matched keywords, tag,
-resolved model, parameters applied, and flag state. The billing event
+outcome (routed, or fell back to the default), resolved model, and parameters applied. The billing event
 already records the model that served the call; credits are keyed to model identity, so that
-record is what reconciles cost against the routing decision.
+record is what reconciles cost against the routing decision. Both carry `workflow_id`, which is the
+join key; see [routing telemetry](../model_selection.md#routing-telemetry) for the event's fields.
 
 ## Why once per request and not per turn
 

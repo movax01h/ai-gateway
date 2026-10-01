@@ -1,0 +1,27 @@
+---
+description: Tracks the model routing decision made for a request before its flow is built
+internal_events: true
+action: duo_workflow_model_routing_decision
+product_group: ai_core_infra
+product_categories:
+  - duo_agent_platform
+additional_properties:
+  label:
+    description: The routing tag selected for the request (e.g. "small", "large")
+  property:
+    description: '"routed" when the tag resolved to its own model, "fallback_default" when the tag has no resolvable model and the request kept the default'
+  value:
+    description: Workflow Id, also recorded as ai_context.session_id. Connects this event to others in the same workflow.
+  feature_setting:
+    description: The feature setting whose models_for_tags policy was matched (e.g. "duo_developer")
+  matched_keywords:
+    description: Every keyword of the tag found in the goal. Each one alone is enough to select the tag; the order follows the policy in unit_primitives.yml.
+  gitlab_identifier:
+    description: gitlab_identifier of the model the request is served by
+  params:
+    description: Sampling parameters (temperature, top_p, top_k) of the model the request is served by
+milestone: "19.5"
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/7117
+tiers:
+  - premium
+  - ultimate
