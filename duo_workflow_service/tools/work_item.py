@@ -700,6 +700,13 @@ class UpdateWorkItemInput(WorkItemResourceInput):
         content untouched, which is how a scoring flow reports on a plan it did not
         author.""",
     )
+    readiness_score_feedback: Optional[str] = Field(
+        default=None,
+        description="""Readiness score feedback for the work item's agent plan.
+        Markdown authored by the verdict LLM. Independent of 'agent_plan' and
+        'readiness_score': passing only feedback leaves the existing plan content
+        and score untouched.""",
+    )
 
 
 class UpdateWorkItem(WorkItemBaseTool):
@@ -710,7 +717,7 @@ class UpdateWorkItem(WorkItemBaseTool):
 
     Supports updating title, description, assignees, labels, state, status, health
     status, weight, dates, hierarchy, to-do items, the agent plan and the agent
-    plan's readiness score.
+    plan's readiness score and feedback.
 
     Note: 'state' (opened / closed) is different from 'status_id' (the status
     category widget, e.g. New / In Progress / Done). To set a status, first call
@@ -727,6 +734,7 @@ class UpdateWorkItem(WorkItemBaseTool):
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="add")
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="mark_as_done", todo_id="gid://gitlab/Todo/123")
     - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score=72)
+    - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score_feedback="## Recommendation\n\n- **blocking**: Name the migration file\n- **non-blocking**: Add a regression test\n- **non-blocking**: Expand rollback notes")
     - update_work_item(project_id='namespace/project', work_item_iid=42, agent_plan="## Why\nFoo can't bar.\n## What\nMake Foo bar.\n## How\nAdd `Foo#bar` calling `Baz.qux`.")
     """
     args_schema: Type[BaseModel] = UpdateWorkItemInput

@@ -16,7 +16,8 @@ These invariants matter enough to pin in CI:
     by the time scoring starts, so a failed fetch must not mark a successful
     planning run failed.
 -   The supervisor's ``update_work_item`` is unpinned and passes only
-    ``readiness_score``. The scoring stage did not author the plan.
+    ``readiness_score`` and ``readiness_score_feedback``. The scoring stage did
+    not author the plan.
 -   The scoring tail reads the work item URL from the
     ``agent_platform_resource_context`` envelope, never ``context:goal``,
     whose prose ``GitLabUrlParser`` rejects.
@@ -246,7 +247,7 @@ class TestWorkplanV110ScoringFailuresEndTheRun:
 
 
 class TestWorkplanV110SupervisorWiring:
-    """The supervisor delegates to the six evaluators and writes only the score."""
+    """The supervisor delegates to the six evaluators and writes the score and feedback."""
 
     def test_supervisor_declares_all_six_subagents(self):
         supervisor = _component(_config(), "readiness_supervisor")
@@ -282,6 +283,23 @@ class TestWorkplanV110SupervisorWiring:
         # The partial-ensemble guard: no score may be written unless all three
         # round-1 evaluators returned.
         assert "STOP" in system
+
+    def test_supervisor_prompt_persists_feedback_alongside_the_score(self):
+        # The supervisor writes the 3 recommendations it already produces for
+        # its final answer into readiness_score_feedback, so the widget shows
+        # *why* the plan scored what it did — not just the number.
+        config = _config()
+        prompt = next(
+            p
+            for p in config.prompts
+            if p.prompt_id == "workplan_readiness_supervisor_prompt"
+        )
+        system = prompt.prompt_template["system"]
+        assert "readiness_score_feedback" in system
+        # The Turn 3 call must pass both arguments, not the score alone.
+        assert "`readiness_score` and `readiness_score_feedback`" in system
+        # And the feedback must be the recommendation markdown, not free text.
+        assert "## Recommendation" in system
 
 
 class TestWorkplanV110GraphBuilds:

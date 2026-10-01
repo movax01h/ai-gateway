@@ -279,7 +279,8 @@ components:
         as: work_item_url
         optional: true
     toolset:
-      # this stage passes only readiness_score to update_work_item.
+      # this stage passes only readiness_score and readiness_score_feedback
+      # to update_work_item — never agent_plan (the planner authored it).
       - update_work_item
     ui_log_events:
       - on_delegation
@@ -800,10 +801,11 @@ prompts:
           Re-issue the same delegations one `delegate_task` call per
           turn, in the same order, with the prompts unchanged, then
           continue the procedure as written.
-        - Never pass `agent_plan` (or any field other than `url` and
-          `readiness_score`) to `update_work_item`. The scoring stage did not
-          author the plan; passing `agent_plan` would overwrite the plan the
-          planner stage just wrote.
+        - Never pass `agent_plan` to `update_work_item`, and never pass any
+          field other than `url`, `readiness_score`, and
+          `readiness_score_feedback`. The scoring stage did not author the
+          plan; passing `agent_plan` would overwrite the plan the planner
+          stage just wrote.
         - Never paraphrase, summarise, or edit a subagent's result. When a
           later delegation needs an earlier result, copy the text from inside
           that delegation's `<result>` element **verbatim** — complete,
@@ -871,12 +873,12 @@ prompts:
         verdict_on_finding = "refuted", resolution_known = false,
         discarded_pros = []) and say so in your final answer.
 
-        ### Turn 3 — apply the verdict arithmetic and write the score
+        ### Turn 3 — apply the verdict arithmetic and write the score and feedback
 
         No delegation in this turn. Work the arithmetic through in your
         reasoning first, so the number stays auditable, then call
         `update_work_item` exactly once with the work item URL (below) and
-        ONLY the `readiness_score` argument.
+        ONLY the `readiness_score` and `readiness_score_feedback` arguments.
 
         Work item URL: {{work_item_url}}
 
@@ -903,23 +905,36 @@ prompts:
         5. Bands (no gate): aggregate = aggregate_uncapped; >=80 "plan is
           ready", 40-79 "needs refinement", <40 "incomplete".
 
-        Then call `update_work_item` with url = the work item URL above and
-        readiness_score = the final aggregate from step 4 or step 5, rounded
-        to the nearest integer. When a gate fired this MUST be the capped
-        value, never aggregate_uncapped.
+        Then call `update_work_item` with url = the work item URL above,
+        readiness_score = the final aggregate from step 4 or step 5,
+        rounded to the nearest integer, and readiness_score_feedback = the
+        recommendation markdown described under "Final answer" below. When a
+        gate fired the score MUST be the capped value, never
+        aggregate_uncapped. The feedback is the same three recommendations
+        you write in your final answer, as a single `## Recommendation`
+        markdown section with exactly three list items, most impactful
+        first; the blocking amendment (when a gate fired) is item 1 and is
+        marked `**blocking**`, the others `**non-blocking**`. Omit the
+        `readiness_score_feedback` argument (write the score alone) only
+        when fewer than three genuine recommendations exist — never
+        fabricate an issue to reach the count.
 
         ## Final answer
 
         After the `update_work_item` call returns, finish with a plain-text
         final answer covering: the score you wrote (and whether it was
         capped), the verdict band, which round-1 evaluators and
-        cross-examiners actually returned, exactly 3 recommendations most
-        impactful first (when a gate fired, item 1 is the blocking amendment —
-        the resolution when resolution_known is true, otherwise the
-        falsification experiment — marked blocking; fill the rest from the
-        deduped material cons of the two scorers and their discarded_pros,
-        never fabricating an issue to reach the count). If the
-        `update_work_item` call failed, or you stopped early on a partial
-        ensemble, say so plainly instead.
+        cross-examiners actually returned, and exactly 3 recommendations
+        most impactful first (when a gate fired, item 1 is the blocking
+        amendment — the resolution when resolution_known is true, otherwise
+        the falsification experiment — marked blocking; fill the rest from
+        the deduped material cons of the two scorers and their
+        discarded_pros, never fabricating an issue to reach the count). The
+        `readiness_score_feedback` argument you just passed to
+        `update_work_item` is this same recommendation list as a
+        `## Recommendation` markdown section — the widget shows it beside
+        the score, so the author can see why the plan scored what it did
+        and what to change. If the `update_work_item` call failed, or you
+        stopped early on a partial ensemble, say so plainly instead.
       user: 'Score the readiness of the plan for this work item - {{work_item_url}}'
       placeholder: history
