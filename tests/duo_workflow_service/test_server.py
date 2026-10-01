@@ -3848,6 +3848,51 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("routed", [True, False])
+@patch("duo_workflow_service.server.track_routing_decision")
+@patch("duo_workflow_service.server.route_default_model_by_goal")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_tracks_model_routing_decision(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_route,
+    mock_track_routing_decision,
+    routed,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    decision = MagicMock()
+    mock_route.return_value = decision if routed else None
+    mock_internal_event_client = create_mock_internal_event_client()
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=mock_internal_event_client,
+    )
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_route.assert_called_once_with("test")
+    if routed:
+        mock_track_routing_decision.assert_called_once_with(
+            decision, "123", mock_internal_event_client
+        )
+    else:
+        mock_track_routing_decision.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_send_events_sends_all_checkpoints_if_number_increases(servicer):
     yielded = []
 

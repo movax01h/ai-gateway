@@ -1240,30 +1240,34 @@ def test_validate_rejects_tag_models_missing_from_models_yml(
     ("goal", "expected"),
     [
         pytest.param(
-            "Fix the typo in the README", ("small", "typo"), id="small-keyword"
+            "Fix the typo in the README",
+            ("small", ["typo", "readme"]),
+            id="every-matched-keyword",
         ),
         pytest.param(
             "Plan the refactor of the auth module",
-            ("large", "refactor"),
+            ("large", ["refactor"]),
             id="large-keyword",
         ),
-        pytest.param("REFACTOR this", ("large", "refactor"), id="case-insensitive"),
+        pytest.param("REFACTOR this", ("large", ["refactor"]), id="case-insensitive"),
         pytest.param(
             "Refactor the parser and fix a typo",
-            ("large", "refactor"),
+            ("large", ["refactor"]),
             id="first-declared-tag-wins",
         ),
         pytest.param("Add pagination to the issues list", None, id="no-match"),
         pytest.param("", None, id="empty-goal"),
-        pytest.param("Fix two typos in the docs", ("small", "typo"), id="plural-form"),
-        pytest.param("Refactoring the parser", ("large", "refactor"), id="verb-form"),
+        pytest.param(
+            "Fix two typos in the docs", ("small", ["typo"]), id="plural-form"
+        ),
+        pytest.param("Refactoring the parser", ("large", ["refactor"]), id="verb-form"),
         pytest.param(
             "Renamed the helper for clarity",
-            ("small", "rename"),
+            ("small", ["rename"]),
             id="verb-form-e-final",
         ),
         pytest.param(
-            "Renaming the helpers", ("small", "rename"), id="progressive-e-final"
+            "Renaming the helpers", ("small", ["rename"]), id="progressive-e-final"
         ),
         pytest.param(
             "Improve the typography of the landing page",

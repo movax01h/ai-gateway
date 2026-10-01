@@ -415,6 +415,24 @@ The keyword lists come from the goal templates GitLab Rails renders for assignme
 
 Components that declare their own `model_tags` are unaffected: they keep resolving through `ModelMetadataByTag.get`.
 
+#### Routing telemetry
+
+With the flag on, every request whose goal matches a tag emits one structured log line and one `duo_workflow_model_routing_decision` internal event ([definition](../config/events/duo_workflow_model_routing_decision.yml)). The log line carries every field below by name. The event carries each value once, using Snowplow's built-in columns where they fit:
+
+| Log field           | Event field                                    | Meaning                                                                                                                                                                                  |
+| ------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflow_id`       | `value` (numeric) and `ai_context.workflow_id` | The workflow ID from the start request.                                                                                                                                                  |
+| `tag`               | `label`                                        | The tag the goal matched.                                                                                                                                                                |
+| `outcome`           | `property`                                     | `routed` when the tag resolved to its own model; `fallback_default` when the tag has no resolvable model and the request kept the default. A fallback is also logged at `warning` level. |
+| `feature_setting`   | `extra.feature_setting`                        | The feature setting whose `models_for_tags` was matched.                                                                                                                                 |
+| `matched_keywords`  | `extra.matched_keywords`                       | Every keyword of the tag found in the goal. Each one alone is enough to select the tag; the order follows the policy in `unit_primitives.yml`.                                           |
+| `gitlab_identifier` | `extra.gitlab_identifier`                      | The model the request is served by.                                                                                                                                                      |
+| `params`            | `extra.params`                                 | Sampling parameters (`temperature`, `top_p`, `top_k`) of that model.                                                                                                                     |
+
+Nothing is emitted on the bypass paths (flag off, explicit `identifier`, no matching tag), because nothing was routed.
+
+`workflow_id` is the join key to billing: the routing event carries it as `ai_context.workflow_id`, and the billing event for the same workflow carries it as `metadata.workflow_id`, next to `llm_operations`, whose `model_id` records the model that actually served each call. Join on it to reconcile a routing decision with what was billed.
+
 ### How tag resolution works
 
 The `ModelMetadataByTag` class wraps one or more `ModelMetadata` instances and exposes a `get(model_tags)` method that resolves the right model for the requested tags.
