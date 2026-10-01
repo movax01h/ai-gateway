@@ -1,13 +1,13 @@
-"""Registry of moved feature prompt roots (module-boundary Layout B).
+"""Registry of prompt roots under ``ai/features/`` and ``ai/shared/``.
 
-A feature that has moved under ``ai/features/<domain>/<feature>/`` owns its prompts
-in ``ai/features/<domain>/<feature>/prompts/``. Both discovery paths consult this
-registry by the flat prompt id:
+A feature owns its prompts in ``ai/features/<domain>/<feature>/prompts/``. A
+definition that several features use lives in ``ai/shared/<name>/prompts/``.
+Both discovery paths consult this registry by prompt id:
 
 - version-file discovery in ``LocalPromptRegistry._resolve_id``
 - Jinja ``{% include %}`` resolution via ``FeatureRootLoader`` in ``base.py``
 
-Registration strips the feature-id prefix, so a self-namespaced include such as
+Registration strips the prompt-id prefix, so a self-namespaced include such as
 ``glab_ask_git_command/system/1.0.0.jinja`` keeps working unchanged.
 """
 
@@ -21,21 +21,22 @@ __all__ = [
     "register_prompt_root",
 ]
 
-# flat prompt id -> that feature's `prompts/` directory
+# prompt id -> the `prompts/` directory that owns it
 _FEATURE_PROMPT_ROOTS: dict[str, Path] = {}
 
 
 def register_prompt_root(feature_id: str, prompts_dir: Path) -> None:
-    """Register a moved feature's ``prompts/`` dir under its flat prompt id.
+    """Register a ``prompts/`` dir under a prompt id.
 
     Args:
-        feature_id: The flat prompt id (the feature directory name).
-        prompts_dir: The feature's ``prompts/`` directory.
+        feature_id: The prompt id, for example ``glab_ask_git_command`` or
+            ``chat/react``.
+        prompts_dir: The ``prompts/`` directory that owns the id.
 
     Raises:
         ValueError: If ``feature_id`` is already registered to a different path.
-            The prompt-id namespace is flat, so two features sharing an id would
-            resolve nondeterministically; raising surfaces the collision instead.
+            Two directories sharing an id would resolve nondeterministically;
+            raising surfaces the collision instead.
     """
     prompts_dir = Path(prompts_dir)
     existing = _FEATURE_PROMPT_ROOTS.get(feature_id)
@@ -48,26 +49,41 @@ def register_prompt_root(feature_id: str, prompts_dir: Path) -> None:
 
 
 def feature_prompt_root(feature_id: str) -> Path | None:
-    """Return the registered ``prompts/`` dir for a flat prompt id, or ``None``."""
+    """Return the registered ``prompts/`` dir for a prompt id, or ``None``."""
     return _FEATURE_PROMPT_ROOTS.get(feature_id)
 
 
 def discover_feature_prompts(features_dir: Path | None = None) -> None:
-    """Register the ``prompts/`` dir of each feature under ``ai/features/<domain>/<feature>/``.
+    """Register the ``prompts/`` dirs under ``ai/features/`` and ``ai/shared/``.
 
-    A feature without a ``prompts/`` dir (for example a flow-only feature) is
-    skipped. Idempotent and silent when the tree is absent (the default before
-    any feature moves).
+    ``ai/features/<domain>/<feature>/prompts/`` registers as ``<feature>`` and as
+    ``<domain>/<feature>``, so a nested id such as ``chat/react`` keeps its name
+    after it moves to ``ai/features/chat/react/``. ``ai/shared/<name>/prompts/``
+    registers as ``<name>``. A directory without ``prompts/`` (for example a
+    flow-only feature) is skipped. Idempotent and silent when a tree is absent.
 
     Args:
-        features_dir: Root directory to scan for features. Defaults to
-            ``default_features_dir()`` when not provided.
+        features_dir: The ``ai/features`` directory to scan. ``ai/shared`` is its
+            sibling. Defaults to ``default_features_dir()`` when not provided.
+
+    Raises:
+        ValueError: If two directories register the same prompt id.
     """
     root = features_dir or default_features_dir()
-    if not root.is_dir():
-        return
+    shared_root = root.parent / "shared"
 
-    for feature_dir in root.glob("*/*"):
-        prompts_dir = feature_dir / "prompts"
-        if prompts_dir.is_dir():
-            register_prompt_root(feature_dir.name, prompts_dir)
+    # Each tree is guarded on its own: ai/shared/ can exist without ai/features/.
+    if root.is_dir():
+        for feature_dir in sorted(root.glob("*/*")):
+            prompts_dir = feature_dir / "prompts"
+            if prompts_dir.is_dir():
+                register_prompt_root(feature_dir.name, prompts_dir)
+                register_prompt_root(
+                    f"{feature_dir.parent.name}/{feature_dir.name}", prompts_dir
+                )
+
+    if shared_root.is_dir():
+        for shared_dir in sorted(shared_root.glob("*")):
+            prompts_dir = shared_dir / "prompts"
+            if prompts_dir.is_dir():
+                register_prompt_root(shared_dir.name, prompts_dir)

@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import (
     Any,
     AsyncIterator,
@@ -629,20 +630,27 @@ _JINJA_DEFAULT_FILTERS["wordwrap"] = guarded_wordwrap_filter
 
 
 class FeatureRootLoader(BaseLoader):
-    """Resolve a self-namespaced include to a moved feature's ``prompts/`` dir.
+    """Resolve a self-namespaced include to a registered ``prompts/`` dir.
 
-    Template name ``<feature_id>/<rest>`` maps to ``<registered_root>/<rest>``,
-    so include strings need no rewrite when a feature moves to Layout B.
+    Template name ``<prompt_id>/<rest>`` maps to ``<registered_root>/<rest>``,
+    so include strings need no rewrite when a prompt moves. A two-part id such
+    as ``chat/react`` is tried before a one-part id.
     """
 
     def get_source(
         self, environment: Environment, template: str
     ) -> tuple[str, str, Callable[[], bool] | None]:
-        feature_id, _, rest = template.partition("/")
-        root = feature_prompt_root(feature_id)
-        if root is None or not rest:
-            raise TemplateNotFound(template)
+        parts = template.split("/")
+        for depth in (2, 1):
+            root = feature_prompt_root("/".join(parts[:depth]))
+            if root is not None and len(parts) > depth:
+                return self._read(root, "/".join(parts[depth:]), template)
+        raise TemplateNotFound(template)
 
+    @staticmethod
+    def _read(
+        root: Path, rest: str, template: str
+    ) -> tuple[str, str, Callable[[], bool] | None]:
         path = (root / rest).resolve()
         if not path.is_relative_to(root.resolve()) or not path.is_file():
             raise TemplateNotFound(template)

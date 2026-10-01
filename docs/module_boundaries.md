@@ -80,6 +80,11 @@ The presence of `config/` and `components/` is what makes a feature a flow. The
 engine in `platform/flow_engine/` interprets `config/`; a prompt-only feature
 calls the prompt registry directly.
 
+A feature's `prompts/` directory registers under two prompt IDs: `<feature>` and
+`<domain>/<feature>`. The second form keeps a nested legacy ID such as
+`chat/react` unchanged when the prompt moves to `ai/features/chat/react/`, so a
+nested ID fixes the domain of its feature.
+
 Feature-specific tools live in the feature, under `components/`. The platform
 owns the *tool framework* (base classes, registration, the calling convention) in
 `platform/tools/`; a feature implements the tools only it needs. Generic tools
@@ -244,6 +249,12 @@ roulette and other automation with accurate per-capability owners.
 `commit_changes` and `create_repository_branch`, referenced by several flows). It
 is kept minimal: every definition that can belong to a single feature lives with
 that feature. The platform registries always include `ai/shared/` as a scan root.
+
+A shared definition uses the feature layout without the domain level:
+`ai/shared/<name>/prompts/` registers the prompt ID `<name>`. Include-only
+directories work the same way, so `ai/shared/common/prompts/` serves includes
+such as `common/branch_naming/1.0.0.jinja`. A shared name must not match a
+feature name. Response schemas are not read from `ai/shared/` yet.
 
 ## Model selection
 

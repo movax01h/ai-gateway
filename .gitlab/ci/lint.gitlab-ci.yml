@@ -130,6 +130,8 @@ lint:prompt_diff_comment:
         - "ai_gateway/prompts/definitions/**/*.yml"
         - "ai/features/**/*.jinja"
         - "ai/features/**/*.yml"
+        - "ai/shared/**/*.jinja"
+        - "ai/shared/**/*.yml"
         - "duo_workflow_service/agent_platform/v1/flows/configs/**/*.yml"
         - "duo_workflow_service/agent_platform/experimental/flows/configs/**/*.yml"
   script:
