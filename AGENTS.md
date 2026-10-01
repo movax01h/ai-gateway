@@ -559,6 +559,27 @@ prompts/definitions/
 system prompt (`ai_gateway/prompts/definitions/common/developer/`), read and follow
 [`duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md`](duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md).
 
+### Flow Registry
+
+The Flow Registry (`duo_workflow_service/agent_platform/`) is a public API of AI
+Gateway. Before changing anything under it, read and follow
+[`docs/flow_registry/contribution_guidelines.md`](docs/flow_registry/contribution_guidelines.md).
+Most critical rules:
+
+- **`v1` is stable**: all changes must be backwards compatible. Don't rename
+  components, remove or rename parameters, change parameter types
+  incompatibly, or add required parameters. Build new components in
+  `experimental/` first.
+- **No direct state access**: components and routers read and write state only
+  through `IOKey` and `IOKeyTemplate`. Put dynamic data under `context`.
+- **Declare outputs**: list every state path a component mutates in `_outputs`,
+  using `IOKeyTemplate` for component-scoped paths.
+- **Integration-style tests**: attach the component to a real `StateGraph`,
+  then compile and invoke it. Mock node classes and external dependencies,
+  not the graph.
+- **Documentation in the same MR**: update the version page (for example
+  `docs/flow_registry/v1.md`) when a component, parameter, or constraint changes.
+
 ### Model Selection
 
 Model configuration in `ai_gateway/model_selection/models.yml`:
