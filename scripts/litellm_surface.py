@@ -107,7 +107,7 @@ PATCH_TARGETS: tuple[tuple[str, str | None, str], ...] = (
     # The permanent fix for #2335 replaces this module-level function. If
     # litellm renames it the import in litellm_empty_text_patch.py raises, but
     # if litellm changes what it does the override silently stops matching, so
-    # the wire fixtures in Stage C are what actually cover the behaviour.
+    # the wire fixtures in Stage C are what actually cover the behavior.
     (
         "litellm.litellm_core_utils.prompt_templates.factory",
         None,

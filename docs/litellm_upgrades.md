@@ -93,7 +93,7 @@ This is the most dangerous finding, because without the check it is silent.
 a dead attribute. The override never runs and nothing raises.
 
 Find out what replaced it, move the patch, and update `PATCH_TARGETS`. If the
-upstream behaviour the patch works around has been fixed, delete the patch
+upstream behavior the patch works around has been fixed, delete the patch
 instead and note it in the merge request.
 
 ### A changed signature
@@ -109,7 +109,7 @@ Commit the updated `scripts/litellm_surface.json` and say in the merge request
 what changed and why it is safe.
 
 Expect some noise here. litellm periodically modernises its type hints, so
-`Optional[List[str]]` becomes `list[str] | None` with no behaviour change. That
+`Optional[List[str]]` becomes `list[str] | None` with no behavior change. That
 still shows as a changed signature. Dismissing it is a judgement call a reviewer
 makes once per bump, which is the trade for catching the real shape changes.
 
@@ -153,7 +153,7 @@ Then:
 ## Never merge a litellm bump expedited
 
 `.gitlab/ci/test.gitlab-ci.yml` is included with
-`rules: *skip-when-expedited-include`. A merge request labelled
+`rules: *skip-when-expedited-include`. A merge request labeled
 `pipeline::expedited`, or a commit message containing `pipeline_expedited: true`,
 excludes the whole file. That skips these jobs along with `tests:unit`.
 

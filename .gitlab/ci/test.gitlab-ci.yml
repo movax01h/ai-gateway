@@ -311,7 +311,7 @@ check-duo-workflow-docs:
 .litellm-conformance:rules:
   rules:
     # Note: this whole file is included with `rules: *skip-when-expedited-include`,
-    # so a merge request labelled `pipeline::expedited` skips these jobs. Never
+    # so a merge request labeled `pipeline::expedited` skips these jobs. Never
     # merge a litellm bump expedited. See docs/litellm_upgrades.md.
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
