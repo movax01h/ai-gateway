@@ -165,7 +165,8 @@ node_modules,\
 package-lock.json,\
 poetry.lock
 """
-ignore-words-list = "astroid"
+# "reacher" is a bl_security prompt term (the principal that can reach an entry point).
+ignore-words-list = "astroid,reacher"
 ignore-multiline-regex = "codespell:ignore-begin.*\n.*codespell:ignore-end"
 
 [tool.pytest.ini_options]
