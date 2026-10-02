@@ -341,6 +341,15 @@ def _tool_name(tool_cls: Union[Type[BaseTool], Type[BaseModel]]) -> str:
     return name
 
 
+def agent_privileges_for_tool(tool_name: str) -> list[str]:
+    """Names of the agent privileges that grant ``tool_name``; empty when no privilege does (e.g. MCP tools)."""
+    return [
+        privilege
+        for privilege, tool_classes in _AGENT_PRIVILEGES.items()
+        if any(_tool_name(tool_cls) == tool_name for tool_cls in tool_classes)
+    ]
+
+
 def _merge_feature_tools(
     privileges: dict[str, list[Type[BaseTool]]],
     discovered: dict[str, list[Type[BaseTool]]],

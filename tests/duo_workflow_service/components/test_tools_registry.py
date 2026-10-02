@@ -2808,3 +2808,15 @@ class TestNotifyMeWhenPreapproval:
         registry = self._registry(tool_metadata, denied_tools=["notify_me_when"])
 
         assert "notify_me_when" not in registry.toolset(["notify_me_when"])
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "expected"),
+    [
+        ("run_command", ["run_commands"]),
+        ("read_file", ["read_only_files", "read_write_files"]),
+        ("nonexistent_tool", []),
+    ],
+)
+def test_agent_privileges_for_tool(tool_name, expected):
+    assert tools_registry.agent_privileges_for_tool(tool_name) == expected
