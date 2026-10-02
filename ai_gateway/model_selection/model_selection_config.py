@@ -1,6 +1,5 @@
 import functools
 import random
-import re
 from itertools import chain
 from pathlib import Path
 from typing import Annotated, Any, Iterable, Literal, Optional
@@ -23,6 +22,7 @@ from ai_gateway.config import (
     ModelReleasesPayload,
     get_config,
 )
+from ai_gateway.model_selection.keyword_bm25 import KeywordBM25
 from ai_gateway.model_selection.models import (
     BaseModelParams,
     ChatAmazonQParams,
@@ -195,6 +195,9 @@ class ModelTagEntry(BaseModel):
 
     models: list[str] = Field(min_length=1)
     keywords: list[str] = Field(default_factory=list)
+    # Evaluated alternatives for this tag. Validated, never served: move one into
+    # `models` to route to it.
+    candidates: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -477,7 +480,7 @@ class ModelSelectionConfig:
             ids = chain(
                 unit_primitive_config.default_model_identifiers,
                 chain.from_iterable(
-                    entry.models
+                    entry.models + entry.candidates
                     for entry in unit_primitive_config.models_for_tags.values()
                 ),
                 unit_primitive_config.selectable_models,
@@ -617,10 +620,9 @@ class ModelSelectionConfig:
     def resolve_tag_for_goal(
         self, feature_setting_name: str, goal: str
     ) -> Optional[tuple[str, list[str]]]:
-        """Return the first matching tag and every one of its keywords found in the goal, or None.
+        """Return the first tag the goal matches and every one of its keywords found in the goal, or None.
 
-        Tags are checked in declaration order. Keywords match as whole words, ignoring case, with plain plural and
-        verb endings.
+        Tags are checked in declaration order. Keywords are scored with BM25 (see `keyword_bm25.py`).
 
         Design: https://gitlab.com/gitlab-org/gitlab/-/work_items/627658
         """
@@ -630,27 +632,25 @@ class ModelSelectionConfig:
         if unit_primitive_config is None or not goal:
             return None
 
-        for tag, entry in unit_primitive_config.models_for_tags.items():
-            matched = [
-                keyword
-                for keyword in entry.keywords
-                if _keyword_pattern(keyword).search(goal)
-            ]
-            if matched:
-                return tag, matched
-        return None
+        tagged = [
+            (tag, keyword)
+            for tag, entry in unit_primitive_config.models_for_tags.items()
+            for keyword in entry.keywords
+        ]
+        if not tagged:
+            return None
+        matches = _keyword_scorer(tuple(keyword for _, keyword in tagged)).matches(goal)
+        hits = [pair for pair, hit in zip(tagged, matches) if hit]
+        if not hits:
+            return None
+        tag = hits[0][0]
+        return tag, [keyword for hit_tag, keyword in hits if hit_tag == tag]
 
 
-@functools.lru_cache(maxsize=256)
-def _keyword_pattern(keyword: str) -> re.Pattern[str]:
-    # Match the keyword as a whole word, allowing plain plural and verb endings
-    # (`typos`, `bumped`, `refactoring`). For keywords ending in "e" the "e" is
-    # folded into the ending so `rename` also matches `renamed` and `renaming`.
-    if keyword.endswith("e"):
-        return re.compile(
-            rf"\b{re.escape(keyword[:-1])}(?:e|es|ed|ing)\b", re.IGNORECASE
-        )
-    return re.compile(rf"\b{re.escape(keyword)}(?:s|es|ed|ing)?\b", re.IGNORECASE)
+@functools.lru_cache(maxsize=64)
+def _keyword_scorer(keywords: tuple[str, ...]) -> KeywordBM25:
+    # Keywords come from static YAML, so build the BM25 statistics once per keyword list.
+    return KeywordBM25(list(keywords))
 
 
 def validate_model_selection_config():

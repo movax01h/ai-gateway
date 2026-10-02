@@ -85,6 +85,10 @@ from duo_workflow_service.gitlab.gitlab_api import (
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
+from duo_workflow_service.model_routing import (
+    route_default_model,
+    track_routing_decision,
+)
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.mcp_tools import (
     McpToolConfig,
@@ -652,6 +656,8 @@ class AbstractWorkflow(ABC):
                     )
                     status_event = WorkflowStatusEventEnum.START
 
+                await self._route_default_model(goal, status_event)
+
                 # Compile is CPU-bound process hence we're using a thread to avoid interrupting the gRPC server.
                 # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1468
                 # for more info.
@@ -876,6 +882,23 @@ class AbstractWorkflow(ABC):
         resolve to RESUME/START.
         """
         return None, WorkflowStatusEventEnum.RETRY
+
+    async def _route_default_model(self, goal: str, status_event: str) -> None:
+        # Route once, before the flow is built, so every turn uses the same model.
+        if status_event != WorkflowStatusEventEnum.START:
+            return
+        decision = await route_default_model(
+            goal,
+            self._http_client,
+            self._project,
+            self._additional_context,
+            self._user,
+            self._prompt_registry,
+        )
+        if decision:
+            track_routing_decision(
+                decision, self._workflow_id, self._internal_event_client
+            )
 
     async def _resolve_graph_invocation(
         self,

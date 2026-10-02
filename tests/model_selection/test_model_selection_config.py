@@ -1053,6 +1053,51 @@ def test_validate_with_invalid_tags_field(selection_config, fs: FakeFilesystem):
     assert "non-existent-small" in str(excinfo.value)
 
 
+def test_validate_reports_unknown_tag_candidates(selection_config, fs: FakeFilesystem):
+    """Candidates are never served but must still name registered models."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent("""
+            models:
+              - name: Large Model
+                gitlab_identifier: large-model
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                params:
+                  model: claude-sonnet
+            """),
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent("""
+            configurable_unit_primitives:
+              - feature_setting: "test_model_size"
+                unit_primitives:
+                  - "ask_commit"
+                default_models:
+                  - "large-model"
+                models_for_tags:
+                  large:
+                    models:
+                      - "large-model"
+                    candidates:
+                      - "non-existent-candidate"
+            """),
+    )
+    # editorconfig-checker-enable
+
+    with pytest.raises(ValueError) as excinfo:
+        selection_config.validate()
+
+    assert "non-existent-candidate" in str(excinfo.value)
+
+
 @pytest.fixture(name="size_preference_model_dir")
 def size_preference_model_dir_fixture(fs: FakeFilesystem):
     """Shared fixture for tag-based model routing validation tests.
@@ -1288,6 +1333,12 @@ def test_resolve_tag_for_goal(selection_config, write_tag_policy, goal, expected
     )
 
     assert selection_config.resolve_tag_for_goal("test_model_size", goal) == expected
+
+
+def test_resolve_tag_for_goal_without_keywords(selection_config, write_tag_policy):
+    write_tag_policy(test_model_size={"large": {"models": ["large-model"]}})
+
+    assert selection_config.resolve_tag_for_goal("test_model_size", "Refactor") is None
 
 
 def test_tag_entry_rejects_an_empty_model_list(selection_config, write_tag_policy):
