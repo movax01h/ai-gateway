@@ -197,6 +197,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         *_READ_ONLY_FILE_TOOLS,
         tools.WriteFile,
         tools.EditFile,
+        tools.BlDedupFindings,
         tools.Mkdir,
         tools.RunTests,
     ],
