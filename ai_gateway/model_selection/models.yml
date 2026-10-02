@@ -1029,6 +1029,9 @@ models:
       model: gpt-5.1-2025-11-13
       temperature: 1.0  # this model always requires temperature to be 1
       max_tokens: 128_000
+    deprecation:
+      deprecation_date: "2026-10-02"
+      removal_version: "19.10"
 
   - name: "GPT-5-Mini"
     provider: "OpenAI"
@@ -1074,6 +1077,9 @@ models:
     params:
       model: gpt-5.4-nano
       max_tokens: 128_000
+    deprecation:
+      deprecation_date: "2026-10-02"
+      removal_version: "19.10"
 
   # proxy endpoint only
   - name: "GPT-5 (alias)"
@@ -1098,6 +1104,9 @@ models:
     params:
       model: gpt-5.1
       max_tokens: 128_000
+    deprecation:
+      deprecation_date: "2026-10-02"
+      removal_version: "19.10"
 
   - name: "GPT-5.3-Codex"
     provider: "OpenAI"
@@ -1110,6 +1119,9 @@ models:
     params:
       model: gpt-5.3-codex
       max_tokens: 128_000
+    deprecation:
+      deprecation_date: "2026-10-02"
+      removal_version: "19.10"
 
   - name: Amazon Q
     gitlab_identifier: amazon_q
