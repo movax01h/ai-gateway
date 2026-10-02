@@ -263,7 +263,9 @@ def sentry_events_fixture():
             "DUO_WORKFLOW_LOGGING__JSON_FORMAT": "true",
         },
     ):
-        setup_logging()
+        # A cached logger keeps this production processor chain after the fixture
+        # restores the config, which hides its events from `capture_logs` in later tests.
+        setup_logging(cache_logger_on_first_use=False)
     root_logger.handlers = [logging.NullHandler()]
 
     sentry_sdk.init(
