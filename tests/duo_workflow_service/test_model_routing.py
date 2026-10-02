@@ -1,16 +1,23 @@
-from unittest.mock import Mock
+import asyncio
+import json
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from langchain_core.messages import AIMessage
 from structlog.testing import capture_logs
 
 from ai_gateway.model_metadata import ModelMetadata, ModelMetadataByTag
 from ai_gateway.model_selection import ModelSelectionConfig
+from duo_workflow_service import model_routing
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.model_routing import (
     RoutingDecision,
     RoutingOutcome,
-    route_default_model_by_goal,
+    resource_task_text,
+    route_default_model,
     track_routing_decision,
 )
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.context.model import (
     current_model_metadata_context,
     current_model_metadata_with_size_context,
@@ -49,68 +56,231 @@ def flag_on_fixture():
     current_feature_flag_context.reset(token)
 
 
+def _registry(ainvoke):
+    registry = Mock()
+    registry.get_on_behalf.return_value.ainvoke = ainvoke
+    return registry
+
+
+async def _slow(*_args, **_kwargs):
+    await asyncio.sleep(1)
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("flag_on")
-def test_routes_default_to_the_matched_tag(routable_context):
-    decision = route_default_model_by_goal("Fix the typo in the README")
+@pytest.mark.parametrize(
+    ("ainvoke", "expected_tag"),
+    [
+        (AsyncMock(return_value=AIMessage(content="small")), "small"),
+        (AsyncMock(return_value=AIMessage(content="Large.\nWhy")), "large"),
+        (AsyncMock(return_value=AIMessage(content="unsure")), None),
+        (AsyncMock(side_effect=_slow), None),
+        (AsyncMock(side_effect=RuntimeError("boom")), None),
+    ],
+)
+async def test_route_default_model(
+    monkeypatch, routable_context, ainvoke, expected_tag
+):
+    monkeypatch.setattr(model_routing, "CLASSIFIER_TIMEOUT_S", 0.01)
+
+    decision = await route_default_model(
+        "Add pagination", Mock(), None, None, Mock(), _registry(ainvoke)
+    )
+
+    tag = decision.tag if decision else None
+    assert tag == expected_tag
+    expected = routable_context.by_tag[tag] if tag else routable_context.default
+    assert current_model_metadata_context.get() is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flag_on")
+@pytest.mark.parametrize(
+    ("goal", "hint_tag", "hint_keyword", "matched_keywords"),
+    [
+        ("Fix the typo in the README", "small", "typo", ["typo", "readme"]),
+        ("Add pagination", None, None, []),
+    ],
+)
+async def test_keywords_are_a_hint_to_the_classifier(
+    routable_context, goal, hint_tag, hint_keyword, matched_keywords
+):
+    ainvoke = AsyncMock(return_value=AIMessage(content="large"))
+
+    with capture_logs() as cap_logs:
+        decision = await route_default_model(
+            goal, Mock(), None, None, Mock(), _registry(ainvoke)
+        )
 
     assert decision == RoutingDecision(
         feature_setting="duo_developer",
-        tag="small",
-        matched_keywords=["typo", "readme"],
+        tag="large",
+        matched_keywords=matched_keywords,
         outcome=RoutingOutcome.ROUTED,
-        gitlab_identifier="claude_haiku_4_5_20251001_vertex",
-        params={"temperature": 0.0},
+        gitlab_identifier="claude_sonnet_4_6_vertex",
+        classifier_identifier="claude_haiku_4_5_20251001_vertex",
+        params=decision.params,
     )
-    small = routable_context.by_tag["small"]
-    assert current_model_metadata_with_size_context.get().default is small
-    assert current_model_metadata_context.get() is small
+    inputs = ainvoke.call_args.args[0]
+    assert (inputs["hint_tag"], inputs["hint_keyword"]) == (hint_tag, hint_keyword)
+    classified = next(e for e in cap_logs if e["event"] == "Classified goal tier")
+    assert classified["hint_keyword"] == hint_keyword
+    assert classified["from_model"] == "claude_sonnet_4_6_vertex"
 
 
-@pytest.mark.usefixtures("flag_on")
-def test_no_matching_tag_is_a_no_op(routable_context):
-    assert route_default_model_by_goal("Add pagination to the issues list") is None
+@pytest.mark.asyncio
+async def test_flag_off_skips_the_classifier(routable_context):
+    registry = _registry(AsyncMock())
+
+    assert (
+        await route_default_model("Fix the typo", Mock(), None, None, Mock(), registry)
+        is None
+    )
+    assert not registry.get_on_behalf.called
     assert current_model_metadata_with_size_context.get() is routable_context
-    assert current_model_metadata_context.get() is routable_context.default
 
 
-def test_flag_off_leaves_context_alone(routable_context):
-    assert route_default_model_by_goal("Fix the typo") is None
-    assert current_model_metadata_with_size_context.get() is routable_context
-
-
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("flag_on")
-def test_no_metadata_context_is_a_no_op():
-    current_model_metadata_with_size_context.set(None)
-
-    assert route_default_model_by_goal("Fix the typo") is None
-    assert current_model_metadata_with_size_context.get() is None
-
-
-@pytest.mark.usefixtures("flag_on")
-def test_pinned_model_is_never_routed(routable_context):
+async def test_pinned_model_is_never_routed(routable_context):
     pinned = routable_context.model_copy(update={"feature_setting": None})
     current_model_metadata_with_size_context.set(pinned)
+    registry = _registry(AsyncMock())
 
-    assert route_default_model_by_goal("Fix the typo") is None
+    assert (
+        await route_default_model("Fix the typo", Mock(), None, None, Mock(), registry)
+        is None
+    )
+    assert not registry.get_on_behalf.called
     assert current_model_metadata_with_size_context.get() is pinned
 
 
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("flag_on")
-def test_tag_without_a_model_falls_back_to_default(routable_context, monkeypatch):
-    monkeypatch.setattr(
-        ModelSelectionConfig.instance(),
-        "resolve_tag_for_goal",
-        lambda *_: ("reasoning", ["reason"]),
+async def test_no_small_tag_skips_the_classifier(routable_context):
+    without_small = routable_context.model_copy(
+        update={"by_tag": {"large": routable_context.default}}
+    )
+    current_model_metadata_with_size_context.set(without_small)
+    registry = _registry(AsyncMock())
+
+    assert (
+        await route_default_model("Fix the typo", Mock(), None, None, Mock(), registry)
+        is None
+    )
+    assert not registry.get_on_behalf.called
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("envelope", "expected"),
+    [
+        ({"resource_type": "work_item", "resource_id": "7"}, "Fix typo\n\nIn README"),
+        ({"resource_type": "pipeline", "resource_id": "7"}, ""),
+        ({"resource_type": "work_item", "resource_id": "../../users"}, ""),
+        ({"resource_type": "work_item", "resource_id": "²"}, ""),
+        ({"resource_type": "work_item", "resource_id": "７"}, ""),
+    ],
+)
+async def test_resource_task_text(envelope, expected):
+    client = Mock()
+    client.aget = AsyncMock(
+        return_value=GitLabHttpResponse(
+            200, json.dumps({"title": "Fix typo", "description": "In README"})
+        )
+    )
+    context = [
+        AdditionalContext(
+            category="agent_platform_resource_context", content=json.dumps(envelope)
+        )
+    ]
+
+    assert await resource_task_text(client, {"id": 3}, context) == expected
+
+
+@pytest.mark.asyncio
+async def test_resource_task_text_when_the_request_fails():
+    client = Mock()
+    client.aget = AsyncMock(return_value=GitLabHttpResponse(404, "{}"))
+    context = [
+        AdditionalContext(
+            category="agent_platform_resource_context",
+            content=json.dumps({"resource_type": "work_item", "resource_id": "7"}),
+        )
+    ]
+
+    assert await resource_task_text(client, {"id": 3}, context) == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flag_on")
+async def test_classifier_tag_pins_the_routing_model(routable_context):
+    classifier = _metadata("claude_haiku_4_5_20251001")
+    routable_context.by_tag["classifier"] = classifier
+    registry = _registry(AsyncMock(return_value=AIMessage(content="small")))
+
+    decision = await route_default_model(
+        "Add pagination", Mock(), None, None, Mock(), registry
     )
 
-    decision = route_default_model_by_goal("anything")
+    assert registry.get_on_behalf.call_args.kwargs["model_metadata"] is classifier
+    assert decision.classifier_identifier == "claude_haiku_4_5_20251001"
 
-    assert decision is not None
-    assert decision.tag == "reasoning"
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flag_on")
+async def test_tag_without_a_model_falls_back_to_default(routable_context):
+    without_large = routable_context.model_copy(
+        update={"by_tag": {"small": routable_context.by_tag["small"]}}
+    )
+    current_model_metadata_with_size_context.set(without_large)
+    registry = _registry(AsyncMock(return_value=AIMessage(content="large")))
+
+    decision = await route_default_model(
+        "Add pagination", Mock(), None, None, Mock(), registry
+    )
+
     assert decision.outcome == RoutingOutcome.FALLBACK_DEFAULT
     assert decision.gitlab_identifier == "claude_sonnet_4_6_vertex"
+    assert current_model_metadata_with_size_context.get() is without_large
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flag_on")
+@pytest.mark.parametrize("answer", ["acme", "password=hunter2"])
+async def test_answer_outside_the_policy_has_no_decision(routable_context, answer):
+    registry = _registry(AsyncMock(return_value=AIMessage(content=answer)))
+
+    assert (
+        await route_default_model(
+            "Add pagination", Mock(), None, None, Mock(), registry
+        )
+        is None
+    )
     assert current_model_metadata_with_size_context.get() is routable_context
-    assert current_model_metadata_context.get() is routable_context.default
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flag_on")
+async def test_decision_carries_no_text_from_the_task(routable_context):
+    # The task is user content; only policy values may reach the log and event.
+    task = (
+        "Acme Corp: refactor the migration, fix the typo in the README "
+        "and drop password=hunter2 from security.md"
+    )
+    registry = _registry(AsyncMock(return_value=AIMessage(content="large")))
+    policy = ModelSelectionConfig.instance().get_resolved_unit_primitive_config_map()[
+        "duo_developer"
+    ]
+    keywords = {k for entry in policy.models_for_tags.values() for k in entry.keywords}
+
+    decision = await route_default_model(task, Mock(), None, None, Mock(), registry)
+
+    assert decision.matched_keywords
+    assert set(decision.matched_keywords) <= keywords
+    dumped = decision.model_dump_json().lower()
+    for fragment in ("acme", "hunter2", "password", "security.md"):
+        assert fragment not in dumped
 
 
 @pytest.mark.parametrize(
@@ -133,12 +303,14 @@ def test_track_routing_decision_emits_one_log_line_and_one_event(
         matched_keywords=["typo", "readme"],
         outcome=outcome,
         gitlab_identifier="claude_haiku_4_5_20251001_vertex",
+        classifier_identifier="claude_haiku_4_5_20251001_vertex",
         params={"temperature": 0.0},
     )
     extra = {
         "feature_setting": "duo_developer",
         "matched_keywords": ["typo", "readme"],
         "gitlab_identifier": "claude_haiku_4_5_20251001_vertex",
+        "classifier_identifier": "claude_haiku_4_5_20251001_vertex",
         "params": {"temperature": 0.0},
     }
     internal_event_client = Mock(spec=InternalEventsClient)
@@ -169,27 +341,6 @@ def test_track_routing_decision_emits_one_log_line_and_one_event(
     )
 
 
-@pytest.mark.usefixtures("flag_on")
-def test_routing_error_keeps_default_and_logs(routable_context, monkeypatch):
-    def _raise(*_):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(ModelSelectionConfig.instance(), "resolve_tag_for_goal", _raise)
-
-    with capture_logs() as cap_logs:
-        assert route_default_model_by_goal("Fix the typo") is None
-
-    assert current_model_metadata_with_size_context.get() is routable_context
-    assert current_model_metadata_context.get() is routable_context.default
-    failure_log = next(
-        entry
-        for entry in cap_logs
-        if entry["event"] == "Model routing failed; keeping the default"
-    )
-    assert failure_log["log_level"] == "warning"
-    assert failure_log["exc_info"] is True
-
-
 def test_tracking_error_does_not_raise_and_logs():
     decision = RoutingDecision(
         feature_setting="duo_developer",
@@ -197,6 +348,7 @@ def test_tracking_error_does_not_raise_and_logs():
         matched_keywords=["typo"],
         outcome=RoutingOutcome.ROUTED,
         gitlab_identifier="claude_haiku_4_5_20251001_vertex",
+        classifier_identifier="claude_haiku_4_5_20251001_vertex",
         params={},
     )
     internal_event_client = Mock(spec=InternalEventsClient)

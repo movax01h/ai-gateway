@@ -1254,6 +1254,42 @@ def test_track_internal_event(workflow, internal_event_client: Mock):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_event", "routed", "tracked"),
+    [
+        (WorkflowStatusEventEnum.START, True, True),
+        (WorkflowStatusEventEnum.START, False, False),
+        (WorkflowStatusEventEnum.RESUME, True, False),
+    ],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.track_routing_decision")
+@patch("duo_workflow_service.workflows.abstract_workflow.route_default_model")
+async def test_route_default_model_only_on_start(
+    mock_route,
+    mock_track,
+    workflow,
+    internal_event_client: Mock,
+    status_event,
+    routed,
+    tracked,
+):
+    decision = MagicMock()
+    mock_route.return_value = decision if routed else None
+    workflow._internal_event_client = internal_event_client
+    workflow._project = None
+
+    await workflow._route_default_model("Fix the typo", status_event)
+
+    assert mock_route.called == (status_event == WorkflowStatusEventEnum.START)
+    if tracked:
+        mock_track.assert_called_once_with(
+            decision, "test-workflow-id", internal_event_client
+        )
+    else:
+        mock_track.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")

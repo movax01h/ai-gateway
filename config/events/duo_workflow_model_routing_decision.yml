@@ -7,17 +7,19 @@ product_categories:
   - duo_agent_platform
 additional_properties:
   label:
-    description: The routing tag selected for the request (e.g. "small", "large")
+    description: The routing tag the classifier picked for the request (e.g. "small", "large"). Only tags declared in models_for_tags are reported.
   property:
     description: '"routed" when the tag resolved to its own model, "fallback_default" when the tag has no resolvable model and the request kept the default'
   value:
     description: Workflow Id, also recorded as ai_context.session_id. Connects this event to others in the same workflow.
   feature_setting:
-    description: The feature setting whose models_for_tags policy was matched (e.g. "duo_developer")
+    description: The feature setting whose models_for_tags policy was used (e.g. "duo_developer")
   matched_keywords:
-    description: Every keyword of the tag found in the goal. Each one alone is enough to select the tag; the order follows the policy in unit_primitives.yml.
+    description: The keyword hint passed to the classifier, copied from the models_for_tags keyword list in unit_primitives.yml (never text taken from the task). Every keyword of the first matching tag found in the task, in policy order; empty when none matched. Can belong to a different tag than label when the classifier overrode the hint.
   gitlab_identifier:
     description: gitlab_identifier of the model the request is served by
+  classifier_identifier:
+    description: gitlab_identifier of the classifier model that picked label (the classifier tag's model, or the small tag's when there is none)
   params:
     description: Sampling parameters (temperature, top_p, top_k) of the model the request is served by
 milestone: "19.5"
