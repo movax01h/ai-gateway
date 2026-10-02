@@ -6,6 +6,9 @@ import pytest
 from langchain_core.tools import ToolException
 
 from ai_gateway.model_selection.models import ModelClassProvider
+from duo_workflow_service.audit_events.collector import AuditEventCollector
+from duo_workflow_service.audit_events.context import audit_collector_context
+from duo_workflow_service.audit_events.event_types import AuditEventType
 from duo_workflow_service.tools.web_search import (
     _MCP_PROTOCOL_VERSION,
     AgentCoreWebSearch,
@@ -327,6 +330,7 @@ def resolved_model_fixture(request):
         metadata.llm_definition.model_class_provider = provider
         metadata.llm_definition.params.model = model
         metadata.llm_definition.params.custom_llm_provider = custom_llm_provider
+        metadata.llm_definition.provider = "Gemini Enterprise Agent Platform"
         token = current_model_metadata_context.set(metadata)
     yield param
     current_model_metadata_context.reset(token)
@@ -712,3 +716,63 @@ class TestLogging:
         assert "unreleased codename acquisition" not in str(captured_log.mock_calls), (
             "search query text leaked into the logs"
         )
+
+
+class TestAuditEvent:
+    @pytest.fixture(name="collector")
+    def collector_fixture(self):
+        collector = AuditEventCollector(
+            client=MagicMock(), workflow_id="42", flush_interval_seconds=1_000
+        )
+        token = audit_collector_context.set(collector)
+        try:
+            yield collector
+        finally:
+            audit_collector_context.reset(token)
+
+    @staticmethod
+    def _captured(collector):
+        return collector._buffer  # pylint: disable=protected-access
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("resolved_model", [VERTEX_LITELLM_MODEL], indirect=True)
+    async def test_records_query(self, tool, mock_post, collector, resolved_model):
+        patcher, _ = mock_post(_tool_result([]))
+        with patcher:
+            await tool._execute(query="CVE-2025-50182")
+
+        events = self._captured(collector)
+        assert len(events) == 1
+        assert events[0].event_type == AuditEventType.AI_WEB_SEARCH_INVOKED
+        assert events[0].workflow_id == "42"
+        assert (
+            events[0].model_name,
+            events[0].provider,
+            events[0].search_source,
+        ) == ("claude-sonnet-4-6", "Gemini Enterprise Agent Platform", "agentcore")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("query", "expected_events"),
+        [
+            pytest.param("q", 1, id="gateway-failure-still-records"),
+            pytest.param("   ", 0, id="query-rejected-before-any-call"),
+        ],
+    )
+    async def test_records_once_the_call_is_outbound(
+        self, tool, mock_post, collector, query, expected_events
+    ):
+        """The event marks an attempted egress, so only local validation can prevent it."""
+        patcher, _ = mock_post({}, status_code=500)
+        with patcher, pytest.raises(ToolException):
+            await tool._execute(query=query)
+
+        assert len(self._captured(collector)) == expected_events
+
+    @pytest.mark.asyncio
+    async def test_no_collector_does_not_break_the_search(self, tool, mock_post):
+        patcher, _ = mock_post(_tool_result([{"text": "hit", "url": "https://a.com"}]))
+        with patcher:
+            result = await tool._execute(query="q")
+
+        assert json.loads(result)["results"][0]["url"] == "https://a.com"

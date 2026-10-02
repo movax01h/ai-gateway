@@ -31,6 +31,7 @@ class AuditEventType(str, Enum):
     AI_TOOL_EXECUTION_FAILED = auto()
     AI_TOOL_EXECUTION_RETRIED = auto()
     AI_LLM_REQUEST_FAILED = auto()
+    AI_WEB_SEARCH_INVOKED = auto()
 
 
 class AuditEvent(BaseModel):
@@ -162,3 +163,13 @@ class LlmRequestFailedEvent(AuditEvent):
     error_type: str
     error_message: str
     latency_ms: Optional[float] = None
+
+
+class WebSearchInvokedEvent(AuditEvent):
+    """Separate from `ToolInvokedEvent`: compliance filters match on the event name."""
+
+    event_type: AuditEventType = AuditEventType.AI_WEB_SEARCH_INVOKED
+    model_name: str
+    provider: str
+    search_source: str
+    """`native` when the model searched itself, `agentcore` when our tool did."""

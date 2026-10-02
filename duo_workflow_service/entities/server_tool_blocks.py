@@ -17,6 +17,22 @@ from duo_workflow_service.entities.state import (
 
 log = structlog.stdlib.get_logger("server_tool_blocks")
 
+WEB_SEARCH_TOOL_NAME = "web_search"
+
+
+def is_web_search_call(call_block: Any) -> bool:
+    """Whether a content block is a server-side web search, on either provider's shape.
+
+    The fallback tool answers to the same name, so only the block type tells them apart.
+    """
+    if openai_web_search.is_call_block(call_block):
+        return openai_web_search.is_web_search_action(call_block)
+
+    return (
+        _is_anthropic_server_tool_use_block(call_block)
+        and call_block.get("name") == WEB_SEARCH_TOOL_NAME
+    )
+
 
 def _is_anthropic_server_tool_use_block(block: Any) -> TypeGuard[dict]:
     """Matches any ``*_tool_use`` type; bare ``tool_use`` excluded by the ``_`` prefix."""
