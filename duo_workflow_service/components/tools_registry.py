@@ -199,6 +199,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.WriteFile,
         tools.EditFile,
         tools.BlDedupFindings,
+        tools.BlWriteSastReport,
         tools.Mkdir,
         tools.RunTests,
         tools.BlDiscoverAndCluster,

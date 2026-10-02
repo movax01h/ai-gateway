@@ -7,6 +7,7 @@ from .audit_events import *
 from .bl_discovery import *
 from .branch import *
 from .bl_report import *
+from .bl_write_sast_report import *
 from .code_review import *
 from .bl_collect_and_flatten import *
 from .ci_linter import *
