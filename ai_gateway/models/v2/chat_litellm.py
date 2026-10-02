@@ -89,6 +89,32 @@ def _drop_unsupported_web_search(kwargs: Dict[str, Any]) -> None:
     )
 
 
+_WEB_SEARCH_UNAVAILABLE_NOTE = (
+    "Web search is not available for the selected model on this provider. If the answer "
+    "needs current or external information, tell the user both that web search doesn't "
+    "work with this model and provider combination, and that they can select a different "
+    "model or provider to use it."
+)
+
+
+def _is_web_search_policy_error(error: litellm.BadRequestError) -> bool:
+    """Whether an org policy on Vertex disallows web search for this model."""
+    message = str(error)
+    return "allowedPartnerModelFeatures" in message and "web_search" in message
+
+
+def _without_web_search(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop web search and tell the model, so it doesn't claim to have searched."""
+    messages = [
+        *kwargs.get("messages", []),
+        {"role": "system", "content": _WEB_SEARCH_UNAVAILABLE_NOTE},
+    ]
+    return {
+        **{k: v for k, v in kwargs.items() if k != "web_search_options"},
+        "messages": messages,
+    }
+
+
 def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
     """GPT-5 needs max_completion_tokens, but some providers (e.g. custom_openai, azure) send the deprecated max_tokens.
     Pass it via extra_body, which LiteLLM forwards as-is, regardless of provider.
@@ -315,7 +341,24 @@ class ChatLiteLLM(_LChatLiteLLM):
         _rewrite_trailing_assistant_prefill(kwargs)
         inject_user_identity_header(kwargs, self.user_id_header)
         _drop_unsupported_web_search(kwargs)
-        return await super().acompletion_with_retry(run_manager=run_manager, **kwargs)
+        try:
+            return await super().acompletion_with_retry(
+                run_manager=run_manager, **kwargs
+            )
+        except litellm.BadRequestError as error:
+            if kwargs.get(
+                "web_search_options"
+            ) is None or not _is_web_search_policy_error(error):
+                raise
+            log.warning(
+                "Retrying without web search: disallowed by provider policy",
+                model=kwargs.get("model"),
+                custom_llm_provider=kwargs.get("custom_llm_provider"),
+                error=str(error),
+            )
+            return await super().acompletion_with_retry(
+                run_manager=run_manager, **_without_web_search(kwargs)
+            )
 
     @property
     @override
