@@ -4,6 +4,7 @@ from typing import Any
 
 from .ascp import *
 from .audit_events import *
+from .bl_discovery import *
 from .branch import *
 from .bl_report import *
 from .code_review import *
