@@ -6,6 +6,7 @@ from .ascp import *
 from .audit_events import *
 from .branch import *
 from .code_review import *
+from .bl_collect_and_flatten import *
 from .ci_linter import *
 from .clarification_question import *
 from .command import *
