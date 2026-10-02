@@ -195,6 +195,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "read_write_files": [
         tools.BlPrioritizeAndCap,
         *_READ_ONLY_FILE_TOOLS,
+        tools.BlCollectAndFlatten,
         tools.WriteFile,
         tools.EditFile,
         tools.Mkdir,

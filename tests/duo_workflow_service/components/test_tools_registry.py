@@ -375,6 +375,7 @@ _outbox = MagicMock(spec=Outbox)
                 "list_dir",
                 "find_files",
                 "grep",
+                "bl_collect_and_flatten",
                 "mkdir",
                 "extract_lines_from_text",
                 "finalize_code_review_findings",
@@ -572,6 +573,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             metadata=tool_metadata
         ),
         "run_tests": tools.RunTests(metadata=tool_metadata),
+        "bl_collect_and_flatten": tools.BlCollectAndFlatten(metadata=tool_metadata),
         "build_review_merge_request_context": BuildReviewMergeRequestContext(
             metadata=tool_metadata
         ),
@@ -935,6 +937,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "create_file_with_contents",
         "edit_file",
         "list_dir",
+        "bl_collect_and_flatten",
         "find_files",
         "grep",
         "mkdir",
@@ -1014,6 +1017,7 @@ async def test_registry_configuration_with_preapproved_tools(
         "create_file_with_contents",
         "edit_file",
         "list_dir",
+        "bl_collect_and_flatten",
         "find_files",
         "grep",
         "mkdir",
