@@ -5,6 +5,7 @@ from typing import Any
 from .ascp import *
 from .audit_events import *
 from .branch import *
+from .bl_report import *
 from .code_review import *
 from .bl_collect_and_flatten import *
 from .ci_linter import *
