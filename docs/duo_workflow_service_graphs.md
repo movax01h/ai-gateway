@@ -245,6 +245,53 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `bl_security 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> grounding;
+    grounding(grounding<br>#91;AgentComponent#93;);
+    tuner(tuner<br>#91;AgentComponent#93;);
+    discover_units(discover_units<br>#91;DeterministicStepComponent#93;);
+    map_reviews_prep(map_reviews_prep<br>#91;DeterministicStepComponent#93;);
+    map_reviews(map_reviews<br>#91;AgentComponent#93;);
+    map_reviews_collect(map_reviews_collect<br>#91;DeterministicStepComponent#93;);
+    sibling_scan_prep(sibling_scan_prep<br>#91;DeterministicStepComponent#93;);
+    sibling_scan(sibling_scan<br>#91;AgentComponent#93;);
+    sibling_scan_collect(sibling_scan_collect<br>#91;DeterministicStepComponent#93;);
+    adjudicate(adjudicate<br>#91;DeterministicStepComponent#93;);
+    triage_prep(triage_prep<br>#91;DeterministicStepComponent#93;);
+    triage(triage<br>#91;AgentComponent#93;);
+    triage_collect(triage_collect<br>#91;DeterministicStepComponent#93;);
+    adjudicate_post(adjudicate_post<br>#91;DeterministicStepComponent#93;);
+    write_report(write_report<br>#91;DeterministicStepComponent#93;);
+    grounding --> tuner;
+    tuner --> discover_units;
+    discover_units --> map_reviews_prep;
+    map_reviews_prep --> map_reviews;
+    map_reviews --> map_reviews_collect;
+    map_reviews_collect --> sibling_scan_prep;
+    sibling_scan_prep --> sibling_scan;
+    sibling_scan --> sibling_scan_collect;
+    sibling_scan_collect --> adjudicate;
+    adjudicate --> triage_prep;
+    triage_prep --> triage;
+    triage --> triage_collect;
+    triage_collect -.->|"success"| adjudicate_post;
+    adjudicate_post -.->|"success"| write_report;
+    write_report -.->|"success"| __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `business_context_security_guidelines 1.0.0 (experimental)` (Flow Registry)
 
 ```mermaid

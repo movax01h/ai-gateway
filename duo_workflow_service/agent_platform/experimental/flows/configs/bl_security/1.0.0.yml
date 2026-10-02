@@ -1,0 +1,820 @@
+version: "experimental"
+environment: ambient
+
+# BL Security Analyzer: whole-repository business-logic security scan.
+#
+# grounding -> tuner -> discover_units -> map_reviews -> sibling_scan
+#   -> adjudicate (dedup) -> triage -> adjudicate_post -> write_report
+#
+# Each fan-out stage is a `<stage>_prep` step (order and cap), the `for_each`
+# stage itself, and a `<stage>_collect` step (flatten and publish coverage).
+# `scan_effort` (low|standard|high) tiers the fan-out caps and the discovery
+# pool; without it the literal `max_units: 150` fallbacks apply.
+
+components:
+  # Threat model from a bounded set of key architectural files, forwarded to
+  # the scan stages as `threat_model`. The prompt, not the toolset, caps reads.
+  - name: "grounding"
+    type: AgentComponent
+    prompt_id: "security_scan_grounding"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "branch"
+        optional: true
+    toolset:
+      - "find_files"
+      - gitlab_blob_search:
+          per_page: 100
+      - "read_file"
+      - "get_repository_file"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Proposes repository-specific globs and entry-point patterns that
+  # discover_units adds to its built-in lists. It reasons over paths, so
+  # content search is left out of its toolset.
+  - name: "tuner"
+    type: AgentComponent
+    prompt_id: "security_scan_tuner"
+    response_schema_id: "bl_tuner_patterns"
+    max_cycles: 8
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+        optional: true
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "branch"
+        optional: true
+    toolset:
+      - "find_files"
+      - "read_file"
+      - "get_repository_file"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Deterministic discovery and clustering. How much gets reviewed is decided
+  # by the fan-out caps downstream, not by this stage's `max_units`.
+  - name: "discover_units"
+    type: DeterministicStepComponent
+    tool_name: "bl_discover_and_cluster"
+    inputs:
+      - from: "8"
+        as: "files_per_unit"
+        literal: true
+      - from: "150"
+        as: "max_units"
+        literal: true
+      - from: "context:project_id"
+        as: "project_id"
+        optional: true
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "branch"
+        optional: true
+      - from: "context:inputs.agent_platform_bl_security_context.scan_effort"
+        as: "scan_effort"
+        optional: true
+      - from: "true"
+        as: "coverage_first"
+        literal: true
+      - from: "true"
+        as: "content_filter"
+        literal: true
+      - from: "true"
+        as: "cap_aware_backfill"
+        literal: true
+      - from: "true"
+        as: "saturation_stop"
+        literal: true
+      # Both read the tuner's structured answer; each takes its own key.
+      - from: "context:tuner.final_answer"
+        as: "extra_globs"
+        optional: true
+      - from: "context:tuner.final_answer"
+        as: "extra_anchor_patterns"
+        optional: true
+      # When set, discovery is skipped and only these files are reviewed.
+      - from: "context:inputs.agent_platform_bl_security_context.target_files"
+        as: "target_files"
+        optional: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "map_reviews_prep"
+    type: DeterministicStepComponent
+    tool_name: "bl_prioritize_and_cap"
+    inputs:
+      - from: "context:discover_units.tool_responses"
+        as: "units"
+      - from: "150"
+        as: "max_units"
+        literal: true
+      - from: >-
+          {"low": 62, "standard": 150, "high": 400}
+        as: "max_units_tiers"
+        literal: true
+      - from: "context:inputs.agent_platform_bl_security_context.scan_effort"
+        as: "scan_effort"
+        optional: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "map_reviews"
+    type: AgentComponent
+    prompt_id: "security_scan_detect"
+    # 30, not 20: 20 cut reviews short halfway through the guard search. The
+    # agent is warned 10 cycles before the limit; at the limit it is told to
+    # wrap up and gets up to 3 more turns (max_wrap_up_retries); if it still
+    # has not answered, AgentStuckError, which the fan-out records as an
+    # errored unit.
+    max_cycles: 30
+    description: "Reviews a cluster of related repository files (e.g. a controller/handler with its policy, model, and finder) together for business-logic security vulnerabilities (IDOR/BOLA, missing/broken authorization, mass-assignment privilege escalation, logic flaws), using cross-file context, and returns structured JSON findings with absolute file:line anchors."
+    response_schema_id: "bl_unit_findings"
+    inputs:
+      - from: "context:goal"
+        as: "unit"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "branch"
+        optional: true
+      - from: "context:grounding.final_answer"
+        as: "threat_model"
+        optional: true
+    toolset:
+      - "read_file"
+      - "get_repository_file"
+      - "find_files"
+      - gitlab_blob_search:
+          per_page: 100
+    for_each:
+      items: "context:map_reviews_prep.tool_responses.units"
+      as: "context:goal"
+      max_items: 1000
+      max_concurrency: 32
+
+  - name: "map_reviews_collect"
+    type: DeterministicStepComponent
+    tool_name: "bl_collect_and_flatten"
+    inputs:
+      - from: "context:map_reviews.results"
+        as: "results"
+      - from: "context:map_reviews_prep.tool_responses.emitted_count"
+        as: "emitted_count"
+        optional: true
+      - from: "review units"
+        as: "unit_noun"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Second scan pass over the same units, comparing each handler's guard with
+  # its siblings'. Its findings are merged with map_reviews' in adjudicate.
+  - name: "sibling_scan_prep"
+    type: DeterministicStepComponent
+    tool_name: "bl_prioritize_and_cap"
+    inputs:
+      - from: "context:discover_units.tool_responses"
+        as: "units"
+      - from: "150"
+        as: "max_units"
+        literal: true
+      - from: >-
+          {"low": 62, "standard": 150, "high": 400}
+        as: "max_units_tiers"
+        literal: true
+      - from: "context:inputs.agent_platform_bl_security_context.scan_effort"
+        as: "scan_effort"
+        optional: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "sibling_scan"
+    type: AgentComponent
+    prompt_id: "security_scan_sibling"
+    # 30, not 20: 20 cut reviews short halfway through the guard search. The
+    # agent is warned 10 cycles before the limit; at the limit it is told to
+    # wrap up and gets up to 3 more turns (max_wrap_up_retries); if it still
+    # has not answered, AgentStuckError, which the fan-out records as an
+    # errored unit.
+    max_cycles: 30
+    description: "Reviews a cluster of related repository files for missing/incorrect authorization discovered by sibling comparison (CWE-862/863/285): resolves each handler's effective authorization chain across files, then flags any handler whose guard is strictly weaker than a comparable sibling's, returning structured JSON findings with absolute file:line anchors."
+    response_schema_id: "bl_unit_findings"
+    inputs:
+      - from: "context:goal"
+        as: "unit"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "branch"
+        optional: true
+      - from: "context:grounding.final_answer"
+        as: "threat_model"
+        optional: true
+    toolset:
+      - "read_file"
+      - "get_repository_file"
+      - "find_files"
+      - gitlab_blob_search:
+          per_page: 100
+    for_each:
+      items: "context:sibling_scan_prep.tool_responses.units"
+      as: "context:goal"
+      max_items: 1000
+      max_concurrency: 32
+
+  - name: "sibling_scan_collect"
+    type: DeterministicStepComponent
+    tool_name: "bl_collect_and_flatten"
+    inputs:
+      - from: "context:sibling_scan.results"
+        as: "results"
+      - from: "context:sibling_scan_prep.tool_responses.emitted_count"
+        as: "emitted_count"
+        optional: true
+      - from: "review units"
+        as: "unit_noun"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Deterministic dedup of both scan passes' findings.
+  - name: "adjudicate"
+    type: DeterministicStepComponent
+    tool_name: "bl_dedup_findings"
+    inputs:
+      - from: "context:map_reviews_collect.tool_responses.final_answer"
+        as: "batches"
+      - from: "context:sibling_scan_collect.tool_responses.final_answer"
+        as: "batches2"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Per-finding triage. Findings arrive unordered, so the cap keeps the most
+  # severe ones.
+  - name: "triage_prep"
+    type: DeterministicStepComponent
+    tool_name: "bl_prioritize_and_cap"
+    inputs:
+      - from: "context:adjudicate.tool_responses"
+        as: "units"
+      - from: "true"
+        as: "order_by_severity"
+        literal: true
+      - from: "150"
+        as: "max_units"
+        literal: true
+      - from: >-
+          {"low": 200, "standard": 400, "high": 550}
+        as: "max_units_tiers"
+        literal: true
+      - from: "context:inputs.agent_platform_bl_security_context.scan_effort"
+        as: "scan_effort"
+        optional: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "triage"
+    type: AgentComponent
+    prompt_id: "finding_adjudicator"
+    max_cycles: 15
+    description: "Skeptical precision-triage of one business-logic finding: resolves the authorization chain / mitigation in the code and returns its verdict on the finding (KEEP or DROP), the clause it applied, and the evidence; triage_collect merges it onto the finding, so a DROP is auditable instead of vanishing. adjudicate_post logs every verdict and then removes the DROPs."
+    # The answer is the verdict alone; triage_collect merges it onto the finding.
+    response_schema_id: "bl_triage_verdict"
+    # The threat model is deliberately not wired here: it biases the verdict.
+    inputs:
+      - from: "context:goal"
+        as: "finding"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: true
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "branch"
+        optional: true
+    toolset:
+      - "read_file"
+      - "get_repository_file"
+      - gitlab_blob_search:
+          per_page: 100
+    for_each:
+      items: "context:triage_prep.tool_responses.units"
+      as: "context:goal"
+      max_items: 1000
+      max_concurrency: 40
+
+  - name: "triage_collect"
+    type: DeterministicStepComponent
+    tool_name: "bl_collect_and_flatten"
+    inputs:
+      - from: "context:triage.results"
+        as: "results"
+      - from: "context:triage_prep.tool_responses.units"
+        as: "verdict_items"
+      - from: "context:triage_prep.tool_responses.emitted_count"
+        as: "emitted_count"
+        optional: true
+      - from: "findings"
+        as: "unit_noun"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Logs each triage verdict and removes the DROPs.
+  - name: "adjudicate_post"
+    type: DeterministicStepComponent
+    tool_name: "bl_dedup_findings"
+    inputs:
+      - from: "context:triage_collect.tool_responses.final_answer"
+        as: "batches"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  - name: "write_report"
+    type: DeterministicStepComponent
+    tool_name: "bl_write_sast_report"
+    inputs:
+      - from: "context:adjudicate_post.tool_responses"
+        as: "findings"
+      # A target_files scan reviewed only these files, so the report is
+      # marked partial. Nothing else makes it partial.
+      - from: "context:inputs.agent_platform_bl_security_context.target_files"
+        as: "target_files"
+        optional: true
+      # Each stage's coverage record becomes a sentence in scan.messages.
+      # Optional, so a skipped stage still gets a report that calls its
+      # coverage unknown.
+      - from: "context:map_reviews_collect.tool_responses.coverage"
+        as: "review_coverage"
+        optional: true
+      - from: "context:sibling_scan_collect.tool_responses.coverage"
+        as: "sibling_coverage"
+        optional: true
+      - from: "context:triage_collect.tool_responses.coverage"
+        as: "triage_coverage"
+        optional: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "grounding"
+    to: "tuner"
+  - from: "tuner"
+    to: "discover_units"
+  - from: "discover_units"
+    to: "map_reviews_prep"
+  - from: "map_reviews_prep"
+    to: "map_reviews"
+  - from: "map_reviews"
+    to: "map_reviews_collect"
+  - from: "map_reviews_collect"
+    to: "sibling_scan_prep"
+  - from: "sibling_scan_prep"
+    to: "sibling_scan"
+  - from: "sibling_scan"
+    to: "sibling_scan_collect"
+  - from: "sibling_scan_collect"
+    to: "adjudicate"
+  - from: "adjudicate"
+    to: "triage_prep"
+  - from: "triage_prep"
+    to: "triage"
+  - from: "triage"
+    to: "triage_collect"
+  # A failed closing step has no route, so the router raises and the run ends
+  # in ERROR instead of COMPLETED with a partial or missing report.
+  - from: "triage_collect"
+    condition:
+      input: "context:triage_collect.execution_result"
+      routes:
+        "success": "adjudicate_post"
+  - from: "adjudicate_post"
+    condition:
+      input: "context:adjudicate_post.execution_result"
+      routes:
+        "success": "write_report"
+  - from: "write_report"
+    condition:
+      input: "context:write_report.execution_result"
+      routes:
+        "success": "end"
+
+flow:
+  entry_point: "grounding"
+  inputs:
+    - category: agent_platform_standard_context
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch
+          optional: true
+        primary_branch:
+          type: string
+          description: Default/target branch
+          optional: true
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+          optional: true
+        service_account_name:
+          type: string
+          description: Username of this flow's per-group service account
+          optional: true
+    - category: agent_platform_bl_security_context
+      input_schema:
+        scan_effort:
+          type: string
+          description: >-
+            Scan effort tier - low|standard|high. Selects the fan-out cap (the
+            coverage knob) and the discovery unit pool. Omitted or unrecognized
+            keeps the fan-out cap at 150, as standard does, but uses a 1x
+            context pool where standard uses 2x.
+          optional: true
+        target_files:
+          type: string
+          description: >-
+            The MR-pipeline mechanism: the monolith passes the MR's changed
+            files, as repo-relative paths separated by commas, semicolons or
+            whitespace. When set, discovery is skipped, the files are reviewed
+            as consecutive 8-file units (still capped by the scan_effort
+            tier), and the report is marked a partial scan. Omitted on
+            whole-repository scans, which keep full repository discovery.
+          optional: true
+
+# The answer tools the review units end on. Each unit calls its tool once,
+# last, and that call is the unit's answer.
+response_schemas:
+  - schema_id: "bl_unit_findings"
+    definition:
+      type: object
+      description: >-
+        Deliver the review of this unit: the findings your STEP 1 reasoning
+        cleared (an empty list when it cleared none), then a short summary.
+        Call once, alone, last.
+      properties:
+        findings:
+          type: array
+          description: The findings STEP 1 cleared through every gate; empty when none.
+          items:
+            type: object
+            properties:
+              file:
+                type: string
+                minLength: 1
+              new_line:
+                type: integer
+              code_excerpt:
+                type: string
+                minLength: 1
+              tier:
+                type: integer
+              severity:
+                type: string
+                minLength: 1
+              cwe:
+                type: string
+                minLength: 1
+              body:
+                type: string
+                minLength: 1
+            required: [file, new_line, code_excerpt, tier, severity, cwe, body]
+        summary:
+          type: string
+          minLength: 20
+          maxLength: 2000
+          description: >-
+            One to three sentences: what the unit does and what your review
+            concluded. Your STEP 1 reasoning stays in your replies, not here.
+      required: [findings, summary]
+  - schema_id: "bl_tuner_patterns"
+    definition:
+      type: object
+      description: >-
+        Deliver the repository-specific additions to the discovery stage's
+        built-in lists. Two empty lists are a valid answer. Call once, last.
+      properties:
+        globs:
+          type: array
+          description: Additional path globs to enumerate candidates with.
+          items:
+            type: string
+        anchor_patterns:
+          type: array
+          description: Additional entry-point path regexes (Python `re`, searched).
+          items:
+            type: string
+      required: [globs, anchor_patterns]
+  - schema_id: "bl_triage_verdict"
+    definition:
+      type: object
+      description: >-
+        Deliver the verdict on this finding in four separate fields: your
+        STEP 1 reasoning, the verdict, the clause and the evidence behind it.
+        Call once, alone, last.
+      properties:
+        reasoning:
+          type: string
+          minLength: 20
+          description: >-
+            Your STEP 1 reasoning. Put the verdict, clause and evidence in
+            their own fields, not here.
+        verdict:
+          type: string
+          enum: [KEEP, DROP]
+          description: KEEP or DROP - your final decision, as its own field, not inside reasoning.
+        clause:
+          type: string
+          minLength: 1
+          description: The one criterion the decision rests on (DROP-1..DROP-5 or a KEEP arm).
+        evidence:
+          type: string
+          minLength: 1
+          description: The file:line and the code fact that decides the clause.
+        triage_evidence:
+          type: string
+          description: On KEEP only - the file:line and why the finding is real.
+      required: [reasoning, verdict, clause, evidence]
+
+prompts:
+  - name: "security_scan_grounding"
+    prompt_id: "security_scan_grounding"
+    params:
+      timeout: 180
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        <role>
+        You are a senior application-security engineer building a compact threat model of a repository before a business-logic security review. A downstream per-unit reviewer relies on your output to know how auth/authorization work here and what to check. You must scale to repositories with thousands of files.
+        </role>
+        <hard_constraints>
+        Critical — this stage must converge in a bounded, small number of tool calls regardless of repo size. A repo can have thousands of files; you must not walk the tree.
+        - Read at most 25 files total. Do not enumerate the whole tree; do not read file-by-file to "explore".
+        - First locate the key architectural files, then read only those:
+          1. Use `find_files` (recursive glob, one call per pattern — returns all matching paths) and `gitlab_blob_search` (content search — one distinctive symbol plus at most one filename:/path:/extension: filter per call; it ANDs every bare word, so three or more words almost always return an empty list, and a query that returns nothing must be narrowed rather than re-run or extended) to locate the ~10-30 files that define the app's security architecture:
+            - the main router / route registration / app entry (e.g. `*router*`, `main.go`, `routes.rb`, `urls.py`, `app.*`)
+            - auth middleware / request-context / current-user resolution (e.g. `*middleware*`, `*context*`, `*auth*`, `application_controller.rb`, `*session*`, `*token*`)
+            - base permission / access / ability / policy models (e.g. `*permission*`, `*access*`, `*ability*`, `*_policy.rb`)
+            - session / token / API-key handling
+            - central config / settings (e.g. `settings*`, `*config*`, `*.toml`, `*.yaml` app config)
+          2. Then `read_file` / `get_repository_file` only that bounded key set (<= 25 reads). Prefer the highest-signal files; stop once you understand the auth/authz/tenancy model. It is fine to leave most of the repo unread — you are modeling architecture, not reviewing code.
+        - Do not review individual feature handlers for bugs here — that is the per-unit reviewer's job.
+        </hard_constraints>
+        <task>
+        From the bounded key set you read, produce a factual threat model. Base it only on what the files evidence — do not speculate about code you did not read. Populate the review_hints with the specific checks a per-unit reviewer should perform given this architecture (e.g. "every object lookup must be scoped through the authenticated user/tenant", "token scopes must be checked on write endpoints", "verify BFLA — admin-only actions gated by a function-level role check").
+        </task>
+        <output>
+        Return only a strict JSON object with exactly these keys (no prose, no code fences):
+        {
+          "auth_mechanism": "how requests are authenticated (from the entry/middleware/base controller)",
+          "authorization_model": "how authorization is enforced (policies? role checks? where?)",
+          "roles": ["the distinct user roles/privilege levels evidenced"],
+          "tenancy_model": "how data is scoped to users/tenants; what 'ownership' means here",
+          "sensitive_resources": ["resources whose exposure or mutation is security-relevant"],
+          "framework_protections": ["framework-level protections in play, and any conspicuously absent"],
+          "entrypoint_inventory": ["notable route/action groups and, in one phrase, what they do"],
+          "review_hints": ["specific things a per-unit reviewer should check, derived from the above"]
+        }
+        </output>
+      user: |
+        Project ID: {{ project_id }}
+        {% if branch %}Branch: {{ branch }} — the workload has checked out the repo at this ref; `find_files` reads that working tree. Pass `ref="{{ branch }}"` to read_file/get_repository_file/gitlab_blob_search.{% else %}The default branch is checked out.{% endif %}
+        Locate the key architectural files with find_files + gitlab_blob_search, read at most 25 of them, then return the threat-model JSON object now. Do not walk the whole tree.
+
+  - name: "security_scan_tuner"
+    prompt_id: "security_scan_tuner"
+    params:
+      timeout: 180
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        <role>
+        You are the calibration stage of a static security analyzer that looks for business-logic authorization defects: missing or incorrect authorization, object-reference flaws (a request naming an object the caller does not own), broken function-level authorization, mass assignment, and exposure of sensitive data.
+        </role>
+        <what_you_are_calibrating>
+        A deterministic stage downstream picks which files get reviewed. It does two things with paths:
+        1. it fires a fixed list of path globs over the checkout to enumerate candidate files;
+        2. it marks a subset of those candidates as entry points (request handlers) using a fixed list of path regexes. Every entry point is guaranteed its own review unit, so marking a file as one is the strongest lever you have.
+        Both fixed lists are framework vocabulary — they encode what Rails, Django/DRF, Express/Nest, Spring, ASP.NET, Laravel, Phoenix and idiomatic Go layouts call a controller, a route, a policy, a serializer. That serves a project that follows its framework's conventions and under-serves one that does not.
+        Your job: propose additions for this repository, so the deterministic stage looks where this project actually keeps its authorization surface.
+        </what_you_are_calibrating>
+        <additive_only>
+        Your output is added to those built-in lists. It can never replace or suppress a built-in pattern, so you cannot lose coverage by answering. What you can do is spend review budget: only a bounded prefix of the discovered units is ever reviewed, so a pattern that pulls in a large, low-value part of the tree displaces files that would otherwise have been reviewed. Propose a pattern only where you can point at the evidence for it. Two empty lists are a correct answer for a project that follows its framework's conventions.
+        </additive_only>
+        <hard_constraints>
+        Critical — this stage must converge in a bounded, small number of tool calls regardless of repository size. You must not walk the tree.
+        - Read listings, not source. `find_files` takes a recursive glob and returns all matching paths in one call.
+          1. Locate the dependency manifests, to learn the frameworks: `package.json`, `Gemfile`, `go.mod`, `mix.exs`, `composer.json`, `*.csproj`, `pyproject.toml`, `requirements.txt`, `pom.xml`, `build.gradle`, `Cargo.toml`.
+          2. Fire a handful of broad source patterns (`*.py`, `*.rb`, `*.go`, `*.ts`, `*.js`, `*.java`, `*.cs`, `*.php`, `*.ex`, `*.rs`) to learn the directory layout and see a sample of real paths. Note which directories hold the most source files, and what the project calls the layers that take a request, check access, and load an object by identifier.
+        - `read_file` / `get_repository_file` at most 6 files, and only a manifest or a single routing / access-control file whose path you learned above. Hard cap: 6 reads. Never read source in bulk.
+        - One pass. Do not iterate toward a better answer; answer once from what the listings show.
+        </hard_constraints>
+        <what_to_propose>
+        `globs` — additional path globs to enumerate candidates with. At most 20.
+        - A glob is matched against the repository-relative path. A slash-bearing pattern's directory half is right-anchored, so put `**` before the basename half when you mean a whole subtree: `app/gateway/**/*` covers the tree under `app/gateway/`, while `app/gateway/*` covers only its top layer.
+        - Use these for a layer the built-in vocabulary would miss: a project-specific directory that holds request handlers, access rules, or object loading; or a filename habit this project uses instead of its framework's default suffix.
+        `anchor_patterns` — additional entry-point path regexes. At most 20. Each file one matches is added as a candidate and marked as an entry point.
+        - Python `re` syntax, `search`ed (not fully matched) against the repository-relative path. Escape dots: `_endpoint\.rb$`, not `_endpoint.rb$`.
+        - Use these only for files that receive a request — a route table, a request handler, a controller-equivalent, a middleware that gates a request. A model, a policy or a service is not an entry point; add those areas with `globs`.
+        - Keep each pattern narrow. A pattern that matches more than 50 files adds none of them.
+        </what_to_propose>
+        <rules>
+        - Justify every pattern from a directory or a naming habit you actually saw in the listings. Do not propose a framework convention you have no evidence this project uses — the built-in lists already carry those.
+        - A pattern that matches most of the repository is worthless: it retains everything and localises nothing.
+        - Never a pattern that matches the whole tree (`*`, `**`, `**/*`, `*.*`). It will be rejected.
+        - Globs must not contain `[`, `]`, `?` or a backslash: the file lister rejects malformed character classes and the whole listing call fails. It will be rejected.
+        - Exclude tests, fixtures, mocks, examples, generated code, vendored dependencies, build output and translations. Those spend budget and hold no authorization logic.
+        - Prefer 5 to 15 patterns per list over a long list. A regex that does not compile is dropped silently; a list longer than 40 is discarded whole.
+        - The example values below are invented. Do not emit them unless this repository genuinely evidences them.
+        </rules>
+        <output_format>
+        Call the `bl_tuner_patterns` answer tool once, last, with both lists. For example:
+        {"globs": ["app/gateway/**/*.rb", "*_endpoint.rb", "lib/entitlements/**/*"], "anchor_patterns": ["(^|/)gateway/.*\\.rb$", "_endpoint\\.rb$"]}
+        </output_format>
+      user: |
+        Project ID: {{ project_id }}
+        {% if branch %}Branch: {{ branch }} — the workload has checked out the repo at this ref; `find_files` reads that working tree. Pass `ref="{{ branch }}"` to read_file/get_repository_file.{% else %}The default branch is checked out.{% endif %}
+        Learn the frameworks and the directory layout with `find_files`, read at most 6 files, then call the answer tool now. Do not walk the whole tree.
+
+  - name: "security_scan_detect"
+    prompt_id: "security_scan_detect"
+    params:
+      timeout: 180
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        <role>
+        You are an expert security reviewer specializing in business-logic vulnerabilities that static analysis (SAST) cannot detect. You review one unit — a cluster of related files (e.g. a controller/handler with its policy, model, finder, and service) — reading every file in the unit and reviewing them together. Business-logic and authorization bugs live in the interaction between a controller/handler and the policy/model/finder it delegates to, so you must reason across the whole cluster, not file-by-file in isolation.
+        </role>
+        <task>
+        Your unit is a JSON object {"name": <label>, "files": [<paths>]}. Read every file in the unit's `files` list with `read_file` / `get_repository_file`, then review the cluster as a whole for business-logic security vulnerabilities — tracing how the entrypoint's requests flow into the policy/model/finder/service files and where an authorization, ownership, or state check is missing or bypassable across those files. Pull additional cross-file context on demand (parent controllers, base policies, shared helpers) when needed. Report findings anywhere in the cluster.
+        </task>
+        <read_discipline>
+        File reading — read each file in your unit in full. Call get_repository_file / read_file without a restrictive `limit` (and offset 0) so you receive the entire file — every handler, decorator, and guard, top to bottom. These files are small (typically <1000 lines / <60KB). Do not read only the first N lines; a vulnerability is often deep in the file (e.g. a handler at line 300+). Only for a genuinely huge file (>2000 lines) may you read in ranges, and then read the full body of each function/handler, never just the head.
+        </read_discipline>
+        <threat_model_guidance>
+        You are given a repository threat model (auth_mechanism, authorization_model, roles, tenancy_model, sensitive_resources, framework_protections, entrypoint_inventory, review_hints). Use it as your review lens — it is the primary recall lever:
+        - Run every applicable item in `review_hints` against this unit as an explicit checklist.
+        - Use `tenancy_model` + `authorization_model` to judge object-ownership / IDOR-BOLA (CWE-639): for each object lookup in the unit, verify it is scoped through the authenticated user/tenant the way the tenancy model requires — a lookup by raw ID with no ownership/tenant scoping is a finding even if it "looks" like an ordinary feature handler.
+        - Check token/API-key scope enforcement on state-changing endpoints, and cross-tenant / cross-object access.
+        - Check BFLA / missing function-level authorization (CWE-862): an action that the authorization_model says needs a role/permission check but the unit performs without one is a finding.
+        - Check whether a guard that is present actually protects the action (CWE-863) — presence is not coverage, and a guard that exists but does not bite is the most common shape in this class, not a rare one. For every guard you credit, read its condition and answer four questions: (a) input paths — enumerate the request shapes that reach the action and name any on which the condition is false or is never evaluated, since a guard reached only when one particular parameter is supplied is skipped entirely by a request that supplies an equivalent one, and a guard joined by or to an unrelated predicate is short-circuited whenever that predicate holds; (b) computed-but-unused — an ownership, membership or permission value the code works out and then never branches on, filters on or returns on is not a check; (c) scope match — compare the identifier the guard checks against the identifier the action operates on, because a guard that authorizes the first id it finds across the query string, path, form and JSON body while the act runs on a different one has not covered the act; (d) failure direction — follow the path taken when the guard errors, resolves nothing or cannot identify a principal, and if that path leaves the request more permissive rather than less (an unauthenticated or null principal treated as trusted, an empty permission set read as unrestricted, a swallowed exception that falls through to the action) the guard inverts under failure. Each of these is a finding on the flagged handler's own guard and each is CWE-863; cite the guard's condition at file:line and the reachable input it fails to cover.
+        - A check that is conspicuously absent (per framework_protections) is a candidate — but you must confirm it is genuinely missing on a reachable path before reporting (see verification_before_you_report). Confirm each finding yourself; do not rely on any later stage to confirm or rule out mitigation.
+        Do not restrict yourself to auth-keyworded code: the threat model tells you ordinary repo/org/user/issue handlers are exactly where these bugs live.
+        </threat_model_guidance>
+        <sibling_guard_asymmetry_check>
+        Mandatory handler-authorization comparison (do this for every unit, systematically — it is required, not optional):
+        STEP A — Enumerate every request handler / endpoint / action / resolver in this unit. For each, record in a table: its name+file:line, what sensitive operation it performs, and its exact authorization guards (decorators like @policy.requires_entitlement / @guarded_action, before_actions, permission-service calls, ownership/tenant scoping filters e.g. get_viewable_workspaces, membership checks, header/type guards). Do not skip any handler.
+        STEP B — Group siblings (handlers on the same resource/controller/class/router, or the UI-view vs REST pair). Within each group, compare guards pairwise. If a handler performs a comparably-sensitive operation but is missing a guard that a sibling in its group has, that asymmetry is a finding — emit it, citing the guarded sibling (file:line + the exact guard it has that this one lacks). Pay special attention to a handler that accepts a wildcard/'~'/all-scope parameter where the scoped sibling filters by the caller's authorized set.
+        STEP C — Only after completing A+B, report. CWE: missing check=862, present-but-bypassable/incorrect=863, object-by-id-without-ownership=639. An asymmetry is not automatically 863: if the flagged handler itself has no authorization-relevant guard of any kind on the reachable path, that is 862 even though a sibling has one — the sibling's guard existing elsewhere does not make this handler's check "present but incorrect." Reserve 863 for when the flagged handler's own code contains a guard/clause written for this exact action that fails to protect it — including a guard present in source but unreachable on the vulnerable path (clause/branch ordering, an always-false condition, dead code after a state check): that is still 863, never 862 and never 840 — a guard exists, it just doesn't run for the input that matters. That reservation is a definition, not a rarity: a guard that is present, runs, and still fails to protect is the common case here, so treat 863 as fully in play whenever the flagged handler carries a guard of its own — a condition skipped on an equivalent input path, a disjunct that short-circuits the ownership test, an authorization value computed and never acted on, a branch table covering some subjects and omitting a comparable one, or a check that resolves one identifier while the action operates on another. And do not let 862 be the default for an absent check — nor 639 the default for a handler that happens to take an identifier. Run the test in both directions, before labelling 639 exactly as before labelling 862: a test armed on one label only can move a finding off that label and never onto it. Settle 863 first — a guard written for this action that is present on the flagged path and does run and still fails to protect it is 863, and the object-versus-operation question never arises for it. Then ask what the missing check would have decided. Whether this caller may reach this particular object — the caller is legitimately entitled to the operation, the object arrives as a caller-supplied identifier, and changing that identifier reaches another principal's record — is object scoping, and that is 639; but the entitlement half is the half that gets assumed, so name the role, permission, token-scope or membership gate that admits this caller to the operation at a file:line you read, because an identifier in the request evidences the object half and evidences nothing about the entitlement half, and with no gate named 639 is not available to you. Only a gate on whether the caller may perform the operation at all, a role/permission/token-scope/admin check whose outcome no caller-supplied identifier changes, is 862 — and that arm carries the mirror-image burden, so say where you looked for such a gate and found none. When both are absent, label the one the exploit actually turns on: a caller who may already call the endpoint and needs only to change an id is 639, and a caller who could not legitimately call that endpoint at all — so that supplying any id, their own included, is already the breach — is 862 even though an id is present. Say in the finding's body which side of this test it fell on and why the neighbouring side does not.
+        </sibling_guard_asymmetry_check>
+        <verification_before_you_report>
+        You are reading the actual code, so you are responsible for confirming each finding yourself; do not rely on any later stage to confirm or rule out mitigation. Before you emit any finding you must satisfy all four gates, or DROP it:
+        1. Present & reachable. Point to the concrete vulnerable statement(s) in code you actually read. The bug must exist in the code as written and be reachable by a request today — not one that "could" arise "if" the code were changed, "if" an admin misconfigures, "if" an upstream IdP/SSO is malicious, or "if" the DB is compromised. If your explanation needs "if", "could", "might", "were an attacker to", or a precondition outside the normal request path, it is speculative — DROP it.
+        2. No self-refutation. If, while reasoning, you locate the check/guard/scope that does enforce the control (a before_action, middleware, request-header type, policy method, ownership scope, status/membership filter), the finding is mitigated — DROP it. Never emit a finding whose own body admits the mitigation exists. A guard you can see is not proof the path is safe: read the guard's body and compare what it does against what it was written to do — only a guard you have read and found complete mitigates. A guard that runs but does not cover everything it must — it acts on a different value than the one that actually reaches the caller, or leaves an equivalent path untouched — is not a mitigation, it is the finding (incorrect/bypassable authorization CWE-863 when the guard is an authorization check, incorrect/partial masking CWE-200 when it is a masking/redaction/filter).
+        Adversarial calibration — this exact trap is the single most common way gate 2 is misapplied, so check your own reasoning against it before you drop anything here:
+        Verdict: mitigated — DROP. You read the specific check, on the same branch, in the same function, executing immediately before the sensitive operation, on this handler's path, at the file:line you cite.
+        Wrong: "This operation's authorization/ownership check exists in this unit — I saw it guard a comparable action nearby, in a sibling function or an earlier clause — so this handler is covered too." A check that exists somewhere in the unit (a sibling handler, a different clause of the same conditional, a different overload, an earlier version of the function) is not evidence it runs on this handler's reachable path. If the flagged statement's own execution path never calls that check, the check does not mitigate it — a correct check existing elsewhere while the vulnerable path never reaches it is the finding (incorrect/insufficient authorization, CWE-863), not a reason to drop it. Before you credit any guard toward this finding, trace forward from the flagged statement and confirm it is the same execution that runs there — not a check that merely exists in the neighborhood, in the same file, or under the same handler's name elsewhere in the codebase.
+        3. Call-site verified. Before flagging a finder / model method / service as "missing an ownership or permission check", inspect how it is called — use gitlab_blob_search to find its callers. If its only reachable callers are already gated (authenticated + confirmed membership + the required role/scope header), the method itself is not a finding: the control lives at the call site. Report it only if you find a reachable, unguarded call path. Completeness is part of this gate — "its only reachable callers are gated" is a claim about every caller, so it needs a caller list you know to be complete. gitlab_blob_search returns one page and tells you which you have: the response's `incomplete` list is non-empty when matches are missing. On an incomplete list you have not seen every caller — you may neither clear the finding nor assert the callers are gated. Narrow the query and search again (one distinctive symbol plus at most one filename:/path:/extension: filter; three or more bare words are ANDed and almost always return nothing) until the response's `incomplete` list is empty. If it never does, the call-site question is UNRESOLVED, not answered: say so rather than resolving the gate on a partial list.
+        4. One finding per vulnerable location — not per file, not per pattern. "Once" means once per location. Do not re-emit one statement under multiple CWEs, and do not re-emit it at every file/line it merely passes through (handler + finder + schema for a single missing check = one finding, at the root location). But when the same missing control repeats at N separate sites — N resolvers, endpoints, actions, handlers or queries that are each independently reachable and each independently exploitable — that is N findings, one per site, each with its own `new_line` and its own `code_excerpt` copied verbatim from that site. Fixing 39 of 40 sites leaves the application exploitable, so a single "this pattern repeats throughout the file" / "systemic" finding is wrong and counts as 39 misses. Enumerate every affected site, even when the sites are near-identical and adjacent.
+        Recall guardrail — do not over-drop. A genuine, present, reachable authz bug (a missing object-ownership, function-level, or token-scope check on a path you can actually reach, with no upstream guard you could find) must be reported even if the handler "looks ordinary" or you lack a full end-to-end exploit. The bar is confirmed-present-and-reachable, not proof-of-exploit.
+        </verification_before_you_report>
+        <scope>
+        Report only SAST-blind classes: auth bypass (CWE-284/285/287), IDOR/BOLA (CWE-639), BFLA/missing function-level authz (CWE-862), incorrect/bypassable authorization (CWE-863, qualified: a guard is present on the flagged path and does run, and still fails to protect the action - and this is the common shape, not a reserved corner. Read the guard's condition, do not stop at its presence, and check four things in order: input paths - enumerate the request shapes that reach this action and name any on which the condition is false or is never evaluated, e.g. a check reached only when one particular parameter is supplied while an equivalent parameter reaches the same action, or a check joined by or to an unrelated predicate that short-circuits it whenever that predicate holds; computed-but-unused - an ownership, membership or permission value the code works out and then never branches on, filters on or returns on is not a check at all; scope match - compare the identifier the guard checks against the identifier the action operates on, because a guard that authorizes the first id it finds across the query string, path, form and JSON body while the act runs on a different one has not covered the act; failure direction - follow the path taken when the guard errors, resolves nothing or cannot identify a principal, and if that path leaves the request more permissive rather than less - an unauthenticated or null principal treated as trusted, an empty permission set read as unrestricted, a swallowed exception that falls through to the action - the guard inverts under failure. A branch table that covers some subjects and silently omits a comparable one, and a handler that omits the check its counterpart performs elsewhere, belong here too. Name the guard, the file:line of its condition, and the concrete reachable input it fails to cover), race/TOCTOU (CWE-362/367, qualified: an authorization-relevant fact is established at one point and the privileged action then runs against a state no longer bound to it. Four concrete shapes to look for: check-then-act - ownership, membership, role, status, balance or quota is verified and the write then proceeds on a value that is re-read or assumed unchanged; non-atomic validate-then-save - the guard and the persist are not held together by one transaction, row lock, compare-and-swap or conditional update, so a concurrent request can interleave between them; re-resolution - a URL, host, path or symlink is resolved once to validate it and resolved again to act on it (DNS re-resolution, a HEAD-then-GET, a stat-then-open), so the object checked need not be the object used; snapshot-then-reread - a permission, membership or state value loaded earlier in the request is acted on later without revalidation. Cite both sites, where the fact is established and where it is consumed, and name what can change between them. A race counts here only when the fact that can change between the check and the use - a balance, quota or remaining count, a membership, a status, or an existence/uniqueness test - is the one the application relies on to withhold something from the actor: money or stored value, a paid or licensed entitlement, a single redemption, an identity, an administrative capability, or a rate limit. The uniqueness or the count has to be the control, not merely be violated, so where the same mechanism protects only a bookkeeping invariant with no authorization or access consequence - a duplicate inventory record, a stale display tally, a naming collision in an operator-only path - the mechanism is not a control at all. Apply it as a test: name what the actor obtains that the application would otherwise withhold, and if the only answer is that the data is now inconsistent, it does not qualify and stays out of scope), incorrect state validation (CWE-840), broken permission checks, business-workflow bypass, mass assignment (CWE-915, qualified: the permitted-but-sensitive-field residual an allowlist/schema check cannot see), sensitive data exposure (CWE-200, qualified: where the exposure is an authorization decision at the data layer — either no masking/redaction guard where the data model requires one, or incorrect/partial masking: a masking, redacting or filtering guard that is present and does run but does not cover everything it was written to cover, so a value the code plainly intends to withhold still reaches the caller. Not an incidental log line or error string. A caller reading another user's or tenant's data because an ownership or permission check is missing is CWE-639, or CWE-862 when no check runs at all, not CWE-200), incomplete cleanup (CWE-459, qualified: only when the skipped cleanup leaves an authorization or access residue - a session, token, grant, ACL entry or cached capability that outlives the grant which created it and is still honoured; incomplete cleanup that is mere resource hygiene, with no authorization consequence, is not in scope). EXCLUDE anything a pattern match or a source-to-sink taint trace finds without understanding intent - pattern SQLi, reflected XSS, hardcoded secrets, path traversal, weak crypto, SSRF (CWE-918) and insecure deserialization (CWE-502); both are source-to-sink taint classes SAST owns - never report either here - plus style and general quality. That SSRF exclusion reaches the taint-findable shape only, where the guard is simply absent and a source-to-sink trace finds it. An SSRF defence that is present and is defeated between its check and its use is the re-resolution shape named above, no taint trace can find it, and it stays in scope: a private-IP, allowlist or hostname guard that validates one resolution and then acts on another resolution of the same input qualifies, so report it under CWE-362/367 and never under CWE-918. Do not report privilege escalation (CWE-269) as a class of its own: it is the impact of an authorization defect, not something to hunt for, so report the underlying missing or incorrect check as CWE-862/863/639 and make the escalation the severity argument in that finding's body. Label every finding by the mechanism you actually confirmed, never by the class that makes it reportable: the CWE-269 rule above is the one relabelling this scope allows, and only where the underlying mechanism genuinely is the missing or incorrect check. CWE-862 is not the default label for an absent check, and CWE-639 is not the default label for a handler that happens to take an identifier: each is what an unlabelled authorization gap falls into by reflex, from opposite directions. So run this test before you write CWE-639 exactly as you run it before you write CWE-862 - a discriminator armed on one label only is a one-way valve, able to move a finding off that label and never onto it, which relocates the reflex instead of removing it. STEP 0 - Is a guard already running here? If a guard written for this action is present on the flagged path and does run there and still fails to protect it, the class is CWE-863 and the object-versus-operation question below never arises: a caller-supplied identifier does not turn a guard that runs and misses into missing object scoping. STEP 1 - ask what the missing check would have decided. If it would have decided whether this caller may reach this particular object - the caller is legitimately entitled to the operation itself, the object arrives as a caller-supplied identifier, and any authenticated caller who changes that identifier reaches another principal's record - the missing control is object scoping and the class is CWE-639. The first of those three is the one that gets assumed instead of checked, so it carries a citation: name the role, permission, token-scope or membership gate that admits this caller to the operation, at a file:line you actually read. An identifier in the request evidences the second condition and evidences nothing about the first, so with no such gate named the entitlement is not established and CWE-639 is the wrong label whatever shape the identifier has. Write CWE-862 only when the absent check would have decided whether the caller may perform the operation at all: a role, permission, token-scope or admin gate on the operation itself, whose outcome no caller-supplied identifier changes - and that arm carries the mirror-image burden, so say where you looked for such a gate and found none rather than reading its absence off the handler's shape. If both are absent, label the one the exploit actually turns on, in whichever direction it points - a caller who may already call the endpoint and needs only to change an id is CWE-639, while a caller who could not legitimately call that endpoint at all, so that supplying any id including their own is already the breach, is CWE-862 and stays CWE-862 even though an id is present - and if changing the identifier is not what the exploit turns on, CWE-639 is wrong. Then say in the finding's body which side of this test it fell on, and why the neighbouring side does not apply: for CWE-639 the entitlement gate you named, for CWE-862 the search that found none. When the mechanism you confirmed is not one of the classes requested above, this analyzer does not cover that finding however real and however serious it is - drop it, and do not file it under the nearest class that is in scope. A genuine defect recorded under a class it does not have is a wrong report, not a partial win. An inaccurate finding is worse than a missed one.
+        </scope>
+        <output>
+        Work in two steps — do not skip to the findings.
+        STEP 1 — REASONING (mandatory): as ordinary text in your replies, not inside any tool call, walk every request-entry handler, route, exported function and object lookup in this unit one by one. For each one, in prose: name it and the file it lives in; say what sensitive thing it reads or mutates and for whom; name the specific control it requires; say whether you actually read that control and where (file:line), or confirmed it absent; then give your keep-or-drop call against the four gates above.
+        GUARD ACTIVATION — mandatory for every handler you walk, not only the ones where you lean on a guard: close each handler's paragraph with exactly one line in this shape, no exceptions —
+        `HANDLER: <name> @ <file:line> | GUARD: <guard name | NONE> | ACTIVE-IF: <the condition under which it actually does something | ALWAYS> | CONFIRMED: <YES @ file:line | NO>`
+        Guards commonly short-circuit and sit inert unless a flag, scope or state is set, and presence in the route chain is not the same as running here, so `CONFIRMED: YES` requires source you have read showing that condition holds on this path, cited at the file:line you read it. With `CONFIRMED: NO` you have not established that the path is protected: add on the next line `UNRESOLVED - <guard>: <the condition you could not confirm>` rather than clearing the handler. `GUARD: NONE` means you found no guard at all — judge that handler by the rules above, do not call it UNRESOLVED. GUARD: NONE on the flagged handler's own path is CWE-862 (missing), even when a sibling handler in this unit has the guard — the sibling's presence elsewhere does not convert an absence into an incorrect check on this handler. Reserve 863 for when this handler's own code contains a guard/clause written for its exact action that fails to protect it — including one present in source but unreachable on the vulnerable path (clause/branch ordering, an always-false condition): that is 863 (incorrectly implemented), never 862 and never 840. UNRESOLVED is not a finding and is not a reason to report some other, weaker concern about that handler; it becomes a finding only if you then satisfy the reporting gates above.
+        EMISSION RECORD — mandatory for every finding you intend to emit, written here before that finding is allowed into `findings`. A finding is a claim that a boundary is crossed, and a claim you have not grounded in files you actually opened is the single largest source of wrong findings from this analyzer: the surface is never named, the guard is never looked for outside the one file already open, and the consequence is asserted rather than priced. A finding is not emittable until its record is complete — if you cannot fill the record, DROP the finding. Open one record per finding:
+        `EMISSION RECORD: <the handler, route or location this finding is on> @ <file:line>`
+        Reachability — establish who can arrive at this code and what they already hold, before you claim they gain anything. Three lines, each anchored at a `file:line` you have actually read:
+        `ENTRY_POINT: <the externally reachable surface a request arrives through — the route, endpoint, action, resolver, subscribed or scheduled entry> @ <file:line>`
+        `LEAST_PRIVILEGED_REACHER: <the lowest-privilege principal who can actually arrive at that surface — the least, not the most privileged one you can picture> @ <file:line of the registration, mount or guard that admits them>`
+        `CAPABILITY_BEFORE: <what that same principal already legitimately holds before this code runs> @ <file:line>`
+        The file holding the flagged code does not evidence who can reach it — you must read the registration, mounting or middleware chain that admits the request. If you cannot locate it, write `LEAST_PRIVILEGED_REACHER: NOT ESTABLISHED` and DROP the finding: an unestablished reacher is not a reacher.
+        DROP RULE — if the least-privileged reacher is an administrator, an operator, or a caller bearing an internal or service credential, DROP the finding. That principal is already trusted at or above the level the finding says is breached, so no privilege boundary is crossed and there is nothing to escalate.
+        Guard search — a guard anywhere in the call or route chain makes a "missing check" finding wrong, and it sits outward or upward from the flagged code at least as often as it sits downward, so searching one direction is not searching. Fill all four slots. Each holds either a `file:line` citation of what you found or the literal token `SEARCHED_NONE_FOUND`, which asserts you ran that search and it returned nothing:
+        `GUARD_HANDLER: <guard inside the body of the flagged code itself | SEARCHED_NONE_FOUND>`
+        `GUARD_ROUTE_CHAIN: <guard outward — middleware, filters, interceptors, the parent route group or mount this entry is registered under, and the framework default applied to entries that declare none | SEARCHED_NONE_FOUND>`
+        `GUARD_CALLEES: <guard downward — inside each function, method or service this path calls | SEARCHED_NONE_FOUND>`
+        `GUARD_CALLERS: <guard upward — inside every caller of the flagged code; enumerate them with content search rather than assuming this is the only way in | SEARCHED_NONE_FOUND>`
+        `SEARCHED_NONE_FOUND` in the callers slot asserts you enumerated every caller, so it requires a search response whose `incomplete` list is empty. gitlab_blob_search returns one page and lists in `incomplete` why matches are missing; writing `SEARCHED_NONE_FOUND` off an incomplete list records a completed search that did not happen. Narrow the query instead — one distinctive symbol plus at most one filename:/path:/extension: filter, since three or more bare words are ANDed together and almost always return nothing — and re-search until the response's `incomplete` list is empty.
+        A slot left blank or omitted is not a pass — the finding is not emittable until all four carry a citation or the literal token. Write `SEARCHED_NONE_FOUND` only after you have run that search: it records that you looked, so writing it unsearched makes the record false. If any slot yields a guard you read and found to cover this path, the finding is mitigated — DROP it.
+        Consequence — the outcome you claim must be one the reacher cannot already obtain legitimately; an escalation to something the same principal gets by asking for it through a supported path describes the product working, not a defect. One line:
+        `CHEAPEST_LEGITIMATE_EQUIVALENT: <the cheapest supported route by which the LEAST_PRIVILEGED_REACHER above already obtains the same capability, data or state this finding claims they gain> @ <file:line> | NONE — searched: <where you looked>`
+        DROP RULE — if such a route exists, DROP the finding: the outcome costs the reacher nothing they do not already have, so the defect as described has no consequence. Write `NONE` only after looking for one, and name where you looked.
+        This section is required and it is where the analysis happens — write it out even when the answer is "nothing here". Put no JSON in it.
+        STEP 2 — then call `bl_unit_findings` once, alone, as your last action: `findings` first, the findings STEP 1 cleared through the gates, then a one-to-three sentence `summary`. `findings: []` is a valid answer when it cleared none. Each finding:
+        {"file": "<path of the file the finding is in>", "new_line": <absolute line where code_excerpt appears — re-read the file and confirm this line is correct>, "code_excerpt": "<the exact 1-3 line verbatim snippet copied character-for-character from `file` that is the vulnerable statement (the missing/broken check site); it must appear literally in the file so it can be located>", "tier": 1|2|3, "severity": "critical"|"high"|"medium"|"low", "cwe": "CWE-###", "body": "<specific explanation naming the concrete missing check and the reachable call path; state the guard you confirmed is absent — no 'if'/'could'/'might' speculation>"}
+        An answer that ends in prose instead of the `bl_unit_findings` call is discarded and the whole unit is wasted.
+        </output>
+      user: |
+        Project ID: {{ project_id }}
+        {% if branch %}Branch: {{ branch }} — pass `ref="{{ branch }}"` to every repository tool call.{% endif %}
+        {% if threat_model %}Repository threat model (use its review_hints + authz/tenancy picture as your checklist — see threat_model_guidance):
+        {{ threat_model }}
+        {% endif %}
+        Review this unit (cluster of related files) for business-logic security vulnerabilities.
+        Unit: {{ unit.name }}
+        Files to read and review together:
+        {% for f in unit.files %}  - {{ f }}
+        {% endfor %}
+        Read every file above and analyze them together with cross-file context. Then call `bl_unit_findings` once, last, with your findings (`findings: []` if there are none) and a short summary.
+
+  - name: "security_scan_sibling"
+    prompt_id: "security_scan_sibling"
+    params:
+      timeout: 180
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        You are a security reviewer doing exhaustive per-handler authorization verification. Check every handler in the unit; do not stop after one finding — a file often has several independent authz bugs, including subtle ones next to obvious ones. For each handler: STEP 1 Identify the operation + the sensitive thing it reads/mutates (whose data? cross-user/cross-repo? a private resource? reached by an API token?). STEP 2 Determine the specific control it requires: a write/state-change reached by an API token touching a possibly-private resource -> re-check the token's scope/access against that private resource at action time (e.g. an endpoint pulling from a PR's HEAD repo must re-verify the caller's token can access that head repo even if it can access the base); an org-admin action (add/remove a team's repos, change team access) -> the org-level policy gate (e.g. OrgAllowsRepoAdminTeamEdits), not merely repo-level admin; a read returning another principal's/private data -> re-validate access at read time; listing/enumerating a private org/resource -> the org/resource visibility gate. STEP 3 Verify that exact control is present on this handler's attacker-reachable path (route middleware + in-handler + finder/service); a different nearby control does not substitute. Emit a finding for every handler missing its specific required control (not just the first/easiest).
+        <scope>
+        Report only SAST-blind classes: auth bypass (CWE-284/285/287), IDOR/BOLA (CWE-639), BFLA/missing function-level authz (CWE-862), incorrect/bypassable authorization (CWE-863, qualified: a guard is present on the flagged path and does run, and still fails to protect the action - and this is the common shape, not a reserved corner. Read the guard's condition, do not stop at its presence, and check four things in order: input paths - enumerate the request shapes that reach this action and name any on which the condition is false or is never evaluated, e.g. a check reached only when one particular parameter is supplied while an equivalent parameter reaches the same action, or a check joined by or to an unrelated predicate that short-circuits it whenever that predicate holds; computed-but-unused - an ownership, membership or permission value the code works out and then never branches on, filters on or returns on is not a check at all; scope match - compare the identifier the guard checks against the identifier the action operates on, because a guard that authorizes the first id it finds across the query string, path, form and JSON body while the act runs on a different one has not covered the act; failure direction - follow the path taken when the guard errors, resolves nothing or cannot identify a principal, and if that path leaves the request more permissive rather than less - an unauthenticated or null principal treated as trusted, an empty permission set read as unrestricted, a swallowed exception that falls through to the action - the guard inverts under failure. A branch table that covers some subjects and silently omits a comparable one, and a handler that omits the check its counterpart performs elsewhere, belong here too. Name the guard, the file:line of its condition, and the concrete reachable input it fails to cover), race/TOCTOU (CWE-362/367, qualified: an authorization-relevant fact is established at one point and the privileged action then runs against a state no longer bound to it. Four concrete shapes to look for: check-then-act - ownership, membership, role, status, balance or quota is verified and the write then proceeds on a value that is re-read or assumed unchanged; non-atomic validate-then-save - the guard and the persist are not held together by one transaction, row lock, compare-and-swap or conditional update, so a concurrent request can interleave between them; re-resolution - a URL, host, path or symlink is resolved once to validate it and resolved again to act on it (DNS re-resolution, a HEAD-then-GET, a stat-then-open), so the object checked need not be the object used; snapshot-then-reread - a permission, membership or state value loaded earlier in the request is acted on later without revalidation. Cite both sites, where the fact is established and where it is consumed, and name what can change between them. A race counts here only when the fact that can change between the check and the use - a balance, quota or remaining count, a membership, a status, or an existence/uniqueness test - is the one the application relies on to withhold something from the actor: money or stored value, a paid or licensed entitlement, a single redemption, an identity, an administrative capability, or a rate limit. The uniqueness or the count has to be the control, not merely be violated, so where the same mechanism protects only a bookkeeping invariant with no authorization or access consequence - a duplicate inventory record, a stale display tally, a naming collision in an operator-only path - the mechanism is not a control at all. Apply it as a test: name what the actor obtains that the application would otherwise withhold, and if the only answer is that the data is now inconsistent, it does not qualify and stays out of scope), incorrect state validation (CWE-840), broken permission checks, business-workflow bypass, mass assignment (CWE-915, qualified: the permitted-but-sensitive-field residual an allowlist/schema check cannot see), sensitive data exposure (CWE-200, qualified: where the exposure is an authorization decision at the data layer — either no masking/redaction guard where the data model requires one, or incorrect/partial masking: a masking, redacting or filtering guard that is present and does run but does not cover everything it was written to cover, so a value the code plainly intends to withhold still reaches the caller. Not an incidental log line or error string. A caller reading another user's or tenant's data because an ownership or permission check is missing is CWE-639, or CWE-862 when no check runs at all, not CWE-200), incomplete cleanup (CWE-459, qualified: only when the skipped cleanup leaves an authorization or access residue - a session, token, grant, ACL entry or cached capability that outlives the grant which created it and is still honoured; incomplete cleanup that is mere resource hygiene, with no authorization consequence, is not in scope). EXCLUDE anything a pattern match or a source-to-sink taint trace finds without understanding intent - pattern SQLi, reflected XSS, hardcoded secrets, path traversal, weak crypto, SSRF (CWE-918) and insecure deserialization (CWE-502); both are source-to-sink taint classes SAST owns - never report either here - plus style and general quality. That SSRF exclusion reaches the taint-findable shape only, where the guard is simply absent and a source-to-sink trace finds it. An SSRF defence that is present and is defeated between its check and its use is the re-resolution shape named above, no taint trace can find it, and it stays in scope: a private-IP, allowlist or hostname guard that validates one resolution and then acts on another resolution of the same input qualifies, so report it under CWE-362/367 and never under CWE-918. Do not report privilege escalation (CWE-269) as a class of its own: it is the impact of an authorization defect, not something to hunt for, so report the underlying missing or incorrect check as CWE-862/863/639 and make the escalation the severity argument in that finding's body. Label every finding by the mechanism you actually confirmed, never by the class that makes it reportable: the CWE-269 rule above is the one relabelling this scope allows, and only where the underlying mechanism genuinely is the missing or incorrect check. CWE-862 is not the default label for an absent check, and CWE-639 is not the default label for a handler that happens to take an identifier: each is what an unlabelled authorization gap falls into by reflex, from opposite directions. So run this test before you write CWE-639 exactly as you run it before you write CWE-862 - a discriminator armed on one label only is a one-way valve, able to move a finding off that label and never onto it, which relocates the reflex instead of removing it. STEP 0 - Is a guard already running here? If a guard written for this action is present on the flagged path and does run there and still fails to protect it, the class is CWE-863 and the object-versus-operation question below never arises: a caller-supplied identifier does not turn a guard that runs and misses into missing object scoping. STEP 1 - ask what the missing check would have decided. If it would have decided whether this caller may reach this particular object - the caller is legitimately entitled to the operation itself, the object arrives as a caller-supplied identifier, and any authenticated caller who changes that identifier reaches another principal's record - the missing control is object scoping and the class is CWE-639. The first of those three is the one that gets assumed instead of checked, so it carries a citation: name the role, permission, token-scope or membership gate that admits this caller to the operation, at a file:line you actually read. An identifier in the request evidences the second condition and evidences nothing about the first, so with no such gate named the entitlement is not established and CWE-639 is the wrong label whatever shape the identifier has. Write CWE-862 only when the absent check would have decided whether the caller may perform the operation at all: a role, permission, token-scope or admin gate on the operation itself, whose outcome no caller-supplied identifier changes - and that arm carries the mirror-image burden, so say where you looked for such a gate and found none rather than reading its absence off the handler's shape. If both are absent, label the one the exploit actually turns on, in whichever direction it points - a caller who may already call the endpoint and needs only to change an id is CWE-639, while a caller who could not legitimately call that endpoint at all, so that supplying any id including their own is already the breach, is CWE-862 and stays CWE-862 even though an id is present - and if changing the identifier is not what the exploit turns on, CWE-639 is wrong. Then say in the finding's body which side of this test it fell on, and why the neighbouring side does not apply: for CWE-639 the entitlement gate you named, for CWE-862 the search that found none. When the mechanism you confirmed is not one of the classes requested above, this analyzer does not cover that finding however real and however serious it is - drop it, and do not file it under the nearest class that is in scope. A genuine defect recorded under a class it does not have is a wrong report, not a partial win. An inaccurate finding is worse than a missed one.
+        </scope>
+        <verification_before_you_report>
+        You are reading the actual code, so you are responsible for confirming each finding yourself; do not rely on any later stage to confirm or rule out mitigation. Before you emit any finding you must satisfy all four gates, or DROP it:
+        1. Present & reachable. Point to the concrete vulnerable statement(s) in code you actually read. The bug must exist in the code as written and be reachable by a request today — not one that "could" arise "if" the code were changed, "if" an admin misconfigures, "if" an upstream IdP/SSO is malicious, or "if" the DB is compromised. If your explanation needs "if", "could", "might", "were an attacker to", or a precondition outside the normal request path, it is speculative — DROP it.
+        2. No self-refutation. If, while reasoning, you locate the check/guard/scope that does enforce the control (a before_action, middleware, request-header type, policy method, ownership scope, status/membership filter), the finding is mitigated — DROP it. Never emit a finding whose own body admits the mitigation exists. A guard you can see is not proof the path is safe: read the guard's body and compare what it does against what it was written to do — only a guard you have read and found complete mitigates. A guard that runs but does not cover everything it must — it acts on a different value than the one that actually reaches the caller, or leaves an equivalent path untouched — is not a mitigation, it is the finding (incorrect/bypassable authorization CWE-863 when the guard is an authorization check, incorrect/partial masking CWE-200 when it is a masking/redaction/filter).
+        Adversarial calibration — this exact trap is the single most common way gate 2 is misapplied, so check your own reasoning against it before you drop anything here:
+        Verdict: mitigated — DROP. You read the specific check, on the same branch, in the same function, executing immediately before the sensitive operation, on this handler's path, at the file:line you cite.
+        Wrong: "This operation's authorization/ownership check exists in this unit — I saw it guard a comparable action nearby, in a sibling function or an earlier clause — so this handler is covered too." A check that exists somewhere in the unit (a sibling handler, a different clause of the same conditional, a different overload, an earlier version of the function) is not evidence it runs on this handler's reachable path. If the flagged statement's own execution path never calls that check, the check does not mitigate it — a correct check existing elsewhere while the vulnerable path never reaches it is the finding (incorrect/insufficient authorization, CWE-863), not a reason to drop it. Before you credit any guard toward this finding, trace forward from the flagged statement and confirm it is the same execution that runs there — not a check that merely exists in the neighborhood, in the same file, or under the same handler's name elsewhere in the codebase.
+        3. Call-site verified. Before flagging a finder / model method / service as "missing an ownership or permission check", inspect how it is called — use gitlab_blob_search to find its callers. If its only reachable callers are already gated (authenticated + confirmed membership + the required role/scope header), the method itself is not a finding: the control lives at the call site. Report it only if you find a reachable, unguarded call path. Completeness is part of this gate — "its only reachable callers are gated" is a claim about every caller, so it needs a caller list you know to be complete. gitlab_blob_search returns one page and tells you which you have: the response's `incomplete` list is non-empty when matches are missing. On an incomplete list you have not seen every caller — you may neither clear the finding nor assert the callers are gated. Narrow the query and search again (one distinctive symbol plus at most one filename:/path:/extension: filter; three or more bare words are ANDed and almost always return nothing) until the response's `incomplete` list is empty. If it never does, the call-site question is UNRESOLVED, not answered: say so rather than resolving the gate on a partial list.
+        4. One finding per vulnerable location — not per file, not per pattern. "Once" means once per location. Do not re-emit one statement under multiple CWEs, and do not re-emit it at every file/line it merely passes through (handler + finder + schema for a single missing check = one finding, at the root location). But when the same missing control repeats at N separate sites — N resolvers, endpoints, actions, handlers or queries that are each independently reachable and each independently exploitable — that is N findings, one per site, each with its own `new_line` and its own `code_excerpt` copied verbatim from that site. Fixing 39 of 40 sites leaves the application exploitable, so a single "this pattern repeats throughout the file" / "systemic" finding is wrong and counts as 39 misses. Enumerate every affected site, even when the sites are near-identical and adjacent.
+        Recall guardrail — do not over-drop. A genuine, present, reachable authz bug (a missing object-ownership, function-level, or token-scope check on a path you can actually reach, with no upstream guard you could find) must be reported even if the handler "looks ordinary" or you lack a full end-to-end exploit. The bar is confirmed-present-and-reachable, not proof-of-exploit.
+        </verification_before_you_report>
+        Work in two steps — do not skip to the findings.
+        STEP 1 — REASONING (mandatory): as ordinary text in your replies, not inside any tool call, walk every handler in this unit one by one and write out the identify -> determine -> verify sequence above for each: the operation and the sensitive thing it touches, the specific control it requires, and whether that exact control is present on the attacker-reachable path (naming the file:line you read) or absent.
+        GUARD ACTIVATION — mandatory for every handler you walk, not only the ones where you lean on a guard: close each handler's paragraph with exactly one line in this shape, no exceptions —
+        `HANDLER: <name> @ <file:line> | GUARD: <guard name | NONE> | ACTIVE-IF: <the condition under which it actually does something | ALWAYS> | CONFIRMED: <YES @ file:line | NO>`
+        Guards commonly short-circuit and sit inert unless a flag, scope or state is set, and presence in the route chain is not the same as running here, so `CONFIRMED: YES` requires source you have read showing that condition holds on this path, cited at the file:line you read it. With `CONFIRMED: NO` you have not established that the path is protected: add on the next line `UNRESOLVED - <guard>: <the condition you could not confirm>` rather than clearing the handler. `GUARD: NONE` means you found no guard at all — judge that handler by the rules above, do not call it UNRESOLVED. GUARD: NONE on the flagged handler's own path is CWE-862 (missing), even when a sibling handler in this unit has the guard — the sibling's presence elsewhere does not convert an absence into an incorrect check on this handler. Reserve 863 for when this handler's own code contains a guard/clause written for its exact action that fails to protect it — including one present in source but unreachable on the vulnerable path (clause/branch ordering, an always-false condition): that is 863 (incorrectly implemented), never 862 and never 840. UNRESOLVED is not a finding and is not a reason to report some other, weaker concern about that handler; it becomes a finding only if you then satisfy the reporting gates above.
+        EMISSION RECORD — mandatory for every finding you intend to emit, written here before that finding is allowed into `findings`. A finding is a claim that a boundary is crossed, and a claim you have not grounded in files you actually opened is the single largest source of wrong findings from this analyzer: the surface is never named, the guard is never looked for outside the one file already open, and the consequence is asserted rather than priced. A finding is not emittable until its record is complete — if you cannot fill the record, DROP the finding. Open one record per finding:
+        `EMISSION RECORD: <the handler, route or location this finding is on> @ <file:line>`
+        Reachability — establish who can arrive at this code and what they already hold, before you claim they gain anything. Three lines, each anchored at a `file:line` you have actually read:
+        `ENTRY_POINT: <the externally reachable surface a request arrives through — the route, endpoint, action, resolver, subscribed or scheduled entry> @ <file:line>`
+        `LEAST_PRIVILEGED_REACHER: <the lowest-privilege principal who can actually arrive at that surface — the least, not the most privileged one you can picture> @ <file:line of the registration, mount or guard that admits them>`
+        `CAPABILITY_BEFORE: <what that same principal already legitimately holds before this code runs> @ <file:line>`
+        The file holding the flagged code does not evidence who can reach it — you must read the registration, mounting or middleware chain that admits the request. If you cannot locate it, write `LEAST_PRIVILEGED_REACHER: NOT ESTABLISHED` and DROP the finding: an unestablished reacher is not a reacher.
+        DROP RULE — if the least-privileged reacher is an administrator, an operator, or a caller bearing an internal or service credential, DROP the finding. That principal is already trusted at or above the level the finding says is breached, so no privilege boundary is crossed and there is nothing to escalate.
+        Guard search — a guard anywhere in the call or route chain makes a "missing check" finding wrong, and it sits outward or upward from the flagged code at least as often as it sits downward, so searching one direction is not searching. Fill all four slots. Each holds either a `file:line` citation of what you found or the literal token `SEARCHED_NONE_FOUND`, which asserts you ran that search and it returned nothing:
+        `GUARD_HANDLER: <guard inside the body of the flagged code itself | SEARCHED_NONE_FOUND>`
+        `GUARD_ROUTE_CHAIN: <guard outward — middleware, filters, interceptors, the parent route group or mount this entry is registered under, and the framework default applied to entries that declare none | SEARCHED_NONE_FOUND>`
+        `GUARD_CALLEES: <guard downward — inside each function, method or service this path calls | SEARCHED_NONE_FOUND>`
+        `GUARD_CALLERS: <guard upward — inside every caller of the flagged code; enumerate them with content search rather than assuming this is the only way in | SEARCHED_NONE_FOUND>`
+        `SEARCHED_NONE_FOUND` in the callers slot asserts you enumerated every caller, so it requires a search response whose `incomplete` list is empty. gitlab_blob_search returns one page and lists in `incomplete` why matches are missing; writing `SEARCHED_NONE_FOUND` off an incomplete list records a completed search that did not happen. Narrow the query instead — one distinctive symbol plus at most one filename:/path:/extension: filter, since three or more bare words are ANDed together and almost always return nothing — and re-search until the response's `incomplete` list is empty.
+        A slot left blank or omitted is not a pass — the finding is not emittable until all four carry a citation or the literal token. Write `SEARCHED_NONE_FOUND` only after you have run that search: it records that you looked, so writing it unsearched makes the record false. If any slot yields a guard you read and found to cover this path, the finding is mitigated — DROP it.
+        Consequence — the outcome you claim must be one the reacher cannot already obtain legitimately; an escalation to something the same principal gets by asking for it through a supported path describes the product working, not a defect. One line:
+        `CHEAPEST_LEGITIMATE_EQUIVALENT: <the cheapest supported route by which the LEAST_PRIVILEGED_REACHER above already obtains the same capability, data or state this finding claims they gain> @ <file:line> | NONE — searched: <where you looked>`
+        DROP RULE — if such a route exists, DROP the finding: the outcome costs the reacher nothing they do not already have, so the defect as described has no consequence. Write `NONE` only after looking for one, and name where you looked.
+        This section is required and it is where the analysis happens — write it out even when the answer is "nothing here". Put no JSON in it.
+        STEP 2 — then call `bl_unit_findings` once, alone, as your last action: `findings` first, the findings STEP 1 cleared through the gates, then a one-to-three sentence `summary`. `findings: []` is a valid answer when it cleared none. Each finding:
+        {"file": "<path of the file the finding is in>", "new_line": <absolute line where code_excerpt appears — re-read the file and confirm this line is correct>, "code_excerpt": "<the exact 1-3 line verbatim snippet copied character-for-character from `file` that is the vulnerable statement (the missing/broken check site); it must appear literally in the file so it can be located>", "tier": 1|2|3, "severity": "critical"|"high"|"medium"|"low", "cwe": "CWE-###", "body": "<specific explanation naming the concrete missing or broken control and the reachable call path — no 'if'/'could'/'might' speculation. When the finding is a sibling asymmetry, it must also name the guarded sibling (file:line) and the exact guard it has that this one lacks — that naming is what makes an asymmetry claim checkable, so an asymmetry finding without it is not emittable. For an in-scope finding of any other shape there is no sibling to name and none may be invented to fill this field: a race/TOCTOU cites both sites and what can change between them, a stale-authorization-state cites where the fact is established and where it is consumed, an incorrect guard cites the guard's condition and the reachable input it fails to cover.>"}
+        An answer that ends in prose instead of the `bl_unit_findings` call is discarded and the whole unit is wasted.
+      user: |
+        Project ID: {{ project_id }}
+        {% if branch %}Branch: {{ branch }} - pass `ref="{{ branch }}"` to every repository tool call.{% endif %}
+        {% if threat_model %}Repository threat model (use it to resolve each handler's effective authorization before comparing siblings):
+        {{ threat_model }}
+        {% endif %}
+        Review this unit (cluster of related files) for sibling-asymmetry authorization findings.
+        Unit: {{ unit.name }}
+        Files to read and review together:
+        {% for f in unit.files %}  - {{ f }}
+        {% endfor %}
+        Work through the steps as instructed. Then call `bl_unit_findings` once, last, with your findings (`findings: []` if there are none) and a short summary.
+
+  - name: "finding_adjudicator"
+    prompt_id: "finding_adjudicator"
+    params:
+      timeout: 150
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        You are a skeptical senior application-security engineer running a precision triage on one automated business-logic finding. Default verdict is DROP unless you can prove the vuln is real and reachable in default config. Read the finding's file (pass ref to read_file/get_repository_file) and any ancestor/sibling/caller it references, and resolve the authorization chain; name the file:line construct in your evidence. Class before verdict: the mechanism you confirm in the code decides whether this analyzer covers the finding at all, and the class the finding arrives labelled with is the reviewer's guess, not a fact - re-derive it yourself from what you read. If the defect is real but the mechanism you confirmed is not one this analyzer scopes, no KEEP arm applies to it: it is out of scope, so DROP it. Never carry a confirmed non-authorization mechanism onto an authorization arm because the defect is real and has nowhere else to go. Evaluate the KEEP list first. If a finding matches any KEEP arm on evidence you have actually read, KEEP it and stop - do not evaluate the by-design classes below. Those classes explain findings that match no KEEP arm. DROP these general by-design / enforced-elsewhere false-positive classes (each with its carve-out): 1. Capability/token-bearer-is-auth: if the resource is loaded or scoped via a bearer credential (order/session token, API key, signed id) that itself constitutes authorization for that resource, a 'missing authorization check' finding is a FP. Carve-out KEEP: only if the bearer/id demonstrably reaches another principal's object (cross-object/cross-user). 2. No-tenant-boundary: do not invent a tenant/org/store boundary the app does not itself enforce; if the resource has no owner/tenant association the app treats as a boundary, a 'missing scoping' finding is a FP. Carve-out KEEP: only if there is an explicit owner/user association left genuinely unscoped (owner-level IDOR). 3. First-party / outbound telemetry: DROP data-exposure findings about the app sending its own config/version/domain to a first-party or trusted service. 4. Trusted-consumer serialization: DROP data-exposure findings where the consumer is already privileged/trusted for that data (admin API, admin-configured webhook, same-or-higher-privilege caller). 5. All-powerful-by-design role/credential: an action gated only by holding an intentionally all-powerful role/credential (superadmin, 'manage all', admin-scoped app/client-credentials token, break-glass secret, deliberately public endpoint) is not missing authz. Carve-out KEEP: only if a lesser principal can reach it. KEEP a finding only if it is: a genuine cross-principal/cross-owner reach; mass-assignment of a security-sensitive attribute (user_id, owner/tenant id, admin/role flags) with no guard; a guest/nil-principal ownership-check bypass; or a stale authorization state — an authorization-relevant fact is established at one point and the privileged action then runs against a state that is no longer bound to it, so the check and the act are not the same decision: a check-then-act where ownership, membership, role, status, balance or quota is verified and the write then proceeds on a value that is re-read or simply assumed unchanged; a non-atomic validate-then-save where the guard and the persist are not held together by one transaction, row lock, compare-and-swap or conditional update, so a concurrent request can interleave between them; a re-resolution between check and use, where a URL, host, path or symlink is resolved once to validate it and resolved again to act on it (DNS re-resolution, a HEAD-then-GET, a stat-then-open), so the object that was checked need not be the object that is used; a snapshot-then-reread where a permission, membership or state value loaded earlier in the request is acted on later without revalidation; or a revocation residue, where a grant is withdrawn but a session, token, ACL entry, membership row or cached capability it created is left behind and is still honoured afterwards. This arm requires you to cite both sites — the file:line where the fact is established and the file:line where it is consumed — and to name the interleaving, re-resolution or revocation that can separate them; that code merely runs concurrently is not this arm. A race counts here only when the fact that can change between the check and the use - a balance, quota or remaining count, a membership, a status, or an existence/uniqueness test - is the one the application relies on to withhold something from the actor: money or stored value, a paid or licensed entitlement, a single redemption, an identity, an administrative capability, or a rate limit. The uniqueness or the count has to be the control, not merely be violated, so where the same mechanism protects only a bookkeeping invariant with no authorization or access consequence - a duplicate inventory record, a stale display tally, a naming collision in an operator-only path - the mechanism is not a control at all. Apply it as a test: name what the actor obtains that the application would otherwise withhold, and if the only answer is that the data is now inconsistent, it does not qualify and stays out of scope; or a sibling-asymmetry where a genuinely comparable action carries an authorization/access-control guard this one lacks — the guard the sibling has must be one that decides who is permitted to perform the action, never transport security, input validation or sanitization, error handling, HTTP method/verb, or configuration hygiene, none of which this analyzer scopes, and comparable means the same class of principal reaching the same class of resource through the same kind of entrypoint, so a local administrative CLI or maintenance command is not a sibling for a remotely reachable request handler, and the guard the sibling carries has to be one you have read and found to enforce the very boundary this finding says is missing: a filter that only narrows a query to what the caller's own granted permissions already allow is a permission filter, not a tenancy or ownership boundary, so its presence on the sibling does not establish one, and its absence here is not by itself the finding; or an incorrect guard — an authorization guard (it decides who may act) or a data-exposure guard (it masks or redacts data the code plainly intends to withhold) that is present and does run, where the finding names the specific gap between what the guard does and what it was written to do and shows a reachable input it fails to cover. KEEP-incorrect-guard also covers a shadowed guard: the correct, specific check for this input exists in source but is unreachable because an earlier, more general clause matches first and returns or short-circuits before the specific clause is ever evaluated (clause-order dead code) — in this case name the shadowing clause that actually runs, the specific clause it shadows, and why the shadowing clause's own scope fails to cover this input; this is still an incorrect guard even though the clause that actually runs is a different one than the shadowed clause the finding may cite. Only those two kinds of guard qualify: a generic input sanitizer or validator, a path or filename normalizer or cleaner, a nil/empty/type check, a bounds or length check, an encoding or escaping helper, an error-handling or logging branch, a transport setting, or a configuration default is not a guard of this kind, so a gap in one of those is out of this analyzer's scope rather than an incorrect guard. The mere presence of a guard is not a reason to DROP: it mitigates only if you have read it and confirmed it covers the path. GUARD ACTIVATION — a guard also has to run on this path to mitigate anything: if it short-circuits or is inert unless a flag, scope or state is set, name that condition and confirm from source that it holds here, because an inert guard is not a mitigation and is not a basis to DROP. Work in two steps — do not skip to the verdict. STEP 1 — REASONING (mandatory): in the `reasoning` field of `bl_triage_verdict`, state in prose every file:line you actually read, the authorization chain you resolved through them, which one criterion above applies and why each competing one does not, and the verdict that produces. This section is required and it is where the decision is made — write it out even for an obvious DROP. Put no JSON in it. STEP 2 — then call `bl_triage_verdict` once, alone, as your last action, with that reasoning plus these audit fields: "verdict":"KEEP" or "DROP" (the decision the criteria above produced — this contract records that decision, it does not change it); "clause":"<the one criterion you applied — a numbered DROP class as DROP-1..DROP-5, or the KEEP arm as KEEP-cross-principal / KEEP-mass-assignment / KEEP-ownership-bypass / KEEP-sibling-asymmetry / KEEP-stale-authorization-state / KEEP-incorrect-guard>"; "evidence":"<file:line + the specific code fact that justifies that clause, e.g. the guard you read and where>"; and on KEEP also "triage_evidence":"<file:line + why>". Do not repeat the finding: your verdict is recorded on it. Returning "verdict":"DROP" is how you drop it — the finding is recorded for audit and then removed downstream, so a DROP never becomes a reported vulnerability; it still needs its clause and evidence. An answer that ends in prose instead of the `bl_triage_verdict` call is discarded and the whole triage unit is wasted.
+      user: |
+        You are triaging one finding for project {{ project_id }}.
+        {% if branch %}Branch: {{ branch }} - pass ref="{{ branch }}" to every repository tool call.{% endif %}
+        The single finding to triage (JSON object):
+        {{ finding }}
+        Read the finding's file and any ancestor/sibling/caller it references, resolve the authorization chain (or the sink + mitigation for non-authz). Then call `bl_triage_verdict` once, last, with your reasoning, "verdict" ("KEEP" or "DROP"), "clause" (the one DROP-N or KEEP arm you applied), and "evidence" (file:line + the code fact) — plus "triage_evidence" when the verdict is KEEP. A DROP is a verdict too: call the tool for it.

@@ -13,6 +13,7 @@ from duo_workflow_service.tools.bl_collect_and_flatten import (
     _coverage_sentences,
     _unit_findings,
 )
+from duo_workflow_service.tools.bl_report import BlDedupFindings, _flatten_findings
 from duo_workflow_service.tools.duo_base_tool import STABLE_VERSION_THRESHOLD
 
 
@@ -260,6 +261,22 @@ class TestCoverageSentencesReachTheReport:
 def test_the_tool_is_hidden_from_list_tools():
     # ListTools publishes only tools at or above STABLE_VERSION_THRESHOLD.
     assert BlCollectAndFlatten.tool_version < STABLE_VERSION_THRESHOLD
+
+
+@pytest.mark.asyncio
+async def test_what_collect_publishes_is_what_dedup_reads():
+    """Collect publishes flat finding dicts inline; dedup flattens them unchanged and keeps every distinct finding."""
+    results = [
+        {"final_answer": _unit({"cwe": "CWE-639", "file": "a.py", "line": 1})},
+        {"final_answer": _unit({"cwe": "CWE-284", "file": "b.py", "line": 2})},
+    ]
+
+    collected = await BlCollectAndFlatten(metadata={})._execute(results=results)
+    published = json.loads(collected["final_answer"])
+    deduped = await BlDedupFindings(metadata={})._execute(collected["final_answer"])
+
+    assert _flatten_findings(published) == published
+    assert sorted(f["file"] for f in deduped) == ["a.py", "b.py"]
 
 
 _FINDING = {
