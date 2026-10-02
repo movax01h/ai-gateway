@@ -460,6 +460,7 @@ class AbstractWorkflow(ABC):
         )
         audit_collector = AuditEventCollector(
             client=audit_client,
+            workflow_id=self._workflow_id,
             buffer_size=self._audit_event_buffer_size,
             flush_interval_seconds=self._audit_event_flush_interval,
         )

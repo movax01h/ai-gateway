@@ -21,6 +21,9 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
 from duo_workflow_service.agents.web_search import WebSearchState
+from duo_workflow_service.audit_events.collector import AuditEventCollector
+from duo_workflow_service.audit_events.context import audit_collector_context
+from duo_workflow_service.audit_events.event_types import AuditEventType
 from duo_workflow_service.checkpointer.gitlab_workflow import _serialize_channel_blobs
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
@@ -51,6 +54,7 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.tools import MalformedToolCallError, Toolset
+from lib.context import current_model_metadata_context
 from lib.context.approval_sources import (
     approval_sources,
     get_approval_source,
@@ -2298,6 +2302,7 @@ def _web_search_ai_message(msg_id="agent-msg-id"):
             {"type": "text", "text": " Here is what I found."},
         ],
         id=msg_id,
+        response_metadata={"model_name": "claude-haiku-4-5"},
     )
 
 
@@ -2434,6 +2439,131 @@ class TestServerToolResponse:
             if e["message_type"] == MessageTypeEnum.TOOL
         ]
         assert tool_entries == []
+
+
+class TestWebSearchAuditEvent:
+    """Audit events for searches the model runs itself."""
+
+    @pytest.fixture(name="collector")
+    def collector_fixture(self):
+        collector = AuditEventCollector(
+            client=Mock(), workflow_id="42", flush_interval_seconds=1_000
+        )
+        token = audit_collector_context.set(collector)
+        try:
+            yield collector
+        finally:
+            audit_collector_context.reset(token)
+
+    @staticmethod
+    def _captured(collector):
+        return collector._buffer  # pylint: disable=protected-access
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("block", "audits"),
+        [
+            pytest.param(
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_search",
+                    "input": {"query": "gitlab duo"},
+                },
+                True,
+                id="anthropic-search",
+            ),
+            pytest.param(
+                {
+                    "type": "web_search_call",
+                    "id": "ws_1",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "urllib3 CVE"},
+                },
+                True,
+                id="openai-search",
+            ),
+            pytest.param(
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_fetch",
+                    "input": {"url": "https://x"},
+                },
+                False,
+                id="web-fetch-is-not-a-search",
+            ),
+            pytest.param(
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "web_search",
+                    "input": {"query": "gitlab duo"},
+                },
+                False,
+                id="fallback-tool-is-audited-by-the-tool-itself",
+            ),
+        ],
+    )
+    async def test_audits_searches_only(self, chat_agent, collector, block, audits):
+        await chat_agent._build_response(
+            AIMessage(content=[block], id="agent-msg-id"), {"conversation_history": {}}
+        )
+
+        assert len(self._captured(collector)) == (1 if audits else 0)
+
+    @pytest.mark.asyncio
+    async def test_event_carries_session_and_model_identity(
+        self, chat_agent, collector
+    ):
+        metadata = Mock()
+        metadata.llm_definition.provider = "Gemini Enterprise Agent Platform"
+        model_token = current_model_metadata_context.set(metadata)
+        try:
+            await chat_agent._build_response(
+                _web_search_ai_message(), {"conversation_history": {}}
+            )
+        finally:
+            current_model_metadata_context.reset(model_token)
+
+        event = self._captured(collector)[0]
+        assert event.event_type == AuditEventType.AI_WEB_SEARCH_INVOKED
+        assert event.workflow_id == "42"
+        assert (event.model_name, event.provider, event.search_source) == (
+            "claude-haiku-4-5",
+            "Gemini Enterprise Agent Platform",
+            "native",
+        )
+
+    @pytest.mark.asyncio
+    async def test_audits_every_search_in_one_message(self, chat_agent, collector):
+        """Two searches in one response are two separate reaches outside GitLab."""
+        blocks = [
+            {
+                "type": "server_tool_use",
+                "id": block_id,
+                "name": "web_search",
+                "input": {"query": "gitlab duo"},
+            }
+            for block_id in ("srvtu_1", "srvtu_2")
+        ]
+        await chat_agent._build_response(
+            AIMessage(content=blocks, id="agent-msg-id"), {"conversation_history": {}}
+        )
+
+        assert len(self._captured(collector)) == 2
+
+    @pytest.mark.asyncio
+    async def test_no_collector_still_builds_the_card(self, chat_agent):
+        result = await chat_agent._build_response(
+            _web_search_ai_message(), {"conversation_history": {}}
+        )
+
+        assert [e["message_type"] for e in result["ui_chat_log"]] == [
+            MessageTypeEnum.AGENT,
+            MessageTypeEnum.TOOL,
+            MessageTypeEnum.AGENT,
+        ]
 
 
 class TestToolApprovalRequestTracking:

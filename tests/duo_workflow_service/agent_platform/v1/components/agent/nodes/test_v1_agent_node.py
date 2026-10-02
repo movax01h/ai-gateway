@@ -32,6 +32,9 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.audit_events.collector import AuditEventCollector
+from duo_workflow_service.audit_events.context import audit_collector_context
+from duo_workflow_service.audit_events.event_types import AuditEventType
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     COMPACTION_CONTINUE_MESSAGE,
 )
@@ -985,6 +988,85 @@ class TestAgentNodeHistoryOptimization:
                 assert i < compaction_idx, (
                     f"Non-compaction entry at index {i} appears after compaction card at {compaction_idx}"
                 )
+
+
+class TestAgentNodeWebSearchAudit:
+    """Flows bind web search too, and those searches fire no tool callback."""
+
+    @staticmethod
+    def _collector():
+        return AuditEventCollector(
+            client=Mock(), workflow_id="42", flush_interval_seconds=1_000
+        )
+
+    @pytest.fixture(name="search_block")
+    def search_block_fixture(self):
+        return {
+            "type": "server_tool_use",
+            "id": "srvtu_1",
+            "name": "web_search",
+            "input": {"query": "urllib3 CVE"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_run_audits_the_search(
+        self,
+        search_block,
+        mock_ai_message,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        _mock_predefined_runtime_variables,
+    ):
+        completion = copy.copy(mock_ai_message)
+        completion.content = [search_block]
+        completion.response_metadata = {"model_name": "claude-haiku-4-5"}
+        completion.tool_calls = []
+        mock_prompt.ainvoke = AsyncMock(return_value=completion)
+        collector = self._collector()
+
+        token = audit_collector_context.set(collector)
+        try:
+            await agent_node.run(base_flow_state)
+        finally:
+            audit_collector_context.reset(token)
+
+        events = collector._buffer  # pylint: disable=protected-access
+        assert len(events) == 1
+        assert events[0].event_type == AuditEventType.AI_WEB_SEARCH_INVOKED
+        assert events[0].model_name == "claude-haiku-4-5"
+
+    @pytest.mark.asyncio
+    async def test_truncation_retry_audits_the_search_once(
+        self,
+        search_block,
+        mock_ai_message,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """A retried turn re-runs the model, but only the final completion is audited."""
+        truncated = copy.copy(mock_ai_message)
+        truncated.content = [search_block]
+        truncated.response_metadata = {"finish_reason": "length"}
+        truncated.tool_calls = []
+
+        final = copy.copy(mock_ai_message)
+        final.content = [search_block]
+        final.response_metadata = {}
+        final.tool_calls = []
+        mock_prompt.ainvoke = AsyncMock(side_effect=[truncated, final])
+        collector = self._collector()
+
+        token = audit_collector_context.set(collector)
+        try:
+            await agent_node.run(base_flow_state)
+        finally:
+            audit_collector_context.reset(token)
+
+        assert mock_prompt.ainvoke.call_count == 2
+        assert len(collector._buffer) == 1  # pylint: disable=protected-access
 
 
 class TestAgentNodeTruncation:

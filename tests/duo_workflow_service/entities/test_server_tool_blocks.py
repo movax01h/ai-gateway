@@ -7,6 +7,7 @@ from duo_workflow_service.entities.server_tool_blocks import (
     ServerToolResults,
     _is_anthropic_server_tool_result_block,
     _is_anthropic_server_tool_use_block,
+    is_web_search_call,
     split_content_around_server_tools,
     warn_unmatched_server_tool_results,
 )
@@ -275,3 +276,48 @@ def test_split_content_around_server_tools_skips_empty_segments():
         ServerToolBoundary(block=content[0], index=0),
         ServerToolBoundary(block=content[1], index=1),
     ]
+
+
+@pytest.mark.parametrize(
+    ("block", "expected"),
+    [
+        ({"type": "server_tool_use", "name": "web_search", "input": {}}, True),
+        (
+            {
+                "type": "server_tool_use",
+                "name": "web_search",
+                "input": {"query": "gitlab duo"},
+            },
+            True,
+        ),
+        (
+            {
+                "type": "server_tool_use",
+                "name": "web_fetch",
+                "input": {"url": "https://x"},
+            },
+            False,
+        ),
+        ({"type": "web_search_call", "action": {"type": "search"}}, True),
+        # An unmapped action falls back to `web_search`, matching the card builder.
+        ({"type": "web_search_call", "action": {"type": "unknown"}}, True),
+        ({"type": "web_search_call", "action": {"type": "open_page"}}, False),
+        ({"type": "tool_use", "name": "read_file", "input": {}}, False),
+        # The fallback tool answers to the same name; only the type tells them apart.
+        (
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "web_search",
+                "input": {"query": "gitlab duo"},
+            },
+            False,
+        ),
+        ({"name": "web_search", "input": {}}, False),
+        ({}, False),
+        ("a plain text block", False),
+        (None, False),
+    ],
+)
+def test_is_web_search_call(block, expected):
+    assert is_web_search_call(block) is expected

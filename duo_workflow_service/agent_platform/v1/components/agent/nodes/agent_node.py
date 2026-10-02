@@ -27,6 +27,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.audit_events.web_search import capture_web_searches
 from duo_workflow_service.checkpointer.write_mode import (
     compaction_ui_chat_log_update,
 )
@@ -626,6 +627,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     and self._response_schema_tool_choice == "auto"
                 ):
                     self._emit_reasoning(completion)
+
+                capture_web_searches(
+                    completion.content,
+                    completion.response_metadata.get("model_name"),
+                )
 
                 # Append new completion to existing history for replace-based reducer.
                 # The reducer will replace this component's conversation history with

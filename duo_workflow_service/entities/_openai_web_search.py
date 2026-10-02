@@ -9,7 +9,13 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from duo_workflow_service.entities.state import ToolStatus
 
-__all__ = ["card_fields", "is_call_block", "is_known_action", "results_by_call_id"]
+__all__ = [
+    "card_fields",
+    "is_call_block",
+    "is_known_action",
+    "is_web_search_action",
+    "results_by_call_id",
+]
 
 _STATUSES: dict[str, ToolStatus] = {
     "completed": ToolStatus.SUCCESS,
@@ -154,3 +160,8 @@ def card_fields(call_block: dict) -> tuple[str, dict, ToolStatus]:
         _args(action),
         _STATUSES.get(call_block.get("status", ""), ToolStatus.PENDING),
     )
+
+
+def is_web_search_action(call_block: dict) -> bool:
+    """Whether the call searched the web, rather than reading a page it already had."""
+    return _tool_name(_action(call_block)) == "web_search"
