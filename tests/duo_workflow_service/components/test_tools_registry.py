@@ -382,6 +382,7 @@ _outbox = MagicMock(spec=Outbox)
                 "clarification_question",
                 "render_ui",
                 "run_tests",
+                "bl_discover_and_cluster",
             },
         ),
     ],
@@ -492,6 +493,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "find_files": tools.FindFiles(metadata=tool_metadata),
         "grep": tools.Grep(metadata=tool_metadata),
         "mkdir": tools.Mkdir(metadata=tool_metadata),
+        "bl_discover_and_cluster": tools.BlDiscoverAndCluster(metadata=tool_metadata),
         "run_git_command": tools.git.Command(metadata=tool_metadata),
         "handover_tool": tools.HandoverTool,
         "request_user_clarification_tool": tools.RequestUserClarificationTool,
@@ -938,6 +940,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "extract_lines_from_text",
         "finalize_code_review_findings",
         "run_tests",
+        "bl_discover_and_cluster",
     }
 
     assert registry._preapproved_tool_names == default_tools.union(read_write_tools)
@@ -1016,6 +1019,7 @@ async def test_registry_configuration_with_preapproved_tools(
         "extract_lines_from_text",
         "finalize_code_review_findings",
         "run_tests",
+        "bl_discover_and_cluster",
     }
     expected_preapproved = always_enabled_tools.union(read_write_tools)
 

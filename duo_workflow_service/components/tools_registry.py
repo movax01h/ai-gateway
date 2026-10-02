@@ -198,6 +198,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.EditFile,
         tools.Mkdir,
         tools.RunTests,
+        tools.BlDiscoverAndCluster,
     ],
     "use_git": [
         tools.git.Command,
