@@ -20,6 +20,7 @@ from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
 from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
 from ai_gateway.models.v2.chat_litellm import (
+    _WEB_SEARCH_UNAVAILABLE_NOTE,
     ChatLiteLLM,
     _drop_unsupported_web_search,
     _force_gpt_5_max_completion_tokens,
@@ -523,6 +524,90 @@ class TestDropUnsupportedWebSearch:
         forwarded = mock_parent.call_args.kwargs
 
         assert ("web_search_options" in forwarded) is expect_forwarded
+
+
+class TestWebSearchPolicyFallback:
+    POLICY_ERROR = (
+        "Organization Policy constraint constraints/vertexai.allowedPartnerModelFeatures "
+        "violated attempting to use a disallowed feature web_search for Partner model "
+        "claude-sonnet-4-6."
+    )
+
+    @staticmethod
+    def _bad_request(message):
+        return litellm.BadRequestError(
+            message=message, model="claude-sonnet-4-6", llm_provider="vertex_ai"
+        )
+
+    async def _call(self, side_effect, **kwargs):
+        chat = ChatLiteLLM(model="claude-sonnet-4-6")
+        with patch.object(
+            _LChatLiteLLM, "acompletion_with_retry", new=AsyncMock()
+        ) as mock_parent:
+            mock_parent.side_effect = side_effect
+            result = await chat.acompletion_with_retry(
+                model="claude-sonnet-4-6",
+                custom_llm_provider="vertex_ai",
+                messages=[{"role": "user", "content": "hi"}],
+                **kwargs,
+            )
+        return result, mock_parent
+
+    @pytest.mark.asyncio
+    async def test_retries_without_web_search_on_policy_error(self):
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            result, mock_parent = await self._call(
+                [self._bad_request(self.POLICY_ERROR), "response"],
+                web_search_options={},
+            )
+
+        assert self.POLICY_ERROR in mock_log.warning.call_args.kwargs["error"]
+
+        assert result == "response"
+        assert mock_parent.call_count == 2
+        retried = mock_parent.call_args_list[1].kwargs
+        assert "web_search_options" not in retried
+        assert retried["messages"][0] == {"role": "user", "content": "hi"}
+        assert retried["messages"][-1] == {
+            "role": "system",
+            "content": _WEB_SEARCH_UNAVAILABLE_NOTE,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("message", "kwargs"),
+        [
+            pytest.param(
+                "prompt is too long", {"web_search_options": {}}, id="other-error"
+            ),
+            pytest.param(POLICY_ERROR, {}, id="no-web-search"),
+        ],
+    )
+    async def test_reraises(self, message, kwargs):
+        with pytest.raises(litellm.BadRequestError):
+            await self._call([self._bad_request(message)], **kwargs)
+
+    @pytest.mark.asyncio
+    async def test_streaming_retries_without_web_search(self):
+        async def stream():
+            yield streaming_chunk({"content": "answer"}, finish_reason="stop")
+
+        chat = ChatLiteLLM(model="claude-sonnet-4-6", custom_llm_provider="vertex_ai")
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(side_effect=[self._bad_request(self.POLICY_ERROR), stream()]),
+        ) as mock_parent:
+            chunks = [
+                chunk.message.content
+                async for chunk in chat._astream(
+                    messages=[HumanMessage(content="hi")], web_search_options={}
+                )
+            ]
+
+        assert "answer" in chunks
+        assert "web_search_options" in mock_parent.call_args_list[0].kwargs
+        assert "web_search_options" not in mock_parent.call_args_list[1].kwargs
 
 
 @pytest.mark.asyncio
