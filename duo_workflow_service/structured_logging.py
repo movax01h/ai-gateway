@@ -45,7 +45,7 @@ class LoggingConfig(BaseSettings):
         return self
 
 
-def setup_logging():
+def setup_logging(cache_logger_on_first_use: bool = True):
     logging_config = LoggingConfig()
 
     # Initialize AI Gateway logging globals so can_log_request_data() works correctly
@@ -165,7 +165,7 @@ def setup_logging():
             structlog.stdlib.render_to_log_kwargs,
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
+        cache_logger_on_first_use=cache_logger_on_first_use,
     )
 
 

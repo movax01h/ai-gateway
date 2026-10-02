@@ -74,7 +74,7 @@ def json_logging_setup_fixture():
             "DUO_WORKFLOW_LOGGING__JSON_FORMAT": "true",
         },
     ):
-        setup_logging()
+        setup_logging(cache_logger_on_first_use=False)
 
     # Replace the root logger's handler with one writing to our stream
     root_logger = logging.getLogger()
