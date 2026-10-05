@@ -12,9 +12,14 @@ from pydantic import AnyUrl
 
 from ai_gateway.api.v3 import api_router as v3_api_router
 from ai_gateway.api.v4 import api_router as v4_api_router
+from ai_gateway.code_suggestions.base import (
+    CodeSuggestionsMetadata,
+    CodeSuggestionsOutput,
+)
 from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
+from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import Prompt
 from ai_gateway.tracking import SnowplowEventContext
 from lib.feature_flags.context import current_feature_flag_context
@@ -67,6 +72,58 @@ def config_values_fixture(assets_dir):
 
 
 class TestEditorContentCompletion:
+    @pytest.mark.parametrize("mock_suggestions_output_text", ["def search"])
+    def test_token_consumption_in_response(
+        self,
+        mock_client: TestClient,
+        mock_suggestions_output: CodeSuggestionsOutput,
+        route: str,
+    ):
+        tokens = TokensConsumptionMetadata(
+            input_tokens=12,
+            output_tokens=3,
+            context_tokens_sent=5,
+            context_tokens_used=4,
+        )
+        output = mock_suggestions_output._replace(
+            metadata=CodeSuggestionsMetadata(tokens_consumption_metadata=tokens)
+        )
+        data = {
+            "prompt_components": [
+                {
+                    "type": "code_editor_completion",
+                    "payload": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "# Create a fast binary search\n",
+                        "content_below_cursor": "\n",
+                        "language_identifier": "python",
+                    },
+                }
+            ],
+        }
+
+        with patch(
+            "ai_gateway.code_suggestions.CodeCompletions.execute", return_value=output
+        ):
+            response = mock_client.post(
+                route,
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                    "X-Gitlab-Global-User-Id": "test-user-id",
+                },
+                json=data,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["model"]["tokens_consumption_metadata"] == tokens.model_dump()
+        assert body["metadata"]["model"]["tokens_consumption_metadata"] == (
+            tokens.model_dump()
+        )
+
     @pytest.mark.parametrize(
         ("mock_suggestions_output_text", "expected_response"),
         [
