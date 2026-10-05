@@ -102,6 +102,13 @@ def test_the_flow_version_resolves_as_a_semver_constraint():
     assert resolve_version(available, "^1.0.0") == FLOW_VERSION
 
 
+def test_the_flow_declares_its_registry_fields():
+    config = _config()
+    assert config.name
+    assert config.description
+    assert config.product_group == "code_security"
+
+
 def _component(name: str) -> dict:
     return next(c for c in _config().components if c.get("name") == name)
 
