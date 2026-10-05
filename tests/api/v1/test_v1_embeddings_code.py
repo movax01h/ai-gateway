@@ -154,7 +154,7 @@ class BaseTestCodeEmbeddings:
                 None,
                 "openai",
                 "test-embedding-002",
-                None,
+                "dummy_key",
             ),
             (
                 "openai/test-embedding-002",
@@ -166,14 +166,14 @@ class BaseTestCodeEmbeddings:
             (
                 "test-embedding-001",
                 None,
-                "custom_openai",
+                "openai",
                 "test-embedding-001",
-                "dummy_key",  # if custom_llm_provider=custom_openai, a dummy key is set
+                "dummy_key",
             ),
             (
                 "test-embedding-001",
                 "test-api-key",
-                "custom_openai",
+                "openai",
                 "test-embedding-001",
                 "test-api-key",
             ),

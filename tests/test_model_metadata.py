@@ -24,6 +24,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatAnthropicDefinition,
     ChatLiteLLMDefinition,
     ChatOpenAIDefinition,
+    EmbeddingLiteLLMDefinition,
 )
 
 
@@ -108,6 +109,20 @@ def gitlab_bedrock_model_fixture():
     )
 
 
+@pytest.fixture(name="gitlab_embedding_model")
+def gitlab_embedding_model_fixture():
+    return EmbeddingLiteLLMDefinition(
+        gitlab_identifier="embedding_model",
+        name="Self-Hosted Embedding Models",
+        max_context_tokens=200000,
+        family=["embedding"],
+        params={
+            "model": "embedding",
+            "custom_llm_provider": "openai",
+        },
+    )
+
+
 @pytest.fixture(name="mock_models")
 def mock_models_fixture(
     gitlab_model1,
@@ -116,6 +131,7 @@ def mock_models_fixture(
     fireworks_model,
     gitlab_vertex_model,
     gitlab_bedrock_model,
+    gitlab_embedding_model,
 ):
     return {
         "gitlab_model1": gitlab_model1,
@@ -124,6 +140,7 @@ def mock_models_fixture(
         "test_model": fireworks_model,
         "claude_sonnet_4_6_vertex": gitlab_vertex_model,
         "claude_sonnet_4_6_bedrock": gitlab_bedrock_model,
+        "embedding_model": gitlab_embedding_model,
     }
 
 
@@ -450,6 +467,73 @@ class TestModelMetadataToParams:
             "model": "mixtral-8x7b",
             "custom_llm_provider": "custom_openai",
             "timeout": 10,
+        }
+
+    def test_dummy_key_set_for_custom_openai(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "gitlab_model1",
+                "endpoint": HttpUrl("https://self-hosted.internal/v1"),
+                "identifier": "mixtral-8x7b",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://self-hosted.internal/v1",
+            "api_key": "dummy_key",
+            "model": "mixtral-8x7b",
+            "custom_llm_provider": "custom_openai",
+            "timeout": 10,
+        }
+
+    def test_embedding_with_identifier_no_provider(self):
+        """The provider is left unset so the definition's own `custom_llm_provider` applies."""
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "embedding_model",
+                "endpoint": HttpUrl("https://proxy.internal/v1"),
+                "identifier": "text-embedding-005",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://proxy.internal/v1",
+            "model": "text-embedding-005",
+        }
+
+    def test_embedding_with_identifier_no_provider_preserves_api_key(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "embedding_model",
+                "endpoint": HttpUrl("https://proxy.internal/v1"),
+                "api_key": "admin-token",
+                "identifier": "text-embedding-005",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://proxy.internal/v1",
+            "api_key": "admin-token",
+            "model": "text-embedding-005",
+        }
+
+    def test_embedding_with_identifier_with_provider(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "embedding_model",
+                "endpoint": HttpUrl("https://proxy.internal/v1"),
+                "identifier": "openai/text-embedding-3-small",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://proxy.internal/v1",
+            "model": "text-embedding-3-small",
+            "custom_llm_provider": "openai",
         }
 
 

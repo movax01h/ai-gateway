@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
+from ai_gateway.model_selection.models import ModelClassProvider
 from lib.context import StarletteUser
 
 log = structlog.stdlib.get_logger("model_metadata")
@@ -118,7 +119,13 @@ class ModelMetadata(BaseModelMetadata):
                 if provider in PROVIDERS_WITHOUT_API_BASE:
                     params.pop("api_base", None)
             else:
-                params["custom_llm_provider"] = "custom_openai"
+                # litellm.embedding() does not allow 'custom_openai' as 'custom_llm_provider'
+                # left blank to use the values defined in ai_gateway/model_selection/models.yml
+                if (
+                    self.llm_definition.model_class_provider
+                    != ModelClassProvider.LITE_LLM_EMBEDDING
+                ):
+                    params["custom_llm_provider"] = "custom_openai"
                 params["model"] = self.identifier
 
         managed_provider = getattr(
