@@ -163,10 +163,9 @@ Always run these `make` targets rather than invoking `pytest`, `mypy`,
 suite and takes no path argument, so to run specific tests use
 `poetry run pytest <path>`. `make test`, `check-mypy`, `check-ruff`, and
 `check-pylint` install required dependencies first via `install-test-deps`/
-`install-lint-deps`, and `check-mypy` also passes `--exclude` flags (for
-`scripts/vendor/*` and the known-noncompliant files listed under
-`MYPY_LINT_TODO_DIR` in the Makefile) that a bare `mypy` invocation would
-silently skip, causing local results to disagree with CI.
+`install-lint-deps`, and `check-mypy` also passes an `--exclude` flag for
+`scripts/vendor/*` that a bare `mypy` invocation would silently skip, causing
+local results to disagree with CI.
 
 The `install-*-deps` steps run `poetry install`, which needs network
 access. In network-restricted environments (e.g. agent sandboxes) with a
@@ -450,7 +449,7 @@ the pipeline — no code change helps.
 
 Lefthook automatically runs on commit (skipped on `main`), scoped to staged files:
 
-1. **Python files** (`*.py`): `check-mypy` (filtered to mypy-safe files), `check-ruff`, `check-pylint`, `check-codespell`, `check-docformatter`, `check-editorconfig`
+1. **Python files** (`*.py`): `check-mypy`, `check-ruff`, `check-pylint`, `check-codespell`, `check-docformatter`, `check-editorconfig`
 1. **GraphQL files** (`*.graphql`): `check-graphql`
 1. **Proto files** (`contract/*.proto`): `lint-proto` (buf lint)
 1. **Markdown files** (`*.md`): vale and markdownlint

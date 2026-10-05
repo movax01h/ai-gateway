@@ -20,9 +20,6 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${TESTS_DIR} \
 	${INTEGRATION_TESTS_DIR}
 
-MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/code_suggestions/completions.py" \
-	--exclude "ai_gateway/code_suggestions/handler.py"
-
 EDITORCONFIG_LINT_WORKING_DIR ?=
 CODESPELL_LINT_WORKING_DIR ?=
 YAMLLINT_WORKING_DIR ?= .
@@ -216,13 +213,8 @@ check-pylint: install-lint-deps
 
 .PHONY: check-mypy
 check-mypy: install-lint-deps
-ifeq ($(TODO),true)
-	@echo "Running mypy check todo..."
-	@poetry run mypy ${LINT_WORKING_DIR}
-else
 	@echo "Running mypy check..."
-	@poetry run mypy ${LINT_WORKING_DIR} ${MYPY_LINT_TODO_DIR} --exclude "scripts/vendor/*"
-endif
+	@poetry run mypy ${LINT_WORKING_DIR} --exclude "scripts/vendor/*"
 
 .PHONY: check-codespell
 check-codespell: install-lint-deps

@@ -410,10 +410,29 @@ class TestCodeCompletions:
             assert chunks == expected_chunks
 
             mock_generate.assert_called_with(
-                use_case.prompt_builder.build().prefix,
+                use_case.prompt_builder.build().get_normalized_prefix(),
                 use_case.prompt_builder.build().suffix,
                 True,
             )
+
+    async def test_execute_uses_first_output_when_model_returns_list(
+        self, use_case_with_billing: CodeCompletions
+    ):
+        use_case_with_billing.model.generate = AsyncMock(
+            return_value=[
+                TextGenModelOutput(text="first", score=0),
+                TextGenModelOutput(text="second", score=0),
+            ]
+        )
+
+        actual = await use_case_with_billing.execute(
+            prefix="def hello",
+            suffix=":",
+            file_name="test.py",
+            editor_lang="python",
+        )
+
+        assert cast(CodeSuggestionsOutput, actual).text == "first"
 
     @pytest.mark.parametrize(
         (
@@ -462,6 +481,7 @@ class TestCodeCompletions:
 
         mock_prompt = Mock(spec=Prompt)
         mock_prompt.prefix = "test_prefix"
+        mock_prompt.get_normalized_prefix.return_value = "test_prefix"
         mock_prompt.suffix = "test_suffix"
         mock_prompt.metadata = Mock(spec=MetadataPromptBuilder)
         mock_prompt.metadata.components = {

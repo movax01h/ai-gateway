@@ -409,7 +409,7 @@ class LiteLlmTextGenModel(TextGenModelBase):
     async def generate(
         self,
         prefix: str,
-        suffix: str = "",
+        suffix: str | None = "",
         stream: bool = False,
         temperature: float = 0.95,
         max_output_tokens: int = 16,
