@@ -23,6 +23,10 @@ from duo_workflow_service.bl_security.executor_output import (
     EXIT_CODE_HEADER,
     executor_truncated,
 )
+from duo_workflow_service.bl_security.finding_text import (
+    fallback_title,
+    markdown_description,
+)
 from duo_workflow_service.bl_security.findings import (
     TRIAGE_CLAUSE_MAX,
     WHITESPACE_RUN,
@@ -36,11 +40,7 @@ from duo_workflow_service.bl_security.findings import (
     norm_excerpt,
     verdict_of,
 )
-from duo_workflow_service.bl_security.model_text import (
-    escape_markdown,
-    model_impact,
-    model_title,
-)
+from duo_workflow_service.bl_security.model_text import model_impact, model_title
 from duo_workflow_service.bl_security.target_files import resolve_target_files
 from duo_workflow_service.executor.action import _execute_action, _read_file_fully
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
@@ -216,42 +216,6 @@ def _collapse_after_reanchor(
     # Last, quotes of different parts of one handler; ``contents`` holds the file texts read by
     # `_verify_anchors`.
     return _merge_overlapping_spans(_collapse_contained_excerpts(kept), contents or {})
-
-
-_TITLE_MAX = 120
-
-# "e.g.", "i.e.", "vs." and "etc." do not end a sentence.
-_SENTENCE_END = re.compile(
-    r"(?<!e\.g\.)(?<!i\.e\.)(?<!\bvs\.)(?<!etc\.)(?<=[.!?])\s", re.I
-)
-
-_TITLE_MARKUP = re.compile(r"[`*\[\]<>]")
-
-
-def _title_of(cwe: str, body: str) -> str:
-    """``CWE-<n>: `` plus the body's first sentence, as one plain line of at most ``_TITLE_MAX`` characters.
-
-    A longer sentence is cut on a word boundary and ends with an ellipsis. The body is model text, so non-printable
-    characters and markdown/HTML markup are removed first. The title is not part of the vulnerability's identity; the id
-    is built from the file and fingerprint.
-    """
-    prefix = f"CWE-{cwe}: " if cwe else ""
-    text = "".join(ch if ch.isprintable() else " " for ch in str(body))
-    text = " ".join(_TITLE_MARKUP.sub("", text).split())
-    sentence = _SENTENCE_END.split(text, 1)[0]
-    if not sentence:
-        return prefix + "Business-logic finding"
-    room = _TITLE_MAX - len(prefix)
-    if len(sentence) > room:
-        cut = sentence[: room - 1]
-        sentence = (cut.rsplit(" ", 1)[0] or cut) + "\u2026"
-    return prefix + sentence
-
-
-def _with_impact(impact: str, body: str) -> str:
-    """The description with the model's impact sentence, escaped as markdown text, as its first paragraph."""
-    lead = escape_markdown(impact)
-    return f"{lead}\n\n{body}" if body else lead
 
 
 def _fingerprint_of(finding: dict) -> str:
@@ -958,8 +922,15 @@ class BlWriteSastReport(DuoBaseTool):
                     identifiers.append(owasp)
             vuln = {
                 "id": vid,
-                "name": _title_of(cwe, body),
-                "description": body,
+                "name": fallback_title(cwe, file),
+                "description": markdown_description(
+                    cwe=cwe,
+                    file=file,
+                    line=line,
+                    excerpt=excerpt_of(f),
+                    body=body,
+                    impact=model_impact(f.get("impact")),
+                ),
                 "severity": sev,
                 "location": {"file": file, "start_line": line},
                 "identifiers": identifiers
@@ -981,14 +952,11 @@ class BlWriteSastReport(DuoBaseTool):
             excerpt = excerpt_of(f)
             if excerpt:
                 vuln["raw_source_code_extract"] = excerpt
-            # The model's own title and impact, when it gave usable ones: they
-            # are written for the customer. Otherwise the text above stays.
+            # The model's own title, when it gave a usable one: it is written
+            # for the customer. Otherwise the fixed title above stays.
             title = model_title(f.get("title"))
             if title:
                 vuln["name"] = title
-            impact = model_impact(f.get("impact"))
-            if impact:
-                vuln["description"] = _with_impact(impact, body)
             # Only a scope_offset signature: GitLab matches on the highest-priority
             # algorithm present, and that ranks above hash and location.
             if signature:

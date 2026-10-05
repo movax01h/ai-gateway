@@ -503,8 +503,8 @@ response_schemas:
               body:
                 type: string
                 minLength: 1
-              # Optional, so a finding without them is still valid. Without them
-              # the report writer keeps its own title and description.
+              # Optional, so a finding without them is still valid. The report
+              # writer falls back to a fixed title and impact per CWE.
               title:
                 type: string
                 description: >-

@@ -27,8 +27,8 @@ def test_the_model_title_and_impact_are_used_when_sane():
     assert v["name"] == (
         "Checkout accepts another user's basket on POST /rest/basket/:id/checkout"
     )
-    assert v["description"] == (
-        "Any signed-in user can check out another user's basket.\n\nProof."
+    assert v["description"].startswith(
+        "**What**\n\nAny signed-in user can check out another user's basket.\n\n"
     )
 
 
@@ -41,7 +41,7 @@ def test_the_impact_leads_the_description_when_there_is_no_body():
     }
     (v,) = _writer()._build_report([finding])["vulnerabilities"]
 
-    assert v["description"] == "Any user reads it."
+    assert v["description"] == "**What**\n\nAny user reads it.\n\n**Where**\n\n`a.ts`"
 
 
 def test_the_model_impact_is_escaped_as_markdown_text():
@@ -54,7 +54,9 @@ def test_the_model_impact_is_escaped_as_markdown_text():
     }
     (v,) = _writer()._build_report([finding])["vulnerabilities"]
 
-    assert v["description"] == "\\# `@admin` can read \\<token>\n\nProof."
+    assert v["description"].startswith(
+        "**What**\n\n\\# `@admin` can read \\<token>\n\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -122,5 +124,5 @@ def test_title_and_impact_survive_dedup_triage_and_report():
 
     assert v["name"] == "Webhook secret returned to a non-admin caller"
     assert v["description"].startswith(
-        "Any project member can read the webhook secret.\n\n"
+        "**What**\n\nAny project member can read the webhook secret.\n\n"
     )
