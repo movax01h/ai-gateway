@@ -18,6 +18,7 @@ from packaging.version import Version
 from pydantic import BaseModel, Field
 
 from contract import contract_pb2
+from duo_workflow_service.bl_security.cwe_guidance import SOLUTIONS, owasp_identifier
 from duo_workflow_service.bl_security.executor_output import (
     EXIT_CODE_HEADER,
     executor_truncated,
@@ -939,6 +940,11 @@ class BlWriteSastReport(DuoBaseTool):
                         "url": f"https://cwe.mitre.org/data/definitions/{cwe}.html",
                     }
                 )
+                # Never before the CWE: identifiers[0] is the primary identifier,
+                # and GitLab's vulnerability identity and tracking depend on it.
+                owasp = owasp_identifier(cwe)
+                if owasp:
+                    identifiers.append(owasp)
             vuln = {
                 "id": vid,
                 "name": _title_of(cwe, body),
@@ -954,6 +960,9 @@ class BlWriteSastReport(DuoBaseTool):
                 # into `vid` above: disclosure must not change identity.
                 "details": {**_anchor_details(f), **_triage_details(f)},
             }
+            solution = SOLUTIONS.get(cwe)
+            if solution:
+                vuln["solution"] = solution
             # The schema's own home for "an unsanitized excerpt of the affected
             # source code" - the quote the check above was made against. Without
             # it the verdict is unauditable downstream: a reader cannot re-derive
