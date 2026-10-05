@@ -195,7 +195,7 @@ def _published_paths(component: dict) -> set[str]:
     if component.get("for_each"):
         return {f"{name}.{key}" for key in PUBLISHED_SUBKEYS}
     if component.get("tool_name"):
-        # Every deterministic step publishes its outcome; the closing routers read it.
+        # Every deterministic step publishes its outcome; its router reads it.
         outcome = {f"{name}.execution_result"}
         if component["tool_name"] not in _TOOL_FIXTURE_ARGS:
             return outcome  # no later step reads its response
@@ -449,7 +449,7 @@ class TestStageGraph:
     def test_one_linear_path_from_entry_to_end_runs_every_component(self):
         successors: dict[str, list[str]] = {}
         for route in _config().routers:
-            # A closing step's only route is its "success" one.
+            # A deterministic step's only route is its "success" one.
             target = route.get("to") or route["condition"]["routes"]["success"]
             successors.setdefault(route["from"], []).append(target)
         assert all(len(targets) == 1 for targets in successors.values())
