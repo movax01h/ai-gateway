@@ -421,7 +421,7 @@ class ConfigBedrockGuardrail(BaseModel):
         Annotated[
             str,
             Field(
-                pattern=r"^(|([1-9][0-9]{0,7})|(DRAFT))$",
+                pattern=r"^(([1-9][0-9]{0,7})|(DRAFT))$",
                 description="The guardrail version ('DRAFT' or a numeric string).",
             ),
         ]
@@ -642,7 +642,7 @@ class Config(BaseSettings):
         default=None,
         description=(
             "Bedrock guardrail configuration as a JSON string. "
-            "Set via AIGW_BEDROCK_GUARDRAIL_CONFIG_JSON. "
+            "Set via AIGW_BEDROCK_GUARDRAIL_CONFIG. "
             'Example: \'{"guardrailIdentifier": "abc123", "guardrailVersion": "1", "trace": "disabled"}\''
         ),
     )

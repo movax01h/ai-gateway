@@ -602,11 +602,11 @@ class ChatLiteLLM(BaseChatModel):
             "custom_llm_provider": self.custom_llm_provider,
             **self.model_kwargs,
         }
-        guardrail_params = bedrock_guardrail_params(
-            self.custom_llm_provider, self.bedrock_guardrail_config
+        params.update(
+            bedrock_guardrail_params(
+                self.custom_llm_provider, self.bedrock_guardrail_config
+            )
         )
-        if guardrail_params:
-            params["guardrailConfig"] = guardrail_params["guardrailConfig"]
         return params
 
     @property
