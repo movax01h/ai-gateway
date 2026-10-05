@@ -640,6 +640,7 @@ class TestTriageVerdictAudit:
             "identifiers",
             "details",
             "raw_source_code_extract",
+            "solution",
         }
         assert not {"verdict", "clause", "evidence", "triage_evidence"} & set(vuln)
         assert not {"verdict", "clause", "evidence", "triage_evidence"} & set(
