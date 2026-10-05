@@ -16,6 +16,7 @@ The job needs no provider credentials and sends no requests. It replaces the HTT
 ## What the job checks
 
 - **Request schemas.** For Fireworks, Vertex AI and Bedrock, the request litellm builds must match the schema in `tests/litellm_bump/schemas/`. The schema holds the URL path, the header names and the structure of the body, not the values.
+- **Empty assistant text.** A tool-call turn with empty text must not be rewritten into a placeholder in the request (#2335). The test runs with our `litellm_empty_text_patch`, like production.
 
 A passing job proves the request schema is unchanged. It does not prove that the providers accept the request, or that credentials work.
 
