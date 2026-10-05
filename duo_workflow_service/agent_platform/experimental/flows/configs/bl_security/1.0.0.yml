@@ -23,6 +23,10 @@ components:
   - name: "grounding"
     type: AgentComponent
     prompt_id: "security_scan_grounding"
+    # The prompt caps reads at 25 files; 50 leaves room for the searches. At
+    # the limit the agent must answer with what it has read; if it keeps
+    # calling tools, AgentStuckError fails the run.
+    max_cycles: 50
     inputs:
       - from: "context:project_id"
         as: "project_id"

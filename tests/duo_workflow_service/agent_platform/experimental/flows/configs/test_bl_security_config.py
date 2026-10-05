@@ -479,6 +479,15 @@ class TestStageGraph:
             assert "model" not in entry, entry["name"]
             assert "model_tags" not in entry, entry["name"]
 
+    def test_every_agent_sets_its_own_cycle_cap(self):
+        uncapped = [
+            c["name"]
+            for c in _config().components
+            if c["type"] == "AgentComponent" and "max_cycles" not in c
+        ]
+        assert not uncapped
+        assert _component("grounding")["max_cycles"] == 50
+
 
 def _tool_names(toolset: list) -> list[str]:
     """Tool names in a toolset, whose entries are names or ``{name: options}`` maps."""
