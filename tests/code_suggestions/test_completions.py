@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser
+from litellm.exceptions import MidStreamFallbackError, RateLimitError
 
 from ai_gateway.code_suggestions import CodeCompletions
 from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestionsOutput
+from ai_gateway.code_suggestions.completions import FallbackModel
 from ai_gateway.code_suggestions.processing.post.completions import PostProcessor
 from ai_gateway.code_suggestions.processing.pre import PromptBuilderPrefixBased
 from ai_gateway.code_suggestions.processing.typing import (
@@ -1210,3 +1212,212 @@ class TestCodeCompletions:
         )
 
         assert agent_model.generate.call_args.args[0]["suffix"] == ""
+
+    def _use_case_with_fallback(self, primary_generate, fallback_generate=None):
+        primary = Mock(spec=AgentModel)
+        primary.input_token_limit = 16
+        primary.generate = primary_generate
+        primary_metadata = Mock()
+        primary_metadata.name = "codestral_2508_vertex"
+        primary_metadata.provider = "gitlab"
+
+        fallback = Mock(spec=AgentModel)
+        fallback.generate = fallback_generate or AsyncMock()
+        fallback_metadata = Mock()
+        fallback_metadata.name = "codestral_2508_fireworks"
+        fallback_metadata.provider = "fireworks_ai"
+        fallback_post_processor = Mock()
+        fallback_post_processor.return_value.process = AsyncMock(
+            return_value="world() post-processed"
+        )
+        fallback_factory = Mock(
+            return_value=FallbackModel(
+                fallback, fallback_metadata, fallback_post_processor
+            )
+        )
+
+        use_case = CodeCompletions(
+            primary,
+            Mock(spec=TokenStrategyBase),
+            Mock(spec=BillingEventService),
+            model_metadata=primary_metadata,
+            fallback_factory=fallback_factory,
+        )
+        use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
+        use_case.prompt_builder.build.return_value = Prompt(
+            prefix="def hello",
+            suffix=":",
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prefix": MetadataCodeContent(length=10, length_tokens=2),
+                    "suffix": MetadataCodeContent(length=10, length_tokens=2),
+                }
+            ),
+        )
+
+        return use_case, primary, fallback
+
+    @staticmethod
+    async def _execute(use_case, stream=False):
+        return await use_case.execute(
+            prefix="def hello",
+            suffix=":",
+            file_name="test.py",
+            editor_lang="python",
+            stream=stream,
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_falls_back_after_rate_limit(self):
+        use_case, primary, fallback = self._use_case_with_fallback(
+            AsyncMock(side_effect=_rate_limit_error()),
+            AsyncMock(return_value=_completion_output("world()")),
+        )
+
+        actual = cast(CodeSuggestionsOutput, await self._execute(use_case))
+
+        assert actual.text == "world() post-processed"
+        assert actual.model_metadata.name == "codestral_2508_fireworks"
+        assert use_case.model is fallback
+        fallback.generate.assert_awaited_once_with(
+            primary.generate.await_args.args[0], False
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("wrapped_mid_stream", [False, True])
+    async def test_execute_stream_falls_back_before_the_first_chunk(
+        self, wrapped_mid_stream
+    ):
+        error = _rate_limit_error()
+        if wrapped_mid_stream:
+            error = _mid_stream_error(error)
+        use_case, _primary, fallback = self._use_case_with_fallback(
+            AsyncMock(return_value=_stream_of(error=error)),
+            AsyncMock(return_value=_stream_of("wor", "ld()")),
+        )
+
+        stream = cast(
+            AsyncIterator[CodeSuggestionsChunk],
+            await self._execute(use_case, stream=True),
+        )
+
+        assert use_case.model_metadata.name == "codestral_2508_fireworks"
+        assert [chunk.text async for chunk in stream] == ["wor", "ld()"]
+        fallback.generate.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("primary_generate", "stream", "with_fallback", "expected_error"),
+        [
+            (
+                lambda: AsyncMock(side_effect=_rate_limit_error()),
+                False,
+                False,
+                RateLimitError,
+            ),
+            (
+                lambda: AsyncMock(side_effect=ValueError("boom")),
+                False,
+                True,
+                ValueError,
+            ),
+            (
+                lambda: AsyncMock(
+                    return_value=_stream_of(error=_mid_stream_error(ValueError("boom")))
+                ),
+                True,
+                True,
+                MidStreamFallbackError,
+            ),
+            (
+                lambda: AsyncMock(
+                    return_value=_stream_of("wor", error=_rate_limit_error())
+                ),
+                True,
+                True,
+                RateLimitError,
+            ),
+        ],
+    )
+    async def test_execute_does_not_fall_back(
+        self, primary_generate, stream, with_fallback, expected_error
+    ):
+        use_case, _primary, fallback = self._use_case_with_fallback(primary_generate())
+        if not with_fallback:
+            use_case.fallback_factory = None
+
+        with pytest.raises(expected_error):
+            result = await self._execute(use_case, stream=stream)
+            if stream:
+                _chunks = [chunk.text async for chunk in result]
+
+        fallback.generate.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_execute_keeps_the_primary_without_a_rate_limit(self, stream):
+        use_case, _primary, _fallback = self._use_case_with_fallback(
+            AsyncMock(
+                return_value=_stream_of() if stream else _completion_output("world()")
+            )
+        )
+
+        result = await self._execute(use_case, stream=stream)
+        if stream:
+            assert [chunk.text async for chunk in result] == []
+
+        use_case.fallback_factory.assert_not_called()
+        assert use_case.model_metadata.name == "codestral_2508_vertex"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_execute_raises_when_the_fallback_is_rate_limited_too(self, stream):
+        def rate_limited():
+            if stream:
+                return AsyncMock(return_value=_stream_of(error=_rate_limit_error()))
+
+            return AsyncMock(side_effect=_rate_limit_error())
+
+        use_case, primary, fallback = self._use_case_with_fallback(
+            rate_limited(), rate_limited()
+        )
+
+        with pytest.raises(RateLimitError):
+            await self._execute(use_case, stream=stream)
+
+        primary.generate.assert_awaited_once()
+        fallback.generate.assert_awaited_once()
+        assert use_case.model_metadata.name == "codestral_2508_fireworks"
+
+
+def _rate_limit_error():
+    return RateLimitError(
+        message="quota", llm_provider="vertex_ai", model="codestral-2"
+    )
+
+
+def _mid_stream_error(original):
+    return MidStreamFallbackError(
+        message=str(original),
+        model="codestral-2",
+        llm_provider="vertex_ai",
+        original_exception=original,
+        is_pre_first_chunk=True,
+    )
+
+
+def _completion_output(text):
+    return TextGenModelOutput(
+        text=text,
+        score=0,
+        safety_attributes=SafetyAttributes(),
+        metadata=Mock(output_tokens=10, spec_set=["output_tokens"]),
+    )
+
+
+async def _stream_of(*texts, error=None):
+    for text in texts:
+        yield TextGenModelChunk(text=text)
+
+    if error:
+        raise error

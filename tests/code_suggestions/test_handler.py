@@ -361,6 +361,19 @@ async def test_code_completion_passes_llm_definition_for_self_hosted(
 async def _complete_with_pinned_model(
     identifier, payload, agent_factory, prompt_registry
 ):
+    kwargs = await _complete_with_metadata(
+        create_model_metadata({"provider": "gitlab", "identifier": identifier}),
+        payload,
+        agent_factory,
+        prompt_registry,
+    )
+
+    return kwargs["model_metadata"]
+
+
+async def _complete_with_metadata(
+    model_metadata, payload, agent_factory, prompt_registry
+):
     current_user = MagicMock()
     current_user.global_user_id = "user-1"
 
@@ -392,14 +405,12 @@ async def _complete_with_pinned_model(
             snowplow_event_context=snowplow_event_context,
             completions_agent_factory=agent_factory,
             completions_amazon_q_factory=MagicMock(),
-            model_metadata=create_model_metadata(
-                {"provider": "gitlab", "identifier": identifier}
-            ),
+            model_metadata=model_metadata,
             config=config,
             using_cache=True,
         )
 
-    return agent_factory.call_args.kwargs["model_metadata"]
+    return agent_factory.call_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -499,3 +510,29 @@ async def test_code_completion_passes_role_arn_to_amazon_q_engine(
     amazon_q_factory.assert_called_once_with(
         model__current_user=current_user, model__role_arn=expected_role_arn
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+@pytest.mark.parametrize("pinned", [False, True])
+async def test_code_completion_wires_the_rate_limit_fallback_for_the_default_only(
+    payload, agent_factory, prompt_registry, pinned
+):
+    model_metadata = (
+        create_model_metadata(
+            {"provider": "gitlab", "identifier": "codestral_2508_vertex"}
+        )
+        if pinned
+        else None
+    )
+    fallback_factory = MagicMock()
+
+    with patch.object(
+        handler_module, "build_rate_limit_fallback", return_value=fallback_factory
+    ) as mock_build:
+        kwargs = await _complete_with_metadata(
+            model_metadata, payload, agent_factory, prompt_registry
+        )
+
+    assert mock_build.call_count == (0 if pinned else 1)
+    assert kwargs.get("fallback_factory") is (None if pinned else fallback_factory)

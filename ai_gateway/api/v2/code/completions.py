@@ -46,6 +46,7 @@ from ai_gateway.code_suggestions import (
     CodeSuggestionsChunk,
 )
 from ai_gateway.code_suggestions.base import CodeSuggestionsOutput
+from ai_gateway.code_suggestions.fallback import build_rate_limit_fallback
 from ai_gateway.code_suggestions.processing.ops import lang_from_filename
 from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessor,
@@ -438,6 +439,7 @@ def _resolve_agent_code_completions(
     using_cache: bool,
     config: Configuration,
     gitlab_identifier: Optional[str] = None,
+    with_fallback: bool = False,
 ) -> CodeCompletions:
     # Use the GitLab identifier if provided (from model_provider: "gitlab")
     # Otherwise, try to map legacy provider/model_name to GitLab identifier
@@ -485,11 +487,26 @@ def _resolve_agent_code_completions(
             detail="Unauthorized to access code completions",
         )
 
+    fallback_factory = None
+    if with_fallback:
+        fallback_factory = build_rate_limit_fallback(
+            model_metadata,
+            prompt_registry,
+            current_user,
+            fireworks_api_base_url=config.fireworks_api_base_url(),
+            model_keys=model_keys,
+            using_cache=using_cache,
+            mock_model_responses=config.mock_model_responses(),
+            excl_post_process=config.feature_flags.excl_post_process(),
+            fireworks_score_thresholds=config.feature_flags.fireworks_score_threshold(),
+        )
+
     return completions_agent_factory(
         model__prompt=prompt,
         model__llm_definition=model_metadata.llm_definition,
         post_processor=post_processor,
         model_metadata=model_metadata,
+        fallback_factory=fallback_factory,
     )
 
 
@@ -616,7 +633,8 @@ def _build_code_completions(
     )
 
     gitlab_identifier: Optional[str] = None
-    if _is_gitlab_default(payload):
+    is_gitlab_default = _is_gitlab_default(payload)
+    if is_gitlab_default:
         payload.model_provider = KindModelProvider.GITLAB
         payload.model_name = None
 
@@ -670,6 +688,7 @@ def _build_code_completions(
             using_cache=using_cache,
             config=config,
             gitlab_identifier=gitlab_identifier,
+            with_fallback=is_gitlab_default,
         )
 
         _track_code_suggestions_event(tracking_event, internal_event_client)

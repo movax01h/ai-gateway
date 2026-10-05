@@ -14,6 +14,7 @@ from ai_gateway.model_metadata import (
     ModelMetadataByTag,
     build_default_code_completions_metadata,
     build_default_feature_setting_metadata,
+    build_fallback_code_completions_metadata,
     completion_context_max_percent_for_model_metadata,
     create_model_metadata,
     create_model_metadata_by_tag,
@@ -25,6 +26,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
     ChatOpenAIDefinition,
 )
+from ai_gateway.model_selection.types import DefaultModelEntry
 
 
 @pytest.fixture(name="gitlab_model1")
@@ -1200,6 +1202,96 @@ class TestBuildDefaultCodeCompletionsMetadata:
         assert isinstance(metadata, FireworksModelMetadata)
         assert metadata.api_key is None
         assert "api_key" not in metadata.to_params()
+
+    def _patch_default_pool(self, entries, models):
+        pool = UnitPrimitiveConfig(
+            feature_setting="code_completions",
+            unit_primitives=["complete_code"],
+            default_models=entries,
+        )
+        return patch.multiple(
+            ModelSelectionConfig,
+            get_resolved_unit_primitive_config_map=mock.Mock(
+                return_value={"code_completions": pool}
+            ),
+            get_model=mock.Mock(side_effect=lambda identifier: models[identifier]),
+        )
+
+    def _fallback_for(self, current, mock_user):
+        return build_fallback_code_completions_metadata(
+            SimpleNamespace(name=current.gitlab_identifier, llm_definition=current),
+            fireworks_api_base_url="https://api.fireworks.ai/inference/v1",
+            model_keys={"fireworks_provider_api_key": "fw_secret"},
+            user=mock_user,
+        )
+
+    def test_fallback_is_drawn_from_the_other_weighted_defaults(
+        self, fireworks_codestral, vertex_model, mock_user
+    ):
+        entries = [
+            DefaultModelEntry(identifier="codestral_fw", weight=60),
+            DefaultModelEntry(identifier="vertex_codestral", weight=30),
+            DefaultModelEntry(identifier="other_vertex", weight=10),
+        ]
+        models = {
+            "codestral_fw": fireworks_codestral,
+            "vertex_codestral": vertex_model,
+            "other_vertex": vertex_model,
+        }
+
+        with (
+            self._patch_default_pool(entries, models),
+            patch(
+                "ai_gateway.model_metadata.random.choices",
+                return_value=["codestral_fw"],
+            ) as mock_choices,
+        ):
+            metadata = self._fallback_for(vertex_model, mock_user)
+
+        mock_choices.assert_called_once_with(
+            ["codestral_fw", "other_vertex"], weights=[60.0, 10.0], k=1
+        )
+        assert isinstance(metadata, FireworksModelMetadata)
+        assert metadata.name == "codestral_fw"
+        assert metadata.api_key == "fw_secret"
+        assert metadata.session_id == "user-42"
+
+    @pytest.mark.parametrize(
+        ("primary_fixture", "entries"),
+        [
+            (
+                "fireworks_codestral",
+                [
+                    DefaultModelEntry(identifier="codestral_fw", weight=75),
+                    DefaultModelEntry(identifier="vertex_codestral", weight=25),
+                ],
+            ),
+            (
+                "vertex_model",
+                [
+                    DefaultModelEntry(identifier="codestral_fw", weight=0),
+                    DefaultModelEntry(identifier="vertex_codestral", weight=100),
+                ],
+            ),
+            ("vertex_model", [DefaultModelEntry(identifier="vertex_codestral")]),
+        ],
+    )
+    def test_fallback_is_none_when_no_other_default_applies(
+        self,
+        request,
+        primary_fixture,
+        entries,
+        fireworks_codestral,
+        vertex_model,
+        mock_user,
+    ):
+        models = {"codestral_fw": fireworks_codestral, "vertex_codestral": vertex_model}
+
+        with self._patch_default_pool(entries, models):
+            assert (
+                self._fallback_for(request.getfixturevalue(primary_fixture), mock_user)
+                is None
+            )
 
 
 class TestMistralModelMetadata:

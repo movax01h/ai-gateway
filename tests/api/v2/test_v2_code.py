@@ -1317,6 +1317,45 @@ class TestCodeCompletions:
 
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
+        ("model_details", "expected_fallback_calls"),
+        [
+            ({"model_provider": "fireworks_ai", "model_name": "codestral-2508"}, 1),
+            ({}, 1),
+            ({"model_provider": "gitlab", "model_name": "codestral_2508_fireworks"}, 0),
+        ],
+    )
+    def test_rate_limit_fallback_is_wired_for_the_gitlab_default_only(
+        self,
+        mock_client: Mock,
+        mock_prompt_ainvoke: Mock,
+        mock_post_processor: Mock,
+        model_details: Dict[str, str],
+        expected_fallback_calls: int,
+    ):
+        params = {
+            "prompt_version": 2,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+        }
+        params.update(model_details)
+
+        with patch(
+            "ai_gateway.api.v2.code.completions.build_rate_limit_fallback",
+            return_value=None,
+        ) as mock_build:
+            response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        assert mock_prompt_ainvoke.called
+        assert mock_build.call_count == expected_fallback_calls
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
         "allow_llm_cache",
         ["true", "false"],
     )
