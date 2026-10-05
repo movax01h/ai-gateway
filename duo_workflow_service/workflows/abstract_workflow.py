@@ -256,6 +256,10 @@ class AbstractWorkflow(ABC):
         self._preapproved_tools = preapproved_tools
         self._denied_tools: list[str] = []
         self._ask_tools: list[str] = []
+        # Admin per-tool `allow` verdicts from the JWT, kept apart from the client's
+        # own preapproved_tools so v1 flows honour governance without also adopting
+        # client-declared pre-approvals they never accepted before.
+        self._governance_allowed_tools: list[str] = []
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
         self._first_response_metric_recorded = False
@@ -426,6 +430,7 @@ class AbstractWorkflow(ABC):
                     self._preapproved_tools = list(
                         set(policies.allow) - set(self._ask_tools)
                     )
+                    self._governance_allowed_tools = list(self._preapproved_tools)
                 if policies.deny:
                     self._denied_tools = list(
                         set(self._denied_tools) | set(policies.deny)
@@ -573,6 +578,7 @@ class AbstractWorkflow(ABC):
                 allow_client_injected_mcp_tools=self._workflow_config.get(
                     "allow_client_injected_mcp_tools", False
                 ),
+                allowed_tools=self._governance_allowed_tools,
             )
 
             def on_gitlab_status_update(status: WorkflowStatusEventEnum):
