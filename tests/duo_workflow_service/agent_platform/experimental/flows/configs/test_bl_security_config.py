@@ -372,6 +372,12 @@ class TestOptionalRunInputs:
         for (component, name), source in readers.items():
             assert source == f"{BL_CONTEXT}.{name}", component
 
+    def test_each_input_category_declares_a_1x_version_constraint(self):
+        assert _config().version_constraints_by_category() == {
+            "agent_platform_standard_context": "^1.0.0",
+            BL_CONTEXT_CATEGORY: "^1.0.0",
+        }
+
 
 class TestScanDialsAtRuntime:
     """The dials resolve from their input category, and degrade to ``None`` without it."""

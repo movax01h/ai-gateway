@@ -417,6 +417,7 @@ flow:
   entry_point: "grounding"
   inputs:
     - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
       input_schema:
         workload_branch:
           type: string
@@ -435,6 +436,7 @@ flow:
           description: Username of this flow's per-group service account
           optional: true
     - category: agent_platform_bl_security_context
+      version_constraint: "^1.0.0"
       input_schema:
         scan_effort:
           type: string
