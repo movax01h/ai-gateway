@@ -231,11 +231,11 @@ class CompletionLiteLLM(BaseChatModel):
                 kwargs.get("vertex_ai_location") or self.vertex_location
             )
 
-        guardrail_params = bedrock_guardrail_params(
-            self.custom_llm_provider, self.bedrock_guardrail_config
+        completion_args.update(
+            bedrock_guardrail_params(
+                self.custom_llm_provider, self.bedrock_guardrail_config
+            )
         )
-        if guardrail_params:
-            completion_args["guardrailConfig"] = guardrail_params["guardrailConfig"]
 
         inject_user_identity_header(completion_args, self.user_id_header)
 
