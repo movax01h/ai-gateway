@@ -8,7 +8,11 @@ from starlette_context import request_cycle_context
 
 from ai_gateway.code_suggestions import handler as handler_module
 from ai_gateway.code_suggestions.handler import code_completion
-from ai_gateway.model_metadata import FireworksModelMetadata, create_model_metadata
+from ai_gateway.model_metadata import (
+    AmazonQModelMetadata,
+    FireworksModelMetadata,
+    create_model_metadata,
+)
 
 
 @pytest.fixture(name="suggestion")
@@ -366,7 +370,7 @@ async def _complete_with_pinned_model(
     config = MagicMock()
     config.model_keys.return_value = {"fireworks_provider_api_key": "fw-key"}
     config.fireworks_api_base_url.return_value = "https://api.fireworks.ai/inference/v1"
-    config.mock_model_responses = False
+    config.mock_model_responses.return_value = False
 
     with (
         patch.object(
@@ -439,3 +443,59 @@ async def test_code_completion_uses_the_default_model_for_a_non_selectable_pin(
     assert isinstance(resolved, FireworksModelMetadata)
     assert resolved.name == "codestral_2508_fireworks"
     assert resolved.api_key == "fw-key"
+
+
+@pytest.mark.parametrize(
+    ("payload_role_arn", "model_metadata", "expected_role_arn"),
+    [
+        ("arn:payload", None, "arn:payload"),
+        (
+            "arn:payload",
+            AmazonQModelMetadata.model_construct(
+                provider="amazon_q", name="amazon_q", role_arn="arn:metadata"
+            ),
+            "arn:payload",
+        ),
+        (
+            None,
+            AmazonQModelMetadata.model_construct(
+                provider="amazon_q", name="amazon_q", role_arn="arn:metadata"
+            ),
+            "arn:metadata",
+        ),
+        (None, MagicMock(provider="openai"), None),
+        (None, None, None),
+    ],
+)
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_completion_passes_role_arn_to_amazon_q_engine(
+    payload,
+    prompt_registry,
+    snowplow_event_context,
+    engine,
+    payload_role_arn,
+    model_metadata,
+    expected_role_arn,
+):
+    payload.model_provider = "amazon_q"
+    payload.role_arn = payload_role_arn
+    amazon_q_factory = MagicMock(return_value=engine)
+    current_user = MagicMock()
+
+    await code_completion(
+        payload=payload,
+        current_user=current_user,
+        prompt_registry=prompt_registry,
+        stream_handler=AsyncMock(),
+        snowplow_event_context=snowplow_event_context,
+        completions_agent_factory=MagicMock(),
+        completions_amazon_q_factory=amazon_q_factory,
+        internal_event_client=MagicMock(),
+        model_metadata=model_metadata,
+        config=MagicMock(),
+    )
+
+    amazon_q_factory.assert_called_once_with(
+        model__current_user=current_user, model__role_arn=expected_role_arn
+    )

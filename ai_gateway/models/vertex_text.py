@@ -244,7 +244,7 @@ class PalmCodeGenBaseModel(TextGenModelBase):
     async def generate(
         self,
         prefix: str,
-        suffix: str,
+        suffix: str | None,
         stream: bool = False,
         temperature: float = 0.2,
         max_output_tokens: int = 32,
@@ -280,7 +280,7 @@ class PalmCodeBisonModel(PalmCodeGenBaseModel):
     async def generate(
         self,
         prefix: str,
-        suffix: str,
+        suffix: str | None,
         stream: bool = False,
         temperature: float = 0.2,
         max_output_tokens: int = 2048,

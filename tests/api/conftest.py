@@ -9,7 +9,11 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import SimpleChatModel
 from langchain_core.messages import BaseMessage
 
-from ai_gateway.code_suggestions.base import CodeSuggestionsChunk, CodeSuggestionsOutput
+from ai_gateway.code_suggestions.base import (
+    CodeSuggestionsChunk,
+    CodeSuggestionsMetadata,
+    CodeSuggestionsOutput,
+)
 from ai_gateway.code_suggestions.processing.typing import LanguageId
 from ai_gateway.models.base import ModelMetadata as LegacyModelMetadata
 from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
@@ -207,7 +211,7 @@ def mock_suggestions_output_fixture(
             name=mock_suggestions_model, engine=mock_suggestions_engine
         ),
         lang_id=LanguageId.PYTHON,
-        metadata=CodeSuggestionsOutput.Metadata(),  # type: ignore[attr-defined]
+        metadata=CodeSuggestionsMetadata(),
     )
 
 

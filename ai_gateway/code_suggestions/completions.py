@@ -7,6 +7,7 @@ from gitlab_cloud_connector import CloudConnectorUser
 
 from ai_gateway.code_suggestions.base import (
     CodeSuggestionsChunk,
+    CodeSuggestionsMetadata,
     CodeSuggestionsOutput,
     LanguageId,
     increment_lang_counter,
@@ -164,7 +165,7 @@ class CodeCompletions:
         elif isinstance(self.model, AmazonQModel):
             if lang := (editor_lang or resolve_lang_name(file_name)):
                 res = await self.model.generate(
-                    prompt.prefix,
+                    prompt.get_normalized_prefix(),
                     prompt.suffix,
                     file_name,
                     lang.lower(),
@@ -175,12 +176,15 @@ class CodeCompletions:
                 res = None
         else:
             res = await self.model.generate(
-                prompt.prefix, prompt.suffix, stream, **kwargs
+                prompt.get_normalized_prefix(), prompt.suffix, stream, **kwargs
             )
 
         if res:
             if isinstance(res, AsyncIterator):
                 return self._handle_stream(res, user)
+
+            if isinstance(res, list):
+                res = res[0]
 
             return await self._handle_sync(prompt, res, lang_id, user)
 
@@ -189,7 +193,7 @@ class CodeCompletions:
             score=0,
             model_metadata=self._model_metadata(),
             lang_id=lang_id,
-            metadata=CodeSuggestionsOutput.Metadata(
+            metadata=CodeSuggestionsMetadata(
                 tokens_consumption_metadata=self._get_tokens_consumption_metadata(
                     prompt
                 ),
@@ -238,7 +242,7 @@ class CodeCompletions:
             score=response.score,
             model_metadata=self._model_metadata(),
             lang_id=lang_id,
-            metadata=CodeSuggestionsOutput.Metadata(
+            metadata=CodeSuggestionsMetadata(
                 tokens_consumption_metadata=tokens_consumption_metadata,
             ),
         )
@@ -254,8 +258,8 @@ class CodeCompletions:
         self,
         response_text: str,
         prompt: Prompt,
-        lang_id: LanguageId,
-        score: float,
+        lang_id: LanguageId | None,
+        score: float | None,
         max_output_tokens_used: bool,
     ):
         if self.post_processor:
@@ -286,11 +290,10 @@ class CodeCompletions:
                 else 0
             )
 
+            reported_input_tokens = getattr(response.metadata, "input_tokens", None)
             input_tokens = (
-                response.metadata.input_tokens
-                if response.metadata
-                and isinstance(getattr(response.metadata, "input_tokens", None), int)
-                and response.metadata.input_tokens > 0
+                reported_input_tokens
+                if isinstance(reported_input_tokens, int) and reported_input_tokens > 0
                 else estimated_input_tokens
             )
 
