@@ -1,3 +1,9 @@
+name: "Business Logic Security Analyzer"
+description: |
+  Scans a whole repository, or a merge request's changed files, for
+  business-logic security flaws such as broken authorization and tenancy
+  checks, and writes the findings as a SAST report.
+product_group: code_security
 version: "experimental"
 environment: ambient
 
