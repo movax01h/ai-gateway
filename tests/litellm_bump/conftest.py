@@ -5,6 +5,7 @@ is replaced. No request leaves the process and no provider credentials are neede
 """
 
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
 
@@ -159,3 +160,9 @@ def fake_vertex_auth_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(VertexBase, "_ensure_access_token_async", token_async)
     monkeypatch.setattr(VertexBase, "_ensure_access_token", token_sync)
+
+
+@pytest.fixture(name="update_schemas")
+def update_schemas_fixture() -> bool:
+    """True when the schema files should be rewritten instead of compared. Set UPDATE_LITELLM_SCHEMAS=1."""
+    return bool(os.environ.get("UPDATE_LITELLM_SCHEMAS"))  # pylint: disable=direct-environment-variable-reference

@@ -1,0 +1,23 @@
+{
+  "method": "POST",
+  "path": "/inference/v1/completions",
+  "headers": [
+    "authorization",
+    "content-type",
+    "x-stainless-arch",
+    "x-stainless-async",
+    "x-stainless-lang",
+    "x-stainless-os",
+    "x-stainless-package-version",
+    "x-stainless-raw-response",
+    "x-stainless-read-timeout",
+    "x-stainless-retry-count",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version"
+  ],
+  "body": {
+    "max_tokens": "number",
+    "model": "string",
+    "prompt": "string"
+  }
+}

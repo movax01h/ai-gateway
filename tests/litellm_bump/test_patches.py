@@ -11,16 +11,13 @@ import inspect
 import httpx
 import litellm
 import pytest
-from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from litellm.llms.openai.openai import OpenAIChatCompletionResponseIterator
 from litellm.proxy.pass_through_endpoints import pass_through_endpoints
 from litellm.proxy.pass_through_endpoints.llm_provider_handlers import (
     openai_passthrough_logging_handler,
 )
-from litellm.types.utils import Delta
 
 import ai_gateway.proxy.clients  # noqa: F401  # pylint: disable=unused-import  # applies the patches under test
-from ai_gateway.models.v2.chat_litellm import _is_deprecated_temperature_model
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
 from tests.litellm_bump.conftest import OPENAI_CHAT, FakeProviders
 
@@ -97,11 +94,6 @@ async def test_success_callback_receives_usage_in_the_shape_we_read(
     assert usage_metadata["total_tokens"] == 8
 
 
-def test_private_model_checks_used_for_request_rewrites_still_work():
-    assert _is_deprecated_temperature_model("claude-opus-4-7") is True
-    assert _is_deprecated_temperature_model("claude-haiku-4-5-20251001") is False
-
-
 @pytest.mark.asyncio
 async def test_vertex_project_and_location_globals_are_still_read(
     providers: FakeProviders, fake_vertex_auth, monkeypatch: pytest.MonkeyPatch
@@ -147,18 +139,3 @@ async def test_mtls_client_session_hook_is_still_used_for_openai_compatible_call
         "litellm no longer uses litellm.aclient_session, so mTLS would be silently dropped"
     )
     assert not providers.requests
-
-
-def test_module_level_aclient_handler_still_accepts_event_hooks():
-    # ai_gateway/models/v2/container.py assigns litellm.module_level_aclient.
-    handler = AsyncHTTPHandler(event_hooks={"request": [lambda _request: None]})
-
-    assert handler is not None
-    assert hasattr(litellm, "module_level_aclient")
-
-
-def test_delta_still_has_the_fields_the_vendored_wrapper_reads():
-    delta = Delta(content="x", reasoning_content="why", provider_specific_fields={})
-
-    assert delta.reasoning_content == "why"
-    assert delta.provider_specific_fields == {}

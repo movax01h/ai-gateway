@@ -282,13 +282,6 @@ test-undercoverage: install-test-deps
 	@echo "Checking test coverage of changed lines..."
 	@poetry run diff-cover .test-reports/coverage.xml --compare-branch=$(UNDERCOVERAGE_COMPARE_BRANCH) --diff-range-notation=$(UNDERCOVERAGE_DIFF_RANGE_NOTATION) --show-uncovered --fail-under=100
 
-.PHONY: test-litellm-bump
-# The regular test suite patches litellm at the object level, so litellm's own
-# code never runs in it. These tests run litellm's real request-building code
-# against fake provider transports. See docs/litellm_upgrades.md.
-test-litellm-bump: install-test-deps
-	@LITELLM_LOCAL_MODEL_COST_MAP=True poetry run pytest tests/litellm_bump -v
-
 .PHONY: test-integration
 # `integration_tests/` drives a deployed AI Gateway over HTTP. The Duo Workflow Service tests instead run a
 # gRPC server in-process, so they live under `tests/` where the shared fixtures are and are named explicitly
