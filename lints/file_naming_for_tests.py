@@ -13,7 +13,6 @@ EXCLUDED_FILES = {
     "/tests/prompts/test_litellm_prompt.py",
     "/tests/litellm_bump/test_patches.py",
     "/tests/litellm_bump/test_request_schemas.py",
-    "/tests/litellm_bump/test_provider_schemas.py",
     "/tests/duo_workflow_service/agent_platform/test_configs.py",
     "/tests/duo_workflow_service/agent_platform/v1/flows/test_developer_goal_config.py",
     "/tests/duo_workflow_service/agent_platform/v1/flows/test_developer_interactive_review_config.py",
