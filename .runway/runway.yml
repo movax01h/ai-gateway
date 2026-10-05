@@ -15,7 +15,7 @@ spec:
     - europe-west2
     - europe-west3
     - europe-west9
-  request_timeout: 90
+  request_timeout: 120
   observability:
     scrape_targets:
       - "localhost:8082"
