@@ -195,9 +195,6 @@ class ModelTagEntry(BaseModel):
 
     models: list[str] = Field(min_length=1)
     keywords: list[str] = Field(default_factory=list)
-    # Evaluated alternatives for this tag. Validated, never served: move one into
-    # `models` to route to it.
-    candidates: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -480,7 +477,7 @@ class ModelSelectionConfig:
             ids = chain(
                 unit_primitive_config.default_model_identifiers,
                 chain.from_iterable(
-                    entry.models + entry.candidates
+                    entry.models
                     for entry in unit_primitive_config.models_for_tags.values()
                 ),
                 unit_primitive_config.selectable_models,
