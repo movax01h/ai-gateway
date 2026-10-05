@@ -2322,6 +2322,24 @@ class TestBaseRegistry:
         internal_event_client.track_event.assert_has_calls(expected_internal_events)
 
     @pytest.mark.parametrize(
+        ("unit_primitive", "scopes"),
+        [(GitLabUnitPrimitive.COMPLETE_CODE, ["complete_code"])],
+    )
+    def test_get_on_behalf_without_tracking(
+        self,
+        internal_event_client: Mock,
+        registry: BasePromptRegistry,
+        user: StarletteUser,
+        prompt: Prompt,
+    ):
+        assert (
+            registry.get_on_behalf(user=user, prompt_id="test", track_event=False)
+            == prompt
+        )
+
+        internal_event_client.track_event.assert_not_called()
+
+    @pytest.mark.parametrize(
         ("model_metadata", "unit_primitive", "scopes"),
         [
             (

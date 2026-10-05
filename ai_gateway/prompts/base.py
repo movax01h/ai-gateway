@@ -1263,6 +1263,7 @@ class BasePromptRegistry(ABC):
         tools: Optional[List[BaseTool]] = None,
         is_graph_node: bool = False,
         unit_primitive: Optional[GitLabUnitPrimitive] = None,
+        track_event: bool = True,
         **kwargs: Any,
     ) -> Prompt:
         if not model_metadata:
@@ -1290,9 +1291,10 @@ class BasePromptRegistry(ABC):
             raise WrongUnitPrimitives
 
         # Only record internal events once we know the user has access to the Unit Primitive
-        self.internal_event_client.track_event(
-            f"request_{authorized_unit_primitive}", category=internal_event_category
-        )
+        if track_event:
+            self.internal_event_client.track_event(
+                f"request_{authorized_unit_primitive}", category=internal_event_category
+            )
 
         return prompt
 

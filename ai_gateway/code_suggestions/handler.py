@@ -24,6 +24,7 @@ from ai_gateway.code_suggestions import (
     LanguageServerVersion,
 )
 from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
+from ai_gateway.code_suggestions.fallback import build_rate_limit_fallback
 from ai_gateway.code_suggestions.processing.post.completions import (
     create_post_processor_for_model_metadata,
 )
@@ -299,6 +300,7 @@ async def code_completion(
             )
             model_metadata = None
 
+        engine_kwargs: dict[str, Any] = {}
         if model_metadata is None:
             model_metadata = build_default_code_completions_metadata(
                 fireworks_api_base_url=config.fireworks_api_base_url(),
@@ -306,6 +308,17 @@ async def code_completion(
                 user=current_user,
                 using_cache=using_cache,
                 mock_model_responses=config.mock_model_responses(),
+            )
+            engine_kwargs["fallback_factory"] = build_rate_limit_fallback(
+                model_metadata,
+                prompt_registry,
+                current_user,
+                fireworks_api_base_url=config.fireworks_api_base_url(),
+                model_keys=config.model_keys(),
+                using_cache=using_cache,
+                mock_model_responses=config.mock_model_responses(),
+                excl_post_process=config.feature_flags.excl_post_process(),
+                fireworks_score_thresholds=config.feature_flags.fireworks_score_threshold(),
             )
         elif model_metadata.provider == "gitlab":
             model_metadata = resolve_provider_aware_metadata(
@@ -330,7 +343,6 @@ async def code_completion(
             config.feature_flags.excl_post_process(),
             config.feature_flags.fireworks_score_threshold(),
         )
-        engine_kwargs: dict[str, Any] = {}
         if model_metadata.is_custom_model:
             engine_kwargs["model__llm_definition"] = model_metadata.llm_definition
 

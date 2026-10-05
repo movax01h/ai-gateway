@@ -478,6 +478,49 @@ def build_default_code_completions_metadata(
     )
 
 
+def build_fallback_code_completions_metadata(
+    model_metadata: TypeModelMetadata,
+    fireworks_api_base_url: str,
+    model_keys: Dict[str, Any],
+    user: StarletteUser,
+    using_cache: bool = True,
+    mock_model_responses: bool = False,
+) -> Optional[TypeModelMetadata]:
+    """Draw another weighted ``code_completions`` default to serve a request after a rate limit error.
+
+    A Fireworks primary gets no fallback: Fireworks retries its own rate limits for up to two minutes before the error
+    reaches the gateway.
+    """
+    primary_provider = getattr(
+        model_metadata.llm_definition.params, "custom_llm_provider", None
+    )
+    if primary_provider == "fireworks_ai":
+        return None
+
+    configs = ModelSelectionConfig.instance()
+    completions = configs.get_resolved_unit_primitive_config_map()["code_completions"]
+    identifiers = completions.default_model_identifiers
+    weights = completions.default_model_weights or [1.0] * len(identifiers)
+    candidates = {
+        identifier: weight
+        for identifier, weight in zip(identifiers, weights)
+        if weight > 0 and identifier != model_metadata.name
+    }
+    if not candidates:
+        return None
+
+    chosen = random.choices(list(candidates), weights=list(candidates.values()), k=1)[0]
+
+    return resolve_provider_aware_metadata(
+        configs.get_model(chosen),
+        provider_keys=model_keys,
+        fireworks_api_base_url=fireworks_api_base_url,
+        mock_model_responses=mock_model_responses,
+        session_id=user.global_user_id,
+        using_cache=using_cache,
+    )
+
+
 def build_default_feature_setting_metadata(
     feature_setting: Optional[str],
     model_keys: Dict[str, Any],
