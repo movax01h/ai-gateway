@@ -1,7 +1,7 @@
 # pylint: disable=file-naming-for-tests
 """Guards for the workplan flow's 1.1.0 config: planning plus the readiness-score tail.
 
-1.1.0 keeps 1.0.0's four planning components unchanged and merges the standalone
+1.1.0 keeps 1.0.0's five planning components unchanged and merges the standalone
 ``readiness_score`` flow in behind the planner: ``plan_ready`` now routes to a
 scoring tail (``score_fetch`` -> ``score_fetch_notes`` ->
 ``readiness_supervisor``) instead of ``end``. The supervisor is declared as a
@@ -18,6 +18,8 @@ These invariants matter enough to pin in CI:
 -   The supervisor's ``update_work_item`` is unpinned and passes only
     ``readiness_score`` and ``readiness_score_feedback``. The scoring stage did
     not author the plan.
+-   Everything outside the scoring tail matches 1.0.0 exactly, so the two
+    versions differ only by scoring and can be compared against each other.
 -   The scoring tail reads the work item URL from the
     ``agent_platform_resource_context`` envelope, never ``context:goal``,
     whose prose ``GitLabUrlParser`` rejects.
@@ -47,13 +49,15 @@ from lib.feature_flags.context import FeatureFlag
 FLOW_NAME = "workplan"
 FLOW_VERSION = "1.1.0"
 
-# The 1.1.0 component set: 1.0.0's four planning components plus the nine of
-# the scoring tail.
-EXPECTED_COMPONENTS = {
+PLANNING_COMPONENTS = {
     "research",
     "research_gate",
     "planner",
     "plan_gate",
+    "context_gate",
+}
+
+SCORING_COMPONENTS = {
     "score_fetch",
     "score_fetch_notes",
     "rubric",
@@ -63,6 +67,17 @@ EXPECTED_COMPONENTS = {
     "xexam_coverage",
     "xexam_falsifier",
     "readiness_supervisor",
+}
+
+EXPECTED_COMPONENTS = PLANNING_COMPONENTS | SCORING_COMPONENTS
+
+SCORING_PROMPT_IDS = {
+    "rs_rubric_prompt",
+    "rs_coverage_prompt",
+    "rs_falsifier_prompt",
+    "rs_xexam_scorer_prompt",
+    "rs_xexam_falsifier_prompt",
+    "workplan_readiness_supervisor_prompt",
 }
 
 WORK_ITEM_URL_INPUT = "context:inputs.agent_platform_resource_context.work_item_web_url"
@@ -86,7 +101,7 @@ def _router_for(config: FlowConfig, from_component: str) -> dict:
 class TestWorkplanV110ComponentSet:
     """The new version adds exactly the nine scoring-tail components."""
 
-    def test_component_set_is_planning_four_plus_scoring_nine(self):
+    def test_component_set_is_planning_five_plus_scoring_nine(self):
         config = _config()
         assert {c["name"] for c in config.components} == EXPECTED_COMPONENTS
 
@@ -100,6 +115,7 @@ class TestWorkplanV110ComponentSet:
         routes = _router_for(config, "planner")["condition"]["routes"]
         assert routes["plan_ready"] == "score_fetch"
         assert routes["ask_question"] == "plan_gate"
+        assert routes["needs_context"] == "context_gate"
         assert routes["default_route"] == "plan_gate"
 
     @pytest.mark.parametrize(
@@ -130,6 +146,50 @@ class TestWorkplanV110ComponentSet:
         assert GetWorkItemNotesInput(page_size=page_size["from"]).page_size == 100
         with pytest.raises(ValidationError):
             GetWorkItemNotesInput(page_size=101)
+
+
+class TestWorkplanV110MatchesV100OutsideScoring:
+    """Outside the scoring tail, 1.1.0 must match 1.0.0."""
+
+    @staticmethod
+    def _v100() -> FlowConfig:
+        return FlowConfig.from_yaml_config(FLOW_NAME, "1.0.0")
+
+    @pytest.mark.parametrize("component_name", sorted(PLANNING_COMPONENTS))
+    def test_planning_components_match(self, component_name):
+        assert _component(_config(), component_name) == _component(
+            self._v100(), component_name
+        )
+
+    def test_v100_has_exactly_the_planning_components(self):
+        assert {c["name"] for c in self._v100().components} == PLANNING_COMPONENTS
+
+    @pytest.mark.parametrize(
+        "from_component", sorted(PLANNING_COMPONENTS - {"planner"})
+    )
+    def test_planning_routers_match(self, from_component):
+        assert _router_for(_config(), from_component) == _router_for(
+            self._v100(), from_component
+        )
+
+    def test_planner_router_differs_only_by_plan_ready(self):
+        v110 = _router_for(_config(), "planner")["condition"]
+        v100 = _router_for(self._v100(), "planner")["condition"]
+        assert v110["input"] == v100["input"]
+        assert v100["routes"]["plan_ready"] == "end"
+        assert {**v110["routes"], "plan_ready": "end"} == v100["routes"]
+
+    def test_planning_prompts_match(self):
+        v110 = {
+            p.prompt_id: p
+            for p in _config().prompts or []
+            if p.prompt_id not in SCORING_PROMPT_IDS
+        }
+        v100 = {p.prompt_id: p for p in self._v100().prompts or []}
+        assert v110 == v100
+
+    def test_entry_point_matches(self):
+        assert _config().flow.entry_point == self._v100().flow.entry_point
 
 
 class TestWorkplanV110WorkItemUrl:
