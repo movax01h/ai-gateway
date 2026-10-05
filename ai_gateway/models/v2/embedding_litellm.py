@@ -25,6 +25,15 @@ __all__ = ["EmbeddingBadRequestError", "EmbeddingLiteLLM", "EmbeddingRateLimitEr
 
 logger = logging.getLogger(__name__)
 
+DUMMY_API_KEY = "dummy_key"
+
+# Self-hosted OpenAI-compatible providers that get a dummy API key when none is configured.
+# Note: `openai_like` loses per-user attribution because LiteLLM sends its `extra_headers`
+# in the JSON body instead of as HTTP headers. We need to decide whether to reject or remap
+# this provider, or wait for the litellm fix in https://github.com/BerriAI/litellm/issues/44300.
+# See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3041.
+PROVIDERS_REQUIRING_API_KEY = frozenset({"openai", "openai_like"})
+
 
 class EmbeddingBadRequestError(Exception):
     pass
@@ -94,6 +103,19 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
     def _llm_type(self) -> str:
         return "litellm-embedding"
 
+    def _resolve_api_key(
+        self, api_key: Optional[str], api_base: Optional[str]
+    ) -> Optional[str]:
+        if resolved := api_key or self.api_key:
+            return resolved
+
+        # Only set a dummy key for self-hosted models
+        # Non self-hosted models may read the API key from an environment variable
+        if api_base and self.custom_llm_provider in PROVIDERS_REQUIRING_API_KEY:
+            return DUMMY_API_KEY
+
+        return None
+
     def _build_embedding_args(
         self,
         contents: list[str],
@@ -115,7 +137,7 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
 
         # Get api_base and api_key from kwargs (bound from model_metadata) or fall back to instance
         api_base = kwargs.pop("api_base", None) or self.api_base
-        api_key = kwargs.pop("api_key", None) or self.api_key
+        api_key = self._resolve_api_key(kwargs.pop("api_key", None), api_base)
         if api_base:
             embedding_args["api_base"] = api_base
         if api_key:
