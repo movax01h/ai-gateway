@@ -13,7 +13,7 @@ You can use an Code Suggestions access token to authenticate with the API by pas
 
 ```shell
 curl --header "Authorization: Bearer <access_token>" --header "X-Gitlab-Authentication-Type: oidc" \
-  "http://localhost:5052/v2/code/completions"
+  "http://localhost:5052/v4/code/suggestions"
 ```
 
 ## Working with self-hosted models
@@ -31,19 +31,22 @@ For more information, see:
 
 #### Code Generation
 
-| Version | Endpoint            | Status                          | Notes                                                            |
-|---------|---------------------|---------------------------------|------------------------------------------------------------------|
-| v4      | `/code/suggestions` | Current                         | Used when client supports SSE Streaming                          |
-| v3      | `/code/completions` | Current                         | Used when client doesn't support SSE Streaming                   |
-| v2      | `/code/generations` | Kept for backward compatibility | Appears to be used by older versions of GitLab (v17.5 and older) |
+| Version | Endpoint            | Status                                      | Notes                                     |
+|---------|---------------------|---------------------------------------------|-------------------------------------------|
+| v4      | `/code/suggestions` | Current                                     | Used by GitLab for all generations since GitLab 19.1 |
+| v3      | `/code/completions` | Deprecated, removal planned for GitLab 21.0 | GitLab 17.5 to 19.0                                  |
+| v2      | `/code/generations` | Deprecated, removal planned for GitLab 21.0 | GitLab versions before 17.5                          |
 
 #### Code Completion
 
-| Version | Endpoint                  | Status         | Notes                                                                                                                             |
-|---------|---------------------------|----------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| v1      | `/code/user_access_token` | Current        | Called from Rails API Endpoint `code_suggestions/direct_access` to provide a token for the user to directly access the AI Gateway |
-| v2      | `/completions`            | Current        | Called directly from VSCode GitLab language server                                                                                |
-| v2      | `/code/completions`       | Current        | Called from Rails side, less frequently                                                                                           |
+| Version | Endpoint                  | Status                                      | Notes                                                                                                                             |
+|---------|---------------------------|---------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| v4      | `/code/suggestions`       | Current                                     | Used by GitLab when `code_completion_v4_endpoint` is enabled (on for GitLab.com), and by the language server direct connection from [GitLab Language Server MR 4169](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/merge_requests/4169) |
+| v1      | `/code/user_access_token` | Current                                     | Called from Rails API Endpoint `code_suggestions/direct_access` to provide a token for the user to directly access the AI Gateway |
+| v2      | `/completions`            | Deprecated, removal planned for GitLab 21.0 | Language server direct connection before [GitLab Language Server MR 4169](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/merge_requests/4169) |
+| v2      | `/code/completions`       | Deprecated, removal planned for GitLab 21.0 | GitLab instances with `code_completion_v4_endpoint` disabled (the default on self-managed)                                          |
+
+The v2 and v3 endpoints are deprecated. Removal is planned for GitLab 21.0. See the [tracking issue](https://gitlab.com/gitlab-org/gitlab/-/issues/605661).
 
 To see the active endpoints on Kibana (internal link), check out [the logs here](https://log.gprd.gitlab.net/app/r/s/Jh53x).
 The logs are available in the data view `pubsub-mlops-inf-gprd-*`.
@@ -55,6 +58,18 @@ We have updated the endpoint name from `completions` to `suggestions` to avoid c
 ```plaintext
 POST /v4/code/suggestions
 ```
+
+#### Migrating from v2 and v3
+
+v3 callers keep the same `prompt_components` body. Only the URL and the streaming format change, and `code_context` content may be up to 500,000 characters instead of 100,000.
+
+The v4 endpoint takes a `prompt_components` list (1 to 100 items). Move your v2 request fields as follows:
+
+- The keys of `current_file` (`file_name`, `content_above_cursor`, `content_below_cursor`, `language_identifier`) become top-level keys of the `payload` of the `code_editor_completion` or `code_editor_generation` component.
+- In v2 the endpoint chose the task: `/v2/completions` and `/v2/code/completions` for completion, `/v2/code/generations` for generation. In v4 the component type does: `code_editor_completion` or `code_editor_generation`.
+- `context` items become extra `code_context` components with `type`, `name`, and `content`.
+- For self-hosted models, `model_provider`, `model_name`, `model_endpoint`, `model_api_key`, and `model_identifier` move into the top-level `model_metadata` as `provider`, `name`, `endpoint`, `api_key`, and `identifier`.
+- `prompt_version` has no meaning for completions. Generations may still pass `prompt_id` and `prompt_version` in the component payload.
 
 #### Streaming responses in SSE format
 
@@ -99,6 +114,8 @@ data: null
 <!-- codespell:ignore-end -->
 
 ### V3
+
+Deprecated. Use [`/v4/code/suggestions`](#v4). Removal is planned for GitLab 21.0 ([tracking issue](https://gitlab.com/gitlab-org/gitlab/-/issues/605661)).
 
 The v3 endpoint is aligned to the [architectural blueprint](https://docs.gitlab.com/ee/architecture/blueprints/ai_gateway/index.html#example-feature-code-suggestions).
 
@@ -351,6 +368,8 @@ This will compile and execute the program, printing "Hello World" to the console
 - `422: Unprocessable Entity` if the required attributes are missing or the number of `prompt_component` objects is not adequate.
 
 ### V2
+
+Deprecated. Use [`/v4/code/suggestions`](#v4). Removal is planned for GitLab 21.0 ([tracking issue](https://gitlab.com/gitlab-org/gitlab/-/issues/605661)).
 
 #### Completions
 
