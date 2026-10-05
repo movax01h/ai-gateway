@@ -122,7 +122,9 @@ class TestBuildReport:
         assert ident["type"] == "cwe"
         assert ident["name"] == "CWE-639"
         assert ident["url"].endswith("/639.html")
-        assert v["name"].startswith("CWE-639:")
+        assert (
+            v["name"] == "Authorization bypass through user-controlled key in app/x.rb"
+        )
         # id is a stable sha256 hex digest
         assert len(v["id"]) == 64
 
@@ -137,44 +139,7 @@ class TestBuildReport:
 
     def test_empty_body_defaults_to_finding_name(self):
         report = _writer()._build_report([{"file": "a.py"}])
-        assert report["vulnerabilities"][0]["name"] == "Business-logic finding"
-
-    def test_name_is_the_cwe_and_first_sentence(self):
-        findings = [
-            {
-                "cwe": "CWE-639",
-                "file": "a.py",
-                "body": "Any user can refund any order. Details.",
-            },
-            {"cwe": "CWE-79", "file": "b.py", "body": "Unescaped name"},
-        ]
-        names = [
-            v["name"] for v in _writer()._build_report(findings)["vulnerabilities"]
-        ]
-        assert names == [
-            "CWE-639: Any user can refund any order.",
-            "CWE-79: Unescaped name",
-        ]
-
-    def test_name_is_one_plain_line_without_markup(self):
-        body = "Line\none\x1b[31m with `code` and [a](http://x) <b>tag</b>"
-        name = bl._title_of("639", body)
-        assert name == "CWE-639: Line one 31m with code and a(http://x) btag/b"
-
-    def test_an_abbreviation_does_not_end_the_sentence(self):
-        body = "Missing check, e.g. on refund, vs. cancel. Details."
-        assert bl._title_of("639", body) == (
-            "CWE-639: Missing check, e.g. on refund, vs. cancel."
-        )
-
-    def test_a_long_name_is_cut_on_a_word_boundary(self):
-        name = bl._title_of("639", "word " * 60)
-        assert len(name) <= bl._TITLE_MAX
-        assert name.endswith(" word\u2026")
-
-    def test_a_first_sentence_that_fits_has_no_ellipsis(self):
-        body = "x" * (bl._TITLE_MAX - len("CWE-639: "))
-        assert bl._title_of("639", body) == "CWE-639: " + body
+        assert report["vulnerabilities"][0]["name"] == "Business-logic finding in a.py"
 
 
 # --------------------------------------------------------------------------- #
