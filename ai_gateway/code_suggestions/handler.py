@@ -10,7 +10,7 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     WrongUnitPrimitives,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, SerializerFunctionWrapHandler, model_serializer
 from sse_starlette.sse import EventSourceResponse
 from starlette.responses import StreamingResponse
 from starlette_context import context as starlette_context
@@ -38,6 +38,7 @@ from ai_gateway.model_metadata import (
 )
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models import KindModelProvider
+from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
@@ -79,6 +80,16 @@ class ModelMetadata(BaseModel):
     engine: Optional[str] = None
     name: Optional[str] = None
     lang: Optional[str] = None
+    tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_missing_token_usage(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        data = handler(self)
+        if data.get("tokens_consumption_metadata") is None:
+            data.pop("tokens_consumption_metadata", None)
+        return data
 
 
 class ResponseMetadataBase(BaseModel):
@@ -361,6 +372,9 @@ async def code_completion(
         engine=first.model_metadata.engine,
         name=first.model_metadata.name,
         lang=first.lang,
+        tokens_consumption_metadata=(
+            first.metadata.tokens_consumption_metadata if first.metadata else None
+        ),
     )
 
     return CompletionResponse(

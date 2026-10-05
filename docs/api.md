@@ -70,6 +70,7 @@ The v4 endpoint takes a `prompt_components` list (1 to 100 items). Move your v2 
 - `context` items become extra `code_context` components with `type`, `name`, and `content`.
 - For self-hosted models, `model_provider`, `model_name`, `model_endpoint`, `model_api_key`, and `model_identifier` move into the top-level `model_metadata` as `provider`, `name`, `endpoint`, `api_key`, and `identifier`.
 - `prompt_version` has no meaning for completions. Generations may still pass `prompt_id` and `prompt_version` in the component payload.
+- Completion responses return `tokens_consumption_metadata` inside `model` and `metadata.model`, as v2 did inside `model`.
 
 #### Streaming responses in SSE format
 
@@ -214,7 +215,14 @@ Example response:
     "model": {
       "engine": "vertex-ai",
       "name": "codestral-2508",
-      "lang": "go"
+      "lang": "go",
+      "tokens_consumption_metadata": {
+        "input_tokens": 1289,
+        "output_tokens": 9,
+        "max_output_tokens_used": false,
+        "context_tokens_sent": 0,
+        "context_tokens_used": 0
+      }
     },
     "timestamp": 1702389046
   }

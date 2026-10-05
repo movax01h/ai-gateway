@@ -13,6 +13,7 @@ from ai_gateway.model_metadata import (
     FireworksModelMetadata,
     create_model_metadata,
 )
+from ai_gateway.models.base import TokensConsumptionMetadata
 
 
 @pytest.fixture(name="suggestion")
@@ -141,6 +142,48 @@ async def test_code_completion_applies_model_driven_behavior(
 
     assert response.metadata.model.engine == "fireworks_ai"
     assert response.metadata.model.name == "codestral_2508_fireworks"
+    assert response.model.tokens_consumption_metadata is None
+
+
+@pytest.mark.asyncio
+async def test_code_completion_reports_token_consumption(
+    payload, suggestion, agent_factory, prompt_registry, snowplow_event_context
+):
+    tokens = TokensConsumptionMetadata(
+        input_tokens=12, output_tokens=3, context_tokens_sent=5, context_tokens_used=4
+    )
+    suggestion.metadata = SimpleNamespace(tokens_consumption_metadata=tokens)
+    model_metadata = MagicMock()
+    model_metadata.provider = "fireworks_ai"
+    model_metadata.is_custom_model = False
+    prompt_registry.get_on_behalf.return_value = MagicMock()
+
+    with (
+        patch.object(
+            handler_module,
+            "create_post_processor_for_model_metadata",
+            return_value=object(),
+        ),
+        patch.object(
+            handler_module,
+            "completion_context_max_percent_for_model_metadata",
+            return_value=0.3,
+        ),
+    ):
+        response = await code_completion(
+            payload=payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=snowplow_event_context,
+            completions_agent_factory=agent_factory,
+            completions_amazon_q_factory=MagicMock(),
+            model_metadata=model_metadata,
+            config=MagicMock(),
+        )
+
+    assert response.model.tokens_consumption_metadata == tokens
+    assert response.metadata.model.tokens_consumption_metadata == tokens
 
 
 @pytest.mark.asyncio
