@@ -366,9 +366,6 @@ configurable_unit_primitives:
         models:
           - claude_opus_5_5
           - kimi_k3_fireworks
-        candidates:
-          - claude_sonnet_4_6_vertex
-          - claude_sonnet_5
         keywords:
           - refactor
           - migration
@@ -379,8 +376,6 @@ configurable_unit_primitives:
       small:
         models:
           - gpt_6_luna
-        candidates:
-          - claude_haiku_4_5_20251001_vertex
         keywords:
           - typo
           - readme

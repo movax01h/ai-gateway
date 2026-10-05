@@ -382,7 +382,7 @@ configurable_unit_primitives:
       reasoning: claude_opus_4_7_vertex
 ```
 
-A tag can also be written as an object. `models` accepts more than one entry and load-balances across provider variants of the same model, the way `default_models` does. `keywords` selects the tag from the request goal (see [Routing the default model by goal](#routing-the-default-model-by-goal)). `candidates` lists models evaluated for the tag. They are validated against `models.yml` but never served until moved into `models`. Both spellings can appear in the same file:
+A tag can also be written as an object. `models` accepts more than one entry and load-balances across provider variants of the same model, the way `default_models` does. `keywords` selects the tag from the request goal (see [Routing the default model by goal](#routing-the-default-model-by-goal)). Both spellings can appear in the same file:
 
 ```yaml
 configurable_unit_primitives:
@@ -394,8 +394,6 @@ configurable_unit_primitives:
       large:
         models:
           - claude_sonnet_4_6_vertex
-        candidates:
-          - claude_opus_5_5
         keywords:
           - refactor
           - concurrency
