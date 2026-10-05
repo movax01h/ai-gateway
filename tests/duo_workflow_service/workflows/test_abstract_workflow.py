@@ -582,6 +582,7 @@ async def test_compile_and_run_graph(
         denied_tools=[],
         ask_tools=[],
         allow_client_injected_mcp_tools=False,
+        allowed_tools=[],
     )
 
 
@@ -1012,6 +1013,77 @@ async def test_compile_and_run_graph_all_ask_policy_does_not_clear_preapproved_w
 
     assert workflow._ask_tools == []
     assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_passes_governance_allow_to_registry(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+):
+    """The admin allow list must reach ToolsRegistry so per-tool allows apply in flows that never read
+    `_preapproved_tools` (agent_platform v1), with ask already subtracted."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    workflow_config["allow_agent_to_request_user"] = True
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": ["gitlab_api_get", "run_command"], "ask": ["run_command"], "deny": []}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert mock_tools_registry.call_args.kwargs["allowed_tools"] == ["gitlab_api_get"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_does_not_pass_client_preapprovals_as_governance_allow(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    """Without an active governance claim, the client's own preapproved_tools stay out of the registry allow list, so v1
+    flows keep ignoring them as before."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_realm="saas")
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._preapproved_tools = ["read_file"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert mock_tools_registry.call_args.kwargs["allowed_tools"] == []
 
 
 @pytest.mark.asyncio

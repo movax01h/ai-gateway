@@ -1391,6 +1391,90 @@ async def test_ask_listed_tool_names_reports_ask_listed_names(
     assert registry.ask_listed_tool_names([]) == set()
 
 
+@pytest.mark.asyncio
+async def test_registry_allowed_tools_preapprove_within_unapproved_privilege(
+    gl_http_client, project_mock
+):
+    """A per-tool admin allow pre-approves a tool whose privilege group is not pre-approved."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": [],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        allowed_tools=["read_file"],
+    )
+
+    assert registry.is_preapproved("read_file")
+    assert not registry.is_preapproved("edit_file")
+    toolset = registry.toolset(["read_file", "edit_file"])
+    assert "read_file" in toolset._pre_approved
+    assert "edit_file" not in toolset._pre_approved
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra_kwargs,expected_preapproved",
+    [
+        # ask outranks allow for the same tool
+        ({"ask_tools": ["read_file"]}, False),
+        # deny strips the tool before pre-approval matters
+        ({"denied_tools": ["read_file"]}, False),
+    ],
+)
+async def test_registry_allowed_tools_do_not_outrank_ask_or_deny(
+    gl_http_client, project_mock, extra_kwargs, expected_preapproved
+):
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": [],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        allowed_tools=["read_file"],
+        **extra_kwargs,
+    )
+
+    toolset = registry.toolset(["read_file", "edit_file"])
+    assert ("read_file" in toolset._pre_approved) is expected_preapproved
+
+
+@pytest.mark.asyncio
+async def test_registry_allowed_tools_ignore_tools_outside_enabled_privileges(
+    gl_http_client, project_mock
+):
+    """An allow cannot introduce a tool the flow's privileges never enabled."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": [],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        allowed_tools=["create_issue"],
+    )
+
+    assert registry.get("create_issue") is None
+    assert not registry.is_preapproved("create_issue")
+
+
 # Tests for Generic GitLab API Tools
 
 
@@ -2665,6 +2749,38 @@ async def test_gitlab_configured_mcp_tool_still_requires_approval(tool_metadata)
     )
 
     assert await registry.approval_required("gitlab_accept_merge_request")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "client_injected,expected_preapproved",
+    [
+        # A client names its own tools, so an admin allow must not reach its entry.
+        (True, False),
+        # The same name from a GitLab-configured server is the tool the admin ruled on.
+        (False, True),
+    ],
+)
+async def test_admin_allow_reaches_only_gitlab_origin_mcp_tools(
+    tool_metadata, client_injected, expected_preapproved
+):
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        allowed_tools=["gitlab_search"],
+        mcp_tools=_mcp_configs(
+            contract_pb2.McpTool(
+                name="gitlab_search",
+                description="MCP tool",
+                inputSchema="{}",
+                client_injected=client_injected,
+            )
+        ),
+    )
+
+    assert registry.get("gitlab_search") is not None
+    assert registry.is_preapproved("gitlab_search") is expected_preapproved
 
 
 @pytest.mark.asyncio
