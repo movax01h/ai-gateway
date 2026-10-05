@@ -618,7 +618,7 @@ class TestResponseSchemas:
         findings = _schema(UNIT_SCHEMA_ID)["properties"]["findings"]
         assert findings["type"] == "array"
         item = findings["items"]
-        assert tuple(item["properties"]) == FINDING_KEYS
+        assert tuple(item["properties"]) == FINDING_KEYS + ("title", "impact")
         assert set(item["required"]) == set(FINDING_KEYS)
         assert item["properties"]["new_line"]["type"] == "integer"
         assert item["properties"]["tier"]["type"] == "integer"
@@ -708,7 +708,12 @@ class TestResponseSchemas:
         model = json_schema_to_pydantic(
             _schema(UNIT_SCHEMA_ID), title_fallback=UNIT_SCHEMA_ID
         )
-        finding = dict.fromkeys(FINDING_KEYS, "x") | {"new_line": 3, "tier": 1}
+        # Every declared key, optional ones included, so the round trip shows
+        # nothing is dropped between the answer tool and the collect step.
+        finding = dict.fromkeys(FINDING_KEYS + ("title", "impact"), "x") | {
+            "new_line": 3,
+            "tier": 1,
+        }
         answer = model(
             summary="One handler, one finding.", findings=[finding]
         ).to_output()

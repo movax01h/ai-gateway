@@ -36,6 +36,11 @@ from duo_workflow_service.bl_security.findings import (
     norm_excerpt,
     verdict_of,
 )
+from duo_workflow_service.bl_security.model_text import (
+    escape_markdown,
+    model_impact,
+    model_title,
+)
 from duo_workflow_service.bl_security.target_files import resolve_target_files
 from duo_workflow_service.executor.action import _execute_action, _read_file_fully
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
@@ -241,6 +246,12 @@ def _title_of(cwe: str, body: str) -> str:
         cut = sentence[: room - 1]
         sentence = (cut.rsplit(" ", 1)[0] or cut) + "\u2026"
     return prefix + sentence
+
+
+def _with_impact(impact: str, body: str) -> str:
+    """The description with the model's impact sentence, escaped as markdown text, as its first paragraph."""
+    lead = escape_markdown(impact)
+    return f"{lead}\n\n{body}" if body else lead
 
 
 def _fingerprint_of(finding: dict) -> str:
@@ -970,6 +981,14 @@ class BlWriteSastReport(DuoBaseTool):
             excerpt = excerpt_of(f)
             if excerpt:
                 vuln["raw_source_code_extract"] = excerpt
+            # The model's own title and impact, when it gave usable ones: they
+            # are written for the customer. Otherwise the text above stays.
+            title = model_title(f.get("title"))
+            if title:
+                vuln["name"] = title
+            impact = model_impact(f.get("impact"))
+            if impact:
+                vuln["description"] = _with_impact(impact, body)
             # Only a scope_offset signature: GitLab matches on the highest-priority
             # algorithm present, and that ranks above hash and location.
             if signature:
