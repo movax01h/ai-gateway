@@ -16,7 +16,6 @@ The job needs no provider credentials and sends no requests. It replaces the HTT
 ## What the job checks
 
 - **Request schemas.** For Fireworks, Vertex AI and Bedrock, the request litellm builds must match the schema in `tests/litellm_bump/schemas/`. The schema holds the URL path, the header names and the structure of the body, not the values.
-- **Patches.** Each litellm patch in this repo still takes effect. A renamed patch target fails the job.
 
 A passing job proves the request schema is unchanged. It does not prove that the providers accept the request, or that credentials work.
 
