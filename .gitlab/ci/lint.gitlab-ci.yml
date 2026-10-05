@@ -77,6 +77,22 @@ lint:duo_workflow_flow_schema:
   script:
     - make check-duo-workflow-flow-schema
 
+lint:legacy_roots:
+  stage: test
+  extends: .poetry
+  needs:
+    - install
+  rules:
+    - changes:
+        - "ai_gateway/prompts/definitions/**/*"
+        - "duo_workflow_service/agent_platform/v1/flows/configs/**/*"
+        - "scripts/check_legacy_roots.py"
+        - "scripts/legacy_roots_allowlist.txt"
+  script:
+    - BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+    - if [ -n "$BASE" ]; then git fetch origin "$BASE" --depth=1; fi
+    - make check-legacy-roots LEGACY_ROOTS_BASE="$BASE"
+
 lint:doc:
   stage: test
   image: ${DOCS_LINT_IMAGE}

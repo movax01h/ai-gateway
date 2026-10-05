@@ -652,9 +652,18 @@ For a simpler alternative to the full GDK + Agent Platform setup, you can use th
 
 #### Running a Flow
 
-Use the `duo run` command with the `--flow-config` flag pointing to your flow YAML file:
+Use the `duo run` command with the `--flow-config` flag pointing to your flow YAML file. A flow
+that has moved to `ai/features/` and a flow that still lives in the legacy root use different
+paths:
 
 ```shell
+# a flow under ai/features/
+duo run \
+  --flow-config ai/features/<domain>/your_flow/config/1.0.0.yml \
+  --flow-config-schema-version v1 \
+  -g "Your goal description here"
+
+# a flow in the legacy root
 duo run \
   --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow/1.0.0.yml \
   --flow-config-schema-version v1 \
@@ -671,10 +680,12 @@ export DUO_WORKFLOW_ADDITIONAL_CONTEXT_CONTENT='[{"Category":"your_category","Co
 
 ```shell
 duo run \
-  --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow/1.0.0.yml \
+  --flow-config ai/features/<domain>/your_flow/config/1.0.0.yml \
   --flow-config-schema-version v1 \
   -g "Your goal description here"
 ```
+
+For a flow in the legacy root, pass its legacy path to `--flow-config`, as in the previous example.
 
 The `Category` must match a category defined in your flow's `flow.inputs` section, and the `Content` must be a JSON-serialized string matching the `input_schema`.
 

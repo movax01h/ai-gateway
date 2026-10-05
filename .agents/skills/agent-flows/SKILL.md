@@ -18,7 +18,9 @@ suits that repo — never in this repo's registry layout. A **foundational flow*
 with the platform and lives here. Ask which one is wanted if it is not obvious; the rest
 of this file is about foundational flows, though the shape advice applies to both.
 
-Configs: `duo_workflow_service/agent_platform/v1/flows/configs/<flow>/<version>.yml`.
+Configs: `ai/features/<domain>/<flow>/config/<version>.yml` for a new flow. Existing flows in
+`duo_workflow_service/agent_platform/v1/flows/configs/<flow>/` take new versions in place. The
+legacy root rejects new flow directories. See `docs/adding_and_moving_features.md`.
 The parallel `experimental/` tree is the unstable framework version — build in `v1`.
 Reference: `docs/flow_registry/v1.md` for component types and examples, `index.md` for
 the input/output system, `contribution_guidelines.md` for versioning and review.
@@ -123,8 +125,8 @@ Then add the instruction if none of those fits, or if the human still wants it.
 
 The deliverable is one `<version>.yml` plus its prompts, and no flow carries a README or
 a usage page. Keep the prompt in the config unless more than one flow or version uses it;
-only then is a file-based prompt in `ai_gateway/prompts/definitions/` worth the extra
-files.
+only then is a file-based prompt worth the extra files. A new flow's file-based prompt goes in
+its own `prompts/` directory with `prompt_id` set to the flow ID.
 
 Validate before you claim it works:
 

@@ -50,7 +50,8 @@ Each layer only uses entities from the layer directly below it (enforced via CI 
 - API endpoints (`ai_gateway/api/v{1,2,3,4}/`) handle HTTP requests
 - Middleware (`ai_gateway/api/middleware/`) processes authentication, feature flags, internal events, usage quotas
 - Code Suggestions flow: API → Processing (pre/post) → Model Engine → Prompt Builder → LLM
-- Prompts are versioned templates in `ai_gateway/prompts/definitions/` using Jinja2
+- Prompts are versioned templates using Jinja2, in `ai/features/<domain>/<feature>/prompts/` (new) and
+  `ai_gateway/prompts/definitions/` (legacy, frozen)
 
 **Duo Workflow Service**:
 
@@ -541,7 +542,14 @@ pipeline is stuck.
 
 ### Prompt Management
 
-Prompts are versioned Jinja2 templates in `ai_gateway/prompts/definitions/`:
+New prompts and flows go under `ai/features/<domain>/<feature>/`. The legacy roots
+`ai_gateway/prompts/definitions/` and `duo_workflow_service/agent_platform/v1/flows/configs/`
+accept new versions of existing features only, and `make check-legacy-roots` rejects new
+directories there. Read [`docs/adding_and_moving_features.md`](docs/adding_and_moving_features.md)
+before you add or move a prompt or flow.
+
+Prompts are versioned Jinja2 templates. The legacy root uses this layout, and a feature's
+`prompts/` directory uses the same layout without the feature level:
 
 ```plaintext
 prompts/definitions/

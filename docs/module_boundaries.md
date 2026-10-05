@@ -1,7 +1,8 @@
 # Module boundaries
 
 > Modules are being implemented. Follow [work item 43](https://gitlab.com/groups/gitlab-org/modelops/applied-ml/code-suggestions/-/work_items/43)
-> for status.
+> for status. To add or move a feature today, see
+> [Adding and moving features](adding_and_moving_features.md).
 
 Application code is organized by **capability**, not by deployment artifact or
 technical layer. Each feature owns its full definition (config, prompts, schemas,

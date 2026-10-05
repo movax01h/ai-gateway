@@ -249,6 +249,12 @@ check-graphql:
 	@echo "Running GraphQL validation..."
 	@poetry run python scripts/validate_graphql.py
 
+# Git ref whose allowlist is the baseline; additions since it fail. Empty skips that check.
+LEGACY_ROOTS_BASE ?=
+.PHONY: check-legacy-roots
+check-legacy-roots:
+	@poetry run python scripts/check_legacy_roots.py $(if $(LEGACY_ROOTS_BASE),--base $(LEGACY_ROOTS_BASE))
+
 .PHONY: install-test-deps
 install-test-deps:
 	@echo "Installing test dependencies..."
