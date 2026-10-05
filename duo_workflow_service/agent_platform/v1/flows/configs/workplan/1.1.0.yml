@@ -99,6 +99,20 @@ components:
     ui_log_events:
       - on_user_input_prompt
       - on_user_response
+  # Reached from both stages, and sends the resume to research: a description
+  # too thin to work from has to be researched again once it's updated.
+  # GitLab reads this name off the paused request to resume with the original
+  # goal (ResumeWorkplanService), so renaming it breaks that resume.
+  - name: context_gate
+    type: HumanInputComponent
+    sends_response_to: research
+    interaction_type: input
+    message_template: |
+      Waiting on more context. The work item's description needs to be
+      expanded - update it, then resume to research it again.
+    ui_log_events:
+      - on_user_input_prompt
+      - on_user_response
 
   # --- Scoring tail (plan_ready) -------------------------------------------
   # 1.1.0 merges the standalone readiness_score flow in behind the planner:
@@ -302,6 +316,7 @@ routers:
       routes:
         ready: planner
         needs_input: research_gate
+        needs_context: context_gate
         # An unmapped value degrades to "ask a human", never to silently
         # proceeding into planning on an unrecognized state.
         default_route: research_gate
@@ -312,12 +327,15 @@ routers:
       input: "context:planner.final_answer.decision"
       routes:
         ask_question: plan_gate
+        needs_context: context_gate
         # 1.1.0: a written plan now continues into the scoring tail instead of
         # ending the run.
         plan_ready: score_fetch
         default_route: plan_gate
   - from: plan_gate
     to: planner
+  - from: context_gate
+    to: research
   # A failed fetch means no SPEC/PLAN to score. In the standalone
   # readiness_score flow this routes to abort, but here the plan has already
   # been written and announced by the time scoring starts, so a scoring
@@ -415,12 +433,17 @@ prompts:
           not "the notes tooling"): the plan's Context section is built out of
           them, and the planner's own read budget is small. If you still have
           one or more genuine questions after that, post them and stop with
-          `decision: needs_input`. Otherwise, once the work item's real ask,
+          `decision: needs_input`. If the description itself is too thin to
+          research, request more context instead and stop with
+          `decision: needs_context` (see "Requesting more context" below).
+          Otherwise, once the work item's real ask,
           the relevant codebase context, and every open question are settled,
           finish with `decision: ready`. The planner that picks this up next
           sees only `findings`, not you, so write it to stand on its own.
 
         {% include 'workplan/partials/resolving_ambiguity/1.0.0.jinja' %}
+
+        {% include 'workplan/partials/requesting_context/1.0.0.jinja' %}
 
         {% include 'workplan/partials/asking_a_question/1.0.0.jinja' %}
       user: 'Here is my task - {{goal}}'
@@ -470,12 +493,16 @@ prompts:
         2. Resolve as much remaining ambiguity as you can yourself (see below).
           If a genuine question comes up while drafting that the research
           didn't already settle, post it and stop - do not call
-          `update_work_item` this run. Otherwise, write the finished plan into
+          `update_work_item` this run. If the work item turns out too thin to
+          plan from at all, request more context instead (see "Requesting
+          more context" below). Otherwise, write the finished plan into
           the Workplan widget with `update_work_item`, then announce it in one
           comment (see "Notifying the author" below) before finishing with
           `decision: plan_ready`. The widget on its own notifies nobody.
 
         {% include 'workplan/partials/resolving_ambiguity/1.0.0.jinja' %}
+
+        {% include 'workplan/partials/requesting_context/1.0.0.jinja' %}
 
         {% include 'workplan/partials/asking_a_question/1.0.0.jinja' %}
 
