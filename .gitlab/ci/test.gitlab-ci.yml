@@ -6,8 +6,10 @@ tests:unit:
   stage: test
   tags:
     - saas-linux-large-amd64
-  needs:
-    - install
+  # `install` produces no artifacts, only the dependency cache. On a warm cache
+  # `make test-coverage-ci` skips the install; on a cold cache (e.g. a
+  # poetry.lock change) it installs for itself, so don't wait on the build stage.
+  needs: []
   script:
     - make test-coverage-ci
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
