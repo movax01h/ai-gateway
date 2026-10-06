@@ -1,10 +1,8 @@
-"""Fixed, per-CWE text the report writer puts on BL findings: how to fix it, and its OWASP Top 10 category.
+"""Fixed, per-CWE text the report writer puts on BL findings: how to fix it, and its OWASP Top 10 categories.
 
 One entry per CWE in ``bl_report.IN_SCOPE_CWES``; a test keeps the two in step. The text is generic per weakness
 class, like a SAST rule's, so it is written once and reviewed here rather than generated per finding.
 """
-
-from typing import Optional
 
 #: How to fix each weakness class: short, plain and actionable, for the report's ``solution``.
 SOLUTIONS = {
@@ -48,8 +46,9 @@ SOLUTIONS = {
         "and reject requests that skip a step."
     ),
     "862": (
-        "Add an authorization check to this handler before it reads or changes data. "
-        "Use the same check as the protected handlers next to it, and return 403 when the caller is not allowed."
+        "Add an authorization check to this handler before it reads or changes data, "
+        "such as the check used by similar protected handlers, if there are any. "
+        "Return 403 when the caller is not allowed."
     ),
     "863": (
         "Make the authorization check cover every condition the protected action requires, "
@@ -64,7 +63,7 @@ SOLUTIONS = {
 }
 
 #: OWASP Top 10 2021 category of each CWE that OWASP maps to one, as ``(id, name, url)``. CWE-362, CWE-367 and
-#: CWE-459 are in no Top 10 2021 category, so they get no OWASP identifier.
+#: CWE-459 are in no Top 10 2021 category, so they get no 2021 identifier.
 _OWASP_2021 = {
     "A01:2021": (
         "Broken Access Control",
@@ -96,16 +95,56 @@ OWASP_2021_OF_CWE = {
     "915": "A08:2021",
 }
 
+#: The same for OWASP Top 10 2025. CWE-459 and CWE-840 are in no Top 10 2025 category.
+_OWASP_2025 = {
+    "A01:2025": (
+        "Broken Access Control",
+        "https://owasp.org/Top10/2025/A01_2025-Broken_Access_Control/",
+    ),
+    "A06:2025": (
+        "Insecure Design",
+        "https://owasp.org/Top10/2025/A06_2025-Insecure_Design/",
+    ),
+    "A07:2025": (
+        "Authentication Failures",
+        "https://owasp.org/Top10/2025/A07_2025-Authentication_Failures/",
+    ),
+    "A08:2025": (
+        "Software or Data Integrity Failures",
+        "https://owasp.org/Top10/2025/A08_2025-Software_or_Data_Integrity_Failures/",
+    ),
+}
 
-def owasp_identifier(cwe: str) -> Optional[dict]:
-    """The report identifier for the CWE's OWASP Top 10 2021 category, or ``None`` when it has none."""
-    category = OWASP_2021_OF_CWE.get(cwe)
-    if not category:
-        return None
-    name, url = _OWASP_2021[category]
-    return {
-        "type": "owasp",
-        "name": f"{category} - {name}",
-        "value": category,
-        "url": url,
-    }
+OWASP_2025_OF_CWE = {
+    "200": "A01:2025",
+    "284": "A01:2025",
+    "285": "A01:2025",
+    "639": "A01:2025",
+    "862": "A01:2025",
+    "863": "A01:2025",
+    "362": "A06:2025",
+    "367": "A06:2025",
+    "287": "A07:2025",
+    "915": "A08:2025",
+}
+
+
+def owasp_identifiers(cwe: str) -> list[dict]:
+    """The report identifiers for the CWE's OWASP Top 10 2021 and 2025 categories, in that order."""
+    identifiers = []
+    for of_cwe, categories in (
+        (OWASP_2021_OF_CWE, _OWASP_2021),
+        (OWASP_2025_OF_CWE, _OWASP_2025),
+    ):
+        category = of_cwe.get(cwe)
+        if category:
+            name, url = categories[category]
+            identifiers.append(
+                {
+                    "type": "owasp",
+                    "name": f"{category} - {name}",
+                    "value": category,
+                    "url": url,
+                }
+            )
+    return identifiers

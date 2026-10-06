@@ -14,8 +14,7 @@ def test_the_cwe_stays_the_primary_identifier_and_owasp_follows():
     findings = [{"cwe": "CWE-639", "file": "a.ts", "body": "x", "code_excerpt": "y"}]
     (v,) = _writer()._build_report(findings)["vulnerabilities"]
 
-    assert [i["type"] for i in v["identifiers"]] == ["cwe", "owasp"]
-    assert v["identifiers"][1]["value"] == "A01:2021"
+    assert [i["value"] for i in v["identifiers"]] == ["639", "A01:2021", "A01:2025"]
 
 
 def test_the_owasp_identifier_changes_neither_the_id_nor_tracking():
@@ -36,11 +35,11 @@ def test_the_owasp_identifier_changes_neither_the_id_nor_tracking():
 
 
 def test_a_cwe_with_no_owasp_category_has_the_cwe_alone():
-    (v,) = _writer()._build_report([{"cwe": "CWE-362", "file": "a.ts"}])[
+    (v,) = _writer()._build_report([{"cwe": "CWE-459", "file": "a.ts"}])[
         "vulnerabilities"
     ]
 
-    assert [i["name"] for i in v["identifiers"]] == ["CWE-362"]
+    assert [i["name"] for i in v["identifiers"]] == ["CWE-459"]
 
 
 def test_the_solution_is_the_fixed_text_for_the_cwe():

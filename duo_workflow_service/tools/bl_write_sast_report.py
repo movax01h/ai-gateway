@@ -18,7 +18,7 @@ from packaging.version import Version
 from pydantic import BaseModel, Field
 
 from contract import contract_pb2
-from duo_workflow_service.bl_security.cwe_guidance import SOLUTIONS, owasp_identifier
+from duo_workflow_service.bl_security.cwe_guidance import SOLUTIONS, owasp_identifiers
 from duo_workflow_service.bl_security.executor_output import (
     EXIT_CODE_HEADER,
     executor_truncated,
@@ -915,9 +915,7 @@ class BlWriteSastReport(DuoBaseTool):
                 )
                 # Never before the CWE: identifiers[0] is the primary identifier,
                 # and GitLab's vulnerability identity and tracking depend on it.
-                owasp = owasp_identifier(cwe)
-                if owasp:
-                    identifiers.append(owasp)
+                identifiers.extend(owasp_identifiers(cwe))
             vuln = {
                 "id": vid,
                 "name": fallback_title(cwe, file),
