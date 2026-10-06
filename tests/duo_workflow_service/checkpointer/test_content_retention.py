@@ -121,7 +121,7 @@ def _checkpoint(checkpoint_id, messages=1):
 
 def _metadata():
     metadata = CheckpointMetadata(source="loop", step=3)
-    metadata["writes"] = {"triage": {"reasoning": SECRET}}  # type: ignore[typeddict-unknown-key]
+    metadata["writes"] = {"triage": {"reasoning": SECRET}}
     return metadata
 
 
