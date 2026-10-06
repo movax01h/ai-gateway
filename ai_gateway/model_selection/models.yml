@@ -6,6 +6,7 @@ models:
     description: "Open-source 2.8T MoE multimodal model with strong coding, visual reasoning, and agentic capabilities."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
+    supports_vision: true  # 2026-09-29 - https://app.fireworks.ai/models/fireworks/kimi-k3 and confirmed via manual testing
     model_class_provider: litellm
     params:
       model: "accounts/fireworks/models/kimi-k3"
@@ -20,6 +21,7 @@ models:
     description: "Native multimodal MoE model for coding, agentic tasks, and reasoning."
     cost_indicator: "$"
     max_context_tokens: 512_000  # https://app.fireworks.ai/models/fireworks/minimax-m3
+    supports_vision: true  # 2026-09-29 - Fireworks docs mention it doesn't support image input but manually testing verified it does, and the HF model card confirms it as well
     model_class_provider: litellm
     params:
       model: "accounts/fireworks/models/minimax-m3"
@@ -34,6 +36,7 @@ models:
     description: "Open-source 1M-context MoE model for agentic coding and long-horizon engineering tasks."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
+    supports_vision: false  # 2026-09-29 - https://app.fireworks.ai/models/fireworks/glm-5p3 and confirmed via manual testing
     model_class_provider: litellm
     params:
       model: "accounts/fireworks/models/glm-5p3"
@@ -48,6 +51,7 @@ models:
     description: "Open-source model for agentic coding."
     cost_indicator: "$"
     max_context_tokens: 262_144  # https://huggingface.co/Qwen/Qwen3.8-27B
+    supports_vision: true  # 2026-09-29 - https://huggingface.co/Qwen/Qwen3.8-27B and confirmed via manual testing
     model_class_provider: litellm
     strip_reasoning: true
     requires_single_system_message: true
@@ -66,6 +70,7 @@ models:
     description: "Fast code generation and assistance."
     cost_indicator: "$"
     max_context_tokens: 32767  # Fireworks has limited the max tokens to 32k to avoid OOM errors
+    supports_vision: false  # 2026-09-29 - https://docs.mistral.ai/models/codestral-25-01
     model_class_provider: litellm_completion
     family:
       - completion_fim
@@ -100,6 +105,7 @@ models:
     gitlab_identifier: "codestral_2508_fireworks"
     description: "Fast code generation and assistance."
     cost_indicator: "$"
+    supports_vision: false  # 2026-09-29 - https://docs.mistral.ai/models/codestral-25-08
     max_context_tokens: 32767  # Fireworks has limited the max tokens to 32k to avoid OOM errors
     model_class_provider: litellm_completion
     family:
