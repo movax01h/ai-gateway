@@ -369,7 +369,7 @@ class AbstractWorkflow(ABC):
         return RECURSION_LIMIT
 
     def _content_retention(self) -> ContentRetention:
-        """What the session keeps: ``metadata`` drops model and user text from checkpoints, the stream and audits."""
+        """What the session exposes: ``metadata`` drops model and user text from the live stream and audit events."""
         return "full"
 
     async def _tag_langsmith_hard_limit(self) -> None:
@@ -618,7 +618,6 @@ class AbstractWorkflow(ABC):
                 self._workflow_type,
                 self._workflow_config,
                 gitlab_status_update_callback=on_gitlab_status_update,
-                content_retention=self._content_retention(),
             ) as checkpointer:
                 status_event = getattr(checkpointer, "initial_status_event", None)
                 checkpoint_tuple = (
@@ -796,8 +795,7 @@ class AbstractWorkflow(ABC):
         # Infrastructure-initiated cancellation (e.g. Workhorse pod rotation, WebSocket
         # ping failure). Unlike a user stop, the session is NOT finished: Rails keeps it
         # `running` (see GitLabWorkflow.__aexit__) and the client reconnects on the
-        # WebSocket 1001 to replay from the last checkpoint (a metadata-retention flow
-        # keeps no content to replay, so it refuses that resume). So skip every terminal
+        # WebSocket 1001 to replay from the last checkpoint. So skip every terminal
         # side-effect:
         #   - no _handle_workflow_failure, which would persist a spurious "something
         #     went wrong" entry into the ui_chat_log of a session that is about to

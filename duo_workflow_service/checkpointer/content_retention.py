@@ -1,8 +1,9 @@
-"""Content retention: what a session keeps of the text it produced.
+"""Content retention: what a session exposes of the text it produced.
 
-A flow whose config sets ``content_retention: metadata`` keeps the shape of the run (which steps and tools ran, their
-status and timing) but none of the model or user text. The checkpointer, the live stream and the audit collector apply
-it at their exits, so it is an allowlist: a field not named here is dropped.
+A flow whose config sets ``content_retention: metadata`` exposes the shape of the run (which steps and tools ran, their
+status and timing) but none of the model or user text. The live stream and the audit collector apply it at their exits,
+so it is an allowlist: a field not named here is dropped. Saved checkpoints stay complete so the session can resume;
+GitLab reduces them when it serves them to anyone but Duo Workflow Service.
 """
 
 from typing import Any, Literal, Mapping, Optional
@@ -12,12 +13,7 @@ ContentRetention = Literal["full", "metadata"]
 METADATA_RETENTION: ContentRetention = "metadata"
 
 
-class SessionNotResumableError(Exception):
-    """A metadata-retention session was asked to resume; its saved state cannot rebuild the run."""
-
-
-# The only channels kept, and the only chat-log fields kept per entry.
-_KEPT_CHANNELS = ("status", "ui_chat_log")
+# The only chat-log fields kept per entry.
 _KEPT_CHAT_LOG_FIELDS = (
     "message_type",
     "message_sub_type",
@@ -50,24 +46,3 @@ def reduce_ui_chat_log_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
 
 def reduce_ui_chat_log(entries: Optional[list]) -> list[dict[str, Any]]:
     return [reduce_ui_chat_log_entry(entry) for entry in entries or []]
-
-
-def reduce_state_for_metadata_retention(
-    channel_values: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Return the channel values a metadata-retention session may persist: ``status`` and a reduced chat log."""
-    reduced = {
-        key: channel_values[key] for key in _KEPT_CHANNELS if key in channel_values
-    }
-    if "ui_chat_log" in reduced:
-        reduced["ui_chat_log"] = reduce_ui_chat_log(reduced["ui_chat_log"])
-    return reduced
-
-
-def reduce_checkpoint_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep LangGraph's bookkeeping keys; drop ``writes`` and anything else that can carry node output."""
-    return {
-        key: metadata[key]
-        for key in ("source", "step", "parents", "run_id")
-        if key in metadata
-    }

@@ -910,7 +910,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     async def test_bl_security_run_wires_metadata_retention(
         self, mock_flow_metadata, user, flow_type
     ):
-        """The bundled bl_security flow hands ``metadata`` to every place that stores text."""
+        """bl_security hands ``metadata`` to the live stream and audits; checkpoints stay complete."""
         config = FlowConfig.from_yaml_config("bl_security", "1.0.0")
         checkpointer = Mock(initial_status_event=WorkflowStatusEventEnum.START)
         checkpointer.aget_tuple = AsyncMock(return_value=None)
@@ -941,8 +941,9 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             )
             await flow.run("scan")
 
-        for cls in (gitlab_workflow, user_interface, audit_collector):
+        for cls in (user_interface, audit_collector):
             assert cls.call_args.kwargs["content_retention"] == "metadata"
+        assert "content_retention" not in gitlab_workflow.call_args.kwargs
 
     def test_process_additional_context_empty_list(self, flow_instance):
         """Test _process_additional_context with empty list."""
