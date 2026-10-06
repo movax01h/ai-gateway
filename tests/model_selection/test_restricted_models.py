@@ -1,3 +1,5 @@
+# These tests cover a cross-module feature (restricted models), not one module.
+# pylint: disable=file-naming-for-tests
 import json
 import re
 from unittest.mock import patch

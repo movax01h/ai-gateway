@@ -684,11 +684,11 @@ class ModelSelectionConfig:
         restricted definition's ``params.model``:
 
         - preceded by the start of the string, ``/``, ``.``, ``:`` or ``@`` (so provider and
-          region prefixes such as ``anthropic/``, ``vertex_ai/`` or ``us.anthropic.`` are
-          caught), and
+            region prefixes such as ``anthropic/``, ``vertex_ai/`` or ``us.anthropic.`` are
+            caught), and
         - followed by the end of the string, ``@`` (``<model>@<date>``), ``:``
-          (``<model>:0``), ``-v<digit>`` (``<model>-v1:0``) or an 8-digit date
-          (``<model>-20261001``).
+            (``<model>:0``), ``-v<digit>`` (``<model>-v1:0``) or an 8-digit date
+            (``<model>-20261001``).
 
         Any other suffix is not matched: sibling models sharing the prefix (``<model>-mini``,
         ``<model>.1``), but also aliases such as ``<model>-2026-10-01``, ``<model>-latest``

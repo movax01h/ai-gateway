@@ -1,3 +1,5 @@
+# These tests cover a cross-module feature (restricted models), not one module.
+# pylint: disable=file-naming-for-tests
 import asyncio
 import operator
 from typing import Annotated, TypedDict
@@ -148,7 +150,7 @@ async def test_authorization_propagates_to_tasks_threads_and_graph_branches(
         items: list[int]
         built: Annotated[list[str], operator.add]
 
-    async def unit(_state: dict) -> dict:
+    async def unit(state: State) -> dict:
         return {"built": [build()]}
 
     graph = StateGraph(State)
