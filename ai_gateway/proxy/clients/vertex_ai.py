@@ -87,8 +87,12 @@ def _load_allowed_upstream_models() -> list[str]:
     Note: The check for textmodels will be removed in the future.
     See: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/906
     """
-    google_models = [el.value for el in KindVertexTextModel]
     config = ModelSelectionConfig.instance()
+    google_models = [
+        el.value
+        for el in KindVertexTextModel
+        if config.restricted_flows_for(models=[el.value]) is None
+    ]
     return google_models + config.get_proxy_models_for_provider(_UPSTREAM_SERVICE)
 
 

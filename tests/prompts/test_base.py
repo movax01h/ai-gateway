@@ -125,10 +125,14 @@ class TestPrompt:  # pylint: disable=too-many-public-methods
 models:
   - name: Mistral
     gitlab_identifier: mistral
+    model_class_provider: litellm
+    max_context_tokens: 1000
     params:
         model: mistral
   - name: Amazon Q
     gitlab_identifier: amazon_q
+    model_class_provider: amazon_q
+    max_context_tokens: 1000
     params:
         model: amazon_q
 """,

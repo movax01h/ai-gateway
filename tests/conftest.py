@@ -18,6 +18,7 @@ from langchain_core.messages.ai import AIMessage, UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 from litellm.types.utils import PromptTokensDetailsWrapper, Usage
+from pydantic import TypeAdapter
 from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 from transformers import PreTrainedTokenizerFast
@@ -877,3 +878,27 @@ def no_gitlab_user_id_in_context_fixture():
     token = gitlab_user_id.set(None)
     yield
     gitlab_user_id.reset(token)
+
+
+FAKE_RESTRICTED_MODEL = {
+    "name": "Fake Restricted Model",
+    "gitlab_identifier": "fake_restricted_model",
+    "model_class_provider": "anthropic",
+    "max_context_tokens": 200000,
+    "proxy_provider": "anthropic",
+    "params": {"model": "claude-fake-restricted-1"},
+    "restricted_to_flows": ["bl_security"],
+}
+
+
+@pytest.fixture(name="fake_restricted_model")
+def fake_restricted_model_fixture():
+    """Register a model restricted to the bl_security flow alongside models.yml."""
+    definition = TypeAdapter(LLMDefinition).validate_python(FAKE_RESTRICTED_MODEL)
+    original = ModelSelectionConfig.get_llm_definitions
+
+    def get_llm_definitions(self):
+        return {**original(self), definition.gitlab_identifier: definition}
+
+    with patch.object(ModelSelectionConfig, "get_llm_definitions", get_llm_definitions):
+        yield definition

@@ -78,7 +78,11 @@ from ai_gateway.model_metadata import (
     TypeModelMetadata,
     resolve_provider_aware_metadata,
 )
-from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    PromptParams,
+    ensure_restricted_model_access,
+)
 from ai_gateway.model_selection.models import (
     BaseModelParams,
     ModelClassProvider,
@@ -776,6 +780,22 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             config.params, model_metadata, config.prompt_template, model_provider
         )
 
+        llm_definition = model_metadata.llm_definition if model_metadata else None
+        # Default-deny for restricted models, on every name the model can be reached
+        # by: the resolved definition, a custom-provider identifier, or a raw model string.
+        ensure_restricted_model_access(
+            identifiers=[
+                llm_definition.gitlab_identifier if llm_definition else None,
+                getattr(model_metadata, "name", None),
+            ],
+            models=[
+                model_kwargs.get("model"),
+                model_kwargs.get("model_id"),
+                config.model.params.model,
+                llm_definition.params.model if llm_definition else None,
+            ],
+        )
+
         if not self._is_anthropic_provider(model_provider, config.model.params):
             for key in ANTHROPIC_ONLY_MODEL_KWARGS:
                 model_kwargs.pop(key, None)
@@ -1020,6 +1040,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     model_factory_args[header_field],
                     additional_allowed=operator_allowed_headers,
                 )
+
+        ensure_restricted_model_access(
+            models=[model_factory_args.get("model"), model_factory_args.get("model_id")]
+        )
 
         return model_factory(**model_factory_args)
 
