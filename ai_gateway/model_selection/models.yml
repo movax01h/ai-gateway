@@ -809,6 +809,9 @@ models:
       max_tokens: 65_536
       thinking_level: "low"
       streaming: "true"
+    deprecation:
+      deprecation_date: "2026-10-06"
+      removal_version: "19.6"
 
   - name: "Gemini 3.7 Flash"
     provider: "Gemini Enterprise Agent Platform"
@@ -824,6 +827,9 @@ models:
       max_tokens: 65_536
       thinking_level: "high"
       streaming: "true"
+    deprecation:
+      deprecation_date: "2026-10-06"
+      removal_version: "19.8"
 
   - name: "Gemini 3.7 Flash Medium"
     provider: "Gemini Enterprise Agent Platform"
@@ -839,6 +845,9 @@ models:
       max_tokens: 65_536
       thinking_level: "medium"
       streaming: "true"
+    deprecation:
+      deprecation_date: "2026-10-06"
+      removal_version: "19.8"
 
   - name: "Gemini 3.7 Flash Low"
     provider: "Gemini Enterprise Agent Platform"
@@ -854,6 +863,9 @@ models:
       max_tokens: 65_536
       thinking_level: "low"
       streaming: "true"
+    deprecation:
+      deprecation_date: "2026-10-06"
+      removal_version: "19.8"
 
   - name: "Gemini 3.8 Flash"
     provider: "Gemini Enterprise Agent Platform"
