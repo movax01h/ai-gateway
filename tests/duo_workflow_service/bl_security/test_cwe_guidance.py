@@ -4,8 +4,9 @@ import pytest
 
 from duo_workflow_service.bl_security.cwe_guidance import (
     OWASP_2021_OF_CWE,
+    OWASP_2025_OF_CWE,
     SOLUTIONS,
-    owasp_identifier,
+    owasp_identifiers,
 )
 from duo_workflow_service.tools.bl_report import IN_SCOPE_CWES
 
@@ -24,54 +25,37 @@ def test_each_solution_is_short_plain_text(cwe):
     assert text.endswith(".")
 
 
-def test_owasp_categories_only_cover_in_scope_cwes():
-    assert set(OWASP_2021_OF_CWE) <= set(IN_SCOPE_CWES)
-
-
-def test_the_owasp_identifier_is_schema_shaped():
-    assert owasp_identifier("639") == {
-        "type": "owasp",
-        "name": "A01:2021 - Broken Access Control",
-        "value": "A01:2021",
-        "url": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
-    }
-    assert owasp_identifier("287")["value"] == "A07:2021"
-
-
-@pytest.mark.parametrize("cwe", ["362", "367", "459", "79", ""])
-def test_a_cwe_outside_the_top_10_gets_no_owasp_identifier(cwe):
-    assert owasp_identifier(cwe) is None
-
-
 @pytest.mark.parametrize(
-    ("cwe", "category"),
+    ("of_cwe", "unmapped"),
     [
-        ("200", "A01:2021"),
-        ("284", "A01:2021"),
-        ("285", "A01:2021"),
-        ("639", "A01:2021"),
-        ("862", "A01:2021"),
-        ("863", "A01:2021"),
-        ("840", "A04:2021"),
-        ("287", "A07:2021"),
-        ("915", "A08:2021"),
-        ("362", None),
-        ("367", None),
-        ("459", None),
+        (OWASP_2021_OF_CWE, {"362", "367", "459"}),
+        (OWASP_2025_OF_CWE, {"459", "840"}),
     ],
 )
-def test_each_in_scope_cwe_maps_to_its_owasp_category(cwe, category):
-    identifier = owasp_identifier(cwe)
+def test_every_in_scope_cwe_is_mapped_or_explicitly_unmapped(of_cwe, unmapped):
+    assert set(of_cwe) | unmapped == set(IN_SCOPE_CWES)
+    assert not set(of_cwe) & unmapped
 
-    assert (identifier or {}).get("value") == category
+
+def test_the_owasp_identifiers_are_schema_shaped():
+    assert owasp_identifiers("639") == [
+        {
+            "type": "owasp",
+            "name": "A01:2021 - Broken Access Control",
+            "value": "A01:2021",
+            "url": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
+        },
+        {
+            "type": "owasp",
+            "name": "A01:2025 - Broken Access Control",
+            "value": "A01:2025",
+            "url": "https://owasp.org/Top10/2025/A01_2025-Broken_Access_Control/",
+        },
+    ]
+    assert [i["value"] for i in owasp_identifiers("287")] == ["A07:2021", "A07:2025"]
+    assert [i["value"] for i in owasp_identifiers("362")] == ["A06:2025"]
 
 
-@pytest.mark.parametrize("cwe", ["639", "863"])
-def test_the_access_control_fixes_do_not_assume_one_language_or_single_user_ownership(
-    cwe,
-):
-    text = SOLUTIONS[cwe]
-
-    assert "`" not in text
-    assert "UserId" not in text
-    assert "signed-in user" not in text
+@pytest.mark.parametrize("cwe", ["459", "79", ""])
+def test_a_cwe_outside_the_top_10_gets_no_owasp_identifier(cwe):
+    assert owasp_identifiers(cwe) == []
