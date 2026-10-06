@@ -16,8 +16,10 @@ from gitlab_cloud_connector import (
 from jose import jwt
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 from langgraph.errors import GraphRecursionError
+from langsmith import utils as ls_utils
 from structlog.testing import capture_logs
 
+from ai_gateway.structured_logging import can_log_request_data
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
@@ -1713,6 +1715,52 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
     mock_tracing_context.assert_called_once()
     call_kwargs = mock_tracing_context.call_args[1]
     assert call_kwargs["enabled"] == expected_tracing_enabled
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content_retention", "expected_tracing", "expected_request_logging"),
+    [("full", True, True), ("metadata", False, False)],
+)
+async def test_metadata_retention_disables_tracing_and_request_logging(
+    content_retention, expected_tracing, expected_request_logging, user
+):
+    """A metadata-retention flow sends no LangSmith trace and logs no LLM request body, even with both switched on."""
+    observed = {}
+
+    async def compile_and_run_graph(**_kwargs):
+        observed["tracing"] = ls_utils.tracing_is_enabled()
+        observed["request_logging"] = can_log_request_data()
+
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {"git_url": "https://example.com", "git_sha": "abc123"},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    token = extended_logging_context.set(True)
+    try:
+        with (
+            patch.dict(os.environ, {"LANGSMITH_TRACING_V2": "true"}, clear=False),
+            patch("ai_gateway.structured_logging.ENABLE_REQUEST_LOGGING", True),
+            patch.object(
+                workflow, "_content_retention", return_value=content_retention
+            ),
+            patch.object(
+                workflow, "_compile_and_run_graph", side_effect=compile_and_run_graph
+            ),
+        ):
+            await workflow.run("Test goal")
+            # The suppression ends with the run.
+            assert can_log_request_data() is True
+    finally:
+        extended_logging_context.reset(token)
+
+    assert observed == {
+        "tracing": expected_tracing,
+        "request_logging": expected_request_logging,
+    }
 
 
 @pytest.mark.asyncio

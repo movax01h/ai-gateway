@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.structured_logging import request_data_logging_suppressed
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
@@ -42,7 +43,10 @@ from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.collector import AuditEventCollector
 from duo_workflow_service.audit_events.context import audit_collector_context
 from duo_workflow_service.audit_events.event_types import SessionStartedEvent
-from duo_workflow_service.checkpointer.content_retention import ContentRetention
+from duo_workflow_service.checkpointer.content_retention import (
+    METADATA_RETENTION,
+    ContentRetention,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
@@ -292,7 +296,13 @@ class AbstractWorkflow(ABC):
 
             # By default, tracing follows extended_logging. Only disable if LANGSMITH_TRACING_V2 is explicitly "false"
             langsmith_tracing_v2_env = os.getenv("LANGSMITH_TRACING_V2", "").lower()
-            tracing_enabled = extended_logging and (langsmith_tracing_v2_env != "false")
+            # A metadata-retention flow sends no trace and logs no LLM request body, whatever the logging settings.
+            metadata_only = self._content_retention() == METADATA_RETENTION
+            tracing_enabled = (
+                extended_logging
+                and (langsmith_tracing_v2_env != "false")
+                and not metadata_only
+            )
 
             monitoring_context.tracing_enabled = str(tracing_enabled)
             monitoring_context.use_ai_prompt_scanning = is_feature_enabled(
@@ -302,19 +312,23 @@ class AbstractWorkflow(ABC):
             # Setup langsmith parent tracing headers if any
             parent_trace = get_langsmith_trace_headers()
 
-            with tracing_context(parent=parent_trace, enabled=tracing_enabled):
-                try:
-                    # pylint: disable=unexpected-keyword-arg
-                    await self._compile_and_run_graph(
-                        goal=goal,
-                        langsmith_extra={"metadata": tracing_metadata},
-                    )
-                except TraceableException:
-                    # Intentionally suppressing the exception here after it has been
-                    # properly traced in Langsmith via the TraceableException
-                    pass
-                finally:
-                    self._outbox.close()
+            suppress_token = request_data_logging_suppressed.set(metadata_only)
+            try:
+                with tracing_context(parent=parent_trace, enabled=tracing_enabled):
+                    try:
+                        # pylint: disable=unexpected-keyword-arg
+                        await self._compile_and_run_graph(
+                            goal=goal,
+                            langsmith_extra={"metadata": tracing_metadata},
+                        )
+                    except TraceableException:
+                        # Intentionally suppressing the exception here after it has been
+                        # properly traced in Langsmith via the TraceableException
+                        pass
+                    finally:
+                        self._outbox.close()
+            finally:
+                request_data_logging_suppressed.reset(suppress_token)
 
     @abstractmethod
     async def _handle_workflow_failure(

@@ -7,7 +7,12 @@ import pytest
 import structlog
 
 from ai_gateway.model_metadata import ModelMetadata
-from ai_gateway.structured_logging import prevent_logging_if_disabled, sanitize_logs
+from ai_gateway.structured_logging import (
+    can_log_request_data,
+    prevent_logging_if_disabled,
+    request_data_logging_suppressed,
+    sanitize_logs,
+)
 
 
 class TestSanitizeLogs:
@@ -149,3 +154,16 @@ class TestPreventLoggingIfDisabled:
                 stack.enter_context(logging_patch)
             with pytest.raises(structlog.DropEvent):
                 prevent_logging_if_disabled(None, None, {"key": "value"})
+
+    @pytest.mark.parametrize("case", CASES_WHERE_LOGS_SHOULD_NOT_BE_DROPPED)
+    def test_suppression_overrides_every_switch(self, case):
+        token = request_data_logging_suppressed.set(True)
+        try:
+            with ExitStack() as stack:
+                for logging_patch in self._setup_logging_patches(case):
+                    stack.enter_context(logging_patch)
+                assert can_log_request_data() is False
+                with pytest.raises(structlog.DropEvent):
+                    prevent_logging_if_disabled(None, None, {"key": "value"})
+        finally:
+            request_data_logging_suppressed.reset(token)
