@@ -7,7 +7,7 @@ tests cover what this config wires together: the ``scan_effort`` dial and its
 fallbacks, the discovery dials, the stage graph and toolsets, the answer
 schemas the pipeline parses, and the joint between the prompts' declared scope
 and ``bl_report.IN_SCOPE_CWES``. Prompt wording is not pinned; only the triage
-schema descriptions that steer the verdict out of ``reasoning`` are.
+schema descriptions that steer the verdict out of ``explanation`` are.
 """
 
 import asyncio
@@ -589,17 +589,17 @@ class TestResponseSchemas:
         assert verdict_items("map_reviews_collect") == []
         assert verdict_items("sibling_scan_collect") == []
 
-    def test_the_triage_reasoning_is_the_first_required_field(self):
+    def test_the_triage_explanation_is_the_first_required_field(self):
         schema = _schema(TRIAGE_SCHEMA_ID)
-        assert next(iter(schema["properties"])) == "reasoning"
-        assert "reasoning" in schema["required"]
+        assert next(iter(schema["properties"])) == "explanation"
+        assert "explanation" in schema["required"]
 
     def test_each_triage_audit_field_says_it_is_its_own_field(self):
-        """Agents put the whole verdict inside `reasoning`; each field's description steers it out."""
+        """Agents put the whole verdict inside `explanation`; each field's description steers it out."""
         properties = _schema(TRIAGE_SCHEMA_ID)["properties"]
-        assert "complete" not in properties["reasoning"]["description"]
-        assert "own fields" in properties["reasoning"]["description"]
-        assert "not inside reasoning" in properties["verdict"]["description"]
+        assert "complete" not in properties["explanation"]["description"]
+        assert "own fields" in properties["explanation"]["description"]
+        assert "not inside explanation" in properties["verdict"]["description"]
         for key in ("clause", "evidence", "triage_evidence"):
             assert properties[key]["description"]
 
@@ -627,7 +627,12 @@ class TestResponseSchemas:
         schema = _schema(TRIAGE_SCHEMA_ID)
         assert tuple(schema["properties"])[1:] == VERDICT_KEYS
         assert schema["properties"]["verdict"]["enum"] == ["KEEP", "DROP"]
-        assert set(schema["required"]) == {"reasoning", "verdict", "clause", "evidence"}
+        assert set(schema["required"]) == {
+            "explanation",
+            "verdict",
+            "clause",
+            "evidence",
+        }
 
     @pytest.mark.parametrize("key", ["file", "code_excerpt", "severity", "cwe", "body"])
     def test_the_answer_tool_rejects_a_finding_with_an_empty_field(self, key):
@@ -644,16 +649,16 @@ class TestResponseSchemas:
 
     @pytest.mark.parametrize(
         ("key", "value"),
-        [("reasoning", "x" * 19), ("clause", ""), ("evidence", "")],
+        [("explanation", "x" * 19), ("clause", ""), ("evidence", "")],
     )
-    def test_the_verdict_tool_rejects_short_reasoning_and_empty_fields(
+    def test_the_verdict_tool_rejects_short_explanation_and_empty_fields(
         self, key, value
     ):
         model = json_schema_to_pydantic(
             _schema(TRIAGE_SCHEMA_ID), title_fallback=TRIAGE_SCHEMA_ID
         )
         verdict = {
-            "reasoning": "x" * 20,
+            "explanation": "x" * 20,
             "verdict": "KEEP",
             "clause": "KEEP-1",
             "evidence": "a.rb:3",

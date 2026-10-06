@@ -109,7 +109,7 @@ def test_title_and_impact_survive_dedup_triage_and_report():
     )
     deduped = asyncio.run(_dedup()._execute([[finding]]))
     verdict = {
-        "reasoning": "x" * 20,
+        "explanation": "x" * 20,
         "verdict": "KEEP",
         "clause": "KEEP-1",
         "evidence": "a",
