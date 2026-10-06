@@ -179,7 +179,7 @@ components:
       - from: "context:map_reviews_prep.tool_responses.emitted_count"
         as: "emitted_count"
         optional: true
-      - from: "review units"
+      - from: "file groups"
         as: "unit_noun"
         literal: true
     ui_log_events:
@@ -251,7 +251,7 @@ components:
       - from: "context:sibling_scan_prep.tool_responses.emitted_count"
         as: "emitted_count"
         optional: true
-      - from: "review units"
+      - from: "file groups"
         as: "unit_noun"
         literal: true
     ui_log_events:

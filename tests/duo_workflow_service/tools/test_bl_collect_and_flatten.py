@@ -44,7 +44,7 @@ class TestBlCollectAndFlatten:
         assert result["coverage"]["completed"] == 1
         assert result["coverage"]["errored"] == 2
         assert "2 of 3" in result["coverage"]["loss"]
-        assert "2 errored" in result["coverage"]["loss"]
+        assert "2 failed" in result["coverage"]["loss"]
 
     async def test_a_for_each_error_record_wins_over_an_answer_in_the_same_entry(
         self,
@@ -126,7 +126,7 @@ async def test_a_garbled_unit_answer_is_counted_unread_not_reviewed():
     cov = out["coverage"]
 
     assert cov["summary"] == "Reviewed 1 of 2 units."
-    assert "1 completed but their findings could not be read" in cov["loss"]
+    assert "1 returned an answer that could not be read" in cov["loss"]
 
 
 @pytest.mark.asyncio
@@ -143,8 +143,8 @@ class TestAUnitWithNoAnswer:
         cov = (await tool._execute(results=results))["coverage"]
 
         assert cov["summary"] == "Reviewed 1 of 2 units."
-        assert "1 of 2 units were DISCARDED" in cov["loss"]
-        assert "1 completed but their findings could not be read" in cov["loss"]
+        assert "1 of 2 units are missing from the results" in cov["loss"]
+        assert "1 returned an answer that could not be read" in cov["loss"]
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ class TestADictFinalAnswer:
 
         assert cov["completed"] == 1
         assert cov["summary"] == "Reviewed 0 of 1 units."
-        assert "1 completed but their findings could not be read" in cov["loss"]
+        assert "1 returned an answer that could not be read" in cov["loss"]
 
 
 class TestCoverageSentencesReachTheReport:
@@ -202,7 +202,7 @@ class TestCoverageSentencesReachTheReport:
             completed=62,
             errored=0,
         )
-        assert "62 of 150 review units were dispatched" in cov["truncation"]
+        assert "62 of 150 review units were sent for review" in cov["truncation"]
         assert "88 were never reviewed" in cov["truncation"]
         # A cap is a CHOICE; it must not read as discarded findings.
         assert "loss" not in cov
@@ -216,8 +216,8 @@ class TestCoverageSentencesReachTheReport:
             errored=0,
             unread=14,
         )
-        assert "14 of 40 review units were DISCARDED" in cov["loss"]
-        assert "14 completed but their findings could not be read" in cov["loss"]
+        assert "14 of 40 review units are missing from the results" in cov["loss"]
+        assert "14 returned an answer that could not be read" in cov["loss"]
         assert "truncation" not in cov
 
     def test_errored_and_unread_units_are_counted_together_but_named_apart(self):
@@ -229,9 +229,9 @@ class TestCoverageSentencesReachTheReport:
             errored=1,
             unread=2,
         )
-        assert "3 of 10 units were DISCARDED" in cov["loss"]
-        assert "2 completed but their findings could not be read" in cov["loss"]
-        assert "1 errored" in cov["loss"]
+        assert "3 of 10 units are missing from the results" in cov["loss"]
+        assert "2 returned an answer that could not be read" in cov["loss"]
+        assert "1 failed" in cov["loss"]
 
     def test_a_stage_that_dispatched_nothing_still_says_so(self):
         cov = _coverage_sentences(
@@ -378,7 +378,7 @@ class TestTriageVerdictMerge:
 
         assert json.loads(out["final_answer"]) == []
         assert cov["summary"] == "Reviewed 0 of 1 units."
-        assert "1 completed but their findings could not be read" in cov["loss"]
+        assert "1 returned an answer that could not be read" in cov["loss"]
 
     async def test_a_verdict_with_no_verdict_field_is_counted_unread(self):
         out = await BlCollectAndFlatten(metadata=None)._execute(
@@ -492,6 +492,5 @@ class TestFlatten:
         assert json.loads(out["final_answer"]) == [_ONE_FINDING]
         assert out["coverage"]["summary"] == "Reviewed 2 of 5 units."
         assert (
-            "3 completed but their findings could not be read"
-            in (out["coverage"]["loss"])
+            "3 returned an answer that could not be read" in (out["coverage"]["loss"])
         )

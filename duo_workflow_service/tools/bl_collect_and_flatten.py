@@ -122,19 +122,19 @@ def _coverage_sentences(
     }
     if emitted is not None and emitted > dispatched:
         out["truncation"] = (
-            f"A cap bound this stage: {dispatched} of {emitted} {noun} were "
-            f"dispatched; {emitted - dispatched} were never reviewed."
+            f"The scan limit was reached: {dispatched} of {emitted} {noun} were "
+            f"sent for review; {emitted - dispatched} were never reviewed."
         )
     lost = errored + unread
     if lost:
         parts = []
         if unread:
-            parts.append(f"{unread} completed but their findings could not be read")
+            parts.append(f"{unread} returned an answer that could not be read")
         if errored:
-            parts.append(f"{errored} errored")
+            parts.append(f"{errored} failed")
         out["loss"] = (
-            f"{lost} of {dispatched} {noun} were DISCARDED without their "
-            f"findings being counted ({'; '.join(parts)})."
+            f"{lost} of {dispatched} {noun} are missing from the results "
+            f"({'; '.join(parts)})."
         )
     return out
 

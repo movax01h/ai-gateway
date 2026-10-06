@@ -184,13 +184,11 @@ def _flatten_findings(batches: Any) -> List[Finding]:
 # the artifacts.
 #
 # WHERE THE VERDICT LIVES. A DROPped finding has no report entry to carry one
-# on, so the service log is the only sink for the DROPs. The SURVIVORS carry
-# their clause and verdict in ``vulnerability.details`` (see
-# ``_triage_details`` in ``bl_write_sast_report``), the schema's own
-# named-list of typed fields and the same channel the anchor state uses: no
-# invented property and no schema-version bump. That makes "did this KEEP arm
-# ever fire?" a grep over the report. Scan-LEVEL disclosure has its own home;
-# see the SCAN COVERAGE DISCLOSURE block in ``bl_write_sast_report``.
+# on, so the service log is the only sink for the DROPs. The SURVIVORS are
+# logged again by ``bl_write_sast_report`` with their clause and verdict (see
+# ``_audit_record`` there), keyed by vulnerability id. The report is read by
+# the customer, so neither is put in it. Scan-LEVEL disclosure has its own
+# home; see the SCAN COVERAGE DISCLOSURE block in ``bl_write_sast_report``.
 #
 # Two properties keep this instrumentation-only:
 #   * a findings list where NOTHING carries a verdict is returned unchanged, so

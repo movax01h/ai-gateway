@@ -44,6 +44,7 @@ from duo_workflow_service.bl_security.model_text import model_impact, model_titl
 from duo_workflow_service.bl_security.target_files import resolve_target_files
 from duo_workflow_service.executor.action import _execute_action, _read_file_fully
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
+from duo_workflow_service.security.secret_redaction import redact_secrets
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.filesystem import validate_duo_context_exclusions
@@ -398,7 +399,8 @@ def _find_excerpt_line(content: str, excerpt: str, hint: int = 0) -> int:
 # carries no excerpt produces anchors that cannot be checked. Collapsing case 3
 # into case 1 hides a real defect behind a bad coordinate; dropping case 3
 # would discard a correct security finding. So the state is recorded per
-# finding and disclosed in the report.
+# finding: logged per finding, counted in the report's scan.messages, and,
+# for case 3, stated in that finding's description.
 #
 # WHAT THIS IS NOT. This makes mislocation DETECTABLE and, where the quote
 # locates it, correctable. It says nothing about whether a finding is right,
@@ -414,8 +416,8 @@ ANCHOR_CORRECTED = "corrected"
 
 ANCHOR_UNVERIFIED = "unverified"
 
-#: Keys the annotation is carried on, in the finding dict and in the report's
-#: ``vulnerability.details`` named-list.
+#: Keys of the per-finding audit log record (see :func:`_audit_record`). The
+#: anchor state is internal: it is logged, never put in the report.
 ANCHOR_DETAIL_KEY = "bl_anchor_status"
 
 ANCHOR_REASON_DETAIL_KEY = "bl_anchor_unverified_reason"
@@ -426,7 +428,7 @@ ANCHOR_CLAIMED_FILE_DETAIL_KEY = "bl_anchor_claimed_file"
 
 #: Every anchor disclosure in ``scan.messages`` starts with this, so a reader
 #: (and the coverage tests) can tell it apart from the coverage sentences.
-ANCHOR_MESSAGE_PREFIX = "Anchor verification:"
+ANCHOR_MESSAGE_PREFIX = "Location check:"
 
 _ANCHOR_NO_FILE = "the finding carries no file path, so nothing could be checked"
 
@@ -483,41 +485,38 @@ def _anchor_status_of(finding: dict) -> str:
 
 _ANCHOR_STATES = (ANCHOR_VERIFIED, ANCHOR_CORRECTED, ANCHOR_UNVERIFIED)
 
-
-def _text_detail(name: str, value: Any) -> dict:
-    """One ``vulnerability.details`` entry.
-
-    Satisfies the SAST schema's ``named_field`` + ``text`` detail type: a
-    non-empty ``name``, ``type: "text"``, and a string ``value``.
-    """
-    return {"name": name, "type": "text", "value": str(value)}
+#: Appended to the description of a finding whose line the location check could not verify. The anchor state itself
+#: stays out of the report; this is what it means for the reader of that one finding.
+UNVERIFIED_LINE_NOTE = "This line could not be matched to the quoted code; the issue may be elsewhere in the file."
 
 
-def _anchor_details(finding: dict) -> dict:
-    """The anchor state as schema-valid ``vulnerability.details`` entries.
+def _add_line_note(finding: dict, vuln: dict) -> None:
+    """Add :data:`UNVERIFIED_LINE_NOTE` as the last paragraph of ``vuln``'s description when its line is unverified."""
+    if _anchor_status_of(finding) != ANCHOR_UNVERIFIED:
+        return
+    body = vuln["description"]
+    vuln["description"] = (
+        f"{body}\n\n{UNVERIFIED_LINE_NOTE}" if body else UNVERIFIED_LINE_NOTE
+    )
 
-    Emitted for EVERY vulnerability, including verified ones. Emitting only the bad cases would make absence mean
-    "fine".
+
+def _anchor_audit(finding: dict) -> dict:
+    """The anchor state, for the per-finding audit log.
+
+    Recorded for EVERY finding, including verified ones. Recording only the bad cases would make absence mean "fine".
     """
     status = _anchor_status_of(finding)
-    details = {
-        ANCHOR_DETAIL_KEY: _text_detail("Anchor verification", status),
-    }
+    audit = {ANCHOR_DETAIL_KEY: status}
     if status == ANCHOR_UNVERIFIED:
-        details[ANCHOR_REASON_DETAIL_KEY] = _text_detail(
-            "Why the anchor is unverified",
-            finding.get("anchor_reason") or _ANCHOR_NOT_RUN,
+        audit[ANCHOR_REASON_DETAIL_KEY] = (
+            finding.get("anchor_reason") or _ANCHOR_NOT_RUN
         )
     claimed = finding.get("anchor_claimed_line")
     if status == ANCHOR_CORRECTED and claimed:
-        details[ANCHOR_CLAIMED_DETAIL_KEY] = _text_detail(
-            "Line originally claimed by the reviewer", claimed
-        )
+        audit[ANCHOR_CLAIMED_DETAIL_KEY] = str(claimed)
     if finding.get("claimed_file"):
-        details[ANCHOR_CLAIMED_FILE_DETAIL_KEY] = _text_detail(
-            "Path originally claimed by the reviewer", finding["claimed_file"]
-        )
-    return details
+        audit[ANCHOR_CLAIMED_FILE_DETAIL_KEY] = str(finding["claimed_file"])
+    return audit
 
 
 def _anchor_message(findings: List[dict]) -> dict:
@@ -532,25 +531,22 @@ def _anchor_message(findings: List[dict]) -> dict:
     total = len(findings)
     body = (
         f"{ANCHOR_MESSAGE_PREFIX} of {total} findings, "
-        f"{counts[ANCHOR_VERIFIED]} verified (the quoted code is at the reported "
-        f"line), {counts[ANCHOR_CORRECTED]} corrected (moved to where the quoted "
-        f"code actually is), {counts[ANCHOR_UNVERIFIED]} could not be verified."
+        f"{counts[ANCHOR_VERIFIED]} were found at the reported line, "
+        f"{counts[ANCHOR_CORRECTED]} were moved to the line where the quoted code "
+        f"is, and {counts[ANCHOR_UNVERIFIED]} could not be checked."
     )
     if counts[ANCHOR_UNVERIFIED] or counts[ANCHOR_CORRECTED]:
         return {
             "level": "warn",
             "value": (
-                f"{body} An unverified line is the reviewer's CLAIM, not a "
-                f"located position: the finding may still be real while "
-                f"pointing at the wrong function. Do not read it as confirmed."
+                f"{body} A finding whose line could not be checked may still be "
+                f"real, but its line may be wrong."
             ),
         }
     return {"level": "info", "value": body}
 
 
-#: Keys the triage decision is carried on in the report's
-#: ``vulnerability.details`` named-list. Prefixed like the anchor keys so the
-#: analyzer's own annotations are distinguishable from any ingesting side's.
+#: Keys of the triage decision in the per-finding audit log record.
 TRIAGE_CLAUSE_DETAIL_KEY = "bl_triage_clause"
 
 TRIAGE_VERDICT_DETAIL_KEY = "bl_triage_verdict"
@@ -571,34 +567,36 @@ _TRIAGE_CLAUSE_UNSPECIFIED = (
 )
 
 
-def _triage_details(finding: dict) -> dict:
-    """The triage decision as schema-valid ``vulnerability.details`` entries.
+def _triage_audit(finding: dict) -> dict:
+    """The triage decision, for the per-finding audit log.
 
-    Emitted for EVERY vulnerability, annotated or not, for the same reason
-    :func:`_anchor_details` is: a key that appears only in the interesting cases
-    makes its absence mean "fine".
+    Recorded for EVERY finding, annotated or not, for the same reason as :func:`_anchor_audit`: a key that appears only
+    in the interesting cases makes its absence mean "fine".
 
-    Every finding that reaches here is a survivor -- ``_record_triage_verdicts``
-    has already removed the DROPs -- so the verdict is KEEP or nothing. It is
-    still published, because "adjudicated KEEP under KEEP-incorrect-guard" and
-    "never adjudicated" are different claims about the same reported line.
+    Every finding that reaches here is a survivor -- ``_record_triage_verdicts`` has already removed the DROPs -- so the
+    verdict is KEEP or nothing. It is still recorded, because "adjudicated KEEP under KEEP-incorrect-guard" and "never
+    adjudicated" are different claims about the same reported line.
     """
     verdict = verdict_of(finding)
-    clause = audit_clause_of(finding)[:TRIAGE_CLAUSE_MAX]
+    # Model-written text bound for the service log: redacted before truncation, like the sibling triage logger.
+    clause = str(redact_secrets(audit_clause_of(finding), "bl_write_sast_report"))[
+        :TRIAGE_CLAUSE_MAX
+    ]
     if not verdict and not clause:
-        return {
-            TRIAGE_CLAUSE_DETAIL_KEY: _text_detail(
-                "Triage clause", _TRIAGE_NOT_RECORDED
-            )
-        }
-    details = {
-        TRIAGE_CLAUSE_DETAIL_KEY: _text_detail(
-            "Triage clause", clause or _TRIAGE_CLAUSE_UNSPECIFIED
-        ),
-    }
+        return {TRIAGE_CLAUSE_DETAIL_KEY: _TRIAGE_NOT_RECORDED}
+    audit = {TRIAGE_CLAUSE_DETAIL_KEY: clause or _TRIAGE_CLAUSE_UNSPECIFIED}
     if verdict:
-        details[TRIAGE_VERDICT_DETAIL_KEY] = _text_detail("Triage verdict", verdict)
-    return details
+        audit[TRIAGE_VERDICT_DETAIL_KEY] = verdict
+    return audit
+
+
+def _audit_record(finding: dict) -> dict:
+    """The finding's anchor and triage state: pipeline internals, logged once per finding and kept out of the report.
+
+    The report is read by the customer, so these are not put in ``vulnerability.details``. The log line carries the
+    same information, keyed by the vulnerability id.
+    """
+    return {**_anchor_audit(finding), **_triage_audit(finding)}
 
 
 # --------------------------------------------------------------------------- #
@@ -742,8 +740,8 @@ class BlWriteSastReport(DuoBaseTool):
             line originally claimed is kept alongside it, because a correction that erases what it corrected cannot
             be audited.
         * anything else (no quote, unreadable file, quote absent from the file) -> ``unverified``. The finding is
-            KEPT with its claimed line - a sound security claim must survive a bad coordinate - but the report says
-            the coordinate is a claim.
+            KEPT with its claimed line - a sound security claim must survive a bad coordinate - but its description
+            says the line could not be matched.
 
         Reads each unique file ONCE and IN FULL, via ``_read_file_fully`` -- a bare ``runReadFile`` would hand this
         check the first page only and it would relocate quotes onto lookalikes in that prefix. Best-effort: it MUST
@@ -935,12 +933,6 @@ class BlWriteSastReport(DuoBaseTool):
                 "location": {"file": file, "start_line": line},
                 "identifiers": identifiers
                 or [{"type": "bl_finding", "name": "BL finding", "value": vid[:16]}],
-                # Whether `location.start_line` was LOCATED or merely CLAIMED,
-                # and WHICH triage clause let this finding survive. `details` is
-                # the schema's named-list of typed fields; no new property is
-                # invented and no schema version is bumped. Neither is folded
-                # into `vid` above: disclosure must not change identity.
-                "details": {**_anchor_details(f), **_triage_details(f)},
             }
             solution = SOLUTIONS.get(cwe)
             if solution:
@@ -964,6 +956,18 @@ class BlWriteSastReport(DuoBaseTool):
                 item = {"file": file, "start_line": line, "end_line": line}
                 item["signatures"] = [sig]
                 vuln["tracking"] = {"type": "source", "items": [item]}
+            _add_line_note(f, vuln)
+            # Whether `location.start_line` was LOCATED or merely CLAIMED, and
+            # WHICH triage clause let this finding survive, go to the log, not
+            # the report: they describe the pipeline, not the vulnerability.
+            _log.info(
+                "bl_write_sast_report finding",
+                vulnerability_id=vid,
+                file=file,
+                line=line,
+                cwe=cwe,
+                **_audit_record(f),
+            )
             vulns.append(vuln)
         scan = {
             "start_time": now,
