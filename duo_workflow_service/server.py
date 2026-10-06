@@ -46,6 +46,9 @@ from duo_workflow_service.agent_platform.utils.validation import FlowValidator
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     discover_feature_flow_configs,
 )
+from duo_workflow_service.checkpointer.content_retention import (
+    SessionNotResumableError,
+)
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
@@ -762,6 +765,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # The workflow state remains unchanged in Rails; we return
                 # INVALID_ARGUMENT so the caller gets a clear signal that the input
                 # itself was wrong, not the system state.
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(str(workflow.last_error))
+            elif isinstance(workflow.last_error, SessionNotResumableError):
+                # The session is already marked failed. INVALID_ARGUMENT is the code
+                # Workhorse forwards to the client as a close (4400) with this message;
+                # INTERNAL would end the socket normally and the run would exit 0.
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(str(workflow.last_error))
             elif workflow.last_error:

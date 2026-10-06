@@ -905,6 +905,45 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             ["read_file", mcp_tool_name], tool_options={}
         )
 
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_state_graph", "mock_tools_registry")
+    async def test_bl_security_run_wires_metadata_retention(
+        self, mock_flow_metadata, user, flow_type
+    ):
+        """The bundled bl_security flow hands ``metadata`` to every place that stores text."""
+        config = FlowConfig.from_yaml_config("bl_security", "1.0.0")
+        checkpointer = Mock(initial_status_event=WorkflowStatusEventEnum.START)
+        checkpointer.aget_tuple = AsyncMock(return_value=None)
+        prefix = "duo_workflow_service.workflows.abstract_workflow"
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.base.load_component_class",
+                return_value=MagicMock(return_value=self.mock_component("c")),
+            ),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+            patch(f"{prefix}.GitLabWorkflow") as gitlab_workflow,
+            patch(
+                f"{prefix}.UserInterface",
+                return_value=MagicMock(spec=UserInterface, ui_chat_log=[]),
+            ) as user_interface,
+            patch(f"{prefix}.AuditEventCollector") as audit_collector,
+        ):
+            gitlab_workflow.return_value.__aenter__.return_value = checkpointer
+            audit_collector.return_value.start = AsyncMock()
+            audit_collector.return_value.close = AsyncMock()
+            flow = Flow(
+                workflow_id="wf-bl",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=config,
+                audit_event_enabled=True,
+            )
+            await flow.run("scan")
+
+        for cls in (gitlab_workflow, user_interface, audit_collector):
+            assert cls.call_args.kwargs["content_retention"] == "metadata"
+
     def test_process_additional_context_empty_list(self, flow_instance):
         """Test _process_additional_context with empty list."""
         result = flow_instance._process_additional_context([])

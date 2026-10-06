@@ -42,6 +42,7 @@ from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.collector import AuditEventCollector
 from duo_workflow_service.audit_events.context import audit_collector_context
 from duo_workflow_service.audit_events.event_types import SessionStartedEvent
+from duo_workflow_service.checkpointer.content_retention import ContentRetention
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
@@ -353,6 +354,10 @@ class AbstractWorkflow(ABC):
     def _recursion_limit(self):
         return RECURSION_LIMIT
 
+    def _content_retention(self) -> ContentRetention:
+        """What the session keeps: ``metadata`` drops model and user text from checkpoints, the stream and audits."""
+        return "full"
+
     async def _tag_langsmith_hard_limit(self) -> None:
         """Attach a LangSmith tag and metadata to the current trace when the hard recursion limit is hit.
 
@@ -472,6 +477,7 @@ class AbstractWorkflow(ABC):
             workflow_id=self._workflow_id,
             buffer_size=self._audit_event_buffer_size,
             flush_interval_seconds=self._audit_event_flush_interval,
+            content_retention=self._content_retention(),
         )
         await audit_collector.start()
         audit_collector_context.set(audit_collector)
@@ -522,7 +528,10 @@ class AbstractWorkflow(ABC):
         last_state = None
         compiled_graph = None
         self.checkpoint_notifier = UserInterface(
-            outbox=self._outbox, goal=goal, node_event_log=node_event_log
+            outbox=self._outbox,
+            goal=goal,
+            node_event_log=node_event_log,
+            content_retention=self._content_retention(),
         )
 
         try:
@@ -595,6 +604,7 @@ class AbstractWorkflow(ABC):
                 self._workflow_type,
                 self._workflow_config,
                 gitlab_status_update_callback=on_gitlab_status_update,
+                content_retention=self._content_retention(),
             ) as checkpointer:
                 status_event = getattr(checkpointer, "initial_status_event", None)
                 checkpoint_tuple = (
@@ -772,7 +782,8 @@ class AbstractWorkflow(ABC):
         # Infrastructure-initiated cancellation (e.g. Workhorse pod rotation, WebSocket
         # ping failure). Unlike a user stop, the session is NOT finished: Rails keeps it
         # `running` (see GitLabWorkflow.__aexit__) and the client reconnects on the
-        # WebSocket 1001 to replay from the last checkpoint. So skip every terminal
+        # WebSocket 1001 to replay from the last checkpoint (a metadata-retention flow
+        # keeps no content to replay, so it refuses that resume). So skip every terminal
         # side-effect:
         #   - no _handle_workflow_failure, which would persist a spurious "something
         #     went wrong" entry into the ui_chat_log of a session that is about to

@@ -11,6 +11,11 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import UserOutputDisplayedEvent
+from duo_workflow_service.checkpointer.content_retention import (
+    METADATA_RETENTION,
+    ContentRetention,
+    reduce_ui_chat_log,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
@@ -125,9 +130,11 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         goal: str,
         workflow_id: str = "",
         node_event_log: Optional[NodeEventLog] = None,
+        content_retention: ContentRetention = "full",
     ):
         self.outbox = outbox
         self.goal = goal
+        self._metadata_only = content_retention == METADATA_RETENTION
         self._workflow_id = workflow_id
         self.ui_chat_log: list[UiChatLog] = []
         self.status = WorkflowStatusEnum.NOT_STARTED
@@ -288,11 +295,19 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
     # them and just send the most recent. This is done by keeping track of the
     # checkpoint_number so we remember the last one we sent.
     def most_recent_new_checkpoint(self):
-        recent_ui_chat_log_changes = self._pop_recent_ui_chat_log_changes()
+        recent_ui_chat_log_changes: list = self._pop_recent_ui_chat_log_changes()
+        steps = self.steps
+        goal = self.goal
+        if self._metadata_only:
+            # Same allowlist as the saved checkpoint. A plan step's description and
+            # the goal are model or user text, so only step ids and statuses remain.
+            recent_ui_chat_log_changes = reduce_ui_chat_log(recent_ui_chat_log_changes)
+            steps = [{"id": s.get("id"), "status": s.get("status")} for s in steps]
+            goal = ""
 
         channel_values: dict[str, Any] = {
             "ui_chat_log": recent_ui_chat_log_changes,
-            "plan": {"steps": self.steps},
+            "plan": {"steps": steps},
         }
         # Append-only node-lifecycle events for live flow visualization. Additive
         # and ignored by clients that don't consume it; omitted when there is
@@ -303,7 +318,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             channel_values["node_events"] = node_events
 
         checkpoint = contract_pb2.NewCheckpoint(
-            goal=self.goal,
+            goal=goal,
             status=WORKFLOW_STATUS_TO_CHECKPOINT_STATUS[self._reportable_status()],
             checkpoint=dumps({"channel_values": channel_values}, cls=CustomEncoder),
         )

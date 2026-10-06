@@ -50,6 +50,7 @@ from duo_workflow_service.agent_platform.v1.components.base import (
 from duo_workflow_service.agent_platform.v1.flows.base import (
     persist_error_to_ui_chat_log,
 )
+from duo_workflow_service.checkpointer.content_retention import ContentRetention
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
@@ -158,6 +159,10 @@ class Flow(AbstractWorkflow):
                 )
 
     # pylint: enable=dangerous-default-value
+
+    @override
+    def _content_retention(self) -> ContentRetention:
+        return self._config.content_retention
 
     @override
     def get_workflow_state(self, goal: str) -> FlowState:  # type: ignore[override]

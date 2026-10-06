@@ -6,6 +6,10 @@ import structlog
 
 from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.event_types import AuditEvent
+from duo_workflow_service.checkpointer.content_retention import (
+    METADATA_RETENTION,
+    ContentRetention,
+)
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
 
@@ -22,6 +26,58 @@ DRAIN_TIMEOUT_SECONDS = 3.0
 # An excerpted field keeps this much of its start and of its end.
 EXCERPT_BYTES = 8 * 1024
 
+# The fields an event keeps under metadata retention. Any other field, including
+# one a future event type adds, is emptied: prompts, responses, tool arguments and
+# results, displayed output, the goal and error messages.
+# Keep in sync with the Rails copy in ee/lib/ai/duo_workflows/content_retention.rb.
+METADATA_AUDIT_FIELDS = frozenset(
+    {
+        # Envelope
+        "id",
+        "event_type",
+        "timestamp",
+        "workflow_id",
+        "sequence",
+        "workflow_type",
+        # Outcome and timing
+        "status",
+        "duration_seconds",
+        "latency_ms",
+        "finish_reason",
+        "error_type",
+        "attempt_number",
+        "max_attempts",
+        # Model and usage
+        "model_name",
+        "provider",
+        "search_source",
+        "prompt_token_count",
+        "completion_token_count",
+        # Sizes of the emptied text
+        "content_length",
+        "response_length",
+        "prompt_content_bytes",
+        "prompt_content_truncated",
+        "response_content_bytes",
+        "response_content_truncated",
+        # Tools and steps
+        "tool_name",
+        "tools_bound",
+        "approval_source",
+        "policy_ref",
+        "input_type",
+        "output_type",
+    }
+)
+
+
+def strip_audit_event_content(event: AuditEvent) -> None:
+    """Empty every field of ``event`` outside METADATA_AUDIT_FIELDS, in place."""
+    for name in type(event).model_fields:
+        if name not in METADATA_AUDIT_FIELDS:
+            value = getattr(event, name)
+            setattr(event, name, "" if isinstance(value, str) else None)
+
 
 class AuditEventCollector:
     def __init__(
@@ -30,9 +86,11 @@ class AuditEventCollector:
         workflow_id: str = "",
         buffer_size: int = 100,
         flush_interval_seconds: float = 10.0,
+        content_retention: ContentRetention = "full",
     ):
         self._client = client
         self._workflow_id = workflow_id
+        self._metadata_only = content_retention == METADATA_RETENTION
         self._buffer: list[AuditEvent] = []
         self._buffer_bytes: int = 0
         self._buffer_size = buffer_size
@@ -46,6 +104,9 @@ class AuditEventCollector:
         return self._workflow_id
 
     def capture(self, event: AuditEvent) -> None:
+        # Every emitter goes through here, so this is the one place to strip text.
+        if self._metadata_only:
+            strip_audit_event_content(event)
         # Measure with the tentative sequence so the size matches the wire;
         # commit it only if the event is kept, so a drop consumes no sequence.
         next_sequence = self._sequence + 1
