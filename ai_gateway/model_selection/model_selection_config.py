@@ -117,6 +117,9 @@ class BaseLLMDefinition(BaseModel):
     # Some reasoning models (e.g. Qwen) leak <think>...</think> reasoning into responses.
     # When true, the ReAct parser strips that block before it reaches the user.
     strip_reasoning: bool = False
+    # Whether this deployment accepts image input; absent means ask litellm's registry.
+    # Set per deployment, with a dated comment naming the evidence.
+    supports_vision: Optional[bool] = None
     requires_single_system_message: bool = False
     # Some models are available only to accounts that have purchased GitLab credits.
     # When true, clients show a "Requires paid credits" indicator and block chat input.

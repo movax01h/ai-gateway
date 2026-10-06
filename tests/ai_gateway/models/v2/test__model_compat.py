@@ -5,16 +5,30 @@ integration (which understands standard blocks natively) the conversion has to
 happen on our side.
 """
 
+from contextlib import contextmanager
+from typing import Optional
+from unittest.mock import call, patch
+
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.model_selection.model_selection_config import (
+    ChatLiteLLMDefinition,
+    ModelSelectionConfig,
+)
+from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.models.v2._model_compat import (
+    IMAGE_OMITTED_NOTICE,
     TOOL_IMAGE_PLACEHOLDER,
     TOOL_IMAGES_BANNER,
+    _model_supports_vision,
     hoist_tool_result_images,
     normalize_image_blocks,
+    strip_image_blocks_for_non_vision_model,
 )
 from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
+from lib.context import current_model_metadata_context
 
 B64 = "aVZCT1J5Qm1ZV3Rs"
 
@@ -489,3 +503,453 @@ class TestChatLiteLLMHoistIntegration:
         ]
         assert len(claude) == 5
         assert claude[2]["content"][1]["type"] == "image_url"
+
+
+# Carries an explicit supports_vision: false in litellm's registry; the
+# precondition test below fails if a litellm bump changes that.
+NON_VISION_MODEL = "o3-mini"
+
+
+class TestStripImageBlocksForNonVisionModel:
+    """The gate fails open: it strips only on a positive non-vision verdict."""
+
+    def test_registry_preconditions_still_hold(self):
+        # The unmocked tests below rely on these two registry facts.
+        assert _model_supports_vision(NON_VISION_MODEL, None) is False
+        assert _model_supports_vision("claude-sonnet-4-6", None) is True
+
+    def test_known_non_vision_model_gets_a_text_notice(self):
+        messages = strip_image_blocks_for_non_vision_model(
+            [
+                image_message(
+                    {"type": "text", "text": "what is this?"},
+                    {"type": "image", "base64": B64, "mime_type": "image/png"},
+                )
+            ],
+            NON_VISION_MODEL,
+            None,
+        )
+
+        assert messages[0]["content"] == [
+            {"type": "text", "text": "what is this?"},
+            {
+                "type": "text",
+                "text": IMAGE_OMITTED_NOTICE.format(model=NON_VISION_MODEL),
+            },
+        ]
+
+    def test_an_already_normalized_image_block_is_stripped_too(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "look"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,QUJD"},
+                    },
+                ],
+            }
+        ]
+
+        stripped = strip_image_blocks_for_non_vision_model(
+            messages, NON_VISION_MODEL, None
+        )
+
+        assert stripped[0]["content"][1] == {
+            "type": "text",
+            "text": IMAGE_OMITTED_NOTICE,
+        }
+
+    def test_a_strip_is_logged_with_where_the_verdict_came_from(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "base64": "QUJD", "mime_type": "image/png"},
+                ],
+            }
+        ]
+
+        with patch("ai_gateway.models.v2._model_compat.log") as log_mock:
+            strip_image_blocks_for_non_vision_model(messages, NON_VISION_MODEL, None)
+
+        log_mock.info.assert_called_once()
+        assert log_mock.info.call_args.kwargs == {
+            "model": NON_VISION_MODEL,
+            "custom_llm_provider": None,
+            "verdict_source": "litellm",
+        }
+
+    def test_url_carrying_image_blocks_are_stripped_too(self):
+        messages = strip_image_blocks_for_non_vision_model(
+            [image_message({"type": "image", "url": "https://example.com/a.png"})],
+            NON_VISION_MODEL,
+            None,
+        )
+
+        assert messages[0]["content"][0]["type"] == "text"
+
+    def test_known_vision_model_passes_through(self):
+        batch = [image_message({"type": "image", "base64": B64})]
+
+        assert (
+            strip_image_blocks_for_non_vision_model(batch, "claude-sonnet-4-6", None)
+            is batch
+        )
+
+    def test_unknown_model_fails_open(self):
+        batch = [image_message({"type": "image", "base64": B64})]
+
+        assert (
+            strip_image_blocks_for_non_vision_model(
+                batch, "custom_openai/my-model", None
+            )
+            is batch
+        )
+
+    def test_unannotated_registry_model_fails_open(self):
+        # An absent flag means "not annotated", not "no vision".
+        batch = [image_message({"type": "image", "base64": B64})]
+
+        with patch("ai_gateway.models.v2._model_compat.litellm") as litellm_mock:
+            litellm_mock.get_model_info.return_value = {"supports_vision": None}
+
+            assert (
+                strip_image_blocks_for_non_vision_model(batch, "some-model", None)
+                is batch
+            )
+
+        litellm_mock.get_model_info.assert_called_once_with("some-model")
+
+    def test_unexpected_registry_failure_fails_open_and_logs(self):
+        # Anything other than litellm's "isn't mapped yet" must leave a trace.
+        batch = [image_message({"type": "image", "base64": B64})]
+
+        with (
+            patch("ai_gateway.models.v2._model_compat.litellm") as litellm_mock,
+            patch("ai_gateway.models.v2._model_compat.log") as log_mock,
+        ):
+            litellm_mock.get_model_info.side_effect = TypeError("boom")
+
+            assert (
+                strip_image_blocks_for_non_vision_model(batch, "some-model", None)
+                is batch
+            )
+
+        log_mock.debug.assert_called_once()
+        assert log_mock.debug.call_args.kwargs["error_type"] == "TypeError"
+
+    @pytest.mark.parametrize("model", [None, ""])
+    def test_missing_model_name_passes_through(self, model):
+        batch = [image_message({"type": "image", "base64": B64})]
+
+        with patch("ai_gateway.models.v2._model_compat.litellm") as litellm_mock:
+            assert strip_image_blocks_for_non_vision_model(batch, model, None) is batch
+
+        litellm_mock.get_model_info.assert_not_called()
+
+    def test_imageless_batches_never_query_the_registry(self):
+        batch = [{"role": "user", "content": "hello"}]
+
+        with patch("ai_gateway.models.v2._model_compat.litellm") as litellm_mock:
+            assert (
+                strip_image_blocks_for_non_vision_model(batch, NON_VISION_MODEL, None)
+                is batch
+            )
+
+        litellm_mock.get_model_info.assert_not_called()
+
+    def test_create_message_dicts_strips_before_normalizing(self):
+        model = ChatLiteLLM(model=NON_VISION_MODEL)
+        messages = [
+            HumanMessage(content="read the diagram"),
+            ToolMessage(
+                content=[
+                    {"type": "text", "text": "Contents of diagram.png:"},
+                    {"type": "image", "base64": B64, "mime_type": "image/png"},
+                ],
+                tool_call_id="call_1",
+            ),
+        ]
+
+        message_dicts, _ = model._create_message_dicts(messages, stop=None)
+
+        tool_content = message_dicts[1]["content"]
+        assert all(block["type"] == "text" for block in tool_content)
+        assert IMAGE_OMITTED_NOTICE.format(model=NON_VISION_MODEL) in [
+            block["text"] for block in tool_content
+        ]
+
+    def test_tool_read_image_block_reaches_a_vision_model_as_a_data_url(self):
+        """Cross-layer contract: a canonical image block must leave the LiteLLM
+        boundary as a byte-identical data-URL.
+
+        ``read_file`` emits exactly these blocks (built with
+        ``image_content_block``; pinned in the envelope funnel's own suite), so
+        this is the provider-boundary half of that contract without importing
+        the funnel, which lives in a separate MR train.
+        """
+        # Only this cross-layer test needs the workflow service's dependency tree.
+        from duo_workflow_service.entities.image_blocks import image_content_block
+
+        blocks = [
+            {"type": "text", "text": "Read image file: diagram.png (image/png)."},
+            image_content_block(base64=B64, mime_type="image/png"),
+        ]
+
+        model = ChatLiteLLM(model="claude-sonnet-4-5-20250929")
+        message_dicts, _ = model._create_message_dicts(
+            [ToolMessage(content=blocks, tool_call_id="call_1")], stop=None
+        )
+
+        image_blocks = [
+            block
+            for block in message_dicts[0]["content"]
+            if block["type"] == "image_url"
+        ]
+        assert len(image_blocks) == 1
+        assert image_blocks[0]["image_url"]["url"] == f"data:image/png;base64,{B64}"
+
+    def test_consecutive_images_collapse_to_one_notice(self):
+        messages = strip_image_blocks_for_non_vision_model(
+            [
+                image_message(
+                    {"type": "text", "text": "three screenshots:"},
+                    {"type": "image", "base64": B64, "mime_type": "image/png"},
+                    {"type": "image", "base64": B64, "mime_type": "image/png"},
+                    {"type": "image", "base64": B64, "mime_type": "image/png"},
+                    {"type": "text", "text": "and one more:"},
+                    {"type": "image", "base64": B64, "mime_type": "image/png"},
+                )
+            ],
+            NON_VISION_MODEL,
+            None,
+        )
+
+        notice = IMAGE_OMITTED_NOTICE.format(model=NON_VISION_MODEL)
+        assert messages[0]["content"] == [
+            {"type": "text", "text": "three screenshots:"},
+            {"type": "text", "text": notice},
+            {"type": "text", "text": "and one more:"},
+            {"type": "text", "text": notice},
+        ]
+
+
+MINIMAX = "accounts/fireworks/models/minimax-m3"
+
+
+@contextmanager
+def model_context(metadata):
+    token = current_model_metadata_context.set(metadata)
+    try:
+        yield
+    finally:
+        current_model_metadata_context.reset(token)
+
+
+def metadata_for(definition) -> ModelMetadata:
+    return ModelMetadata(
+        provider="gitlab",
+        name=definition.gitlab_identifier,
+        llm_definition=definition,
+        friendly_name=definition.name,
+    )
+
+
+def fireworks_definition(supports_vision, model=MINIMAX, **params):
+    return ChatLiteLLMDefinition(
+        name="Fireworks Test",
+        gitlab_identifier="fireworks_test",
+        max_context_tokens=200_000,
+        supports_vision=supports_vision,
+        params={"model": model, "custom_llm_provider": "fireworks_ai", **params},
+    )
+
+
+class TestModelSupportsVision:
+    """Layer order: definition flag, litellm with the provider, litellm bare, unknown."""
+
+    @pytest.fixture(name="litellm_mock")
+    def litellm_mock_fixture(self):
+        with patch("ai_gateway.models.v2._model_compat.litellm") as mock:
+            yield mock
+
+    @pytest.mark.parametrize(
+        ("declared", "registry", "expected"),
+        [
+            # Minimax M3: live-verified vision while litellm's registry says no.
+            (True, False, True),
+            (False, True, False),
+        ],
+        ids=["flag-true-beats-registry-false", "flag-false-beats-registry-true"],
+    )
+    def test_declared_flag_beats_litellm(
+        self, litellm_mock, declared, registry, expected
+    ):
+        litellm_mock.get_model_info.return_value = {"supports_vision": registry}
+
+        with model_context(metadata_for(fireworks_definition(declared))):
+            assert _model_supports_vision(MINIMAX, "fireworks_ai") is expected
+
+        litellm_mock.get_model_info.assert_not_called()
+
+    def test_without_a_flag_litellm_is_asked_with_the_provider(self, litellm_mock):
+        litellm_mock.get_model_info.return_value = {"supports_vision": False}
+
+        with model_context(metadata_for(fireworks_definition(None))):
+            assert _model_supports_vision(MINIMAX, "fireworks_ai") is False
+
+        litellm_mock.get_model_info.assert_called_once_with(
+            MINIMAX, custom_llm_provider="fireworks_ai"
+        )
+
+    def test_unannotated_provider_entry_falls_back_to_the_bare_name(self, litellm_mock):
+        litellm_mock.get_model_info.side_effect = [
+            {"supports_vision": None},
+            {"supports_vision": True},
+        ]
+
+        assert _model_supports_vision("some-model", "fireworks_ai") is True
+
+        assert litellm_mock.get_model_info.call_args_list == [
+            call("some-model", custom_llm_provider="fireworks_ai"),
+            call("some-model"),
+        ]
+
+    def test_nothing_known_returns_none(self, litellm_mock):
+        litellm_mock.get_model_info.side_effect = Exception(
+            "This model isn't mapped yet."
+        )
+
+        assert _model_supports_vision("my-model", "custom_openai") is None
+
+    def test_flag_of_another_model_in_the_context_is_ignored(self, litellm_mock):
+        # A tag-routed component runs on a model other than the context's default.
+        litellm_mock.get_model_info.return_value = {"supports_vision": False}
+
+        with model_context(metadata_for(fireworks_definition(True))):
+            assert (
+                _model_supports_vision(
+                    "accounts/fireworks/models/glm-5p3", "fireworks_ai"
+                )
+                is False
+            )
+
+    def test_flag_matches_the_router_identifier_too(self, litellm_mock):
+        definition = fireworks_definition(
+            False, model="glm-x", identifier="accounts/gitlab/routers/glm-x"
+        )
+
+        with model_context(metadata_for(definition)):
+            assert (
+                _model_supports_vision("accounts/gitlab/routers/glm-x", "fireworks_ai")
+                is False
+            )
+
+        litellm_mock.get_model_info.assert_not_called()
+
+    def test_metadata_without_a_definition_reads_as_undeclared(self, litellm_mock):
+        litellm_mock.get_model_info.return_value = {"supports_vision": True}
+
+        with model_context(object()):
+            assert _model_supports_vision(MINIMAX, "fireworks_ai") is True
+
+    def test_create_message_dicts_strips_on_a_declared_false_flag(self):
+        # litellm has no verdict for this deployment, so only the flag can strip.
+        model = "accounts/gitlab/deployments/no-eyes"
+        chat = ChatLiteLLM(model=model, custom_llm_provider="fireworks_ai")
+        messages = [
+            HumanMessage(content="read the diagram"),
+            ToolMessage(
+                content=[
+                    {"type": "text", "text": "Contents of diagram.png:"},
+                    {"type": "image", "base64": B64, "mime_type": "image/png"},
+                ],
+                tool_call_id="call_1",
+            ),
+        ]
+
+        with model_context(metadata_for(fireworks_definition(False, model=model))):
+            message_dicts, _ = chat._create_message_dicts(messages, stop=None)
+
+        # No image survived to be hoisted into a trailing user message.
+        assert [m["role"] for m in message_dicts] == ["user", "tool"]
+        assert message_dicts[1]["content"] == [
+            {"type": "text", "text": "Contents of diagram.png:"},
+            {"type": "text", "text": IMAGE_OMITTED_NOTICE.format(model=model)},
+        ]
+
+
+_CHAT_CLASSES = frozenset(
+    {
+        ModelClassProvider.LITE_LLM,
+        ModelClassProvider.ANTHROPIC,
+        ModelClassProvider.OPENAI,
+        ModelClassProvider.GOOGLE_GENAI,
+    }
+)
+
+# Every chat model in models.yml is expected to see images unless listed here.
+# Computed with the gate's own layers, so a litellm bump that flips a model, or a
+# new model litellm does not know, fails by name. Once !7167 lands its flags,
+# Minimax and Qwen leave this list.
+_NON_VISION_OR_UNKNOWN: dict[str, Optional[bool]] = {
+    "minimax_m3_fireworks": False,  # litellm is wrong; live-verified vision
+    "glm_5_3_fireworks": False,
+    "qwen_3_8_27b_fireworks": None,  # GitLab deployment, registered unannotated
+    # Self-hosted family templates: no provider, unknown to litellm.
+    **dict.fromkeys(
+        [
+            "claude_3",
+            "codegemma",
+            "codellama",
+            "codestral",
+            "deepseekcoder",
+            "gemini",
+            "general",
+            "gpt",
+            "llama3",
+            "mistral",
+            "mixtral",
+            "qwen",
+        ],
+        None,
+    ),
+}
+
+
+def _shipped_chat_definitions() -> dict:
+    return {
+        identifier: definition
+        for identifier, definition in (
+            ModelSelectionConfig.instance().get_llm_definitions().items()
+        )
+        if definition.model_class_provider in _CHAT_CLASSES
+    }
+
+
+class TestShippedCatalogueVisionVerdicts:
+    """Every chat model in models.yml has the vision verdict we expect."""
+
+    def test_every_exception_still_ships(self):
+        gone = sorted(set(_NON_VISION_OR_UNKNOWN) - set(_shipped_chat_definitions()))
+
+        assert not gone, f"listed but gone from models.yml: {gone}"
+
+    @pytest.mark.parametrize("identifier", sorted(_shipped_chat_definitions()))
+    def test_verdict_matches_the_expectation(self, identifier):
+        definition = _shipped_chat_definitions()[identifier]
+        model = definition.params.model
+        provider = getattr(definition.params, "custom_llm_provider", None)
+        with model_context(metadata_for(definition)):
+            verdict = _model_supports_vision(model, provider) if model else None
+
+        # A declared flag is the expectation by definition, so !7167's values need no edit here.
+        expected = definition.supports_vision
+        if expected is None:
+            expected = _NON_VISION_OR_UNKNOWN.get(identifier, True)
+        assert verdict is expected, (
+            f"{identifier}: flag+litellm say {verdict!r}, expected {expected!r} "
+            f"(model={model!r}, provider={provider!r})"
+        )

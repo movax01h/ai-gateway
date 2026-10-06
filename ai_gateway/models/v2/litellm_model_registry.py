@@ -25,10 +25,14 @@ Expected JSON structure::
                 "max_output_tokens": 262144,
                 "supports_function_calling": true,
                 "supports_tool_choice": true,
-                "supports_response_schema": true
+                "supports_response_schema": true,
+                "supports_vision": false
             }
         }
     }
+
+``supports_vision`` is what the vision gate and LiteLLM's own Fireworks check
+read; set it per deployment when LiteLLM's bundled table is wrong or silent.
 """
 
 import json
@@ -49,6 +53,7 @@ __all__ = [
     "register_builtin_models",
     "register_external_models",
     "register_fireworks_models",
+    "register_fireworks_vision_flags",
 ]
 
 ENV_VAR_NAME = "AIGW_LITELLM__MODEL_METADATA_FILE"
@@ -214,6 +219,73 @@ def register_fireworks_models(llm_definitions: dict[str, LLMDefinition]) -> None
         "Registered Fireworks LiteLLM models from model selection config",
         count=len(metadata),
         models=list(metadata.keys()),
+    )
+
+
+def register_fireworks_vision_flags(llm_definitions: dict[str, LLMDefinition]) -> None:
+    """Write each Fireworks chat definition's ``supports_vision`` flag into LiteLLM's registry.
+
+    LiteLLM refuses images client-side when its own table says a Fireworks model has no vision (it is wrong about
+    Minimax M3), and its lookup tries ``fireworks_ai/<short name>`` before the full path, so both keys get the flag,
+    for ``params.model`` and for a router's ``params.identifier``. ``register_model`` merges, so only the flag changes.
+    A short key claimed by two definitions with different flags is left to LiteLLM and logged.
+    """
+    flags: Dict[str, bool] = {}
+    owners: Dict[str, str] = {}
+    collisions: set[str] = set()
+    for llm_def in llm_definitions.values():
+        params = llm_def.params
+        if not isinstance(params, ChatLiteLLMParams):
+            continue
+        if (
+            params.custom_llm_provider != "fireworks_ai"
+            or llm_def.supports_vision is None
+        ):
+            continue
+        for model_id in (params.model, params.identifier):
+            if not model_id:
+                continue
+            for key in (
+                f"fireworks_ai/{model_id}",
+                f"fireworks_ai/{model_id.rsplit('/', 1)[-1]}",
+            ):
+                if key in flags and flags[key] != llm_def.supports_vision:
+                    collisions.add(key)
+                    log.warning(
+                        "Fireworks vision flag collision; key left to LiteLLM",
+                        key=key,
+                        models=[owners[key], llm_def.gitlab_identifier],
+                    )
+                    continue
+                flags[key] = llm_def.supports_vision
+                owners[key] = llm_def.gitlab_identifier
+
+    metadata = {
+        key: {
+            "litellm_provider": "fireworks_ai",
+            "mode": "chat",
+            **litellm.model_cost.get(key, {}),
+            "supports_vision": flag,
+        }
+        for key, flag in flags.items()
+        if key not in collisions
+    }
+    if not metadata:
+        return
+    try:
+        register_model(metadata)
+    except Exception as exc:  # pylint: disable=broad-except
+        log.warning(
+            "Failed to register Fireworks vision flags in LiteLLM",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            keys=sorted(metadata),
+        )
+        return
+    log.info(
+        "Registered Fireworks vision flags in LiteLLM",
+        count=len(metadata),
+        keys=sorted(metadata),
     )
 
 
