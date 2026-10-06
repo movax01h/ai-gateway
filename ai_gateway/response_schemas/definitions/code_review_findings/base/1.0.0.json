@@ -80,6 +80,11 @@
                 "type": "object",
                 "title": "PreviousFinding",
                 "properties": {
+                    "discussion_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "The thread's discussion_id, as given in existing_discussions."
+                    },
                     "file": {
                         "type": "string",
                         "minLength": 1,
@@ -96,7 +101,7 @@
                         "description": "One sentence on the finding and, when partially fixed, what still stands."
                     }
                 },
-                "required": ["file", "status", "note"]
+                "required": ["discussion_id", "file", "status", "note"]
             }
         }
     },

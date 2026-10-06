@@ -188,6 +188,11 @@ class TestDeepCodeReviewConfig:
         previous = self._input(publish, "previous_findings")
         assert previous["from"] == "context:review.final_answer.previous_findings"
         assert previous["optional"] is True
+        discussions = self._input(publish, "existing_discussions")
+        assert (
+            discussions["from"] == "context:fetch_existing_discussions.tool_responses"
+        )
+        assert discussions["optional"] is True
 
     @classmethod
     def _finding_model(cls) -> type:

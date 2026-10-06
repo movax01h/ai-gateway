@@ -120,6 +120,9 @@ components:
       - from: "context:review.final_answer.previous_findings"
         as: "previous_findings"
         optional: true
+      - from: "context:fetch_existing_discussions.tool_responses"
+        as: "existing_discussions"
+        optional: true
       - from: "4"
         as: "min_confidence"
         literal: true

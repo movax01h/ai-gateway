@@ -6,9 +6,10 @@ returning the result to a local session are two terminal steps over this one mod
 `min_confidence` is the same wherever the review runs.
 """
 
+import json
 import re
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import structlog
 
@@ -27,6 +28,7 @@ __all__ = [
     "render_posted_finding",
     "render_previous_findings",
     "render_structured_finding",
+    "resolved_discussion_ids",
     "select_findings",
     "severity_counts",
 ]
@@ -153,14 +155,49 @@ def _previous_finding_rank(status: Any) -> int:
         return len(PREVIOUS_FINDING_ORDER)
 
 
-def render_previous_findings(items: List[Dict[str, Any]]) -> Optional[str]:
+def resolved_discussion_ids(existing_discussions: object) -> Set[str]:
+    """The IDs of resolved threads in the `list_mr_discussions` output the reviewer was given.
+
+    Accepts the tool's JSON string or an already-parsed list. Unreadable input yields no IDs, so every item stays listed
+    rather than the step failing a finished review.
+    """
+    discussions = existing_discussions
+    if isinstance(discussions, str):
+        try:
+            discussions = json.loads(discussions)
+        except ValueError:
+            logger.warning(
+                "Could not parse existing discussions; listing every previous finding"
+            )
+            return set()
+
+    if not isinstance(discussions, list):
+        return set()
+
+    return {
+        str(d["discussion_id"])
+        for d in discussions
+        if isinstance(d, dict) and d.get("resolved") and d.get("discussion_id")
+    }
+
+
+def render_previous_findings(
+    items: List[Dict[str, Any]], resolved_ids: Optional[Set[str]] = None
+) -> Optional[str]:
     """Render the reviewer's reconciliation of earlier threads as a status-first bullet list.
 
     Returns `None` unless at least one thread still needs the author's attention: a list made only of fixed and
     verified items reads as if there were something left to do, so a re-review that closed everything is published as
     a clean review instead.
+
+    Items on threads in `resolved_ids` are left out: a resolved thread is one the author has settled, and repeating it
+    on every re-review buries what changed. A closing line counts them so the list is not read as complete.
     """
-    items = [item for item in items if item.get("status") not in HIDDEN]
+    resolved_ids = resolved_ids or set()
+    visible = [item for item in items if item.get("status") not in HIDDEN]
+    items = [
+        item for item in visible if str(item.get("discussion_id")) not in resolved_ids
+    ]
     if not any(item.get("status") in NEEDS_ATTENTION for item in items):
         return None
 
@@ -170,6 +207,12 @@ def render_previous_findings(items: List[Dict[str, Any]]) -> Optional[str]:
         status = str(item.get("status"))
         label = PREVIOUS_FINDING_LABELS.get(status, status)
         lines.append(f"- **{label}:** `{item.get('file')}`: {item.get('note')}")
+
+    omitted = len(visible) - len(items)
+    if omitted == 1:
+        lines.append("\n1 resolved thread is not listed.")
+    elif omitted:
+        lines.append(f"\n{omitted} resolved threads are not listed.")
     return "\n".join(lines)
 
 
