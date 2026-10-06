@@ -3,12 +3,24 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain.tools import ToolException
+from pydantic import ValidationError
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.merge_request import (
+    CreateMergeRequestInput,
     PostSuggestedReviewers,
     PostSuggestedReviewersInput,
+    UpdateMergeRequestInput,
 )
+
+USER_ID_INPUTS = [
+    pytest.param(
+        CreateMergeRequestInput,
+        {"source_branch": "feature", "target_branch": "main", "title": "Title"},
+        id="create",
+    ),
+    pytest.param(UpdateMergeRequestInput, {"merge_request_iid": 1}, id="update"),
+]
 
 
 @pytest.fixture(name="gitlab_client_mock")
@@ -209,3 +221,40 @@ async def test_post_suggested_reviewers_supported_or_unknown_version_proceeds(
         )
 
     gitlab_client_mock.apost.assert_called_once()
+
+
+@pytest.mark.parametrize("input_cls,required_args", USER_ID_INPUTS)
+@pytest.mark.parametrize("field", ["assignee_ids", "reviewer_ids"])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("[1]", [1]),
+        ("[1, 2]", [1, 2]),
+        ("[]", []),
+        ([1, 2], [1, 2]),
+        (None, None),
+    ],
+)
+def test_user_ids_accept_json_encoded_list(
+    input_cls, required_args, field, value, expected
+):
+    input_data = input_cls(**required_args, **{field: value})
+
+    assert getattr(input_data, field) == expected
+
+
+@pytest.mark.parametrize("input_cls,required_args", USER_ID_INPUTS)
+@pytest.mark.parametrize("field", ["assignee_ids", "reviewer_ids"])
+@pytest.mark.parametrize(
+    "value,expected_error",
+    [
+        ("not valid json", "Invalid JSON string"),
+        ("1", "Expected JSON string to deserialize to a list, got int"),
+        ('["a"]', "Input should be a valid integer"),
+    ],
+)
+def test_user_ids_reject_invalid_json_string(
+    input_cls, required_args, field, value, expected_error
+):
+    with pytest.raises(ValidationError, match=expected_error):
+        input_cls(**required_args, **{field: value})

@@ -3,7 +3,7 @@ from typing import Any, Literal, Optional, Type
 
 import structlog
 from langchain_core.tools import ToolException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from duo_workflow_service.gitlab.resource_resolver import resolve_identifier_to_path
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
@@ -52,6 +52,27 @@ MERGE_REQUEST_IDENTIFICATION_DESCRIPTION = """To identify a merge request you mu
 # editorconfig-checker-enable
 
 
+def _parse_json_list(value: Any) -> Any:
+    """Parse a JSON-encoded list such as ``"[1, 2]"``, which some models send for list arguments.
+
+    Non-string values are returned unchanged for pydantic to validate.
+    """
+    if not isinstance(value, str):
+        return value
+
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON string: {e}") from e
+
+    if not isinstance(parsed, list):
+        raise ValueError(
+            f"Expected JSON string to deserialize to a list, got {type(parsed).__name__}"
+        )
+
+    return parsed
+
+
 class MergeRequestResourceInput(ProjectResourceInput):
     merge_request_iid: Optional[int] = Field(
         default=None,
@@ -87,6 +108,11 @@ class CreateMergeRequestInput(ProjectResourceInput):
         default=None,
         description="Comma-separated label names for the merge request. For example: 'bug,feature,high-priority'",
     )
+
+    @field_validator("assignee_ids", "reviewer_ids", mode="before")
+    @classmethod
+    def _parse_user_ids(cls, value: Any) -> Any:
+        return _parse_json_list(value)
 
 
 class CreateMergeRequest(DuoBaseTool):
@@ -370,6 +396,11 @@ class UpdateMergeRequestInput(MergeRequestResourceInput):
         default=None,
         description="Comma-separated label names to remove from a merge request",
     )
+
+    @field_validator("assignee_ids", "reviewer_ids", mode="before")
+    @classmethod
+    def _parse_user_ids(cls, value: Any) -> Any:
+        return _parse_json_list(value)
 
 
 class ListMergeRequestInput(ProjectResourceInput):
