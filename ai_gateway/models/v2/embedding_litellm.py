@@ -57,6 +57,7 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
     max_retries: int = 1
     custom_models_enabled: bool = False
     user_id_header: Optional[str] = None
+    vertex_location: Optional[str] = None
 
     # define unused attribute to satisfy the LLMModelProtocol interface
     disable_streaming: bool = False
@@ -121,7 +122,9 @@ class EmbeddingLiteLLM(RunnableSerializable[Dict[str, Any], AIMessage]):
         if api_key:
             embedding_args["api_key"] = api_key
 
-        if vertex_location := kwargs.pop("vertex_location", None):
+        if vertex_location := (
+            kwargs.pop("vertex_location", None) or self.vertex_location
+        ):
             embedding_args["vertex_ai_location"] = vertex_location
 
         inject_user_identity_header(embedding_args, self.user_id_header)

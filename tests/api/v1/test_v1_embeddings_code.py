@@ -364,10 +364,27 @@ class BaseTestCodeEmbeddings:
         response_json = response.json()
         assert response_json["predictions"] == mock_litellm_aembedding_response.data
 
+    @pytest.mark.parametrize(
+        ("config_values", "expected_location"),
+        [
+            (
+                {"custom_models": {"enabled": True}, "vertexai_location": None},
+                None,
+            ),
+            (
+                {
+                    "custom_models": {"enabled": True},
+                    "vertexai_location": "europe-west2",
+                },
+                "europe-west2",
+            ),
+        ],
+    )
     def test_successful_response_custom_provider_vertex(
         self,
         mock_client: TestClient,
         mock_litellm_aembedding: AsyncMock,
+        expected_location: str | None,
     ):
         params = self._build_params(
             model_provider="gitlab", model_identifier="text_embedding_005_vertex"
@@ -381,7 +398,7 @@ class BaseTestCodeEmbeddings:
         assert call_kwargs["model"] == "text-embedding-005"
         assert call_kwargs["input"] == params["contents"]
         assert call_kwargs["custom_llm_provider"] == "vertex_ai"
-        assert call_kwargs["vertex_ai_location"] == "global"
+        assert call_kwargs.get("vertex_ai_location") == expected_location
 
     def test_unsupported_provider(
         self,

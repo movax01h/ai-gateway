@@ -257,17 +257,36 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         assert call_kwargs["drop_params"] is True
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("configured_location", "prompt_params_location", "expected"),
+        [
+            (None, "europe-west4", "europe-west4"),
+            ("europe-west2", None, "europe-west2"),
+            ("europe-west2", "us-east4", "us-east4"),
+            (None, None, None),
+        ],
+    )
     async def test_async_invoke_vertex(
-        self, mock_litellm_aembedding, mock_litellm_aembedding_response
+        self,
+        mock_litellm_aembedding,
+        mock_litellm_aembedding_response,
+        configured_location,
+        prompt_params_location,
+        expected,
     ):
         model = EmbeddingLiteLLM(
             model="text-embedding",
             custom_llm_provider="vertex_ai",
+            vertex_location=configured_location,
         )
 
         result = await model.ainvoke(
             input={"contents": ["test text 1", "test text 2"]},
-            vertex_location="europe-west4",
+            **(
+                {"vertex_location": prompt_params_location}
+                if prompt_params_location
+                else {}
+            ),
         )
 
         assert isinstance(result, AIMessage)
@@ -277,7 +296,7 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         assert call_kwargs["input"] == ["test text 1", "test text 2"]
         assert call_kwargs["model"] == "text-embedding"
         assert call_kwargs["custom_llm_provider"] == "vertex_ai"
-        assert call_kwargs["vertex_ai_location"] == "europe-west4"
+        assert call_kwargs.get("vertex_ai_location") == expected
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
