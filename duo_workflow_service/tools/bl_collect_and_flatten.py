@@ -59,7 +59,7 @@ def _maybe_json(value: Any) -> Any:
 def _unit_findings(answer: Any) -> Optional[list]:
     """The finding dicts of one unit answer: the dicts under its ``findings`` list.
 
-    A unit answers through a response-schema tool call, stored as ``json.dumps`` of ``{"reasoning": ...,
+    A unit answers through a response-schema tool call, stored as ``json.dumps`` of ``{"explanation": ...,
     "findings": [...]}``, so a string answer is decoded as strict JSON. ``None`` when the answer is not such an
     object, or when its ``findings`` list is non-empty but holds no finding dict. ``[]`` for an honest empty answer.
     """
@@ -76,7 +76,7 @@ def _unit_findings(answer: Any) -> Optional[list]:
 
 
 def _merge_verdict(answer: Any, item: Any) -> Any:
-    """A triage verdict merged onto the finding it judged: ``{"reasoning": ..., "findings": [finding + verdict]}``.
+    """A triage verdict merged onto the finding it judged: ``{"explanation": ..., "findings": [finding + verdict]}``.
 
     ``item`` is the unit's own fan-out item, the finding as triage received it. Verdict fields left unset are not
     merged. An answer that is not a structured object, or has no ``verdict``, is returned unchanged.
@@ -92,7 +92,7 @@ def _merge_verdict(answer: Any, item: Any) -> Any:
         finding = {}
     fields = {k: verdict[k] for k in _VERDICT_FIELDS if verdict.get(k) is not None}
     return {
-        "reasoning": verdict.get("reasoning", ""),
+        "explanation": verdict.get("explanation", ""),
         "findings": [{**finding, **fields}],
     }
 

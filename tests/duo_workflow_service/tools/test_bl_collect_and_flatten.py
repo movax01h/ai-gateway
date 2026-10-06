@@ -24,7 +24,9 @@ def _failed(message: str = "boom") -> dict:
 
 def _unit(*findings: dict) -> str:
     """A unit answer as it is stored: JSON of the structured answer."""
-    return json.dumps({"reasoning": "walked every handler", "findings": list(findings)})
+    return json.dumps(
+        {"explanation": "walked every handler", "findings": list(findings)}
+    )
 
 
 @pytest.mark.asyncio
@@ -116,9 +118,9 @@ async def test_a_garbled_unit_answer_is_counted_unread_not_reviewed():
     """An answer that does not parse as a structured answer must not pass as a reviewed unit with no findings."""
     tool = BlCollectAndFlatten(metadata={})
     results = [
-        {"final_answer": '{"reasoning": "r", "findings": [{'},
+        {"final_answer": '{"explanation": "r", "findings": [{'},
         {
-            "final_answer": '{"reasoning": "r", "findings": [{"id": "ok"}]}',
+            "final_answer": '{"explanation": "r", "findings": [{"id": "ok"}]}',
         },
     ]
 
@@ -153,7 +155,7 @@ class TestADictFinalAnswer:
 
     async def test_its_findings_are_flattened_and_the_unit_counted_completed(self):
         tool = BlCollectAndFlatten(metadata=None)
-        answer = {"reasoning": "walked every handler", "findings": [{"id": "d1"}]}
+        answer = {"explanation": "walked every handler", "findings": [{"id": "d1"}]}
 
         out = await tool._execute(results=[{"final_answer": answer}])
 
@@ -286,7 +288,7 @@ _FINDING = {
     "anchor_status": "exact",
 }
 _VERDICT = {
-    "reasoning": "read app/c.rb:12 and its policy",
+    "explanation": "read app/c.rb:12 and its policy",
     "verdict": "KEEP",
     "clause": "KEEP-cross-principal",
     "evidence": "app/c.rb:12 no owner scope",
@@ -313,7 +315,7 @@ class TestTriageVerdictMerge:
         merged = await self._collect([_VERDICT, drop], [dict(_FINDING), other])
 
         assert merged == [
-            {**_FINDING, **{k: v for k, v in _VERDICT.items() if k != "reasoning"}},
+            {**_FINDING, **{k: v for k, v in _VERDICT.items() if k != "explanation"}},
             {
                 **other,
                 "verdict": "DROP",
@@ -360,7 +362,12 @@ class TestTriageVerdictMerge:
 
     @pytest.mark.parametrize("item", ["not a json finding", ["a", "list"]])
     async def test_an_item_that_is_not_a_finding_keeps_the_verdict_alone(self, item):
-        verdict = {"reasoning": "r", "verdict": "DROP", "clause": "c", "evidence": "e"}
+        verdict = {
+            "explanation": "r",
+            "verdict": "DROP",
+            "clause": "c",
+            "evidence": "e",
+        }
 
         with capture_logs() as logs:
             merged = await self._collect([verdict], [item])
@@ -382,7 +389,9 @@ class TestTriageVerdictMerge:
 
     async def test_a_verdict_with_no_verdict_field_is_counted_unread(self):
         out = await BlCollectAndFlatten(metadata=None)._execute(
-            results=[{"final_answer": json.dumps({"reasoning": "x", "error": "oops"})}],
+            results=[
+                {"final_answer": json.dumps({"explanation": "x", "error": "oops"})}
+            ],
             verdict_items=[dict(_FINDING)],
         )
 
@@ -430,12 +439,12 @@ class TestUnitFindings:
         assert _unit_findings(json.loads(_unit(_ONE_FINDING))) == [_ONE_FINDING]
 
     def test_findings_holding_no_finding_dict_is_lost(self):
-        answer = json.dumps({"reasoning": "r", "findings": [1, "prose"]})
+        answer = json.dumps({"explanation": "r", "findings": [1, "prose"]})
 
         assert _unit_findings(answer) is None
 
     def test_non_dict_items_beside_a_finding_are_not_counted(self):
-        answer = json.dumps({"reasoning": "r", "findings": [_ONE_FINDING, "x", None]})
+        answer = json.dumps({"explanation": "r", "findings": [_ONE_FINDING, "x", None]})
 
         assert _unit_findings(answer) == [_ONE_FINDING]
 
@@ -444,7 +453,7 @@ class TestUnitFindings:
         [
             pytest.param("prose, not the answer tool", id="prose"),
             pytest.param(json.dumps([_ONE_FINDING]), id="bare-array"),
-            pytest.param(json.dumps({"reasoning": "r"}), id="no-findings-key"),
+            pytest.param(json.dumps({"explanation": "r"}), id="no-findings-key"),
             pytest.param(json.dumps({"findings": None}), id="null-findings"),
             pytest.param(json.dumps({"findings": "none"}), id="string-findings"),
             pytest.param(None, id="none"),
@@ -481,7 +490,7 @@ class TestFlatten:
     async def test_an_unreadable_unit_contributes_nothing_and_is_unread(self):
         results = [
             {"final_answer": "prose"},
-            {"final_answer": {"reasoning": "r"}},
+            {"final_answer": {"explanation": "r"}},
             {"final_answer": "Result: " + _unit(_ONE_FINDING)},
             {"final_answer": _unit(_ONE_FINDING)},
             {"final_answer": _unit()},
