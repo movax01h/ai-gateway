@@ -19,7 +19,7 @@ The chat engine is a boundary policy over the shared executor, not a second engi
 
 - Every component is shared. `AgentComponent`, the tool nodes, approvals, compaction, and streaming are the same
   classes ambient flows use, unchanged.
-- The graph is built by `FlowGraphBuilder` and run by `Flow`. `ChatFlow` subclasses `Flow` and overrides four seams.
+- The graph is built by `FlowGraphBuilder` and run by `Flow`. `ChatFlow` subclasses `Flow` and overrides three seams.
 - Nothing in the engine assumes a component count or a topology. Every mechanism on this page reads the declared
   graph and works on any shape. The chat-partial environment keeps its existing rule of one root `AgentComponent`.
   That rule belongs to the environment, not to the engine.
@@ -29,7 +29,6 @@ The chat engine is a boundary policy over the shared executor, not a second engi
 | `_graph_builder`: a builder subclass that seeds the terminal component and rejects graphs that cannot reach it | Where a turn ends |
 | `_initial_entry_dispatch`: the structural dispatch strategy | Where a turn begins |
 | Entry wiring: the builder seeds the ingestion node like the terminals, sets it as the entry point, and hops to the declared entry component | What crosses the line inbound |
-| `get_graph_input`: the RECOVERY input, which rolls forward from the tip | What happens after a bad crossing |
 
 Streaming is the shared mechanism end to end. The client's `startRequest.streaming` flag reaches `ChatFlow` through
 `Flow` and decides whether the notifier forwards model chunks. `AgentComponent` streams tokens only when its
@@ -43,8 +42,8 @@ component.
 1. **A turn is one invocation.** Each user message enters through ingestion as graph input, runs to `END`, and the
    session is at rest between turns.
 1. **The terminal component commits the boundary.** The seeded terminal writes `INPUT_REQUIRED` as the last state
-   update of the turn. A turn that stops before the terminal runs leaves the tip mid-turn, and recovery rolls
-   forward from it.
+   update of the turn. A turn that stops before the terminal runs leaves the tip mid-turn, and the next message
+   rolls the session back to the last boundary (see [Recovery](#recovery)).
 1. **Mid-turn pauses are interrupts.** Tool approvals pause the turn with `interrupt()` and never end it.
    Clarifying-input gates, when they arrive, are elicitation
    ([epic &55](https://gitlab.com/groups/gitlab-org/modelops/applied-ml/code-suggestions/-/work_items/55)) under the
@@ -94,9 +93,11 @@ projection of the tip, reconciled toward it, and is never the source of classifi
 | No checkpoints | message | START | New invocation, graph input through ingestion |
 | Boundary: `END` reached, `INPUT_REQUIRED`, nothing pending | message | TURN | New invocation from the tip, through ingestion |
 | Pending `__interrupt__` writes | approval or rejection | RESUME | `Command(resume=)` |
-| Mid-turn at rest | message | RECOVERY | Roll forward, see [Recovery](#recovery) |
-| Pending `__interrupt__` writes | message | RECOVERY | Roll forward. The awaiting calls close as cancelled |
-| Mid-turn at rest | reconnect, no message | RETRY | Replay from the tip, unchanged |
+| Stopped mid-turn | message | TURN | From the last boundary, once `Flow`'s stop recovery rolls the session back. See [Recovery](#recovery) |
+| Failed mid-turn | message | TURN or REJECT | TURN from the last boundary when the walk lands on one. When it lands on an answered gate, an error that asks the user to retry first. See [Recovery](#recovery) |
+| Still running, per Rails | message | REJECT | An error that asks the user to retry first, so no message is dropped |
+| Pending `__interrupt__` writes | message | RESUME | `Command(resume=)`: the message answers the wait, see [What crosses the line inbound](#what-crosses-the-line-inbound) |
+| Mid-turn at rest | reconnect, no message | RETRY | Replay from the tip, unchanged. A client can offer it as `/retry` |
 | Any checkpoint pinned by `resume_checkpoint_ts` | message | TURN | New invocation from the pinned checkpoint, through ingestion. LangGraph writes the fork checkpoint |
 | Boundary, nothing pending | approval or rejection | REJECT | Stale event, structured error |
 
@@ -105,33 +106,74 @@ selects `structural_entry_dispatch`. TURN and RESUME project to the same wire ev
 
 ## What crosses the line inbound
 
-Ingestion runs once per turn as the first node, for the first message and the fortieth alike. The node owns
-sequencing only. Each stage is a pure function in `duo_workflow_service/entities/message_ingestion.py` and its
-sibling modules, and legacy `chat.Workflow` consumes the same stages.
+Every user message is shaped by the same pure stages, the first message and the fortieth alike. Each stage is a
+function in `duo_workflow_service/entities/message_ingestion.py` and its sibling modules, and legacy `chat.Workflow`
+consumes the same stages.
+
+Stages 1 to 3 below read only the message, so `ChatFlow` runs them before the graph, once for every message. It claims
+the attachments, tells a platform directive from a message, and renders the message. The result then crosses at one
+of two sites.
+
+**Plain input** (START and TURN) enters through the ingestion node. The builder seeds it like the terminals and sets
+it as the entry point. The node owns only what needs the graph. For a directive it runs the system turn and hops to
+`end`. For a message it refreshes the envelope inputs and normalizes history (stages 4 and 5), then hops to the
+declared entry component. A message after a stop is plain input too, because the session has rolled back to the last
+boundary first (see [Recovery](#recovery)).
+
+**A message that answers a wait**, at a gate or a tool approval, is a resume value. A resume never runs the ingestion
+node, because LangGraph hands it straight to the node that waits, so `ChatFlow` hands the rendered message to `Flow`'s
+resume, which already refreshes the envelope inputs. The rendered content needs a new `FlowEvent` field, because
+`message` is a plain string and cannot hold attachment content blocks. With it the waiting component gets the same
+message an entry would. The waiting component writes the USER UI log entry itself. What the wait does with the
+message stays the waiting component's.
+
+The stages, in order:
 
 1. Claim attachments out of `additional_context` (`category: attachments`) into content blocks. Attachments are
    message-scoped and never enter `context.inputs`.
-1. Parse slash input for platform directives. `/compact` runs as a system turn: mutate state at a platform-owned node,
-   write the UI log entry, reach the boundary. The engine renders no command macros. Slash text that is not a
-   directive reaches the model unchanged.
+1. Tell a platform directive from a message, from the raw text. `/compact` runs as a system turn: the ingestion node
+   mutates state at a platform-owned node, writes the UI log entry, and reaches the boundary. The engine renders no
+   command macros. Slash text that is not a directive reaches the model unchanged.
 1. Render the user message once. The rendered text is the `HumanMessage` content. Raw content and context ride in
-   `additional_kwargs`.
+   `additional_kwargs`. After a rollback the rendered text of plain input starts with the `cancelled_turn` transcript
+   (see [Recovery](#recovery)). A resume after a rollback only reaches a `HumanInputComponent`, because the walk stops
+   only at `INPUT_REQUIRED`, and its fetch node already prepends the transcript, so a resume leaves it out and the
+   model never reads it twice.
 1. Refresh envelope inputs into `context.inputs`, which is flow-scoped, through `Flow._process_additional_context`, so
-   schema and version validation run with the refresh.
-1. Normalize history: synthetic tool closures for dangling calls, budget reset, the USER UI log entry, internal
-   events.
+   schema and version validation run with the refresh. After a rollback the refresh carries the `cancelled_turn`
+   envelope.
+1. Normalize history: budget reset, the USER UI log entry, internal events.
 
 Rendering commands are templated by the client. The IDE webviews template the four flagship commands before the
 cutover. The directive invocation surface belongs to the commands track.
 
 ## Recovery
 
-A RECOVERY entry rolls forward. The tip is where the stopped turn left the session, and the next message enters
-there through ingestion like any TURN. The normalization stage closes every call that never returned with a
-cancelled tool result, and the turn runs.
+A message after a stop rolls the session back. `ChatFlow` keeps `Flow`'s stop recovery unchanged: the walk finds the
+newest `INPUT_REQUIRED` checkpoint and pins the run there, discarding everything the stopped turn did. On the engine
+that is the stopped turn's input checkpoint, which LangGraph writes before the turn's first node and which still holds
+the last boundary's state, so the message enters from it as a TURN. A stop in the first turn has no boundary, and the
+walk starts the session again from its first checkpoint with the new message. `chat` and ambient flows recover through
+the same walk, so every v1 flow rolls back.
 
-Nothing is discarded, so there is no `cancelled_turn` envelope. The transcript the user saw is the transcript the
-model sees. Recovery never forks.
+The discarded turn's user and agent messages reach the model as the `cancelled_turn` envelope, the transcript delta
+`Flow` computes between the tip and the boundary. Tool entries are left out. Ingestion includes it by default: the
+message starts with the transcript, and the envelope is cleared once read, so a later message never repeats it.
+`HumanInputComponent` treats it the same way on a resume, and no flow has to declare anything. An entry component
+that declares an input named `cancelled_turn` overrides the default, and a literal empty value turns it off.
+
+No recovery undoes a tool call that ran before the stop. What rolling back adds is that the model never sees that
+call, because `cancelled_turn` leaves tool entries out. What the envelope should carry is tracked with cancellation.
+
+A message after a failure rolls back only to a turn boundary. `Flow` runs the walk only after a stop, so `ChatFlow`
+runs it itself when Rails reports the session failed. When the walk lands on a boundary, the message enters from
+there as a TURN. The boundary is `end`, the session's first checkpoint, or the failed turn's input checkpoint, which
+still holds the last boundary's state, as after a stop. When the walk lands on a gate the user already answered,
+rolling back would reopen the gate and read the message as its answer, so the message is rejected with an error
+that asks the user to retry first. A retry is an entry with no message, which replays the failed step through `Flow`'s
+retry. A client can offer it as `/retry`, and the engine adds no directive for it. Chat-partial has no gates, so a
+failure there always rolls back. A message while Rails still reports the turn running is rejected the same way, so no
+message is dropped silently. A stop rolls back to an answered gate as well, which is tracked with cancellation.
 
 A client-requested fork is not recovery. Manual retry pins an earlier checkpoint through `resume_checkpoint_ts`, and
 the message enters as a TURN from there. A TURN is plain graph input, so LangGraph treats the pinned checkpoint as
@@ -228,9 +270,15 @@ wrong key. Three layers prevent that, in order:
 ## Open items
 
 - Directive invocation surface: slash text, client affordance, or protocol event. Owned by the commands track.
+- Directives sent while something waits. Stage 2 ends a directive's turn at the boundary, which a waiting turn cannot
+  reach without abandoning the wait.
 - `gitlab-lsp`: template `/explain`, `/fix`, `/refactor` and `/tests` in both IDE webviews before the cutover.
 - Pin at session creation and the read-only cutoff for old threads.
 - Per-owner acceptance of the `ui_log_events` change at version swap.
+- Cancellation, tracked in
+  [ai-assist#2998](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2998): the
+  effects of tool calls a rollback discards, what `cancelled_turn` tells the model about them, and a stop that rolls
+  back to an answered gate. Approached for chat and chat-partial together.
 - At-rest session status, distinct from `INPUT_REQUIRED` at the boundary:
   [ai-assist#2878](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2878).
   When it lands, the seeded terminal writes the new status and nothing else in the engine changes.
