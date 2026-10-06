@@ -94,6 +94,7 @@ def test_restricted_flows_for_includes_env_releases_when_flag_is_off():
     assert config.restricted_flows_for(models=["claude-released-restricted-1"]) == {
         "bl_security"
     }
+    assert "bl_security" in config.all_restricted_flows()
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai", "vertex-ai"])

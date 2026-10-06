@@ -21,7 +21,8 @@ current_model_metadata_context: ContextVar[Optional[Any]] = ContextVar(
 
 # Flow config id this request is authorized for; a restricted model (one with
 # `restricted_to_flows`) is usable only when it is in that list. None means no
-# restricted model may be used. Nothing sets it yet, so restricted models are denied.
+# restricted model may be used. Set only by the Duo Workflow Service's ExecuteWorkflow,
+# from a verified flow claim.
 restricted_access_ctx: ContextVar[Optional[str]] = ContextVar(
     "restricted_access_ctx", default=None
 )
