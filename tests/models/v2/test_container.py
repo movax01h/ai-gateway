@@ -141,6 +141,23 @@ def test_lite_llm_completion_resolves_vertex_location(
     assert model.vertex_location == expected
 
 
+@pytest.mark.parametrize("vertexai_location", [None, "europe-west2"])
+def test_lite_llm_embedding_uses_vertexai_location(vertexai_location):
+    container = ContainerModels()
+    container.config.from_dict(
+        {
+            "custom_models": {"enabled": False, "user_id_header": None},
+            "vertexai_location": vertexai_location,
+            "mock_model_responses": False,
+            "use_agentic_mock": False,
+        }
+    )
+
+    model = container.lite_llm_embedding_fn(model="text-embedding-005")
+
+    assert model.vertex_location == vertexai_location
+
+
 @pytest.mark.asyncio
 async def test_google_chat_gen_vertex_ai_client_not_shared_across_resolutions():
     """Each resolution of the Vertex Gemini factory must build its own `google.genai.Client` instead of sharing one

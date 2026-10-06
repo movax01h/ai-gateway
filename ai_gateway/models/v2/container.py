@@ -185,6 +185,7 @@ class ContainerModels(containers.DeclarativeContainer):
             EmbeddingLiteLLM,
             custom_models_enabled=config.custom_models.enabled,
             user_id_header=config.custom_models.user_id_header,
+            vertex_location=config.vertexai_location,
         ),
         mocked=providers.Factory(mock.FakeEmbeddingModel),
     )

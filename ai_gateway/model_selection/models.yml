@@ -1316,8 +1316,6 @@ models:
     params:
       model: "text-embedding-005"
       custom_llm_provider: vertex_ai
-    prompt_params:
-      vertex_location: global
 
   - name: "Self-Hosted Embedding Models"
     gitlab_identifier: "embedding"
