@@ -23,12 +23,14 @@ from ai_gateway.models.v2._model_compat import (
     hoist_tool_result_images,
     normalize_image_blocks,
     remove_trailing_assistant_message,
+    strip_image_blocks_for_non_vision_model,
     supports_assistant_prefill,
 )
 from ai_gateway.models.v2.litellm_model_registry import (
     register_builtin_models,
     register_external_models,
     register_fireworks_models,
+    register_fireworks_vision_flags,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
@@ -254,6 +256,10 @@ register_builtin_models()
 # custom deployment identifiers (see work item #2587).
 register_fireworks_models(ModelSelectionConfig.instance().get_llm_definitions())
 
+# Make LiteLLM's client-side image check agree with the definitions' `supports_vision`
+# flags. Runs before the operator's external file, which stays the final override.
+register_fireworks_vision_flags(ModelSelectionConfig.instance().get_llm_definitions())
+
 # Register any additional model metadata supplied by operators via an external
 # JSON file (path set by AIGW_LITELLM__MODEL_METADATA_FILE). It allows operators
 # to enable parameters like `tool_choice` for models that are missing from
@@ -312,11 +318,14 @@ class ChatLiteLLM(_LChatLiteLLM):
         self, messages: List[BaseMessage], stop: Optional[List[str]]
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         message_dicts, params = super()._create_message_dicts(messages, stop)
-        # The LiteLLM converter copies `message.content` verbatim, so LangChain
-        # standard image blocks have to be rewritten into OpenAI's `image_url`
-        # form before they reach the provider.
-        message_dicts = normalize_image_blocks(message_dicts)
         model_name = self.model_name or self.model
+        # Models known not to see images get a text notice instead of a provider
+        # error; the remaining LangChain image blocks are then rewritten into
+        # OpenAI's `image_url` form, which the LiteLLM converter does not do.
+        message_dicts = strip_image_blocks_for_non_vision_model(
+            message_dicts, model_name, self.custom_llm_provider
+        )
+        message_dicts = normalize_image_blocks(message_dicts)
         # After normalize, so there is one image shape to recognise, and before
         # the prefill rewrite, since the hoist can append a user message.
         message_dicts = hoist_tool_result_images(

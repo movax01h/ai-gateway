@@ -5,7 +5,13 @@
 
 from typing import Any, Optional
 
+import litellm
+import structlog
+
 from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
+from lib.context import current_model_metadata_context
+
+log = structlog.stdlib.get_logger("model_compat")
 
 PREVIOUS_ASSISTANT_CONTEXT_PREFIX = "[Previous assistant context]: "
 
@@ -234,3 +240,136 @@ def _split_tool_images(content: list) -> tuple[list, list[dict]]:
         else:
             kept.append(block)
     return kept, images
+
+
+# No model identifier: the model repeats what it reads, and a deployment path is noise to the user.
+IMAGE_OMITTED_NOTICE = (
+    "[image omitted: the selected model does not support image input]"
+)
+
+
+def strip_image_blocks_for_non_vision_model(
+    messages: list[dict], model: Optional[str], custom_llm_provider: Optional[str]
+) -> list[dict]:
+    """Replace image blocks with a text notice when the model is known not to see images.
+
+    Only a positive "no" strips; unknown passes through so self-hosted vision models keep working.
+    """
+    if not model:
+        return messages
+    if not any(
+        isinstance(message.get("content"), list)
+        and any(_is_gated_image_block(block) for block in message["content"])
+        for message in messages
+    ):
+        return messages
+    if _model_supports_vision(model, custom_llm_provider) is not False:
+        return messages
+
+    log.info(
+        "Replaced image blocks for non-vision model",
+        model=model,
+        custom_llm_provider=custom_llm_provider,
+        verdict_source="flag"
+        if _declared_vision_support(model) is not None
+        else "litellm",
+    )
+    notice_text = IMAGE_OMITTED_NOTICE
+    return [
+        (
+            message
+            if not isinstance(message.get("content"), list)
+            else {
+                **message,
+                "content": _replace_images_with_notice(message["content"], notice_text),
+            }
+        )
+        for message in messages
+    ]
+
+
+def _replace_images_with_notice(blocks: list, notice_text: str) -> list:
+    """Swap image blocks for a text notice, one per run of consecutive images."""
+    replaced: list = []
+    previous_was_notice = False
+    for block in blocks:
+        if _is_gated_image_block(block):
+            if not previous_was_notice:
+                replaced.append({"type": "text", "text": notice_text})
+            previous_was_notice = True
+            continue
+        replaced.append(block)
+        previous_was_notice = False
+    return replaced
+
+
+def _is_gated_image_block(block: Any) -> bool:
+    """Either image shape: the strip runs before normalize, but an already-normalized block must not slip past."""
+    return _is_standard_image_block(block) or _is_openai_image_block(block)
+
+
+def _model_supports_vision(
+    model: str, custom_llm_provider: Optional[str]
+) -> Optional[bool]:
+    """Return the vision verdict for ``model``: True, False, or None when nobody knows.
+
+    The definition's ``supports_vision`` flag wins, then litellm's registry under
+    the provider (how it files Fireworks models), then litellm by bare name. The
+    flag comes first because litellm is wrong for some deployments: Minimax M3
+    reads images live while the registry says it cannot. An unannotated registry
+    entry counts as unknown, not as "no vision".
+    """
+    declared = _declared_vision_support(model)
+    if declared is not None:
+        return declared
+    if custom_llm_provider:
+        verdict = _litellm_vision_verdict(model, custom_llm_provider)
+        if verdict is not None:
+            return verdict
+    return _litellm_vision_verdict(model, None)
+
+
+def _declared_vision_support(model: str) -> Optional[bool]:
+    """Return the context definition's ``supports_vision`` flag, only if that definition is for ``model``.
+
+    A tag-routed component can run on a model other than the context's default, so the names have to match before the
+    flag is trusted.
+    """
+    metadata = current_model_metadata_context.get()
+    definition = getattr(metadata, "llm_definition", None)
+    declared = getattr(definition, "supports_vision", None)
+    if definition is None or declared is None:
+        return None
+    params = definition.params
+    if model not in (
+        getattr(params, "model", None),
+        getattr(params, "identifier", None),
+    ):
+        return None
+    return declared
+
+
+def _litellm_vision_verdict(
+    model: str, custom_llm_provider: Optional[str]
+) -> Optional[bool]:
+    """Return litellm's explicit ``supports_vision`` boolean for ``model``, else ``None``."""
+    try:
+        if custom_llm_provider:
+            info = litellm.get_model_info(
+                model, custom_llm_provider=custom_llm_provider
+            )
+        else:
+            info = litellm.get_model_info(model)
+    # litellm raises a plain Exception for unmapped models; only other failures are logged.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        if "isn't mapped yet" not in str(e):
+            log.debug(
+                "litellm model info lookup failed",
+                model=model,
+                custom_llm_provider=custom_llm_provider,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+        return None
+    supports = info.get("supports_vision")
+    return supports if isinstance(supports, bool) else None

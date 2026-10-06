@@ -120,6 +120,31 @@ def test_load_llm_definitions(selection_config):
     }
 
 
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [
+        ({"supports_vision": True}, True),
+        ({"supports_vision": False}, False),
+        ({}, None),
+    ],
+    ids=["declared-true", "declared-false", "absent"],
+)
+def test_supports_vision_reads_the_declared_value_or_none(declared, expected):
+    # Absent is a distinct state from false: it means "ask litellm's registry",
+    # while false means images are stripped before the request.
+    definition = ChatLiteLLMDefinition.model_validate(
+        {
+            "name": "Model",
+            "gitlab_identifier": "gitlab-model",
+            "max_context_tokens": 1000,
+            "params": {"model": "provider-model"},
+            **declared,
+        }
+    )
+
+    assert definition.supports_vision is expected
+
+
 @pytest.mark.usefixtures("mock_fs")
 def test_get_unit_primitive_config(selection_config):
     assert list(selection_config.get_unit_primitive_config()) == [
