@@ -571,6 +571,38 @@ def _decode_token(response):
     )
 
 
+class TestFeatureEnablementTypeClaimSurvivesTokenExchange:
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self):
+        claims = UserClaims(
+            scopes=["complete_code", "ai_gateway_model_provider_proxy"],
+            gitlab_realm="saas",
+            gitlab_instance_id="1234",
+            extra={
+                "gitlab_root_namespace_id": "42",
+                "feature_enablement_type": "duo_core",
+            },
+        )
+        return CloudConnectorUser(authenticated=True, claims=claims)
+
+    def test_feature_enablement_type_is_carried_into_the_minted_token(
+        self, mock_client: TestClient
+    ):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-Gitlab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "saas",
+            "X-Gitlab-Feature-Enablement-Type": "duo_pro",
+        }
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert _decode_token(response)["feature_enablement_type"] == "duo_core"
+
+
 class TestSaasRootNamespaceIdFromJwt:
     @pytest.fixture(name="auth_user")
     def auth_user_fixture(self):

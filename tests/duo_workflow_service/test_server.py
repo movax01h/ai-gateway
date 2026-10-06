@@ -7788,3 +7788,42 @@ async def test_execute_workflow_without_enforcement_runs_gitlab_com_and_minted_t
 
     mock_context.abort.assert_not_called()
     mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {"feature_enablement_type": "duo_pro"},
+        {"feature_enablement_type": ""},
+        {},  # no feature_enablement_type
+        None,  # no extra claims
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_propagates_feature_enablement_type(
+    _mock_generate_token_response,
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claims_extra,
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    if claims_extra and "feature_enablement_type" in claims_extra:
+        assert (
+            extra_claims["feature_enablement_type"]
+            == claims_extra["feature_enablement_type"]
+        )
+    else:
+        assert "feature_enablement_type" not in extra_claims

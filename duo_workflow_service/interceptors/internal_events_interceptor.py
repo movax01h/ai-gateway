@@ -38,6 +38,7 @@ from lib.internal_events import (
     validate_event_context,
 )
 from lib.jwt import (
+    resolve_feature_enablement_type,
     root_namespace_id_from_claims_extra,
     root_namespace_id_from_header,
 )
@@ -116,11 +117,17 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
 
         unique_instance_id = None
         root_namespace_id = None
+        claims_extra = None
 
         user = current_user.get()
         if hasattr(user, "claims") and user.claims:
             unique_instance_id = getattr(user.claims, "gitlab_instance_uid", None)
             root_namespace_id = root_namespace_id_from_claims_extra(user.claims.extra)
+            claims_extra = user.claims.extra
+
+        feature_enablement_type = resolve_feature_enablement_type(
+            claims_extra, metadata.get(X_GITLAB_FEATURE_ENABLEMENT_TYPE)
+        )
 
         if root_namespace_id is None:
             root_namespace_id = root_namespace_id_from_header(
@@ -146,7 +153,7 @@ class InternalEventsInterceptor(grpc.aio.ServerInterceptor):
             feature_enabled_by_namespace_ids=convert_feature_enabled_string_to_list(
                 enabled_features=feature_enabled_by_namespace_ids
             ),
-            feature_enablement_type=metadata.get(X_GITLAB_FEATURE_ENABLEMENT_TYPE),
+            feature_enablement_type=feature_enablement_type,
             namespace_id=namespace_id,
             ultimate_parent_namespace_id=root_namespace_id,
             is_gitlab_team_member=is_gitlab_member,
