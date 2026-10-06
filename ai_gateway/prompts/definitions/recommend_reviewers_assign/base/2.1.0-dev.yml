@@ -1,0 +1,10 @@
+name: recommend_reviewers_assign
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'recommend_reviewers_assign/system/2.1.0-dev.jinja' %}
+  user: |
+    {% include 'recommend_reviewers_assign/user/2.1.0-dev.jinja' %}
+params:
+  timeout: 60
+  cache_control_injection_points: []

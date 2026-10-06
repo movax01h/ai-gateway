@@ -1,0 +1,18 @@
+Recommend reviewers for merge request !{{ merge_request_iid }} in project {{ project_id }}.
+{%- set current_ids = reviewer_data.current_reviewers | map(attribute='id') | list %}
+{%- set rules = reviewer_data.approval_rules %}
+{%- set candidate_ids %},{% for r in rules if r.approvals_required > (r.eligible_approvers | selectattr('id', 'in', current_ids) | list | length) %}{% for u in r.eligible_approvers if not u.busy and u.id not in current_ids %}{{ u.id }},{% endfor %}{% endfor %}{% endset %}
+{%- set users = rules | map(attribute='eligible_approvers') | sum(start=[]) | unique(attribute='id') | sort(attribute='pending_reviews') %}
+
+Candidates (id|pending_reviews|local_time|last_activity_on|status):
+{%- for u in users if (',' ~ u.id ~ ',') in candidate_ids %}
+{{ u.id }}|{{ u.pending_reviews }}|{{ u.local_time or '' }}|{{ u.last_activity_on or '' }}|{{ [u.status_emoji, u.status_message] | select | join(' ') | replace('|', '/') | replace('\n', ' ') | trim }}
+{%- endfor %}
+
+Approval rules that need reviewers (id|type|section|name|still_needed|candidate_ids):
+{%- for r in rules %}
+{%- set still_needed = r.approvals_required - (r.eligible_approvers | selectattr('id', 'in', current_ids) | list | length) %}
+{%- if still_needed > 0 %}
+{{ r.id }}|{{ r.type }}|{{ (r.section or '') | replace('|', '/') | replace('\n', ' ') }}|{{ r.name | replace('|', '/') | replace('\n', ' ') }}|{{ still_needed }}|{% for u in r.eligible_approvers if not u.busy and u.id not in current_ids %}{{ u.id }}{{ ',' if not loop.last }}{% endfor %}
+{%- endif %}
+{%- endfor %}
