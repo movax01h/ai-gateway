@@ -1,8 +1,6 @@
 from pathlib import Path
 from typing import Callable, ClassVar, List, Literal, Optional
 
-from pydantic import model_validator
-
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
 from duo_workflow_service.agent_platform.experimental.components import (
@@ -35,26 +33,10 @@ class FlowConfig(BaseFlowConfig):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
     prompts: Optional[list[InMemoryPromptConfig]] = None
     response_schemas: Optional[list[InlineResponseSchemaConfig]] = None
-    # "metadata" keeps step names and statuses but no model or user text in saved
-    # checkpoints, the live stream and audit events, so the session cannot resume.
+    # "metadata" keeps step names and statuses but no model or user text in the live
+    # stream and audit events. Checkpoints stay complete so the session can resume.
     # Only for DWS-bundled flows: an inline (Rails-sent) config may not set it.
     content_retention: Literal["full", "metadata"] = "full"
-
-    @model_validator(mode="after")
-    def _metadata_retention_never_pauses(self) -> "FlowConfig":
-        # A paused session resumes from its checkpoint, which metadata retention empties.
-        if self.content_retention == "metadata" and (
-            self.environment != "ambient"
-            or any(
-                c.get("type") == "HumanInputComponent" or c.get("require_tool_approval")
-                for c in self.components or []
-            )
-        ):
-            raise ValueError(
-                "content_retention: metadata needs an ambient flow with no "
-                "human input or tool approval"
-            )
-        return self
 
     def should_auto_inject_mcp_tools(self) -> bool:
         """Return whether MCP tools should be automatically injected into this flow's toolset.

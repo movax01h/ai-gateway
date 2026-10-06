@@ -6,8 +6,8 @@ description: |
 product_group: code_security
 version: "experimental"
 environment: ambient
-# No model or user text in saved state, the live stream or audit events:
-# customers see only the finished findings, in the SAST report.
+# No model or user text in the live stream or audit events, and GitLab serves
+# checkpoints reduced: customers see only the finished findings, in the SAST report.
 content_retention: metadata
 
 # BL Security Analyzer: whole-repository business-logic security scan.

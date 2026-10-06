@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from google.protobuf import struct_pb2
 from langgraph.checkpoint.base import CheckpointMetadata
-from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
@@ -15,8 +14,7 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig as V1FlowConfig,
 )
 from duo_workflow_service.checkpointer.content_retention import (
-    SessionNotResumableError,
-    reduce_state_for_metadata_retention,
+    reduce_ui_chat_log,
     reduce_ui_chat_log_entry,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
@@ -168,25 +166,17 @@ def workflow_config_fixture():
 
 @pytest.fixture(name="checkpointer")
 def checkpointer_fixture(http_client, workflow_id, workflow_type, workflow_config):
-    return GitLabWorkflow(
-        http_client,
-        workflow_id,
-        workflow_type,
-        workflow_config,
-        content_retention="metadata",
-    )
+    # Built exactly as a metadata-retention flow builds it: no retention argument.
+    return GitLabWorkflow(http_client, workflow_id, workflow_type, workflow_config)
 
 
 class TestReduction:
-    def test_keeps_only_status_and_a_reduced_chat_log(self):
-        reduced = reduce_state_for_metadata_retention(
-            _checkpoint("1")["channel_values"]
-        )
-
-        assert reduced == {
-            "status": WorkflowStatusEnum.EXECUTION,
-            "ui_chat_log": [_reduced_entry("msg-0")],
-        }
+    def test_reduces_every_chat_log_entry(self):
+        assert reduce_ui_chat_log([_chat_entry("msg-0"), _chat_entry("msg-1")]) == [
+            _reduced_entry("msg-0"),
+            _reduced_entry("msg-1"),
+        ]
+        assert not reduce_ui_chat_log(None)
 
     @pytest.mark.parametrize(
         "overrides",
@@ -231,9 +221,6 @@ class TestReduction:
 
         assert "message_id" not in reduce_ui_chat_log_entry(entry)
 
-    def test_missing_channels_stay_missing(self):
-        assert reduce_state_for_metadata_retention({"context": SECRET}) == {}
-
 
 class TestFlowConfig:
     def test_bl_security_declares_metadata_retention(self):
@@ -268,18 +255,20 @@ class TestFlowConfig:
             ),
         ],
     )
-    def test_metadata_is_rejected_for_a_flow_that_can_pause(
+    def test_metadata_is_allowed_for_a_flow_that_can_pause(
         self, environment, component
     ):
-        with pytest.raises(ValidationError, match="ambient flow"):
-            FlowConfig(
-                flow={},
-                components=[component],
-                routers=[],
-                environment=environment,
-                version="experimental",
-                content_retention="metadata",
-            )
+        # Checkpoints stay complete, so a paused session can resume.
+        config = FlowConfig(
+            flow={},
+            components=[component],
+            routers=[],
+            environment=environment,
+            version="experimental",
+            content_retention="metadata",
+        )
+
+        assert config.content_retention == "metadata"
 
     def test_v1_flow_configs_ignore_it(self):
         config = V1FlowConfig(
@@ -311,147 +300,53 @@ class TestFlowConfig:
             _load_flow_from_inline_config(struct, schema_version)
 
 
-class TestCheckpointWrites:
+class TestCheckpointsStayComplete:
+    """GitLab reduces checkpoints on read; DWS must save them whole so the session can resume."""
+
     @pytest.mark.asyncio
-    async def test_full_snapshot_and_metadata_carry_no_text(
+    async def test_snapshot_and_metadata_keep_the_conversation(
         self, checkpointer, http_client
     ):
-        await checkpointer.aput(
-            {"configurable": {"checkpoint_id": "0"}},
-            _checkpoint("1"),
-            _metadata(),
-            {},
-        )
-
-        (post,) = _decoded_posts(http_client)
-        assert post["compressed_checkpoint"]["channel_values"] == {
-            "status": WorkflowStatusEnum.EXECUTION.value,
-            "ui_chat_log": [_reduced_entry("msg-0")],
-        }
-        assert post["metadata"] == {"source": "loop", "step": 3}
-        assert SECRET not in json.dumps(post)
-
-    @pytest.mark.asyncio
-    async def test_deltas_and_compaction_reseeds_carry_no_text(
-        self, checkpointer, http_client, workflow_config
-    ):
-        workflow_config["incremental_checkpoints_enabled"] = True
-        changed = {"ui_chat_log": 2, "conversation_history": 2, "context": 2}
-
-        # Group start (full re-seed), then an append delta, then a shrink that
-        # compacts and re-seeds again.
-        await checkpointer.aput(
-            {"configurable": {"checkpoint_id": None}}, _checkpoint("1", 2), {}, {}
-        )
-        await checkpointer.aput(
-            {"configurable": {"checkpoint_id": "1"}},
-            _checkpoint("2", 3),
-            {},
-            changed,
-        )
-        await checkpointer.aput(
-            {"configurable": {"checkpoint_id": "2"}},
-            _checkpoint("3", 1),
-            {},
-            changed,
-        )
-
-        posts = _decoded_posts(http_client)
-        assert len(posts) == 3
-        for post in posts:
-            assert {blob["channel"] for blob in post["channel_blobs"]} <= {
-                "status",
-                "ui_chat_log",
-            }
-            assert SECRET not in json.dumps(post)
-        assert [b["step_action"] for b in posts[1]["channel_blobs"]] == ["conversation"]
-        assert posts[1]["channel_blobs"][0]["data"] == [_reduced_entry("msg-2")]
-        # The shrink opened a new group and re-seeded the kept channels in full.
-        assert posts[2]["current_thread"] == posts[1]["current_thread"] + 1
-        reseed = {b["channel"]: b for b in posts[2]["channel_blobs"]}
-        assert {b["step_action"] for b in reseed.values()} == {"compaction"}
-        assert reseed["ui_chat_log"]["data"] == [_reduced_entry("msg-0")]
-        assert "status" in reseed
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("incremental", [False, True])
-    async def test_nested_lineage_carries_no_text(
-        self, checkpointer, http_client, workflow_config, incremental
-    ):
-        workflow_config["incremental_checkpoints_enabled"] = incremental
-        ns = "triage:abc|sub:def"
-
-        await checkpointer.aput(
-            {"configurable": {"checkpoint_id": None, "checkpoint_ns": ns}},
-            _checkpoint("1", 2),
-            _metadata(),
-            {},
-        )
-        await checkpointer.aput(
-            {"configurable": {"checkpoint_id": "1", "checkpoint_ns": ns}},
-            _checkpoint("2", 3),
-            _metadata(),
-            {"ui_chat_log": 2, "conversation_history": 2, "context": 2},
-        )
-
-        posts = _decoded_posts(http_client)
-        assert [post["checkpoint_ns"] for post in posts] == [ns, ns]
-        for post in posts:
-            assert SECRET not in json.dumps(post)
-
-    @pytest.mark.asyncio
-    async def test_full_retention_is_unchanged(
-        self, http_client, workflow_id, workflow_type, workflow_config
-    ):
-        checkpointer = GitLabWorkflow(
-            http_client, workflow_id, workflow_type, workflow_config
-        )
-
         await checkpointer.aput(
             {"configurable": {"checkpoint_id": "0"}}, _checkpoint("1"), _metadata(), {}
         )
 
         (post,) = _decoded_posts(http_client)
-        assert "conversation_history" in post["compressed_checkpoint"]["channel_values"]
-        assert "writes" in post["metadata"]
+        channel_values = post["compressed_checkpoint"]["channel_values"]
+        assert channel_values["conversation_history"] == {"agent": [f"{SECRET} 0"]}
+        assert channel_values["ui_chat_log"][0]["content"] == SECRET
+        assert post["metadata"]["writes"] == {"triage": {"reasoning": SECRET}}
 
     @pytest.mark.asyncio
-    async def test_interrupt_writes_are_not_persisted(self, checkpointer, http_client):
+    async def test_interrupt_writes_are_persisted(self, checkpointer, http_client):
         await checkpointer.aput_writes(
             {"configurable": {"checkpoint_id": "1", "thread_id": "123"}},
             [("__interrupt__", SECRET)],
             "task",
         )
 
-        http_client.apost.assert_not_called()
+        http_client.apost.assert_called_once()
 
-
-class TestNoResume:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "workflow_status", ["failed", "stopped", "running", "input_required"]
+        "workflow_status,status_event",
+        [
+            ("failed", WorkflowStatusEventEnum.RETRY),
+            ("input_required", WorkflowStatusEventEnum.RESUME),
+        ],
     )
-    async def test_resume_entries_fail_the_session(
-        self, checkpointer, http_client, workflow_config, workflow_id, workflow_status
+    async def test_a_saved_session_resumes(
+        self, checkpointer, http_client, workflow_config, workflow_status, status_event
     ):
         workflow_config["workflow_status"] = workflow_status
         workflow_config["first_checkpoint"] = {"checkpoint": "{}"}
 
-        with pytest.raises(SessionNotResumableError, match="cannot be resumed"):
-            await checkpointer.__aenter__()
-
-        # Marked failed, never moved back to running.
-        http_client.apatch.assert_called_once_with(
-            path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
-            body=json.dumps({"status_event": WorkflowStatusEventEnum.DROP.value}),
-            parse_json=True,
-        )
-
-    @pytest.mark.asyncio
-    async def test_a_fresh_start_still_runs(self, checkpointer):
         await checkpointer.__aenter__()
 
-        assert checkpointer.initial_status_event == WorkflowStatusEventEnum.START
+        assert checkpointer.initial_status_event == status_event
+        assert json.dumps(
+            {"status_event": WorkflowStatusEventEnum.DROP.value}
+        ) not in str(http_client.apatch.call_args_list)
 
 
 class TestLiveStream:

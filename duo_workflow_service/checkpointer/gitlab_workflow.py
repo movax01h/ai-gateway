@@ -46,13 +46,6 @@ from langgraph.checkpoint.memory import MemorySaver
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import SessionEndedEvent
-from duo_workflow_service.checkpointer.content_retention import (
-    METADATA_RETENTION,
-    ContentRetention,
-    SessionNotResumableError,
-    reduce_checkpoint_metadata,
-    reduce_state_for_metadata_retention,
-)
 from duo_workflow_service.checkpointer.entry_dispatch import (
     EntryDispatchContext,
     InitialEntryDispatch,
@@ -444,7 +437,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             Callable[[WorkflowStatusEventEnum], NoReturn] | None
         ) = None,
         initial_entry_dispatch: InitialEntryDispatch = rails_status_dispatch,
-        content_retention: ContentRetention = "full",
         internal_event_client: InternalEventsClient = Provide[
             ContainerApplication.internal_event.client
         ],
@@ -462,7 +454,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._workflow_type = workflow_type
         self._workflow_config = workflow_config
         self._initial_entry_dispatch = initial_entry_dispatch
-        self._metadata_only = content_retention == METADATA_RETENTION
         self._internal_event_client = internal_event_client
         self._billing_event_service = billing_event_service
         self._orbit_called = False
@@ -626,16 +617,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 self.initial_status_event,
                 event_property,
             ) = await self._get_initial_status_event(config)
-            if (
-                self._metadata_only
-                and self.initial_status_event != WorkflowStatusEventEnum.START
-            ):
-                # The saved state holds no conversation to rebuild from. Raised
-                # into the generic handler below, which marks the session failed.
-                raise SessionNotResumableError(
-                    "This session keeps no conversation state, so it cannot be "
-                    "resumed. Start a new session."
-                )
             await self._update_workflow_status(self.initial_status_event)
 
             if self.initial_status_event == WorkflowStatusEventEnum.START:
@@ -1821,21 +1802,6 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if not self._orbit_called:
             self._orbit_called = _get_orbit_tool_calls(checkpoint)
 
-        if self._metadata_only:
-            # Reduce before anything is derived from the checkpoint, so the full
-            # snapshot, the channel deltas and the compaction re-seeds all carry
-            # only the kept channels.
-            channel_values = reduce_state_for_metadata_retention(
-                checkpoint.get("channel_values", {})
-            )
-            checkpoint = {**checkpoint, "channel_values": channel_values}
-            new_versions = {
-                channel: version
-                for channel, version in new_versions.items()
-                if channel in channel_values
-            }
-            metadata = reduce_checkpoint_metadata(metadata)  # type: ignore[assignment]
-
         incremental_enabled = self._workflow_config.get(
             "incremental_checkpoints_enabled", False
         )
@@ -2053,9 +2019,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if status:
             self._defer_status(status, _flush_point_for(status), checkpoint_id)
 
-        # for now only interrupts are stored. An interrupt carries the prompt it
-        # pauses on and exists only to be resumed, so metadata retention skips it.
-        if not writes or writes[0][0] != "__interrupt__" or self._metadata_only:
+        # for now only interrupts are stored
+        if not writes or writes[0][0] != "__interrupt__":
             return None
 
         encoded_writes = []

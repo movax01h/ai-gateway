@@ -47,9 +47,6 @@ from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
-from duo_workflow_service.checkpointer.content_retention import (
-    SessionNotResumableError,
-)
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
@@ -1284,15 +1281,6 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             None,
             grpc.StatusCode.INVALID_ARGUMENT,
             "RESPONSE event must include a non-empty message.",
-        ),
-        (
-            SessionNotResumableError(
-                "This session keeps no conversation state, so it cannot be resumed."
-            ),
-            False,
-            None,
-            grpc.StatusCode.INVALID_ARGUMENT,
-            "This session keeps no conversation state",
         ),
         (
             WorkflowAlreadyFinishedException(
