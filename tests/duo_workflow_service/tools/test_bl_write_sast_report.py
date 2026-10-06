@@ -28,6 +28,13 @@ def _writer():
     return BlWriteSastReport(metadata={"outbox": object()})
 
 
+def _audit(findings, **kwargs):
+    """The per-finding audit records ``_build_report`` logs, in report order."""
+    with capture_logs() as logs:
+        _writer()._build_report(findings, **kwargs)
+    return [log for log in logs if log["event"] == "bl_write_sast_report finding"]
+
+
 def test_the_bl_tools_are_hidden_from_list_tools():
     # ListTools publishes only tools at or above STABLE_VERSION_THRESHOLD.
     assert BlWriteSastReport.tool_version < STABLE_VERSION_THRESHOLD
@@ -623,14 +630,10 @@ class TestTriageVerdictAudit:
         report = _writer()._build_report(out)
         vuln = report["vulnerabilities"][0]
         # The vulnerability object must not grow audit fields: it carries only
-        # the fixed set below. `details` and `raw_source_code_extract` are
-        # schema-defined, and they are where the audit travels:
-        # the anchor state, the quote it was checked against, and the triage
-        # clause + verdict, all inside `details`. What stays out is the RAW
-        # model-authored keys: `verdict` / `clause` /
-        # `evidence` / `triage_evidence` are never emitted under their own
-        # names, at the top level or as detail keys, so the schema does not
-        # grow and an ingesting side sees only defined properties.
+        # the fixed set below. The anchor state and the triage clause + verdict
+        # are pipeline internals: they go to the log, never into `details`, and
+        # the RAW model-authored keys (`verdict` / `clause` / `evidence` /
+        # `triage_evidence`) are never emitted at all.
         assert set(vuln) == {
             "id",
             "name",
@@ -638,14 +641,10 @@ class TestTriageVerdictAudit:
             "severity",
             "location",
             "identifiers",
-            "details",
             "raw_source_code_extract",
             "solution",
         }
         assert not {"verdict", "clause", "evidence", "triage_evidence"} & set(vuln)
-        assert not {"verdict", "clause", "evidence", "triage_evidence"} & set(
-            vuln["details"]
-        )
 
 
 # --------------------------------------------------------------------------- #
@@ -699,23 +698,26 @@ _SCHEMA_LEVELS = {"info", "warn", "fatal"}
 
 
 # --------------------------------------------------------------------------- #
-# The triage clause travels WITH the surviving finding
+# The triage clause travels WITH the surviving finding, in the log
 #
-# "Did this KEEP arm ever fire?" must be answerable with a grep over the report.
+# "Did this KEEP arm ever fire?" must be answerable with a grep over the logs.
+# It is pipeline state, so it stays out of the customer-facing report.
 # --------------------------------------------------------------------------- #
-class TestTriageClauseReachesTheReport:
-    def test_the_clause_and_verdict_land_in_the_vulnerability_details(self):
-        report = _writer()._build_report(
-            [_finding(verdict="KEEP", clause="KEEP-incorrect-guard")]
-        )
-        details = report["vulnerabilities"][0]["details"]
+class TestTriageClauseReachesTheLog:
+    def test_the_clause_and_verdict_are_logged_and_not_reported(self):
+        findings = [_finding(verdict="KEEP", clause="KEEP-incorrect-guard")]
+        report = _writer()._build_report(findings)
+        (audit,) = _audit(findings)
 
-        # THE assertion: the arm that let this finding survive is greppable in
-        # the artifact a reader is handed.
-        assert details[bl.TRIAGE_CLAUSE_DETAIL_KEY]["value"] == "KEEP-incorrect-guard"
-        assert details[bl.TRIAGE_VERDICT_DETAIL_KEY]["value"] == "KEEP"
-        # ...and the anchor disclosure it shares `details` with is untouched.
-        assert bl.ANCHOR_DETAIL_KEY in details
+        # THE assertion: the arm that let this finding survive is in the log
+        # line, keyed by the vulnerability id...
+        assert audit["vulnerability_id"] == report["vulnerabilities"][0]["id"]
+        assert audit[bl.TRIAGE_CLAUSE_DETAIL_KEY] == "KEEP-incorrect-guard"
+        assert audit[bl.TRIAGE_VERDICT_DETAIL_KEY] == "KEEP"
+        assert bl.ANCHOR_DETAIL_KEY in audit
+        # ...and not in the report a customer reads.
+        assert "details" not in report["vulnerabilities"][0]
+        assert "KEEP-incorrect-guard" not in json.dumps(report)
 
     def test_the_clause_survives_the_real_triage_path_end_to_end(self):
         # Not a hand-built dict: the same list the adjudicator returns, through
@@ -739,45 +741,32 @@ class TestTriageClauseReachesTheReport:
         report = _writer()._build_report(out)
 
         assert [v["location"]["file"] for v in report["vulnerabilities"]] == ["keep.py"]
-        assert (
-            report["vulnerabilities"][0]["details"][bl.TRIAGE_CLAUSE_DETAIL_KEY][
-                "value"
-            ]
-            == "KEEP-stale-authorization-state"
-        )
+        (audit,) = _audit(out)
+        assert audit[bl.TRIAGE_CLAUSE_DETAIL_KEY] == "KEEP-stale-authorization-state"
 
     def test_an_unadjudicated_finding_says_so_rather_than_going_silent(self):
         # A finding that never went through triage carries no annotation. The
         # key is still emitted: absence would read as "adjudicated and fine".
-        report = _writer()._build_report([_finding()])
-        details = report["vulnerabilities"][0]["details"]
+        (audit,) = _audit([_finding()])
 
-        assert bl.TRIAGE_VERDICT_DETAIL_KEY not in details
-        assert "no triage annotation" in details[bl.TRIAGE_CLAUSE_DETAIL_KEY]["value"]
+        assert bl.TRIAGE_VERDICT_DETAIL_KEY not in audit
+        assert "no triage annotation" in audit[bl.TRIAGE_CLAUSE_DETAIL_KEY]
 
     def test_a_verdict_with_no_clause_is_not_dressed_up_as_one(self):
         # Three distinct states, three distinct strings: annotated, never
         # annotated, and annotated-without-a-reason. Collapsing the third into
         # either of the others invents a criterion the adjudicator never named.
-        report = _writer()._build_report([_finding(verdict="KEEP")])
-        details = report["vulnerabilities"][0]["details"]
+        (audit,) = _audit([_finding(verdict="KEEP")])
 
-        assert details[bl.TRIAGE_VERDICT_DETAIL_KEY]["value"] == "KEEP"
-        assert "named no clause" in details[bl.TRIAGE_CLAUSE_DETAIL_KEY]["value"]
+        assert audit[bl.TRIAGE_VERDICT_DETAIL_KEY] == "KEEP"
+        assert "named no clause" in audit[bl.TRIAGE_CLAUSE_DETAIL_KEY]
 
-    def test_the_clause_is_bounded_and_schema_shaped(self):
-        # The clause is LLM output. A 500-finding report must not be able to
-        # grow without bound through it, and every detail entry still has to
-        # satisfy the schema's named_field + text detail type.
-        report = _writer()._build_report([_finding(verdict="KEEP", clause="K" * 500)])
-        details = report["vulnerabilities"][0]["details"]
+    def test_the_clause_is_bounded(self):
+        # The clause is LLM output. A 500-finding run must not be able to grow
+        # the log without bound through it.
+        (audit,) = _audit([_finding(verdict="KEEP", clause="K" * 500)])
 
-        assert len(details[bl.TRIAGE_CLAUSE_DETAIL_KEY]["value"]) == TRIAGE_CLAUSE_MAX
-        for detail in details.values():
-            assert set(detail) == {"name", "type", "value"}
-            assert isinstance(detail["name"], str) and detail["name"]
-            assert detail["type"] == "text"
-            assert isinstance(detail["value"], str) and detail["value"]
+        assert len(audit[bl.TRIAGE_CLAUSE_DETAIL_KEY]) == TRIAGE_CLAUSE_MAX
 
 
 def _messages(report: dict) -> list[dict]:
@@ -1180,33 +1169,29 @@ class TestAnchorVerificationOutcomes:
         assert all("anchor_status" in f for f in findings)
 
 
-class TestAnchorVerificationIsDisclosedInTheReport:
-    """A state the report does not carry is a state the scorer cannot read.
+class TestAnchorVerificationIsDisclosed:
+    """A state nobody records is a state nobody can audit.
 
-    The SAST schema this tool declares already has the homes for this:
-    ``vulnerability.details`` (a named-list of typed fields) and
-    ``vulnerability.raw_source_code_extract`` ("an unsanitized excerpt of the
-    affected source code"). Nothing new is invented and no version is bumped.
+    The per-finding anchor state is pipeline-internal, so it goes to the log
+    (one record per finding, keyed by vulnerability id). The quote it was checked
+    against stays in the report, in the schema's own
+    ``vulnerability.raw_source_code_extract``.
     """
 
-    def test_every_vulnerability_carries_an_explicit_anchor_state(self):
+    def test_every_vulnerability_logs_an_explicit_anchor_state(self):
         findings = [
             {"file": "a.go", "new_line": 3, "anchor_status": bl.ANCHOR_VERIFIED},
             {"file": "b.go", "new_line": 4, "anchor_status": bl.ANCHOR_UNVERIFIED},
         ]
-        report = _writer()._build_report(findings)
 
-        states = [
-            v["details"][bl.ANCHOR_DETAIL_KEY]["value"]
-            for v in report["vulnerabilities"]
-        ]
+        states = [a[bl.ANCHOR_DETAIL_KEY] for a in _audit(findings)]
         assert states == [bl.ANCHOR_VERIFIED, bl.ANCHOR_UNVERIFIED]
 
     def test_an_unverified_anchor_is_distinguishable_from_a_verified_one(self):
-        verified = _writer()._build_report(
+        (verified,) = _audit(
             [{"file": "a.go", "new_line": 3, "anchor_status": bl.ANCHOR_VERIFIED}],
-        )["vulnerabilities"][0]
-        unverified = _writer()._build_report(
+        )
+        (unverified,) = _audit(
             [
                 {
                     "file": "a.go",
@@ -1215,22 +1200,17 @@ class TestAnchorVerificationIsDisclosedInTheReport:
                     "anchor_reason": "the quoted code does not appear in the file",
                 }
             ],
-        )["vulnerabilities"][0]
+        )
 
         # Same file, same line, same everything the scorer binds on...
-        assert verified["location"] == unverified["location"]
-        # ...and yet they are not the same claim, and the report says which.
-        assert (
-            verified["details"][bl.ANCHOR_DETAIL_KEY]["value"]
-            != unverified["details"][bl.ANCHOR_DETAIL_KEY]["value"]
-        )
-        assert (
-            "does not appear"
-            in unverified["details"][bl.ANCHOR_REASON_DETAIL_KEY]["value"]
-        )
+        assert verified["file"] == unverified["file"]
+        assert verified["line"] == unverified["line"]
+        # ...and yet they are not the same claim, and the log says which.
+        assert verified[bl.ANCHOR_DETAIL_KEY] != unverified[bl.ANCHOR_DETAIL_KEY]
+        assert "does not appear" in unverified[bl.ANCHOR_REASON_DETAIL_KEY]
 
-    def test_a_corrected_anchor_reports_the_line_originally_claimed(self):
-        report = _writer()._build_report(
+    def test_a_corrected_anchor_logs_the_line_originally_claimed(self):
+        (audit,) = _audit(
             [
                 {
                     "file": "container.go",
@@ -1240,11 +1220,10 @@ class TestAnchorVerificationIsDisclosedInTheReport:
                 }
             ],
         )
-        v = report["vulnerabilities"][0]
 
-        assert v["location"]["start_line"] == 9
-        assert v["details"][bl.ANCHOR_DETAIL_KEY]["value"] == bl.ANCHOR_CORRECTED
-        assert v["details"][bl.ANCHOR_CLAIMED_DETAIL_KEY]["value"] == "4"
+        assert audit["line"] == 9
+        assert audit[bl.ANCHOR_DETAIL_KEY] == bl.ANCHOR_CORRECTED
+        assert audit[bl.ANCHOR_CLAIMED_DETAIL_KEY] == "4"
 
     def test_a_finding_verification_never_saw_is_not_reported_as_verified(self):
         """``_verify_anchors`` is best-effort and ``_execute`` swallows its failure, so a report CAN be built from
@@ -1253,10 +1232,10 @@ class TestAnchorVerificationIsDisclosedInTheReport:
         Absent must not read as checked - that is the same collapse, arrived at
         from the other side.
         """
-        report = _writer()._build_report([{"file": "a.go", "new_line": 3}])
-        v = report["vulnerabilities"][0]
+        (audit,) = _audit([{"file": "a.go", "new_line": 3}])
 
-        assert v["details"][bl.ANCHOR_DETAIL_KEY]["value"] == bl.ANCHOR_UNVERIFIED
+        assert audit[bl.ANCHOR_DETAIL_KEY] == bl.ANCHOR_UNVERIFIED
+        assert audit[bl.ANCHOR_REASON_DETAIL_KEY] == bl._ANCHOR_NOT_RUN
 
     def test_the_verbatim_quote_travels_with_the_finding(self):
         report = _writer()._build_report(
@@ -1279,27 +1258,6 @@ class TestAnchorVerificationIsDisclosedInTheReport:
         report = _writer()._build_report([{"file": "a.go", "new_line": 3}])
 
         assert "raw_source_code_extract" not in report["vulnerabilities"][0]
-
-    def test_the_anchor_details_are_shaped_the_way_the_schema_defines(self):
-        report = _writer()._build_report(
-            [
-                {
-                    "file": "a.go",
-                    "new_line": 3,
-                    "anchor_status": bl.ANCHOR_CORRECTED,
-                    "anchor_claimed_line": 1,
-                    "anchor_reason": "why",
-                }
-            ],
-        )
-
-        for detail in report["vulnerabilities"][0]["details"].values():
-            # named_field requires a non-empty `name`; detail_type/text requires
-            # `type == "text"` and a string `value`.
-            assert set(detail) == {"name", "type", "value"}
-            assert isinstance(detail["name"], str) and detail["name"]
-            assert detail["type"] == "text"
-            assert isinstance(detail["value"], str) and detail["value"]
 
     def test_the_anchor_state_does_not_change_a_finding_id(self):
         """Comparability guard.
@@ -1331,7 +1289,7 @@ class TestAnchorVerificationIsDisclosedInTheReport:
         message = _anchor_message(report)
 
         assert message["level"] == "info"
-        assert "1 verified" in message["value"]
+        assert "1 were found at the reported line" in message["value"]
 
     def test_any_unverified_anchor_makes_the_disclosure_a_warning(self):
         report = _writer()._build_report(
@@ -1344,9 +1302,9 @@ class TestAnchorVerificationIsDisclosedInTheReport:
         message = _anchor_message(report)
 
         assert message["level"] == "warn"
-        assert "1 verified" in message["value"]
-        assert "1 corrected" in message["value"]
-        assert "1 could not be verified" in message["value"]
+        assert "1 were found at the reported line" in message["value"]
+        assert "1 were moved" in message["value"]
+        assert "1 could not be checked" in message["value"]
 
     def test_a_report_with_no_findings_still_states_the_anchor_position(self):
         report = _writer()._build_report([])
@@ -1401,17 +1359,16 @@ class TestAnchorVerificationEndToEnd:
             ]
         )
 
-        out = asyncio.run(_writer()._execute(findings))
+        with capture_logs() as logs:
+            out = asyncio.run(_writer()._execute(findings))
 
         assert "Wrote 4 vulnerabilities" in out
         report = json.loads(writes["contents"])
-        got = [
-            (
-                v["location"]["start_line"],
-                v["details"][bl.ANCHOR_DETAIL_KEY]["value"],
-            )
-            for v in report["vulnerabilities"]
+        audits = [log for log in logs if log["event"] == "bl_write_sast_report finding"]
+        assert [a["vulnerability_id"] for a in audits] == [
+            v["id"] for v in report["vulnerabilities"]
         ]
+        got = [(a["line"], a[bl.ANCHOR_DETAIL_KEY]) for a in audits]
         assert got == [
             (10, bl.ANCHOR_VERIFIED),
             (9, bl.ANCHOR_CORRECTED),  # relocated out of the wrong function
@@ -2550,6 +2507,6 @@ class TestPathRepair:
     def test_the_report_records_the_claimed_path(self, monkeypatch):
         _, out, _ = self._run(monkeypatch, [self.REAL], ["vpn/graphql/schema.py"])
         (vuln,) = _writer()._build_report(out)["vulnerabilities"]
-        detail = vuln["details"][bl.ANCHOR_CLAIMED_FILE_DETAIL_KEY]
-        assert detail["value"] == "vpn/graphql/schema.py"
+        (audit,) = _audit(out)
+        assert audit[bl.ANCHOR_CLAIMED_FILE_DETAIL_KEY] == "vpn/graphql/schema.py"
         assert vuln["location"]["file"] == self.REAL
