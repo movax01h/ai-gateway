@@ -34,14 +34,16 @@ def parse_instructions(content: Optional[str]) -> List[Dict[str, Any]]:
     # review; the shapes yaml.safe_load can return are too open to enumerate.
     try:
         data = yaml.safe_load(content)
-        if not isinstance(data, dict) or "instructions" not in data:
+        if not isinstance(data, dict) or not isinstance(data.get("instructions"), list):
             return []
 
-        return [
+        normalized = (
             _normalize_instruction(item)
             for item in data["instructions"]
-            if isinstance(item, dict) and _is_valid_instruction(item)
-        ]
+            if isinstance(item, dict)
+        )
+
+        return [instruction for instruction in normalized if instruction is not None]
     except Exception:
         return []
 
@@ -64,20 +66,27 @@ def format_instructions(
     custom_instructions: List[Dict[str, Any]],
     include_format_hint: bool = True,
 ) -> str:
-    """Render the `<custom_instructions>` block, or an empty string when there are none."""
-    if not custom_instructions:
-        return ""
-
+    """Render the `<custom_instructions>` block, or an empty string when nothing renders."""
     instruction_items = []
     for instruction in custom_instructions:
+        body = instruction.get("instructions")
+        # GitLab 19.0+ resolves these in Rails, whose `valid?` is `name.present? &&
+        # instructions.present?`, so a list or numeric body never passes through the parser.
+        if not isinstance(body, str) or not body.strip():
+            continue
+
         include_patterns = ", ".join(instruction["include_patterns"]) or "all files"
         exclude_patterns = ", ".join(instruction["exclude_patterns"]) or "none"
 
         instruction_items.append(
             f'For files matching "{include_patterns}" '
-            f"(excluding: {exclude_patterns}) - {instruction['name']}:\n"
-            f"{instruction['instructions'].strip()}\n"
+            f"(excluding: {exclude_patterns}) - {str(instruction['name']).strip()}:\n"
+            f"{body.strip()}\n"
         )
+
+    # An empty block would still tell the model to apply instructions that are not there.
+    if not instruction_items:
+        return ""
 
     instructions_text = "\n".join(instruction_items)
     format_hint = CUSTOM_INSTRUCTION_FORMAT_HINT if include_format_hint else ""
@@ -90,21 +99,73 @@ IMPORTANT: Only apply each custom instruction to files that match its specified 
 </custom_instructions>"""
 
 
-def _is_valid_instruction(item: Dict[str, Any]) -> bool:
-    return bool(
-        item.get("name") and item.get("instructions") and item.get("fileFilters")
-    )
+def _normalize_instruction(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Normalize one instruction, or None when it cannot scope anything.
 
+    Usability is decided here rather than in a separate predicate, because whether an instruction is usable is the same
+    question as whether it normalizes.
+    """
+    name = item.get("name")
+    instructions = item.get("instructions")
+    # A scalar here would otherwise iterate per character, and the resulting `*` pattern
+    # turns a scoped instruction into one that matches every file.
+    file_filters = _as_patterns(item.get("fileFilters"))
 
-def _normalize_instruction(item: Dict[str, Any]) -> Dict[str, Any]:
-    file_filters = item.get("fileFilters", [])
+    if not (
+        isinstance(name, str)
+        and name.strip()
+        and isinstance(instructions, str)
+        and instructions.strip()
+        and file_filters is not None
+    ):
+        return None
 
     return {
-        "name": item.get("name"),
-        "instructions": item.get("instructions"),
+        # Stripped on the way in, not at render: the reviewer copies this into a finding's
+        # `custom_instruction_ref`, which is quoted verbatim in the published comment.
+        "name": name.strip(),
+        "instructions": instructions,
         "include_patterns": [f for f in file_filters if not f.startswith("!")],
         "exclude_patterns": [f[1:] for f in file_filters if f.startswith("!")],
     }
+
+
+def _as_patterns(value: Any) -> Optional[List[str]]:
+    """The patterns scoping an instruction, empty when it is unscoped, None when it cannot scope.
+
+    An absent `fileFilters` means every file, which is what the documentation promises and what
+    Rails produces from `Array(nil)`. Empty is therefore distinct from unusable, which rejects
+    the instruction.
+    """
+    if value is None:
+        return []
+
+    patterns = [value] if isinstance(value, str) else value
+    if not isinstance(patterns, list):
+        return None
+
+    if not all(isinstance(item, str) for item in patterns):
+        return None
+
+    normalized = [_strip_pattern(item) for item in patterns]
+
+    # Rejected whole rather than filtered: dropping an unusable entry can leave an
+    # exclude-only instruction, which matches every file outside those excludes.
+    if not all(item.removeprefix("!") for item in normalized):
+        return None
+
+    return normalized
+
+
+def _strip_pattern(item: str) -> str:
+    """Strip around any leading `!`, so a padded exclusion still names what it excludes.
+
+    Stripping only the outside leaves `"! vendor/**"` excluding `" vendor/**"`, which matches nothing, so the
+    instruction would apply to the very files the author excluded.
+    """
+    item = item.strip()
+
+    return "!" + item[1:].strip() if item.startswith("!") else item
 
 
 def _matches_pattern(path: str, instruction: Dict[str, Any]) -> bool:
