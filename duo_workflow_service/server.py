@@ -428,9 +428,8 @@ def _extract_error_message(error: BaseException) -> str:
 def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
     """Whether the caller token is GitLab.com's own instance token.
 
-    Requires the token to be signed by the configured GitLab OIDC issuer, to carry the
-    SaaS realm claim, and its subject to be an allowlisted instance UUID. An empty
-    allowlist matches nothing.
+    Requires the token to be signed by the configured GitLab OIDC issuer, to carry the SaaS realm claim, and its subject
+    to be an allowlisted instance UUID. An empty allowlist matches nothing.
     """
     claims = user.claims
     if user.is_debug or not claims:
@@ -451,9 +450,9 @@ def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
 def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
     """Return the signed flow id a workflow token may use restricted models for.
 
-    The token must carry a flow_config_id claim and be either one this service minted
-    (see GenerateToken) with the SaaS realm claim, or GitLab.com's allowlisted instance
-    token (see _is_gitlab_com_instance_token). Debug users never qualify.
+    The token must carry a flow_config_id claim and be either one this service minted (see GenerateToken) with the SaaS
+    realm claim, or GitLab.com's allowlisted instance token (see _is_gitlab_com_instance_token). Debug users never
+    qualify.
     """
     claims = user.claims
     if user.is_debug or not claims or not claims.extra:

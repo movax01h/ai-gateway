@@ -5889,8 +5889,8 @@ async def test_execute_workflow_denies_restricted_model_on_malformed_flow_claim(
 ):
     """A missing, empty or non-string flow claim never reaches a restricted model.
 
-    The missing claim is denied by the restricted model check; an empty or non-string
-    claim is already refused by the flow binding check.
+    The missing claim is denied by the restricted model check; an empty or non-string claim is already refused by the
+    flow binding check.
     """
     current_user.set(_workflow_token_user(extra=extra))
 
