@@ -19,6 +19,7 @@ from duo_workflow_service.tools.code_review.findings import (
     build_review_payload,
     build_summary,
     render_previous_findings,
+    resolved_discussion_ids,
     select_findings,
     severity_counts,
 )
@@ -61,8 +62,16 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
         default=None,
         description=(
             "The reviewer's `previous_findings` array from a re-review. Each item "
-            "has file, status (fixed, verified, partially_fixed, still_outstanding, disputed) "
-            "and note. Rendered as a list only when something still needs attention."
+            "has file, status (fixed, verified, partially_fixed, still_outstanding, disputed), "
+            "note and optional discussion_id. Rendered as a list only when something still "
+            "needs attention."
+        ),
+    )
+    existing_discussions: Optional[Any] = Field(
+        default=None,
+        description=(
+            "The `list_mr_discussions` output the reviewer reconciled against. Previous "
+            "findings on threads it marks resolved are left out of the list."
         ),
     )
     min_confidence: int = Field(
@@ -100,12 +109,15 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
         findings: Optional[List[Dict[str, Any]]] = None,
         summary: Optional[str] = None,
         previous_findings: Optional[List[Dict[str, Any]]] = None,
+        existing_discussions: Optional[Any] = None,
         min_confidence: int = 0,
         **kwargs: Any,
     ) -> str:
         published, suppressed = select_findings(findings or [], min_confidence)
         summary_text = build_summary(published, summary)
-        previous = render_previous_findings(previous_findings or [])
+        previous = render_previous_findings(
+            previous_findings or [], resolved_discussion_ids(existing_discussions)
+        )
         logger.info(
             "Publishing code review findings",
             published=len(published),

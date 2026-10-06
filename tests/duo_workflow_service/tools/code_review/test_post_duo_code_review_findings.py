@@ -211,6 +211,35 @@ async def test_post_duo_code_review_findings_re_review_with_outstanding_threads(
 
 
 @pytest.mark.asyncio
+async def test_post_duo_code_review_findings_re_review_skips_resolved_threads(
+    gitlab_client_mock, metadata
+):
+    """A re-review whose open points all sit on resolved threads is published as clean."""
+    gitlab_client_mock.apost = AsyncMock(return_value=success_response())
+    tool = PostDuoCodeReviewFindings(metadata=metadata)
+
+    await tool._arun(
+        project_id=123,
+        merge_request_iid=45,
+        findings=[],
+        summary="- Nothing new",
+        previous_findings=[
+            {**previous("fixed"), "discussion_id": "d1"},
+            {**previous("still_outstanding", file="b.rb"), "discussion_id": "d2"},
+        ],
+        existing_discussions=json.dumps(
+            [
+                {"discussion_id": "d1", "resolved": True},
+                {"discussion_id": "d2", "resolved": True},
+            ]
+        ),
+    )
+
+    _, review = posted_review(gitlab_client_mock)
+    assert review == {"findings": [], "summary": "- Nothing new"}
+
+
+@pytest.mark.asyncio
 async def test_post_duo_code_review_findings_failure_raises(
     gitlab_client_mock, metadata
 ):
