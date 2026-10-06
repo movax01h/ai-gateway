@@ -88,17 +88,19 @@ class _InternalImageBlock(dict[str, Any]):
 
 # Flat per-image token cost charged wherever a conversation is budgeted.
 #
-# Not a magic number: it is the ceiling of what an image can cost, derived from
-# Anthropic's published behaviour. They downscale anything larger to roughly
-# 1.15 megapixels and bill about `width * height / 750` tokens, so the most any
-# single image can cost is `1_150_000 / 750` ~= 1533; 1600 rounds that up.
+# Not a magic number: it is the ceiling of what an image can cost, from
+# Anthropic's published resolution tiers. The model sees an image as 28 px
+# patches, one visual token each, after downscaling it to the tier's long edge:
+# at most 4784 tokens (2576 px) on Claude 4.7 and later, at most 1568 tokens
+# (1568 px) on older models. 4800 rounds the larger tier up.
+# https://platform.claude.com/docs/en/build-with-claude/vision#resolution-and-token-cost
 #
 # Being the ceiling is the point. A budget estimate that can only ever be too
 # high makes context management compact early, which is recoverable. One that
 # can be too low overflows the model's window mid-turn, which is not. The
 # alternative of measuring the base64 string as if it were prose over-counts by
 # two orders of magnitude and would compact away most of the conversation.
-IMAGE_BLOCK_TOKEN_ESTIMATE = 1600
+IMAGE_BLOCK_TOKEN_ESTIMATE = 4800
 
 
 def image_content_block(base64: str, mime_type: str) -> dict[str, Any]:
