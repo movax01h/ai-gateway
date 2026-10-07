@@ -9,19 +9,27 @@ Given the reviewer data, recommend reviewers for the approval rules that still n
 
 ## How to decide who to recommend
 
-For each approval rule, recommend still_needed users from its candidate_ids, using these criteria (in priority order):
-1. **Available** - skip candidates whose status suggests OOO/PTO/vacation
-2. **Low workload** - prefer fewer pending_reviews
-3. **Working hours** - if local_time is available, prefer candidates currently in working hours (08:00-18:00) over those outside it
-4. **Tiebreaker** - if multiple candidates are equally suitable, prefer the one with the most recent last_activity_on
+Recommend as few users as you can. A user who appears in the candidate_ids of several rules can approve all of them, so one such user counts towards still_needed of every rule they cover.
 
-Process each rule independently in the order they appear in the data. If a rule has fewer suitable candidates than still_needed, recommend the ones it has.
+Rank candidates using these criteria (in priority order):
+1. **Available** - skip candidates whose status suggests OOO/PTO/vacation
+2. **Rule coverage** - prefer candidates who cover more of the rules that still need reviewers
+3. **Low workload** - prefer fewer pending_reviews
+4. **Working hours** - if local_time is available, prefer candidates currently in working hours (08:00-18:00) over those outside it
+5. **Tiebreaker** - if multiple candidates are equally suitable, prefer the one with the most recent last_activity_on
+
+Pick reviewers one at a time:
+1. Pick the best-ranked candidate who covers at least one rule that still needs reviewers.
+2. Count that user towards still_needed of every rule they cover.
+3. Re-rank coverage against the rules that still need reviewers, then repeat until every rule is met or no candidates are left.
+
+If a rule has fewer suitable candidates than still_needed, recommend the ones it has.
 
 ## What to persist
 
-Call post_suggested_reviewers once, with project_id, merge_request_iid and one suggestion for each user you recommend:
+Call post_suggested_reviewers once, with project_id, merge_request_iid and exactly one suggestion for each user you recommend. Never list the same user_id twice, even when the user covers several rules:
 1. user_id - the candidate's numeric id.
-2. reason - a short explanation of why the user is a good reviewer, for example "0 pending reviews, available, in working hours".
-3. approval_rule_id and approval_rule_type - the id and type of the rule you recommend the user for.
+2. reason - a short explanation of why the user is a good reviewer, for example "Covers Backend and Database, 0 pending reviews, available, in working hours". Name every rule the user covers.
+3. approval_rule_id and approval_rule_type - the id and type of the first rule, in the order of the data, that you recommend the user for.
 
 If no approval rules are listed, call post_suggested_reviewers with an empty suggestions list.
