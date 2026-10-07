@@ -14,7 +14,9 @@ control channel (see ``orbit_context``).
 
 import json
 from typing import Any, NamedTuple, Optional, Sequence
+from uuid import uuid4
 
+from langchain_core.messages import AIMessage, BaseMessage
 from structlog import get_logger
 
 from duo_workflow_service.tools.start_flow import CATALOG_FLOW_NAME
@@ -22,7 +24,10 @@ from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 __all__ = [
     "CHAT_COMMAND_CATEGORY",
+    "FORCED_CALL_ID_PREFIX",
     "ForcedToolCall",
+    "forced_tool_call_message_id",
+    "is_forced_tool_call_message",
     "parse_forced_tool_call",
     "strip_command_context",
 ]
@@ -34,7 +39,32 @@ logger = get_logger("chat.commands")
 # non-null AdditionalContextCategory GraphQL enum.
 CHAT_COMMAND_CATEGORY = "duo_chat_command"
 
+# Marks the assistant turn carrying a tool call the client chose rather than the
+# model. The graph reads it back to tell whose call the tools node just ran, so
+# it is a contract rather than a debugging aid: the prefix travels in the
+# message id, which survives the checkpoint round-trip.
+FORCED_CALL_ID_PREFIX = "forced-"
+
 _FLOW_COMMAND = "flow"
+
+
+def forced_tool_call_message_id() -> str:
+    """Message id marking an assistant turn as client-forced."""
+    return f"{FORCED_CALL_ID_PREFIX}{uuid4()!s}"
+
+
+def is_forced_tool_call_message(message: BaseMessage) -> bool:
+    """Whether this assistant turn carries a tool call the client chose.
+
+    Read off the message rather than off the workflow, because the workflow's ``_forced_tool_call`` is scoped to the
+    session and says only that *some* turn was forced. Routing needs to know whether *this* turn was, or every later
+    turn in the same session inherits the answer.
+    """
+    return (
+        isinstance(message, AIMessage)
+        and bool(message.id)
+        and str(message.id).startswith(FORCED_CALL_ID_PREFIX)
+    )
 
 
 class ForcedToolCall(NamedTuple):
@@ -70,8 +100,20 @@ def _build_flow_call(payload: dict[str, Any]) -> Optional[ForcedToolCall]:
     return ForcedToolCall(name="start_flow", args={"flow": flow_args})
 
 
-# Routing straight to the tool node bypasses ChatAgent._get_approvals, so only
-# commands whose tool is unconditionally pre-approved may be built here.
+# Routing straight to the tool node bypasses ChatAgent._get_approvals. That is the
+# intent, not an oversight: typing the command *is* the approval, and asking the user
+# to confirm an action they just spelled out is a prompt with one sensible answer.
+# `start_flow` is deliberately not in the session's pre-approved privileges, so do not
+# read this list as one of tools that are approved anyway.
+#
+# What makes the bypass safe is that the call is settled before the model sees it:
+# every argument comes from the envelope, so a builder must never leave one for the
+# model to fill, and the tool it names must do only what the command says.
+#
+# Governance still binds. ToolsRegistry.toolset drops denied tools, so a denied tool is
+# absent from the toolset, the tools node cannot run it, and the turn falls through to
+# the model to explain (see Workflow._turn_completed_a_forced_call). A deny rule outranks
+# a command; only the per-call approval prompt is skipped.
 _COMMAND_BUILDERS = {_FLOW_COMMAND: _build_flow_call}
 
 

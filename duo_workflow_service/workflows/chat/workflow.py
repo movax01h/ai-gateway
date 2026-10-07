@@ -60,6 +60,8 @@ from duo_workflow_service.tracking.errors import log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.chat.commands import (
     ForcedToolCall,
+    forced_tool_call_message_id,
+    is_forced_tool_call_message,
     parse_forced_tool_call,
     strip_command_context,
 )
@@ -315,7 +317,7 @@ class Workflow(AbstractWorkflow):
         """
         return AIMessage(
             content="",
-            id=f"forced-{uuid4()!s}",
+            id=forced_tool_call_message_id(),
             tool_calls=[
                 {
                     "name": forced.name,
@@ -341,6 +343,95 @@ class Workflow(AbstractWorkflow):
             return Routes.TOOL_USE
 
         return Routes.CONTINUE
+
+    def _post_tools_route(self, state: ChatWorkflowState) -> Routes:
+        """Route the step after the tools node.
+
+        A call the client forced and that *did the thing* ends the turn there. The model never chose it, so it has
+        nothing left to decide, and handing control back costs a turn spent re-deriving what the tool has already done.
+        Worse, the transcript does not say the call was the client's -- so the model reads it as its own, and nothing
+        but its judgement stops it running the tool a second time. For a ``/flow:`` command that second run is a second
+        flow session.
+
+        Anything short of done goes on to the model. A call that failed, and a call that never ran at all, both leave
+        the user with no way forward: the turn would end on an error they cannot act on, and retyping the command is
+        their only move. The model can at least say what went wrong, and offer to do it itself.
+        See ``_turn_completed_a_forced_call``.
+        """
+        if self._turn_completed_a_forced_call(state):
+            return Routes.STOP
+
+        return Routes.CONTINUE
+
+    def _turn_completed_a_forced_call(self, state: ChatWorkflowState) -> bool:
+        """Whether the tool results just written answer a call the client chose, and that call succeeded.
+
+        Answered from the assistant turn the tools node ran, not from ``self._forced_tool_call``: that is scoped to the
+        session and says only that *some* turn carried a command. Routing on it would make every later turn in a
+        session that began with one skip the model too.
+
+        "Succeeded" is read off the chat log rather than the tool results, because the transcript cannot tell the two
+        apart: ``ToolsExecutor._process_response`` wraps a handler's error string in a bare ``ToolMessage``, which
+        defaults to ``status="success"``. The card is where the distinction survives -- every failure handler builds one
+        with ``ToolStatus.FAILURE`` -- and it is also what the user is actually looking at. Matched on ``message_id``,
+        which ``_create_tool_ui_chat_log`` sets to the tool call's id, so the log accumulating across turns cannot make
+        an earlier card answer for this one.
+
+        Two cases produce no card at all and so fall through to the model. A tool missing from the session's toolset:
+        ``ToolsExecutor`` answers an unknown tool with "Tool ... not found" and moves on *before* building a chat log
+        entry, reachable in production when a governance deny rule strips the tool. And a tool whose
+        ``format_display_message`` renders empty, since ``_create_tool_ui_chat_log`` returns ``None`` rather than an
+        empty card. Neither left anything on screen, which is the same position a failure leaves the user in, so both
+        take the same route.
+        """
+        history: List[BaseMessage] = state["conversation_history"].get(
+            self._agent.name, []
+        )
+        answered = next(
+            (
+                message
+                for message in reversed(history)
+                if isinstance(message, AIMessage)
+            ),
+            None,
+        )
+
+        if answered is None or not is_forced_tool_call_message(answered):
+            return False
+
+        succeeded = {
+            entry.get("message_id")
+            for entry in state.get("ui_chat_log", [])
+            if entry.get("status") == ToolStatus.SUCCESS
+        }
+
+        return bool(answered.tool_calls) and all(
+            call.get("id") in succeeded for call in answered.tool_calls
+        )
+
+    def _forced_call_complete(self, state: ChatWorkflowState) -> dict[str, Any]:
+        """End a turn the client dispatched, leaving the reply to the tool's own card.
+
+        The tools node has already written what the user sees -- for ``start_flow``, an entry naming the flow and
+        linking the new session -- so a templated sentence on top of it would only say the same thing twice.
+
+        The status is why this is a node and not an edge to ``END``. Ending a chat turn means leaving
+        ``INPUT_REQUIRED`` behind, and ``ChatAgent._build_response`` is otherwise the only thing that writes it.
+        Skipping the agent without it strands the checkpoint on ``CREATED`` (a fresh thread) or ``RUNNING`` (a resumed
+        one), neither of which maps to a Rails status event, so the session stays ``running`` until the stuck-workflow
+        reaper fails it.
+
+        A terminal status is left alone. No turn can arrive here already failed today: every turn enters at
+        ``NOT_STARTED`` (a fresh thread) or ``EXECUTION`` (``get_graph_input`` sets it on a resumed one), and
+        ``ToolsExecutor.run`` only writes ``ERROR`` when a tool result carries a ``status`` key, which none of its
+        handlers set. The guard is for the day one does: overwriting ``ERROR`` with ``INPUT_REQUIRED`` would report a
+        failed command to Rails as a turn waiting on the user, and the failure would never surface. One comparison is a
+        cheaper way to hold that than a docstring promising the call never happens.
+        """
+        if state["status"] == WorkflowStatusEnum.ERROR:
+            return {}
+
+        return {"status": WorkflowStatusEnum.INPUT_REQUIRED}
 
     def _are_tools_called(self, state: ChatWorkflowState) -> Routes:
         if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
@@ -809,6 +900,7 @@ class Workflow(AbstractWorkflow):
 
         graph.add_node("agent", self._agent.run)
         graph.add_node("run_tools", tools_runner)
+        graph.add_node("forced_call_complete", self._forced_call_complete)
 
         graph.set_conditional_entry_point(
             self._entry_route,
@@ -826,7 +918,15 @@ class Workflow(AbstractWorkflow):
                 Routes.STOP: END,
             },
         )
-        graph.add_edge("run_tools", "agent")
+        graph.add_conditional_edges(
+            "run_tools",
+            self._post_tools_route,
+            {
+                Routes.CONTINUE: "agent",
+                Routes.STOP: "forced_call_complete",
+            },
+        )
+        graph.add_edge("forced_call_complete", END)
 
         return graph.compile(checkpointer=checkpointer)
 

@@ -117,12 +117,15 @@ graph TD;
     __start__([<p>__start__</p>]):::first
     agent(agent)
     run_tools(run_tools)
+    forced_call_complete(forced_call_complete)
     __end__([<p>__end__</p>]):::last
     __start__ -. &nbsp;continue&nbsp; .-> agent;
     __start__ -. &nbsp;tool_use&nbsp; .-> run_tools;
     agent -. &nbsp;stop&nbsp; .-> __end__;
     agent -. &nbsp;tool_use&nbsp; .-> run_tools;
-    run_tools --> agent;
+    run_tools -. &nbsp;continue&nbsp; .-> agent;
+    run_tools -. &nbsp;stop&nbsp; .-> forced_call_complete;
+    forced_call_complete --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2
     classDef first fill-opacity:0
     classDef last fill:#bfb6fc
