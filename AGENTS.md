@@ -155,12 +155,17 @@ make ruff-fix       # ruff check --fix only; does not format
 make docformatter
 make codespell      # Auto-fix spelling
 
-# Lint documentation
-make lint-doc  # Runs vale + markdownlint
+# Lint documentation (all docs, a few seconds)
+make lint-doc  # Runs vale + markdownlint + lychee
+make markdownlint
+make vale
+make lychee
 ```
 
 Always run these `make` targets rather than invoking `pytest`, `mypy`,
-`ruff`, or `pylint` directly. Exception: `make test` always runs the full
+`ruff`, `pylint`, or the doc linters directly. The doc linters come from
+`.tool-versions` via mise, not npm, so `npx markdownlint-cli2` fails even
+though `make markdownlint` works. Exception: `make test` always runs the full
 suite and takes no path argument, so to run specific tests use
 `poetry run pytest <path>`. `make test`, `check-mypy`, `check-ruff`, and
 `check-pylint` install required dependencies first via `install-test-deps`/
