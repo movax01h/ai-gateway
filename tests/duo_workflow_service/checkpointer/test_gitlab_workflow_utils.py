@@ -1,9 +1,12 @@
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     add_compression_param,
+    compress_checkpoint,
+    uncompress_checkpoint,
 )
 
 
@@ -44,3 +47,21 @@ def test_add_compression_param_preserves_existing_query(endpoint, expected_param
 
     assert parsed.path == "/api/v4/ai/duo_workflows/workflows/1/checkpoints"
     assert parse_qs(parsed.query, keep_blank_values=True) == expected_params
+
+
+def test_uncompress_checkpoint_decodes_messages_by_default():
+    compressed = compress_checkpoint({"channel_values": {"m": AIMessage(content="hi")}})
+
+    message = uncompress_checkpoint(compressed)["channel_values"]["m"]
+
+    assert isinstance(message, AIMessage)
+    assert message.content == "hi"
+
+
+def test_uncompress_checkpoint_without_object_hook_keeps_dicts():
+    compressed = compress_checkpoint({"channel_values": {"m": AIMessage(content="hi")}})
+
+    message = uncompress_checkpoint(compressed, object_hook=None)["channel_values"]["m"]
+
+    assert message["type"] == "AIMessage"
+    assert message["content"] == "hi"
