@@ -751,17 +751,18 @@ class ChatLiteLLM(BaseChatModel):
         response = self.completion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         )
-        return self._create_chat_result(response)
+        return self._create_chat_result(response, params)
 
-    def _create_chat_result(self, response: Mapping[str, Any]) -> ChatResult:
+    def _create_chat_result(
+        self, response: Mapping[str, Any], params: Optional[Mapping[str, Any]] = None
+    ) -> ChatResult:
         generations = []
         token_usage = response.get("usage", {})
+        model_name = (params or {}).get("model") or self.model_name or self.model
         for res in response["choices"]:
             message = _convert_dict_to_message(res["message"])
             if isinstance(message, AIMessage):
-                message.response_metadata = {
-                    "model_name": self.model_name or self.model
-                }
+                message.response_metadata = {"model_name": model_name}
                 message.usage_metadata = _create_usage_metadata(token_usage)
             gen = ChatGeneration(
                 message=message,
@@ -770,10 +771,7 @@ class ChatLiteLLM(BaseChatModel):
                 ),
             )
             generations.append(gen)
-        set_model_value = self.model
-        if self.model_name is not None:
-            set_model_value = self.model_name
-        llm_output = {"token_usage": token_usage, "model": set_model_value}
+        llm_output = {"token_usage": token_usage, "model": model_name}
         return ChatResult(generations=generations, llm_output=llm_output)
 
     def _create_message_dicts(
@@ -933,7 +931,7 @@ class ChatLiteLLM(BaseChatModel):
         response = await self.acompletion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         )
-        result = self._create_chat_result(response)
+        result = self._create_chat_result(response, params)
 
         # Extract logprobs as score for Fireworks (matching LiteLlmTextGenModel behavior)
         if self.custom_llm_provider == "fireworks_ai":

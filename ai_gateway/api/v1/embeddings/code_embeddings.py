@@ -134,7 +134,7 @@ async def _generate_code_embeddings(
     return EmbeddingsResponse(
         model=EmbeddingsResponse.Model(
             engine=prompt.model_provider,
-            name=prompt.model_name,
+            name=prompt.reported_model_name,
             identifier=payload.model_metadata.identifier,
         ),
         predictions=[

@@ -362,6 +362,50 @@ async def test_code_generation_skips_event_when_unauthorized(
     snowplow_instrumentator.watch.assert_not_called()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prompt_id", "prompt_version", "event"),
+    [
+        (
+            "code_suggestions/generations",
+            "^1.0.0",
+            "Executing code generation with prompt registry",
+        ),
+        (None, None, "Executing code generation with prompt registry (legacy path)"),
+    ],
+)
+async def test_code_generation_logs_the_requested_model(
+    generation_payload,
+    agent_factory,
+    prompt_registry,
+    snowplow_instrumentator,  # pylint: disable=unused-argument
+    snowplow_event_context,
+    prompt_id,
+    prompt_version,
+    event,
+):
+    generation_payload.prompt_id = prompt_id
+    generation_payload.prompt_version = prompt_version
+    prompt_registry.get_on_behalf.return_value = MagicMock(
+        model_name="placeholder", reported_model_name="requested-model"
+    )
+
+    with patch.object(handler_module, "request_log") as request_log:
+        await handler_module.code_generation(
+            payload=generation_payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=snowplow_event_context,
+            agent_factory=agent_factory,
+            generations_amazon_q_factory=MagicMock(),
+            model_metadata=MagicMock(provider="openai"),
+        )
+
+    [entry] = [c for c in request_log.info.call_args_list if c.args == (event,)]
+    assert entry.kwargs["prompt_model_name"] == "requested-model"
+
+
 @pytest.mark.parametrize(
     ("model_metadata_provider", "is_custom_model"), [("openai", True)]
 )

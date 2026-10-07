@@ -755,6 +755,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     limits: Optional[ModelLimits] = None
     internal_event_extra: dict[str, Any] = {}
     internal_callbacks: list[BasePromptCallbackHandler] = []
+    requested_model: Optional[str] = None
 
     def __init__(
         self,
@@ -874,6 +875,11 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             operation_type=config.operation_type,
             bound=chain,
             prompt_tpl=prompt_tpl,
+            requested_model=(
+                model_kwargs.get("model")
+                if model_metadata and model_metadata.is_custom_model
+                else None
+            ),
             **kwargs,
         )  # type: ignore[call-arg]
 
@@ -1028,10 +1034,15 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         return self.model._identifying_params["model"]
 
     @property
+    def reported_model_name(self) -> str:
+        """Name to report in logs and metrics: the requested model for custom models, else the instance model."""
+        return self.requested_model or self.model_name
+
+    @property
     def instrumentator(self) -> ModelRequestInstrumentator:
         return ModelRequestInstrumentator(
             model_engine=self.model._llm_type,
-            model_name=self.model_name,
+            model_name=self.reported_model_name,
             limits=self.limits,
             model_provider=self.model_provider,
         )
