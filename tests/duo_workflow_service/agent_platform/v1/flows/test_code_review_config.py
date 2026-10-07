@@ -62,3 +62,21 @@ def test_explore_step_reads_the_checkout(version):
     )
 
     assert explore["toolset"] == ["find_files"]
+
+
+def test_3_0_0_reads_the_merge_request_from_the_resource_context():
+    config = FlowConfig.from_yaml_config(FLOW, "3.0.0")
+    sources = {
+        i["from"]
+        for c in config.components
+        for i in c.get("inputs", [])
+        if i["as"] == "merge_request_iid"
+    }
+    [category] = [
+        i for i in config.flow.inputs if i.category == "agent_platform_resource_context"
+    ]
+
+    assert sources == {
+        "context:inputs.agent_platform_resource_context.merge_request_id"
+    }
+    assert not category.input_schema["merge_request_id"].optional
