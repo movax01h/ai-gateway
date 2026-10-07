@@ -198,10 +198,10 @@ configurable_unit_primitives:
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - identifier: "claude_sonnet_4_6_vertex"
+      - identifier: "claude_sonnet_5_5_vertex"
     models_for_tags:
       small: claude_haiku_4_5_20251001_vertex
-      large: claude_sonnet_4_6_vertex
+      large: claude_sonnet_5_5_vertex
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
@@ -281,11 +281,11 @@ configurable_unit_primitives:
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - identifier: "claude_sonnet_4_6_vertex"
-      - identifier: "claude_sonnet_4_6"
+      - identifier: "claude_sonnet_5_5_vertex"
+      - identifier: "claude_sonnet_5_5"
     models_for_tags:
       small: claude_haiku_4_5_20251001_vertex
-      large: claude_sonnet_4_6_vertex
+      large: claude_sonnet_5_5_vertex
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
@@ -364,7 +364,7 @@ configurable_unit_primitives:
   - feature_setting: "duo_developer"
     unit_primitives: []
     default_models:
-      - identifier: "claude_sonnet_4_6_vertex"
+      - identifier: "claude_sonnet_5_5_vertex"
     # Routing hints, not a security boundary. Starting lists; the classifier tier
     # in gitlab-org/gitlab#630219 is meant to take over where they miss.
     models_for_tags:
