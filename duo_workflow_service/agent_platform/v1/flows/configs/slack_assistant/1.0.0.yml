@@ -21,6 +21,9 @@ components:
       - from: "context:inputs.user_rule"
         as: "agents_dot_md"
         optional: true
+      - from: "context:inputs.agent_platform_client_context.content"
+        as: "client_context"
+        optional: true
     toolset:
       - "gitlab_api_get"
       - "gitlab_graphql"
@@ -43,6 +46,13 @@ routers:
 
 flow:
   entry_point: "slack_agent"
+  inputs:
+    - category: agent_platform_client_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        content:
+          type: string
+          description: Instructions and context written by the client that started the session, for example Slack reply style and mention rules
 
 prompts:
   - name: "slack_agent_prompt"
@@ -53,19 +63,14 @@ prompts:
       - duo_agent_platform
     prompt_template:
       system: |
-        {% extends 'common/api_assistant/system/1.0.0.jinja' %}
-        {% block client_guidance %}
-        You are mentioned in a Slack thread. You work through the GitLab API: no repository, no shell, no local files.
-        Your reply is posted back to the Slack thread, so finish with a complete, self-contained answer.
-
-        Delegate requests that need a repository to an available coding agent, and include the resulting session link in your reply.
-
-        # Writing for Slack
-        Write standard Markdown, not Slack's own mrkdwn: your reply is converted for you, so `**bold**` and `[text](url)` are right, `*bold*` and `<url|text>` are not. Keep URLs out of bold, italic and code — the conversion mangles them.
-
-        Mention people the way each surface understands. In your Slack reply use the Slack user ID form, `<@U0123ABCD>` — a GitLab `@username` notifies nobody in Slack and may match the wrong person. In GitLab content you create, use the person's GitLab `@username`, or name them plainly when you do not know it.
-        {% endblock %}
+        {% include 'common/api_assistant/system/1.0.0.jinja' %}
       user: |
+        {% if client_context -%}
+        <client_context>
+        {{ client_context }}
+        </client_context>
+
+        {% endif -%}
         <runtime_context>
         <current_date>{{ today }}</current_date>
         </runtime_context>
