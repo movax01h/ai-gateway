@@ -7,7 +7,7 @@ happen on our side.
 
 from contextlib import contextmanager
 from typing import Optional
-from unittest.mock import call, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -23,12 +23,16 @@ from ai_gateway.models.v2._model_compat import (
     TOOL_IMAGE_PLACEHOLDER,
     TOOL_IMAGES_BANNER,
     _model_supports_vision,
+    current_model_supports_vision,
     hoist_tool_result_images,
     normalize_image_blocks,
     strip_image_blocks_for_non_vision_model,
 )
 from ai_gateway.models.v2.chat_litellm import ChatLiteLLM
-from lib.context import current_model_metadata_context
+from lib.context import (
+    current_model_metadata_context,
+    current_model_metadata_with_size_context,
+)
 
 B64 = "aVZCT1J5Qm1ZV3Rs"
 
@@ -765,6 +769,107 @@ def fireworks_definition(supports_vision, model=MINIMAX, **params):
         supports_vision=supports_vision,
         params={"model": model, "custom_llm_provider": "fireworks_ai", **params},
     )
+
+
+class TestCurrentModelSupportsVision:
+    @staticmethod
+    def _metadata(model, provider, declared, request_params=None):
+        metadata = MagicMock()
+        metadata.to_params.return_value = request_params or {}
+        metadata.llm_definition.supports_vision = declared
+        metadata.llm_definition.params.model = model
+        metadata.llm_definition.params.identifier = None
+        metadata.llm_definition.params.custom_llm_provider = provider
+        return metadata
+
+    @pytest.fixture(autouse=True)
+    def _no_by_tag_context(self):
+        token = current_model_metadata_with_size_context.set(None)
+        yield
+        current_model_metadata_with_size_context.reset(token)
+
+    def test_no_resolved_model_is_unknown(self):
+        token = current_model_metadata_context.set(None)
+        try:
+            assert current_model_supports_vision() is None
+        finally:
+            current_model_metadata_context.reset(token)
+
+    @pytest.mark.parametrize("declared", [True, False])
+    def test_the_declared_flag_is_the_verdict(self, declared):
+        token = current_model_metadata_context.set(
+            self._metadata(
+                "accounts/fireworks/models/minimax-m3", "fireworks_ai", declared
+            )
+        )
+        try:
+            assert current_model_supports_vision() is declared
+        finally:
+            current_model_metadata_context.reset(token)
+
+    def test_a_self_hosted_request_is_judged_by_its_own_model(self):
+        # The family template says "gpt"; the request names the real deployment.
+        token = current_model_metadata_context.set(
+            self._metadata(
+                "gpt",
+                None,
+                None,
+                request_params={"model": "gpt-4o", "custom_llm_provider": "openai"},
+            )
+        )
+        try:
+            with patch(
+                "ai_gateway.models.v2._model_compat._litellm_vision_verdict",
+                return_value=True,
+            ) as verdict:
+                assert current_model_supports_vision() is True
+        finally:
+            current_model_metadata_context.reset(token)
+
+        verdict.assert_called_once_with("gpt-4o", "openai")
+
+    def test_metadata_without_a_model_name_is_unknown(self):
+        token = current_model_metadata_context.set(self._metadata(None, None, None))
+        try:
+            assert current_model_supports_vision() is None
+        finally:
+            current_model_metadata_context.reset(token)
+
+    @pytest.mark.parametrize(
+        "tagged_declared,expected",
+        [(False, False), (True, None), (None, None)],
+        ids=["all-blind", "a-tagged-model-sees", "a-tagged-model-unknown"],
+    )
+    def test_every_model_a_component_may_run_on_has_a_say(
+        self, tagged_declared, expected
+    ):
+        by_tag = MagicMock()
+        by_tag.default = self._metadata(
+            "accounts/fireworks/models/glm-5p3", "fireworks_ai", False
+        )
+        by_tag.by_tag = {
+            "large": self._metadata(
+                "accounts/fireworks/models/kimi-k3", "fireworks_ai", tagged_declared
+            )
+        }
+        if tagged_declared is None:
+            by_tag.by_tag[
+                "large"
+            ].llm_definition.params.model = "accounts/gitlab/deployments/unknown"
+        token = current_model_metadata_with_size_context.set(by_tag)
+        try:
+            assert current_model_supports_vision() is expected
+        finally:
+            current_model_metadata_with_size_context.reset(token)
+
+    def test_a_lookup_failure_is_unknown(self):
+        broken = MagicMock()
+        broken.to_params.side_effect = RuntimeError("boom")
+        token = current_model_metadata_context.set(broken)
+        try:
+            assert current_model_supports_vision() is None
+        finally:
+            current_model_metadata_context.reset(token)
 
 
 class TestModelSupportsVision:
