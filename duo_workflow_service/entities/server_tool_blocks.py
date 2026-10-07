@@ -1,5 +1,6 @@
 """Project server-side tool content blocks (e.g. web search) to UiChatLog."""
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import cached_property
@@ -37,6 +38,15 @@ def is_web_search_call(call_block: Any) -> bool:
 def _is_anthropic_server_tool_use_block(block: Any) -> TypeGuard[dict]:
     """Matches any ``*_tool_use`` type; bare ``tool_use`` excluded by the ``_`` prefix."""
     return isinstance(block, dict) and str(block.get("type", "")).endswith("_tool_use")
+
+
+def _streamed_input(call_block: dict) -> dict:
+    """Extract tool arguments from streamed input when `input` is unavailable."""
+    try:
+        parsed = json.loads(call_block.get("partial_json") or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _is_anthropic_server_tool_result_block(block: Any) -> TypeGuard[dict]:
@@ -170,7 +180,7 @@ class ServerToolResults:
         else:
             result = self._anthropic.get(call_block.get("id", ""))
             name = call_block.get("name") or "server_tool"
-            args = call_block.get("input") or {}
+            args = call_block.get("input") or _streamed_input(call_block)
             status = ToolStatus.SUCCESS if result else ToolStatus.PENDING
             tool_response = (result or {}).get("content")
 

@@ -184,13 +184,40 @@ def _result(url, title=None):
             id="a-citation-stays-with-the-call-that-claimed-it",
         ),
         pytest.param(
-            # A page read carries no `sources`, so its citations reach it by the fallback.
             [
                 _call(type="open_page", url="https://a"),
                 _answer(_url_citation("https://a", "A")),
             ],
             {"ws_1": [_result("https://a", "A")]},
-            id="page-reads-are-attributed-through-citations",
+            id="open-page-uses-citation-title",
+        ),
+        pytest.param(
+            [_call(type="open_page", url="https://a")],
+            {"ws_1": [_result("https://a")]},
+            id="open-page-without-citation",
+        ),
+        pytest.param(
+            [_call(status="failed", type="open_page", url="https://a")],
+            {"ws_1": []},
+            id="failed-open-page-has-no-sources",
+        ),
+        pytest.param(
+            [
+                _call("ws_1", type="open_page", url="https://a"),
+                _call("ws_2", type="find_in_page", url="https://a", pattern="p"),
+                _answer(_url_citation("https://a", "A")),
+            ],
+            {"ws_1": [_result("https://a", "A")], "ws_2": [_result("https://a", "A")]},
+            id="open-page-and-find-in-page-share-source",
+        ),
+        pytest.param(
+            [
+                _call("ws_1", type="open_page", url="https://a"),
+                _call("ws_2", type="find_in_page", pattern="p"),
+                _answer(_url_citation("https://a", "A")),
+            ],
+            {"ws_1": [_result("https://a", "A")], "ws_2": []},
+            id="page-search-without-url-does-not-inherit-citation",
         ),
         pytest.param(
             [
@@ -229,7 +256,7 @@ def test_card_fields_status_mapping(status, expected):
         ({"type": "open_page", "url": "https://x"}, "web_fetch", {"url": "https://x"}),
         (
             {"type": "find_in_page", "url": "https://x", "pattern": "p"},
-            "web_fetch",
+            "find_in_page",
             {"url": "https://x", "pattern": "p"},
         ),
         ({}, "web_search", {}),
