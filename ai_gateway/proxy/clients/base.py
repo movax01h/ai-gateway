@@ -20,6 +20,7 @@ from ai_gateway.instrumentators.model_requests import (
     ModelRequestInstrumentator,
     init_llm_operations,
 )
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
 from lib.billing_events import BillingEvent
 from lib.billing_events.service import BillingEventService, ExecutionEnvironment
@@ -38,6 +39,57 @@ async def extract_json_body(request: fastapi.Request) -> Any:
         )
 
     return json_body
+
+
+ALLOWED_MODEL_REFS_CLAIM = "gitlab_allowed_model_refs"
+
+# Provider variants of a ref share its allowlist entry (e.g. claude_fable_5_vertex).
+_PROVIDER_VARIANT_SUFFIXES = ("", "_vertex", "_bedrock")
+
+
+def _upstream_models_for_refs(refs: list[str]) -> set[str]:
+    identifiers = {
+        f"{ref}{suffix}" for ref in refs for suffix in _PROVIDER_VARIANT_SUFFIXES
+    }
+
+    return {
+        llm_def.params.model
+        for identifier, llm_def in ModelSelectionConfig.instance()
+        .get_llm_definitions()
+        .items()
+        if identifier in identifiers and llm_def.params.model
+    }
+
+
+def enforce_model_allowlist(request: fastapi.Request, model_name: str) -> None:
+    """Raise HTTP 403 if the token restricts models and ``model_name`` is not allowed.
+
+    GitLab signs the allowlist into the token as ``gitlab_allowed_model_refs``. A token
+    without the claim is unrestricted.
+
+    Args:
+        request: The incoming proxy request, authenticated with a verified token.
+        model_name: The upstream model name the request targets.
+
+    Raises:
+        fastapi.HTTPException: 403 if the claim is present and does not allow the model.
+    """
+    claims = getattr(request.user, "claims", None)
+    extra = (claims.extra if claims else None) or {}
+    if ALLOWED_MODEL_REFS_CLAIM not in extra:
+        return
+
+    refs = extra[ALLOWED_MODEL_REFS_CLAIM]
+
+    # A malformed claim must deny, never error or widen access.
+    if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+        refs = []
+
+    if model_name not in _upstream_models_for_refs(refs):
+        raise fastapi.HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Model is not allowed by the namespace model allowlist",
+        )
 
 
 def _create_headers_to_upstream(
