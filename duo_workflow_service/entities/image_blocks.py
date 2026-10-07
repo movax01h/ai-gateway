@@ -52,15 +52,21 @@ tool card and the compaction summarizer. Images become the placeholder above;
 every other block without text becomes a marker naming its type.
 """
 
+from enum import StrEnum
+from http import HTTPStatus
 from typing import Any, Optional
 
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.messages.content import create_image_block
 
 __all__ = [
     "IMAGE_BLOCK_TOKEN_ESTIMATE",
+    "ImageLimitKind",
+    "ImageScope",
     "block_text",
     "content_as_text",
     "image_content_block",
+    "image_limit_kind",
     "is_image_block",
     "is_image_content_block",
     "is_internal_image_block",
@@ -68,6 +74,7 @@ __all__ = [
     "strip_image_payloads",
     "with_block_text",
     "without_image_blocks",
+    "without_image_payloads",
 ]
 
 
@@ -186,6 +193,56 @@ def strip_image_payloads(content: Any) -> Any:
         else:
             stripped.append(block)
     return stripped
+
+
+class ImageLimitKind(StrEnum):
+    SINGLE_IMAGE = "single_image"
+    REQUEST = "request"
+
+
+class ImageScope(StrEnum):
+    SEEN = "seen"
+    CURRENT = "current"
+
+
+def image_limit_kind(status_code: int, message: str) -> Optional[ImageLimitKind]:
+    """``single_image`` when Anthropic names one oversized image, ``request`` for any other image-limit rejection.
+
+    Anthropic names the rejected block ``...image.source.base64.data``; other providers' wording is unverified.
+    """
+    if status_code == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
+        return ImageLimitKind.REQUEST
+    if status_code != HTTPStatus.BAD_REQUEST or "image.source.base64" not in message:
+        return None
+    if "max allowed size" in message and "many-image" not in message:
+        return ImageLimitKind.SINGLE_IMAGE
+    return ImageLimitKind.REQUEST
+
+
+def without_image_payloads(
+    messages: list[BaseMessage], *, scope: ImageScope
+) -> tuple[list[BaseMessage], int]:
+    """Replace inline images with the checkpoint placeholder in the messages *scope* selects, by the last
+    ``AIMessage``."""
+    last_answer = max(
+        (i for i, message in enumerate(messages) if isinstance(message, AIMessage)),
+        default=-1,
+    )
+    replaced = list(messages)
+    removed = 0
+    for index, message in enumerate(messages):
+        if (scope is ImageScope.SEEN) == (index > last_answer):
+            continue
+        if not isinstance(message.content, list):
+            continue
+        count = sum(1 for block in message.content if is_image_content_block(block))
+        if not count:
+            continue
+        replaced[index] = message.model_copy(
+            update={"content": strip_image_payloads(message.content)}
+        )
+        removed += count
+    return (replaced, removed) if removed else (messages, 0)
 
 
 def _placeholder(mime_type: Optional[str]) -> str:

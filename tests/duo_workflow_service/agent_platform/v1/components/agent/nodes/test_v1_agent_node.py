@@ -45,6 +45,10 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionResult,
 )
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
+from duo_workflow_service.entities.image_blocks import (
+    image_content_block,
+    is_image_content_block,
+)
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
@@ -2994,3 +2998,285 @@ class TestAgentNodeTextOnlyTurns:
 
         assert self._request_history(mock_prompt) == history
         assert result["conversation_history"][component_name][-1] == completion
+
+
+_MANY_IMAGES_MESSAGE = (
+    "messages.1.content.5.image.source.base64.data: At least one of the image "
+    "dimensions exceed max allowed size for many-image requests: 2000 pixels"
+)
+_ONE_IMAGE_MESSAGE = (
+    "messages.1.content.3.image.source.base64.data: At least one of the image "
+    "dimensions exceed max allowed size: 8000 pixels"
+)
+
+
+def _image_limit_error(
+    message: str = _MANY_IMAGES_MESSAGE, status_code: int = 400
+) -> APIStatusError:
+    return APIStatusError(message, response=Mock(status_code=status_code), body=None)
+
+
+def _image_tool_message(call_id: str) -> ToolMessage:
+    return ToolMessage(
+        content=[
+            {"type": "text", "text": f"Read image file: {call_id}.png"},
+            image_content_block(base64="aW1n", mime_type="image/png"),
+        ],
+        tool_call_id=call_id,
+    )
+
+
+def _live_images(messages) -> int:
+    return sum(
+        1
+        for message in messages
+        if isinstance(message.content, list)
+        for block in message.content
+        if is_image_content_block(block)
+    )
+
+
+class TestAgentNodeImageLimitFallback:
+    @pytest.fixture(name="two_rounds")
+    def two_rounds_fixture(self):
+        return [
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "fix what the screenshot shows"},
+                    image_content_block(base64="aW1n", mime_type="image/png"),
+                ]
+            ),
+            AIMessage(
+                content="", tool_calls=[{"id": "a", "name": "read_file", "args": {}}]
+            ),
+            _image_tool_message("a"),
+            AIMessage(
+                content="", tool_calls=[{"id": "b", "name": "read_file", "args": {}}]
+            ),
+            _image_tool_message("b"),
+        ]
+
+    @staticmethod
+    def _run(agent_node, base_flow_state, component_name, history):
+        base_flow_state["conversation_history"] = {component_name: history}
+        return agent_node.run(base_flow_state)
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(_image_limit_error(), id="many_image_400"),
+            pytest.param(
+                _image_limit_error("request too large", status_code=413), id="413"
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_seen_images_leave_the_saved_history_and_the_request_is_retried(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        error,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(side_effect=[error, mock_ai_message])
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 2
+        retried = mock_prompt.ainvoke.call_args.kwargs["input"]["history"]
+        assert retried == saved[:-1]
+        assert _live_images(saved) == 1
+        assert is_image_content_block(saved[4].content[1])
+        assert saved[0].content[1] == {
+            "type": "text",
+            "text": "[image/png omitted from history]",
+        }
+        assert saved[2].content[1]["type"] == "text"
+        assert saved[-2] == HumanMessage(content=AgentNode._IMAGE_LIMIT_SEEN_MESSAGE)
+        assert saved[-1] == mock_ai_message
+
+    @pytest.mark.asyncio
+    async def test_a_second_rejection_removes_the_current_round_too(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(), _image_limit_error(), mock_ai_message]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 3
+        assert _live_images(saved) == 0
+        assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
+            AgentNode._IMAGE_LIMIT_SEEN_MESSAGE,
+            AgentNode._IMAGE_LIMIT_LATEST_MESSAGE,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_one_oversized_image_removes_the_current_round_first(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_ONE_IMAGE_MESSAGE), mock_ai_message]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 2
+        assert _live_images(saved) == 2
+        assert is_image_content_block(saved[0].content[1])
+        assert is_image_content_block(saved[2].content[1])
+        assert saved[4].content[1]["type"] == "text"
+        assert saved[-2] == HumanMessage(
+            content=AgentNode._IMAGE_TOO_LARGE_MESSAGE.format(
+                limit=" (one side is over 8000 px)"
+            )
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_kind_may_change_between_attempts(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Removing the seen images drops the request under the many-image threshold, so the per-image rule names the
+        new one next."""
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[
+                _image_limit_error(),
+                _image_limit_error(_ONE_IMAGE_MESSAGE),
+                mock_ai_message,
+            ]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 3
+        assert _live_images(saved) == 0
+        assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
+            AgentNode._IMAGE_LIMIT_SEEN_MESSAGE,
+            AgentNode._IMAGE_TOO_LARGE_MESSAGE.format(
+                limit=" (one side is over 8000 px)"
+            ),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_an_unseen_image_is_removed_on_the_first_pass_when_nothing_was_seen(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        history = [
+            HumanMessage(
+                content=[image_content_block(base64="aW1n", mime_type="image/png")]
+            )
+        ]
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(), mock_ai_message]
+        )
+
+        result = await self._run(agent_node, base_flow_state, component_name, history)
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 2
+        assert _live_images(saved) == 0
+        assert saved[1] == HumanMessage(content=AgentNode._IMAGE_LIMIT_LATEST_MESSAGE)
+
+    @pytest.mark.asyncio
+    async def test_a_third_rejection_raises(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(side_effect=[_image_limit_error()] * 3)
+
+        with pytest.raises(ModelError) as raised:
+            await self._run(agent_node, base_flow_state, component_name, two_rounds)
+
+        assert raised.value.status_code == 400
+        assert mock_prompt.ainvoke.call_count == 3
+
+    @pytest.mark.parametrize(
+        ("error", "history"),
+        [
+            pytest.param(
+                APIStatusError(
+                    "tools.0.name: invalid", response=Mock(status_code=400), body=None
+                ),
+                [HumanMessage(content=[image_content_block("aW1n", "image/png")])],
+                id="another_400_with_images",
+            ),
+            pytest.param(
+                _image_limit_error(),
+                [HumanMessage(content="no images at all")],
+                id="image_limit_without_images",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_other_errors_and_imageless_histories_raise_as_before(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        error,
+        history,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(side_effect=error)
+
+        with pytest.raises(ModelError):
+            await self._run(agent_node, base_flow_state, component_name, history)
+
+        assert mock_prompt.ainvoke.call_count == 1
