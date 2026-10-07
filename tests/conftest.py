@@ -38,6 +38,7 @@ from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
     LLMDefinition,
+    ModelRestriction,
     ModelSelectionConfig,
     PromptParams,
 )
@@ -887,12 +888,23 @@ FAKE_RESTRICTED_MODEL = {
     "max_context_tokens": 200000,
     "proxy_provider": "anthropic",
     "params": {"model": "claude-fake-restricted-1"},
-    "restricted_to_flows": ["bl_security"],
 }
 
 
+@pytest.fixture(name="model_restrictions")
+def model_restrictions_fixture():
+    """Serve these restrictions instead of model_restrictions.yml; tests may append."""
+    restrictions = [
+        ModelRestriction(identifier="fake_restricted_model", flows=["bl_security"])
+    ]
+    with patch.object(
+        ModelSelectionConfig, "get_model_restrictions", return_value=restrictions
+    ):
+        yield restrictions
+
+
 @pytest.fixture(name="fake_restricted_model")
-def fake_restricted_model_fixture():
+def fake_restricted_model_fixture(model_restrictions):  # pylint: disable=unused-argument
     """Register a model restricted to the bl_security flow alongside models.yml."""
     definition = TypeAdapter(LLMDefinition).validate_python(FAKE_RESTRICTED_MODEL)
     original = ModelSelectionConfig.get_llm_definitions

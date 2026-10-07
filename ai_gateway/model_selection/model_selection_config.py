@@ -82,6 +82,7 @@ def _partition_known(ids: list[str], known: set[str]) -> tuple[list[str], list[s
 BASE_PATH = Path(__file__).parent
 MODELS_CONFIG_PATH = BASE_PATH / "models.yml"
 UNIT_PRIMITIVE_CONFIG_PATH = BASE_PATH / "unit_primitives.yml"
+MODEL_RESTRICTIONS_CONFIG_PATH = BASE_PATH / "model_restrictions.yml"
 
 
 class PromptParams(BaseModel):
@@ -140,11 +141,6 @@ class BaseLLMDefinition(BaseModel):
     # Some models return an empty 404 on streaming requests when max_tokens is at the
     # model's max. Opt in to use this model's max_tokens from models.yml
     use_model_max_tokens: bool = False
-    # Flow config ids (e.g. "bl_security") allowed to use this model. When non-empty,
-    # the model is usable only by a request authorized for one of these flows
-    # (restricted_access_ctx) and is denied everywhere else; see
-    # ensure_restricted_model_access.
-    restricted_to_flows: list[str] = []
 
 
 class ChatLiteLLMDefinition(BaseLLMDefinition):
@@ -204,6 +200,20 @@ LLMDefinition = Annotated[
     | EmbeddingLiteLLMDefinition,
     Field(discriminator="model_class_provider"),
 ]
+
+
+class ModelRestriction(BaseModel):
+    """A model usable only by the given flows; see model_restrictions.yml.
+
+    ``flows`` are flow config ids (e.g. "bl_security"). The model is usable only by a
+    request authorized for one of them (restricted_access_ctx) and is denied everywhere
+    else; see ensure_restricted_model_access.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    identifier: str
+    flows: list[str]
 
 
 class ModelTagEntry(BaseModel):
@@ -294,6 +304,7 @@ class ModelSelectionConfig:
     ) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
         self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
+        self._model_restrictions: Optional[list[ModelRestriction]] = None
         self._default_models_override: dict[str, list[str]] = default_models_override
         self._model_params_override: dict[str, dict] = model_params_override or {}
         self._prompt_params_override: dict[str, dict] = prompt_params_override or {}
@@ -412,6 +423,29 @@ class ModelSelectionConfig:
                     ]
 
         return self._unit_primitive_configs
+
+    def get_model_restrictions(self) -> list[ModelRestriction]:
+        if self._model_restrictions is None:
+            with open(MODEL_RESTRICTIONS_CONFIG_PATH, "r") as f:
+                config_data = yaml.safe_load(f) or {}
+
+            self._model_restrictions = [
+                ModelRestriction(**data)
+                for data in config_data.get("restricted_models") or []
+            ]
+
+        return self._model_restrictions
+
+    def _restricted_flows_by_identifier(self) -> dict[str, frozenset[str]]:
+        # validate() rejects duplicate identifiers; should one slip through, only the
+        # flows every entry allows are kept (fail closed).
+        flows: dict[str, frozenset[str]] = {}
+        for restriction in self.get_model_restrictions():
+            entry = frozenset(restriction.flows)
+            flows[restriction.identifier] = (
+                flows.get(restriction.identifier, entry) & entry
+            )
+        return flows
 
     def get_unit_primitive_config(self) -> Iterable[UnitPrimitiveConfig]:
         return self.get_unit_primitive_config_map().values()
@@ -584,20 +618,36 @@ class ModelSelectionConfig:
         unit_primitive_configs: Iterable[UnitPrimitiveConfig],
         models: dict[str, LLMDefinition],
     ) -> list[str]:
+        restrictions = self.get_model_restrictions()
+        # A restriction may name a model that only an env-injected release defines
+        # (AIGW_MODEL_SELECTION__MODEL_RELEASES), so identifiers loaded from it are
+        # accepted too. The feature-list checks below cover unit_primitives.yml only.
+        known = models.keys() | self._env_llm_definitions.keys()
+        identifiers = [r.identifier for r in restrictions]
         errors = [
-            f"Model '{model_id}': restricted_to_flows has empty or duplicate entries"
-            for model_id, llm_def in models.items()
-            if any(not flow.strip() for flow in llm_def.restricted_to_flows)
-            or len(set(llm_def.restricted_to_flows)) != len(llm_def.restricted_to_flows)
+            f"Restricted model '{r.identifier}' is not defined in models.yml"
+            for r in restrictions
+            if r.identifier not in known
         ]
+        errors.extend(
+            f"Restricted model '{r.identifier}': flows is empty or has empty or duplicate entries"
+            for r in restrictions
+            if not r.flows
+            or any(not flow.strip() for flow in r.flows)
+            or len(set(r.flows)) != len(r.flows)
+        )
+        errors.extend(
+            f"Restricted model '{i}' is listed more than once in model_restrictions.yml"
+            for i in sorted({i for i in identifiers if identifiers.count(i) > 1})
+        )
+        flows_by_identifier = self._restricted_flows_by_identifier()
         for config in unit_primitive_configs:
             # A feature's feature_setting names its flow by convention, so a restricted
             # model may be listed by the features of its own flows only.
             restricted = {
                 i
-                for i, d in models.items()
-                if d.restricted_to_flows
-                and config.feature_setting not in d.restricted_to_flows
+                for i, flows in flows_by_identifier.items()
+                if config.feature_setting not in flows
             }
             for list_name, ids in {
                 "default_models": config.default_model_identifiers,
@@ -639,11 +689,12 @@ class ModelSelectionConfig:
         """Refresh the configuration by reloading from source files."""
         self._llm_definitions = None
         self._unit_primitive_configs = None
+        self._model_restrictions = None
 
     def get_proxy_models_for_provider(self, provider: str) -> list[str]:
         """Get list of allowed model names for a provider's proxy endpoint.
 
-        Restricted models (``restricted_to_flows``) are never exposed on the proxy.
+        Restricted models (model_restrictions.yml) are never exposed on the proxy.
 
         Args:
             provider: The provider name (e.g., "anthropic", "openai")
@@ -660,16 +711,17 @@ class ModelSelectionConfig:
             and self.restricted_flows_for(models=[llm_def.params.model]) is None
         ]
 
-    def _restricted_definitions(self) -> list[LLMDefinition]:
+    def _restricted_definitions(self) -> list[tuple[LLMDefinition, frozenset[str]]]:
         # Env-injected releases are included whether or not their feature flag is on:
         # a restriction must hold even where the definition itself is not served.
+        flows_by_identifier = self._restricted_flows_by_identifier()
         return [
-            llm_def
+            (llm_def, flows_by_identifier[llm_def.gitlab_identifier])
             for llm_def in chain(
                 self.get_llm_definitions().values(),
                 self._env_llm_definitions.values(),
             )
-            if llm_def.restricted_to_flows
+            if llm_def.gitlab_identifier in flows_by_identifier
         ]
 
     def restricted_flows_for(
@@ -700,7 +752,7 @@ class ModelSelectionConfig:
         ids = {i for i in identifiers if i}
         model_strings = [m.lower() for m in models if m]
         allowed: Optional[frozenset[str]] = None
-        for llm_def in self._restricted_definitions():
+        for llm_def, flows in self._restricted_definitions():
             restricted_model = (llm_def.params.model or "").lower()
             matched = llm_def.gitlab_identifier in ids or (
                 bool(restricted_model)
@@ -714,7 +766,6 @@ class ModelSelectionConfig:
                 )
             )
             if matched:
-                flows = frozenset(llm_def.restricted_to_flows)
                 allowed = flows if allowed is None else allowed & flows
         return allowed
 

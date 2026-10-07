@@ -1,0 +1,9 @@
+# Models that only specific flows may use. Any other use is refused.
+#
+# Each entry names a model by its gitlab_identifier (from models.yml, or from an
+# env-injected release) and the flow config ids allowed to use it, e.g.:
+#
+#   restricted_models:
+#     - identifier: <gitlab_identifier>
+#       flows: [<flow config id>, ...]
+restricted_models: []
