@@ -9,7 +9,10 @@ import litellm
 import structlog
 
 from ai_gateway.model_selection.model_selection_config import ModelSelectionConfig
-from lib.context import current_model_metadata_context
+from lib.context import (
+    current_model_metadata_context,
+    current_model_metadata_with_size_context,
+)
 
 log = structlog.stdlib.get_logger("model_compat")
 
@@ -326,6 +329,61 @@ def _model_supports_vision(
         verdict = _litellm_vision_verdict(model, custom_llm_provider)
         if verdict is not None:
             return verdict
+    return _litellm_vision_verdict(model, None)
+
+
+def current_model_supports_vision() -> Optional[bool]:
+    """Return ``False`` only when every model this request can run on is known not to see images.
+
+    Components pick their model by tag, so the request's default alone is not enough. Any failure reads as unknown: this
+    decides one advisory line, never whether the read succeeds.
+    """
+    try:
+        verdicts = {_metadata_vision_verdict(m) for m in _request_models()}
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        log.debug(
+            "vision verdict lookup failed", error=str(e), error_type=type(e).__name__
+        )
+        return None
+    if not verdicts or None in verdicts:
+        return None
+    if all(verdicts):
+        return True
+    return False if not any(verdicts) else None
+
+
+def _request_models() -> list[Any]:
+    by_tag = current_model_metadata_with_size_context.get()
+    if by_tag is not None:
+        return [by_tag.default, *by_tag.by_tag.values()]
+    metadata = current_model_metadata_context.get()
+    return [metadata] if metadata is not None else []
+
+
+def _metadata_vision_verdict(metadata: Any) -> Optional[bool]:
+    # Fireworks and self-hosted metadata name the deployment in their request params; plain
+    # GitLab-managed metadata does not, so the definition's params are the fallback.
+    request_params = metadata.to_params() if hasattr(metadata, "to_params") else {}
+    definition_params = getattr(
+        getattr(metadata, "llm_definition", None), "params", None
+    )
+    model = (
+        request_params.get("model")
+        or getattr(definition_params, "identifier", None)
+        or getattr(definition_params, "model", None)
+    )
+    if not model:
+        return None
+    declared = getattr(
+        getattr(metadata, "llm_definition", None), "supports_vision", None
+    )
+    if declared is not None:
+        return declared
+    provider = request_params.get("custom_llm_provider") or getattr(
+        definition_params, "custom_llm_provider", None
+    )
+    if provider and (verdict := _litellm_vision_verdict(model, provider)) is not None:
+        return verdict
     return _litellm_vision_verdict(model, None)
 
 

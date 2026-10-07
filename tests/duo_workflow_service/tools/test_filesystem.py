@@ -1809,6 +1809,33 @@ class TestImageResponseConversion:
         assert result[1]["mime_type"] == "image/png"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "verdict,note_expected", [(False, True), (True, False), (None, False)]
+    )
+    async def test_a_model_known_not_to_see_is_told_so_once(
+        self, mock_project, verdict, note_expected
+    ):
+        """Only a positive no adds the line; unknown stays silent so a vision-capable self-hosted model is not
+        misled."""
+        tool = ReadFile(description="Read file content")
+        tool.metadata = self.metadata_with_image_response(
+            mock_project, "image/png", self.FAKE_PNG_BYTES
+        )
+
+        with patch(
+            "duo_workflow_service.tools.filesystem.current_model_supports_vision",
+            return_value=verdict,
+        ):
+            result = await tool._arun("./screenshot.png")
+
+        assert isinstance(result, list)
+        assert result[1]["type"] == "image"
+        notes = [b for b in result[2:] if b.get("type") == "text"]
+        assert (len(notes) == 1) is note_expected
+        if note_expected:
+            assert "Do not read it again" in notes[0]["text"]
+
+    @pytest.mark.asyncio
     async def test_read_file_chunked_converts_image_response(self, mock_project):
         tool = ReadFileChunked(description="Read file content")
         tool.metadata = self.metadata_with_image_response(

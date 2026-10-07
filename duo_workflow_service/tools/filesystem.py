@@ -11,6 +11,7 @@ import structlog
 from langchain_core.tools.base import ToolException
 from pydantic import BaseModel, Field, model_validator
 
+from ai_gateway.models.v2._model_compat import current_model_supports_vision
 from contract import contract_pb2
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.entities.image_response import (
@@ -251,6 +252,12 @@ def _strip_image_note_if_disabled(tool: DuoBaseTool, note: str) -> None:
         tool.description = tool.description.replace(note, "")
 
 
+_NO_VISION_NOTE = (
+    "This model cannot see images. The file was read, but the image will not be shown to it. "
+    "Do not read it again; ask the user to describe it, or to switch to a model with image support."
+)
+
+
 def _image_response_to_blocks_if_enabled(
     image: ImageActionResult, file_path: str
 ) -> str | list[dict[str, Any]]:
@@ -261,7 +268,10 @@ def _image_response_to_blocks_if_enabled(
     is off, or the client sent an image without having declared the capability.
     """
     if _image_support_enabled():
-        return image_response_to_blocks(image, file_path=file_path)
+        blocks = image_response_to_blocks(image, file_path=file_path)
+        if isinstance(blocks, list) and current_model_supports_vision() is False:
+            blocks = [*blocks, {"type": "text", "text": _NO_VISION_NOTE}]
+        return blocks
     if not is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT):
         return (
             f'Cannot read file: "{file_path}" is an image file, and image '
