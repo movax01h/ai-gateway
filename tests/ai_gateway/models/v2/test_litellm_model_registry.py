@@ -111,6 +111,36 @@ class TestSonnet5BedrockMetadata:
         assert registered[model_name]["max_output_tokens"] == 64_000
 
 
+class TestHaiku55BedrockMetadata:
+    """Tests for the manually-registered Claude Haiku 5.5 Bedrock metadata."""
+
+    @pytest.mark.parametrize(
+        "model_name",
+        [
+            "global.anthropic.claude-haiku-5-5",
+            "us.anthropic.claude-haiku-5-5",
+            "eu.anthropic.claude-haiku-5-5",
+            "bedrock/global.anthropic.claude-haiku-5-5",
+        ],
+    )
+    def test_builtin_metadata_has_haiku_5_5_bedrock_keys(self, model_name: str) -> None:
+        """Every Haiku 5.5 Bedrock cross-region inference profile is registered."""
+        assert model_name in BUILTIN_MODEL_METADATA
+        assert (
+            BUILTIN_MODEL_METADATA[model_name]["litellm_provider"] == "bedrock_converse"
+        )
+        assert BUILTIN_MODEL_METADATA[model_name]["supports_tool_choice"] is True
+
+    def test_registered_with_litellm(self, mock_register) -> None:
+        """register_builtin_models passes the Haiku 5.5 Bedrock model string used in models.yml to LiteLLM."""
+        register_builtin_models()
+
+        registered = mock_register.call_args.args[0]
+        model_name = "bedrock/global.anthropic.claude-haiku-5-5"
+        assert registered[model_name]["max_input_tokens"] == 1_000_000
+        assert registered[model_name]["max_output_tokens"] == 128_000
+
+
 class TestLoadExternalModelMetadata:
     """Tests for ``load_external_model_metadata``."""
 

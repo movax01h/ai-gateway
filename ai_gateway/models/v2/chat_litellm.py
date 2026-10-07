@@ -136,8 +136,9 @@ def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
 
 
 def _remove_deprecated_temperature_parameters(kwargs: Dict[str, Any]) -> None:
-    """Claude Opus 4.7/4.8, Sonnet 5, Fable 5, and Mythos 5 deprecated the temperature parameter. Passing it causes a
-    Bad Request response, so we drop it to avoid that.
+    """Claude Opus 4.7/4.8, Sonnet 5, Fable 5, Mythos 5, and Haiku 5.5 deprecated the temperature parameter.
+
+    Passing it causes a Bad Request response, so we drop it to avoid that.
 
     https://gitlab.com/gitlab-org/gitlab/-/work_items/601614
     """
@@ -169,6 +170,9 @@ def _is_deprecated_temperature_model(model: str) -> bool:
             "fable_5",
             "mythos-5",
             "mythos_5",
+            "haiku-5-5",
+            "haiku_5_5",
+            "haiku-5.5",
         )
     )
 

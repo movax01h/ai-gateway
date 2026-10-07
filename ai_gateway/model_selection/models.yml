@@ -770,6 +770,52 @@ models:
       max_tokens: 64_000
       max_retries: 1
 
+  - name: "Claude Haiku 5.5"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_haiku_5_5"
+    description: "Anthropic's fastest model, for high-volume, latency-sensitive tasks such as classification, extraction, and routing."
+    cost_indicator: "$"
+    max_context_tokens: 1_000_000  # https://platform.claude.com/docs/en/models/haiku-5-5/overview
+    proxy_provider: anthropic
+    model_class_provider: anthropic
+    family:
+      - claude
+    params:
+      model: "claude-haiku-5-5"
+      max_tokens: 128_000
+
+  - name: "Claude Haiku 5.5"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "claude_haiku_5_5_vertex"
+    description: "Anthropic's fastest model, for high-volume, latency-sensitive tasks such as classification, extraction, and routing."
+    cost_indicator: "$"
+    max_context_tokens: 1_000_000
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: "claude-haiku-5-5"
+      custom_llm_provider: "vertex_ai"
+      max_tokens: 128_000
+      max_retries: 1
+    prompt_params:
+      vertex_location: global
+
+  - name: "Claude Haiku 5.5"
+    provider: "Bedrock"
+    gitlab_identifier: "claude_haiku_5_5_bedrock"
+    description: "Anthropic's fastest model, for high-volume, latency-sensitive tasks such as classification, extraction, and routing."
+    cost_indicator: "$"
+    max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-haiku-5-5
+    model_class_provider: litellm
+    family:
+      - claude
+    params:
+      model: bedrock/global.anthropic.claude-haiku-5-5
+      custom_llm_provider: bedrock
+      max_tokens: 128_000
+      max_retries: 1
+
   - name: "Gemini 3.1 Pro Preview"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_1_pro_preview_vertex"

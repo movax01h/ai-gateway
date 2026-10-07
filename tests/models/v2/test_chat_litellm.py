@@ -1138,6 +1138,9 @@ class TestDeprecatedTemperatureRemoval:
             "anthropic.claude-fable-5",
             "claude-mythos-5",
             "anthropic.claude-mythos-5",
+            "claude-haiku-5-5",
+            "claude_haiku_5_5",
+            "bedrock/global.anthropic.claude-haiku-5-5",
         ],
     )
     def test_removes_temperature(self, model):
@@ -1167,6 +1170,11 @@ class TestDeprecatedTemperatureRemoval:
             "claude-opus-4.6",
             "claude-3-5-sonnet",
             "claude-sonnet-4-5",
+            "claude-haiku-4-5",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-4-5@20251001",
+            "bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "claude-3-5-haiku-20241022",
             "gpt-5",
         ],
     )
