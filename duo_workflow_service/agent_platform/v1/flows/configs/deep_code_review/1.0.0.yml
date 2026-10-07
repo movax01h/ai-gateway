@@ -15,7 +15,7 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:goal"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
       # The reviewer reads files on demand; preloaded contents were ~68% of the
       # payload, re-billed every cycle, with no recall gain.
@@ -46,7 +46,7 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:goal"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
       - from: "context:inputs.code_review_context.duo_code_review_bot_name"
         as: "only_from_author"
@@ -69,7 +69,7 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:goal"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
       - from: "context:fetch_mr_data.tool_responses"
         as: "mr_data"
@@ -110,7 +110,7 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:goal"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
       - from: "context:review.final_answer.findings"
         as: "findings"
@@ -163,3 +163,10 @@ flow:
           type: string
           description: Head commit SHA of the merge request at the previous review
           optional: true
+    # Built by Rails from the merge request the session is linked to.
+    - category: agent_platform_resource_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        merge_request_id:
+          type: string
+          description: IID of the merge request under review.
