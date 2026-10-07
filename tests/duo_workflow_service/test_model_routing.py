@@ -119,7 +119,6 @@ async def test_keywords_are_a_hint_to_the_classifier(
         outcome=RoutingOutcome.ROUTED,
         gitlab_identifier="claude_sonnet_4_6_vertex",
         classifier_identifier="claude_haiku_4_5_20251001_vertex",
-        params=decision.params,
     )
     inputs = ainvoke.call_args.args[0]
     assert (inputs["hint_tag"], inputs["hint_keyword"]) == (hint_tag, hint_keyword)
@@ -304,14 +303,12 @@ def test_track_routing_decision_emits_one_log_line_and_one_event(
         outcome=outcome,
         gitlab_identifier="claude_haiku_4_5_20251001_vertex",
         classifier_identifier="claude_haiku_4_5_20251001_vertex",
-        params={"temperature": 0.0},
     )
     extra = {
         "feature_setting": "duo_developer",
         "matched_keywords": ["typo", "readme"],
         "gitlab_identifier": "claude_haiku_4_5_20251001_vertex",
         "classifier_identifier": "claude_haiku_4_5_20251001_vertex",
-        "params": {"temperature": 0.0},
     }
     internal_event_client = Mock(spec=InternalEventsClient)
 
@@ -349,7 +346,6 @@ def test_tracking_error_does_not_raise_and_logs():
         outcome=RoutingOutcome.ROUTED,
         gitlab_identifier="claude_haiku_4_5_20251001_vertex",
         classifier_identifier="claude_haiku_4_5_20251001_vertex",
-        params={},
     )
     internal_event_client = Mock(spec=InternalEventsClient)
     internal_event_client.track_event.side_effect = RuntimeError("boom")

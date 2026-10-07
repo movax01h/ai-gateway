@@ -9,13 +9,12 @@ import asyncio
 import json
 import time
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Optional
 
 import structlog
 from gitlab_cloud_connector import CloudConnectorUser
 from pydantic import BaseModel
 
-from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.prompts.base import BasePromptRegistry
 from duo_workflow_service.gitlab.gitlab_api import Project, extract_id_from_global_id
@@ -37,10 +36,6 @@ CLASSIFIER_PROMPT_ID = "classify_goal_tier"
 CLASSIFIER_TIMEOUT_S = 3.0
 CLASSIFIER_MAX_CHARS = 6000
 RESOURCE_PATHS = {"work_item": "issues", "merge_request": "merge_requests"}
-
-# Sampling parameters reported on the routing event. Other model params (model name, max_tokens, retries, headers)
-# don't vary with the routing decision.
-_REPORTED_PARAMS = ("temperature", "top_p", "top_k")
 
 
 class RoutingOutcome(StrEnum):
@@ -72,7 +67,6 @@ class RoutingDecision(BaseModel):
             back.
         classifier_identifier: The model that classified the task and picked `tag` (the `classifier` tag's model, or
             the `small` tag's when there is none).
-        params: Sampling parameters (`temperature`, `top_p`, `top_k`) of that model.
     """
 
     feature_setting: str
@@ -81,16 +75,6 @@ class RoutingDecision(BaseModel):
     outcome: RoutingOutcome
     gitlab_identifier: str
     classifier_identifier: str
-    params: dict[str, Any]
-
-
-def _sampling_params(metadata: TypeModelMetadata) -> dict[str, Any]:
-    params = metadata.llm_definition.params
-    return {
-        name: getattr(params, name)
-        for name in _REPORTED_PARAMS
-        if getattr(params, name, None) is not None
-    }
 
 
 async def route_default_model(
@@ -229,7 +213,6 @@ async def route_default_model_by_classifier(
         outcome=outcome,
         gitlab_identifier=served.llm_definition.gitlab_identifier,
         classifier_identifier=classifier_model.llm_definition.gitlab_identifier,
-        params=_sampling_params(served),
     )
 
 
