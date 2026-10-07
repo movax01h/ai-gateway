@@ -82,6 +82,68 @@ def config_values_fixture():
     }
 
 
+class TestUserAccessTokenInstanceIdSelfManaged:
+    """The minted token carries the verified instance ID, since its own ``sub`` is the user."""
+
+    @staticmethod
+    def _mint(mock_client: TestClient):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-Gitlab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "self-managed",
+        }
+        response = mock_client.post("/code/user_access_token", headers=headers)
+        assert response.status_code == status.HTTP_200_OK
+        return jwt.decode(
+            response.json()["token"],
+            TEST_PUBLIC_KEY,
+            audience="gitlab-ai-gateway",
+            algorithms=CompositeProvider.SUPPORTED_ALGORITHMS,
+        )
+
+    class TestInstanceSignedToken:
+        @pytest.fixture(name="auth_user")
+        def auth_user_fixture(self):
+            claims = UserClaims(
+                scopes=["complete_code", "ai_gateway_model_provider_proxy"],
+                gitlab_realm="self-managed",
+                issuer="https://gitlab.example.com",
+                subject="instance-uuid",
+                gitlab_instance_id="1234",
+            )
+            return CloudConnectorUser(authenticated=True, claims=claims)
+
+        def test_instance_uuid_becomes_gitlab_instance_uid(
+            self, mock_client: TestClient, mock_track_internal_event
+        ):
+            decoded = TestUserAccessTokenInstanceIdSelfManaged._mint(mock_client)
+
+            assert decoded["sub"] == GLOBAL_USER_ID
+            assert decoded["gitlab_instance_uid"] == "instance-uuid"
+
+    class TestCustomersDotToken:
+        @pytest.fixture(name="auth_user")
+        def auth_user_fixture(self):
+            claims = UserClaims(
+                scopes=["complete_code", "ai_gateway_model_provider_proxy"],
+                gitlab_realm="self-managed",
+                issuer="customers.gitlab.com",
+                subject="cdot-subject",
+                gitlab_instance_uid="cdot-uid",
+                gitlab_instance_id="1234",
+            )
+            return CloudConnectorUser(authenticated=True, claims=claims)
+
+        def test_cdot_assigned_uid_is_kept(
+            self, mock_client: TestClient, mock_track_internal_event
+        ):
+            decoded = TestUserAccessTokenInstanceIdSelfManaged._mint(mock_client)
+
+            assert decoded["gitlab_instance_uid"] == "cdot-uid"
+
+
 class TestUserAccessTokenSuccessSelfManaged:
     @pytest.fixture(name="auth_user")
     def auth_user_fixture(self):

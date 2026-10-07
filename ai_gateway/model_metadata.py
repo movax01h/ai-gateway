@@ -10,15 +10,38 @@ from pydantic import (
     Field,
     StringConstraints,
     UrlConstraints,
+    field_validator,
+    model_validator,
 )
+from pydantic_core import PydanticCustomError
 
+from ai_gateway.config import get_config
 from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
 from ai_gateway.model_selection.models import ModelClassProvider
+from lib.aws_assume_role import (
+    IAM_ROLE_ARN_MAX_LENGTH,
+    AssumeRoleError,
+    get_assumed_role_credentials,
+    validate_external_id,
+    validate_iam_role_arn,
+)
 from lib.context import StarletteUser
+from lib.jwt import trusted_instance_id
 
 log = structlog.stdlib.get_logger("model_metadata")
 
 PROVIDERS_WITHOUT_API_BASE = frozenset({"bedrock", "vertex_ai"})
+BEDROCK_PROVIDERS = frozenset({"bedrock", "bedrock_converse"})
+
+
+IAM_ROLE_USAGE_ERROR = "iam_role_usage"
+
+
+class IamRoleNotAllowedError(ValueError):
+    """``iam_role`` was sent to a gateway that does not serve custom models."""
+
+    def __init__(self) -> None:
+        super().__init__("iam_role is only supported when custom models are enabled")
 
 
 class BaseModelMetadata(BaseModel):
@@ -95,6 +118,40 @@ class ModelMetadata(BaseModelMetadata):
     endpoint: Optional[Annotated[AnyUrl, UrlConstraints(max_length=255)]] = None
     api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
     identifier: Optional[Annotated[str, StringConstraints(max_length=1000)]] = None
+    iam_role: Optional[
+        Annotated[str, StringConstraints(max_length=IAM_ROLE_ARN_MAX_LENGTH)]
+    ] = Field(
+        default=None,
+        description=(
+            "IAM role ARN to assume (STS AssumeRole). Only valid for Amazon Bedrock models, "
+            "and cannot be combined with `api_key`."
+        ),
+    )
+
+    @field_validator("iam_role")
+    @classmethod
+    def _validate_iam_role(cls, value: Optional[str]) -> Optional[str]:
+        return validate_iam_role_arn(value) if value else None
+
+    @model_validator(mode="after")
+    def _validate_iam_role_usage(self) -> "ModelMetadata":
+        if not self.iam_role:
+            return self
+        if self.api_key:
+            raise PydanticCustomError(
+                IAM_ROLE_USAGE_ERROR, "iam_role and api_key cannot both be set"
+            )
+        if self._resolved_provider() not in BEDROCK_PROVIDERS:
+            raise PydanticCustomError(
+                IAM_ROLE_USAGE_ERROR, "iam_role is only supported for Bedrock models"
+            )
+        return self
+
+    def _resolved_provider(self) -> Optional[str]:
+        if self.identifier:
+            provider, _, model_name = self.identifier.partition("/")
+            return provider if model_name else "custom_openai"
+        return getattr(self.llm_definition.params, "custom_llm_provider", None)
 
     @override
     def to_params(self) -> Dict[str, Any]:
@@ -141,7 +198,46 @@ class ModelMetadata(BaseModelMetadata):
         elif params.get("custom_llm_provider", "") == "custom_openai":
             params["api_key"] = "dummy_key"
 
+        effective_provider = params.get("custom_llm_provider") or managed_provider
+        if effective_provider in BEDROCK_PROVIDERS:
+            self._add_bedrock_credentials(params)
+
         return params
+
+    def _external_id_for(self, iam_role: str) -> str:
+        """Derive the STS ExternalId from the verified JWT's instance identity, never from the request body."""
+        claims = getattr(self._user, "claims", None)
+        if getattr(claims, "gitlab_realm", None) == "saas":
+            raise AssumeRoleError(
+                "Assuming a request-supplied IAM role is not supported on GitLab.com",
+                role_arn=iam_role,
+                error_code="UnsupportedRealm",
+            )
+        instance_id = trusted_instance_id(claims)
+        if not instance_id:
+            raise AssumeRoleError(
+                "Cannot assume the requested IAM role without a verified GitLab instance ID",
+                role_arn=iam_role,
+                error_code="MissingInstanceId",
+            )
+        try:
+            return validate_external_id(instance_id)
+        except ValueError as exc:
+            raise AssumeRoleError(
+                "Cannot assume the requested IAM role: the GitLab instance ID is not a valid ExternalId",
+                role_arn=iam_role,
+                error_code="InvalidInstanceId",
+            ) from exc
+
+    def _add_bedrock_credentials(self, params: Dict[str, Any]) -> None:
+        if not self.iam_role:
+            return
+
+        credentials = get_assumed_role_credentials(
+            self.iam_role,
+            external_id=self._external_id_for(self.iam_role),
+        )
+        params.update(credentials.to_litellm_params())
 
 
 TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | FireworksModelMetadata
@@ -424,6 +520,9 @@ def create_model_metadata(
 ) -> TypeModelMetadata:
     if not data or "provider" not in data:
         raise ValueError("Argument error: provider must be present.")
+
+    if data.get("iam_role") and not get_config().custom_models.enabled:
+        raise IamRoleNotAllowedError()
 
     configs = ModelSelectionConfig.instance()
     data.pop("is_custom_model", None)

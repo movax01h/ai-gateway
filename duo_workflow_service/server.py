@@ -150,6 +150,7 @@ from lib.internal_events.context import (
     merge_event_context_extra,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
+from lib.jwt import instance_uid_claim
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
@@ -1087,9 +1088,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         extra_claims = {}
 
         if hasattr(user, "claims") and user.claims:
-            extra_claims = {
-                "gitlab_instance_uid": getattr(user.claims, "gitlab_instance_uid", None)
-            }
+            extra_claims = instance_uid_claim(user.claims)
             if user.claims.extra:
                 incoming_extra = dict(user.claims.extra)
                 for claim in _PROPAGATED_EXTRA_CLAIMS:

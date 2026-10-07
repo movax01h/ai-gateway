@@ -15,6 +15,7 @@ from structlog.testing import capture_logs
 
 from ai_gateway.api import create_fast_api_server, server
 from ai_gateway.api.server import (
+    assume_role_exception_handler,
     custom_http_exception_handler,
     model_api_exception_handler,
     setup_custom_exception_handlers,
@@ -31,6 +32,7 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.structured_logging import setup_logging
+from lib.aws_assume_role import AssumeRoleError
 
 
 def _flatten_routes(app: FastAPI) -> list[RouteContext]:
@@ -395,6 +397,7 @@ def test_setup_custom_exception_handlers(app, monkeypatch):
     assert mock_add_exception_handler.mock_calls == [
         mock.call(StarletteHTTPException, custom_http_exception_handler),
         mock.call(ModelAPIError, model_api_exception_handler),
+        mock.call(AssumeRoleError, assume_role_exception_handler),
         mock.call(RequestValidationError, validation_exception_handler),
     ]
 
@@ -431,6 +434,26 @@ def test_model_exception_handler(app):
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Inference failed"}
+
+
+def test_assume_role_exception_handler(app):
+    @app.get("/test")
+    def test_route():
+        raise AssumeRoleError(
+            "Failed to assume IAM role arn:aws:iam::123456789012:role/r: AccessDenied",
+            role_arn="arn:aws:iam::123456789012:role/r",
+            error_code="AccessDenied",
+        )
+
+    setup_custom_exception_handlers(app)
+
+    response = TestClient(app).get("/test")
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Failed to assume the requested IAM role: AccessDenied"
+    }
+    assert "123456789012" not in response.text
 
 
 def test_model_exception_handler_with_429_error(app):

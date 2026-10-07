@@ -1,5 +1,6 @@
 # JWT claim parsing shared between ai_gateway and duo_workflow_service
 
+from lib.jwt.instance_id import instance_uid_claim, trusted_instance_id
 from lib.jwt.root_namespace import (
     GITLAB_ROOT_NAMESPACE_ID_CLAIM,
     parse_root_namespace_id,
@@ -9,7 +10,9 @@ from lib.jwt.root_namespace import (
 
 __all__ = [
     "GITLAB_ROOT_NAMESPACE_ID_CLAIM",
+    "instance_uid_claim",
     "parse_root_namespace_id",
     "root_namespace_id_from_claims_extra",
     "root_namespace_id_from_header",
+    "trusted_instance_id",
 ]
