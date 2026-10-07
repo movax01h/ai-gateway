@@ -1,5 +1,8 @@
 # pylint: disable=too-many-lines
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Annotated, Literal
 from unittest.mock import patch
@@ -1413,3 +1416,281 @@ class TestSastResolvesTargetBranchBeforeGitOperations:
             "from": self.BRANCH_SOURCE,
             "as": input_alias,
         } in component["inputs"]
+
+
+class TestSastHidesTheSandboxsOwnFiles:
+    """Regression guard for https://gitlab.com/gitlab-org/gitlab/-/work_items/629525.
+
+    The flow runs under ``@anthropic-ai/sandbox-runtime``, which protects a set of
+    sensitive filenames by mounting read-only ``/dev/null`` or empty directories over
+    them. The paths are relative and the working directory is the checkout, so they
+    land in the repository: untracked, unremovable ("Device or resource busy") and
+    unstageable ("can only add regular files"). ``git add .`` exited 128 on one, the
+    commit exited 1 with the fix left unstaged, and because a non-zero exit returns as
+    ordinary text rather than raising, both were recorded as successes. The flow
+    pushed an empty branch and opened a merge request asserting the fix.
+
+    Taking them out of git's view is what makes every later step's reading of the
+    working tree honest again, ``validate_fix_has_changes`` included.
+    """
+
+    FLOW = "resolve_sast_vulnerability"
+    COMPONENT = "exclude_pre_existing_files"
+    # The executor wraps output as "Exit code: N\n<output>", so a clean exit and the
+    # step's own marker are both required before the flow may continue.
+    ROUTE_KEY = "Exit code: 0\nexcluded"
+    # Named only so the tests can assert the flow does NOT hardcode them.
+    SANDBOX_FILENAMES = (
+        ".bashrc",
+        ".bash_profile",
+        ".zshrc",
+        ".gitconfig",
+        ".gitmodules",
+        ".ripgreprc",
+        ".mcp.json",
+        ".vscode",
+        ".idea",
+        ".claude",
+    )
+
+    def _versions(self):
+        """Versions carrying the step, discovered rather than listed.
+
+        A hardcoded list would silently stop covering a version added later.
+        """
+        config_dir = FlowConfig.DIRECTORY_PATH / self.FLOW
+        return [
+            version
+            for version in sorted(path.stem for path in config_dir.glob("*.yml"))
+            if any(
+                c["name"] == self.COMPONENT
+                for c in FlowConfig.from_yaml_config(self.FLOW, version).components
+            )
+        ]
+
+    def _config(self, version):
+        return FlowConfig.from_yaml_config(self.FLOW, version)
+
+    def _component(self, version):
+        return next(
+            c for c in self._config(version).components if c["name"] == self.COMPONENT
+        )
+
+    @staticmethod
+    def _targets(router):
+        if "to" in router:
+            return {router["to"]}
+        return set(router["condition"]["routes"].values())
+
+    def _command(self, version):
+        return next(
+            step_input["from"]
+            for step_input in self._component(version)["inputs"]
+            if step_input["as"] == "command"
+        )
+
+    def test_at_least_one_version_hides_them(self):
+        """Stops every guard below from passing by having nothing to check."""
+        assert self._versions(), (
+            "no shipped version hides the sandbox's files, so nothing stops them "
+            "reaching `git add` and leaving the fix unstaged"
+        )
+
+    def test_it_runs_before_the_fix_and_cannot_fail_open(self):
+        """Recorded after the fix, the fix itself would count as pre-existing.
+
+        And everything downstream reads git's view of the tree, so a failure here has to stop the flow rather than let
+        the sandbox's files reach a commit.
+        """
+        for version in self._versions():
+            config = self._config(version)
+
+            # Component order in the YAML is declaration order, not execution order,
+            # so reachability has to come off the routers: nothing may enter
+            # `execute_fix` except this step.
+            feeders = {
+                router["from"]
+                for router in config.routers
+                if "execute_fix" in self._targets(router)
+            }
+            assert feeders == {self.COMPONENT}, (
+                f"{version}: {sorted(feeders)} can reach execute_fix, so the fix can "
+                "run while the sandbox's files are still visible to git"
+            )
+
+            component = self._component(version)
+            assert component["type"] == "DeterministicStepComponent", version
+            assert component["tool_name"] == "run_command", version
+            for step_input in component.get("inputs", []):
+                assert step_input.get("literal"), version
+
+            router = next(r for r in config.routers if r["from"] == self.COMPONENT)
+            assert router["condition"]["input"] == (
+                f"context:{self.COMPONENT}.tool_responses"
+            ), (
+                f"{version}: routing on execution_result would gate on whether the "
+                "tool raised, and DeterministicStepNode reports success for a command "
+                "that merely exits non-zero, which is this issue's own failure mode"
+            )
+            assert router["condition"]["routes"][self.ROUTE_KEY] == "execute_fix", (
+                version
+            )
+            assert router["condition"]["routes"][BaseRouter.DEFAULT_ROUTE] == "end", (
+                version
+            )
+
+    def test_it_hides_them_from_git_not_from_the_project(self):
+        """``.gitignore`` is a tracked file and would land in the commit.
+
+        The list is derived rather than written down: the sandbox's own list is
+        versioned in the runtime image and was bumped three times in one month, so a
+        hardcoded copy goes stale silently and fails the way the original bug failed.
+        The block is delimited and rewritten because local clones are reused between
+        runs, and a blind append would grow the file every time.
+        """
+        for version in self._versions():
+            command = self._command(version)
+
+            assert ".git/info/exclude" in command, version
+            assert ".gitignore" not in command, (
+                f"{version}: writing .gitignore would commit the sandbox's filenames "
+                "into the user's repository"
+            )
+            assert "ls-files --others --exclude-standard" in command, (
+                f"{version}: the ignore list is not derived from the working tree"
+            )
+            for filename in self.SANDBOX_FILENAMES:
+                assert filename not in command, (
+                    f"{version}: {filename} is hardcoded; the next sandbox release "
+                    "that adds a filename silently stops being handled"
+                )
+            assert "/^# duo-flow-begin$/,/^# duo-flow-end$/d" in command, (
+                f"{version}: the previous block is never stripped, so every run on a "
+                "reused clone appends another copy"
+            )
+            assert command.startswith("set -e;"), (
+                f"{version}: without it the command runs on past a failure and still "
+                "reaches its final printf, reporting the route key either way"
+            )
+            assert command.count("ls-files --others --exclude-standard") >= 2, (
+                f"{version}: the step never re-reads the tree, so an entry that was "
+                "written but does not match still reports success"
+            )
+
+    @staticmethod
+    def _git(repo, *args):
+        subprocess.run(
+            ["git", "-c", "commit.gpgsign=false", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+
+    def _repo(self, tmp_path):
+        """A checkout holding a tracked dotfile, as a real project would."""
+        repo = tmp_path / "checkout"
+        repo.mkdir(parents=True)
+        self._git(repo, "init", "--quiet", ".")
+        self._git(repo, "config", "user.email", "test@example.com")
+        self._git(repo, "config", "user.name", "test")
+        (repo / "app.py").write_text("vulnerable\n")
+        (repo / ".gitlab-ci.yml").write_text("stages: [test]\n")
+        self._git(repo, "add", "--all")
+        self._git(repo, "commit", "--quiet", "--message", "base")
+        return repo
+
+    # Built from the real binaries' locations rather than the inherited PATH, so the
+    # shim takes precedence over git without the test reading the environment.
+    _COREUTILS = ("sh", "sed", "mkdir", "touch", "mv")
+
+    def _run(self, command, repo, shim=None):
+        env = None
+        if shim is not None:
+            real = sorted(
+                {str(Path(shutil.which(tool)).parent) for tool in self._COREUTILS}
+            )
+            env = {"PATH": os.pathsep.join([str(shim), *real]), "HOME": str(repo)}
+        return subprocess.run(
+            ["sh", "-c", command],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+            env=env,
+        )
+
+    def _untracked(self, repo):
+        return subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout.split()
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs a real git")
+    def test_it_leaves_git_blind_to_everything_that_was_already_there(self, tmp_path):
+        """The outcome, not the wiring: `git add .` must stage the fix and nothing else.
+
+        ``.weird[1].json`` is here because the paths are written into a gitignore
+        file, where ``[`` is a character class. An unescaped entry is still written
+        successfully and still leaves the file visible, so only checking the
+        outcome catches it.
+        """
+        for version in self._versions():
+            repo = self._repo(tmp_path / version)
+            for name in (".bashrc", ".zshrc", ".weird[1].json"):
+                (repo / name).write_text("sandbox\n")
+            (repo / ".claude").mkdir()
+            (repo / ".claude" / "agents").write_text("sandbox\n")
+
+            result = self._run(self._command(version), repo)
+
+            assert result.returncode == 0, f"{version}: {result.stderr}"
+            assert result.stdout == "excluded", version
+            assert self._untracked(repo) == [], (
+                f"{version}: the sandbox's files are still visible to git, so "
+                "`git add .` will fail on them and leave the fix unstaged"
+            )
+
+            (repo / "app.py").write_text("fixed\n")
+            (repo / ".gitlab-ci.yml").write_text("stages: [test, sast]\n")
+            (repo / "helper.py").write_text("new\n")
+            self._git(repo, "add", ".")
+            staged = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            ).stdout.split()
+            assert sorted(staged) == [".gitlab-ci.yml", "app.py", "helper.py"], version
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs a real git")
+    def test_it_reports_failure_rather_than_claiming_success(self, tmp_path):
+        """A command that prints its marker anyway is indistinguishable from one that worked.
+
+        The router can only be as honest as the exit code and the output it reads, and
+        ``DeterministicStepNode`` will not notice a non-zero exit on its own.
+        """
+        for version in self._versions():
+            repo = self._repo(tmp_path / version)
+            failing_bin = tmp_path / version / "bin"
+            failing_bin.mkdir(parents=True)
+            broken_git = failing_bin / "git"
+            broken_git.write_text("#!/bin/sh\nexit 7\n")
+            broken_git.chmod(0o755)
+
+            result = self._run(self._command(version), repo, shim=str(failing_bin))
+
+            assert result.returncode != 0, (
+                f"{version}: a broken git still exits 0, so the router sees a clean "
+                "run and the flow continues with the sandbox's files in the tree"
+            )
+            assert "excluded" not in result.stdout, (
+                f"{version}: the step printed its route key despite failing"
+            )
