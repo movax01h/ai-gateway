@@ -92,16 +92,22 @@ def severity_counts(findings: List[Dict[str, Any]]) -> Dict[str, int]:
     return {severity: counts[severity] for severity in SEVERITY_ORDER}
 
 
+def _clean_narrative(narrative: Optional[str]) -> str:
+    """Strip the reviewer's stray tool-call tags from the end, then repair escaped bullet breaks."""
+    text = (narrative or "").strip()
+    while text.endswith(("</summary>", "</invoke>")):
+        text = text[: text.rindex("</")].rstrip()
+    return _ESCAPED_BULLET_BREAK.sub(lambda m: m.group().replace("\\n", "\n"), text)
+
+
 def build_summary(findings: List[Dict[str, Any]], narrative: Optional[str]) -> str:
     """Compose the reader-facing overview: the reviewer's narrative, then computed counts.
 
-    The narrative is the reviewer's own judgment, carried verbatim apart from repairing escaped bullet breaks. Every
-    number and the per-severity breakdown are computed here from the findings that will actually be posted, so the
-    overview cannot contradict the comments it sits above.
+    The narrative is the reviewer's own judgment, carried verbatim apart from stripping trailing tool-call markup and
+    repairing escaped bullet breaks. Every number and the per-severity breakdown are computed here from the findings
+    that will actually be posted, so the overview cannot contradict the comments it sits above.
     """
-    text = _ESCAPED_BULLET_BREAK.sub(
-        lambda m: m.group().replace("\\n", "\n"), (narrative or "").strip()
-    )
+    text = _clean_narrative(narrative)
     if not findings:
         return text or "No issues were raised in this review."
 
