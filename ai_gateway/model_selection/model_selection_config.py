@@ -772,9 +772,7 @@ class ModelSelectionConfig:
     def all_restricted_flows(self) -> frozenset[str]:
         """Return every flow id that some restricted model is restricted to."""
         return frozenset(
-            flow
-            for llm_def in self._restricted_definitions()
-            for flow in llm_def.restricted_to_flows
+            flow for _, flows in self._restricted_definitions() for flow in flows
         )
 
     def get_model(self, model_id: str) -> LLMDefinition:

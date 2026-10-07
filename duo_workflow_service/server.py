@@ -571,7 +571,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     f"Unauthorized to execute {workflow_definition or 'workflow'}",
                 )
 
-        # Restricted models (`restricted_to_flows`) are usable only by the flows they are
+        # Restricted models (model_restrictions.yml) are usable only by the flows they are
         # restricted to, on a signed flow claim; no debug bypass. Prompt construction
         # enforces this for every model; the request's default model is checked here
         # so a denied run fails before any workflow setup.
