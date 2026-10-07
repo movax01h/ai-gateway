@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import litellm
 import pytest
+from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -1970,3 +1971,135 @@ class TestReasoningEffort:
             "foo",
             "reasoning_effort",
         ]
+
+
+class TestNonStreamedModelName:
+    """The non-streamed result names the model the request was sent with, as the streamed path does."""
+
+    @staticmethod
+    def _response():
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hi"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+        }
+
+    @pytest.mark.parametrize(
+        ("init_kwargs", "request_kwargs", "expected_model"),
+        [
+            ({"model": "constructor-model"}, {}, "constructor-model"),
+            (
+                {"model": "constructor-model", "model_name": "named-model"},
+                {},
+                "named-model",
+            ),
+            ({}, {"model": "request-model"}, "request-model"),
+            (
+                {"model": "constructor-model", "model_name": "named-model"},
+                {"model": "request-model"},
+                "request-model",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_agenerate_names_the_requested_model(
+        self, init_kwargs, request_kwargs, expected_model
+    ):
+        chat = ChatLiteLLM(custom_llm_provider="openai", **init_kwargs)
+
+        with patch(
+            "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.acompletion_with_retry",
+            new=AsyncMock(return_value=self._response()),
+        ):
+            result = await chat._agenerate(
+                messages=[HumanMessage(content="Hello")], **request_kwargs
+            )
+
+        message = result.generations[0].message
+        assert message.response_metadata["model_name"] == expected_model
+        assert result.llm_output["model"] == expected_model
+
+    @pytest.mark.parametrize(
+        ("init_kwargs", "request_kwargs", "expected_model"),
+        [
+            ({"model": "constructor-model"}, {}, "constructor-model"),
+            ({}, {"model": "request-model"}, "request-model"),
+        ],
+    )
+    def test_generate_names_the_requested_model(
+        self, init_kwargs, request_kwargs, expected_model
+    ):
+        chat = ChatLiteLLM(custom_llm_provider="openai", **init_kwargs)
+
+        with patch(
+            "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.completion_with_retry",
+            new=lambda *_args, **_kwargs: self._response(),
+        ):
+            result = chat._generate(
+                messages=[HumanMessage(content="Hello")], **request_kwargs
+            )
+
+        message = result.generations[0].message
+        assert message.response_metadata["model_name"] == expected_model
+        assert result.llm_output["model"] == expected_model
+
+    @pytest.mark.asyncio
+    async def test_usage_is_keyed_by_the_requested_model(self):
+        chat = ChatLiteLLM(custom_llm_provider="openai")
+
+        with patch(
+            "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.acompletion_with_retry",
+            new=AsyncMock(return_value=self._response()),
+        ):
+            with get_usage_metadata_callback() as usage_callback:
+                await chat.ainvoke(
+                    [HumanMessage(content="Hello")], model="request-model", stream=False
+                )
+
+        assert usage_callback.usage_metadata == {
+            "request-model": UsageMetadata(
+                input_tokens=7, output_tokens=3, total_tokens=10
+            )
+        }
+
+    @pytest.mark.parametrize(
+        ("init_kwargs", "expected_model"),
+        [
+            ({"model": "constructor-model"}, "constructor-model"),
+            (
+                {"model": "constructor-model", "model_name": "named-model"},
+                "named-model",
+            ),
+        ],
+    )
+    def test_create_chat_result_without_params_falls_back_to_the_instance_model(
+        self, init_kwargs, expected_model
+    ):
+        chat = ChatLiteLLM(custom_llm_provider="openai", **init_kwargs)
+
+        result = chat._create_chat_result(self._response())
+
+        assert (
+            result.generations[0].message.response_metadata["model_name"]
+            == expected_model
+        )
+        assert result.llm_output["model"] == expected_model
+
+    def test_create_chat_result_falls_back_when_the_request_model_is_empty(self):
+        chat = ChatLiteLLM(
+            model="constructor-model",
+            model_name="named-model",
+            custom_llm_provider="openai",
+        )
+
+        result = chat._create_chat_result(self._response(), {"model": None})
+
+        assert (
+            result.generations[0].message.response_metadata["model_name"]
+            == "named-model"
+        )
+        assert result.llm_output["model"] == "named-model"

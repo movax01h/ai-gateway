@@ -485,7 +485,7 @@ async def code_generation(
             "Executing code generation with prompt registry",
             prompt_name=prompt.name,
             prompt_model_class=prompt.model.__class__.__name__,
-            prompt_model_name=prompt.model_name,
+            prompt_model_name=prompt.reported_model_name,
         )
     else:
         # If model_provider is specified in payload but no prompt_id, use it to override model_metadata
@@ -521,7 +521,7 @@ async def code_generation(
             "Executing code generation with prompt registry (legacy path)",
             prompt_name=prompt.name,
             prompt_model_class=prompt.model.__class__.__name__,
-            prompt_model_name=prompt.model_name,
+            prompt_model_name=prompt.reported_model_name,
         )
 
     _watch_code_suggestion_event(snowplow_event_context)

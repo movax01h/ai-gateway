@@ -219,7 +219,7 @@ class BaseTestCodeEmbeddings:
         response_json = response.json()
         assert response_json["model"] == {
             "engine": "litellm_embedding",
-            "name": "embedding",
+            "name": expected_llm_model,
             "identifier": model_identifier,
         }
         assert response_json["predictions"] == mock_litellm_aembedding_response.data

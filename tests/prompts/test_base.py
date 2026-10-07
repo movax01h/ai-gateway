@@ -39,7 +39,10 @@ from structlog.testing import capture_logs
 from tenacity import RetryCallState
 
 from ai_gateway.config import ConfigModelLimits
-from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from ai_gateway.instrumentators.model_requests import (
+    INFERENCE_COUNTER,
+    ModelRequestInstrumentator,
+)
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     FireworksModelMetadata,
@@ -1897,6 +1900,89 @@ configurable_unit_primitives:
             assert anthropic_only_kwarg in bind_kwargs
         else:
             assert anthropic_only_kwarg not in bind_kwargs
+
+
+def _requests_for(model_name: str) -> float:
+    return sum(
+        sample.value
+        for metric in INFERENCE_COUNTER.collect()
+        for sample in metric.samples
+        if sample.name == "model_inferences_total"
+        and sample.labels["model_name"] == model_name
+    )
+
+
+class TestPromptRequestedModel:
+    @pytest.fixture(name="is_custom_model")
+    def is_custom_model_fixture(self):
+        return True
+
+    @pytest.fixture(name="identifier")
+    def identifier_fixture(self):
+        return "custom_openai/requested-model"
+
+    @pytest.fixture(name="model_metadata")
+    def model_metadata_fixture(
+        self,
+        llm_definition: ChatLiteLLMDefinition,
+        is_custom_model: bool,
+        identifier: Optional[str],
+    ):
+        return ModelMetadata(
+            provider="openai",
+            name="mistral",
+            llm_definition=llm_definition,
+            identifier=identifier,
+            is_custom_model=is_custom_model,
+        )
+
+    @pytest.mark.parametrize(
+        ("is_custom_model", "identifier", "expected_model_name"),
+        [
+            (True, "custom_openai/requested-model", "requested-model"),
+            (True, None, "fake-model"),
+            (False, "custom_openai/requested-model", "fake-model"),
+        ],
+    )
+    def test_instrumentator_names_the_requested_model(
+        self, prompt: Prompt, expected_model_name: str
+    ):
+        assert prompt.instrumentator.labels["model_name"] == expected_model_name
+        assert prompt.model_name == "fake-model"
+
+    @pytest.mark.parametrize("model_metadata", [None])
+    def test_instrumentator_without_model_metadata_names_the_model(
+        self, prompt: Prompt
+    ):
+        assert prompt.instrumentator.labels["model_name"] == "fake-model"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_request_log_and_metrics_name_the_requested_model(
+        self, prompt: Prompt, stream: bool
+    ):
+        before = _requests_for("requested-model")
+
+        with capture_logs() as logs:
+            if stream:
+                async for _ in prompt.astream({"name": "Duo", "content": "Hi"}):
+                    pass
+            else:
+                await prompt.ainvoke({"name": "Duo", "content": "Hi"})
+
+        [entry] = [log for log in logs if log["event"] == "Request to LLM complete"]
+        assert entry["model_name"] == "requested-model"
+        assert _requests_for("requested-model") == before + 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model_error", [ValueError("model failed")])
+    async def test_error_log_names_the_requested_model(self, prompt: Prompt):
+        with capture_logs() as logs, pytest.raises(ValueError):
+            async for _ in prompt.astream({"name": "Duo", "content": "Hi"}):
+                pass
+
+        [entry] = [log for log in logs if log["event"] == "model failed"]
+        assert entry["extra"]["model_name"] == "requested-model"
 
 
 @pytest.mark.skipif(
