@@ -3,13 +3,16 @@ import copy
 import json
 
 import pytest
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from duo_workflow_service.entities.image_blocks import (
     IMAGE_BLOCK_TOKEN_ESTIMATE,
+    ImageLimitKind,
+    ImageScope,
     block_text,
     content_as_text,
     image_content_block,
+    image_limit_kind,
     is_image_block,
     is_image_content_block,
     is_internal_image_block,
@@ -17,6 +20,7 @@ from duo_workflow_service.entities.image_blocks import (
     strip_image_payloads,
     with_block_text,
     without_image_blocks,
+    without_image_payloads,
 )
 
 PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\npixels").decode()
@@ -190,6 +194,137 @@ class TestWithoutImageBlocks:
         without_image_blocks(content)
 
         assert content == before
+
+
+class TestImageLimitKind:
+    @pytest.mark.parametrize(
+        ("status_code", "message", "expected"),
+        [
+            pytest.param(
+                400,
+                "messages.1.content.5.image.source.base64.data: At least one of the image "
+                "dimensions exceed max allowed size for many-image requests: 2000 pixels",
+                ImageLimitKind.REQUEST,
+                id="anthropic_many_image_rule",
+            ),
+            pytest.param(
+                400,
+                "litellm.BadRequestError: messages.1.content.1.image.source.base64.data: "
+                "At least one of the image dimensions exceed max allowed size: 8000 pixels",
+                ImageLimitKind.SINGLE_IMAGE,
+                id="one_oversized_image",
+            ),
+            pytest.param(
+                400,
+                "messages.1.content.1.image.source.base64.data: image exceeds 5 MB maximum",
+                ImageLimitKind.REQUEST,
+                id="unknown_image_wording_is_a_request_limit",
+            ),
+            pytest.param(
+                413, "request too large", ImageLimitKind.REQUEST, id="body_too_large"
+            ),
+            pytest.param(400, "tools.0.name: invalid", None, id="other_400"),
+            pytest.param(500, "image.source.base64 oops", None, id="server_error"),
+        ],
+    )
+    def test_classifies_image_limit_rejections(self, status_code, message, expected):
+        assert image_limit_kind(status_code, message) == expected
+
+
+class TestWithoutImagePayloads:
+    @staticmethod
+    def _image_tool_message(call_id: str) -> ToolMessage:
+        return ToolMessage(
+            content=[
+                {"type": "text", "text": f"Read image file: {call_id}.png"},
+                image_content_block(base64=PNG_B64, mime_type="image/png"),
+            ],
+            tool_call_id=call_id,
+        )
+
+    @pytest.fixture(name="two_rounds")
+    def two_rounds_fixture(self):
+        return [
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "attached"},
+                    image_content_block(base64=PNG_B64, mime_type="image/png"),
+                ]
+            ),
+            AIMessage(
+                content="", tool_calls=[{"id": "a", "name": "read_file", "args": {}}]
+            ),
+            self._image_tool_message("a"),
+            AIMessage(
+                content="", tool_calls=[{"id": "b", "name": "read_file", "args": {}}]
+            ),
+            self._image_tool_message("b"),
+        ]
+
+    def test_seen_keeps_the_current_round(self, two_rounds):
+        replaced, removed = without_image_payloads(two_rounds, scope=ImageScope.SEEN)
+
+        assert removed == 2
+        assert replaced[0].content[1] == {
+            "type": "text",
+            "text": "[image/png omitted from history]",
+        }
+        assert replaced[2].content[0] == {
+            "type": "text",
+            "text": "Read image file: a.png",
+        }
+        assert replaced[2].content[1]["type"] == "text"
+        assert is_image_content_block(replaced[4].content[1])
+        assert replaced[1] is two_rounds[1]
+
+    def test_current_keeps_the_seen_rounds(self, two_rounds):
+        replaced, removed = without_image_payloads(two_rounds, scope=ImageScope.CURRENT)
+
+        assert removed == 1
+        assert is_image_content_block(replaced[0].content[1])
+        assert is_image_content_block(replaced[2].content[1])
+        assert replaced[4].content[1]["type"] == "text"
+
+    @pytest.mark.parametrize("scope", list(ImageScope))
+    def test_returns_the_same_list_when_nothing_changes(self, scope):
+        messages = [HumanMessage(content="hi"), AIMessage(content="hello")]
+
+        replaced, removed = without_image_payloads(messages, scope=scope)
+
+        assert replaced is messages
+        assert removed == 0
+
+    def test_block_lists_without_images_are_left_alone(self):
+        messages = [
+            ToolMessage(
+                content=[{"type": "text", "text": "grep: 3 hits"}], tool_call_id="g"
+            ),
+            AIMessage(content="noted"),
+        ]
+
+        replaced, removed = without_image_payloads(messages, scope=ImageScope.SEEN)
+
+        assert replaced is messages
+        assert removed == 0
+
+    def test_nothing_is_seen_before_the_first_answer(self):
+        messages = [
+            HumanMessage(
+                content=[image_content_block(base64=PNG_B64, mime_type="image/png")]
+            )
+        ]
+
+        replaced, removed = without_image_payloads(messages, scope=ImageScope.SEEN)
+
+        assert replaced is messages
+        assert removed == 0
+
+    def test_input_messages_are_not_mutated(self, two_rounds):
+        without_image_payloads(two_rounds, scope=ImageScope.SEEN)
+        without_image_payloads(two_rounds, scope=ImageScope.CURRENT)
+
+        assert is_image_content_block(two_rounds[0].content[1])
+        assert is_image_content_block(two_rounds[4].content[1])
 
 
 def test_image_token_estimate_is_a_sane_constant():

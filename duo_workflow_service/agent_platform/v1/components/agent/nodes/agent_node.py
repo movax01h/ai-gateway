@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPStatus
@@ -38,6 +39,12 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
+from duo_workflow_service.entities.image_blocks import (
+    ImageLimitKind,
+    ImageScope,
+    image_limit_kind,
+    without_image_payloads,
+)
 from duo_workflow_service.errors.error_handler import (
     ModelError,
     ModelErrorHandler,
@@ -277,6 +284,25 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     )
 
     _MAX_TRUNCATION_RETRIES: int = 5
+
+    _IMAGE_LIMIT_SEEN_MESSAGE = (
+        "Older images were removed because the request exceeded the provider's "
+        "image limit. Rely on what you noted about them."
+    )
+
+    _IMAGE_LIMIT_LATEST_MESSAGE = (
+        "The images from the latest step were removed because the request exceeded "
+        "the provider's image limit. Reading them again will hit the same limit. "
+        "Continue without them."
+    )
+
+    _IMAGE_TOO_LARGE_MESSAGE = (
+        "The images from the latest step were removed: one of them is larger than "
+        "the provider accepts{limit}. Reading it again will hit the same limit. "
+        "If the user needs it read, ask for a smaller copy."
+    )
+
+    _MAX_IMAGE_LIMIT_RETRIES: int = 2
     # Consecutive text-only turns in schema mode under "auto" before the wrap-up is sent,
     # independent of max_cycles; a text-only reply to that wrap-up raises AgentStuckError.
     _MAX_TEXT_ONLY_TURNS: int = 3
@@ -552,6 +578,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
         wrap_up_retries: int = 0
         truncation_retries: int = 0
+        image_limit_retries: int = 0
         answer_rejections: int = 0
 
         while True:
@@ -687,15 +714,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             # so an Anthropic-only clause leaves this retry loop unreachable for
             # every model served through LiteLLM.
             except (AnthropicAPIStatusError, OpenAIAPIStatusError) as e:
-                error_message = str(e)
-                status_code = e.response.status_code
-                model_error = ModelError(
-                    error_type=self._error_handler.get_error_type(status_code),
-                    status_code=status_code,
-                    message=error_message,
+                recovered = await self._recover_from_status_error(
+                    history, e, image_limit_retries
                 )
-
-                await self._error_handler.handle_error(model_error)
+                if recovered is not None:
+                    history, image_limit_retries = recovered, image_limit_retries + 1
 
     def _deliberates_in_text(self) -> bool:
         return (
@@ -754,6 +777,82 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 f"Agent '{self.name}' is stuck: it replied in text without calling a tool "
                 f"{previous_turns + 1} times in a row, the last after the wrap-up instruction."
             )
+
+    async def _recover_from_status_error(
+        self,
+        history: list,
+        error: AnthropicAPIStatusError | OpenAIAPIStatusError,
+        image_limit_retries: int,
+    ) -> Optional[list]:
+        """Return a history to retry with, or let the error handler wait or raise."""
+        message = str(error)
+        status_code = error.response.status_code
+        recovered = self._without_rejected_images(
+            history, status_code, message, image_limit_retries
+        )
+        if recovered is not None:
+            return recovered
+        await self._error_handler.handle_error(
+            ModelError(
+                error_type=self._error_handler.get_error_type(status_code),
+                status_code=status_code,
+                message=message,
+            )
+        )
+        return None
+
+    def _without_rejected_images(
+        self, history: list, status_code: int, message: str, retries: int
+    ) -> Optional[list]:
+        """Drop the images the model already answered first, or the current round's first when the provider names one
+        oversized image, which can only be new; then whatever is left.
+
+        The change lands in the saved history: one cache rewrite on the failed request, none after.
+        """
+        kind = image_limit_kind(status_code, message)
+        if kind is None or retries >= self._MAX_IMAGE_LIMIT_RETRIES:
+            return None
+        preferred = (
+            ImageScope.CURRENT
+            if kind is ImageLimitKind.SINGLE_IMAGE
+            else ImageScope.SEEN
+        )
+        # The kind can change between attempts: once the seen images are gone the
+        # request is under the many-image threshold and the per-image rule names the
+        # new one. So every pass tries the preferred scope, then whatever is left.
+        for scope in (preferred, *(s for s in ImageScope if s is not preferred)):
+            recovered, removed = without_image_payloads(history, scope=scope)
+            if removed:
+                break
+        else:
+            return None
+        log.warning(
+            "Provider rejected the request over its image limit; retrying without images",
+            agent=self.name,
+            status_code=status_code,
+            kind=kind,
+            removed=removed,
+            scope=scope,
+            retry=retries + 1,
+            provider_message=message[:500],
+        )
+        return restore_message_consistency(
+            [
+                *recovered,
+                HumanMessage(content=self._image_limit_note(scope, kind, message)),
+            ]
+        )
+
+    def _image_limit_note(
+        self, scope: ImageScope, kind: ImageLimitKind, message: str
+    ) -> str:
+        if scope is ImageScope.SEEN:
+            return self._IMAGE_LIMIT_SEEN_MESSAGE
+        if kind is not ImageLimitKind.SINGLE_IMAGE:
+            return self._IMAGE_LIMIT_LATEST_MESSAGE
+        pixels = re.search(r"(\d[\d,]*) pixels", message)
+        limit = f" (one side is over {pixels.group(1)} px)" if pixels else ""
+        return self._IMAGE_TOO_LARGE_MESSAGE.format(limit=limit)
 
     def _agent_context_limits_update(self, history_iokey: IOKey) -> dict:
         """Stamp ``{agent_key: max_context_tokens}`` keyed off ``history_iokey``.
