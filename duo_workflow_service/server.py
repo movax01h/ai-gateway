@@ -1176,10 +1176,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         metadata = dict(context.invocation_metadata())
         global_user_id = metadata.get("x-gitlab-global-user-id")
-        # Prefer the signed realm claim over the client-supplied header.
-        gitlab_realm = (
-            user.claims.gitlab_realm if user.claims else None
-        ) or metadata.get("x-gitlab-realm")
+        gitlab_realm = metadata.get("x-gitlab-realm")
         gitlab_instance_id = metadata.get("x-gitlab-instance-id")
 
         extra_claims = {}
@@ -1200,12 +1197,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             if (
                 request.flow_config_id
                 in ModelSelectionConfig.instance().all_restricted_flows()
-                and not _is_gitlab_com_instance_token(user)
             ):
-                await context.abort(
-                    grpc.StatusCode.PERMISSION_DENIED,
-                    f"Flow '{request.flow_config_id}' is only available on GitLab.com",
-                )
+                if not _is_gitlab_com_instance_token(user):
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        f"Flow '{request.flow_config_id}' is only available on GitLab.com",
+                    )
+                # The caller's signed realm claim is SaaS; don't trust the header here.
+                gitlab_realm = SAAS_REALM
             extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
 
         if request.HasField("flow_config"):
