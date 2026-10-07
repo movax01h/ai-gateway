@@ -579,3 +579,62 @@ async def test_lifespan_wires_and_validates():
     mock_wire.assert_called_once_with(
         mock_container.return_value, modules=server.CONTAINER_APPLICATION_MODULES
     )
+
+
+@pytest.mark.asyncio
+async def test_lifespan_snowplow_shutdown():
+    """Verify that snowplow.client().shutdown() is called during lifespan teardown."""
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = False
+    app = MagicMock()
+    app.extra = {"extra": {"config": config}}
+
+    with (
+        patch("ai_gateway.api.server.ContainerApplication") as mock_container,
+        patch("ai_gateway.api.server.wire_and_validate"),
+        patch("ai_gateway.api.server.discover_feature_prompts"),
+        patch("ai_gateway.api.server.setup_litellm"),
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        async with server.lifespan(app):
+            pass
+
+    mock_container.return_value.snowplow.client.return_value.shutdown.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_snowplow_shutdown_exception():
+    """Verify that an exception from snowplow.client().shutdown() is logged and swallowed."""
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = False
+    app = MagicMock()
+    app.extra = {"extra": {"config": config}}
+
+    with (
+        patch("ai_gateway.api.server.ContainerApplication") as mock_container,
+        patch("ai_gateway.api.server.wire_and_validate"),
+        patch("ai_gateway.api.server.discover_feature_prompts"),
+        patch("ai_gateway.api.server.setup_litellm"),
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        mock_container.return_value.snowplow.client.return_value.shutdown.side_effect = RuntimeError(
+            "snowplow unavailable"
+        )
+
+        with capture_logs() as cap_logs:
+            # Should not raise despite the shutdown() exception
+            async with server.lifespan(app):
+                pass
+
+    warning_logs = [
+        log
+        for log in cap_logs
+        if log.get("log_level") == "warning"
+        and log.get("event") == "Failed to shutdown Snowplow client"
+    ]
+    assert len(warning_logs) == 1
+    assert warning_logs[0]["error"] == "snowplow unavailable"

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from pydantic import SecretStr
 from snowplow_tracker import SelfDescribingJson, Snowplow
 
 from lib.billing_events import BillingEvent, BillingEventsClient
@@ -126,6 +127,36 @@ class TestBillingEventsClient:
         assert tracker_args["namespace"] == "gl"
         assert len(tracker_args["emitters"]) == 1
         assert tracker_args["emitters"][0] is client._emitter
+
+    @pytest.mark.parametrize(
+        "api_key,expected_header",
+        [
+            pytest.param(None, None, id="no_api_key"),
+            pytest.param(SecretStr("glsa-key"), "Bearer glsa-key", id="api_key"),
+        ],
+    )
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_initialization_session_bearer_token(
+        self, mock_emitter_init, mock_tracker_init, api_key, expected_header
+    ):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = BillingEventsClient(
+            enabled=True,
+            endpoint="https://billing.local",
+            app_id="gitlab_ai_gateway-billing",
+            namespace="gl",
+            batch_size=1,
+            thread_count=1,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+            api_key=api_key,
+        )
+
+        emitter_args = mock_emitter_init.call_args[1]
+        assert emitter_args["session"] is client._session
+        assert client._session.headers.get("Authorization") == expected_header
 
     @pytest.mark.parametrize(
         "event, unit_of_measure, quantity, metadata, category, kwargs",
@@ -802,8 +833,14 @@ class TestBillingEventsClient:
             mock_event_store.size.return_value = buffer_size
             client._emitter.event_store = mock_event_store
 
-        with mock.patch.object(client._logger, "info") as mock_info:
+        with (
+            mock.patch.object(client.snowplow_tracker, "flush") as mock_flush,
+            mock.patch.object(client._session, "close") as mock_close,
+            mock.patch.object(client._logger, "info") as mock_info,
+        ):
             client.shutdown()
+            mock_flush.assert_called_once()
+            mock_close.assert_called_once()
             mock_info.assert_called_once_with(
                 "Shutting down billing events client",
                 emitter_queue_size=expected_queue,

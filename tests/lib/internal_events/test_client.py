@@ -3,6 +3,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
+from pydantic import SecretStr
 
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import (
@@ -662,3 +663,30 @@ class TestInternalEventsClientExplicitAIContext:
         assert standard_ctx.data["total_tokens"] == 15
         # workflow_id still appears in extra (backwards compat)
         assert standard_ctx.data["extra"]["workflow_id"] == "wf-abc"
+
+
+class TestInternalEventsClientSession:
+    @pytest.mark.parametrize(
+        "api_key,expected_header",
+        [
+            pytest.param(None, None, id="no_api_key"),
+            pytest.param(SecretStr("glsa-key"), "Bearer glsa-key", id="api_key"),
+        ],
+    )
+    def test_session_bearer_token(self, api_key, expected_header):
+        with (
+            patch("lib.internal_events.client.LoggingAsyncEmitter") as emitter_class,
+            patch("lib.internal_events.client.Tracker"),
+        ):
+            client = InternalEventsClient(
+                enabled=True,
+                endpoint="https://test.endpoint.com",
+                app_id="test_app",
+                namespace="test_namespace",
+                batch_size=1,
+                thread_count=1,
+                api_key=api_key,
+            )
+
+        assert emitter_class.call_args.kwargs["session"] is client._session
+        assert client._session.headers.get("Authorization") == expected_header

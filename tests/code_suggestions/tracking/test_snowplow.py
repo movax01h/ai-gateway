@@ -3,6 +3,7 @@ from dataclasses import asdict
 from unittest import mock
 
 import pytest
+from pydantic import SecretStr
 from snowplow_tracker import SelfDescribingJson, Snowplow
 
 from ai_gateway.tracking import (
@@ -48,6 +49,48 @@ class TestSnowplowClient:
         assert tracker_args["app_id"] == configuration.app_id
         assert tracker_args["namespace"] == configuration.namespace
         assert len(tracker_args["emitters"]) == 1
+
+    @pytest.mark.parametrize(
+        "api_key,expected_header",
+        [
+            pytest.param(None, None, id="no_api_key"),
+            pytest.param(SecretStr("glsa-key"), "Bearer glsa-key", id="api_key"),
+        ],
+    )
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_initialization_session_bearer_token(
+        self, mock_emitter_init, mock_tracker_init, api_key, expected_header
+    ):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = SnowplowClient(
+            SnowplowClientConfiguration(
+                endpoint="https://whitechoc.local",
+                api_key=api_key,
+            )
+        )
+
+        assert mock_emitter_init.call_args[1]["session"] is client._session
+        assert client._session.headers.get("Authorization") == expected_header
+
+    @mock.patch("snowplow_tracker.Tracker.flush")
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_shutdown(self, mock_emitter_init, mock_tracker_init, mock_tracker_flush):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = SnowplowClient(
+            SnowplowClientConfiguration(endpoint="https://whitechoc.local")
+        )
+
+        with mock.patch.object(client._session, "close") as mock_session_close:
+            client.shutdown()
+
+        mock_tracker_flush.assert_called_once()
+        mock_session_close.assert_called_once()
 
     @pytest.mark.parametrize(
         ("inputs"),

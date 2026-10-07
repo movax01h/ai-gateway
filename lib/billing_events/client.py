@@ -3,8 +3,10 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 import structlog
 from gitlab_cloud_connector import CloudConnectorUser
+from pydantic import SecretStr
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
 
 from lib.billing_events.context import BillingEventContext
@@ -14,6 +16,7 @@ from lib.internal_events.context import (
     InternalEventAdditionalProperties,
     current_event_context,
 )
+from lib.snowplow import set_bearer_token
 from lib.usage_quota.client import should_skip_usage_quota_for_user
 
 __all__ = ["BillingEvent", "BillingEventsClient"]
@@ -40,6 +43,7 @@ class BillingEventsClient:
         batch_size: int,
         thread_count: int,
         internal_event_client: InternalEventsClient,
+        api_key: Optional[SecretStr] = None,
     ) -> None:
         self._logger = structlog.stdlib.get_logger("billing_events_client")
         self.enabled = enabled
@@ -53,16 +57,20 @@ class BillingEventsClient:
             namespace=namespace,
             batch_size=batch_size,
             thread_count=thread_count,
+            api_key_configured=bool(api_key),
         )
 
         if enabled:
             self._logger.info("Creating AsyncEmitter and Tracker for billing events")
+            self._session = requests.Session()
+            set_bearer_token(self._session, api_key)
             self._emitter = AsyncEmitter(
                 batch_size=batch_size,
                 thread_count=thread_count,
                 endpoint=endpoint,
                 on_success=self._on_success,
                 on_failure=self._on_failure,
+                session=self._session,
             )
 
             self.snowplow_tracker = Tracker(
@@ -102,6 +110,8 @@ class BillingEventsClient:
                 queue_size + buffer_size if queue_size >= 0 and buffer_size >= 0 else -1
             ),
         )
+        self.snowplow_tracker.flush(is_async=True)
+        self._session.close()
 
     def _on_success(self, sent_events: List[Dict[str, Any]]) -> None:
         self._logger.info(

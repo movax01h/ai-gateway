@@ -22,6 +22,7 @@ class ContainerBillingEvent(containers.DeclarativeContainer):
         app_id=config.app_id,
         namespace=config.namespace,
         internal_event_client=internal_event.client,
+        api_key=config.api_key,
     )
 
     service = providers.Factory(
