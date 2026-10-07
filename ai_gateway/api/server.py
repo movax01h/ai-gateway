@@ -113,6 +113,12 @@ async def lifespan(app: FastAPI):
         structlog.stdlib.get_logger("internal_events_client").warning(
             "Failed to shutdown internal events client", error=str(e)
         )
+    try:
+        container_application.snowplow.client().shutdown()
+    except Exception as e:
+        structlog.stdlib.get_logger("snowplow_client").warning(
+            "Failed to shutdown Snowplow client", error=str(e)
+        )
 
 
 def create_fast_api_server(config: Config):

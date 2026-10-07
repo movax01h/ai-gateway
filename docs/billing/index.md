@@ -66,6 +66,7 @@ See [Further reading](#further-reading) for links to each deployment type's docu
 
 - `AIGW_BILLING_EVENT__ENABLED` — enable or disable billing event emission
 - `AIGW_BILLING_EVENT__ENDPOINT` — Snowplow collector endpoint URL
+- `AIGW_BILLING_EVENT__API_KEY` — optional API key, sent as a bearer token to the collector when set
 - `AIGW_BILLING_EVENT__BATCH_SIZE` — events per batch (set to `1` for local testing)
 - `AIGW_BILLING_EVENT__THREAD_COUNT` — number of async emitter worker threads
 
