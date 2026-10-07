@@ -686,14 +686,13 @@ class ModelSelectionConfig:
         - preceded by the start of the string, ``/``, ``.``, ``:`` or ``@`` (so provider and
             region prefixes such as ``anthropic/``, ``vertex_ai/`` or ``us.anthropic.`` are
             caught), and
-        - followed by the end of the string, ``@`` (``<model>@<date>``), ``:``
-            (``<model>:0``), ``-v<digit>`` (``<model>-v1:0``) or an 8-digit date
-            (``<model>-20261001``).
+        - followed by the end of the string, ``@``, ``:``, ``-`` or ``_``, so any
+            date, version or alias suffix matches (``<model>@20261001``, ``<model>-v1:0``,
+            ``<model>-2026-10-01``, ``<model>-latest``). This fails closed: a sibling
+            ``<model>-mini`` is restricted too, while ``<model>.1`` or ``<model>0`` is not.
 
-        Any other suffix is not matched: sibling models sharing the prefix (``<model>-mini``,
-        ``<model>.1``), but also aliases such as ``<model>-2026-10-01``, ``<model>-latest``
-        or ``<model>-preview``. A restricted definition's ``params.model`` must therefore be
-        the base upstream model name, with no date or preview suffix.
+        A restricted definition's ``params.model`` must therefore be the base upstream
+        model name, with no date or preview suffix.
 
         When several restricted definitions match, only flows allowed by all of them are
         returned.
@@ -708,7 +707,7 @@ class ModelSelectionConfig:
                 and any(
                     re.search(
                         rf"(?:^|[/.:@]){re.escape(restricted_model)}"
-                        r"(?=$|[@:]|-v\d|-\d{8})",
+                        r"(?=$|[@:_-])",
                         m,
                     )
                     for m in model_strings

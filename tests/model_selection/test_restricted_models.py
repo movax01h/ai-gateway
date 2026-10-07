@@ -53,6 +53,7 @@ def restricted_access(config: ModelSelectionConfig, authorized_flow: str | None)
         ([], ["us.anthropic.claude-fake-restricted-1-v1:0"]),
         ([], ["claude-fake-restricted-1-20261001"]),
         ([], ["vertex_ai/claude-fake-restricted-1:latest"]),
+        ([], ["claude-fake-restricted-1-mini"]),
         ([], ["CLAUDE-FAKE-RESTRICTED-1"]),
         (["claude_sonnet_4_5_20250929"], ["claude-fake-restricted-1"]),
     ],
@@ -68,7 +69,6 @@ def test_restricted_flows_for_matches_identifier_and_model_strings(
     [
         (["claude_sonnet_4_5_20250929"], ["claude-sonnet-4-5-20250929"]),
         ([], ["not-claude-fake-restricted-1"]),
-        ([], ["claude-fake-restricted-1-mini"]),
         ([], ["claude-fake-restricted-1.1"]),
         ([], ["anthropic/claude-fake-restricted-10"]),
         ([None], [None]),
@@ -190,7 +190,7 @@ def _config_with(definition: dict) -> ModelSelectionConfig:
     )
 
 
-def test_gpt_style_sibling_models_are_not_restricted():
+def test_gpt_style_dash_suffixes_are_restricted():
     config = _config_with(
         {
             **FAKE_RESTRICTED_MODEL,
@@ -203,8 +203,32 @@ def test_gpt_style_sibling_models_are_not_restricted():
     assert config.restricted_flows_for(models=["us.openai.gpt-6-v1:0"]) == {
         "bl_security"
     }
-    assert config.restricted_flows_for(models=["gpt-6-mini"]) is None
+    assert config.restricted_flows_for(models=["gpt-6-mini"]) == {"bl_security"}
     assert config.restricted_flows_for(models=["gpt-6.1"]) is None
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [
+        ("claude-mythos-5-1-latest", {"bl_security"}),
+        ("claude-mythos-5-1-2026-10-01", {"bl_security"}),
+        ("claude-mythos-5-1-20261001", {"bl_security"}),
+        ("claude-mythos-5-1@20261001", {"bl_security"}),
+        ("claude-mythos-5-1-v1:0", {"bl_security"}),
+        ("claude-mythos-5-1_preview", {"bl_security"}),
+        ("claude-mythos-5-10", None),
+    ],
+)
+def test_alias_suffixes_on_restricted_base_fail_closed(model: str, expected):
+    config = _config_with(
+        {
+            **FAKE_RESTRICTED_MODEL,
+            "gitlab_identifier": "restricted_mythos",
+            "params": {"model": "claude-mythos-5-1"},
+        }
+    )
+
+    assert config.restricted_flows_for(models=[model]) == expected
 
 
 RESTRICTED_LIST_NAMES = [
