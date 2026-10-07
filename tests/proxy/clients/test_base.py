@@ -12,10 +12,12 @@ from ai_gateway.instrumentators.model_requests import (
     ModelRequestInstrumentator,
     init_llm_operations,
 )
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.proxy.clients.base import (
     ProxyClient,
     ProxyModel,
     current_proxy_client,
+    enforce_model_allowlist,
     litellm_async_success_callback,
 )
 from lib.billing_events import BillingEvent
@@ -313,3 +315,76 @@ async def test_upstream_error_body_relayed_unchanged(
     assert response.status_code == 429
     assert response.headers["content-type"] == "application/json"
     assert await _read_body(response) == _UPSTREAM_RATE_LIMIT_BODY
+
+
+class TestEnforceModelAllowlist:
+    @pytest.fixture(name="request_with_claims")
+    def request_with_claims_fixture(self):
+        def create(extra):
+            from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+
+            request = Mock(spec=fastapi.Request)
+            request.user = CloudConnectorUser(
+                authenticated=True, claims=UserClaims(gitlab_realm="saas", extra=extra)
+            )
+            return request
+
+        return create
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            pytest.param(None, id="no_extra_claims"),
+            pytest.param({"gitlab_root_namespace_id": 1}, id="no_allowlist_claim"),
+        ],
+    )
+    def test_allows_any_model_without_the_claim(self, request_with_claims, extra):
+        enforce_model_allowlist(request_with_claims(extra), "claude-fable-5")
+
+    @pytest.mark.parametrize(
+        "model_name",
+        [
+            pytest.param("claude-haiku-4-5-20251001", id="anthropic"),
+            pytest.param("claude-haiku-4-5@20251001", id="vertex_variant"),
+        ],
+    )
+    def test_allows_models_for_allowed_refs(self, request_with_claims, model_name):
+        request = request_with_claims(
+            {"gitlab_allowed_model_refs": ["claude_haiku_4_5_20251001"]}
+        )
+
+        enforce_model_allowlist(request, model_name)
+
+    @pytest.mark.parametrize(
+        "refs",
+        [
+            pytest.param(["claude_haiku_4_5_20251001"], id="other_model_allowed"),
+            pytest.param([], id="empty_allowlist"),
+            pytest.param(None, id="null_claim"),
+            pytest.param("claude_fable_5", id="string_claim"),
+            pytest.param(42, id="non_list_claim"),
+            pytest.param([42], id="non_string_refs"),
+        ],
+    )
+    def test_rejects_models_outside_the_allowlist(self, request_with_claims, refs):
+        request = request_with_claims({"gitlab_allowed_model_refs": refs})
+
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            enforce_model_allowlist(request, "claude-fable-5")
+
+        assert excinfo.value.status_code == 403
+        assert (
+            excinfo.value.detail
+            == "Model is not allowed by the namespace model allowlist"
+        )
+
+
+def test_provider_variants_have_a_base_model():
+    """Allowlist matching treats ``<ref>_vertex`` and ``<ref>_bedrock`` as ``<ref>``."""
+    definitions = ModelSelectionConfig.instance().get_llm_definitions()
+
+    for identifier, llm_def in definitions.items():
+        for suffix in ("_vertex", "_bedrock"):
+            base = identifier.removesuffix(suffix)
+            if base != identifier and base in definitions:
+                assert definitions[base].name == llm_def.name, identifier

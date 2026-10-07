@@ -12,6 +12,7 @@ from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.proxy.clients.base import (
     BaseProxyModelFactory,
     ProxyModel,
+    enforce_model_allowlist,
     extract_json_body,
 )
 
@@ -119,6 +120,8 @@ class VertexAIProxyModelFactory(BaseProxyModelFactory):
             raise fastapi.HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported model"
             )
+
+        enforce_model_allowlist(request, path_params.model_name)
 
         return ProxyModel(
             base_url=self._base_url,

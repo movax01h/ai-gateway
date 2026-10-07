@@ -10,6 +10,7 @@ from ai_gateway.models.base import KindModelProvider, anthropic_facilitator_head
 from ai_gateway.proxy.clients.base import (
     BaseProxyModelFactory,
     ProxyModel,
+    enforce_model_allowlist,
     extract_json_body,
 )
 
@@ -111,6 +112,8 @@ class AnthropicProxyModelFactory(BaseProxyModelFactory):
             raise fastapi.HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported model"
             )
+
+        enforce_model_allowlist(request, model_name)
 
         api_key = _resolve_api_key(model_name)
 

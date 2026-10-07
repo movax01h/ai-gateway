@@ -415,6 +415,35 @@ class TestSaasExtraClaims:
         assert decoded_token["skip_usage_cutoff"] == "true"
 
     @pytest.mark.parametrize(
+        "auth_user",
+        [{"gitlab_allowed_model_refs": ["claude_haiku_4_5_20251001"]}],
+        indirect=True,
+    )
+    def test_user_access_token_keeps_allowed_model_refs(self, mock_client: TestClient):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-Gitlab-Instance-Id": "1234",
+            "X-Gitlab-Realm": "saas",
+        }
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        decoded_token = jwt.decode(
+            response.json()["token"],
+            TEST_PUBLIC_KEY,
+            audience="gitlab-ai-gateway",
+            algorithms=CompositeProvider.SUPPORTED_ALGORITHMS,
+        )
+
+        assert decoded_token["gitlab_allowed_model_refs"] == [
+            "claude_haiku_4_5_20251001"
+        ]
+
+    @pytest.mark.parametrize(
         ("auth_user", "header", "expected"),
         [
             pytest.param({}, "3456", 3456, id="no_claim_falls_back_to_header"),

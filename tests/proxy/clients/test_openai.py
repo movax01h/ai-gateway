@@ -3,6 +3,7 @@ import json
 import fastapi
 import pytest
 from fastapi import status
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
 from ai_gateway.proxy.clients import OpenAIProxyModelFactory, ProxyClient
 
@@ -256,3 +257,31 @@ async def test_invalid_json_body(
 
     assert excinfo.value.status_code == status.HTTP_400_BAD_REQUEST
     assert excinfo.value.detail == "Invalid JSON"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refs,allowed",
+    [(["gpt_5_3_codex"], True), (["claude_fable_5"], False)],
+)
+async def test_model_allowlist(
+    openai_factory, request_factory, request_params, request_headers, refs, allowed
+):
+    request = request_factory(
+        request_url="http://0.0.0.0:5052/v1/proxy/openai/v1/chat/completions",
+        request_body=json.dumps(request_params).encode("utf-8"),
+        request_headers=request_headers,
+    )
+    request.user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={"gitlab_allowed_model_refs": refs}),
+    )
+
+    if allowed:
+        model = await openai_factory.factory(request)
+        assert model.model_name == "gpt-5.3-codex"
+    else:
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await openai_factory.factory(request)
+
+        assert excinfo.value.status_code == status.HTTP_403_FORBIDDEN
