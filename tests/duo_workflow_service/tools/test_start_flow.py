@@ -1820,6 +1820,11 @@ def test_format_display_message_fallback_catalog_flow(tool):
 
 
 def test_format_display_message_fallback_catalog_flow_without_goal(tool):
+    """The consumer id is shown, but never as the goal.
+
+    A flow run from a `/flow:` slash command carries no goal, so this is the message the user actually reads while it
+    starts. Asserting only that the id appears is what let it read "with goal: 28".
+    """
     args = StartFlowInput(
         flow={
             "name": "catalog_flow",
@@ -1827,4 +1832,7 @@ def test_format_display_message_fallback_catalog_flow_without_goal(tool):
         }
     )
 
-    assert "9" in tool.format_display_message(args, None)
+    message = tool.format_display_message(args, None)
+
+    assert message == "Starting flow catalog_flow (ID 9)"
+    assert "goal" not in message

@@ -784,9 +784,16 @@ class StartFlow(DuoBaseTool):
         ):
             detail = str(flow_dict.get("vulnerability_id", ""))
         elif flow_name == CATALOG_FLOW_NAME:
-            detail = flow_dict.get("goal") or str(
-                flow_dict.get("ai_catalog_item_consumer_id", "")
-            )
+            goal = flow_dict.get("goal")
+            if not goal:
+                # A catalog flow started without a goal falls back to its own
+                # description, leaving the consumer id as the only thing to show. That
+                # id is not the user's intent, and the "with goal" template below
+                # presented it as one -- a flow run from a slash command carries no
+                # goal, so it read as "with goal: 28".
+                consumer_id = flow_dict.get("ai_catalog_item_consumer_id", "")
+                return f"Starting flow {flow_name} (ID {consumer_id})"
+            detail = goal
         else:
             detail = str(flow_dict)
 

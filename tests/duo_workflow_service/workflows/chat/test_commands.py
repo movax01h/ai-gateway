@@ -2,11 +2,14 @@
 import json
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from duo_workflow_service.tools.start_flow import StartFlow
 from duo_workflow_service.workflows.chat.commands import (
     CHAT_COMMAND_CATEGORY,
     ForcedToolCall,
+    forced_tool_call_message_id,
+    is_forced_tool_call_message,
     parse_forced_tool_call,
     strip_command_context,
 )
@@ -169,3 +172,29 @@ def test_the_arguments_it_builds_satisfy_the_tool(features, goal):
     assert flow.name == "catalog_flow"
     assert flow.ai_catalog_item_consumer_id == 42
     assert flow.goal == goal
+
+
+def test_each_forced_message_id_is_unique():
+    """The id doubles as the message's identity in the transcript, so the marker cannot be the whole of it."""
+    assert forced_tool_call_message_id() != forced_tool_call_message_id()
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (AIMessage(content="", id=forced_tool_call_message_id()), True),
+        (AIMessage(content="on it", id="lc_run--01a0d910"), False),
+        (AIMessage(content="on it"), False),
+        (HumanMessage(content="/flow:sushi-flow", id="user-1"), False),
+        (ToolMessage(content="{}", tool_call_id="c1", id="forced-lookalike"), False),
+    ],
+    ids=[
+        "forced_assistant_turn",
+        "model_authored_turn",
+        "turn_with_no_id",
+        "user_turn",
+        "tool_result_with_a_lookalike_id",
+    ],
+)
+def test_recognises_a_forced_assistant_turn(message, expected):
+    assert is_forced_tool_call_message(message) is expected
