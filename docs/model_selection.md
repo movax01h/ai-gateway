@@ -436,7 +436,6 @@ With the flag on, every workflow start where the classifier answers with a tag e
 | `matched_keywords`      | `extra.matched_keywords`                       | The keyword hint: every keyword of the first matching tag found in the task, in policy order. Empty when no keyword matched. Can belong to another tag when the classifier overrode it.  |
 | `gitlab_identifier`     | `extra.gitlab_identifier`                      | The model the request is served by.                                                                                                                                                      |
 | `classifier_identifier` | `extra.classifier_identifier`                  | The classifier model that picked the tag: the `classifier` tag's model, or the `small` tag's when there is none.                                                                         |
-| `params`                | `extra.params`                                 | Sampling parameters (`temperature`, `top_p`, `top_k`) of that model.                                                                                                                     |
 
 Nothing is emitted on the bypass paths (flag off, explicit `identifier`, an `unsure` answer, a timeout, or an error), because nothing was routed.
 

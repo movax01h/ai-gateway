@@ -20,8 +20,6 @@ additional_properties:
     description: gitlab_identifier of the model the request is served by
   classifier_identifier:
     description: gitlab_identifier of the classifier model that picked label (the classifier tag's model, or the small tag's when there is none)
-  params:
-    description: Sampling parameters (temperature, top_p, top_k) of the model the request is served by
 milestone: "19.5"
 introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/7117
 tiers:
