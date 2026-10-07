@@ -41,6 +41,22 @@ def test_the_description_is_structured_and_keeps_the_model_text():
     )
 
 
+def test_the_model_text_is_escaped_in_the_written_description():
+    """Markup in the model text reaches the report escaped, through the same path as the real writer."""
+    finding = {
+        "cwe": "CWE-639",
+        "file": "a.ts",
+        "new_line": 4,
+        "code_excerpt": "find(id)",
+        "body": "Send <token> as @admin. See #12.",
+        "anchor_status": bl.ANCHOR_VERIFIED,
+    }
+    (v,) = _writer()._build_report([finding])["vulnerabilities"]
+
+    details = v["description"].split("**Details**\n\n")[1]
+    assert details == "- Send \\<token> as `@admin`.\n- See \\#12."
+
+
 def test_the_id_still_comes_from_the_raw_model_text():
     """The description is rebuilt, but identity is keyed on the excerpt or the raw body, as before."""
     finding = {"cwe": "CWE-639", "file": "a.ts", "body": "raw body"}
