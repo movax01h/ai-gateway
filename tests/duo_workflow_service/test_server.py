@@ -1595,6 +1595,33 @@ async def test_generate_token(
     )
 
 
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_carries_instance_uuid_from_subject(
+    mock_token_authority,
+    mock_context,
+):
+    # Self-hosted instances sign their own tokens: the UUID is in ``sub`` and there is no
+    # ``gitlab_instance_uid``.
+    claims = UserClaims(
+        scopes=["duo_agent_platform"],
+        issuer="https://gitlab.example.com",
+        subject="instance-uuid",
+        gitlab_realm="self-managed",
+    )
+    current_user.set(CloudConnectorUser(authenticated=True, claims=claims))
+    servicer = DuoWorkflowService()
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["gitlab_instance_uid"] == "instance-uuid"
+
+
 def test_flow_config_digest_is_independent_of_map_insertion_order():
     first = struct_pb2.Struct()
     first.update({"name": "catalog-flow", "config": {"enabled": True, "count": 2}})

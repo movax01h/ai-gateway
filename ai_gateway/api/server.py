@@ -47,6 +47,7 @@ from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.profiling import setup_profiling
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
 from ai_gateway.structured_logging import can_log_request_data, setup_app_logging
+from lib.aws_assume_role import AssumeRoleError
 from lib.container_wiring import wire_and_validate
 
 __all__ = [
@@ -256,12 +257,32 @@ async def validation_exception_handler(
     )
 
 
+async def assume_role_exception_handler(
+    request: Request, exc: AssumeRoleError
+) -> Response:
+    # The role ARN is left out of the response: it stays in the logs, and the STS
+    # error code is enough for the caller to tell what went wrong.
+    return await http_exception_handler(
+        request,
+        StarletteHTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Failed to assume the requested IAM role: "
+                f"{exc.error_code or 'Unknown'}"
+            ),
+        ),
+    )
+
+
 def setup_custom_exception_handlers(app: FastAPI):
     app.add_exception_handler(
         StarletteHTTPException, cast(ExceptionHandler, custom_http_exception_handler)
     )
     app.add_exception_handler(
         ModelAPIError, cast(ExceptionHandler, model_api_exception_handler)
+    )
+    app.add_exception_handler(
+        AssumeRoleError, cast(ExceptionHandler, assume_role_exception_handler)
     )
     app.add_exception_handler(
         RequestValidationError, cast(ExceptionHandler, validation_exception_handler)
