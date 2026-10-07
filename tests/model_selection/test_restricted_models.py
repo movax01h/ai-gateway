@@ -13,6 +13,7 @@ from ai_gateway.model_selection import (
 )
 from ai_gateway.model_selection.model_selection_config import (
     DefaultModelEntry,
+    ModelRestriction,
     ModelTagEntry,
 )
 from ai_gateway.model_selection.types import DevConfig
@@ -81,15 +82,16 @@ def test_restricted_flows_for_ignores_other_models(
     assert config.restricted_flows_for(identifiers, models) is None
 
 
-def test_restricted_flows_for_includes_env_releases_when_flag_is_off():
-    released = {
-        **FAKE_RESTRICTED_MODEL,
-        "gitlab_identifier": "released_restricted_model",
-        "params": {"model": "claude-released-restricted-1"},
-    }
-    config = ModelSelectionConfig(
-        default_models_override={},
-        model_releases=json.dumps({"models": [released]}),
+def test_restricted_flows_for_includes_env_releases_when_flag_is_off(
+    model_restrictions: list[ModelRestriction],
+):
+    config = _config_with(
+        {
+            **FAKE_RESTRICTED_MODEL,
+            "gitlab_identifier": "released_restricted_model",
+            "params": {"model": "claude-released-restricted-1"},
+        },
+        model_restrictions,
     )
 
     assert config.restricted_flows_for(["released_restricted_model"]) == {"bl_security"}
@@ -98,9 +100,23 @@ def test_restricted_flows_for_includes_env_releases_when_flag_is_off():
     }
 
 
+def test_validate_accepts_restriction_on_env_only_model(
+    model_restrictions: list[ModelRestriction],
+):
+    config = _config_with(
+        {**FAKE_RESTRICTED_MODEL, "gitlab_identifier": "released_restricted_model"},
+        model_restrictions,
+    )
+
+    config.validate()
+
+
 @pytest.mark.parametrize("provider", ["anthropic", "openai", "vertex-ai"])
 def test_proxy_models_exclude_restricted_models(
-    config: ModelSelectionConfig, fake_restricted_model, provider: str
+    config: ModelSelectionConfig,
+    fake_restricted_model,
+    model_restrictions: list[ModelRestriction],
+    provider: str,
 ):
     fake_restricted_model.proxy_provider = provider
     proxy_models = config.get_proxy_models_for_provider(provider)
@@ -108,7 +124,7 @@ def test_proxy_models_exclude_restricted_models(
     assert proxy_models
     assert "claude-fake-restricted-1" not in proxy_models
 
-    fake_restricted_model.restricted_to_flows = []
+    model_restrictions.clear()
     assert "claude-fake-restricted-1" in config.get_proxy_models_for_provider(provider)
 
 
@@ -169,34 +185,48 @@ def test_legacy_client_models_are_never_restricted():
     )
 
 
-def test_legacy_client_models_check_would_catch_a_restricted_entry():
-    restricted_legacy = {
-        **FAKE_RESTRICTED_MODEL,
-        "gitlab_identifier": "restricted_legacy",
-        "params": {"model": KindAnthropicModel.CLAUDE_HAIKU_4_5.value},
-    }
-    config = ModelSelectionConfig(
-        default_models_override={},
-        model_releases=json.dumps({"models": [restricted_legacy]}),
+def _config_with(
+    definition: dict,
+    model_restrictions: list[ModelRestriction],
+    flows: list[str] | None = None,
+) -> ModelSelectionConfig:
+    """Build a config with ``definition`` env-injected and restricted to ``flows``."""
+    model_restrictions.append(
+        ModelRestriction(
+            identifier=definition["gitlab_identifier"], flows=flows or ["bl_security"]
+        )
     )
-
-    assert config.restricted_flows_for(LEGACY_CLIENT_MODELS, LEGACY_CLIENT_MODELS)
-
-
-def _config_with(definition: dict) -> ModelSelectionConfig:
     return ModelSelectionConfig(
         default_models_override={},
         model_releases=json.dumps({"models": [definition]}),
     )
 
 
-def test_gpt_style_dash_suffixes_are_restricted():
+def test_legacy_client_models_check_would_catch_a_restricted_entry(
+    model_restrictions: list[ModelRestriction],
+):
+    config = _config_with(
+        {
+            **FAKE_RESTRICTED_MODEL,
+            "gitlab_identifier": "restricted_legacy",
+            "params": {"model": KindAnthropicModel.CLAUDE_HAIKU_4_5.value},
+        },
+        model_restrictions,
+    )
+
+    assert config.restricted_flows_for(LEGACY_CLIENT_MODELS, LEGACY_CLIENT_MODELS)
+
+
+def test_gpt_style_dash_suffixes_are_restricted(
+    model_restrictions: list[ModelRestriction],
+):
     config = _config_with(
         {
             **FAKE_RESTRICTED_MODEL,
             "gitlab_identifier": "restricted_gpt",
             "params": {"model": "gpt-6"},
-        }
+        },
+        model_restrictions,
     )
 
     assert config.restricted_flows_for(models=["gpt-6"]) == {"bl_security"}
@@ -219,13 +249,16 @@ def test_gpt_style_dash_suffixes_are_restricted():
         ("claude-mythos-5-10", None),
     ],
 )
-def test_alias_suffixes_on_restricted_base_fail_closed(model: str, expected):
+def test_alias_suffixes_on_restricted_base_fail_closed(
+    model_restrictions: list[ModelRestriction], model: str, expected
+):
     config = _config_with(
         {
             **FAKE_RESTRICTED_MODEL,
             "gitlab_identifier": "restricted_mythos",
             "params": {"model": "claude-mythos-5-1"},
-        }
+        },
+        model_restrictions,
     )
 
     assert config.restricted_flows_for(models=[model]) == expected
@@ -290,18 +323,44 @@ def test_validate_allows_restricted_model_in_its_own_flow_feature(
     )
 
 
-@pytest.mark.parametrize("flows", [["bl_security", ""], ["bl_security", "bl_security"]])
+@pytest.mark.parametrize(
+    "flows", [[], ["bl_security", ""], ["bl_security", "bl_security"]]
+)
 def test_validate_rejects_empty_or_duplicate_restricted_flows(
-    config: ModelSelectionConfig, flows: list[str]
+    config: ModelSelectionConfig,
+    model_restrictions: list[ModelRestriction],
+    flows: list[str],
 ):
-    definitions = config.get_llm_definitions()
-    definitions["fake_restricted_model"].restricted_to_flows = flows
+    model_restrictions[0].flows = flows
 
-    with patch.object(
-        ModelSelectionConfig, "get_llm_definitions", return_value=definitions
+    with pytest.raises(ValueError, match="empty or duplicate entries"):
+        config.validate()
+
+
+def test_validate_rejects_restriction_on_unknown_model(
+    config: ModelSelectionConfig, model_restrictions: list[ModelRestriction]
+):
+    model_restrictions.append(
+        ModelRestriction(identifier="no_such_model", flows=["bl_security"])
+    )
+
+    with pytest.raises(
+        ValueError, match="Restricted model 'no_such_model' is not defined"
     ):
-        with pytest.raises(ValueError, match="empty or duplicate entries"):
-            config.validate()
+        config.validate()
+
+
+def test_validate_rejects_duplicate_restrictions(
+    config: ModelSelectionConfig, model_restrictions: list[ModelRestriction]
+):
+    model_restrictions.append(
+        ModelRestriction(identifier="fake_restricted_model", flows=["other_flow"])
+    )
+
+    with pytest.raises(ValueError, match="listed more than once"):
+        config.validate()
+    # Until fixed, only the flows both entries allow are kept: none.
+    assert config.restricted_flows_for(["fake_restricted_model"]) == frozenset()
 
 
 def test_validate_accepts_shipped_config(config: ModelSelectionConfig):
@@ -309,15 +368,18 @@ def test_validate_accepts_shipped_config(config: ModelSelectionConfig):
 
 
 @pytest.mark.parametrize("flow", ["bl_security", "other_flow"])
-def test_request_matching_two_restricted_models_needs_a_flow_both_allow(flow: str):
+def test_request_matching_two_restricted_models_needs_a_flow_both_allow(
+    model_restrictions: list[ModelRestriction], flow: str
+):
     """Two restricted definitions matching one request allow only their common flows."""
     config = _config_with(
         {
             **FAKE_RESTRICTED_MODEL,
             "gitlab_identifier": "other_restricted_model",
             "params": {"model": "claude-other-restricted-1"},
-            "restricted_to_flows": ["other_flow"],
-        }
+        },
+        model_restrictions,
+        flows=["other_flow"],
     )
     request = {
         "identifiers": ["fake_restricted_model"],
