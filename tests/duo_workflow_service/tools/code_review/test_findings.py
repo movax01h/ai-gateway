@@ -193,6 +193,26 @@ class TestBuildSummary:
 
         assert build_summary([], narrative) == narrative
 
+    @pytest.mark.parametrize(
+        ("narrative", "expected"),
+        [
+            ("Little further work.</summary>", "Little further work."),
+            ("No new issues.</summary>\n</invoke>", "No new issues."),
+            (
+                "Use `</summary>` here.\n<details><summary>x</summary>y</details>",
+                "Use `</summary>` here.\n<details><summary>x</summary>y</details>",
+            ),
+            ("</summary>", "No issues were raised in this review."),
+        ],
+    )
+    def test_stray_tool_call_markup_is_stripped(self, narrative, expected):
+        assert build_summary([], narrative) == expected
+
+    def test_stray_tool_call_markup_is_stripped_before_the_counts(self):
+        summary = build_summary([finding()], "Worth tightening.</summary>\n")
+
+        assert summary.startswith("Worth tightening.\n\n1 finding (1 critical)")
+
     def test_blank_narrative_falls_back_to_the_default(self):
         assert build_summary([], "   ") == "No issues were raised in this review."
 
