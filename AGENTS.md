@@ -150,7 +150,8 @@ make check-graphql       # GraphQL schema validation
 make lint-proto          # buf lint for protobuf contracts
 
 # Auto-format code
-make ruff-fix       # ruff check --fix + ruff format
+make ruff-format    # ruff format (fixes what check-ruff's format check flags)
+make ruff-fix       # ruff check --fix only; does not format
 make docformatter
 make codespell      # Auto-fix spelling
 
@@ -257,6 +258,8 @@ poetry run validate-model-selection-config
 - **Import sorting**: Handled by Ruff's `isort`-compatible rule group (`I`), configured in `[tool.ruff.lint.isort]`
 - **Code formatter**: `ruff format` (replaced Black; migration tracked in work item #2237)
 - **Docstrings**: Google-style, formatted with `docformatter` (max 120 chars)
+- **Indentation**: `check-editorconfig` requires every line of a `.py` file to be indented in multiples of 4,
+  including lines inside multi-line string literals; build such text from single-line strings instead
 
 ### Python Conventions
 
