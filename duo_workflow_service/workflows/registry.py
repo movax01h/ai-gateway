@@ -19,6 +19,9 @@ from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
+from duo_workflow_service.agent_platform.constants import (
+    CHAT_PARTIAL_ENVIRONMENT,
+)
 from duo_workflow_service.agent_platform.experimental.flows import (
     Flow as ExperimentalFlow,
 )
@@ -32,10 +35,7 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     list_configs as experimental_list_configs,
 )
 from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
-from duo_workflow_service.agent_platform.v1.chat_engine import (
-    ChatFlow,
-    normalize_engine_owned_config,
-)
+from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
 from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
 from duo_workflow_service.agent_platform.v1.flows import (
@@ -79,8 +79,6 @@ _WORKFLOWS_LOOKUP = {
     f"{Path(inspect.getfile(workflow_cls)).relative_to(current_directory).parent.with_suffix('')}": workflow_cls
     for workflow_cls in _WORKFLOWS
 }
-
-CHAT_AGENT_COMPONENT_ENVIRONMENT = "chat-partial"
 
 # Engine-owned config versions. A chat-partial config listed here builds
 # ``ChatFlow``; every other chat-partial version builds legacy ``chat.Workflow``.
@@ -352,8 +350,8 @@ def _engine_owned_chat_factory(
     The engine runs the declared graph through the shared builder, so two rules
     of the chat-partial environment that legacy ``chat.Workflow`` never had to
     enforce apply here: the root component needs a name for the builder to key
-    on, and declared routers are rejected because the single component is the
-    sink and the engine synthesizes its hop to the boundary.
+    on, and declared routers are rejected because the environment completes the
+    config with the single component's route to the boundary.
     """
     if not isinstance(config, V1FlowConfig):
         raise ValueError("Engine-owned chat-partial flows require the v1 config schema")
@@ -365,11 +363,11 @@ def _engine_owned_chat_factory(
 
     if config.routers:
         raise ValueError(
-            "Engine-owned chat-partial flows reject declared routers: the single "
-            "component is the sink and the engine routes it to the boundary"
+            "Engine-owned chat-partial flows reject declared routers: the "
+            "environment routes the single component to the boundary"
         )
 
-    return partial(ChatFlow, config=normalize_engine_owned_config(config))
+    return partial(ChatFlow, config=config.to_config())
 
 
 def flow_factory(
@@ -387,7 +385,7 @@ def flow_factory(
     # Validate all prompts for security issues before creating the flow
     _validate_flow_config_prompts(config)
 
-    if config.environment != CHAT_AGENT_COMPONENT_ENVIRONMENT:
+    if config.environment != CHAT_PARTIAL_ENVIRONMENT:
         return partial(flow_cls, config=config)
 
     if len(config.components) != 1:
@@ -452,7 +450,7 @@ def get_flow_classes(
     Any,
 ]:
 
-    if environment == CHAT_AGENT_COMPONENT_ENVIRONMENT:
+    if environment == CHAT_PARTIAL_ENVIRONMENT:
         _, partial_flow_config_cls, flow_cls = _FLOW_BY_VERSIONS[
             flow_config_schema_version
         ]

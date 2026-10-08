@@ -52,15 +52,21 @@ tool card and the compaction summarizer. Images become the placeholder above;
 every other block without text becomes a marker naming its type.
 """
 
+from enum import StrEnum
+from http import HTTPStatus
 from typing import Any, Optional
 
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.messages.content import create_image_block
 
 __all__ = [
     "IMAGE_BLOCK_TOKEN_ESTIMATE",
+    "ImageLimitKind",
+    "ImageScope",
     "block_text",
     "content_as_text",
     "image_content_block",
+    "image_limit_kind",
     "is_image_block",
     "is_image_content_block",
     "is_internal_image_block",
@@ -68,6 +74,7 @@ __all__ = [
     "strip_image_payloads",
     "with_block_text",
     "without_image_blocks",
+    "without_image_payloads",
 ]
 
 
@@ -88,17 +95,19 @@ class _InternalImageBlock(dict[str, Any]):
 
 # Flat per-image token cost charged wherever a conversation is budgeted.
 #
-# Not a magic number: it is the ceiling of what an image can cost, derived from
-# Anthropic's published behaviour. They downscale anything larger to roughly
-# 1.15 megapixels and bill about `width * height / 750` tokens, so the most any
-# single image can cost is `1_150_000 / 750` ~= 1533; 1600 rounds that up.
+# Not a magic number: it is the ceiling of what an image can cost, from
+# Anthropic's published resolution tiers. The model sees an image as 28 px
+# patches, one visual token each, after downscaling it to the tier's long edge:
+# at most 4784 tokens (2576 px) on Claude 4.7 and later, at most 1568 tokens
+# (1568 px) on older models. 4800 rounds the larger tier up.
+# https://platform.claude.com/docs/en/build-with-claude/vision#resolution-and-token-cost
 #
 # Being the ceiling is the point. A budget estimate that can only ever be too
 # high makes context management compact early, which is recoverable. One that
 # can be too low overflows the model's window mid-turn, which is not. The
 # alternative of measuring the base64 string as if it were prose over-counts by
 # two orders of magnitude and would compact away most of the conversation.
-IMAGE_BLOCK_TOKEN_ESTIMATE = 1600
+IMAGE_BLOCK_TOKEN_ESTIMATE = 4800
 
 
 def image_content_block(base64: str, mime_type: str) -> dict[str, Any]:
@@ -184,6 +193,69 @@ def strip_image_payloads(content: Any) -> Any:
         else:
             stripped.append(block)
     return stripped
+
+
+class ImageLimitKind(StrEnum):
+    """Why the provider rejected a request that carried images.
+
+    ``single_image`` and ``request`` are read from Anthropic's wording and pick the scope
+    order and the note for the model. ``unclassified`` is every other 400 or 413: the
+    rejection still recovers, since the newest images are the only unproven content in
+    the request, but the note cannot name a cause.
+    """
+
+    SINGLE_IMAGE = "single_image"
+    REQUEST = "request"
+    UNCLASSIFIED = "unclassified"
+
+
+class ImageScope(StrEnum):
+    SEEN = "seen"
+    CURRENT = "current"
+
+
+def image_limit_kind(status_code: int, message: str) -> Optional[ImageLimitKind]:
+    """Classify a provider rejection, or return ``None`` for a status the image fallback does not cover.
+
+    Only the wording decides between the kinds, never whether to recover: a 400 or 413
+    of any wording is ``unclassified`` at worst. Anthropic names the rejected block
+    ``...image.source.base64.data`` for size errors.
+    """
+    if status_code == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
+        return ImageLimitKind.REQUEST
+    if status_code != HTTPStatus.BAD_REQUEST:
+        return None
+    if "image.source.base64" not in message:
+        return ImageLimitKind.UNCLASSIFIED
+    if "max allowed size" in message and "many-image" not in message:
+        return ImageLimitKind.SINGLE_IMAGE
+    return ImageLimitKind.REQUEST
+
+
+def without_image_payloads(
+    messages: list[BaseMessage], *, scope: ImageScope
+) -> tuple[list[BaseMessage], int]:
+    """Replace inline images with the checkpoint placeholder in the messages *scope* selects, by the last
+    ``AIMessage``."""
+    last_answer = max(
+        (i for i, message in enumerate(messages) if isinstance(message, AIMessage)),
+        default=-1,
+    )
+    replaced = list(messages)
+    removed = 0
+    for index, message in enumerate(messages):
+        if (scope is ImageScope.SEEN) == (index > last_answer):
+            continue
+        if not isinstance(message.content, list):
+            continue
+        count = sum(1 for block in message.content if is_image_content_block(block))
+        if not count:
+            continue
+        replaced[index] = message.model_copy(
+            update={"content": strip_image_payloads(message.content)}
+        )
+        removed += count
+    return (replaced, removed) if removed else (messages, 0)
 
 
 def _placeholder(mime_type: Optional[str]) -> str:

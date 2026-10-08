@@ -2,7 +2,7 @@ from enum import StrEnum
 from time import time
 from typing import Any, AsyncIterator, List, Optional, Protocol, Union
 
-from dependency_injector.providers import Factory
+from dependency_injector.providers import Configuration, Factory
 from dependency_injector.wiring import Provide, inject
 from fastapi import HTTPException, Request, status
 from gitlab_cloud_connector import (
@@ -10,7 +10,7 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     WrongUnitPrimitives,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, SerializerFunctionWrapHandler, model_serializer
 from sse_starlette.sse import EventSourceResponse
 from starlette.responses import StreamingResponse
 from starlette_context import context as starlette_context
@@ -24,12 +24,13 @@ from ai_gateway.code_suggestions import (
     LanguageServerVersion,
 )
 from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
+from ai_gateway.code_suggestions.fallback import build_rate_limit_fallback
 from ai_gateway.code_suggestions.processing.post.completions import (
     create_post_processor_for_model_metadata,
 )
-from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import (
+    AmazonQModelMetadata,
     TypeModelMetadata,
     build_default_code_completions_metadata,
     completion_context_max_percent_for_model_metadata,
@@ -38,6 +39,7 @@ from ai_gateway.model_metadata import (
 )
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models import KindModelProvider
+from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.structured_logging import get_request_logger
 from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
@@ -79,6 +81,16 @@ class ModelMetadata(BaseModel):
     engine: Optional[str] = None
     name: Optional[str] = None
     lang: Optional[str] = None
+    tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_missing_token_usage(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        data = handler(self)
+        if data.get("tokens_consumption_metadata") is None:
+            data.pop("tokens_consumption_metadata", None)
+        return data
 
 
 class ResponseMetadataBase(BaseModel):
@@ -140,6 +152,16 @@ def _get_prompt_on_behalf(
         )
 
 
+def _amazon_q_role_arn(
+    payload: Any, model_metadata: TypeModelMetadata | None
+) -> str | None:
+    if payload.role_arn:
+        return payload.role_arn
+    if isinstance(model_metadata, AmazonQModelMetadata):
+        return model_metadata.role_arn
+    return None
+
+
 def _selectable_completion_models() -> set[str]:
     completions = (
         ModelSelectionConfig.instance().get_resolved_unit_primitive_config_map()[
@@ -158,7 +180,7 @@ async def code_suggestions(
     payload: Any,
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
-    config: Config,
+    config: Configuration,
     stream_handler: StreamHandler,
 ):
     language_server_version = LanguageServerVersion.from_string(
@@ -230,20 +252,21 @@ async def code_completion(
     stream_handler: StreamHandler,
     snowplow_event_context: SnowplowEventContext,
     completions_agent_factory: Factory[CodeCompletions] = Provide[
-        ContainerApplication.code_suggestions.completions.agent_factory.provider
+        "code_suggestions.completions.agent_factory.provider"
     ],
     completions_amazon_q_factory: Factory[CodeCompletions] = Provide[
-        ContainerApplication.code_suggestions.completions.amazon_q_factory.provider
+        "code_suggestions.completions.amazon_q_factory.provider"
     ],
     internal_event_client: InternalEventsClient = Provide[
         ContainerApplication.internal_event.client
     ],
     code_context: Optional[List[Any]] = None,
-    model_metadata: TypeModelMetadata = None,
-    config: Config = None,
+    model_metadata: TypeModelMetadata | None = None,
+    *,
+    config: Configuration,
     using_cache: bool = True,
 ):
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
 
     if payload.model_provider == KindModelProvider.AMAZON_Q or (
         model_metadata and model_metadata.provider == KindModelProvider.AMAZON_Q
@@ -263,7 +286,7 @@ async def code_completion(
         )
         engine = completions_amazon_q_factory(
             model__current_user=current_user,
-            model__role_arn=payload.role_arn or model_metadata.role_arn,
+            model__role_arn=_amazon_q_role_arn(payload, model_metadata),
         )
     else:
         if (
@@ -277,24 +300,32 @@ async def code_completion(
             )
             model_metadata = None
 
+        engine_kwargs: dict[str, Any] = {}
         if model_metadata is None:
-            if config is None:
-                raise ValueError(
-                    "config must be provided when model_metadata is not set"
-                )
             model_metadata = build_default_code_completions_metadata(
                 fireworks_api_base_url=config.fireworks_api_base_url(),
                 model_keys=config.model_keys(),
                 user=current_user,
                 using_cache=using_cache,
-                mock_model_responses=config.mock_model_responses,
+                mock_model_responses=config.mock_model_responses(),
+            )
+            engine_kwargs["fallback_factory"] = build_rate_limit_fallback(
+                model_metadata,
+                prompt_registry,
+                current_user,
+                fireworks_api_base_url=config.fireworks_api_base_url(),
+                model_keys=config.model_keys(),
+                using_cache=using_cache,
+                mock_model_responses=config.mock_model_responses(),
+                excl_post_process=config.feature_flags.excl_post_process(),
+                fireworks_score_thresholds=config.feature_flags.fireworks_score_threshold(),
             )
         elif model_metadata.provider == "gitlab":
             model_metadata = resolve_provider_aware_metadata(
                 model_metadata.llm_definition,
                 provider_keys=config.model_keys(),
                 fireworks_api_base_url=config.fireworks_api_base_url(),
-                mock_model_responses=config.mock_model_responses,
+                mock_model_responses=config.mock_model_responses(),
                 session_id=current_user.global_user_id,
                 using_cache=using_cache,
             )
@@ -312,7 +343,6 @@ async def code_completion(
             config.feature_flags.excl_post_process(),
             config.feature_flags.fireworks_score_threshold(),
         )
-        engine_kwargs: dict[str, Any] = {}
         if model_metadata.is_custom_model:
             engine_kwargs["model__llm_definition"] = model_metadata.llm_definition
 
@@ -343,26 +373,29 @@ async def code_completion(
         **kwargs,
     )
 
-    if not isinstance(suggestions, list):
-        suggestions = [suggestions]
+    results = suggestions if isinstance(suggestions, list) else [suggestions]
+    first = results[0]
 
-    if isinstance(suggestions[0], AsyncIterator):
+    if isinstance(first, AsyncIterator):
         stream_metadata = _get_stream_metadata(engine, snowplow_event_context)
-        return await stream_handler(suggestions[0], stream_metadata)
+        return await stream_handler(first, stream_metadata)
 
     model_meta = ModelMetadata(
-        engine=suggestions[0].model_metadata.engine,
-        name=suggestions[0].model_metadata.name,
-        lang=suggestions[0].lang,
+        engine=first.model_metadata.engine,
+        name=first.model_metadata.name,
+        lang=first.lang,
+        tokens_consumption_metadata=(
+            first.metadata.tokens_consumption_metadata if first.metadata else None
+        ),
     )
 
     return CompletionResponse(
-        choices=_completion_suggestion_choices(suggestions),
+        choices=_completion_suggestion_choices(results),
         model=model_meta,
         metadata=ResponseMetadataBase(
             timestamp=int(time()),
             model=model_meta,
-            enabled_feature_flags=current_feature_flag_context.get(),
+            enabled_feature_flags=list(current_feature_flag_context.get()),
             region=snowplow_event_context.region,
         ),
     )
@@ -397,21 +430,21 @@ async def code_generation(
     stream_handler: StreamHandler,
     snowplow_event_context: SnowplowEventContext,
     agent_factory: Factory[CodeGenerations] = Provide[
-        ContainerApplication.code_suggestions.generations.agent_factory.provider
+        "code_suggestions.generations.agent_factory.provider"
     ],
     generations_amazon_q_factory: Factory[CodeGenerations] = Provide[
-        ContainerApplication.code_suggestions.generations.amazon_q_factory.provider
+        "code_suggestions.generations.amazon_q_factory.provider"
     ],
     internal_event_client: InternalEventsClient = Provide[
         ContainerApplication.internal_event.client
     ],
     # pylint: disable=unused-argument
     code_context: Optional[List[Any]] = None,
-    model_metadata: Optional[TypeModelMetadata] = None,
-    config: Optional[Config] = None,
+    model_metadata: TypeModelMetadata | None = None,
+    config: Configuration | None = None,
 ):
-    model_provider = payload.model_provider or (
-        model_metadata and model_metadata.provider
+    model_provider: str | None = payload.model_provider or (
+        model_metadata.provider if model_metadata else None
     )
     if model_provider == KindModelProvider.AMAZON_Q:
         if not current_user.can(
@@ -429,7 +462,7 @@ async def code_generation(
         )
         engine = generations_amazon_q_factory(
             model__current_user=current_user,
-            model__role_arn=payload.role_arn or model_metadata.role_arn,
+            model__role_arn=_amazon_q_role_arn(payload, model_metadata),
         )
     elif payload.prompt_id:
         # for backward compatibility, eventually prmpt_version should be a mandatory field
@@ -452,7 +485,7 @@ async def code_generation(
             "Executing code generation with prompt registry",
             prompt_name=prompt.name,
             prompt_model_class=prompt.model.__class__.__name__,
-            prompt_model_name=prompt.model_name,
+            prompt_model_name=prompt.reported_model_name,
         )
     else:
         # If model_provider is specified in payload but no prompt_id, use it to override model_metadata
@@ -461,7 +494,7 @@ async def code_generation(
                 model_metadata = create_model_metadata(
                     {"provider": "gitlab", "identifier": "claude_sonnet_4_5_20250929"},
                     mock_model_responses=(
-                        config.mock_model_responses if config else False
+                        config.mock_model_responses() if config else False
                     ),
                 )
             elif model_provider == KindModelProvider.VERTEX_AI:
@@ -471,7 +504,7 @@ async def code_generation(
                         "identifier": "claude_sonnet_4_5_20250929_vertex",
                     },
                     mock_model_responses=(
-                        config.mock_model_responses if config else False
+                        config.mock_model_responses() if config else False
                     ),
                 )
 
@@ -488,7 +521,7 @@ async def code_generation(
             "Executing code generation with prompt registry (legacy path)",
             prompt_name=prompt.name,
             prompt_model_class=prompt.model.__class__.__name__,
-            prompt_model_name=prompt.model_name,
+            prompt_model_name=prompt.reported_model_name,
         )
 
     _watch_code_suggestion_event(snowplow_event_context)
@@ -525,7 +558,7 @@ async def code_generation(
         metadata=ResponseMetadataBase(
             timestamp=int(time()),
             model=model_meta,
-            enabled_feature_flags=current_feature_flag_context.get(),
+            enabled_feature_flags=list(current_feature_flag_context.get()),
             region=snowplow_event_context.region,
         ),
     )
@@ -541,6 +574,6 @@ def _get_stream_metadata(
             engine=engine.model.metadata.engine,
             name=engine.model.metadata.name,
         ),
-        enabled_feature_flags=current_feature_flag_context.get(),
+        enabled_feature_flags=list(current_feature_flag_context.get()),
         region=snowplow_event_context.region,
     )

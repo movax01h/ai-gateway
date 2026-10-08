@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from pydantic import SecretStr
 from snowplow_tracker import SelfDescribingJson, Snowplow
 
 from lib.billing_events import BillingEvent, BillingEventsClient
@@ -128,6 +129,36 @@ class TestBillingEventsClient:
         assert tracker_args["emitters"][0] is client._emitter
 
     @pytest.mark.parametrize(
+        "api_key,expected_header",
+        [
+            pytest.param(None, None, id="no_api_key"),
+            pytest.param(SecretStr("glsa-key"), "Bearer glsa-key", id="api_key"),
+        ],
+    )
+    @mock.patch("snowplow_tracker.Tracker.__init__")
+    @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
+    def test_initialization_session_bearer_token(
+        self, mock_emitter_init, mock_tracker_init, api_key, expected_header
+    ):
+        mock_emitter_init.return_value = None
+        mock_tracker_init.return_value = None
+
+        client = BillingEventsClient(
+            enabled=True,
+            endpoint="https://billing.local",
+            app_id="gitlab_ai_gateway-billing",
+            namespace="gl",
+            batch_size=1,
+            thread_count=1,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+            api_key=api_key,
+        )
+
+        emitter_args = mock_emitter_init.call_args[1]
+        assert emitter_args["session"] is client._session
+        assert client._session.headers.get("Authorization") == expected_header
+
+    @pytest.mark.parametrize(
         "event, unit_of_measure, quantity, metadata, category, kwargs",
         [
             (
@@ -213,7 +244,7 @@ class TestBillingEventsClient:
             "organization_id": kwargs.get("organization_id"),
         }
 
-        client.track_billing_event(
+        tracked = client.track_billing_event(
             user=user,
             event=event,
             unit_of_measure=unit_of_measure,
@@ -222,6 +253,7 @@ class TestBillingEventsClient:
             category=category,
         )
 
+        assert tracked is True
         mock_dependencies["track"].assert_called_once()
         mock_dependencies["structured_event_init"].assert_called_once()
 
@@ -247,7 +279,7 @@ class TestBillingEventsClient:
         assert not hasattr(client, "snowplow_tracker")
 
         try:
-            client.track_billing_event(
+            tracked = client.track_billing_event(
                 user=user,
                 event=BillingEvent.AIGW_PROXY_USE,
                 category=__name__,
@@ -257,9 +289,11 @@ class TestBillingEventsClient:
         except Exception as e:
             pytest.fail(f"Disabled client raised an unexpected exception: {e}")
 
+        assert tracked is False
+
     def test_track_billing_event_negative_quantity(self, client, user):
         with mock.patch.object(client.snowplow_tracker, "track") as mock_track:
-            client.track_billing_event(
+            tracked = client.track_billing_event(
                 user=user,
                 event=BillingEvent.AIGW_PROXY_USE,
                 category=__name__,
@@ -267,6 +301,7 @@ class TestBillingEventsClient:
                 quantity=-100.0,
             )
             mock_track.assert_not_called()
+            assert tracked is False
 
     def test_track_billing_event_with_empty_metadata(
         self, client, user, mock_dependencies
@@ -440,7 +475,7 @@ class TestBillingEventsClient:
             mock_track.side_effect = Exception("Network error")
 
             try:
-                client.track_billing_event(
+                tracked = client.track_billing_event(
                     user=user,
                     event=BillingEvent.AIGW_PROXY_USE,
                     category=__name__,
@@ -449,6 +484,33 @@ class TestBillingEventsClient:
                 )
             except Exception as e:
                 pytest.fail(f"Failed to send billing event: {e}")
+
+            assert tracked is False
+
+    def test_track_billing_event_internal_event_exception(
+        self, client, user, mock_dependencies
+    ):
+        """Test that a failure in the internal analytics event still reports the billing event as tracked, since the
+        Snowplow billing event was already sent."""
+        current_event_context.set(EventContext())
+        client.internal_event_client.track_event.side_effect = Exception(
+            "Internal events down"
+        )
+
+        try:
+            tracked = client.track_billing_event(
+                user=user,
+                event=BillingEvent.AIGW_PROXY_USE,
+                category=__name__,
+                unit_of_measure="tokens",
+                quantity=100.0,
+            )
+        except Exception as e:
+            pytest.fail(f"Internal event failure leaked out: {e}")
+
+        assert tracked is True
+        mock_dependencies["track"].assert_called_once()
+        client.internal_event_client.track_event.assert_called_once()
 
     @pytest.mark.usefixtures("mock_dependencies")
     def test_internal_events_client_track_event_called_with_correct_parameters(
@@ -802,8 +864,14 @@ class TestBillingEventsClient:
             mock_event_store.size.return_value = buffer_size
             client._emitter.event_store = mock_event_store
 
-        with mock.patch.object(client._logger, "info") as mock_info:
+        with (
+            mock.patch.object(client.snowplow_tracker, "flush") as mock_flush,
+            mock.patch.object(client._session, "close") as mock_close,
+            mock.patch.object(client._logger, "info") as mock_info,
+        ):
             client.shutdown()
+            mock_flush.assert_called_once()
+            mock_close.assert_called_once()
             mock_info.assert_called_once_with(
                 "Shutting down billing events client",
                 emitter_queue_size=expected_queue,

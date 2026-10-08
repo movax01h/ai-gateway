@@ -1,4 +1,4 @@
-"""Cross-root prompt discovery for features moved under ai/features/ (Layout B)."""
+"""Cross-root prompt discovery for ai/features/ and ai/shared/."""
 
 from pathlib import Path
 from unittest.mock import Mock
@@ -30,8 +30,7 @@ def _make_registry() -> LocalPromptRegistry:
     )
 
 
-def _write_moved_feature(features_dir: Path, domain: str, feature: str) -> Path:
-    prompts = features_dir / domain / feature / "prompts"
+def _write_prompts(prompts: Path, prompt_id: str) -> Path:
     (prompts / "base").mkdir(parents=True)
     (prompts / "system").mkdir(parents=True)
     (prompts / "base" / "1.0.0.yml").write_text(
@@ -39,10 +38,14 @@ def _write_moved_feature(features_dir: Path, domain: str, feature: str) -> Path:
         "name: Moved\n"
         "unit_primitive: duo_chat\n"
         "prompt_template:\n"
-        f"  system: \"{{% include '{feature}/system/1.0.0.jinja' %}}\"\n"
+        f"  system: \"{{% include '{prompt_id}/system/1.0.0.jinja' %}}\"\n"
     )
     (prompts / "system" / "1.0.0.jinja").write_text("Hello {{ target }}")
     return prompts
+
+
+def _write_moved_feature(features_dir: Path, domain: str, feature: str) -> Path:
+    return _write_prompts(features_dir / domain / feature / "prompts", feature)
 
 
 class TestDiscovery:
@@ -59,6 +62,38 @@ class TestDiscovery:
         assert feature_roots.feature_prompt_root("other_feature") == (
             features / "code" / "other_feature" / "prompts"
         )
+
+    def test_registers_domain_qualified_id(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        prompts = _write_moved_feature(features, "chat", "react")
+
+        feature_roots.discover_feature_prompts(features)
+
+        assert feature_roots.feature_prompt_root("chat/react") == prompts
+        assert feature_roots.feature_prompt_root("react") == prompts
+
+    def test_registers_shared_prompts_dir(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        shared = tmp_path / "ai" / "shared"
+        prompts = _write_prompts(
+            shared / "commit_changes" / "prompts", "commit_changes"
+        )
+        (shared / "no_prompts").mkdir()
+        (shared / "README.md").write_text("not a definition")
+
+        feature_roots.discover_feature_prompts(features)
+
+        assert feature_roots.feature_prompt_root("commit_changes") == prompts
+        assert feature_roots.feature_prompt_root("no_prompts") is None
+        assert feature_roots.feature_prompt_root("README.md") is None
+
+    def test_shared_name_colliding_with_feature_raises(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        _write_moved_feature(features, "cli", "common")
+        _write_prompts(tmp_path / "ai" / "shared" / "common" / "prompts", "common")
+
+        with pytest.raises(ValueError, match="Duplicate prompt feature id 'common'"):
+            feature_roots.discover_feature_prompts(features)
 
     def test_missing_tree_is_silent(self, tmp_path: Path):
         feature_roots.discover_feature_prompts(tmp_path / "does_not_exist")
@@ -101,6 +136,26 @@ class TestResolveId:
             prompts / "base"
         )
 
+    def test_resolves_domain_qualified_id(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        prompts = _write_moved_feature(features, "chat", "react")
+        feature_roots.discover_feature_prompts(features)
+
+        assert _make_registry()._resolve_id("chat/react", family=[]) == (
+            prompts / "base"
+        )
+
+    def test_resolves_shared_prompt(self, tmp_path: Path):
+        shared = tmp_path / "ai" / "shared"
+        prompts = _write_prompts(
+            shared / "commit_changes" / "prompts", "commit_changes"
+        )
+        feature_roots.discover_feature_prompts(tmp_path / "ai" / "features")
+
+        assert _make_registry()._resolve_id("commit_changes", family=[]) == (
+            prompts / "base"
+        )
+
     def test_unregistered_id_uses_legacy_definitions_root(self):
         registry = _make_registry()
         with pytest.raises(FileNotFoundError, match="definitions"):
@@ -117,6 +172,46 @@ class TestJinjaIncludeLoader:
             "{% include 'my_feature/system/1.0.0.jinja' %}"
         ).render(target="world")
         assert rendered == "Hello world"
+
+    def test_domain_qualified_include_resolves(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        _write_prompts(features / "demo" / "nested" / "prompts", "demo/nested")
+        feature_roots.discover_feature_prompts(features)
+
+        rendered = base.jinja_env.from_string(
+            "{% include 'demo/nested/system/1.0.0.jinja' %}"
+        ).render(target="world")
+        assert rendered == "Hello world"
+
+    def test_shared_include_resolves(self, tmp_path: Path):
+        partials = tmp_path / "ai" / "shared" / "demo_partials" / "prompts" / "naming"
+        partials.mkdir(parents=True)
+        (partials / "1.0.0.jinja").write_text("Name the branch {{ target }}")
+        feature_roots.discover_feature_prompts(tmp_path / "ai" / "features")
+
+        rendered = base.jinja_env.from_string(
+            "{% include 'demo_partials/naming/1.0.0.jinja' %}"
+        ).render(target="well")
+        assert rendered == "Name the branch well"
+
+    def test_two_part_id_wins_over_one_part_id(self, tmp_path: Path):
+        (tmp_path / "one" / "react").mkdir(parents=True)
+        (tmp_path / "one" / "react" / "x.jinja").write_text("one-part")
+        (tmp_path / "two").mkdir()
+        (tmp_path / "two" / "x.jinja").write_text("two-part")
+        feature_roots.register_prompt_root("chat", tmp_path / "one")
+        feature_roots.register_prompt_root("chat/react", tmp_path / "two")
+
+        source, _, _ = base.FeatureRootLoader().get_source(
+            base.jinja_env, "chat/react/x.jinja"
+        )
+        assert source == "two-part"
+
+    def test_id_without_file_part_raises(self, tmp_path: Path):
+        feature_roots.register_prompt_root("chat/react", tmp_path)
+
+        with pytest.raises(TemplateNotFound):
+            base.FeatureRootLoader().get_source(base.jinja_env, "chat/react")
 
     def test_missing_file_under_registered_root_raises(self, tmp_path: Path):
         features = tmp_path / "ai" / "features"

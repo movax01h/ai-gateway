@@ -1,6 +1,5 @@
 import functools
 import random
-import re
 from itertools import chain
 from pathlib import Path
 from typing import Annotated, Any, Iterable, Literal, Optional
@@ -23,6 +22,7 @@ from ai_gateway.config import (
     ModelReleasesPayload,
     get_config,
 )
+from ai_gateway.model_selection.keyword_bm25 import KeywordBM25
 from ai_gateway.model_selection.models import (
     BaseModelParams,
     ChatAmazonQParams,
@@ -117,6 +117,9 @@ class BaseLLMDefinition(BaseModel):
     # Some reasoning models (e.g. Qwen) leak <think>...</think> reasoning into responses.
     # When true, the ReAct parser strips that block before it reaches the user.
     strip_reasoning: bool = False
+    # Whether this deployment accepts image input; absent means ask litellm's registry.
+    # Set per deployment, with a dated comment naming the evidence.
+    supports_vision: Optional[bool] = None
     requires_single_system_message: bool = False
     # Some models are available only to accounts that have purchased GitLab credits.
     # When true, clients show a "Requires paid credits" indicator and block chat input.
@@ -240,6 +243,10 @@ class UnitPrimitiveConfig(BaseModel):
             raise ValueError(
                 f"Feature '{self.feature_setting}': weight must be specified for all "
                 f"default_models entries or none. Missing weight for: {missing}"
+            )
+        if all(has_weight) and sum(w for w in weights if w is not None) <= 0:
+            raise ValueError(
+                f"Feature '{self.feature_setting}': at least one default_models weight must be above 0"
             )
         return self
 
@@ -612,11 +619,10 @@ class ModelSelectionConfig:
 
     def resolve_tag_for_goal(
         self, feature_setting_name: str, goal: str
-    ) -> Optional[tuple[str, str]]:
-        """Return the first matching tag and the keyword that matched, or None.
+    ) -> Optional[tuple[str, list[str]]]:
+        """Return the first tag the goal matches and every one of its keywords found in the goal, or None.
 
-        Tags are checked in declaration order. Keywords match as whole words, ignoring case, with plain plural and
-        verb endings.
+        Tags are checked in declaration order. Keywords are scored with BM25 (see `keyword_bm25.py`).
 
         Design: https://gitlab.com/gitlab-org/gitlab/-/work_items/627658
         """
@@ -626,23 +632,25 @@ class ModelSelectionConfig:
         if unit_primitive_config is None or not goal:
             return None
 
-        for tag, entry in unit_primitive_config.models_for_tags.items():
-            for keyword in entry.keywords:
-                if _keyword_pattern(keyword).search(goal):
-                    return tag, keyword
-        return None
+        tagged = [
+            (tag, keyword)
+            for tag, entry in unit_primitive_config.models_for_tags.items()
+            for keyword in entry.keywords
+        ]
+        if not tagged:
+            return None
+        matches = _keyword_scorer(tuple(keyword for _, keyword in tagged)).matches(goal)
+        hits = [pair for pair, hit in zip(tagged, matches) if hit]
+        if not hits:
+            return None
+        tag = hits[0][0]
+        return tag, [keyword for hit_tag, keyword in hits if hit_tag == tag]
 
 
-@functools.lru_cache(maxsize=256)
-def _keyword_pattern(keyword: str) -> re.Pattern[str]:
-    # Match the keyword as a whole word, allowing plain plural and verb endings
-    # (`typos`, `bumped`, `refactoring`). For keywords ending in "e" the "e" is
-    # folded into the ending so `rename` also matches `renamed` and `renaming`.
-    if keyword.endswith("e"):
-        return re.compile(
-            rf"\b{re.escape(keyword[:-1])}(?:e|es|ed|ing)\b", re.IGNORECASE
-        )
-    return re.compile(rf"\b{re.escape(keyword)}(?:s|es|ed|ing)?\b", re.IGNORECASE)
+@functools.lru_cache(maxsize=64)
+def _keyword_scorer(keywords: tuple[str, ...]) -> KeywordBM25:
+    # Keywords come from static YAML, so build the BM25 statistics once per keyword list.
+    return KeywordBM25(list(keywords))
 
 
 def validate_model_selection_config():

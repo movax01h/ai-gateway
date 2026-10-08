@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import fastapi
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
 from ai_gateway.proxy.clients import ProxyClient, VertexAIProxyModelFactory
 from ai_gateway.proxy.clients.vertex_ai import PathParams
@@ -184,6 +185,11 @@ def test_allowed_upstream_models_includes_anthropic():
 
     assert "text-embedding-005" in allowed_models
     assert "claude-sonnet-4-5@20250929" in allowed_models
+
+    # Newer Vertex model IDs carry neither an @version nor a -vertex suffix,
+    # which the previous name-shape heuristic silently excluded.
+    assert "claude-opus-4-8" in allowed_models
+    assert "claude-sonnet-4-6" in allowed_models
 
 
 class TestPathParams:
@@ -435,3 +441,31 @@ class TestUpstreamPathGeneration:
             assert model.upstream_path.startswith(
                 "/v1/projects/my-project/locations/my-location"
             )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refs,allowed",
+    [(["claude_sonnet_4_5_20250929"], True), (["claude_fable_5"], False)],
+)
+async def test_model_allowlist(vertex_factory, request_factory, refs, allowed):
+    request = request_factory(
+        request_url="http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
+        "locations/LOCATION/publishers/anthropic/models/claude-sonnet-4-5@20250929:streamRawPredict",
+        request_body=b'{"messages": []}',
+    )
+    request.user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={"gitlab_allowed_model_refs": refs}),
+    )
+
+    if allowed:
+        with patch("ai_gateway.proxy.clients.vertex_ai.access_token"):
+            model = await vertex_factory.factory(request)
+
+        assert model.model_name == "claude-sonnet-4-5@20250929"
+    else:
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await vertex_factory.factory(request)
+
+        assert excinfo.value.status_code == 403

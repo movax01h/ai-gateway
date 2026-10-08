@@ -22,12 +22,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from openai.resources.responses import AsyncResponses
 
-import tests.duo_workflow_service.integration.conftest as integration_conftest
+import integration_tests.duo_workflow_service.conftest as integration_conftest
 from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
 )
 from duo_workflow_service.server import DuoWorkflowService
-from tests.duo_workflow_service.integration.conftest import (
+from integration_tests.duo_workflow_service.conftest import (
     FakeExecutor,
     run_exchange,
     start_registry_flow_event,

@@ -134,15 +134,16 @@ SAAS_PROMPT_MODEL_MAP = {
 }
 
 
-class CodeSuggestionsOutput(NamedTuple):
-    class Metadata(NamedTuple):  # type: ignore[misc]
-        tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
+class CodeSuggestionsMetadata(NamedTuple):
+    tokens_consumption_metadata: TokensConsumptionMetadata | None = None
 
+
+class CodeSuggestionsOutput(NamedTuple):
     text: str
     model_metadata: ModelMetadata
     score: Optional[float] = None
     lang_id: Optional[LanguageId] = None
-    metadata: Optional["CodeSuggestionsOutput.Metadata"] = None  # type: ignore[name-defined]
+    metadata: CodeSuggestionsMetadata | None = None
 
     @property
     def lang(self) -> str:

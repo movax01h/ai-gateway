@@ -10,14 +10,38 @@ from pydantic import (
     Field,
     StringConstraints,
     UrlConstraints,
+    field_validator,
+    model_validator,
 )
+from pydantic_core import PydanticCustomError
 
+from ai_gateway.config import get_config
 from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
+from ai_gateway.model_selection.models import ModelClassProvider
+from lib.aws_assume_role import (
+    IAM_ROLE_ARN_MAX_LENGTH,
+    AssumeRoleError,
+    get_assumed_role_credentials,
+    validate_external_id,
+    validate_iam_role_arn,
+)
 from lib.context import StarletteUser
+from lib.jwt import trusted_instance_id
 
 log = structlog.stdlib.get_logger("model_metadata")
 
 PROVIDERS_WITHOUT_API_BASE = frozenset({"bedrock", "vertex_ai"})
+BEDROCK_PROVIDERS = frozenset({"bedrock", "bedrock_converse"})
+
+
+IAM_ROLE_USAGE_ERROR = "iam_role_usage"
+
+
+class IamRoleNotAllowedError(ValueError):
+    """``iam_role`` was sent to a gateway that does not serve custom models."""
+
+    def __init__(self) -> None:
+        super().__init__("iam_role is only supported when custom models are enabled")
 
 
 class BaseModelMetadata(BaseModel):
@@ -94,6 +118,40 @@ class ModelMetadata(BaseModelMetadata):
     endpoint: Optional[Annotated[AnyUrl, UrlConstraints(max_length=255)]] = None
     api_key: Optional[Annotated[str, StringConstraints(max_length=2000)]] = None
     identifier: Optional[Annotated[str, StringConstraints(max_length=1000)]] = None
+    iam_role: Optional[
+        Annotated[str, StringConstraints(max_length=IAM_ROLE_ARN_MAX_LENGTH)]
+    ] = Field(
+        default=None,
+        description=(
+            "IAM role ARN to assume (STS AssumeRole). Only valid for Amazon Bedrock models, "
+            "and cannot be combined with `api_key`."
+        ),
+    )
+
+    @field_validator("iam_role")
+    @classmethod
+    def _validate_iam_role(cls, value: Optional[str]) -> Optional[str]:
+        return validate_iam_role_arn(value) if value else None
+
+    @model_validator(mode="after")
+    def _validate_iam_role_usage(self) -> "ModelMetadata":
+        if not self.iam_role:
+            return self
+        if self.api_key:
+            raise PydanticCustomError(
+                IAM_ROLE_USAGE_ERROR, "iam_role and api_key cannot both be set"
+            )
+        if self._resolved_provider() not in BEDROCK_PROVIDERS:
+            raise PydanticCustomError(
+                IAM_ROLE_USAGE_ERROR, "iam_role is only supported for Bedrock models"
+            )
+        return self
+
+    def _resolved_provider(self) -> Optional[str]:
+        if self.identifier:
+            provider, _, model_name = self.identifier.partition("/")
+            return provider if model_name else "custom_openai"
+        return getattr(self.llm_definition.params, "custom_llm_provider", None)
 
     @override
     def to_params(self) -> Dict[str, Any]:
@@ -118,7 +176,13 @@ class ModelMetadata(BaseModelMetadata):
                 if provider in PROVIDERS_WITHOUT_API_BASE:
                     params.pop("api_base", None)
             else:
-                params["custom_llm_provider"] = "custom_openai"
+                # litellm.embedding() does not allow 'custom_openai' as 'custom_llm_provider'
+                # left blank to use the values defined in ai_gateway/model_selection/models.yml
+                if (
+                    self.llm_definition.model_class_provider
+                    != ModelClassProvider.LITE_LLM_EMBEDDING
+                ):
+                    params["custom_llm_provider"] = "custom_openai"
                 params["model"] = self.identifier
 
         managed_provider = getattr(
@@ -134,7 +198,46 @@ class ModelMetadata(BaseModelMetadata):
         elif params.get("custom_llm_provider", "") == "custom_openai":
             params["api_key"] = "dummy_key"
 
+        effective_provider = params.get("custom_llm_provider") or managed_provider
+        if effective_provider in BEDROCK_PROVIDERS:
+            self._add_bedrock_credentials(params)
+
         return params
+
+    def _external_id_for(self, iam_role: str) -> str:
+        """Derive the STS ExternalId from the verified JWT's instance identity, never from the request body."""
+        claims = getattr(self._user, "claims", None)
+        if getattr(claims, "gitlab_realm", None) == "saas":
+            raise AssumeRoleError(
+                "Assuming a request-supplied IAM role is not supported on GitLab.com",
+                role_arn=iam_role,
+                error_code="UnsupportedRealm",
+            )
+        instance_id = trusted_instance_id(claims)
+        if not instance_id:
+            raise AssumeRoleError(
+                "Cannot assume the requested IAM role without a verified GitLab instance ID",
+                role_arn=iam_role,
+                error_code="MissingInstanceId",
+            )
+        try:
+            return validate_external_id(instance_id)
+        except ValueError as exc:
+            raise AssumeRoleError(
+                "Cannot assume the requested IAM role: the GitLab instance ID is not a valid ExternalId",
+                role_arn=iam_role,
+                error_code="InvalidInstanceId",
+            ) from exc
+
+    def _add_bedrock_credentials(self, params: Dict[str, Any]) -> None:
+        if not self.iam_role:
+            return
+
+        credentials = get_assumed_role_credentials(
+            self.iam_role,
+            external_id=self._external_id_for(self.iam_role),
+        )
+        params.update(credentials.to_litellm_params())
 
 
 TypeModelMetadata = AmazonQModelMetadata | ModelMetadata | FireworksModelMetadata
@@ -418,6 +521,9 @@ def create_model_metadata(
     if not data or "provider" not in data:
         raise ValueError("Argument error: provider must be present.")
 
+    if data.get("iam_role") and not get_config().custom_models.enabled:
+        raise IamRoleNotAllowedError()
+
     configs = ModelSelectionConfig.instance()
     data.pop("is_custom_model", None)
     provider = data["provider"]
@@ -456,25 +562,61 @@ def build_default_code_completions_metadata(
         mock_model_responses: When ``True``, allows an empty model identifier for local testing.
 
     Returns:
-        A ``FireworksModelMetadata`` when the configured default model uses the ``fireworks_ai``
-        provider, otherwise a generic ``ModelMetadata`` for the ``gitlab`` provider.
+        Metadata for the picked default model. Fireworks- and Mistral-backed models carry their
+        provider key and endpoint; any other model returns generic ``gitlab`` metadata.
     """
     llm_def = ModelSelectionConfig.instance().get_model_for_feature("code_completions")
-    if getattr(llm_def.params, "custom_llm_provider", None) == "fireworks_ai":
-        return create_model_metadata(
-            {
-                "provider": "fireworks_ai",
-                "name": llm_def.gitlab_identifier,
-                "fireworks_api_base_url": fireworks_api_base_url,
-                "provider_keys": model_keys,
-                "using_cache": using_cache,
-                "session_id": user.global_user_id,
-            },
-            mock_model_responses=mock_model_responses,
-        )
-    return create_model_metadata(
-        {"provider": "gitlab", "feature_setting": "code_completions"},
+
+    return resolve_provider_aware_metadata(
+        llm_def,
+        provider_keys=model_keys,
+        fireworks_api_base_url=fireworks_api_base_url,
         mock_model_responses=mock_model_responses,
+        session_id=user.global_user_id,
+        using_cache=using_cache,
+    )
+
+
+def build_fallback_code_completions_metadata(
+    model_metadata: TypeModelMetadata,
+    fireworks_api_base_url: str,
+    model_keys: Dict[str, Any],
+    user: StarletteUser,
+    using_cache: bool = True,
+    mock_model_responses: bool = False,
+) -> Optional[TypeModelMetadata]:
+    """Draw another weighted ``code_completions`` default to serve a request after a rate limit error.
+
+    A Fireworks primary gets no fallback: Fireworks retries its own rate limits for up to two minutes before the error
+    reaches the gateway.
+    """
+    primary_provider = getattr(
+        model_metadata.llm_definition.params, "custom_llm_provider", None
+    )
+    if primary_provider == "fireworks_ai":
+        return None
+
+    configs = ModelSelectionConfig.instance()
+    completions = configs.get_resolved_unit_primitive_config_map()["code_completions"]
+    identifiers = completions.default_model_identifiers
+    weights = completions.default_model_weights or [1.0] * len(identifiers)
+    candidates = {
+        identifier: weight
+        for identifier, weight in zip(identifiers, weights)
+        if weight > 0 and identifier != model_metadata.name
+    }
+    if not candidates:
+        return None
+
+    chosen = random.choices(list(candidates), weights=list(candidates.values()), k=1)[0]
+
+    return resolve_provider_aware_metadata(
+        configs.get_model(chosen),
+        provider_keys=model_keys,
+        fireworks_api_base_url=fireworks_api_base_url,
+        mock_model_responses=mock_model_responses,
+        session_id=user.global_user_id,
+        using_cache=using_cache,
     )
 
 

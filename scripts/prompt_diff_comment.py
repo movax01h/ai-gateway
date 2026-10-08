@@ -43,6 +43,7 @@ SENTINEL = "<!-- prompt-diff-bot -->"
 VERSIONED_ROOTS = (
     "ai_gateway/prompts/definitions",
     "ai/features",
+    "ai/shared",
     "duo_workflow_service/agent_platform/v1/flows/configs",
     "duo_workflow_service/agent_platform/experimental/flows/configs",
 )

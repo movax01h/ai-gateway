@@ -23,12 +23,14 @@ from ai_gateway.models.v2._model_compat import (
     hoist_tool_result_images,
     normalize_image_blocks,
     remove_trailing_assistant_message,
+    strip_image_blocks_for_non_vision_model,
     supports_assistant_prefill,
 )
 from ai_gateway.models.v2.litellm_model_registry import (
     register_builtin_models,
     register_external_models,
     register_fireworks_models,
+    register_fireworks_vision_flags,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
@@ -89,6 +91,32 @@ def _drop_unsupported_web_search(kwargs: Dict[str, Any]) -> None:
     )
 
 
+_WEB_SEARCH_UNAVAILABLE_NOTE = (
+    "Web search is not available for the selected model on this provider. If the answer "
+    "needs current or external information, tell the user both that web search doesn't "
+    "work with this model and provider combination, and that they can select a different "
+    "model or provider to use it."
+)
+
+
+def _is_web_search_policy_error(error: litellm.BadRequestError) -> bool:
+    """Whether an org policy on Vertex disallows web search for this model."""
+    message = str(error)
+    return "allowedPartnerModelFeatures" in message and "web_search" in message
+
+
+def _without_web_search(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop web search and tell the model, so it doesn't claim to have searched."""
+    messages = [
+        *kwargs.get("messages", []),
+        {"role": "system", "content": _WEB_SEARCH_UNAVAILABLE_NOTE},
+    ]
+    return {
+        **{k: v for k, v in kwargs.items() if k != "web_search_options"},
+        "messages": messages,
+    }
+
+
 def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
     """GPT-5 needs max_completion_tokens, but some providers (e.g. custom_openai, azure) send the deprecated max_tokens.
     Pass it via extra_body, which LiteLLM forwards as-is, regardless of provider.
@@ -108,8 +136,9 @@ def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
 
 
 def _remove_deprecated_temperature_parameters(kwargs: Dict[str, Any]) -> None:
-    """Claude Opus 4.7/4.8, Sonnet 5, Fable 5, and Mythos 5 deprecated the temperature parameter. Passing it causes a
-    Bad Request response, so we drop it to avoid that.
+    """Claude Opus 4.7/4.8, Sonnet 5, Fable 5, Mythos 5, and Haiku 5.5 deprecated the temperature parameter.
+
+    Passing it causes a Bad Request response, so we drop it to avoid that.
 
     https://gitlab.com/gitlab-org/gitlab/-/work_items/601614
     """
@@ -141,6 +170,9 @@ def _is_deprecated_temperature_model(model: str) -> bool:
             "fable_5",
             "mythos-5",
             "mythos_5",
+            "haiku-5-5",
+            "haiku_5_5",
+            "haiku-5.5",
         )
     )
 
@@ -228,6 +260,10 @@ register_builtin_models()
 # custom deployment identifiers (see work item #2587).
 register_fireworks_models(ModelSelectionConfig.instance().get_llm_definitions())
 
+# Make LiteLLM's client-side image check agree with the definitions' `supports_vision`
+# flags. Runs before the operator's external file, which stays the final override.
+register_fireworks_vision_flags(ModelSelectionConfig.instance().get_llm_definitions())
+
 # Register any additional model metadata supplied by operators via an external
 # JSON file (path set by AIGW_LITELLM__MODEL_METADATA_FILE). It allows operators
 # to enable parameters like `tool_choice` for models that are missing from
@@ -286,11 +322,14 @@ class ChatLiteLLM(_LChatLiteLLM):
         self, messages: List[BaseMessage], stop: Optional[List[str]]
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         message_dicts, params = super()._create_message_dicts(messages, stop)
-        # The LiteLLM converter copies `message.content` verbatim, so LangChain
-        # standard image blocks have to be rewritten into OpenAI's `image_url`
-        # form before they reach the provider.
-        message_dicts = normalize_image_blocks(message_dicts)
         model_name = self.model_name or self.model
+        # Models known not to see images get a text notice instead of a provider
+        # error; the remaining LangChain image blocks are then rewritten into
+        # OpenAI's `image_url` form, which the LiteLLM converter does not do.
+        message_dicts = strip_image_blocks_for_non_vision_model(
+            message_dicts, model_name, self.custom_llm_provider
+        )
+        message_dicts = normalize_image_blocks(message_dicts)
         # After normalize, so there is one image shape to recognise, and before
         # the prefill rewrite, since the hoist can append a user message.
         message_dicts = hoist_tool_result_images(
@@ -315,7 +354,24 @@ class ChatLiteLLM(_LChatLiteLLM):
         _rewrite_trailing_assistant_prefill(kwargs)
         inject_user_identity_header(kwargs, self.user_id_header)
         _drop_unsupported_web_search(kwargs)
-        return await super().acompletion_with_retry(run_manager=run_manager, **kwargs)
+        try:
+            return await super().acompletion_with_retry(
+                run_manager=run_manager, **kwargs
+            )
+        except litellm.BadRequestError as error:
+            if kwargs.get(
+                "web_search_options"
+            ) is None or not _is_web_search_policy_error(error):
+                raise
+            log.warning(
+                "Retrying without web search: disallowed by provider policy",
+                model=kwargs.get("model"),
+                custom_llm_provider=kwargs.get("custom_llm_provider"),
+                error=str(error),
+            )
+            return await super().acompletion_with_retry(
+                run_manager=run_manager, **_without_web_search(kwargs)
+            )
 
     @property
     @override

@@ -1,16 +1,16 @@
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPStatus
-from typing import Any, ClassVar, Literal, Optional, Sequence, Type, cast
+from typing import Any, ClassVar, Literal, NamedTuple, Optional, Sequence, Type, cast
 
 import structlog
 from anthropic import APIStatusError as AnthropicAPIStatusError
 from langchain_core.exceptions import ContextOverflowError
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from openai import APIStatusError as OpenAIAPIStatusError
-from pydantic import ConfigDict, Field
-from pydantic_core import ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 
 from ai_gateway.prompts import Prompt
 from ai_gateway.response_schemas.base import BaseAgentOutput
@@ -28,13 +28,23 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.audit_events.web_search import capture_web_searches
 from duo_workflow_service.checkpointer.write_mode import (
     compaction_ui_chat_log_update,
+)
+from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
+    COMPACTION_CONTINUE_MESSAGE,
 )
 from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
+from duo_workflow_service.entities.image_blocks import (
+    ImageLimitKind,
+    ImageScope,
+    image_limit_kind,
+    without_image_payloads,
+)
 from duo_workflow_service.errors.error_handler import (
     ModelError,
     ModelErrorHandler,
@@ -57,11 +67,22 @@ _LITELLM_EMPTY_CONTENT_PLACEHOLDER = (
 )
 
 
-class AgentStuckError(Exception):
-    """Exception raised when an agent exceeds the maximum number of truncation retries.
+def _is_text_only(message: BaseMessage) -> bool:
+    return isinstance(message, AIMessage) and not message.tool_calls
 
-    This indicates the agent is stuck in an unrecoverable loop where the LLM repeatedly produces truncated responses
-    despite recovery attempts.
+
+class _AnswerCheck(NamedTuple):
+    """Correction messages for a rejected final answer, and a reason free of model output."""
+
+    corrections: list
+    reason: str = ""
+
+
+class AgentStuckError(Exception):
+    """Exception raised when an agent is stuck in an unrecoverable loop within one node step.
+
+    Raised when the LLM, despite recovery attempts, repeatedly produces truncated responses, keeps making tool calls
+    after the wrap-up instruction, or keeps sending a final answer that is rejected.
     """
 
 
@@ -264,6 +285,48 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
     _MAX_TRUNCATION_RETRIES: int = 5
 
+    _IMAGE_LIMIT_SEEN_MESSAGE = (
+        "Older images were removed because the request exceeded the provider's "
+        "image limit. Rely on what you noted about them."
+    )
+
+    _IMAGE_LIMIT_LATEST_MESSAGE = (
+        "The images from the latest step were removed because the request exceeded "
+        "the provider's image limit. Reading them again will hit the same limit. "
+        "Continue without them."
+    )
+
+    _IMAGE_TOO_LARGE_MESSAGE = (
+        "The images from the latest step were removed: one of them is larger than "
+        "the provider accepts{limit}. Reading it again will hit the same limit. "
+        "If the user needs it read, ask for a smaller copy."
+    )
+
+    _IMAGE_REJECTED_SEEN_MESSAGE = (
+        "Older images were removed because the provider rejected the request "
+        "while they were in it. Rely on what you noted about them."
+    )
+
+    _IMAGE_REJECTED_LATEST_MESSAGE = (
+        "The images from the latest step were removed because the provider "
+        "rejected the request while they were in it. Reading them again will fail "
+        "the same way. If the user needs one read, ask for a smaller or re-saved "
+        "copy of the file."
+    )
+
+    _MAX_IMAGE_LIMIT_RETRIES: int = 2
+    # Consecutive text-only turns in schema mode under "auto" before the wrap-up is sent,
+    # independent of max_cycles; a text-only reply to that wrap-up raises AgentStuckError.
+    _MAX_TEXT_ONLY_TURNS: int = 3
+
+    # Rejected final answers are retried inside a single run() call, so max_cycles
+    # never sees them. Two corrections are allowed; the third rejection stops the
+    # agent (issue #2945).
+    _MAX_ANSWER_REJECTIONS: int = 3
+
+    # How much of the rejection reason to quote in logs and the AgentStuckError message.
+    _REJECTION_ERROR_PREVIEW_CHARS: int = 300
+
     @staticmethod
     def _extract_text(completion: AIMessage) -> str:
         """Extract plain text from an ``AIMessage``, handling both string and list content.
@@ -421,13 +484,72 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             )
         return True
 
+    def _count_truncation(
+        self, truncation_retries: int, finish_reason: Optional[LLMFinishReason]
+    ) -> int:
+        """Log a truncated response and return the new count.
+
+        Raises:
+            AgentStuckError: When the count reaches ``_MAX_TRUNCATION_RETRIES``.
+        """
+        truncation_retries += 1
+        log.warning(
+            "LLM response was truncated due to token limit; "
+            "injecting recovery message and retrying within AgentNode",
+            finish_reason=finish_reason,
+            truncation_retries=truncation_retries,
+            max_truncation_retries=self._MAX_TRUNCATION_RETRIES,
+        )
+        if truncation_retries >= self._MAX_TRUNCATION_RETRIES:
+            raise AgentStuckError(
+                f"Agent '{self.name}' is stuck in an unrecoverable loop: "
+                f"LLM response was truncated {truncation_retries} times in a row, "
+                f"exceeding the maximum of {self._MAX_TRUNCATION_RETRIES} retries."
+            )
+        return truncation_retries
+
+    def _count_answer_rejection(self, answer_rejections: int, reason: str) -> int:
+        """Log a rejected final answer and return the new count.
+
+        ``reason`` must not contain model output: it goes to logs and the error message.
+
+        Raises:
+            AgentStuckError: When the count reaches ``_MAX_ANSWER_REJECTIONS``.
+        """
+        answer_rejections += 1
+        last_error = reason[: self._REJECTION_ERROR_PREVIEW_CHARS]
+        stuck = answer_rejections >= self._MAX_ANSWER_REJECTIONS
+        log.warning(
+            (
+                "Final answer rejected; maximum reached, stopping the agent"
+                if stuck
+                else "Final answer rejected; returning the error to the agent and retrying within AgentNode"
+            ),
+            agent=self.name,
+            answer_rejections=answer_rejections,
+            max_answer_rejections=self._MAX_ANSWER_REJECTIONS,
+            error=last_error,
+        )
+        if stuck:
+            raise AgentStuckError(
+                f"Agent '{self.name}' is stuck: "
+                f"its final answer was rejected {answer_rejections} times, "
+                f"reaching the maximum of {self._MAX_ANSWER_REJECTIONS}. "
+                f"Last error: {last_error}"
+            )
+        return answer_rejections
+
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
         history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)
+        # Count before the trimmer drops empty replies: each text-only turn is its own run.
+        text_only_turns = self._text_only_turns(history)
 
         history, optimization_results = await self._optimizer_pipeline.optimize(history)
-        history = restore_message_consistency(history)
+        history = self._with_continue_nudge(
+            restore_message_consistency(history), text_only_turns
+        )
 
         cycle_count, cycle_count_state_update = self._check_and_increment_cycle_count(
             state
@@ -468,6 +590,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
         wrap_up_retries: int = 0
         truncation_retries: int = 0
+        image_limit_retries: int = 0
+        answer_rejections: int = 0
 
         while True:
             try:
@@ -485,20 +609,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 )
                 finish_reason = extract_finish_reason(completion.response_metadata)
                 if finish_reason in LLMFinishReason.truncation_values():
-                    truncation_retries += 1
-                    log.warning(
-                        "LLM response was truncated due to token limit; "
-                        "injecting recovery message and retrying within AgentNode",
-                        finish_reason=finish_reason,
-                        truncation_retries=truncation_retries,
-                        max_truncation_retries=self._MAX_TRUNCATION_RETRIES,
+                    truncation_retries = self._count_truncation(
+                        truncation_retries, finish_reason
                     )
-                    if truncation_retries >= self._MAX_TRUNCATION_RETRIES:
-                        raise AgentStuckError(
-                            f"Agent '{self.name}' is stuck in an unrecoverable loop: "
-                            f"LLM response was truncated {truncation_retries} times in a row, "
-                            f"exceeding the maximum of {self._MAX_TRUNCATION_RETRIES} retries."
-                        )
                     history = restore_message_consistency(
                         [
                             *history,
@@ -511,8 +624,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 if finish_reason in LLMFinishReason.abnormal_values():
                     log.warning(f"LLM stopped abnormally with reason: {finish_reason}")
 
-                if len(updates := self._final_answer_validate(completion)) > 0:
-                    history = [*history, *updates]
+                if (check := self._final_answer_validate(completion)).corrections:
+                    answer_rejections = self._count_answer_rejection(
+                        answer_rejections, check.reason
+                    )
+                    history = [*history, *check.corrections]
                     continue
 
                 if wrap_up_active and self._completion_has_non_final_tool_calls(
@@ -541,6 +657,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     )
                     continue
 
+                self._check_text_only_turn(completion, text_only_turns)
+
                 # Without a schema a text-only message is itself the final answer, so
                 # emitting it would duplicate. In schema mode it is deliberation.
                 if completion.tool_calls or (
@@ -548,6 +666,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     and self._response_schema_tool_choice == "auto"
                 ):
                     self._emit_reasoning(completion)
+
+                capture_web_searches(
+                    completion.content,
+                    completion.response_metadata.get("model_name"),
+                )
 
                 # Append new completion to existing history for replace-based reducer.
                 # The reducer will replace this component's conversation history with
@@ -603,15 +726,154 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             # so an Anthropic-only clause leaves this retry loop unreachable for
             # every model served through LiteLLM.
             except (AnthropicAPIStatusError, OpenAIAPIStatusError) as e:
-                error_message = str(e)
-                status_code = e.response.status_code
-                model_error = ModelError(
-                    error_type=self._error_handler.get_error_type(status_code),
-                    status_code=status_code,
-                    message=error_message,
+                recovered = await self._recover_from_status_error(
+                    history, e, image_limit_retries
                 )
+                if recovered is not None:
+                    history, image_limit_retries = recovered, image_limit_retries + 1
 
-                await self._error_handler.handle_error(model_error)
+    def _deliberates_in_text(self) -> bool:
+        return (
+            self._response_schema is not None
+            and self._response_schema_tool_choice == "auto"
+        )
+
+    def _continue_message(self) -> str:
+        title = cast(Type[BaseAgentOutput], self._response_schema).tool_title
+        return f"Continue. When you are done, call the `{title}` tool with your final answer."
+
+    def _text_only_turns(self, history: list[BaseMessage]) -> int:
+        """Count the text-only turns in a row ending the history: the last one plus one per nudge before it.
+
+        Nudges are counted because the trimmer drops empty replies from the persisted history.
+        Compaction's own continue message after a text-only tail is skipped, not a reset.
+        """
+        if not (self._deliberates_in_text() and history and _is_text_only(history[-1])):
+            return 0
+        turns = 1
+        for msg in reversed(history[:-1]):
+            if (
+                isinstance(msg, HumanMessage)
+                and msg.content == self._continue_message()
+            ):
+                turns += 1
+            elif not _is_text_only(msg) and msg.content != COMPACTION_CONTINUE_MESSAGE:
+                break
+        return turns
+
+    def _with_continue_nudge(
+        self, history: list[BaseMessage], text_only_turns: int
+    ) -> list[BaseMessage]:
+        """After a text-only or empty turn, make the next (persisted) request differ, so it can't repeat.
+
+        At the cap, the nudge is the max_cycles wrap-up instruction: one last chance to answer.
+        """
+        if not text_only_turns:
+            return history
+        if text_only_turns >= self._MAX_TEXT_ONLY_TURNS:
+            return [*history, HumanMessage(content=self._wrap_up_message())]
+        return [*history, HumanMessage(content=self._continue_message())]
+
+    def _check_text_only_turn(self, completion: AIMessage, previous_turns: int) -> None:
+        if completion.tool_calls or not self._deliberates_in_text():
+            return
+        log.warning(
+            "Agent replied in text without calling a tool",
+            agent=self.name,
+            text_only_turns=previous_turns + 1,
+            max_text_only_turns=self._MAX_TEXT_ONLY_TURNS,
+        )
+        # At the cap, the request carried the wrap-up instruction, and this reply ignored it.
+        if previous_turns >= self._MAX_TEXT_ONLY_TURNS:
+            raise AgentStuckError(
+                f"Agent '{self.name}' is stuck: it replied in text without calling a tool "
+                f"{previous_turns + 1} times in a row, the last after the wrap-up instruction."
+            )
+
+    async def _recover_from_status_error(
+        self,
+        history: list,
+        error: AnthropicAPIStatusError | OpenAIAPIStatusError,
+        image_limit_retries: int,
+    ) -> Optional[list]:
+        """Return a history to retry with, or let the error handler wait or raise."""
+        message = str(error)
+        status_code = error.response.status_code
+        recovered = self._without_rejected_images(
+            history, status_code, message, image_limit_retries
+        )
+        if recovered is not None:
+            return recovered
+        await self._error_handler.handle_error(
+            ModelError(
+                error_type=self._error_handler.get_error_type(status_code),
+                status_code=status_code,
+                message=message,
+            )
+        )
+        return None
+
+    def _without_rejected_images(
+        self, history: list, status_code: int, message: str, retries: int
+    ) -> Optional[list]:
+        """Retry a 400 or 413 without the images, whatever the provider's wording.
+
+        The newest images are the only unproven content in the request, so they go first
+        unless Anthropic names a many-image limit, which the images the model already
+        answered trip. The wording only picks the order and the note; a reworded error
+        degrades the note, not the session. A rejection unrelated to the images costs at
+        most two more requests before it surfaces, and only while images are live.
+
+        The change lands in the saved history: one cache rewrite on the failed request, none after.
+        """
+        kind = image_limit_kind(status_code, message)
+        if kind is None or retries >= self._MAX_IMAGE_LIMIT_RETRIES:
+            return None
+        preferred = (
+            ImageScope.SEEN if kind is ImageLimitKind.REQUEST else ImageScope.CURRENT
+        )
+        # The kind can change between attempts: once the seen images are gone the
+        # request is under the many-image threshold and the per-image rule names the
+        # new one. So every pass tries the preferred scope, then whatever is left.
+        for scope in (preferred, *(s for s in ImageScope if s is not preferred)):
+            recovered, removed = without_image_payloads(history, scope=scope)
+            if removed:
+                break
+        else:
+            return None
+        log.warning(
+            "Provider rejected a request with images; retrying without them",
+            agent=self.name,
+            status_code=status_code,
+            kind=kind,
+            removed=removed,
+            scope=scope,
+            retry=retries + 1,
+            provider_message=message[:500],
+        )
+        return restore_message_consistency(
+            [
+                *recovered,
+                HumanMessage(content=self._image_limit_note(scope, kind, message)),
+            ]
+        )
+
+    def _image_limit_note(
+        self, scope: ImageScope, kind: ImageLimitKind, message: str
+    ) -> str:
+        if kind is ImageLimitKind.UNCLASSIFIED:
+            return (
+                self._IMAGE_REJECTED_SEEN_MESSAGE
+                if scope is ImageScope.SEEN
+                else self._IMAGE_REJECTED_LATEST_MESSAGE
+            )
+        if scope is ImageScope.SEEN:
+            return self._IMAGE_LIMIT_SEEN_MESSAGE
+        if kind is not ImageLimitKind.SINGLE_IMAGE:
+            return self._IMAGE_LIMIT_LATEST_MESSAGE
+        pixels = re.search(r"(\d[\d,]*) pixels", message)
+        limit = f" (one side is over {pixels.group(1)} px)" if pixels else ""
+        return self._IMAGE_TOO_LARGE_MESSAGE.format(limit=limit)
 
     def _agent_context_limits_update(self, history_iokey: IOKey) -> dict:
         """Stamp ``{agent_key: max_context_tokens}`` keyed off ``history_iokey``.
@@ -629,9 +891,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         )
         return limits_iokey.to_nested_dict(self._max_context_tokens)
 
-    def _final_answer_validate(self, completion: AIMessage) -> list:
+    def _final_answer_validate(self, completion: AIMessage) -> _AnswerCheck:
         if self._response_schema is None:
-            return []
+            return _AnswerCheck([])
 
         tool_title = self._response_schema.tool_title
 
@@ -645,25 +907,39 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         )
 
         if not final_answer:
-            return []
+            return _AnswerCheck([])
 
         if len(completion.tool_calls) > 1:
-            return [completion] + [
-                ToolMessage(
-                    content=f"{tool_title} mustn't be combined with other tool calls",
-                    tool_call_id=tool_call["id"],
-                )
-                for tool_call in completion.tool_calls
-            ]
+            combined = f"{tool_title} mustn't be combined with other tool calls"
+            return _AnswerCheck(
+                [completion]
+                + [
+                    ToolMessage(
+                        content=combined,
+                        tool_call_id=tool_call["id"],
+                    )
+                    for tool_call in completion.tool_calls
+                ],
+                combined,
+            )
 
         try:
             self._response_schema.from_ai_message(completion)
-            return []
+            return _AnswerCheck([])
         except ValidationError as ve:
-            return [
-                completion,
-                ToolMessage(
-                    content=f"{tool_title} raised validation error: {ve}",
-                    tool_call_id=final_answer["id"],
-                ),
-            ]
+            # The model sees the full error; logs only get locations and types, since
+            # str(ve) quotes the rejected input.
+            fields = "; ".join(
+                f"{'.'.join(map(str, err['loc']))}: {err['type']}"
+                for err in ve.errors(include_input=False)
+            )
+            return _AnswerCheck(
+                [
+                    completion,
+                    ToolMessage(
+                        content=f"{tool_title} raised validation error: {ve}",
+                        tool_call_id=final_answer["id"],
+                    ),
+                ],
+                f"{tool_title} raised validation error: {fields}",
+            )

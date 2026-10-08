@@ -1,3 +1,4 @@
+import json
 import re
 
 import pytest
@@ -10,6 +11,7 @@ from duo_workflow_service.tools.code_review.findings import (
     render_posted_finding,
     render_previous_findings,
     render_structured_finding,
+    resolved_discussion_ids,
     select_findings,
     severity_counts,
 )
@@ -164,6 +166,53 @@ class TestBuildSummary:
 
         assert summary == "- Well tested\n- Follows conventions"
 
+    @pytest.mark.parametrize(
+        ("narrative", "expected"),
+        [
+            (
+                r"- Pins `yq` to `v4.53.6`.\n- Explains the pin.\n- Minimal change.",
+                "- Pins `yq` to `v4.53.6`.\n- Explains the pin.\n- Minimal change.",
+            ),
+            (
+                r"A routine version bump.\n- No logic changes.\n- No tests needed.",
+                "A routine version bump.\n- No logic changes.\n- No tests needed.",
+            ),
+            (
+                r"A routine version bump.\n\n- No logic changes.",
+                "A routine version bump.\n\n- No logic changes.",
+            ),
+        ],
+    )
+    def test_escaped_newlines_between_bullets_become_line_breaks(
+        self, narrative, expected
+    ):
+        assert build_summary([], narrative) == expected
+
+    def test_escaped_newlines_outside_bullet_breaks_are_kept(self):
+        narrative = r"- Splits lines on `\n` correctly."
+
+        assert build_summary([], narrative) == narrative
+
+    @pytest.mark.parametrize(
+        ("narrative", "expected"),
+        [
+            ("Little further work.</summary>", "Little further work."),
+            ("No new issues.</summary>\n</invoke>", "No new issues."),
+            (
+                "Use `</summary>` here.\n<details><summary>x</summary>y</details>",
+                "Use `</summary>` here.\n<details><summary>x</summary>y</details>",
+            ),
+            ("</summary>", "No issues were raised in this review."),
+        ],
+    )
+    def test_stray_tool_call_markup_is_stripped(self, narrative, expected):
+        assert build_summary([], narrative) == expected
+
+    def test_stray_tool_call_markup_is_stripped_before_the_counts(self):
+        summary = build_summary([finding()], "Worth tightening.</summary>\n")
+
+        assert summary.startswith("Worth tightening.\n\n1 finding (1 critical)")
+
     def test_blank_narrative_falls_back_to_the_default(self):
         assert build_summary([], "   ") == "No issues were raised in this review."
 
@@ -177,7 +226,8 @@ class TestRenderPreviousFindings:
         assert render_previous_findings([]) is None
 
     @pytest.mark.parametrize(
-        "statuses", [["fixed"], ["verified"], ["fixed", "verified"]]
+        "statuses",
+        [["fixed"], ["verified"], ["fixed", "verified"], ["fixed", "disputed"]],
     )
     def test_withheld_when_nothing_needs_attention(self, statuses):
         """A list of closed points reads as if there were something to act on, so the review is published as clean."""
@@ -206,6 +256,72 @@ class TestRenderPreviousFindings:
         )
 
         assert rendered.splitlines()[-1].startswith("- **mystery:**")
+
+    def test_disputed_items_are_left_out(self):
+        rendered = render_previous_findings(
+            [
+                previous("disputed", file="a.rb", note="Author explained."),
+                previous("still_outstanding", file="b.rb", note="Still nil."),
+            ]
+        )
+
+        assert rendered == "- **Still outstanding:** `b.rb`: Still nil."
+
+    def test_items_on_resolved_threads_are_left_out(self):
+        rendered = render_previous_findings(
+            [
+                {**previous("still_outstanding", file="a.rb"), "discussion_id": "d1"},
+                {**previous("still_outstanding", file="b.rb"), "discussion_id": "d2"},
+                previous("fixed", file="c.rb"),
+            ],
+            resolved_ids={"d1"},
+        )
+
+        assert rendered.splitlines() == [
+            "- **Fixed:** `c.rb`: Nil check on `user`.",
+            "- **Still outstanding:** `b.rb`: Nil check on `user`.",
+            "",
+            "1 resolved thread is not listed.",
+        ]
+
+    def test_counts_several_resolved_threads(self):
+        rendered = render_previous_findings(
+            [
+                {**previous("still_outstanding"), "discussion_id": "d1"},
+                {**previous("fixed"), "discussion_id": "d2"},
+                {**previous("still_outstanding", file="b.rb"), "discussion_id": "d3"},
+            ],
+            resolved_ids={"d1", "d2"},
+        )
+
+        assert rendered.splitlines()[-1] == "2 resolved threads are not listed."
+
+    def test_withheld_when_only_resolved_threads_need_attention(self):
+        rendered = render_previous_findings(
+            [
+                {**previous("still_outstanding"), "discussion_id": "d1"},
+                previous("fixed", file="c.rb"),
+            ],
+            resolved_ids={"d1"},
+        )
+
+        assert rendered is None
+
+
+class TestResolvedDiscussionIds:
+    def test_collects_only_resolved_threads(self):
+        discussions = [
+            {"discussion_id": "d1", "resolved": True},
+            {"discussion_id": "d2", "resolved": False},
+            {"discussion_id": "d3"},
+        ]
+
+        assert resolved_discussion_ids(json.dumps(discussions)) == {"d1"}
+        assert resolved_discussion_ids(discussions) == {"d1"}
+
+    @pytest.mark.parametrize("raw", [None, "", "not json", "{}", '["d1"]', 42])
+    def test_unreadable_input_resolves_nothing(self, raw):
+        assert resolved_discussion_ids(raw) == set()
 
 
 class TestAttributeMessage:
@@ -350,6 +466,7 @@ class TestBuildPayload:
                 "target_code": "  return true",
                 "message": "**[Critical] fail-open**\n\nFails open when the check errors.",
                 "severity": "critical",
+                "category": "fail-open",
                 "confidence": 9,
             }
         ]

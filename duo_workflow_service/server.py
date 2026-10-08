@@ -9,7 +9,7 @@ import os
 import re
 import signal
 from itertools import chain
-from typing import AsyncIterable, AsyncIterator, Optional, cast, override
+from typing import Any, AsyncIterable, AsyncIterator, Optional, cast, override
 
 import aiohttp
 import grpc
@@ -96,7 +96,6 @@ from duo_workflow_service.interceptors.request_metadata_log_interceptor import (
     RequestMetadataLogInterceptor,
 )
 from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
-from duo_workflow_service.model_routing import route_default_model_by_goal
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
@@ -151,6 +150,7 @@ from lib.internal_events.context import (
     merge_event_context_extra,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
+from lib.jwt import instance_uid_claim
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
@@ -159,6 +159,7 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
 FLOW_CONFIG_ID_CLAIM = "flow_config_id"
 FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
+WORKFLOW_ID_CLAIM = "workflow_id"
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
@@ -177,6 +178,33 @@ WORKFLOW_TASK_NAME_PREFIX = "workflow:"
 DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S = 3.0
 # Cloud Run sends SIGKILL 10s after SIGTERM; drain plus the gRPC grace period must finish before that.
 DEFAULT_SHUTDOWN_KILL_DEADLINE_S = 10.0
+
+
+_WORKFLOW_ID_FORMS = re.compile(
+    r"(?:#|gid://gitlab/Ai::DuoWorkflows::Workflow/)?([1-9][0-9]{0,19})"
+)
+
+
+def _workflow_id_number(value: Any) -> Optional[int]:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and (match := _WORKFLOW_ID_FORMS.fullmatch(value)):
+        return int(match.group(1))
+    return None
+
+
+def _workflow_binding_matches(bound: Any, requested: str) -> bool:
+    """Compare a token's bound workflow id with the one the client asked to run.
+
+    Only a plain id, a `#`-prefixed id or a workflow global id is accepted, matched in full. Anything else, or a bound
+    id that is not positive, is a mismatch.
+    """
+    bound_id = _workflow_id_number(bound)
+    return (
+        bound_id is not None
+        and bound_id > 0
+        and bound_id == _workflow_id_number(requested)
+    )
 
 
 def _flow_config_digest(flow_config: Struct) -> str:
@@ -490,6 +518,24 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     "Workflow token is not authorized for the supplied flow config",
                 )
 
+        if (
+            not user.is_debug
+            and claims_extra is not None
+            and WORKFLOW_ID_CLAIM in claims_extra
+        ):
+            if not _workflow_binding_matches(
+                claims_extra[WORKFLOW_ID_CLAIM], start_req.workflowID
+            ):
+                log.warning(
+                    "Workflow token bound to a different workflow",
+                    bound_workflow_id=str(claims_extra[WORKFLOW_ID_CLAIM]),
+                    requested_workflow_id=start_req.workflowID[:64],
+                )
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    "Workflow token is not authorized for the requested workflow",
+                )
+
         workflow_definition = map_workflow_definition(
             flow_request.to_legacy_identifier()
         )
@@ -546,9 +592,6 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         )
 
         goal = start_req.goal
-
-        # Route once per request, before the flow is built, so every turn uses the same model.
-        route_default_model_by_goal(goal)
 
         if start_req.additional_context:
             additional_context = [
@@ -690,8 +733,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     await asyncio.wait_for(
                         workflow_task, timeout=self.TASK_CANCELLATION_TIMEOUT
                     )
-                except (asyncio.TimeoutError, asyncio.CancelledError) as ex:
+                except asyncio.TimeoutError as ex:
+                    # The task ignored the cancellation for too long.
                     log_exception(ex, extra={"source": __name__})
+                except asyncio.CancelledError as ex:
+                    # The cancellation requested above has been honoured.
+                    log.info("Workflow task cancelled", reason=str(ex))
 
         try:
             async for action in self.send_events(workflow, workflow_task):
@@ -797,7 +844,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # This exception is raised when RPC is cancelled by the client.
                 context.set_code(grpc.StatusCode.CANCELLED)
                 context.set_details("RPC cancelled by client")
-                log_exception(err, extra={"source": __name__})
+                log.info("RPC cancelled by client", reason=err_str)
 
             await abort_workflow(workflow_task, err)
             # Task cancellation must be reraised to the grpc server side so that the rpc task can be shutdown properly.
@@ -1086,9 +1133,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         extra_claims = {}
 
         if hasattr(user, "claims") and user.claims:
-            extra_claims = {
-                "gitlab_instance_uid": getattr(user.claims, "gitlab_instance_uid", None)
-            }
+            extra_claims = instance_uid_claim(user.claims)
             if user.claims.extra:
                 incoming_extra = dict(user.claims.extra)
                 for claim in _PROPAGATED_EXTRA_CLAIMS:
@@ -1102,6 +1147,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             extra_claims[FLOW_CONFIG_DIGEST_CLAIM] = _flow_config_digest(
                 request.flow_config
             )
+
+        if request.workflowID:
+            extra_claims[WORKFLOW_ID_CLAIM] = request.workflowID
 
         scopes = []
         if user.is_debug:
@@ -1186,7 +1234,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
             else:
                 try:
-                    billing_service.track_billing(
+                    tracked = billing_service.track_billing(
                         user,
                         gl_context,
                         workflow_id=client_event.workflowID,
@@ -1201,11 +1249,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     if is_bill_once_feature:
                         billed_once_features.add(feature_prefix)
 
-                    log.info(
-                        "Successfully sent billing event for self-hosted LLM auth",
-                        request_id=client_event.requestID,
-                        workflow_id=client_event.workflowID,
-                    )
+                    if tracked:
+                        log.info(
+                            "Successfully sent billing event for self-hosted LLM auth",
+                            request_id=client_event.requestID,
+                            workflow_id=client_event.workflowID,
+                        )
                 except Exception as e:
                     log_exception(
                         e,

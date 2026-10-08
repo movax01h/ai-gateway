@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
 
 class FlowValidationError(ValueError):

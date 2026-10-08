@@ -19,6 +19,7 @@ from langgraph.checkpoint.base import (
 )
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
+from structlog.testing import capture_logs
 
 from duo_workflow_service.audit_events.event_types import SessionEndedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import (
@@ -32,7 +33,10 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     _serialize_all_channels_full,
     _serialize_channel_blobs,
 )
-from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    compress_checkpoint,
+    uncompress_checkpoint,
+)
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
     CheckpointFetchError,
@@ -1837,6 +1841,27 @@ async def test_aput(
     }
 
 
+@pytest.mark.asyncio
+async def test_aput_drops_nul_characters(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    # PostgreSQL `jsonb` cannot store NUL, so GitLab would reject the checkpoint.
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["command_output"] = "Exit code: 0\n\x1b]633;C\x07\x00"
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+    saved = uncompress_checkpoint(post_call_body["compressed_checkpoint"])
+
+    assert saved["channel_values"]["command_output"] == "Exit code: 0\n\x1b]633;C\x07"
+
+
 def _checkpoint_saved_kwargs(logger):
     for logger_call in logger.info.call_args_list:
         if logger_call.args and logger_call.args[0] == "Checkpoint saved":
@@ -2870,6 +2895,38 @@ async def test_track_workflow_completion_with_non_billable_status(
     await gitlab_workflow._track_workflow_completion("some_other_status")
 
     billing_event_client.track_billing_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_llm_operations")
+@pytest.mark.parametrize(
+    ("tracked", "expected_success_logs"),
+    [(True, 1), (False, 0)],
+)
+async def test_track_workflow_completion_logs_success_only_when_tracked(
+    gitlab_workflow,
+    billing_event_service,
+    billing_event_client,
+    mock_user,
+    tracked,
+    expected_success_logs,
+):
+    """Test that the success log is only emitted when the billing event was actually tracked, e.g. not when billing
+    events are disabled."""
+    current_user.set(mock_user)
+    gitlab_workflow._billing_event_service = billing_event_service
+    billing_event_client.track_billing_event.return_value = tracked
+
+    with capture_logs() as cap_logs:
+        await gitlab_workflow._track_workflow_completion(WorkflowStatusEnum.FINISHED)
+
+    billing_event_client.track_billing_event.assert_called_once()
+    success_logs = [
+        log
+        for log in cap_logs
+        if log["event"].startswith("Successfully sent billing event for workflow")
+    ]
+    assert len(success_logs) == expected_success_logs
 
 
 @pytest.mark.asyncio
@@ -4802,6 +4859,52 @@ async def test_aput_raises_on_failed_post(
             checkpoint_metadata,
             ChannelVersions(),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,body,expected_level",
+    [
+        (401, {"error": "invalid_token"}, "warning"),
+        (403, {"message": "403 Forbidden - Your account has been blocked."}, "warning"),
+        (404, {"message": "404 Not found"}, "warning"),
+        (400, {"message": "400 Bad request - PG::UntranslatableCharacter"}, "error"),
+        (413, {"message": "Payload too large"}, "error"),
+        (500, {}, "error"),
+    ],
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_failed_post_log_level(
+    _mock_duo_workflow_metrics,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    status_code,
+    body,
+    expected_level,
+):
+    """Failures caused by the user's or session's state are warnings; failures that point at our payload or at GitLab
+    stay errors."""
+    http_client.apost.return_value = GitLabHttpResponse(
+        status_code=status_code, body=body
+    )
+
+    with capture_logs() as cap_logs:
+        with pytest.raises(CheckpointSaveError):
+            await gitlab_workflow.aput(
+                {"configurable": {"checkpoint_id": None}},
+                checkpoint_data[0]["checkpoint"],
+                checkpoint_metadata,
+                ChannelVersions(),
+            )
+
+    failure_logs = [
+        log for log in cap_logs if log["event"] == "Failed to save checkpoint"
+    ]
+    assert len(failure_logs) == 1
+    assert failure_logs[0]["log_level"] == expected_level
+    assert failure_logs[0]["status_code"] == status_code
 
 
 @pytest.mark.asyncio

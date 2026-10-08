@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import structlog
+from pydantic import SecretStr
 from snowplow_tracker import SelfDescribingJson, StructuredEvent, Tracker
 
 from lib.internal_events.ai_context import AIContext
@@ -14,7 +15,7 @@ from lib.internal_events.context import (
     pipeline_source_context,
     tracked_internal_events,
 )
-from lib.snowplow import LoggingAsyncEmitter
+from lib.snowplow import LoggingAsyncEmitter, set_bearer_token
 
 __all__ = ["InternalEventsClient"]
 
@@ -39,12 +40,14 @@ class InternalEventsClient:
         namespace: str,
         batch_size: int,
         thread_count: int,
+        api_key: Optional[SecretStr] = None,
     ) -> None:
         self._logger = structlog.stdlib.get_logger("internal_events_client")
         self.enabled = enabled
 
         if enabled:
             self._session = requests.Session()
+            set_bearer_token(self._session, api_key)
             self._emitter = LoggingAsyncEmitter(
                 logger=self._logger,
                 batch_size=batch_size,
@@ -85,7 +88,7 @@ class InternalEventsClient:
             emitter_queue_size=queue_size,
             emitter_buffer_size=buffer_size,
         )
-        self.snowplow_tracker.flush()
+        self.snowplow_tracker.flush(is_async=True)
         queue_size, buffer_size = self._get_emitter_stats()
         self._session.close()
         self._logger.info(

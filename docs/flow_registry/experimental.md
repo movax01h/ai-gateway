@@ -605,17 +605,22 @@ Each branch is invoked with a `FlowState` of its own, built from scratch rather 
 
 - `conversation_history`, `ui_chat_log` and `agent_context_limits` start empty, so a branch neither reads nor
   re-emits what the flow accumulated before it.
-- `context` is a one-level copy of the flow's own, with this item written at the path named in `as`. So with
-  `as: "context:item"`, the body reads `context:item`, and a prompt template refers to the item by the last part
-  of that path. `context:goal` still holds the flow's own user prompt, unchanged, in every branch.
-- The component's own `context:<name>` namespace is left out. That is where the fan-out publishes its results,
-  and every branch payload is checkpointed, so carrying it would make checkpoints grow with the square of the
-  item count.
+- `context` holds only what the wrapped component declares in its `inputs`, with this item written at the path
+  named in `as`. So with `as: "context:item"`, the body reads `context:item`, and a prompt template refers to the
+  item by the last part of that path. An input such as `context:goal` holds the flow's own value, unchanged, in
+  every branch. An input with a subpath, such as `context:discover.final_answer.summary`, carries just that leaf.
+  **Context the component reads without declaring it in `inputs` is not there**, and an optional input the flow
+  never produced is left out. A supervisor's subagents run inside the branch too, so their declared `inputs` are
+  carried as well.
+- Nothing else of the flow's context is carried. Every branch payload is checkpointed, so a branch holding the
+  whole parent context would multiply that context by the item count.
+- The component's own `context:<name>` namespace is never carried either. That is where the fan-out publishes its
+  results.
 - `context:<name>.for_each_index` carries the item's position in the list. It is scoped to the
   component, so a fan-out nested inside another one cannot overwrite the outer one's index.
 
-A branch therefore sees what the flow had produced before the fan-out began, and nothing of what its siblings are
-doing.
+A branch therefore sees what it declared the flow had produced before the fan-out began, and nothing of what its
+siblings are doing.
 
 #### Collected outputs
 

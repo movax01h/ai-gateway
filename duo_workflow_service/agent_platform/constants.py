@@ -10,3 +10,8 @@ NODE_ROLE_SEPARATOR = "#"
 # (e.g. developer). See AgentComponentBase.max_cycles for the separate, lower
 # soft per-component limit this is not automatically tied to.
 RECURSION_LIMIT = 600
+
+# The environment whose flows run one root ``AgentComponent`` as a chat
+# assistant. The registry forks on it to pick the chat executor, and
+# ``AgentComponent`` fills the chat-surface defaults under it.
+CHAT_PARTIAL_ENVIRONMENT = "chat-partial"

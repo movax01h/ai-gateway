@@ -63,7 +63,7 @@ from duo_workflow_service.entities.state import (
     resolve_approval_attribution,
 )
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
-from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.tracking.errors import log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
 )
@@ -584,7 +584,7 @@ class Flow(AbstractWorkflow):
         if isinstance(error, NotifiableAgentException) and error.internal_detail:
             log_extra["internal_detail"] = error.internal_detail
 
-        log_exception(error, extra=log_extra)
+        log_workflow_failure(error, extra=log_extra)
 
         if compiled_graph is not None:
             existing_logs = (

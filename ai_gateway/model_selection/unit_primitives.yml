@@ -34,6 +34,9 @@ configurable_unit_primitives:
       - "complete_code"
     default_models:
       - identifier: "codestral_2508_fireworks"
+        weight: 75
+      - identifier: "codestral_2508_vertex"
+        weight: 25
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "codestral_2501_fireworks"
@@ -195,10 +198,10 @@ configurable_unit_primitives:
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - identifier: "claude_sonnet_4_6_vertex"
+      - identifier: "claude_sonnet_5_5_vertex"
     models_for_tags:
       small: claude_haiku_4_5_20251001_vertex
-      large: claude_sonnet_4_6_vertex
+      large: claude_sonnet_5_5_vertex
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
@@ -215,6 +218,9 @@ configurable_unit_primitives:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_vertex"
       - "claude_haiku_4_5_20251001_bedrock"
+      - "claude_haiku_5_5"
+      - "claude_haiku_5_5_vertex"
+      - "claude_haiku_5_5_bedrock"
       - "claude_opus_4_5_20251101"
       - "claude_opus_4_5_20251101_vertex"
       - "claude_opus_4_6_20260205"
@@ -256,7 +262,11 @@ configurable_unit_primitives:
       - "gpt_5_6_luna"
       - "gpt_5_6_sol"
       - "gpt_5_6_terra"
+      - "gpt_6_1_sol"
       - "gpt_6_astra"
+      - "gpt_5_6_sol_bedrock"
+      - "gpt_5_6_terra_bedrock"
+      - "gpt_5_6_luna_bedrock"
       - "gpt_6_luna"
       - "gpt_6_sol"
       - "kimi_k3_fireworks"
@@ -271,15 +281,18 @@ configurable_unit_primitives:
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - identifier: "claude_sonnet_4_6_vertex"
-      - identifier: "claude_sonnet_4_6"
+      - identifier: "claude_sonnet_5_5_vertex"
+      - identifier: "claude_sonnet_5_5"
     models_for_tags:
       small: claude_haiku_4_5_20251001_vertex
-      large: claude_sonnet_4_6_vertex
+      large: claude_sonnet_5_5_vertex
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
       - "claude_haiku_4_5_20251001_vertex"
+      - "claude_haiku_5_5"
+      - "claude_haiku_5_5_bedrock"
+      - "claude_haiku_5_5_vertex"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
       - "claude_sonnet_4_5_20250929_bedrock"
@@ -333,7 +346,11 @@ configurable_unit_primitives:
       - "gpt_5_6_luna"
       - "gpt_5_6_sol"
       - "gpt_5_6_terra"
+      - "gpt_6_1_sol"
       - "gpt_6_astra"
+      - "gpt_5_6_sol_bedrock"
+      - "gpt_5_6_terra_bedrock"
+      - "gpt_5_6_luna_bedrock"
       - "gpt_6_luna"
       - "gpt_6_sol"
       - "kimi_k3_fireworks"
@@ -347,13 +364,14 @@ configurable_unit_primitives:
   - feature_setting: "duo_developer"
     unit_primitives: []
     default_models:
-      - identifier: "claude_sonnet_4_6_vertex"
+      - identifier: "claude_sonnet_5_5_vertex"
     # Routing hints, not a security boundary. Starting lists; the classifier tier
     # in gitlab-org/gitlab#630219 is meant to take over where they miss.
     models_for_tags:
       large:
         models:
-          - claude_sonnet_4_6_vertex
+          - claude_opus_5_5
+          - kimi_k3_fireworks
         keywords:
           - refactor
           - migration
@@ -363,7 +381,7 @@ configurable_unit_primitives:
           - security
       small:
         models:
-          - claude_haiku_4_5_20251001_vertex
+          - gpt_6_luna
         keywords:
           - typo
           - readme
@@ -371,6 +389,7 @@ configurable_unit_primitives:
           - bump
           - rename
           - unused
+      classifier: claude_haiku_4_5_20251001_vertex
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_vertex"
@@ -387,6 +406,9 @@ configurable_unit_primitives:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_vertex"
       - "claude_haiku_4_5_20251001_bedrock"
+      - "claude_haiku_5_5"
+      - "claude_haiku_5_5_vertex"
+      - "claude_haiku_5_5_bedrock"
       - "claude_opus_4_5_20251101"
       - "claude_opus_4_5_20251101_vertex"
       - "claude_opus_4_6_20260205"
@@ -426,7 +448,11 @@ configurable_unit_primitives:
       - "gpt_5_6_luna"
       - "gpt_5_6_sol"
       - "gpt_5_6_terra"
+      - "gpt_6_1_sol"
       - "gpt_6_astra"
+      - "gpt_5_6_sol_bedrock"
+      - "gpt_5_6_terra_bedrock"
+      - "gpt_5_6_luna_bedrock"
       - "gpt_6_luna"
       - "gpt_6_sol"
       - "kimi_k3_fireworks"
@@ -510,12 +536,21 @@ configurable_unit_primitives:
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - identifier: "claude_sonnet_4_6_vertex"
+      - identifier: "claude_haiku_5_5_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_6"
-      - "claude_sonnet_4_6_vertex"
-      - "claude_sonnet_4_6_bedrock"
+      - "claude_haiku_4_5_20251001"
+      - "claude_haiku_4_5_20251001_bedrock"
+      - "claude_haiku_4_5_20251001_vertex"
+      - "claude_haiku_5_5"
+      - "claude_haiku_5_5_bedrock"
+      - "claude_haiku_5_5_vertex"
+      - "claude_sonnet_5"
+      - "claude_sonnet_5_5"
+      - "claude_sonnet_5_5_bedrock"
+      - "claude_sonnet_5_5_vertex"
+      - "claude_sonnet_5_bedrock"
+      - "claude_sonnet_5_vertex"
+      - "gpt_6_luna"
   - feature_setting: "review_merge_request"
     unit_primitives:
       - "review_merge_request"
@@ -530,12 +565,14 @@ configurable_unit_primitives:
   - feature_setting: "review_merge_request_dap"
     unit_primitives: []
     default_models:
-      - identifier: "claude_sonnet_5_vertex"
+      - identifier: "claude_sonnet_5_5_vertex"
     selectable_models:
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_5"
       - "claude_sonnet_5_vertex"
+      - "claude_sonnet_5_5"
+      - "claude_sonnet_5_5_vertex"
       - "gpt_5_2"
       - "gpt_5_3_codex"
 
@@ -577,3 +614,46 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_sonnet_4_6"
       - "claude_sonnet_5"
+  - feature_setting: "bl_security"
+    unit_primitives: []
+    default_models:
+      - "claude_sonnet_5_vertex"
+    selectable_models:
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_vertex"
+      - "claude_sonnet_5"
+      - "claude_sonnet_5_vertex"
+  - feature_setting: "risk_classification"
+    unit_primitives:
+      - "duo_agent_platform"
+    default_models:
+      - identifier: "claude_sonnet_5_5_vertex"
+    selectable_models:
+      - "claude_opus_4_6_20260205"
+      - "claude_opus_4_6_bedrock"
+      - "claude_opus_4_6_vertex"
+      - "claude_opus_4_7"
+      - "claude_opus_4_7_bedrock"
+      - "claude_opus_4_7_vertex"
+      - "claude_opus_4_8"
+      - "claude_opus_4_8_bedrock"
+      - "claude_opus_4_8_vertex"
+      - "claude_opus_5"
+      - "claude_opus_5_5"
+      - "claude_opus_5_5_bedrock"
+      - "claude_opus_5_5_vertex"
+      - "claude_opus_5_bedrock"
+      - "claude_opus_5_vertex"
+      - "claude_sonnet_4_6"
+      - "claude_sonnet_4_6_bedrock"
+      - "claude_sonnet_4_6_vertex"
+      - "claude_sonnet_5"
+      - "claude_sonnet_5_5"
+      - "claude_sonnet_5_5_bedrock"
+      - "claude_sonnet_5_5_vertex"
+      - "claude_sonnet_5_bedrock"
+      - "claude_sonnet_5_vertex"
+      - "gpt_6_1_sol"
+      - "gpt_6_astra"
+      - "gpt_6_luna"
+      - "gpt_6_sol"

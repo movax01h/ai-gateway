@@ -34,6 +34,7 @@ from litellm.exceptions import (
 from packaging.version import Version
 from pydantic import BaseModel, model_validator
 from pydantic import ValidationError as PydanticValidationError
+from structlog.testing import capture_logs
 
 from ai_gateway.config import (
     Config,
@@ -911,9 +912,10 @@ async def test_execute_workflow_emits_billing_event(
             "llm_operations": [
                 {
                     "token_count": 15,
-                    "model_id": "claude-sonnet-4-6",
+                    "model_id": "claude-sonnet-5-5",
                     "model_engine": "litellm",
                     "model_provider": "litellm",
+                    "model_vendor": "vertex_ai",
                     "prompt_tokens": 10,
                     "completion_tokens": 5,
                     "agent_name": "test_agent",
@@ -1342,32 +1344,28 @@ async def test_execute_workflow_status_codes(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "cancel_error_message,expected_status,expected_detail_prefix,expected_log_count",
+    "cancel_error_message,expected_status,expected_detail_prefix",
     [
         (
             AIO_CANCEL_STOP_WORKFLOW_REQUEST,
             grpc.StatusCode.OK,
             "workflow execution stopped",
-            1,  # Only called from abort_workflow
         ),
         (
             AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
             grpc.StatusCode.OK,
             "workflow execution stopped",
-            1,  # Only called from abort_workflow
         ),
         (
             # Tuple-style error from LangGraph cleanup
             (AIO_CANCEL_STOP_WORKFLOW_REQUEST, "<Task cancelled>"),
             grpc.StatusCode.OK,
             "workflow execution stopped",
-            1,  # Only called from abort_workflow
         ),
         (
             "Some other cancellation",
             grpc.StatusCode.CANCELLED,
             "RPC cancelled by client",
-            2,  # Called from main handler AND abort_workflow
         ),
     ],
 )
@@ -1381,7 +1379,6 @@ async def test_execute_workflow_cancellation_handling(
     cancel_error_message,
     expected_status,
     expected_detail_prefix,
-    expected_log_count,
     start_request_iterator,
     mock_context,
     servicer,
@@ -1391,7 +1388,7 @@ async def test_execute_workflow_cancellation_handling(
     This test verifies that:
     1. Simple string error messages are handled correctly
     2. Tuple-style error messages (from LangGraph cleanup) are handled correctly
-    3. Unexpected cancellations are logged appropriately
+    3. Cancellations are expected and are not reported as errors
     """
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = False
@@ -1417,15 +1414,59 @@ async def test_execute_workflow_cancellation_handling(
     actual_detail = mock_context.set_details.call_args[0][0]
     assert actual_detail.startswith(expected_detail_prefix)
 
-    # Verify logging behavior
-    assert mock_log_exception.call_count == expected_log_count
+    # Neither the RPC cancellation nor the workflow task honouring it is an error
+    mock_log_exception.assert_not_called()
 
-    # For the main handler call (when expected_log_count == 2), verify the first call
-    if expected_log_count == 2:
-        # First call should be from the main exception handler
-        first_call_exception = mock_log_exception.call_args_list[0][0][0]
-        assert isinstance(first_call_exception, asyncio.CancelledError)
-        assert str(first_call_exception) == cancel_error_message
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch("duo_workflow_service.server.log_exception")
+async def test_execute_workflow_reports_task_ignoring_cancellation(
+    mock_log_exception,
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """A workflow task that outlives TASK_CANCELLATION_TIMEOUT is still reported as an error."""
+    cancellation_timeout = 0.01
+
+    async def run_ignoring_cancellation(_goal):
+        # Keep running for well past the timeout (e.g. stuck cleanup), then honour the cancellation.
+        deadline = asyncio.get_running_loop().time() + cancellation_timeout * 20
+        while asyncio.get_running_loop().time() < deadline:
+            try:
+                await asyncio.sleep(cancellation_timeout)
+            except asyncio.CancelledError:
+                pass
+        raise asyncio.CancelledError()
+
+    async def fail_after_workflow_starts():
+        await asyncio.sleep(0)
+        raise RuntimeError("send failed")
+
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = False
+    mock_workflow.run = run_ignoring_cancellation
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_gitlab_status = "running"
+    mock_workflow.get_from_outbox = fail_after_workflow_starts
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    with patch.object(servicer, "TASK_CANCELLATION_TIMEOUT", cancellation_timeout):
+        result = servicer.ExecuteWorkflow(
+            start_request_iterator,
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
+
+        with pytest.raises(StopAsyncIteration):
+            await anext(result)
+
+    logged = [c.args[0] for c in mock_log_exception.call_args_list]
+    assert [type(e) for e in logged] == [RuntimeError, TimeoutError]
 
 
 @pytest.mark.asyncio
@@ -1556,6 +1597,33 @@ async def test_generate_token(
     )
 
 
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_carries_instance_uuid_from_subject(
+    mock_token_authority,
+    mock_context,
+):
+    # Self-hosted instances sign their own tokens: the UUID is in ``sub`` and there is no
+    # ``gitlab_instance_uid``.
+    claims = UserClaims(
+        scopes=["duo_agent_platform"],
+        issuer="https://gitlab.example.com",
+        subject="instance-uuid",
+        gitlab_realm="self-managed",
+    )
+    current_user.set(CloudConnectorUser(authenticated=True, claims=claims))
+    servicer = DuoWorkflowService()
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["gitlab_instance_uid"] == "instance-uuid"
+
+
 def test_flow_config_digest_is_independent_of_map_insertion_order():
     first = struct_pb2.Struct()
     first.update({"name": "catalog-flow", "config": {"enabled": True, "count": 2}})
@@ -1614,40 +1682,209 @@ async def test_generate_token_without_inline_flow_config_has_no_digest_binding(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "claims_extra",
-    [{"flow_config_id": "secrets_fp_detection"}],
+    "field,claim,value",
+    [
+        ("flow_config_id", "flow_config_id", "developer"),
+        ("workflowID", "workflow_id", "42"),
+    ],
 )
 @patch("duo_workflow_service.server.TokenAuthority")
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-async def test_generate_token_binds_authorized_flow_config_id(
+async def test_generate_token_binds_request_claim(
     mock_token_authority,
     mock_context,
     servicer,
-    claims_extra,
+    field,
+    claim,
+    value,
 ):
     mock_token_authority.return_value.encode.return_value = ("token", 0)
 
     await servicer.GenerateToken(
-        contract_pb2.GenerateTokenRequest(flow_config_id="developer"), mock_context
+        contract_pb2.GenerateTokenRequest(**{field: value}), mock_context
     )
 
     extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
         "extra_claims"
     ]
-    assert extra_claims["flow_config_id"] == "developer"
+    assert extra_claims[claim] == value
+
+
+WORKFLOW_BINDING_ABORT = (
+    grpc.StatusCode.PERMISSION_DENIED,
+    "Workflow token is not authorized for the requested workflow",
+)
+
+
+async def _execute_workflow_with_id(servicer, mock_context, workflow_id):
+    """Drive ExecuteWorkflow far enough to pass (or trip) the binding guard.
+
+    Downstream failures are irrelevant here; the assertions below look only at
+    whether the guard aborted. `abort` is replaced with an AsyncMock because the
+    handler awaits it and the shared fixture supplies a plain MagicMock.
+    """
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    start_request = contract_pb2.StartWorkflowRequest(
+        workflowDefinition="software_development"
+    )
+    start_request.workflowID = workflow_id
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    try:
+        await anext(result)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
+def _binding_guard_aborted(mock_context) -> bool:
+    return any(
+        c.args == WORKFLOW_BINDING_ABORT for c in mock_context.abort.await_args_list
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "claims_extra",
-    [None, {"flow_config_id": "developer"}],
+    "claims_extra,workflow_id",
+    [
+        ({"workflow_id": "42"}, "99"),
+        ({"workflow_id": "not-a-number"}, "42"),
+        ({"workflow_id": ""}, "42"),
+        ({"workflow_id": ""}, "0"),
+        ({"workflow_id": "0"}, "#0"),
+        ({"workflow_id": "42"}, "99?gid://gitlab/Ai::DuoWorkflows::Workflow/42"),
+        ({"workflow_id": "42"}, "99#gid://x/42"),
+        ({"workflow_id": "42"}, "gid://gitlab/Project/42"),
+        ({"workflow_id": "42"}, " 42 "),
+        ({"workflow_id": "42"}, "\u0664\u0662"),
+        ({"workflow_id": "42"}, "042"),
+        ({"workflow_id": "42"}, "4" * 5000),
+        ({"workflow_id": True}, "1"),
+        ({"workflow_id": 0}, "0"),
+        ({"workflow_id": -5}, "5"),
+        ({"workflow_id": None}, "42"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_mismatched_workflow_binding(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    workflow_id,
+):
+    await _execute_workflow_with_id(servicer, mock_context, workflow_id)
+
+    assert _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@patch("duo_workflow_service.server.log")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_logs_mismatched_workflow_binding(
+    _mock_resolve_flow,
+    mock_log,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "9" * 100)
+
+    assert _binding_guard_aborted(mock_context)
+    mock_log.warning.assert_any_call(
+        "Workflow token bound to a different workflow",
+        bound_workflow_id="42",
+        requested_workflow_id="9" * 64,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,workflow_id",
+    [
+        ({"workflow_id": "42"}, "42"),
+        ({"workflow_id": "42"}, "gid://gitlab/Ai::DuoWorkflows::Workflow/42"),
+        ({"workflow_id": "42"}, "#42"),
+        ({"workflow_id": 42}, "42"),
+        ({}, "42"),
+        (None, "42"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_allows_matching_workflow_token(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    workflow_id,
+):
+    await _execute_workflow_with_id(servicer, mock_context, workflow_id)
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_with_empty_id_never_reaches_the_binding_guard(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    """An empty workflowID is short-circuited by the usage-quota decorator.
+
+    It returns before ExecuteWorkflow's body runs, so no claim guard sees it and nothing is aborted. Asserted here so
+    the binding guard is not later widened to duplicate a check that already stops the request upstream.
+    """
+    await _execute_workflow_with_id(servicer, mock_context, "")
+
+    assert not _binding_guard_aborted(mock_context)
+    assert mock_context.abort.await_args_list == []
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_is_debug", [True])
+@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_exempts_debug_user_from_workflow_binding(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "99")
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claim,claims_extra",
+    [
+        ("flow_config_id", None),
+        ("flow_config_id", {"flow_config_id": "developer"}),
+        ("workflow_id", None),
+        ("workflow_id", {"workflow_id": "42"}),
+    ],
 )
 @patch("duo_workflow_service.server.TokenAuthority")
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-async def test_generate_token_without_flow_config_id_has_no_flow_binding(
+async def test_generate_token_without_field_has_no_binding(
     mock_token_authority,
     mock_context,
     servicer,
+    claim,
     claims_extra,
 ):
     mock_token_authority.return_value.encode.return_value = ("token", 0)
@@ -1657,7 +1894,7 @@ async def test_generate_token_without_flow_config_id_has_no_flow_binding(
     extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
         "extra_claims"
     ]
-    assert "flow_config_id" not in extra_claims
+    assert claim not in extra_claims
 
 
 @pytest.mark.asyncio
@@ -1827,6 +2064,13 @@ async def test_generate_token_propagates_gitlab_root_namespace_id_end_to_end(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,claim,value",
+    [
+        ("flow_config_id", "flow_config_id", "developer"),
+        ("workflowID", "workflow_id", "42"),
+    ],
+)
 @patch.dict(
     os.environ,
     {
@@ -1834,7 +2078,9 @@ async def test_generate_token_propagates_gitlab_root_namespace_id_end_to_end(
         "DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY": TEST_PRIVATE_KEY,
     },
 )
-async def test_generate_token_binds_flow_config_id_end_to_end(mock_context):
+async def test_generate_token_binds_request_claim_end_to_end(
+    mock_context, field, claim, value
+):
     incoming_user = CloudConnectorUser(
         authenticated=True,
         claims=UserClaims(scopes=["duo_agent_platform"], gitlab_instance_uid="uid-1"),
@@ -1858,12 +2104,12 @@ async def test_generate_token_binds_flow_config_id_end_to_end(mock_context):
     ]
 
     response = await DuoWorkflowService().GenerateToken(
-        contract_pb2.GenerateTokenRequest(flow_config_id="developer"), mock_context
+        contract_pb2.GenerateTokenRequest(**{field: value}), mock_context
     )
     decoded_user = provider.authenticate(response.token)
 
     assert decoded_user.authenticated
-    assert decoded_user.claims.extra["flow_config_id"] == "developer"
+    assert decoded_user.claims.extra[claim] == value
 
 
 @pytest.mark.asyncio
@@ -3275,6 +3521,7 @@ async def test_track_self_hosted_execute_workflow_billing_event(
                     "model_id": "self-hosted-model",
                     "model_engine": "litellm",
                     "model_provider": "litellm",
+                    "model_vendor": None,
                     "prompt_tokens": 1,
                     "completion_tokens": 1,
                     "agent_name": None,
@@ -3287,6 +3534,55 @@ async def test_track_self_hosted_execute_workflow_billing_event(
             "orbit_called": False,
         },
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tracked", "expected_success_logs"),
+    [(True, 1), (False, 0)],
+)
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_logs_success_only_when_tracked(
+    _mock_container,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+    tracked,
+    expected_success_logs,
+):
+    """The success log is only emitted when the billing event was actually tracked, e.g. not when billing events are
+    disabled."""
+    auth_user.can = MagicMock(return_value=True)
+    billing_event_client.track_billing_event.return_value = tracked
+
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
+        yield contract_pb2.TrackSelfHostedClientEvent(
+            requestID="test-req-id",
+            workflowID="#1337",
+            featureQualifiedName="test_feature",
+            featureAiCatalogItem=True,
+        )
+
+    with capture_logs() as cap_logs:
+        result = servicer.TrackSelfHostedExecuteWorkflow(
+            mock_request_iterator(),
+            mock_context,
+            billing_service=billing_event_service,
+        )
+        actions = [action async for action in result]
+
+    assert [a.requestID for a in actions] == ["test-req-id"]
+    billing_event_client.track_billing_event.assert_called_once()
+    success_logs = [
+        log
+        for log in cap_logs
+        if log["event"] == "Successfully sent billing event for self-hosted LLM auth"
+    ]
+    assert len(success_logs) == expected_success_logs
 
 
 @pytest.mark.asyncio

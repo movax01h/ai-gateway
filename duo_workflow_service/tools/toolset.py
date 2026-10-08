@@ -151,10 +151,10 @@ class Toolset(collections.abc.Mapping):
     ) -> Optional[ApprovalSource]:
         """Resolve the source that lets a specific tool call skip human approval.
 
-        Pre-approved tools skip approval on privilege grounds. Other tools are
-        checked against the approval policy, which may consult session
-        approvals persisted on the GitLab instance. See `approved` for the
-        name-only pre-approval check.
+        Pre-approved tools skip approval on registry grounds: a privilege group
+        or an admin `allow` rule. Other tools are checked against the approval
+        policy, which may consult session approvals persisted on the GitLab
+        instance. See `approved` for the name-only pre-approval check.
 
         Args:
             tool_name: The name of the tool to check.
@@ -162,10 +162,10 @@ class Toolset(collections.abc.Mapping):
 
         Returns:
             None if the tool call requires human approval; otherwise the source
-            of the skip: `ApprovalSource.PREAPPROVED_CONFIG` for a
-            privilege-level pre-approval, or `ApprovalSource.SESSION_APPROVAL`
-            when the approval policy (a session approval persisted on the
-            GitLab instance) grants it.
+            of the skip: `ApprovalSource.PREAPPROVED_CONFIG` for a registry
+            pre-approval (privilege group or admin `allow` rule), or
+            `ApprovalSource.SESSION_APPROVAL` when the approval policy (a
+            session approval persisted on the GitLab instance) grants it.
 
         Raises:
             UnknownToolError: If the tool is not found in all_tools.
@@ -178,7 +178,7 @@ class Toolset(collections.abc.Mapping):
         # separate approval layer.
         if tool_name in self._pre_approved:
             log.debug(
-                "Tool call approval skipped: privilege pre-approval",
+                "Tool call approval skipped: registry pre-approval",
                 tool_name=tool_name,
             )
             return ApprovalSource.PREAPPROVED_CONFIG

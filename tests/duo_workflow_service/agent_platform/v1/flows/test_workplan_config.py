@@ -88,6 +88,7 @@ class TestWorkplanRouterWiring:
         assert router["condition"]["routes"] == {
             "ready": "planner",
             "needs_input": "research_gate",
+            "needs_context": "context_gate",
             "default_route": "research_gate",
         }
 
@@ -98,6 +99,7 @@ class TestWorkplanRouterWiring:
         assert router["condition"]["input"] == "context:planner.final_answer.decision"
         assert router["condition"]["routes"] == {
             "ask_question": "plan_gate",
+            "needs_context": "context_gate",
             "plan_ready": "end",
             "default_route": "plan_gate",
         }
@@ -111,6 +113,16 @@ class TestWorkplanRouterWiring:
         router = self._router_for(config, gate_name)
 
         assert router["to"] == target
+
+    # The resume after a context request carries the original goal, so it has
+    # to land in research's conversation, not the planner's.
+    def test_context_gate_resumes_into_research(self):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        router = self._router_for(config, "context_gate")
+        gate = _component(config, "context_gate")
+
+        assert router["to"] == "research"
+        assert gate["sends_response_to"] == "research"
 
     def test_entry_point_is_research(self):
         config = FlowConfig.from_yaml_config("workplan", "1.0.0")
@@ -151,6 +163,46 @@ class TestWorkplanQuestionToolingIsAvailable:
         assert self.REQUIRED_TOOLS <= declared
 
 
+SCHEMA_DEFINITIONS = Path(response_schemas.__file__).parent / "definitions"
+
+
+def _component(config: FlowConfig, component_name: str) -> dict:
+    return next(c for c in config.components if c.get("name") == component_name)
+
+
+def _declared_decisions(component: dict) -> list[str]:
+    """Read the ``decision`` enum straight out of the component's schema."""
+    schema_dir = SCHEMA_DEFINITIONS / component["response_schema_id"] / "base"
+    version = resolve_version(
+        [f.stem for f in schema_dir.glob("*.json")],
+        component["response_schema_version"],
+    )
+    schema = json.loads((schema_dir / f"{version}.json").read_text())
+
+    return schema["properties"]["decision"]["enum"]
+
+
+def _rendered_system_prompt(config: FlowConfig, component: dict) -> str:
+    # The stage literal the flow actually passes, not the component name -
+    # a config declaring the wrong one renders the other stage's branch.
+    stage = next(
+        inp["from"]
+        for inp in component["inputs"]
+        if inp.get("as") == "stage" and inp.get("literal")
+    )
+    assert config.prompts is not None
+    prompt = next(p for p in config.prompts if p.prompt_id == component["prompt_id"])
+    system = prompt.prompt_template["system"]
+    assert isinstance(system, str)
+
+    return jinja2_formatter(
+        system,
+        stage=stage,
+        goal="",
+        research_findings="",
+    )
+
+
 class TestDuplicateQuestionStopDecision:
     """Guard the stage-conditional decision literal in the duplicate-question stop.
 
@@ -163,55 +215,62 @@ class TestDuplicateQuestionStopDecision:
     hardcoded string.
     """
 
-    SCHEMA_DEFINITIONS = Path(response_schemas.__file__).parent / "definitions"
-
     EXPECTED_DECISION = {"research": "needs_input", "planner": "ask_question"}
-
-    @staticmethod
-    def _component(config: FlowConfig, component_name: str) -> dict:
-        return next(c for c in config.components if c.get("name") == component_name)
-
-    def _declared_decisions(self, component: dict) -> list[str]:
-        """Read the ``decision`` enum straight out of the component's schema."""
-        schema_dir = self.SCHEMA_DEFINITIONS / component["response_schema_id"] / "base"
-        version = resolve_version(
-            [f.stem for f in schema_dir.glob("*.json")],
-            component["response_schema_version"],
-        )
-        schema = json.loads((schema_dir / f"{version}.json").read_text())
-
-        return schema["properties"]["decision"]["enum"]
 
     @pytest.mark.parametrize("component_name", AGENT_COMPONENT_NAMES)
     def test_stop_names_this_stage_decision_and_the_schema_accepts_it(
         self, component_name
     ):
         config = FlowConfig.from_yaml_config("workplan", "1.0.0")
-        component = self._component(config, component_name)
+        component = _component(config, component_name)
         expected = self.EXPECTED_DECISION[component_name]
 
-        # The stage literal the flow actually passes, not the component name -
-        # a config declaring the wrong one renders the other stage's branch.
-        stage = next(
-            inp["from"]
-            for inp in component["inputs"]
-            if inp.get("as") == "stage" and inp.get("literal")
-        )
-        assert config.prompts is not None
-        prompt = next(
-            p for p in config.prompts if p.prompt_id == component["prompt_id"]
-        )
-        rendered = jinja2_formatter(
-            prompt.prompt_template["system"],
-            stage=stage,
-            goal="",
-            research_findings="",
-        )
+        rendered = _rendered_system_prompt(config, component)
 
         assert f"`decision: {expected}`" in rendered
-        assert expected in self._declared_decisions(component)
+        assert expected in _declared_decisions(component)
 
         # And the other stage's keyword must not leak in: both branches of the
         # conditional rendering would look fine in isolation.
         (other,) = set(self.EXPECTED_DECISION.values()) - {expected}
         assert other not in rendered
+
+
+class TestContextRequestStopDecision:
+    """Guard the decision each stage stops with after requesting more context.
+
+    GitLab tells a context request apart from a question by the gate the run
+    paused at, and only ``context_gate`` resumes with the original goal. Both
+    stages reach it with ``needs_context``; a wrong keyword would pause at the
+    question gate instead, and the resume would carry replies, not the goal.
+    """
+
+    @pytest.mark.parametrize("component_name", AGENT_COMPONENT_NAMES)
+    def test_request_stops_with_needs_context_and_routes_to_context_gate(
+        self, component_name
+    ):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        component = _component(config, component_name)
+        rendered = _rendered_system_prompt(config, component)
+        router = next(r for r in config.routers if r["from"] == component_name)
+
+        assert "## Requesting more context" in rendered
+        assert "`decision: needs_context`" in rendered
+        assert "needs_context" in _declared_decisions(component)
+        assert router["condition"]["routes"]["needs_context"] == "context_gate"
+
+    # Research hands back to the planner without appending a message, so the
+    # prompt is the only thing telling it that a context request was acted on.
+    def test_planner_is_told_research_ran_again_after_a_context_request(self):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        rendered = _rendered_system_prompt(config, _component(config, "planner"))
+
+        assert "research\nhas since run again on an updated description" in rendered
+
+    # The planner's request lands back in research's own conversation, right
+    # after its earlier `ready`, so only the prompt tells it not to repeat it.
+    def test_research_is_told_to_rerun_after_a_planner_context_request(self):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        rendered = _rendered_system_prompt(config, _component(config, "research"))
+
+        assert "the planner found\nthe description too thin" in rendered

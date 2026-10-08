@@ -18,5 +18,10 @@ prompt_template:
     <request>
     {{goal}}
     </request>
+    {%- if hint_tag %}
+
+    Hint: the request mentions "{{hint_keyword}}", which usually means {{hint_tag}}. Weigh it
+    against the request as a whole.
+    {%- endif %}
 
     Answer: small, large, or unsure.

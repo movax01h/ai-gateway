@@ -30,6 +30,7 @@ from duo_workflow_service.agent_platform.v1.flows.validation import (
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from lib.feature_roots import default_features_dir
+from lib.internal_events.client import InternalEventsClient
 
 # Legacy root plus moved features' config/ dirs, so a moved flow keeps validation.
 # Reuse the loader's own root derivation so this sweep cannot silently diverge.
@@ -329,7 +330,9 @@ class TestValidateFlowConfigs:
         DryRunFlowValidator(
             config=config,
             prompt_registry=_make_local_prompt_registry(),
-            internal_event_client=Mock(),
+            # Spec'd: a bare Mock fails Router's pydantic field, so a config with
+            # a conditional router could not reach compilation at all.
+            internal_event_client=Mock(spec=InternalEventsClient),
             catalog_items=items,
         ).validate()
 

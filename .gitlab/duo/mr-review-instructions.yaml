@@ -20,6 +20,7 @@ instructions:
     instructions: |
       1. Ensure inclusive language is used where applicable, e.g. prefer `allowlist` over `whitelist`.
       1. Verify type hints are present on all functions and methods (mypy is enforced incrementally).
+        This applies to inner/local helper functions and closures as well, not just top-level definitions.
       1. Ensure Google-style docstrings are used for public classes and functions, wrapped at 120 characters.
       1. Flag comments that only describe what code does (e.g., `# Loop through items`) rather than why.
         Suggest removing these and using better naming or method extraction instead.
@@ -31,6 +32,8 @@ instructions:
       1. Flag any use of `time.sleep()` in async code — use `asyncio.sleep()` instead.
       1. Verify exception handling is specific (avoid bare `except:` or `except Exception:` without re-raising or logging).
       1. Ensure no mutable default arguments in function signatures (e.g., `def f(x=[])` is a bug).
+      1. Module-level constants that are not part of the public API should be prefixed with `_` to signal
+        they are internal. Flag constants that are only used within the same module but lack the `_` prefix.
 
   - name: Clean Architecture Layer Separation
     fileFilters:
@@ -221,6 +224,23 @@ instructions:
       1. Cloud Connector JWT claims are validated against expected values.
       1. Self-hosted instance authentication paths are tested separately from SaaS paths.
 
+  - name: Duo Workflow Tools — File Access Security
+    fileFilters:
+      - "duo_workflow_service/tools/**/*.py"
+      - "!tests/**/*"
+    instructions: |
+      Any tool that reads files from the executor must apply the full two-layer access check,
+      matching what `ReadFile` and `ReadFileChunked` enforce. Verify:
+      1. Every file-read path calls `validate_duo_context_exclusions(path)` (the always-on hardcoded
+        denylist covering `.ssh`, `.env*`, `.git`, path-traversal sequences, etc.) before issuing
+        `runReadFile`. Relying only on the optional project-level `FileExclusionPolicy` is not
+        sufficient — when a project has no `exclusion_rules`, that check unconditionally returns `True`.
+      1. The same two-layer check must be applied to any path recovered by path-repair or glob-expansion
+        logic, not just the originally-supplied path.
+      1. Flag any new tool that reads a file path derived from LLM output (findings, model-controlled
+        fields) without both checks — even if the read content is not echoed verbatim in the output,
+        the read itself crosses the security boundary.
+
   - name: gRPC and Protocol Buffers
     fileFilters:
       - "contract/**/*.proto"
@@ -261,8 +281,12 @@ instructions:
         - `None`/empty values
         - Boundary conditions
         - Error states and exception propagation
-      1. Async tests must use `pytest-asyncio` with `@pytest.mark.asyncio` decorator.
+      1. Async tests must use `pytest-asyncio` with `@pytest.mark.asyncio` decorator — do not call `asyncio.run()` inside test bodies.
       1. Mock external dependencies (LLM providers, GCP, GitLab API) — do not make real network calls in unit tests.
+      1. Use `unittest.mock.patch` (or `patch.object`) for mocking rather than manual monkeypatching:
+        - Use `return_value=` for fixed return values, `side_effect=` for exceptions or computed results.
+        - Use `new_callable=AsyncMock` for async callables.
+        - Prefer `assert_called_once_with(...)` / `assert_not_called()` over manual flag variables.
       1. Integration tests in `integration_tests/` may make real calls but must be clearly marked.
       1. Follow the testing pyramid: most tests at unit level, fewer at integration/system level.
       1. Verify that new fixtures in `conftest.py` are scoped appropriately (`function`, `module`, `session`).

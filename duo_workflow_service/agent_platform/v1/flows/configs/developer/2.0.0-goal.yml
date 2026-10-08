@@ -49,8 +49,6 @@ components:
       - "create_work_item_note"
       - "create_merge_request"
       - "update_merge_request"
-    pre_approved_tools:
-      - "notify_me_when"
 
     ui_log_events:
       - "on_agent_reasoning"

@@ -910,7 +910,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             self.mock_components(["AgentComponent", "AnotherComponent"]),
             patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
             ) as mock_log_exception,
         ):
             # Create flow instance
@@ -1137,7 +1137,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             self.mock_components(["AgentComponent"]),
             patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
             ) as mock_log_exception,
         ):
             flow = Flow(
@@ -1561,7 +1561,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
 
         with patch(
-            "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
         ) as mock_log_exception:
             await flow_instance._handle_workflow_failure(error, graph, {})
 
@@ -1590,7 +1590,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         error = NotifiableAgentException("Safe message only")
 
         with patch(
-            "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
         ) as mock_log_exception:
             await flow_instance._handle_workflow_failure(error, graph, {})
 
@@ -1612,7 +1612,9 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         compiled_graph = AsyncMock()
 
         with (
-            patch("duo_workflow_service.agent_platform.v1.flows.base.log_exception"),
+            patch(
+                "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
+            ),
             pytest.raises(TraceableException) as exc_info,
         ):
             await flow_instance._handle_compile_and_run_exception(
@@ -2438,7 +2440,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_checkpointer.fetch_checkpoint = AsyncMock(return_value=None)
 
         with patch(
-            "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
         ) as mock_log_exception:
             await flow_instance.run("test goal")
 

@@ -50,7 +50,8 @@ Each layer only uses entities from the layer directly below it (enforced via CI 
 - API endpoints (`ai_gateway/api/v{1,2,3,4}/`) handle HTTP requests
 - Middleware (`ai_gateway/api/middleware/`) processes authentication, feature flags, internal events, usage quotas
 - Code Suggestions flow: API → Processing (pre/post) → Model Engine → Prompt Builder → LLM
-- Prompts are versioned templates in `ai_gateway/prompts/definitions/` using Jinja2
+- Prompts are versioned templates using Jinja2, in `ai/features/<domain>/<feature>/prompts/` (new) and
+  `ai_gateway/prompts/definitions/` (legacy, frozen)
 
 **Duo Workflow Service**:
 
@@ -149,21 +150,28 @@ make check-graphql       # GraphQL schema validation
 make lint-proto          # buf lint for protobuf contracts
 
 # Auto-format code
-make ruff-fix       # ruff check --fix + ruff format
+make ruff-format    # ruff format (fixes what check-ruff's format check flags)
+make ruff-fix       # ruff check --fix only; does not format
 make docformatter
 make codespell      # Auto-fix spelling
 
-# Lint documentation
-make lint-doc  # Runs vale + markdownlint
+# Lint documentation (all docs, a few seconds)
+make lint-doc  # Runs vale + markdownlint + lychee
+make markdownlint
+make vale
+make lychee
 ```
 
 Always run these `make` targets rather than invoking `pytest`, `mypy`,
-`ruff`, or `pylint` directly. `make test`, `check-mypy`, `check-ruff`, and
+`ruff`, `pylint`, or the doc linters directly. The doc linters come from
+`.tool-versions` via mise, not npm, so `npx markdownlint-cli2` fails even
+though `make markdownlint` works. Exception: `make test` always runs the full
+suite and takes no path argument, so to run specific tests use
+`poetry run pytest <path>`. `make test`, `check-mypy`, `check-ruff`, and
 `check-pylint` install required dependencies first via `install-test-deps`/
-`install-lint-deps`, and `check-mypy` also passes `--exclude` flags (for
-`scripts/vendor/*` and the known-noncompliant files listed under
-`MYPY_LINT_TODO_DIR` in the Makefile) that a bare `mypy` invocation would
-silently skip, causing local results to disagree with CI.
+`install-lint-deps`, and `check-mypy` also passes an `--exclude` flag for
+`scripts/vendor/*` that a bare `mypy` invocation would silently skip, causing
+local results to disagree with CI.
 
 The `install-*-deps` steps run `poetry install`, which needs network
 access. In network-restricted environments (e.g. agent sandboxes) with a
@@ -172,6 +180,26 @@ pre-installed `.venv`, prefix the make target with `CI=true` (e.g.
 `CI=true` and `.venv` exists. The same prefix fixes lefthook hooks that
 fail in the install step (`CI=true git commit ...`); prefer it over
 `LEFTHOOK=0`, which skips the checks entirely.
+
+The pre-installed `.venv` matches the `poetry.lock` of the commit the session
+started on. After you check out or rebase onto another ref, run
+`git diff --stat <start-sha> HEAD -- poetry.lock`. If the lock changed, run
+`poetry install --with test,lint`. If that can't reach the network, the
+`.venv` is stale, so run the same tests on the base ref to find failures that
+come from the environment and not your change. Report those tests as
+unverified.
+
+`check-mypy` type-checks the whole repo (`LINT_WORKING_DIR`: `ai_gateway`,
+`duo_workflow_service`, `tests`, and more) and typically exceeds the ~120s
+per-command timeout in a sandbox. Scope it to the files you changed so it
+completes while keeping the Makefile's `--exclude` flags:
+
+```shell
+CI=true make check-mypy LINT_WORKING_DIR="path/to/changed_file.py"
+```
+
+Run the full-repo `check-mypy` only when you can allow a longer timeout;
+never weaken the check to make it pass.
 
 ### Pre-commit Hooks
 
@@ -235,6 +263,8 @@ poetry run validate-model-selection-config
 - **Import sorting**: Handled by Ruff's `isort`-compatible rule group (`I`), configured in `[tool.ruff.lint.isort]`
 - **Code formatter**: `ruff format` (replaced Black; migration tracked in work item #2237)
 - **Docstrings**: Google-style, formatted with `docformatter` (max 120 chars)
+- **Indentation**: `check-editorconfig` requires every line of a `.py` file to be indented in multiples of 4,
+  including lines inside multi-line string literals; build such text from single-line strings instead
 
 ### Python Conventions
 
@@ -427,7 +457,7 @@ the pipeline — no code change helps.
 
 Lefthook automatically runs on commit (skipped on `main`), scoped to staged files:
 
-1. **Python files** (`*.py`): `check-mypy` (filtered to mypy-safe files), `check-ruff`, `check-pylint`, `check-codespell`, `check-docformatter`, `check-editorconfig`
+1. **Python files** (`*.py`): `check-mypy`, `check-ruff`, `check-pylint`, `check-codespell`, `check-docformatter`, `check-editorconfig`
 1. **GraphQL files** (`*.graphql`): `check-graphql`
 1. **Proto files** (`contract/*.proto`): `lint-proto` (buf lint)
 1. **Markdown files** (`*.md`): vale and markdownlint
@@ -519,7 +549,14 @@ pipeline is stuck.
 
 ### Prompt Management
 
-Prompts are versioned Jinja2 templates in `ai_gateway/prompts/definitions/`:
+New prompts and flows go under `ai/features/<domain>/<feature>/`. The legacy roots
+`ai_gateway/prompts/definitions/` and `duo_workflow_service/agent_platform/v1/flows/configs/`
+accept new versions of existing features only, and `make check-legacy-roots` rejects new
+directories there. Read [`docs/adding_and_moving_features.md`](docs/adding_and_moving_features.md)
+before you add or move a prompt or flow.
+
+Prompts are versioned Jinja2 templates. The legacy root uses this layout, and a feature's
+`prompts/` directory uses the same layout without the feature level:
 
 ```plaintext
 prompts/definitions/
@@ -536,6 +573,27 @@ prompts/definitions/
 (`duo_workflow_service/agent_platform/v1/flows/configs/developer/`) or its shared
 system prompt (`ai_gateway/prompts/definitions/common/developer/`), read and follow
 [`duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md`](duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md).
+
+### Flow Registry
+
+The Flow Registry (`duo_workflow_service/agent_platform/`) is a public API of AI
+Gateway. Before changing anything under it, read and follow
+[`docs/flow_registry/contribution_guidelines.md`](docs/flow_registry/contribution_guidelines.md).
+Most critical rules:
+
+- **`v1` is stable**: all changes must be backwards compatible. Don't rename
+  components, remove or rename parameters, change parameter types
+  incompatibly, or add required parameters. Build new components in
+  `experimental/` first.
+- **No direct state access**: components and routers read and write state only
+  through `IOKey` and `IOKeyTemplate`. Put dynamic data under `context`.
+- **Declare outputs**: list every state path a component mutates in `_outputs`,
+  using `IOKeyTemplate` for component-scoped paths.
+- **Integration-style tests**: attach the component to a real `StateGraph`,
+  then compile and invoke it. Mock node classes and external dependencies,
+  not the graph.
+- **Documentation in the same MR**: update the version page (for example
+  `docs/flow_registry/v1.md`) when a component, parameter, or constraint changes.
 
 ### Model Selection
 

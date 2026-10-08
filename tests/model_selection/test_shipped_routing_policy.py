@@ -50,7 +50,9 @@ def test_only_duo_developer_carries_routing_keywords(shipped_tags):
 
 
 def test_large_precedes_small_so_a_goal_matching_both_escalates(duo_developer_tags):
-    assert list(duo_developer_tags) == list(_DUO_DEVELOPER_TIERS)
+    tiers = [tag for tag in duo_developer_tags if tag in _DUO_DEVELOPER_TIERS]
+
+    assert tiers == list(_DUO_DEVELOPER_TIERS)
 
 
 @pytest.mark.parametrize("tier", _DUO_DEVELOPER_TIERS)
@@ -72,13 +74,15 @@ def test_keywords_need_no_cleanup_at_match_time(duo_developer_tags, tier):
 
 
 @pytest.mark.parametrize(
-    ("tier", "model_id", "keyword"),
+    ("tier", "model_ids", "keyword"),
     [
-        pytest.param("large", "claude_sonnet_4_6_vertex", "refactor", id="large"),
-        pytest.param("small", "claude_haiku_4_5_20251001_vertex", "typo", id="small"),
+        pytest.param(
+            "large", ["claude_opus_5_5", "kimi_k3_fireworks"], "refactor", id="large"
+        ),
+        pytest.param("small", ["gpt_6_luna"], "typo", id="small"),
     ],
 )
-def test_shipped_policy_loads_into_tag_entries(tier, model_id, keyword):
+def test_shipped_policy_loads_into_tag_entries(tier, model_ids, keyword):
     """The policy parses into ModelTagEntry objects, not just into valid YAML."""
     tags = (
         ModelSelectionConfig.instance()
@@ -86,5 +90,5 @@ def test_shipped_policy_loads_into_tag_entries(tier, model_id, keyword):
         .models_for_tags
     )
 
-    assert tags[tier].models == [model_id]
+    assert tags[tier].models == model_ids
     assert keyword in tags[tier].keywords

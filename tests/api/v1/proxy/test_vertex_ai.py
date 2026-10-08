@@ -129,6 +129,7 @@ class TestProxyVertexAI:
                         "model_id": "text-embedding-005",
                         "model_engine": "vertex-ai",
                         "model_provider": "vertex-ai",
+                        "model_vendor": "vertex-ai",
                         "prompt_tokens": 2,
                         "completion_tokens": 0,
                         "agent_name": None,

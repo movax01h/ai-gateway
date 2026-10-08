@@ -4,6 +4,7 @@ from unittest.mock import patch
 import fastapi
 import pytest
 from fastapi import status
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from pydantic import SecretStr
 
 from ai_gateway.model_selection import ModelSelectionConfig
@@ -143,6 +144,26 @@ async def test_invalid_proxy_requests(
 
     assert excinfo.value.status_code == expected_status
     assert excinfo.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+async def test_rejects_model_outside_the_allowlist(
+    anthropic_factory, request_factory, request_params, request_headers
+):
+    request = request_factory(
+        request_url="http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages",
+        request_body=json.dumps(request_params).encode("utf-8"),
+        request_headers=request_headers,
+    )
+    request.user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={"gitlab_allowed_model_refs": ["claude_fable_5"]}),
+    )
+
+    with pytest.raises(fastapi.HTTPException) as excinfo:
+        await anthropic_factory.factory(request)
+
+    assert excinfo.value.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio

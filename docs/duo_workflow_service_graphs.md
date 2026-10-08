@@ -117,12 +117,15 @@ graph TD;
     __start__([<p>__start__</p>]):::first
     agent(agent)
     run_tools(run_tools)
+    forced_call_complete(forced_call_complete)
     __end__([<p>__end__</p>]):::last
     __start__ -. &nbsp;continue&nbsp; .-> agent;
     __start__ -. &nbsp;tool_use&nbsp; .-> run_tools;
     agent -. &nbsp;stop&nbsp; .-> __end__;
     agent -. &nbsp;tool_use&nbsp; .-> run_tools;
-    run_tools --> agent;
+    run_tools -. &nbsp;continue&nbsp; .-> agent;
+    run_tools -. &nbsp;stop&nbsp; .-> forced_call_complete;
+    forced_call_complete --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2
     classDef first fill-opacity:0
     classDef last fill:#bfb6fc
@@ -245,6 +248,53 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `bl_security 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> grounding;
+    grounding(grounding<br>#91;AgentComponent#93;);
+    tuner(tuner<br>#91;AgentComponent#93;);
+    discover_units(discover_units<br>#91;DeterministicStepComponent#93;);
+    map_reviews_prep(map_reviews_prep<br>#91;DeterministicStepComponent#93;);
+    map_reviews(map_reviews<br>#91;AgentComponent#93;);
+    map_reviews_collect(map_reviews_collect<br>#91;DeterministicStepComponent#93;);
+    sibling_scan_prep(sibling_scan_prep<br>#91;DeterministicStepComponent#93;);
+    sibling_scan(sibling_scan<br>#91;AgentComponent#93;);
+    sibling_scan_collect(sibling_scan_collect<br>#91;DeterministicStepComponent#93;);
+    adjudicate(adjudicate<br>#91;DeterministicStepComponent#93;);
+    triage_prep(triage_prep<br>#91;DeterministicStepComponent#93;);
+    triage(triage<br>#91;AgentComponent#93;);
+    triage_collect(triage_collect<br>#91;DeterministicStepComponent#93;);
+    adjudicate_post(adjudicate_post<br>#91;DeterministicStepComponent#93;);
+    write_report(write_report<br>#91;DeterministicStepComponent#93;);
+    grounding --> tuner;
+    tuner --> discover_units;
+    discover_units --> map_reviews_prep;
+    map_reviews_prep --> map_reviews;
+    map_reviews --> map_reviews_collect;
+    map_reviews_collect --> sibling_scan_prep;
+    sibling_scan_prep --> sibling_scan;
+    sibling_scan --> sibling_scan_collect;
+    sibling_scan_collect --> adjudicate;
+    adjudicate --> triage_prep;
+    triage_prep --> triage;
+    triage --> triage_collect;
+    triage_collect -.->|"success"| adjudicate_post;
+    adjudicate_post -.->|"success"| write_report;
+    write_report -.->|"success"| __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `business_context_security_guidelines 1.0.0 (experimental)` (Flow Registry)
 
 ```mermaid
@@ -297,6 +347,42 @@ graph TD;
 ```
 
 ## Graph: `code_review 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> build_review_context;
+    build_review_context(build_review_context<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_diffs(fetch_mr_diffs<br>#91;DeterministicStepComponent#93;);
+    explore_relevant_directories(explore_relevant_directories<br>#91;OneOffComponent#93;);
+    prescan_codebase(prescan_codebase<br>#91;OneOffComponent#93;);
+    fetch_mr_metadata(fetch_mr_metadata<br>#91;DeterministicStepComponent#93;);
+    analyze_prescan_results(analyze_prescan_results<br>#91;AgentComponent#93;);
+    fetch_existing_discussions(fetch_existing_discussions<br>#91;DeterministicStepComponent#93;);
+    perform_code_review_and_publish(perform_code_review_and_publish<br>#91;OneOffComponent#93;);
+    build_review_context -.->|"success"| fetch_mr_diffs;
+    build_review_context -.->|"default_route"| abort;
+    fetch_mr_diffs --> explore_relevant_directories;
+    explore_relevant_directories --> prescan_codebase;
+    prescan_codebase --> fetch_mr_metadata;
+    fetch_mr_metadata --> analyze_prescan_results;
+    analyze_prescan_results -.->|"None"| perform_code_review_and_publish;
+    analyze_prescan_results -.->|"(empty)"| perform_code_review_and_publish;
+    analyze_prescan_results -.->|"default_route"| fetch_existing_discussions;
+    fetch_existing_discussions --> perform_code_review_and_publish;
+    perform_code_review_and_publish --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `code_review 3.0.0 (v1)` (Flow Registry)
 
 ```mermaid
 ---
@@ -1142,6 +1228,25 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `recommend_reviewers 3.1.0-dev (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> suggest_reviewers;
+    suggest_reviewers(suggest_reviewers<br>#91;OneOffComponent#93;);
+    suggest_reviewers --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `resolve_dependency_bump 1.0.0 (experimental)` (Flow Registry)
 
 ```mermaid
@@ -1321,6 +1426,58 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `resolve_sast_vulnerability 1.0.3 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> gather_context;
+    gather_context(gather_context<br>#91;DeterministicStepComponent#93;);
+    evaluate_vuln_fp_status(evaluate_vuln_fp_status<br>#91;DeterministicStepComponent#93;);
+    resolve_target_branch(resolve_target_branch<br>#91;DeterministicStepComponent#93;);
+    ensure_clean_git_state(ensure_clean_git_state<br>#91;AgentComponent#93;);
+    create_repository_branch(create_repository_branch<br>#91;AgentComponent#93;);
+    exclude_pre_existing_files(exclude_pre_existing_files<br>#91;DeterministicStepComponent#93;);
+    execute_fix(execute_fix<br>#91;AgentComponent#93;);
+    validate_fix_has_changes(validate_fix_has_changes<br>#91;DeterministicStepComponent#93;);
+    commit_changes(commit_changes<br>#91;OneOffComponent#93;);
+    push_commits(push_commits<br>#91;AgentComponent#93;);
+    push_and_create_mr(push_and_create_mr<br>#91;OneOffComponent#93;);
+    link_vulnerability(link_vulnerability<br>#91;DeterministicStepComponent#93;);
+    evaluate_merge_request(evaluate_merge_request<br>#91;AgentComponent#93;);
+    gather_context --> evaluate_vuln_fp_status;
+    evaluate_vuln_fp_status -.->|"skip_false_positive"| __end__;
+    evaluate_vuln_fp_status -.->|"proceed_with_fix"| resolve_target_branch;
+    evaluate_vuln_fp_status -.->|"default_route"| resolve_target_branch;
+    resolve_target_branch -.->|"success"| ensure_clean_git_state;
+    resolve_target_branch -.->|"default_route"| __end__;
+    ensure_clean_git_state --> create_repository_branch;
+    create_repository_branch -.->|"success"| exclude_pre_existing_files;
+    create_repository_branch -.->|"default_route"| __end__;
+    exclude_pre_existing_files -.->|"Exit code: 0\nexcluded"| execute_fix;
+    exclude_pre_existing_files -.->|"default_route"| __end__;
+    execute_fix --> validate_fix_has_changes;
+    validate_fix_has_changes -.->|"Exit code: 0\nproceed"| commit_changes;
+    validate_fix_has_changes -.->|"default_route"| __end__;
+    commit_changes -.->|"success"| push_commits;
+    commit_changes -.->|"default_route"| __end__;
+    push_commits -.->|"success"| push_and_create_mr;
+    push_commits -.->|"default_route"| __end__;
+    push_and_create_mr -.->|"success"| evaluate_merge_request;
+    push_and_create_mr -.->|"default_route"| __end__;
+    evaluate_merge_request --> link_vulnerability;
+    link_vulnerability --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `risk_classification 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -1476,6 +1633,43 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `security_review 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> check_existing_review;
+    check_existing_review(check_existing_review<br>#91;DeterministicStepComponent#93;);
+    apply_triggered_label(apply_triggered_label<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_data(fetch_mr_data<br>#91;DeterministicStepComponent#93;);
+    build_review_context(build_review_context<br>#91;AgentComponent#93;);
+    prescan_codebase(prescan_codebase<br>#91;AgentComponent#93;);
+    perform_security_review(perform_security_review<br>#91;AgentComponent#93;);
+    validate_and_publish(validate_and_publish<br>#91;AgentComponent#93;);
+    apply_completed_label(apply_completed_label<br>#91;DeterministicStepComponent#93;);
+    respond_to_comment(respond_to_comment<br>#91;AgentComponent#93;);
+    check_existing_review -.->|"mention"| respond_to_comment;
+    check_existing_review -.->|"default_route"| apply_triggered_label;
+    apply_triggered_label --> fetch_mr_data;
+    fetch_mr_data -.->|"success"| build_review_context;
+    fetch_mr_data -.->|"default_route"| abort;
+    build_review_context --> prescan_codebase;
+    prescan_codebase --> perform_security_review;
+    perform_security_review --> validate_and_publish;
+    validate_and_publish --> apply_completed_label;
+    apply_completed_label --> __end__;
+    respond_to_comment --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `slack_assistant 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -1556,14 +1750,18 @@ graph TD;
     research_gate(research_gate<br>#91;HumanInputComponent#93;);
     planner(planner<br>#91;AgentComponent#93;);
     plan_gate(plan_gate<br>#91;HumanInputComponent#93;);
+    context_gate(context_gate<br>#91;HumanInputComponent#93;);
     research -.->|"ready"| planner;
     research -.->|"needs_input"| research_gate;
+    research -.->|"needs_context"| context_gate;
     research -.->|"default_route"| research_gate;
     research_gate --> research;
     planner -.->|"ask_question"| plan_gate;
+    planner -.->|"needs_context"| context_gate;
     planner -.->|"plan_ready"| __end__;
     planner -.->|"default_route"| plan_gate;
     plan_gate --> planner;
+    context_gate --> research;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
@@ -1585,6 +1783,7 @@ graph TD;
     research_gate(research_gate<br>#91;HumanInputComponent#93;);
     planner(planner<br>#91;AgentComponent#93;);
     plan_gate(plan_gate<br>#91;HumanInputComponent#93;);
+    context_gate(context_gate<br>#91;HumanInputComponent#93;);
     score_fetch(score_fetch<br>#91;DeterministicStepComponent#93;);
     score_fetch_notes(score_fetch_notes<br>#91;DeterministicStepComponent#93;);
     rubric(rubric<br>#91;AgentComponent#93;):::subagent;
@@ -1602,12 +1801,69 @@ graph TD;
     readiness_supervisor <-.->|"subagent"| xexam_falsifier;
     research -.->|"ready"| planner;
     research -.->|"needs_input"| research_gate;
+    research -.->|"needs_context"| context_gate;
     research -.->|"default_route"| research_gate;
     research_gate --> research;
     planner -.->|"ask_question"| plan_gate;
+    planner -.->|"needs_context"| context_gate;
     planner -.->|"plan_ready"| score_fetch;
     planner -.->|"default_route"| plan_gate;
     plan_gate --> planner;
+    context_gate --> research;
+    score_fetch -.->|"success"| score_fetch_notes;
+    score_fetch -.->|"default_route"| __end__;
+    score_fetch_notes -.->|"success"| readiness_supervisor;
+    score_fetch_notes -.->|"default_route"| __end__;
+    readiness_supervisor --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;
+```
+
+## Graph: `workplan 1.2.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> research;
+    research(research<br>#91;AgentComponent#93;);
+    research_gate(research_gate<br>#91;HumanInputComponent#93;);
+    planner(planner<br>#91;AgentComponent#93;);
+    plan_gate(plan_gate<br>#91;HumanInputComponent#93;);
+    context_gate(context_gate<br>#91;HumanInputComponent#93;);
+    score_fetch(score_fetch<br>#91;DeterministicStepComponent#93;);
+    score_fetch_notes(score_fetch_notes<br>#91;DeterministicStepComponent#93;);
+    rubric(rubric<br>#91;AgentComponent#93;):::subagent;
+    coverage(coverage<br>#91;AgentComponent#93;):::subagent;
+    falsifier(falsifier<br>#91;AgentComponent#93;):::subagent;
+    xexam_rubric(xexam_rubric<br>#91;AgentComponent#93;):::subagent;
+    xexam_coverage(xexam_coverage<br>#91;AgentComponent#93;):::subagent;
+    xexam_falsifier(xexam_falsifier<br>#91;AgentComponent#93;):::subagent;
+    readiness_supervisor(readiness_supervisor<br>#91;AgentComponent#93;<br>max_delegations: 6);
+    readiness_supervisor <-.->|"subagent"| rubric;
+    readiness_supervisor <-.->|"subagent"| coverage;
+    readiness_supervisor <-.->|"subagent"| falsifier;
+    readiness_supervisor <-.->|"subagent"| xexam_rubric;
+    readiness_supervisor <-.->|"subagent"| xexam_coverage;
+    readiness_supervisor <-.->|"subagent"| xexam_falsifier;
+    research -.->|"ready"| planner;
+    research -.->|"needs_input"| research_gate;
+    research -.->|"needs_context"| context_gate;
+    research -.->|"default_route"| research_gate;
+    research_gate --> research;
+    planner -.->|"ask_question"| plan_gate;
+    planner -.->|"needs_context"| context_gate;
+    planner -.->|"plan_ready"| score_fetch;
+    planner -.->|"default_route"| plan_gate;
+    plan_gate --> planner;
+    context_gate --> research;
     score_fetch -.->|"success"| score_fetch_notes;
     score_fetch -.->|"default_route"| __end__;
     score_fetch_notes -.->|"success"| readiness_supervisor;

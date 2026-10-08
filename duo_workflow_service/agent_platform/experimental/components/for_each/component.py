@@ -36,6 +36,7 @@ from duo_workflow_service.agent_platform.experimental.state import (
     FlowState,
     IOKey,
     IOKeyTemplate,
+    RuntimeIOKey,
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.components.base import (
@@ -97,6 +98,18 @@ PUBLISHED_SUBKEYS = (
 #: append-reduced rather than component-scoped.
 _UI_CHAT_LOG_KEY = IOKey(target="ui_chat_log")
 
+# Channels a branch never takes from its parent, even when declared. ``status``
+# is the runtime's control channel. ``ui_chat_log`` is output: the fan-out adds
+# each branch's log to the parent's, so an inherited copy would repeat it once
+# per item.
+_NOT_INHERITED = ("status", "ui_chat_log")
+
+#: What reading an input the parent cannot satisfy raises: a missing required
+#: key, a path step that is not a dict, or a runtime key's factory failing on
+#: state it did not expect. The body then meets the input as missing inside
+#: its branch.
+_UNREADABLE = (KeyError, TypeError, AttributeError)
+
 #: How much of an offending value an error message quotes back.
 _PREVIEW_CHARS = 100
 
@@ -105,6 +118,12 @@ def _preview(value: Any) -> str:
     """Render a value for an error message, truncated."""
     text = repr(value)
     return text if len(text) <= _PREVIEW_CHARS else f"{text[:_PREVIEW_CHARS]}..."
+
+
+def _with_subagents(component: Any) -> list[Any]:
+    """``component`` and every subagent under it, at any depth."""
+    subagents = getattr(component, "subagent_components", None) or {}
+    return [component, *(c for sub in subagents.values() for c in _with_subagents(sub))]
 
 
 class ForEachComponent(BaseComponent):
@@ -150,6 +169,13 @@ class ForEachComponent(BaseComponent):
         Routers address a component by name and enter it through
         ``__entry_hook__``, so the wrapper takes the component's identity.
         """
+        for inner in _with_subagents(component):
+            if isinstance(inner, ForEachComponent):
+                raise ValueError(
+                    f"for_each cannot be nested: '{inner.name}' already runs "
+                    f"once per item."
+                )
+
         return cls(
             component=component,
             for_each=for_each,
@@ -174,6 +200,16 @@ class ForEachComponent(BaseComponent):
     def _own_key(self, subkey: str) -> IOKey:
         """One leaf of the namespace this component owns."""
         return IOKey(target="context", subkeys=[self.name, subkey])
+
+    @property
+    def _namespace_key(self) -> IOKey:
+        """The whole namespace this component owns, the index included.
+
+        The fan-out writes the index inside it, so a branch inherits nothing
+        under this root: the root, not the index leaf, is what a parent key
+        has to be tested against.
+        """
+        return IOKey(target="context", subkeys=[self.name])
 
     @property
     def _index_key(self) -> IOKey:
@@ -271,37 +307,139 @@ class ForEachComponent(BaseComponent):
     def _branch_state(self, state: FlowState, index: int, item: Any) -> FlowState:
         """Build the isolated ``FlowState`` one branch is invoked with.
 
-        Empty channels and a one-level copy of ``context``, so a branch sees
-        what the flow produced before the fan-out and nothing of its siblings.
-        The whole channel is copied rather than read through ``IOKey``s: one
-        addresses one leaf, and a branch inherits every leaf published so far.
-        ``SupervisorAgentComponentV2._build_initial_state`` does the same.
+        Empty channels, overlaid with whatever the body declares it reads, so
+        a branch sees nothing of its siblings and carries no more of the
+        parent than it needs.
 
-        The component's own context sub-dict is left out: it holds the branch
-        writes, and every branch payload is checkpointed, so carrying it would
-        make checkpoints grow with the square of the item count. That also
-        leaves the namespace free for the item's index, where a nested fan-out
-        cannot collide with the one around it.
+        Only declared inputs, rather than a copy of the whole state, because
+        every pending branch payload is checkpointed: a branch carrying the
+        full parent state multiplies it by the item count, and that once took
+        a real flow past the executor's 4 MiB message cap. A body that reads
+        anything from the parent has to say so in ``inputs``.
+
+        ``inputs`` is the single source of truth for what crosses into a
+        branch, whichever channel it names: a component may declare inputs on
+        any ``FlowState`` channel -- ``AgentComponent`` allows all of them --
+        so restricting the forward to ``context`` would silently empty a
+        declared ``conversation_history`` input.
+
+        ``status`` and ``ui_chat_log`` are the exceptions. ``status`` is the
+        runtime's own control channel, and a branch has to start executing, so
+        it is pinned here. ``ui_chat_log`` is output: each branch's log is added
+        to the parent's, so an inherited copy would repeat it once per item.
+
+        The item and the index are written by the fan-out itself, so the
+        inputs that address them are not looked up in the parent. That also
+        leaves the component's own namespace free for the index.
         """
-        inherited = {
-            key: value
-            for key, value in (state.get("context") or {}).items()
-            if key != self.name
-        }
-        context = merge_nested_dict(
-            inherited, self.for_each.item_key.to_nested_dict(item)["context"]
-        )
-        context = merge_nested_dict(
-            context, self._index_key.to_nested_dict(index)["context"]
-        )
-
-        return {
+        branch: dict[str, Any] = {
             "status": WorkflowStatusEnum.EXECUTION,
             "conversation_history": {},
             "ui_chat_log": [],
-            "context": context,
+            "context": {},
             "agent_context_limits": {},
         }
+        branch = merge_nested_dict(branch, self._inherited_state(state))
+
+        context = merge_nested_dict(
+            branch["context"], self.for_each.item_key.to_nested_dict(item)["context"]
+        )
+        branch["context"] = merge_nested_dict(
+            context, self._index_key.to_nested_dict(index)["context"]
+        )
+        return cast(FlowState, branch)
+
+    def _inherited_state(self, state: FlowState) -> dict[str, Any]:
+        """The slice of the parent state the body's declared inputs address.
+
+        Each input is rebuilt as a nested dict holding just its own leaf under
+        its own channel, and the leaves are deep-merged, so two inputs under
+        one root arrive together.
+
+        Every channel an input may name is carried, not just ``context``: a
+        component decides its own ``_allowed_input_targets``, and an
+        ``AgentComponent`` allows all of them, so a declared
+        ``conversation_history:`` input has to cross into the branch as much
+        as a ``context:`` one does. ``status`` and ``ui_chat_log`` are never
+        carried; see ``_branch_state``.
+
+        An input the parent cannot satisfy is skipped rather than raised on,
+        so it never fails the whole fan-out: a key that is absent, a path that
+        runs into a non-dict on the way, or a ``RuntimeIOKey`` whose factory
+        fails against the parent. The body then reads that input as missing
+        inside its branch. A required one fails that item alone, as it did when
+        the whole context was copied; a non-dict path now fails there as a
+        missing key rather than a ``TypeError``. An optional one reads as
+        ``None``, unless another input carried the same non-dict root.
+        """
+        inherited: dict[str, Any] = {}
+        for declared in self._body_inputs():
+            if declared.literal:
+                continue
+
+            try:
+                key = (
+                    declared.to_iokey(state)
+                    if isinstance(declared, RuntimeIOKey)
+                    else declared
+                )
+            except _UNREADABLE:
+                continue
+            if key.target in _NOT_INHERITED or self._written_by_fan_out(key):
+                continue
+
+            if not key.subkeys:
+                # A bare channel input reads all of it, less every namespace
+                # the fan-out writes: a stale dict item would otherwise
+                # deep-merge into the new one.
+                inherited = merge_nested_dict(
+                    inherited, {key.target: self._whole_channel(state, key.target)}
+                )
+                continue
+
+            try:
+                value = key.value_from_state(state)
+            except _UNREADABLE:
+                continue
+            if value is None and key.optional:
+                continue
+
+            inherited = merge_nested_dict(inherited, key.to_nested_dict(value))
+        return inherited
+
+    def _whole_channel(self, state: FlowState, target: str) -> dict[str, Any]:
+        """One channel of the parent, less anything the fan-out writes itself.
+
+        Only dict channels get here: ``status`` and ``ui_chat_log`` are never inherited.
+        """
+        return {
+            name: entry
+            for name, entry in cast(dict[str, Any], state.get(target) or {}).items()
+            if not self._written_by_fan_out(IOKey(target=target, subkeys=[name]))
+        }
+
+    def _body_inputs(self) -> list[IOKey | RuntimeIOKey]:
+        """The inputs of the body and of every subagent under it.
+
+        A supervisor runs its subagents on the branch state too, at any depth, and their inputs are not part of its own,
+        so they are collected as well.
+        """
+        return [
+            key
+            for component in _with_subagents(self.component)
+            for key in getattr(component, "inputs", [])
+        ]
+
+    def _written_by_fan_out(self, key: IOKey) -> bool:
+        """Whether ``key`` addresses an item, or the namespace holding the index."""
+        item = self.for_each.item_key
+        # A key above the item (`context:item` for `as: context:item.value`)
+        # would carry a stale copy of it into the branch.
+        return (
+            key in item
+            or key in self._namespace_key
+            or (bool(key.subkeys) and item in key)
+        )
 
     def _concurrency_gate(self) -> asyncio.Semaphore:
         """The semaphore bounding how many branches of this fan-out run at once.

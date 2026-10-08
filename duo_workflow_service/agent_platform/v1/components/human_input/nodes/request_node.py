@@ -26,6 +26,10 @@ class RequestNode:
     Request types:
         - approval: Requests user approval/rejection (APPROVE/REJECT events)
         - input: Requests freeform text input (RESPONSE/MODIFY events)
+        - external: Reply is collected outside this UI (e.g. a linked
+            resource); the workflow still pauses and waits for the same
+            RESPONSE/MODIFY events as "input", but no reply control should
+            render for it.
 
     Args:
         name: The name of this node
@@ -33,7 +37,7 @@ class RequestNode:
         message_template: Jinja2 template string to display to the user
         inputs: List of IOKeys for extracting variables from state for message template rendering
         ui_history: UI logging history for tracking events
-        request_type: Type of request - "approval" or "input"
+        request_type: Type of request - "approval", "input", or "external"
         status_key: IOKey for setting workflow status
     """
 
@@ -45,7 +49,7 @@ class RequestNode:
         message_template: str,
         inputs: Sequence[IOKey | RuntimeIOKey],
         ui_history: UIHistory[AgentLogWriter, UILogEventsHumanInput],
-        request_type: Literal["approval", "input"] = "approval",
+        request_type: Literal["approval", "input", "external"] = "approval",
         status_key: IOKey,
     ):
         self.name = name

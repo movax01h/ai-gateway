@@ -18,7 +18,7 @@ import grpc
 import pytest
 
 from duo_workflow_service.server import DuoWorkflowService
-from tests.duo_workflow_service.integration.conftest import (
+from integration_tests.duo_workflow_service.conftest import (
     FakeExecutor,
     run_exchange,
     start_inline_config_event,

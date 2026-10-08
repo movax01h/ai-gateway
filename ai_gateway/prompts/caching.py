@@ -183,7 +183,7 @@ class CacheControlInjectionPointsConverter(Runnable[PromptValue, PromptValue]):
                     "cache_control": self.ANTHROPIC_DEFAULT_CACHE_CONTROL,
                 }
             ]
-        elif isinstance(msg.content, list):
+        elif isinstance(msg.content, list) and msg.content:
             last_content = msg.content[-1]
 
             if isinstance(last_content, str):

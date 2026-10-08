@@ -43,6 +43,7 @@ from duo_workflow_service.tracking import (
 )
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
+    GraphInvocation,
     TraceableException,
     _nothing_stamped_the_request,
 )
@@ -477,6 +478,28 @@ def test_permitted_mcp_tools(
     assert [tool["llm_name"] for tool in permitted] == expected_tools
 
 
+@pytest.mark.parametrize(
+    ("workflow_config", "expected"),
+    [
+        ({"mcp_enabled": True}, True),
+        ({"mcp_enabled": False}, False),
+        ({"mcp_enabled": None}, False),
+        ({}, False),
+    ],
+    ids=["enabled", "disabled", "null", "missing"],
+)
+def test_mcp_enabled(user, workflow_config, expected):
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._workflow_config = workflow_config
+
+    assert workflow._mcp_enabled() is expected
+
+
 @pytest.mark.asyncio
 @patch(
     "duo_workflow_service.workflows.abstract_workflow.strips_client_mcp_trust",
@@ -559,6 +582,7 @@ async def test_compile_and_run_graph(
         denied_tools=[],
         ask_tools=[],
         allow_client_injected_mcp_tools=False,
+        allowed_tools=[],
     )
 
 
@@ -996,6 +1020,77 @@ async def test_compile_and_run_graph_all_ask_policy_does_not_clear_preapproved_w
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_passes_governance_allow_to_registry(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+):
+    """The admin allow list must reach ToolsRegistry so per-tool allows apply in flows that never read
+    `_preapproved_tools` (agent_platform v1), with ask already subtracted."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    workflow_config["allow_agent_to_request_user"] = True
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": ["gitlab_api_get", "run_command"], "ask": ["run_command"], "deny": []}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert mock_tools_registry.call_args.kwargs["allowed_tools"] == ["gitlab_api_get"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_does_not_pass_client_preapprovals_as_governance_allow(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    """Without an active governance claim, the client's own preapproved_tools stay out of the registry allow list, so v1
+    flows keep ignoring them as before."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_realm="saas")
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._preapproved_tools = ["read_file"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert mock_tools_registry.call_args.kwargs["allowed_tools"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_parses_tool_access_policies_dict(
     mock_tools_registry,
     mock_gitlab_workflow,
@@ -1228,6 +1323,42 @@ def test_track_internal_event(workflow, internal_event_client: Mock):
         additional_properties=additional_properties,
         category=workflow_type,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_event", "routed", "tracked"),
+    [
+        (WorkflowStatusEventEnum.START, True, True),
+        (WorkflowStatusEventEnum.START, False, False),
+        (WorkflowStatusEventEnum.RESUME, True, False),
+    ],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.track_routing_decision")
+@patch("duo_workflow_service.workflows.abstract_workflow.route_default_model")
+async def test_route_default_model_only_on_start(
+    mock_route,
+    mock_track,
+    workflow,
+    internal_event_client: Mock,
+    status_event,
+    routed,
+    tracked,
+):
+    decision = MagicMock()
+    mock_route.return_value = decision if routed else None
+    workflow._internal_event_client = internal_event_client
+    workflow._project = None
+
+    await workflow._route_default_model("Fix the typo", status_event)
+
+    assert mock_route.called == (status_event == WorkflowStatusEventEnum.START)
+    if tracked:
+        mock_track.assert_called_once_with(
+            decision, "test-workflow-id", internal_event_client
+        )
+    else:
+        mock_track.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2237,6 +2368,109 @@ async def test_compile_and_run_graph_stop_recovery_default_behaves_like_retry(
     assert graph.captured_input == expected_input
     assert "checkpoint_id" not in graph.captured_config["configurable"]
     mock_checkpointer.checkpoints_reversed.assert_not_called()
+
+
+def _pinning_invocation_resolver() -> AsyncMock:
+    """A ``_resolve_graph_invocation`` override that replaces the input and pins the run to a checkpoint."""
+
+    async def resolve(**kwargs: Any) -> GraphInvocation:
+        graph_config = kwargs["graph_config"]
+        return GraphInvocation(
+            graph_input={"resolved": True},
+            graph_config={
+                **graph_config,
+                "configurable": {
+                    **graph_config["configurable"],
+                    "checkpoint_id": "pinned",
+                },
+            },
+        )
+
+    return AsyncMock(side_effect=resolve)
+
+
+@pytest.mark.asyncio
+async def test_resolve_graph_invocation_defaults_to_get_graph_input(workflow):
+    """Without an override the run streams ``get_graph_input`` with the config it was given, unchanged."""
+    graph_config = {"configurable": {"thread_id": "test-workflow-id"}}
+
+    invocation = await workflow._resolve_graph_invocation(
+        compiled_graph=ConfigCapturingGraph(),
+        graph_config=graph_config,
+        goal="goal",
+        status_event=WorkflowStatusEventEnum.START,
+        checkpoint_tuple=None,
+    )
+
+    assert invocation.graph_input == {"goal": "goal", "state": "initial"}
+    assert invocation.graph_config is graph_config
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_streams_the_resolved_invocation(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    workflow,
+):
+    """The hook sees the compiled graph, and the graph streams exactly the input and config it returns."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = _checkpointer(mock_gitlab_workflow)
+    mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+    workflow._resolve_graph_invocation = _pinning_invocation_resolver()
+
+    await workflow._compile_and_run_graph("goal")
+
+    workflow._resolve_graph_invocation.assert_awaited_once()
+    received = workflow._resolve_graph_invocation.await_args.kwargs
+    assert received["compiled_graph"] is graph
+    assert received["graph_config"]["configurable"] == {"thread_id": "test-workflow-id"}
+    assert received["goal"] == "goal"
+    assert received["status_event"] == WorkflowStatusEventEnum.RESUME
+    assert received["checkpoint_tuple"] is None
+    assert graph.captured_input == {"resolved": True}
+    assert graph.captured_config["configurable"] == {
+        "thread_id": "test-workflow-id",
+        "checkpoint_id": "pinned",
+    }
+    assert graph.captured_config["callbacks"] is received["graph_config"]["callbacks"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+async def test_compile_and_run_graph_hands_the_resolved_config_to_the_failure_handler(
+    mock_user_interface,
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    workflow,
+):
+    """A run that fails after the hook reports against the config it ran with, not the one it was built with."""
+
+    class FailingGraph:
+        async def astream(  # pylint: disable=unused-argument  # astream() signature
+            self, input, config, stream_mode
+        ):
+            yield "updates", {"step1": {"key": "value"}}
+            raise RuntimeError("graph failed")
+
+    mock_user_interface.return_value = AsyncMock()
+    mock_tools_registry.return_value = MagicMock()
+    _checkpointer(mock_gitlab_workflow)
+    workflow._compile = MagicMock(return_value=FailingGraph())
+    workflow._resolve_graph_invocation = _pinning_invocation_resolver()
+
+    with pytest.raises(TraceableException):
+        await workflow._compile_and_run_graph("goal")
+
+    [(_, _, failure_config)] = workflow.handle_failure_calls
+    assert failure_config["configurable"]["checkpoint_id"] == "pinned"
 
 
 @pytest.mark.asyncio

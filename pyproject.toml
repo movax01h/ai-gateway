@@ -24,9 +24,9 @@ fetch-foundational-agents = "duo_workflow_service.scripts.fetch_foundational_age
 verify-pricing-multipliers = "scripts.verify_pricing_multipliers:main"
 
 [tool.poetry.dependencies]
-fastapi = "^0.141.0"
+fastapi = "^0.142.0"
 dependency-injector = "^4.41.0"
-uvicorn = {version = "^0.52.0", extras = ["standard"]}
+uvicorn = {version = "^0.54.0", extras = ["standard"]}
 requests = "^2.32.3"
 numpy = "^2.2.3"
 python-dotenv = "^1.0.1"
@@ -95,7 +95,6 @@ langsmith = "^0.14.0"
 openai = "^2.37.0"
 ormsgpack = "^1.12.1"
 packaging = "^24.1"
-pydantic-core = "^2.46.4"
 tenacity = "^9.0.0"
 
 [[tool.poetry.source]]
@@ -162,11 +161,13 @@ skip = """
 ./tmp,\
 ./vendor,\
 Gemfile.lock,\
+go.sum,\
 node_modules,\
 package-lock.json,\
 poetry.lock
 """
-ignore-words-list = "astroid"
+# "reacher" is a bl_security prompt term (the principal that can reach an entry point).
+ignore-words-list = "astroid,reacher"
 ignore-multiline-regex = "codespell:ignore-begin.*\n.*codespell:ignore-end"
 
 [tool.pytest.ini_options]

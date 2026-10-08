@@ -684,12 +684,6 @@ def test_config_audit_event(values: dict, expected: ConfigAuditEvent):
         ),
         (
             {
-                "AIGW_BEDROCK_GUARDRAIL_CONFIG": '{"guardrailIdentifier": "abc123", "guardrailVersion": ""}'
-            },
-            ConfigBedrockGuardrail(guardrailIdentifier="abc123", guardrailVersion=""),
-        ),
-        (
-            {
                 "AIGW_BEDROCK_GUARDRAIL_CONFIG": (
                     '{"guardrailIdentifier":'
                     ' "arn:aws:bedrock:us-east-1:123456789012:guardrail/abc123"}'
@@ -855,6 +849,7 @@ def test_config_bedrock_guardrail_invalid_identifier(invalid_identifier):
 @pytest.mark.parametrize(
     "invalid_version",
     [
+        "",
         "0",
         "01",
         "abc",

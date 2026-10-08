@@ -441,7 +441,11 @@ export interface GenerateTokenRequest {
     | string
     | undefined;
   /** flow_config is the authoritative inline catalog flow configuration to bind to the issued token. */
-  flow_config?: { [key: string]: any } | undefined;
+  flow_config?:
+    | { [key: string]: any }
+    | undefined;
+  /** workflowID identifies the workflow run this token is issued for. */
+  workflowID?: string | undefined;
 }
 
 /** GenerateTokenResponse returns the generated token and its expiry information. */
@@ -3535,7 +3539,7 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
 };
 
 function createBaseGenerateTokenRequest(): GenerateTokenRequest {
-  return { workflowDefinition: undefined, flow_config_id: undefined, flow_config: undefined };
+  return { workflowDefinition: undefined, flow_config_id: undefined, flow_config: undefined, workflowID: undefined };
 }
 
 export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
@@ -3548,6 +3552,9 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     }
     if (message.flow_config !== undefined) {
       Struct.encode(Struct.wrap(message.flow_config), writer.uint32(26).fork()).join();
+    }
+    if (message.workflowID !== undefined) {
+      writer.uint32(34).string(message.workflowID);
     }
     return writer;
   },
@@ -3583,6 +3590,14 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
           message.flow_config = Struct.unwrap(Struct.decode(reader, reader.uint32()));
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.workflowID = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3597,6 +3612,7 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
       workflowDefinition: isSet(object.workflowDefinition) ? globalThis.String(object.workflowDefinition) : undefined,
       flow_config_id: isSet(object.flow_config_id) ? globalThis.String(object.flow_config_id) : undefined,
       flow_config: isObject(object.flow_config) ? object.flow_config : undefined,
+      workflowID: isSet(object.workflowID) ? globalThis.String(object.workflowID) : undefined,
     };
   },
 
@@ -3611,6 +3627,9 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     if (message.flow_config !== undefined) {
       obj.flow_config = message.flow_config;
     }
+    if (message.workflowID !== undefined) {
+      obj.workflowID = message.workflowID;
+    }
     return obj;
   },
 
@@ -3622,6 +3641,7 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     message.workflowDefinition = object.workflowDefinition ?? undefined;
     message.flow_config_id = object.flow_config_id ?? undefined;
     message.flow_config = object.flow_config ?? undefined;
+    message.workflowID = object.workflowID ?? undefined;
     return message;
   },
 };

@@ -2,7 +2,7 @@ from typing import Any
 
 import structlog
 from langchain_core.tools import BaseTool
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.experimental.components.deterministic_step.ui_log import (
     UILogEventsDeterministicStep,

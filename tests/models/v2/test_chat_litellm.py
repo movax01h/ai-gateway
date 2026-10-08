@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import litellm
 import pytest
+from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -20,6 +21,7 @@ from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
 from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
 from ai_gateway.models.v2.chat_litellm import (
+    _WEB_SEARCH_UNAVAILABLE_NOTE,
     ChatLiteLLM,
     _drop_unsupported_web_search,
     _force_gpt_5_max_completion_tokens,
@@ -523,6 +525,90 @@ class TestDropUnsupportedWebSearch:
         forwarded = mock_parent.call_args.kwargs
 
         assert ("web_search_options" in forwarded) is expect_forwarded
+
+
+class TestWebSearchPolicyFallback:
+    POLICY_ERROR = (
+        "Organization Policy constraint constraints/vertexai.allowedPartnerModelFeatures "
+        "violated attempting to use a disallowed feature web_search for Partner model "
+        "claude-sonnet-4-6."
+    )
+
+    @staticmethod
+    def _bad_request(message):
+        return litellm.BadRequestError(
+            message=message, model="claude-sonnet-4-6", llm_provider="vertex_ai"
+        )
+
+    async def _call(self, side_effect, **kwargs):
+        chat = ChatLiteLLM(model="claude-sonnet-4-6")
+        with patch.object(
+            _LChatLiteLLM, "acompletion_with_retry", new=AsyncMock()
+        ) as mock_parent:
+            mock_parent.side_effect = side_effect
+            result = await chat.acompletion_with_retry(
+                model="claude-sonnet-4-6",
+                custom_llm_provider="vertex_ai",
+                messages=[{"role": "user", "content": "hi"}],
+                **kwargs,
+            )
+        return result, mock_parent
+
+    @pytest.mark.asyncio
+    async def test_retries_without_web_search_on_policy_error(self):
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            result, mock_parent = await self._call(
+                [self._bad_request(self.POLICY_ERROR), "response"],
+                web_search_options={},
+            )
+
+        assert self.POLICY_ERROR in mock_log.warning.call_args.kwargs["error"]
+
+        assert result == "response"
+        assert mock_parent.call_count == 2
+        retried = mock_parent.call_args_list[1].kwargs
+        assert "web_search_options" not in retried
+        assert retried["messages"][0] == {"role": "user", "content": "hi"}
+        assert retried["messages"][-1] == {
+            "role": "system",
+            "content": _WEB_SEARCH_UNAVAILABLE_NOTE,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("message", "kwargs"),
+        [
+            pytest.param(
+                "prompt is too long", {"web_search_options": {}}, id="other-error"
+            ),
+            pytest.param(POLICY_ERROR, {}, id="no-web-search"),
+        ],
+    )
+    async def test_reraises(self, message, kwargs):
+        with pytest.raises(litellm.BadRequestError):
+            await self._call([self._bad_request(message)], **kwargs)
+
+    @pytest.mark.asyncio
+    async def test_streaming_retries_without_web_search(self):
+        async def stream():
+            yield streaming_chunk({"content": "answer"}, finish_reason="stop")
+
+        chat = ChatLiteLLM(model="claude-sonnet-4-6", custom_llm_provider="vertex_ai")
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(side_effect=[self._bad_request(self.POLICY_ERROR), stream()]),
+        ) as mock_parent:
+            chunks = [
+                chunk.message.content
+                async for chunk in chat._astream(
+                    messages=[HumanMessage(content="hi")], web_search_options={}
+                )
+            ]
+
+        assert "answer" in chunks
+        assert "web_search_options" in mock_parent.call_args_list[0].kwargs
+        assert "web_search_options" not in mock_parent.call_args_list[1].kwargs
 
 
 @pytest.mark.asyncio
@@ -1052,6 +1138,9 @@ class TestDeprecatedTemperatureRemoval:
             "anthropic.claude-fable-5",
             "claude-mythos-5",
             "anthropic.claude-mythos-5",
+            "claude-haiku-5-5",
+            "claude_haiku_5_5",
+            "bedrock/global.anthropic.claude-haiku-5-5",
         ],
     )
     def test_removes_temperature(self, model):
@@ -1081,6 +1170,11 @@ class TestDeprecatedTemperatureRemoval:
             "claude-opus-4.6",
             "claude-3-5-sonnet",
             "claude-sonnet-4-5",
+            "claude-haiku-4-5",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-4-5@20251001",
+            "bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "claude-3-5-haiku-20241022",
             "gpt-5",
         ],
     )
@@ -1885,3 +1979,135 @@ class TestReasoningEffort:
             "foo",
             "reasoning_effort",
         ]
+
+
+class TestNonStreamedModelName:
+    """The non-streamed result names the model the request was sent with, as the streamed path does."""
+
+    @staticmethod
+    def _response():
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hi"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+        }
+
+    @pytest.mark.parametrize(
+        ("init_kwargs", "request_kwargs", "expected_model"),
+        [
+            ({"model": "constructor-model"}, {}, "constructor-model"),
+            (
+                {"model": "constructor-model", "model_name": "named-model"},
+                {},
+                "named-model",
+            ),
+            ({}, {"model": "request-model"}, "request-model"),
+            (
+                {"model": "constructor-model", "model_name": "named-model"},
+                {"model": "request-model"},
+                "request-model",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_agenerate_names_the_requested_model(
+        self, init_kwargs, request_kwargs, expected_model
+    ):
+        chat = ChatLiteLLM(custom_llm_provider="openai", **init_kwargs)
+
+        with patch(
+            "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.acompletion_with_retry",
+            new=AsyncMock(return_value=self._response()),
+        ):
+            result = await chat._agenerate(
+                messages=[HumanMessage(content="Hello")], **request_kwargs
+            )
+
+        message = result.generations[0].message
+        assert message.response_metadata["model_name"] == expected_model
+        assert result.llm_output["model"] == expected_model
+
+    @pytest.mark.parametrize(
+        ("init_kwargs", "request_kwargs", "expected_model"),
+        [
+            ({"model": "constructor-model"}, {}, "constructor-model"),
+            ({}, {"model": "request-model"}, "request-model"),
+        ],
+    )
+    def test_generate_names_the_requested_model(
+        self, init_kwargs, request_kwargs, expected_model
+    ):
+        chat = ChatLiteLLM(custom_llm_provider="openai", **init_kwargs)
+
+        with patch(
+            "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.completion_with_retry",
+            new=lambda *_args, **_kwargs: self._response(),
+        ):
+            result = chat._generate(
+                messages=[HumanMessage(content="Hello")], **request_kwargs
+            )
+
+        message = result.generations[0].message
+        assert message.response_metadata["model_name"] == expected_model
+        assert result.llm_output["model"] == expected_model
+
+    @pytest.mark.asyncio
+    async def test_usage_is_keyed_by_the_requested_model(self):
+        chat = ChatLiteLLM(custom_llm_provider="openai")
+
+        with patch(
+            "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.acompletion_with_retry",
+            new=AsyncMock(return_value=self._response()),
+        ):
+            with get_usage_metadata_callback() as usage_callback:
+                await chat.ainvoke(
+                    [HumanMessage(content="Hello")], model="request-model", stream=False
+                )
+
+        assert usage_callback.usage_metadata == {
+            "request-model": UsageMetadata(
+                input_tokens=7, output_tokens=3, total_tokens=10
+            )
+        }
+
+    @pytest.mark.parametrize(
+        ("init_kwargs", "expected_model"),
+        [
+            ({"model": "constructor-model"}, "constructor-model"),
+            (
+                {"model": "constructor-model", "model_name": "named-model"},
+                "named-model",
+            ),
+        ],
+    )
+    def test_create_chat_result_without_params_falls_back_to_the_instance_model(
+        self, init_kwargs, expected_model
+    ):
+        chat = ChatLiteLLM(custom_llm_provider="openai", **init_kwargs)
+
+        result = chat._create_chat_result(self._response())
+
+        assert (
+            result.generations[0].message.response_metadata["model_name"]
+            == expected_model
+        )
+        assert result.llm_output["model"] == expected_model
+
+    def test_create_chat_result_falls_back_when_the_request_model_is_empty(self):
+        chat = ChatLiteLLM(
+            model="constructor-model",
+            model_name="named-model",
+            custom_llm_provider="openai",
+        )
+
+        result = chat._create_chat_result(self._response(), {"model": None})
+
+        assert (
+            result.generations[0].message.response_metadata["model_name"]
+            == "named-model"
+        )
+        assert result.llm_output["model"] == "named-model"

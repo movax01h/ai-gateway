@@ -12,6 +12,7 @@
     - ai_gateway/model_metadata.py
     - ai_gateway/model_selection/*.py
     - ai_gateway/model_selection/models.py
+    - ai_gateway/models/v2/_model_compat.py
     - ai_gateway/models/v2/web_search_support.py
     - ai_gateway/prompts/*.py
     - ai_gateway/prompts/base.py

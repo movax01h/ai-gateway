@@ -5,6 +5,19 @@ from typing import Any, TypeGuard
 from langchain_core.tools import ArgsSchema, BaseTool
 from pydantic import BaseModel
 
+from duo_workflow_service.components.tools_registry import agent_privileges_for_tool
+
+
+def privilege_hint(tool_name: str) -> str:
+    """Sentence naming the agent privileges that grant ``tool_name``, for appending to a missing-tool error.
+
+    Returns an empty string when no privilege grants the tool (e.g. MCP tools).
+    """
+    privileges = agent_privileges_for_tool(tool_name)
+    if not privileges:
+        return ""
+    return f" Grant one of these agent privileges: {', '.join(privileges)}."
+
 
 def extract_configured_params(inputs: list[Any]) -> set[str]:
     """Extract parameter names from input keys.

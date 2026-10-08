@@ -9,6 +9,7 @@ from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.proxy.clients.base import (
     BaseProxyModelFactory,
     ProxyModel,
+    enforce_model_allowlist,
     extract_json_body,
 )
 
@@ -97,6 +98,8 @@ class OpenAIProxyModelFactory(BaseProxyModelFactory):
             raise fastapi.HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported model"
             )
+
+        enforce_model_allowlist(request, model_name)
 
         stream = _extract_stream_flag(json_body)
 

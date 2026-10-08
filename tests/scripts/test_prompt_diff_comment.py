@@ -45,6 +45,7 @@ SYSTEM_DIR = f"{PROMPTS_ROOT}/chat/explain_code/system"
         ),
         ("ai/features/cli/glab_ask_git_command/prompts/system/1.0.0.jinja", True),
         ("ai/features/insights/analytics_agent/config/2.0.0.yml", True),
+        ("ai/shared/commit_changes/prompts/base/1.0.0.yml", True),
         # Wrong root
         ("scripts/prompt_diff_comment.py", False),
         ("ai_gateway/other/1.0.0.jinja", False),

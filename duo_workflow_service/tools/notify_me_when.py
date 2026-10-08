@@ -129,4 +129,7 @@ class NotifyMeWhen(DuoBaseTool):
         args: NotifyMeWhenInput,
         _tool_response: Any = None,
     ) -> str:
-        return f"Schedule a notification in {args.when.delay_minutes} minute(s)"
+        return (
+            f"Schedule a notification in {args.when.delay_minutes} minute(s): "
+            f"{args.message}"
+        )

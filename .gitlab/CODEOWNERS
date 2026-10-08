@@ -12,6 +12,20 @@
 /ai_gateway/prompts/definitions/common/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai_gateway/prompts/definitions/developer_*/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
+# Duo Code Review flows, tools, and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
+/duo_workflow_service/agent_platform/v1/flows/configs/deep_code_review/ @kinsingh @wanpol @iamphill @marc_shaw
+/duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/review_merge_request/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/review_merge_request_dap/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/deep_code_review_reviewer/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/code_review_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/explore_directories_for_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/classify_code_review_mention_intent/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
+
 # Orbit-specific flows, prompts, and libs are co-owned by the Orbit team
 /duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
 /duo_workflow_service/agent_platform/v1/flows/configs/developer/*-orbit.yml @gitlab-org/orbit
@@ -31,6 +45,20 @@
 /duo_workflow_service/agent_platform/v1/flows/configs/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai_gateway/prompts/definitions/common/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai_gateway/prompts/definitions/developer_*/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+
+# Duo Code Review flow configs, tools, and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
+/duo_workflow_service/agent_platform/v1/flows/configs/deep_code_review/ @kinsingh @wanpol @iamphill @marc_shaw
+/duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/review_merge_request/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/review_merge_request_dap/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/deep_code_review_reviewer/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/code_review_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/explore_directories_for_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/classify_code_review_mention_intent/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
+/ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Orbit-specific flow configs
 /duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit

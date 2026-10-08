@@ -19,6 +19,7 @@ class ContainerInternalEvent(containers.DeclarativeContainer):
         endpoint=config.endpoint,
         app_id=config.app_id,
         namespace=config.namespace,
+        api_key=config.api_key,
     )
 
     unified_event_service = providers.Singleton(UnifiedEventService)

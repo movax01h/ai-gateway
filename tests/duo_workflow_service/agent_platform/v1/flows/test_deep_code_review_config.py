@@ -65,7 +65,9 @@ class TestDeepCodeReviewConfig:
     def test_flow_declares_the_code_review_context_input(self):
         """The service drops any additional-context category the flow does not declare, so without this the bot name and
         the previous review's head SHA never reach the steps that read them."""
-        [flow_input] = self._config().flow.inputs
+        [flow_input] = [
+            i for i in self._config().flow.inputs if i.category == "code_review_context"
+        ]
 
         assert flow_input.category == "code_review_context"
         assert set(flow_input.input_schema) == {
@@ -188,6 +190,11 @@ class TestDeepCodeReviewConfig:
         previous = self._input(publish, "previous_findings")
         assert previous["from"] == "context:review.final_answer.previous_findings"
         assert previous["optional"] is True
+        discussions = self._input(publish, "existing_discussions")
+        assert (
+            discussions["from"] == "context:fetch_existing_discussions.tool_responses"
+        )
+        assert discussions["optional"] is True
 
     @classmethod
     def _finding_model(cls) -> type:
@@ -227,10 +234,33 @@ class TestDeepCodeReviewConfig:
         assert schema.model_fields["previous_findings"].is_required() is False
 
     def test_publish_confidence_gate_is_a_literal(self):
-        """The reviewer never self-censors; the volume/precision operating point lives in config, where it is logged and
-        counted."""
+        """The reviewer still reports every finding; the volume/precision operating point lives in config, where it is
+        logged and counted.
+
+        The reviewer gets the same value so its summary leaves out the findings the gate drops.
+        """
         components = self._components()
         gate = self._input(components["publish_review"], "min_confidence")
+        reviewer = self._input(components["review"], "min_confidence")
 
         assert gate["from"] == "4"
         assert gate["literal"] is True
+        assert reviewer == gate
+
+
+def test_1_0_0_reads_the_merge_request_from_the_resource_context():
+    config = FlowConfig.from_yaml_config("deep_code_review", "1.0.0")
+    sources = {
+        i["from"]
+        for c in config.components
+        for i in c.get("inputs", [])
+        if i["as"] == "merge_request_iid"
+    }
+    [category] = [
+        i for i in config.flow.inputs if i.category == "agent_platform_resource_context"
+    ]
+
+    assert sources == {
+        "context:inputs.agent_platform_resource_context.merge_request_id"
+    }
+    assert not category.input_schema["merge_request_id"].optional

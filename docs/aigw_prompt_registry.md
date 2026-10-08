@@ -23,8 +23,10 @@ parameters and prompt templates that structure each request.
 
 ### AI Gateway Prompt Configuration
 
-AI Gateway Prompts are defined as `.yml` files located in `prompts/definitions/` and specify parameters for different
-LLMs. Each configuration file includes:
+AI Gateway Prompts are defined as `.yml` files and specify parameters for different LLMs. New prompts live in a
+feature's `prompts/` directory, `ai/features/<domain>/<feature>/prompts/`, and existing prompts also live in the legacy
+`ai_gateway/prompts/definitions/` root. See [Adding and moving features](adding_and_moving_features.md). Each
+configuration file includes:
 
 - **Model Parameters:** Specify LLM provider and configurations, including model name and parameters such as
   `temperature`, `top_p`, `top_k`, `max_tokens`, and `stop`
@@ -51,7 +53,8 @@ system.
 #### Process Flow
 
 - **Prompt Definition and Configuration:**
-  - Prompts are defined in YAML configuration files located in the `prompts/definitions/` directory.
+  - Prompts are defined in YAML configuration files, in a feature's `prompts/` directory or in the legacy
+    `ai_gateway/prompts/definitions/` directory.
   - Each prompt configuration includes model parameters, prompt templates, and control parameters.
 - **Prompt Initialization:**
   - The `LocalPromptRegistry` class loads prompt definitions from the YAML files and initializes the prompts.
@@ -109,7 +112,7 @@ print(response)
 
 ### AI Gateway Prompt Configuration Reference
 
-Each prompt configuration file in `prompts/definitions/` requires the following structure:
+Each prompt configuration file requires the following structure:
 
 ```yaml
 name: <string>                    # Required. Unique identifier for the prompt

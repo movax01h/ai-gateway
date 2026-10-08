@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from langchain_core.tools import BaseTool, ToolException
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.tool_governance import track_tool_governance_event

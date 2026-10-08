@@ -49,7 +49,7 @@ setup_script:
   # Mise and its tool installations are cached between runs (see cache section).
   - curl -sSL https://mise.run | sh
   - export PATH="$HOME/.local/bin:$MISE_DATA_DIR/shims:$PATH"
-  - mise install vale markdownlint-cli2 lefthook nodejs
+  - mise install vale markdownlint-cli2 lefthook nodejs lychee
   - eval "$(mise env)"
 
   # Install commitlint (required by lefthook pre-push lint-commit hook)

@@ -104,11 +104,15 @@ _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
 # someone puts it here on purpose. Superseding tools are absent because they inherit the approval
 # state of the tool they replace.
 #
-# Only read-only tools with no side effects belong here.
+# Only tools with no effect outside this session belong here: a read, or a message the
+# agent sends its future self.
 _PREAPPROVED_CAPABILITY_TOOLS: list[Type[BaseTool]] = [
     # Reads public web pages and returns text. Nothing is written, and the agent is told to treat
     # results as untrusted, so prompting on each search would only add friction.
     tools.AgentCoreWebSearch,
+    # A message from the agent to its future self. Touches no file, process, network or
+    # GitLab resource, so prompting on it is friction without protection. See #2906.
+    tools.NotifyMeWhen,
 ]
 
 _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
@@ -189,11 +193,16 @@ ToolsOrConfigs = Union[Sequence[Type[BaseTool]], Sequence[McpToolConfig]]
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "read_only_files": _READ_ONLY_FILE_TOOLS,
     "read_write_files": [
+        tools.BlPrioritizeAndCap,
         *_READ_ONLY_FILE_TOOLS,
+        tools.BlCollectAndFlatten,
         tools.WriteFile,
         tools.EditFile,
+        tools.BlDedupFindings,
+        tools.BlWriteSastReport,
         tools.Mkdir,
         tools.RunTests,
+        tools.BlDiscoverAndCluster,
     ],
     "use_git": [
         tools.git.Command,
@@ -334,6 +343,15 @@ def _tool_name(tool_cls: Union[Type[BaseTool], Type[BaseModel]]) -> str:
             "cannot be checked for registry collisions"
         )
     return name
+
+
+def agent_privileges_for_tool(tool_name: str) -> list[str]:
+    """Names of the agent privileges that grant ``tool_name``; empty when no privilege does (e.g. MCP tools)."""
+    return [
+        privilege
+        for privilege, tool_classes in _AGENT_PRIVILEGES.items()
+        if any(_tool_name(tool_cls) == tool_name for tool_cls in tool_classes)
+    ]
 
 
 def _merge_feature_tools(
@@ -477,6 +495,7 @@ class ToolsRegistry:
         denied_tools: Optional[list[str]] = None,
         ask_tools: Optional[list[str]] = None,
         allow_client_injected_mcp_tools: bool = False,
+        allowed_tools: Optional[list[str]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -509,6 +528,7 @@ class ToolsRegistry:
             denied_tools=denied_tools or [],
             ask_tools=ask_tools or [],
             allow_client_injected_mcp_tools=allow_client_injected_mcp_tools,
+            allowed_tools=allowed_tools or [],
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
         )
@@ -525,6 +545,7 @@ class ToolsRegistry:
         denied_tools: Optional[list[str]] = None,
         ask_tools: Optional[list[str]] = None,
         allow_client_injected_mcp_tools: bool = False,
+        allowed_tools: Optional[list[str]] = None,
     ):
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
 
@@ -637,6 +658,18 @@ class ToolsRegistry:
                 if getattr(tool, "_client_injected", False)
             )
 
+        # Per-tool admin `allow` rules pre-approve a tool even when its privilege group
+        # is not pre-approved as a whole (a mixed group). Scoped to enabled tools so an
+        # allow cannot introduce a tool the flow never had, and to GitLab-origin tools:
+        # a client names its own MCP tools, so an allow on a GitLab MCP tool name must
+        # not reach a client entry that shares it. The flag above covers the opted-in case.
+        self._preapproved_tool_names |= {
+            name
+            for name in allowed_tools or []
+            if name in self._enabled_tools
+            and not getattr(self._enabled_tools[name], "_client_injected", False)
+        }
+
         # Applied last so it outranks every pre-approval source above. Only binds where
         # a user can be prompted: headless sessions arrive with `ask_tools` already
         # emptied upstream, so an ask rule cannot force a prompt there.
@@ -668,8 +701,9 @@ class ToolsRegistry:
     def is_preapproved(self, tool_name: str) -> bool:
         """Check if a tool is preapproved (no approval ever needed).
 
-        This is a local check against the privilege-level preapproval list. Use this for routing decisions where you
-        don't need per-call checks.
+        This is a local check against the registry's pre-approved names, which come from privilege groups, capability
+        tools, admin `allow` rules, and client-injected tools where a session opted in. Use this for routing decisions
+        where you don't need per-call checks.
         """
         return tool_name in self._preapproved_tool_names
 

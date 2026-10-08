@@ -4,6 +4,10 @@ import google.auth
 import google.auth.transport.requests
 from google.auth.credentials import Credentials, TokenState
 
+# Workload identity federation with service account impersonation rejects a
+# token request that carries no scope, so ADC must be scoped explicitly.
+_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
 
 def access_token() -> str:
     """Get access token from Google Application Default Credentials (ADC).
@@ -26,7 +30,7 @@ def access_token() -> str:
 
 @lru_cache(maxsize=1)
 def _fetch_application_default_credentials() -> Credentials:
-    creds, _ = google.auth.default()
+    creds, _ = google.auth.default(scopes=_SCOPES)
     auth_req = google.auth.transport.requests.Request()
     creds.refresh(auth_req)
     return creds

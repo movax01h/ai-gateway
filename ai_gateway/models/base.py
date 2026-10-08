@@ -200,11 +200,11 @@ class ModelBase(ABC):
             params["custom_llm_provider"] = "custom_openai"
             params["model"] = self.metadata.identifier
 
-        guardrail_params = bedrock_guardrail_params(
-            params.get("custom_llm_provider"), bedrock_guardrail_config
+        params.update(
+            bedrock_guardrail_params(
+                params.get("custom_llm_provider"), bedrock_guardrail_config
+            )
         )
-        if guardrail_params:
-            params["guardrailConfig"] = guardrail_params["guardrailConfig"]
 
         return params
 

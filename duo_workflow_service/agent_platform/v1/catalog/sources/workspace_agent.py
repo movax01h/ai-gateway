@@ -8,12 +8,9 @@ prompts travel as ``literal`` inputs, never spliced into Jinja source, so client
 code.
 """
 
-from typing import Any, Literal, Optional, Self, Union, override
+from typing import override
 
-from gitlab_cloud_connector import GitLabUnitPrimitive
-from pydantic import BaseModel, ConfigDict
-
-from ai_gateway.prompts.config.base import InMemoryPromptConfig, PromptParams
+from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from duo_workflow_service.agent_platform.v1.catalog.errors import (
     CatalogItemConfigError,
     CatalogItemsError,
@@ -26,16 +23,17 @@ from duo_workflow_service.agent_platform.v1.catalog.sources.base import (
     CatalogSource,
     without_claim,
 )
+from duo_workflow_service.agent_platform.v1.catalog.sources.promotion import (
+    AgentComponentTemplate,
+    item_prompt_config,
+    literal_input,
+    promote_claimant,
+    synthesized_agent_config,
+)
 from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
     CatalogItemRef,
     CatalogItemSource,
     CatalogItemType,
-)
-from duo_workflow_service.agent_platform.v1.components.agent.component import (
-    AgentComponent,
-)
-from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import (
-    UILogEventsSupervisor,
 )
 from lib.feature_flags import FeatureFlag
 
@@ -53,85 +51,9 @@ WILDCARD_ITEM_ID = "*"
 # prompt.
 _PROMPT_ID = f"{CatalogItemSource.WORKSPACE}_{CatalogItemType.AGENT_TEMPLATE}_prompt"
 
-# Prompt variables injected as literal inputs: the item's own prompt, and whether the
-# request carried any items for the claimant to coordinate.
-_ITEM_PROMPT_VARIABLE = "item_prompt"
+# Injected as a literal input on every claimant: whether the request carried any items
+# for it to coordinate.
 _HAS_AGENTS_VARIABLE = "has_workspace_agents"
-
-# Merged into the claimant's `ui_log_events` on promotion. Not declarable per flow,
-# because a plain `AgentComponent` rejects them.
-_DELEGATION_UI_LOG_EVENTS = (
-    UILogEventsSupervisor.ON_DELEGATION,
-    UILogEventsSupervisor.ON_DELEGATION_RETURNS,
-    UILogEventsSupervisor.ON_DELEGATION_ERROR,
-)
-
-
-def _literal_input(value: str, alias: str, *, optional: bool = False) -> dict[str, Any]:
-    """Build a ``literal`` component input.
-
-    Args:
-        value: The literal value the input carries.
-        alias: The prompt variable it arrives as.
-        optional: Whether a prompt that never reads the variable is still valid. No runtime effect, so it is
-            opt-in per input.
-
-    Returns:
-        The input config.
-    """
-    key: dict[str, Any] = {"from": value, "as": alias, "literal": True}
-    if optional:
-        key["optional"] = True
-
-    return key
-
-
-class AgentComponentTemplate(BaseModel):
-    """Component config built once per included item.
-
-    Declares only the keys binding reasons about; ``extra="allow"`` forwards the rest to ``AgentComponent``, which
-    stays the single definition of its own config. ``name``, ``description`` and ``toolset`` are set per item and
-    would be overwritten if declared here.
-
-    Attributes:
-        type: Always ``AgentComponent``.
-        prompt_id: The prompt these items are built against.
-        inputs: Component inputs, appended to per item.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    type: Literal["AgentComponent"]
-    prompt_id: str
-    inputs: Optional[list[Union[str, dict[str, Any]]]] = None
-
-    @classmethod
-    def default(cls) -> Self:
-        """Return the template a workspace agent item is built from.
-
-        Returns:
-            A fresh instance per call, so nothing accumulates across items or runs. Built from a dict, like a
-            YAML-supplied template would be, so every forwarded key takes the same ``extra="allow"`` path.
-        """
-        return cls.model_validate(
-            {
-                "type": AgentComponent.__name__,
-                # Left unversioned, so it resolves to `agent_template_prompt`
-                # below rather than to a file-based definition.
-                "prompt_id": _PROMPT_ID,
-                # The delegated task, and the only thing a subagent reads from state.
-                # `bind_to_supervisor` swaps this for a subsession-scoped key at attach
-                # time; declared anyway, because prompt-variable coverage is checked at
-                # construction, before that swap.
-                "inputs": [{"from": "context:goal", "as": "goal"}],
-                "ui_log_events": [
-                    "on_agent_reasoning",
-                    "on_tool_execution_success",
-                    "on_tool_execution_failed",
-                    "on_agent_final_answer",
-                ],
-            }
-        )
 
 
 def _validate_agents(request: BindRequest) -> None:
@@ -181,7 +103,7 @@ def _rewrite_claimant(claimant_config: dict, agents: list[WorkspaceAgent]) -> di
     # Optional, because every claimant gets the flag, including prompts with no
     # delegation guidance to gate.
     rewritten["inputs"] = list(claimant_config.get("inputs", [])) + [
-        _literal_input(
+        literal_input(
             "true" if agents else "",
             _HAS_AGENTS_VARIABLE,
             optional=True,
@@ -191,45 +113,9 @@ def _rewrite_claimant(claimant_config: dict, agents: list[WorkspaceAgent]) -> di
     if not agents:
         return rewritten
 
-    rewritten["subagents"] = list(rewritten.get("subagents") or []) + [
-        {"name": agent.name} for agent in agents
-    ]
-
-    # str() keeps the config dict plain: YAML-declared events arrive as strings, and
-    # the component re-validates either form.
-    declared = list(claimant_config.get("ui_log_events") or [])
-    rewritten["ui_log_events"] = declared + [
-        str(event) for event in _DELEGATION_UI_LOG_EVENTS if str(event) not in declared
-    ]
-
-    return rewritten
-
-
-def _to_component_config(agent: WorkspaceAgent, claimant_config: dict) -> dict:
-    """Synthesize a component config for one agent item.
-
-    Args:
-        agent: The item to build.
-        claimant_config: The claiming component's config, read for flags a subagent inherits.
-
-    Returns:
-        The default template with what the item owns filled in. ``exclude_unset`` leaves the component's own
-        defaults to apply.
-    """
-    config = AgentComponentTemplate.default().model_dump(exclude_unset=True)
-    # These belong to the item, whatever the template says.
-    config["name"] = agent.name
-    config["description"] = agent.description
-    config["toolset"] = list(agent.toolset)
-    # Required rather than optional: the prompt is ours, and always reads it.
-    config["inputs"] = list(config.get("inputs", [])) + [
-        _literal_input(agent.prompt, _ITEM_PROMPT_VARIABLE)
-    ]
-    # A synthesized subagent is validated as strictly as the component claiming it.
-    if claimant_config.get("strict_validation"):
-        config["strict_validation"] = True
-
-    return config
+    return promote_claimant(
+        rewritten, claimant_config, [agent.name for agent in agents]
+    )
 
 
 def agent_template_prompt() -> InMemoryPromptConfig:
@@ -243,16 +129,7 @@ def agent_template_prompt() -> InMemoryPromptConfig:
         a value in ``item_prompt``, never spliced into the template source, so client text is data rather
         than template code. ``goal`` is the task the coordinator delegates.
     """
-    return InMemoryPromptConfig(
-        prompt_id=_PROMPT_ID,
-        name="Workspace Agent Template",
-        unit_primitives=[GitLabUnitPrimitive.DUO_AGENT_PLATFORM],
-        prompt_template={
-            "system": f"{{{{ {_ITEM_PROMPT_VARIABLE} }}}}",
-            "user": "{{ goal }}",
-        },
-        params=PromptParams(timeout=120),
-    )
+    return item_prompt_config(_PROMPT_ID, "Workspace Agent Template")
 
 
 class WorkspaceAgentSource(CatalogSource):
@@ -314,6 +191,11 @@ class WorkspaceAgentSource(CatalogSource):
             )
             for comp_config in request.components_config
         ]
-        bound.extend(_to_component_config(agent, claimant_config) for agent in agents)
+        bound.extend(
+            synthesized_agent_config(
+                AgentComponentTemplate.default(_PROMPT_ID), agent, claimant_config
+            )
+            for agent in agents
+        )
 
         return bound

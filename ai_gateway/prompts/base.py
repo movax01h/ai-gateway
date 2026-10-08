@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import (
     Any,
     AsyncIterator,
@@ -629,20 +630,27 @@ _JINJA_DEFAULT_FILTERS["wordwrap"] = guarded_wordwrap_filter
 
 
 class FeatureRootLoader(BaseLoader):
-    """Resolve a self-namespaced include to a moved feature's ``prompts/`` dir.
+    """Resolve a self-namespaced include to a registered ``prompts/`` dir.
 
-    Template name ``<feature_id>/<rest>`` maps to ``<registered_root>/<rest>``,
-    so include strings need no rewrite when a feature moves to Layout B.
+    Template name ``<prompt_id>/<rest>`` maps to ``<registered_root>/<rest>``,
+    so include strings need no rewrite when a prompt moves. A two-part id such
+    as ``chat/react`` is tried before a one-part id.
     """
 
     def get_source(
         self, environment: Environment, template: str
     ) -> tuple[str, str, Callable[[], bool] | None]:
-        feature_id, _, rest = template.partition("/")
-        root = feature_prompt_root(feature_id)
-        if root is None or not rest:
-            raise TemplateNotFound(template)
+        parts = template.split("/")
+        for depth in (2, 1):
+            root = feature_prompt_root("/".join(parts[:depth]))
+            if root is not None and len(parts) > depth:
+                return self._read(root, "/".join(parts[depth:]), template)
+        raise TemplateNotFound(template)
 
+    @staticmethod
+    def _read(
+        root: Path, rest: str, template: str
+    ) -> tuple[str, str, Callable[[], bool] | None]:
         path = (root / rest).resolve()
         if not path.is_relative_to(root.resolve()) or not path.is_file():
             raise TemplateNotFound(template)
@@ -739,6 +747,7 @@ ANTHROPIC_ONLY_MODEL_KWARGS = ("context_management", "thinking", "output_config"
 class Prompt(RunnableBinding[Any, BaseMessage]):
     name: str
     model_provider: str
+    model_vendor: Optional[str] = None
     model: Model
     unit_primitive: GitLabUnitPrimitive
     operation_type: LLMOperationType = "standard"
@@ -747,6 +756,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     limits: Optional[ModelLimits] = None
     internal_event_extra: dict[str, Any] = {}
     internal_callbacks: list[BasePromptCallbackHandler] = []
+    requested_model: Optional[str] = None
 
     def __init__(
         self,
@@ -858,14 +868,29 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             ),
         )
 
+        # Only LiteLLM clients name the vendor (e.g. fireworks_ai); other clients
+        # (anthropic, openai, ...) are their own vendor.
+        custom_llm_provider = getattr(base_model, "custom_llm_provider", None)
+        model_vendor = (
+            custom_llm_provider
+            if isinstance(custom_llm_provider, str) and custom_llm_provider
+            else model_provider
+        )
+
         super().__init__(
             name=config.name,
             model_provider=model_provider,
+            model_vendor=model_vendor,
             model=model,
             unit_primitive=config.unit_primitive,
             operation_type=config.operation_type,
             bound=chain,
             prompt_tpl=prompt_tpl,
+            requested_model=(
+                model_kwargs.get("model")
+                if model_metadata and model_metadata.is_custom_model
+                else None
+            ),
             **kwargs,
         )  # type: ignore[call-arg]
 
@@ -1020,12 +1045,18 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         return self.model._identifying_params["model"]
 
     @property
+    def reported_model_name(self) -> str:
+        """Name to report in logs and metrics: the requested model for custom models, else the instance model."""
+        return self.requested_model or self.model_name
+
+    @property
     def instrumentator(self) -> ModelRequestInstrumentator:
         return ModelRequestInstrumentator(
             model_engine=self.model._llm_type,
-            model_name=self.model_name,
+            model_name=self.reported_model_name,
             limits=self.limits,
             model_provider=self.model_provider,
+            model_vendor=self.model_vendor or "",
         )
 
     def set_limits(self, model_limits: ConfigModelLimits):
@@ -1255,6 +1286,7 @@ class BasePromptRegistry(ABC):
         tools: Optional[List[BaseTool]] = None,
         is_graph_node: bool = False,
         unit_primitive: Optional[GitLabUnitPrimitive] = None,
+        track_event: bool = True,
         **kwargs: Any,
     ) -> Prompt:
         if not model_metadata:
@@ -1282,9 +1314,10 @@ class BasePromptRegistry(ABC):
             raise WrongUnitPrimitives
 
         # Only record internal events once we know the user has access to the Unit Primitive
-        self.internal_event_client.track_event(
-            f"request_{authorized_unit_primitive}", category=internal_event_category
-        )
+        if track_event:
+            self.internal_event_client.track_event(
+                f"request_{authorized_unit_primitive}", category=internal_event_category
+            )
 
         return prompt
 

@@ -1,10 +1,11 @@
 # pylint: disable=too-many-lines
+import json
 import sys
 from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.tools import BaseTool
+from langchain.tools import BaseTool, ToolException
 from pydantic import BaseModel
 
 from ai_gateway.model_selection.models import ModelClassProvider
@@ -23,7 +24,7 @@ from duo_workflow_service.components.tools_registry import (
 )
 from duo_workflow_service.entities.state import ApprovalSource
 from duo_workflow_service.executor.outbox import Outbox
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from duo_workflow_service.tools.ascp import (
     CreateAscpComponent,
     CreateAscpScan,
@@ -367,20 +368,25 @@ _outbox = MagicMock(spec=Outbox)
                 "set_task_status",
                 "todo_write",
                 "read_file",
+                "bl_prioritize_and_cap",
                 "read_files",
                 "create_file_with_contents",
                 "edit_file",
                 "list_dir",
                 "find_files",
                 "grep",
+                "bl_collect_and_flatten",
                 "mkdir",
                 "extract_lines_from_text",
                 "finalize_code_review_findings",
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
+                "bl_dedup_findings",
+                "bl_write_sast_report",
                 "render_ui",
                 "run_tests",
+                "bl_discover_and_cluster",
             },
         ),
     ],
@@ -484,13 +490,17 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "gitlab_wiki_blob_search": tools.WikiBlobSearch(metadata=tool_metadata),
         "gitlab_note_search": tools.NoteSearch(metadata=tool_metadata),
         "read_file": tools.ReadFile(metadata=tool_metadata),
+        "bl_prioritize_and_cap": tools.BlPrioritizeAndCap(metadata=tool_metadata),
         "read_files": tools.ReadFiles(metadata=tool_metadata),
         "list_dir": tools.ListDir(metadata=tool_metadata),
         "create_file_with_contents": tools.WriteFile(metadata=tool_metadata),
         "edit_file": tools.EditFile(metadata=tool_metadata),
         "find_files": tools.FindFiles(metadata=tool_metadata),
+        "bl_dedup_findings": tools.BlDedupFindings(metadata=tool_metadata),
+        "bl_write_sast_report": tools.BlWriteSastReport(metadata=tool_metadata),
         "grep": tools.Grep(metadata=tool_metadata),
         "mkdir": tools.Mkdir(metadata=tool_metadata),
+        "bl_discover_and_cluster": tools.BlDiscoverAndCluster(metadata=tool_metadata),
         "run_git_command": tools.git.Command(metadata=tool_metadata),
         "handover_tool": tools.HandoverTool,
         "request_user_clarification_tool": tools.RequestUserClarificationTool,
@@ -569,6 +579,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             metadata=tool_metadata
         ),
         "run_tests": tools.RunTests(metadata=tool_metadata),
+        "bl_collect_and_flatten": tools.BlCollectAndFlatten(metadata=tool_metadata),
         "build_review_merge_request_context": BuildReviewMergeRequestContext(
             metadata=tool_metadata
         ),
@@ -737,6 +748,52 @@ async def test_registry_toolset_with_tool_options(gl_http_client, project_mock):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pinned, error",
+    [
+        pytest.param(100, None, id="pinned-100"),
+        # Tool options bypass the input schema, so the tool checks the range itself.
+        pytest.param(500, "Invalid per_page 500", id="pinned-above-max"),
+        pytest.param(0, "Invalid per_page 0", id="pinned-zero"),
+    ],
+)
+async def test_blob_search_page_size_tool_option_overrides_the_model(
+    gl_http_client, project_mock, pinned, error
+):
+    """A flow that pins `per_page` for blob search wins over the model's value."""
+    registry = await ToolsRegistry.configure(
+        workflow_config={
+            "workflow_id": "test_workflow",
+            "agent_privileges_names": ["read_only_gitlab"],
+            "gitlab_host": "gitlab.example.com",
+        },
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+    )
+    toolset = registry.toolset(
+        ["gitlab_blob_search"],
+        tool_options={"gitlab_blob_search": {"per_page": pinned}},
+    )
+    gl_http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=[{"path": f"src/f{i}.py", "data": "x"} for i in range(20)],
+        headers={},
+    )
+    tool = toolset["gitlab_blob_search"]
+
+    if error:
+        with pytest.raises(ToolException, match=error):
+            await tool._arun(id="1", search="authorize", per_page=20)
+        return
+
+    result = json.loads(await tool._arun(id="1", search="authorize", per_page=20))
+
+    assert gl_http_client.aget.call_args.kwargs["params"]["per_page"] == 100
+    assert result["incomplete"] == []
+
+
+@pytest.mark.asyncio
 async def test_registry_toolset_with_tool_options_no_cross_contamination(
     gl_http_client, project_mock
 ):
@@ -881,16 +938,21 @@ def test_preapproved_tools_initialization(tool_metadata):
     # Tools from read_write_files privilege should be in preapproved_tools
     read_write_tools = {
         "read_file",
+        "bl_prioritize_and_cap",
         "read_files",
         "create_file_with_contents",
         "edit_file",
         "list_dir",
+        "bl_collect_and_flatten",
         "find_files",
         "grep",
         "mkdir",
+        "bl_dedup_findings",
+        "bl_write_sast_report",
         "extract_lines_from_text",
         "finalize_code_review_findings",
         "run_tests",
+        "bl_discover_and_cluster",
     }
 
     assert registry._preapproved_tool_names == default_tools.union(read_write_tools)
@@ -959,16 +1021,21 @@ async def test_registry_configuration_with_preapproved_tools(
 
     read_write_tools = {
         "read_file",
+        "bl_prioritize_and_cap",
         "read_files",
         "create_file_with_contents",
         "edit_file",
         "list_dir",
+        "bl_collect_and_flatten",
         "find_files",
         "grep",
         "mkdir",
+        "bl_dedup_findings",
+        "bl_write_sast_report",
         "extract_lines_from_text",
         "finalize_code_review_findings",
         "run_tests",
+        "bl_discover_and_cluster",
     }
     expected_preapproved = always_enabled_tools.union(read_write_tools)
 
@@ -1322,6 +1389,90 @@ async def test_ask_listed_tool_names_reports_ask_listed_names(
 
     assert registry.ask_listed_tool_names(["read_file", "edit_file"]) == {"read_file"}
     assert registry.ask_listed_tool_names([]) == set()
+
+
+@pytest.mark.asyncio
+async def test_registry_allowed_tools_preapprove_within_unapproved_privilege(
+    gl_http_client, project_mock
+):
+    """A per-tool admin allow pre-approves a tool whose privilege group is not pre-approved."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": [],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        allowed_tools=["read_file"],
+    )
+
+    assert registry.is_preapproved("read_file")
+    assert not registry.is_preapproved("edit_file")
+    toolset = registry.toolset(["read_file", "edit_file"])
+    assert "read_file" in toolset._pre_approved
+    assert "edit_file" not in toolset._pre_approved
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra_kwargs,expected_preapproved",
+    [
+        # ask outranks allow for the same tool
+        ({"ask_tools": ["read_file"]}, False),
+        # deny strips the tool before pre-approval matters
+        ({"denied_tools": ["read_file"]}, False),
+    ],
+)
+async def test_registry_allowed_tools_do_not_outrank_ask_or_deny(
+    gl_http_client, project_mock, extra_kwargs, expected_preapproved
+):
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": [],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        allowed_tools=["read_file"],
+        **extra_kwargs,
+    )
+
+    toolset = registry.toolset(["read_file", "edit_file"])
+    assert ("read_file" in toolset._pre_approved) is expected_preapproved
+
+
+@pytest.mark.asyncio
+async def test_registry_allowed_tools_ignore_tools_outside_enabled_privileges(
+    gl_http_client, project_mock
+):
+    """An allow cannot introduce a tool the flow's privileges never enabled."""
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": ["read_write_files"],
+        "pre_approved_agent_privileges_names": [],
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        allowed_tools=["create_issue"],
+    )
+
+    assert registry.get("create_issue") is None
+    assert not registry.is_preapproved("create_issue")
 
 
 # Tests for Generic GitLab API Tools
@@ -2601,6 +2752,38 @@ async def test_gitlab_configured_mcp_tool_still_requires_approval(tool_metadata)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "client_injected,expected_preapproved",
+    [
+        # A client names its own tools, so an admin allow must not reach its entry.
+        (True, False),
+        # The same name from a GitLab-configured server is the tool the admin ruled on.
+        (False, True),
+    ],
+)
+async def test_admin_allow_reaches_only_gitlab_origin_mcp_tools(
+    tool_metadata, client_injected, expected_preapproved
+):
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        allowed_tools=["gitlab_search"],
+        mcp_tools=_mcp_configs(
+            contract_pb2.McpTool(
+                name="gitlab_search",
+                description="MCP tool",
+                inputSchema="{}",
+                client_injected=client_injected,
+            )
+        ),
+    )
+
+    assert registry.get("gitlab_search") is not None
+    assert registry.is_preapproved("gitlab_search") is expected_preapproved
+
+
+@pytest.mark.asyncio
 async def test_client_entry_cannot_launder_a_shadowed_gitlab_tool(tool_metadata):
     """Workhorse appends its own last, so the GitLab entry survives and stays governed."""
     registry = ToolsRegistry(
@@ -2697,3 +2880,75 @@ async def test_approval_required_for_unregistered_tool_name(tool_metadata):
     )
 
     assert await registry.approval_required("never_registered")
+
+
+class TestNotifyMeWhenPreapproval:
+    """`notify_me_when` schedules the agent to wake itself; it must not prompt."""
+
+    @pytest.fixture(name="capable")
+    def capable_fixture(self):
+        with patch(
+            "duo_workflow_service.components.tools_registry.is_client_capable",
+            return_value=True,
+        ):
+            yield
+
+    def _registry(self, tool_metadata, ask_tools=None, denied_tools=None):
+        return ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            ask_tools=ask_tools,
+            denied_tools=denied_tools,
+        )
+
+    @pytest.mark.asyncio
+    async def test_is_preapproved(self, capable, tool_metadata):
+        """Without this the tool prompts on every call, which is friction with nothing behind it.
+
+        It is capability-dependent, so it reaches pre-approval only through
+        `_PREAPPROVED_CAPABILITY_TOOLS`; no privilege group grants it.
+        """
+        registry = self._registry(tool_metadata)
+
+        assert "notify_me_when" in registry._preapproved_tool_names
+        assert not await registry.approval_required("notify_me_when")
+
+    @pytest.mark.asyncio
+    async def test_admin_ask_rule_still_outranks_it(self, capable, tool_metadata):
+        """The exemption is a default, not an override.
+
+        An admin who rules the tool `ask` must still get a prompt, so the pre-approval has to
+        lose to the ask subtraction rather than survive it.
+        """
+        registry = self._registry(tool_metadata, ask_tools=["notify_me_when"])
+
+        assert "notify_me_when" not in registry._preapproved_tool_names
+        assert await registry.approval_required("notify_me_when")
+
+    @pytest.mark.asyncio
+    async def test_approval_node_path_skips_the_prompt(self, capable, tool_metadata):
+        """The prompt came from the approval node, which asks the toolset, not the registry."""
+        toolset = self._registry(tool_metadata).toolset(["notify_me_when"])
+
+        assert (
+            await toolset.resolve_approval_source("notify_me_when", {})
+            == ApprovalSource.PREAPPROVED_CONFIG
+        )
+
+    def test_admin_deny_rule_still_removes_it(self, capable, tool_metadata):
+        registry = self._registry(tool_metadata, denied_tools=["notify_me_when"])
+
+        assert "notify_me_when" not in registry.toolset(["notify_me_when"])
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "expected"),
+    [
+        ("run_command", ["run_commands"]),
+        ("read_file", ["read_only_files", "read_write_files"]),
+        ("nonexistent_tool", []),
+    ],
+)
+def test_agent_privileges_for_tool(tool_name, expected):
+    assert tools_registry.agent_privileges_for_tool(tool_name) == expected

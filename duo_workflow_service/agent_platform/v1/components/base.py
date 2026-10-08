@@ -112,6 +112,10 @@ class BaseComponent(BaseModel, ABC):
 
 
 class EndComponent(BaseComponent):
+    # The status the terminal writes. ``COMPLETED`` ends the session; an
+    # environment that ends only the turn seeds ``INPUT_REQUIRED`` instead.
+    status: WorkflowStatusEnum = WorkflowStatusEnum.COMPLETED
+
     @override
     def __entry_hook__(self) -> Annotated[str, "Components entry node name"]:
         return "terminate_flow"
@@ -127,7 +131,7 @@ class EndComponent(BaseComponent):
         self,
         state: FlowState,  # pylint: disable=unused-argument
     ) -> dict:
-        return {FlowStateKeys.STATUS: WorkflowStatusEnum.COMPLETED.value}
+        return {FlowStateKeys.STATUS: self.status.value}
 
 
 class AbortComponent(BaseComponent):

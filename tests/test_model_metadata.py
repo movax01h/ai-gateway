@@ -1,7 +1,7 @@
 # pylint: disable=too-many-lines
 from types import SimpleNamespace
 from unittest import mock
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
@@ -10,10 +10,12 @@ from pydantic import HttpUrl
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     FireworksModelMetadata,
+    IamRoleNotAllowedError,
     ModelMetadata,
     ModelMetadataByTag,
     build_default_code_completions_metadata,
     build_default_feature_setting_metadata,
+    build_fallback_code_completions_metadata,
     completion_context_max_percent_for_model_metadata,
     create_model_metadata,
     create_model_metadata_by_tag,
@@ -24,7 +26,10 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatAnthropicDefinition,
     ChatLiteLLMDefinition,
     ChatOpenAIDefinition,
+    EmbeddingLiteLLMDefinition,
 )
+from ai_gateway.model_selection.types import DefaultModelEntry
+from lib.aws_assume_role import AssumedRoleCredentials, AssumeRoleError
 
 
 @pytest.fixture(name="gitlab_model1")
@@ -108,6 +113,20 @@ def gitlab_bedrock_model_fixture():
     )
 
 
+@pytest.fixture(name="gitlab_embedding_model")
+def gitlab_embedding_model_fixture():
+    return EmbeddingLiteLLMDefinition(
+        gitlab_identifier="embedding_model",
+        name="Self-Hosted Embedding Models",
+        max_context_tokens=200000,
+        family=["embedding"],
+        params={
+            "model": "embedding",
+            "custom_llm_provider": "openai",
+        },
+    )
+
+
 @pytest.fixture(name="mock_models")
 def mock_models_fixture(
     gitlab_model1,
@@ -116,6 +135,7 @@ def mock_models_fixture(
     fireworks_model,
     gitlab_vertex_model,
     gitlab_bedrock_model,
+    gitlab_embedding_model,
 ):
     return {
         "gitlab_model1": gitlab_model1,
@@ -124,6 +144,7 @@ def mock_models_fixture(
         "test_model": fireworks_model,
         "claude_sonnet_4_6_vertex": gitlab_vertex_model,
         "claude_sonnet_4_6_bedrock": gitlab_bedrock_model,
+        "embedding_model": gitlab_embedding_model,
     }
 
 
@@ -451,6 +472,306 @@ class TestModelMetadataToParams:
             "custom_llm_provider": "custom_openai",
             "timeout": 10,
         }
+
+    def test_dummy_key_set_for_custom_openai(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "gitlab_model1",
+                "endpoint": HttpUrl("https://self-hosted.internal/v1"),
+                "identifier": "mixtral-8x7b",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://self-hosted.internal/v1",
+            "api_key": "dummy_key",
+            "model": "mixtral-8x7b",
+            "custom_llm_provider": "custom_openai",
+            "timeout": 10,
+        }
+
+    def test_embedding_with_identifier_no_provider(self):
+        """The provider is left unset so the definition's own `custom_llm_provider` applies."""
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "embedding_model",
+                "endpoint": HttpUrl("https://proxy.internal/v1"),
+                "identifier": "text-embedding-005",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://proxy.internal/v1",
+            "model": "text-embedding-005",
+        }
+
+    def test_embedding_with_identifier_no_provider_preserves_api_key(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "embedding_model",
+                "endpoint": HttpUrl("https://proxy.internal/v1"),
+                "api_key": "admin-token",
+                "identifier": "text-embedding-005",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://proxy.internal/v1",
+            "api_key": "admin-token",
+            "model": "text-embedding-005",
+        }
+
+    def test_embedding_with_identifier_with_provider(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "embedding_model",
+                "endpoint": HttpUrl("https://proxy.internal/v1"),
+                "identifier": "openai/text-embedding-3-small",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://proxy.internal/v1",
+            "model": "text-embedding-3-small",
+            "custom_llm_provider": "openai",
+        }
+
+
+ROLE_ARN = "arn:aws:iam::123456789012:role/runtime-role"
+INSTANCE_UID = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b"
+
+
+class TestBedrockIamRole:
+    @pytest.fixture(name="gateway_service_name", autouse=True)
+    def gateway_service_name_fixture(self, monkeypatch):
+        # The Cloud Connector service name is process-global; other tests (for example the
+        # Duo Workflow Service `run()` tests) can leave it set to another service's name.
+        monkeypatch.setenv("CLOUD_CONNECTOR_SERVICE_NAME", "gitlab-ai-gateway")
+
+    @pytest.fixture(name="custom_models_enabled", autouse=True)
+    def custom_models_enabled_fixture(self):
+        with patch("ai_gateway.model_metadata.get_config") as get_config:
+            get_config.return_value.custom_models.enabled = True
+            yield get_config
+
+    @pytest.fixture(name="assume")
+    def assume_fixture(self):
+        with patch(
+            "ai_gateway.model_metadata.get_assumed_role_credentials",
+            side_effect=lambda role, external_id=None: AssumedRoleCredentials(
+                f"key-{role}", "secret", "token"
+            ),
+        ) as assume:
+            yield assume
+
+    @staticmethod
+    def _user(
+        instance_uid=INSTANCE_UID,
+        subject="hashed-user-id",
+        issuer="gitlab-ai-gateway",
+        realm="self-managed",
+    ):
+        return Mock(
+            claims=Mock(
+                subject=subject,
+                issuer=issuer,
+                gitlab_realm=realm,
+                gitlab_instance_uid=instance_uid,
+                gitlab_instance_id="reported-by-the-instance",
+            )
+        )
+
+    @classmethod
+    def _bedrock_metadata(cls, user=None, **extra):
+        metadata = create_model_metadata(
+            {
+                "provider": "gitlab",
+                "name": "claude_sonnet_4_6_bedrock",
+                **extra,
+            }
+        )
+        metadata.add_user(user or cls._user())
+        return metadata
+
+    def test_runtime_role_is_used(self, assume):
+        params = self._bedrock_metadata(iam_role=ROLE_ARN).to_params()
+
+        assume.assert_called_once_with(ROLE_ARN, external_id=INSTANCE_UID)
+        assert params["aws_access_key_id"] == f"key-{ROLE_ARN}"
+        assert params["aws_session_token"] == "token"
+
+    def test_assume_role_failure_propagates(self, assume):
+        assume.side_effect = AssumeRoleError(
+            "denied", role_arn=ROLE_ARN, error_code="AccessDenied"
+        )
+
+        with pytest.raises(AssumeRoleError, match="denied"):
+            self._bedrock_metadata(iam_role=ROLE_ARN).to_params()
+
+    def test_runtime_role_with_identifier_provider(self, assume):
+        metadata = create_model_metadata(
+            {
+                "provider": "provider",
+                "name": "gitlab_model1",
+                "identifier": "bedrock/model/identifier",
+                "iam_role": ROLE_ARN,
+            }
+        )
+        metadata.add_user(self._user())
+
+        params = metadata.to_params()
+
+        assert params["custom_llm_provider"] == "bedrock"
+        assert params["aws_access_key_id"] == f"key-{ROLE_ARN}"
+
+    def test_no_role_leaves_params_unchanged(self, assume):
+        params = self._bedrock_metadata().to_params()
+
+        assume.assert_not_called()
+        assert not any(key.startswith("aws_") for key in params)
+
+    def test_external_id_is_the_verified_instance_id(self, assume):
+        self._bedrock_metadata(iam_role=ROLE_ARN).to_params()
+
+        assume.assert_called_once_with(ROLE_ARN, external_id=INSTANCE_UID)
+
+    def test_request_supplied_external_id_is_ignored(self, assume):
+        self._bedrock_metadata(
+            iam_role=ROLE_ARN, iam_role_external_id="another-customers-id"
+        ).to_params()
+
+        assume.assert_called_once_with(ROLE_ARN, external_id=INSTANCE_UID)
+
+    def test_external_id_is_the_instance_subject_of_an_instance_signed_token(
+        self, assume
+    ):
+        user = self._user(
+            instance_uid="", subject=INSTANCE_UID, issuer="https://gitlab.example.com"
+        )
+
+        self._bedrock_metadata(user=user, iam_role=ROLE_ARN).to_params()
+
+        assume.assert_called_once_with(ROLE_ARN, external_id=INSTANCE_UID)
+
+    def test_user_subject_of_a_gateway_issued_token_is_never_the_external_id(
+        self, assume
+    ):
+        user = self._user(instance_uid="", subject="hashed-user-id")
+
+        with pytest.raises(AssumeRoleError):
+            self._bedrock_metadata(user=user, iam_role=ROLE_ARN).to_params()
+
+        assume.assert_not_called()
+
+    @pytest.mark.parametrize("instance_uid", ["has a space", "non-ascii-\u00e9", "x"])
+    def test_malformed_instance_id_is_an_assume_role_error(self, assume, instance_uid):
+        user = self._user(instance_uid=instance_uid)
+
+        with pytest.raises(AssumeRoleError) as exc_info:
+            self._bedrock_metadata(user=user, iam_role=ROLE_ARN).to_params()
+
+        assert exc_info.value.error_code == "InvalidInstanceId"
+        assume.assert_not_called()
+
+    def test_saas_realm_is_rejected(self, assume):
+        user = self._user(realm="saas")
+
+        with pytest.raises(AssumeRoleError) as exc_info:
+            self._bedrock_metadata(user=user, iam_role=ROLE_ARN).to_params()
+
+        assert exc_info.value.error_code == "UnsupportedRealm"
+        assume.assert_not_called()
+
+    def test_saas_realm_does_not_affect_a_model_without_a_role(self, assume):
+        self._bedrock_metadata(user=self._user(realm="saas")).to_params()
+
+        assume.assert_not_called()
+
+    def test_instance_reported_id_claim_is_not_trusted(self, assume):
+        user = self._user(instance_uid="")  # gitlab_instance_id is set but spoofable
+
+        with pytest.raises(AssumeRoleError):
+            self._bedrock_metadata(user=user, iam_role=ROLE_ARN).to_params()
+
+        assume.assert_not_called()
+
+    @pytest.mark.parametrize("instance_uid", [None, ""])
+    def test_runtime_role_without_instance_id_fails_closed(self, assume, instance_uid):
+        metadata = self._bedrock_metadata(
+            user=self._user(instance_uid=instance_uid), iam_role=ROLE_ARN
+        )
+
+        with pytest.raises(AssumeRoleError):
+            metadata.to_params()
+
+        assume.assert_not_called()
+
+    def test_runtime_role_without_user_fails_closed(self, assume):
+        metadata = create_model_metadata(
+            {
+                "provider": "gitlab",
+                "name": "claude_sonnet_4_6_bedrock",
+                "iam_role": ROLE_ARN,
+            }
+        )
+
+        with pytest.raises(AssumeRoleError):
+            metadata.to_params()
+
+        assume.assert_not_called()
+
+    def test_iam_role_rejected_when_custom_models_disabled(self, custom_models_enabled):
+        custom_models_enabled.return_value.custom_models.enabled = False
+
+        with pytest.raises(IamRoleNotAllowedError, match="custom models are enabled"):
+            self._bedrock_metadata(iam_role=ROLE_ARN)
+
+    def test_iam_role_with_api_key_rejected(self):
+        with pytest.raises(ValueError, match="iam_role and api_key cannot both be set"):
+            self._bedrock_metadata(api_key="bearer", iam_role=ROLE_ARN)
+
+    @pytest.mark.parametrize(
+        "identifier", ["vertex_ai/model", "custom_model", "openai/gpt-5"]
+    )
+    def test_iam_role_rejected_for_non_bedrock_provider(self, identifier):
+        with pytest.raises(ValueError, match="only supported for Bedrock models"):
+            create_model_metadata(
+                {
+                    "provider": "provider",
+                    "name": "gitlab_model1",
+                    "identifier": identifier,
+                    "iam_role": ROLE_ARN,
+                }
+            )
+
+    def test_iam_role_rejected_for_non_bedrock_gitlab_model(self):
+        with pytest.raises(ValueError, match="only supported for Bedrock models"):
+            create_model_metadata(
+                {
+                    "provider": "gitlab",
+                    "name": "claude_sonnet_4_6_vertex",
+                    "iam_role": ROLE_ARN,
+                }
+            )
+
+    @pytest.mark.parametrize(
+        "iam_role",
+        [
+            "not-an-arn",
+            "arn:aws:iam::123456789012:user/bob",
+            "arn:aws:iam::12345:role/short",
+        ],
+    )
+    def test_invalid_arn_rejected(self, iam_role):
+        with pytest.raises(ValueError, match="Invalid IAM role ARN"):
+            self._bedrock_metadata(iam_role=iam_role)
+
+    def test_empty_role_treated_as_absent(self, assume):
+        assert self._bedrock_metadata(iam_role="").iam_role is None
 
 
 def test_create_model_metadata_with_none_data():
@@ -1152,6 +1473,24 @@ class TestBuildDefaultCodeCompletionsMetadata:
         params = metadata.to_params()
         assert "api_key" not in params or params.get("api_key") != "fw_secret"
 
+    def test_picks_the_default_model_once(
+        self, vertex_model, fireworks_codestral, mock_user
+    ):
+        with patch.object(
+            ModelSelectionConfig,
+            "get_model_for_feature",
+            side_effect=[vertex_model, fireworks_codestral],
+        ) as mock_get_model_for_feature:
+            metadata = build_default_code_completions_metadata(
+                fireworks_api_base_url="unused",
+                model_keys={"fireworks_provider_api_key": "fw_secret"},
+                user=mock_user,
+            )
+
+        mock_get_model_for_feature.assert_called_once_with("code_completions")
+        assert metadata.provider == "gitlab"
+        assert metadata.name == "vertex_codestral"
+
     def test_using_cache_false_propagates_to_params(
         self, fireworks_codestral, mock_user
     ):
@@ -1182,6 +1521,96 @@ class TestBuildDefaultCodeCompletionsMetadata:
         assert isinstance(metadata, FireworksModelMetadata)
         assert metadata.api_key is None
         assert "api_key" not in metadata.to_params()
+
+    def _patch_default_pool(self, entries, models):
+        pool = UnitPrimitiveConfig(
+            feature_setting="code_completions",
+            unit_primitives=["complete_code"],
+            default_models=entries,
+        )
+        return patch.multiple(
+            ModelSelectionConfig,
+            get_resolved_unit_primitive_config_map=mock.Mock(
+                return_value={"code_completions": pool}
+            ),
+            get_model=mock.Mock(side_effect=lambda identifier: models[identifier]),
+        )
+
+    def _fallback_for(self, current, mock_user):
+        return build_fallback_code_completions_metadata(
+            SimpleNamespace(name=current.gitlab_identifier, llm_definition=current),
+            fireworks_api_base_url="https://api.fireworks.ai/inference/v1",
+            model_keys={"fireworks_provider_api_key": "fw_secret"},
+            user=mock_user,
+        )
+
+    def test_fallback_is_drawn_from_the_other_weighted_defaults(
+        self, fireworks_codestral, vertex_model, mock_user
+    ):
+        entries = [
+            DefaultModelEntry(identifier="codestral_fw", weight=60),
+            DefaultModelEntry(identifier="vertex_codestral", weight=30),
+            DefaultModelEntry(identifier="other_vertex", weight=10),
+        ]
+        models = {
+            "codestral_fw": fireworks_codestral,
+            "vertex_codestral": vertex_model,
+            "other_vertex": vertex_model,
+        }
+
+        with (
+            self._patch_default_pool(entries, models),
+            patch(
+                "ai_gateway.model_metadata.random.choices",
+                return_value=["codestral_fw"],
+            ) as mock_choices,
+        ):
+            metadata = self._fallback_for(vertex_model, mock_user)
+
+        mock_choices.assert_called_once_with(
+            ["codestral_fw", "other_vertex"], weights=[60.0, 10.0], k=1
+        )
+        assert isinstance(metadata, FireworksModelMetadata)
+        assert metadata.name == "codestral_fw"
+        assert metadata.api_key == "fw_secret"
+        assert metadata.session_id == "user-42"
+
+    @pytest.mark.parametrize(
+        ("primary_fixture", "entries"),
+        [
+            (
+                "fireworks_codestral",
+                [
+                    DefaultModelEntry(identifier="codestral_fw", weight=75),
+                    DefaultModelEntry(identifier="vertex_codestral", weight=25),
+                ],
+            ),
+            (
+                "vertex_model",
+                [
+                    DefaultModelEntry(identifier="codestral_fw", weight=0),
+                    DefaultModelEntry(identifier="vertex_codestral", weight=100),
+                ],
+            ),
+            ("vertex_model", [DefaultModelEntry(identifier="vertex_codestral")]),
+        ],
+    )
+    def test_fallback_is_none_when_no_other_default_applies(
+        self,
+        request,
+        primary_fixture,
+        entries,
+        fireworks_codestral,
+        vertex_model,
+        mock_user,
+    ):
+        models = {"codestral_fw": fireworks_codestral, "vertex_codestral": vertex_model}
+
+        with self._patch_default_pool(entries, models):
+            assert (
+                self._fallback_for(request.getfixturevalue(primary_fixture), mock_user)
+                is None
+            )
 
 
 class TestMistralModelMetadata:

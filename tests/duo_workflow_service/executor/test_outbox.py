@@ -147,6 +147,7 @@ class TestOutbox:
 
             assert len(cap_logs) == 3
             assert cap_logs[0]["event"] == "Request ID not found."
+            assert cap_logs[0]["log_level"] == "warning"
             assert cap_logs[1]["event"] == "legacy_set_action_response"
             assert cap_logs[2]["event"] == "Setting action response for request ID."
 
@@ -210,8 +211,11 @@ class TestOutbox:
         assert item == OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
 
     @pytest.mark.asyncio
-    async def test_check_empty(self, outbox: Outbox):
+    @pytest.mark.parametrize("closed", [False, True])
+    async def test_check_empty(self, outbox: Outbox, closed: bool):
         outbox.put_action(contract_pb2.Action())
+        if closed:
+            outbox.close()
 
         assert not outbox._queue.empty()
 
@@ -221,6 +225,17 @@ class TestOutbox:
         assert outbox._queue.empty()
         assert len(cap_logs) == 1
         assert cap_logs[0]["event"] == "Found unsent items in outbox"
+        assert cap_logs[0]["log_level"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_check_empty_ignores_close_signal(self, outbox: Outbox):
+        outbox.close()
+
+        with capture_logs() as cap_logs:
+            outbox.check_empty()
+
+        assert outbox._queue.empty()
+        assert not cap_logs
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

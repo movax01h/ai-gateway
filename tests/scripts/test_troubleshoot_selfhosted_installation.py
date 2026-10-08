@@ -129,6 +129,62 @@ class TestCheckProviderAccessibleRouting:
             ts.check_provider_accessible("bedrock")
 
 
+class TestCheckSuggestionsModelAccess:
+    ARGS = (
+        "localhost:5052",
+        "mistral",
+        "http://localhost:4000/v1",
+        "a-key",
+        "custom_openai/mistral-7b",
+        "custom_openai",
+    )
+
+    def test_posts_a_v4_generation_request(self, monkeypatch, capsys):
+        calls = {}
+
+        def fake_post(url, json=None, **_):
+            calls["url"] = url
+            calls["json"] = json
+            return MagicMock(status_code=200)
+
+        monkeypatch.setattr(ts.requests, "post", fake_post)
+
+        ts.check_suggestions_model_access(*self.ARGS)
+
+        assert calls["url"] == "http://localhost:5052/v4/code/suggestions"
+        component = calls["json"]["prompt_components"][0]
+        assert component["type"] == "code_editor_generation"
+        assert component["payload"]["file_name"] == "test.py"
+        assert component["payload"]["stream"] is False
+        assert calls["json"]["model_metadata"] == {
+            "provider": "openai",
+            "name": "mistral",
+            "endpoint": "http://localhost:4000/v1",
+            "api_key": "a-key",
+            "identifier": "custom_openai/mistral-7b",
+        }
+        assert "Successfully accessed the mistral model" in capsys.readouterr().out
+
+    def test_non_200_raises_runtime_error_with_status(self, monkeypatch):
+        monkeypatch.setattr(
+            ts.requests,
+            "post",
+            lambda *a, **k: MagicMock(status_code=422, text="Validation error"),
+        )
+
+        with pytest.raises(RuntimeError, match="422"):
+            ts.check_suggestions_model_access(*self.ARGS)
+
+    def test_connection_error_raises_runtime_error(self, monkeypatch):
+        def boom(*a, **k):
+            raise requests.ConnectionError("no route")
+
+        monkeypatch.setattr(ts.requests, "post", boom)
+
+        with pytest.raises(RuntimeError, match="no route"):
+            ts.check_suggestions_model_access(*self.ARGS)
+
+
 class TestTroubleshootWiring:
     def test_bedrock_mantle_identifier_routes_to_provider_checks(self, monkeypatch):
         monkeypatch.setattr(

@@ -348,6 +348,7 @@ Rules:
 
 - Weights are relative — they are passed directly to `random.choices`, so they don't need to sum to 100. In the
   example above, `claude_sonnet_4_6_vertex` serves roughly 70% of requests and `claude_sonnet_4_6` the remaining 30%.
+- Weights must be 0 or more, and at least one weight in a feature must be above 0. Both checks run at startup.
 - Weights are all-or-nothing within a feature: if any entry has a `weight`, **every** entry in that feature's
   `default_models` must have one. A mix of weighted and unweighted entries fails validation at startup.
 - When no entry has a `weight`, traffic is distributed uniformly across all listed models (equivalent to giving every
@@ -381,7 +382,7 @@ configurable_unit_primitives:
       reasoning: claude_opus_4_7_vertex
 ```
 
-A tag can also be written as an object, which is the schema that per-request routing will use once it lands. `models` accepts more than one entry and load-balances across provider variants of the same model, the way `default_models` does. `keywords` selects the tag from the request goal (see [Routing the default model by goal](#routing-the-default-model-by-goal)). Both spellings can appear in the same file:
+A tag can also be written as an object. `models` accepts more than one entry and load-balances across provider variants of the same model, the way `default_models` does. `keywords` selects the tag from the request goal (see [Routing the default model by goal](#routing-the-default-model-by-goal)). Both spellings can appear in the same file:
 
 ```yaml
 configurable_unit_primitives:
@@ -408,11 +409,43 @@ Keyword rules are routing hints and never a security boundary: they are sensitiv
 
 ### Routing the default model by goal
 
-When the `duo_developer_model_routing` feature flag is enabled for a request, Duo Workflow Service matches the goal of a `StartWorkflowRequest` against each tag's `keywords` and makes the first matching tag's model the request's `default`. This happens once, before the flow is built, so every turn of the flow runs on the same model. Tags are checked in the order they are declared in `models_for_tags`. A keyword matches as a whole word, ignoring case and allowing plain plural and verb endings, so `typo` matches `typos` but not `typography`. A goal that matches nothing keeps the configured `default_models`, and requests that name an explicit model `identifier` are never routed.
+When the `duo_developer_model_routing` feature flag is enabled for a request, Duo Workflow Service routes the request once, when the workflow starts and before the flow is built, so every turn of the flow runs on the same model.
+It reads the task: the title and description of the triggering issue or merge request (from the `agent_platform_resource_context` additional context), otherwise the goal of the `StartWorkflowRequest`.
+The model behind the `classifier` tag, or the `small` tag when no `classifier` tag is configured, then classifies the task with the `classify_goal_tier` prompt, answering `small`, `large`, or `unsure` under a three-second timeout.
+A `small` or `large` answer makes that tag's model the request's `default`.
+`unsure`, a timeout, or an error keeps the configured `default_models`, and requests that name an explicit model `identifier` are never routed.
 
-The keyword lists come from the goal templates GitLab Rails renders for assignments, review requests, and mentions (`ee/app/models/ai/catalog/goal_templates/developer/`) — that template text is the whole goal for those requests and dictates the level of effort, so keep the lists free of words it contains. This keyword matching is the v1 tier of model selection; a later tier adds a small LLM classifier for goals that match nothing (see the [model routing design document](model_routing/index.md)).
+Before the classifier runs, the task is scored against each tag's `keywords` with BM25, and the first matching tag (in the order tags are declared in `models_for_tags`) is passed to the classifier as a hint.
+A keyword matches when the task scores at least 75% of what the keyword scores against itself: a one-word keyword matches wherever it appears, but half of a phrase, such as `race` for `race condition`, does not.
+Matching ignores case, links, and @mentions, and allows plain plural and verb endings, so `typo` matches `typos` but not `typography`.
+
+The keyword lists come from the goal templates GitLab Rails renders for assignments, review requests, and mentions (`ee/app/models/ai/catalog/goal_templates/developer/`) — that template text is the whole goal for those requests and dictates the level of effort, so keep the lists free of words it contains. See the [model routing design document](model_routing/index.md).
 
 Components that declare their own `model_tags` are unaffected: they keep resolving through `ModelMetadataByTag.get`.
+
+#### Routing telemetry
+
+With the flag on, every workflow start where the classifier answers with a tag emits one structured log line and one `duo_workflow_model_routing_decision` internal event ([definition](../config/events/duo_workflow_model_routing_decision.yml)). The log line carries every field below by name. The event carries each value once, using Snowplow's built-in columns where they fit:
+
+| Log field               | Event field                                    | Meaning                                                                                                                                                                                  |
+| ----------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflow_id`           | `value` (numeric) and `ai_context.workflow_id` | The workflow ID from the start request.                                                                                                                                                  |
+| `tag`                   | `label`                                        | The tag the classifier picked.                                                                                                                                                           |
+| `outcome`               | `property`                                     | `routed` when the tag resolved to its own model; `fallback_default` when the tag has no resolvable model and the request kept the default. A fallback is also logged at `warning` level. |
+| `feature_setting`       | `extra.feature_setting`                        | The feature setting whose `models_for_tags` was matched.                                                                                                                                 |
+| `matched_keywords`      | `extra.matched_keywords`                       | The keyword hint: every keyword of the first matching tag found in the task, in policy order. Empty when no keyword matched. Can belong to another tag when the classifier overrode it.  |
+| `gitlab_identifier`     | `extra.gitlab_identifier`                      | The model the request is served by.                                                                                                                                                      |
+| `classifier_identifier` | `extra.classifier_identifier`                  | The classifier model that picked the tag: the `classifier` tag's model, or the `small` tag's when there is none.                                                                         |
+
+Nothing is emitted on the bypass paths (flag off, explicit `identifier`, an `unsure` answer, a timeout, or an error), because nothing was routed.
+
+`tag` and `matched_keywords` never contain text from the task. `matched_keywords` is copied from the `keywords` lists in `unit_primitives.yml`, and a classifier answer that isn't a tag declared in `models_for_tags` produces no event.
+
+Routing runs only when a workflow starts, so each workflow emits at most one routing event. A resumed workflow isn't routed again and emits nothing.
+
+`workflow_id` is the join key to billing: the routing event carries it as `ai_context.workflow_id`, and the billing event for the same workflow carries it as `metadata.workflow_id`, next to `llm_operations`.
+Each operation's `model_id` is the provider-reported model name, not a `gitlab_identifier`, so map `gitlab_identifier` to its `params.model` in `models.yml` before comparing them.
+Billing also covers resumed runs, which aren't routed again and can be served by a different model than the routing event names.
 
 ### How tag resolution works
 

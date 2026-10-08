@@ -26,7 +26,7 @@ from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUr
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.version_compatibility import (
     get_gitlab_version,
-    supports_agent_plan_readiness_score,
+    supports_agent_plan_readiness,
     supports_agent_plan_widget,
     supports_labels_by_name,
 )
@@ -174,7 +174,6 @@ class WorkItemBaseTool(DuoBaseTool):
     @staticmethod
     def _decode_path(path: str) -> str:
         """Make sure the path is safe for GraphQL (i.e., decoded slashes)."""
-
         return urllib.parse.unquote(path)
 
     def _parse_parent_work_item_url(self, url: str) -> ResolvedParent:
@@ -411,37 +410,41 @@ class WorkItemBaseTool(DuoBaseTool):
 
     @staticmethod
     def _build_agent_plan_widget(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Build agentPlanWidget input from the plan content and/or its readiness score.
+        """Build agentPlanWidget input from the plan content and/or its readiness fields.
 
-        The two fields are independent inputs to the same widget: a plan-drafting
-        flow writes `content`, while a scoring flow writes only `readinessScore`
-        against a plan it did not author. Sending the absent field as `null` would
-        clear it, so each key is included only when supplied.
+        The three fields are independent inputs to the same widget: a
+        plan-drafting flow writes `content`, while a scoring flow writes only
+        `readinessScore` and `readinessScoreFeedback` against a plan it did
+        not author. Sending an absent field as `null` would clear it, so each
+        key is included only when supplied.
 
-        The fields are also gated independently by GitLab version: the widget type
-        and its `content` field exist from 19.0, while `readinessScore` was only
-        added to the widget input in 19.4. On a 19.0-19.3 instance `content` goes
-        out without `readinessScore`; before 19.0 neither does, because sending an
-        unknown argument fails the mutation with a schema error.
+        The fields are also gated independently by GitLab version: the widget
+        type and its `content` field exist from 19.0, while the readiness
+        fields were only added to the widget input in 19.4. On a 19.0-19.3
+        instance `content` goes out without the readiness fields; before 19.0
+        none does, because sending an unknown argument fails the mutation with
+        a schema error.
 
         Args:
-            kwargs: Input parameters that may contain `agent_plan` and/or
-                `readiness_score`.
+            kwargs: Input parameters that may contain `agent_plan`,
+                `readiness_score` and/or `readiness_score_feedback`.
 
         Returns:
-            Dictionary with the agentPlanWidget input, or `None` when neither field
-            was supplied or neither survived the version gates.
+            Dictionary with the agentPlanWidget input, or `None` when no
+            field was supplied or none survived the version gates.
         """
         widget: Dict[str, Any] = {}
+        readiness_supported = supports_agent_plan_readiness()
 
         if kwargs.get("agent_plan") is not None and supports_agent_plan_widget():
             widget["content"] = kwargs["agent_plan"]
 
-        if (
-            kwargs.get("readiness_score") is not None
-            and supports_agent_plan_readiness_score()
-        ):
+        if kwargs.get("readiness_score") is not None and readiness_supported:
             widget["readinessScore"] = kwargs["readiness_score"]
+
+        feedback = kwargs.get("readiness_score_feedback")
+        if feedback is not None and readiness_supported:
+            widget["readinessScoreFeedback"] = feedback
 
         return widget or None
 

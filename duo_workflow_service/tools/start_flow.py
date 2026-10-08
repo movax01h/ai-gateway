@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Annotated, Any, ClassVar, Literal, Optional, Type, Union
 from urllib.parse import unquote
 
@@ -32,12 +33,16 @@ FLOW_IDENTIFIER_MAP = {
 # FLOW_IDENTIFIER_MAP and handled on its own branch throughout.
 CATALOG_FLOW_NAME = "catalog_flow"
 
+_FORBIDDEN_BOILERPLATE_RE = re.compile(r"^403\s+forbidden\s*-?\s*", re.IGNORECASE)
+
 _DESCRIPTION_PREFIX = (
     "Delegate a task to a specialist GitLab agent that works "
-    "asynchronously over multiple steps. Always use this tool when the "
-    "user's request matches one of the agents below — specialist "
-    "agents are purpose-built for their domain and deliver better "
-    "outcomes than inline handling.\n"
+    "asynchronously over multiple steps. Prefer using this tool when the "
+    "user's request matches one of the agents below, unless the user "
+    "asks you to work directly. In that case, use your available tools "
+    "and do not refuse solely because a specialist flow exists. "
+    "Specialist agents are purpose-built for their domain and can "
+    "deliver better outcomes than inline handling.\n"
     "\n"
     "Available agents:\n"
 )
@@ -166,19 +171,31 @@ def _failure_detail(status_code: int, flow_name: str, body: Any) -> str:
     Returns:
         A reason suitable for both the LLM-facing message and the UI chat log.
     """
-    if status_code == 403:
-        # A 403 can name records the caller may not be able to see, so keep the
-        # fixed, permission-focused wording regardless of the body.
-        return _FORBIDDEN_FAILURE_DETAIL
-
     if status_code < 500:
         message = _extract_rails_message(body)
+        if status_code == 403 and message:
+            message = _strip_forbidden_boilerplate(message)
         if message:
             if flow_name == CATALOG_FLOW_NAME:
                 return f"{message} (flow ID: see ai_catalog_item_consumer_id)"
             return message
+        if status_code == 403:
+            # A bare 403 carries no reason (e.g. Rails rejecting a workflow
+            # without a project), so fall back to the fixed permissions
+            # wording rather than surfacing the boilerplate status line.
+            return _FORBIDDEN_FAILURE_DETAIL
 
     return _GENERIC_FAILURE_DETAIL
+
+
+def _strip_forbidden_boilerplate(message: str) -> Optional[str]:
+    """Strip the ``403 Forbidden[ - reason]`` prefix Rails' ``forbidden!`` adds.
+
+    Returns:
+        The remaining reason text, or None if only the boilerplate status line
+        was present (a bare 403).
+    """
+    return _FORBIDDEN_BOILERPLATE_RE.sub("", message, count=1).strip() or None
 
 
 class StartFlowError(ToolException):
@@ -767,9 +784,16 @@ class StartFlow(DuoBaseTool):
         ):
             detail = str(flow_dict.get("vulnerability_id", ""))
         elif flow_name == CATALOG_FLOW_NAME:
-            detail = flow_dict.get("goal") or str(
-                flow_dict.get("ai_catalog_item_consumer_id", "")
-            )
+            goal = flow_dict.get("goal")
+            if not goal:
+                # A catalog flow started without a goal falls back to its own
+                # description, leaving the consumer id as the only thing to show. That
+                # id is not the user's intent, and the "with goal" template below
+                # presented it as one -- a flow run from a slash command carries no
+                # goal, so it read as "with goal: 28".
+                consumer_id = flow_dict.get("ai_catalog_item_consumer_id", "")
+                return f"Starting flow {flow_name} (ID {consumer_id})"
+            detail = goal
         else:
             detail = str(flow_dict)
 

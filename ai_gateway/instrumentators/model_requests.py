@@ -148,8 +148,12 @@ class ModelRequestInstrumentator:
             streaming: bool,
             unit_primitive: Optional[GitLabUnitPrimitive] = None,
             internal_event_client: Optional[InternalEventsClient] = None,
+            model_vendor: str = "",
         ):
             self.model_provider = model_provider
+            # The company serving the model (e.g. fireworks_ai), which model_provider
+            # (the model client class, e.g. litellm) does not reveal.
+            self.model_vendor = model_vendor or model_provider
             self.labels = labels
             self.limits = limits
             self.error = False
@@ -367,6 +371,7 @@ class ModelRequestInstrumentator:
             if self.internal_event_client and self.unit_primitive:
                 additional_properties = InternalEventAdditionalProperties(
                     label="cache_details",
+                    model_vendor=self.model_vendor,
                     **token_cache_usage_data,
                     **internal_event_extra,
                 )
@@ -398,6 +403,7 @@ class ModelRequestInstrumentator:
                     "model_id": model,
                     "model_engine": self.model_provider,
                     "model_provider": self.model_provider,
+                    "model_vendor": self.model_vendor,
                     "prompt_tokens": usage["input_tokens"],
                     "completion_tokens": usage["output_tokens"],
                     "agent_name": agent_name,
@@ -429,10 +435,12 @@ class ModelRequestInstrumentator:
         model_name: str,
         limits: Optional[ModelLimits],
         model_provider: str = "",
+        model_vendor: str = "",
     ):
         self.labels = {"model_engine": model_engine, "model_name": model_name}
         self.limits = limits
         self.model_provider = model_provider
+        self.model_vendor = model_vendor
 
     @contextmanager
     def watch(self, stream=False, unit_primitive=None, internal_event_client=None):
@@ -443,6 +451,7 @@ class ModelRequestInstrumentator:
             streaming=stream,
             unit_primitive=unit_primitive,
             internal_event_client=internal_event_client,
+            model_vendor=self.model_vendor,
         )
         watcher.start()
         error: Optional[BaseException] = None

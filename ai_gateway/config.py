@@ -180,6 +180,7 @@ class ConfigInternalEvent(BaseModel):
     app_id: str = "gitlab_ai_gateway"
     namespace: str = "gl"
     endpoint: Optional[str] = None
+    api_key: Optional[SecretStr] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
 
@@ -189,6 +190,7 @@ class ConfigBillingEvent(BaseModel):
     app_id: str = "gitlab_ai_gateway-billing"
     namespace: str = "gl"
     endpoint: Optional[str] = None
+    api_key: Optional[SecretStr] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
 
@@ -205,6 +207,7 @@ class ConfigAuditEvent(BaseModel):
 class ConfigSnowplow(ConfigInternalEvent):
     enabled: bool = False
     endpoint: Optional[str] = None
+    api_key: Optional[SecretStr] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
 
@@ -421,7 +424,7 @@ class ConfigBedrockGuardrail(BaseModel):
         Annotated[
             str,
             Field(
-                pattern=r"^(|([1-9][0-9]{0,7})|(DRAFT))$",
+                pattern=r"^(([1-9][0-9]{0,7})|(DRAFT))$",
                 description="The guardrail version ('DRAFT' or a numeric string).",
             ),
         ]
@@ -642,7 +645,7 @@ class Config(BaseSettings):
         default=None,
         description=(
             "Bedrock guardrail configuration as a JSON string. "
-            "Set via AIGW_BEDROCK_GUARDRAIL_CONFIG_JSON. "
+            "Set via AIGW_BEDROCK_GUARDRAIL_CONFIG. "
             'Example: \'{"guardrailIdentifier": "abc123", "guardrailVersion": "1", "trace": "disabled"}\''
         ),
     )

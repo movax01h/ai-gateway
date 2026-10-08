@@ -2,14 +2,14 @@ import base64
 import json
 import zlib
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from langgraph.checkpoint.base import Checkpoint
 
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import checkpoint_decoder
-from duo_workflow_service.json_encoder.encoder import CustomEncoder
+from duo_workflow_service.json_encoder.encoder import dumps_checkpoint
 from lib.internal_events.event_enum import EventPropertyEnum
 
 STATUS_TO_EVENT_PROPERTY = {
@@ -63,23 +63,28 @@ def compress_checkpoint(data: Checkpoint) -> str:
     Returns:
         Base64-encoded compressed checkpoint string
     """
-    json_str = json.dumps(dict(data), cls=CustomEncoder)
+    json_str = dumps_checkpoint(dict(data))
     compressed = zlib.compress(json_str.encode("utf-8"))
     return base64.b64encode(compressed).decode("utf-8")
 
 
-def uncompress_checkpoint(compressed_data: str) -> dict:
-    """Uncompress compressed checkpoint data and decode using checkpoint_decoder.
+def uncompress_checkpoint(
+    compressed_data: str,
+    object_hook: Optional[Callable[[dict], Any]] = checkpoint_decoder,
+) -> dict:
+    """Uncompress compressed checkpoint data and decode it with ``object_hook``.
 
     Args:
         compressed_data: Base64-encoded zlib compressed string
+        object_hook: JSON object hook. Defaults to ``checkpoint_decoder``, which rebuilds messages and ``Send``
+            packets. Pass ``None`` to keep every object a plain dict.
 
     Returns:
-        Uncompressed checkpoint dictionary with decoded objects
+        Uncompressed checkpoint dictionary
     """
     decoded = base64.b64decode(compressed_data.encode("utf-8"))
     uncompressed = zlib.decompress(decoded)
-    return json.loads(uncompressed.decode("utf-8"), object_hook=checkpoint_decoder)
+    return json.loads(uncompressed.decode("utf-8"), object_hook=object_hook)
 
 
 def decode_gitlab_checkpoint_payload(checkpoint: Mapping[str, Any]) -> dict:

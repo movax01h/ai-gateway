@@ -95,7 +95,8 @@ class Outbox:
 
         # Log when a response has an unknown request ID so we can monitor clients' behavior.
         # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1122#note_2830605887
-        log.error(
+        # Both cases below are handled, so this is a warning rather than an error.
+        log.warning(
             "Request ID not found.",
             responseType=event.WhichOneof("response"),
             request_id=request_id,
@@ -184,6 +185,10 @@ class Outbox:
                 except asyncio.QueueEmpty:
                     # Queue is empty, exit loop
                     break
+
+                # `close()` queues this signal itself, so it is not a lost action.
+                if isinstance(item, OutboxSignal):
+                    continue
 
                 content = str(item)
 

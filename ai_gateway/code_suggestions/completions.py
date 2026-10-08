@@ -1,12 +1,15 @@
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional, Union
+from typing import Any, AsyncIterator, Callable, NamedTuple, Optional, Union
 
 import structlog
 from dependency_injector.providers import Factory
 from gitlab_cloud_connector import CloudConnectorUser
+from litellm.exceptions import MidStreamFallbackError, RateLimitError
+from prometheus_client import Counter
 
 from ai_gateway.code_suggestions.base import (
     CodeSuggestionsChunk,
+    CodeSuggestionsMetadata,
     CodeSuggestionsOutput,
     LanguageId,
     increment_lang_counter,
@@ -17,7 +20,7 @@ from ai_gateway.code_suggestions.processing import Prompt, TokenStrategyBase
 from ai_gateway.code_suggestions.processing.post.completions import PostProcessor
 from ai_gateway.code_suggestions.processing.pre import PromptBuilderPrefixBased
 from ai_gateway.code_suggestions.processing.typing import MetadataExtraInfo
-from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.models import ChatModelBase, Message
 from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.amazon_q import AmazonQModel
@@ -40,6 +43,28 @@ __all__ = ["CodeCompletions"]
 
 log = structlog.stdlib.get_logger("codesuggestions")
 
+FALLBACK_COUNTER = Counter(
+    "code_completion_fallbacks_total",
+    "Code completions served by the fallback model after a rate limit error",
+    ["primary_model", "fallback_model"],
+)
+
+
+class FallbackModel(NamedTuple):
+    model: TextGenModelBase
+    model_metadata: TypeModelMetadata
+    post_processor: Optional[Factory[PostProcessor]]
+
+
+FallbackFactory = Callable[[], FallbackModel]
+
+
+def _is_rate_limit(exc: BaseException) -> bool:
+    if isinstance(exc, MidStreamFallbackError):
+        return isinstance(exc.original_exception, RateLimitError)
+
+    return isinstance(exc, RateLimitError)
+
 
 class CodeCompletions:
     SUFFIX_RESERVED_PERCENT = 0.07
@@ -50,10 +75,12 @@ class CodeCompletions:
         tokenization_strategy: TokenStrategyBase,
         billing_event_service: BillingEventService,
         post_processor: Optional[Factory[PostProcessor]] = None,
-        model_metadata: Optional[ModelMetadata] = None,
+        model_metadata: Optional[TypeModelMetadata] = None,
+        fallback_factory: Optional[FallbackFactory] = None,
     ):
         self.model = model
         self.model_metadata = model_metadata
+        self.fallback_factory = fallback_factory
 
         self.post_processor = post_processor
         self.billing_event_service = billing_event_service
@@ -141,6 +168,44 @@ class CodeCompletions:
         )
         init_llm_operations()
 
+        try:
+            res = await self._generate(prompt, file_name, editor_lang, stream, **kwargs)
+        except (RateLimitError, MidStreamFallbackError) as exc:
+            if self.fallback_factory is None or not _is_rate_limit(exc):
+                raise
+
+            self._switch_to_fallback(self.fallback_factory)
+            res = await self._generate(prompt, file_name, editor_lang, stream, **kwargs)
+
+        if res:
+            if isinstance(res, AsyncIterator):
+                return self._handle_stream(res, user)
+
+            if isinstance(res, list):
+                res = res[0]
+
+            return await self._handle_sync(prompt, res, lang_id, user)
+
+        return CodeSuggestionsOutput(
+            text="",
+            score=0,
+            model_metadata=self._model_metadata(),
+            lang_id=lang_id,
+            metadata=CodeSuggestionsMetadata(
+                tokens_consumption_metadata=self._get_tokens_consumption_metadata(
+                    prompt
+                ),
+            ),
+        )
+
+    async def _generate(
+        self,
+        prompt: Prompt,
+        file_name: str,
+        editor_lang: Optional[str],
+        stream: bool,
+        **kwargs: Any,
+    ) -> Any:
         if isinstance(self.model, AgentModel):
             lang = (
                 editor_lang
@@ -164,7 +229,7 @@ class CodeCompletions:
         elif isinstance(self.model, AmazonQModel):
             if lang := (editor_lang or resolve_lang_name(file_name)):
                 res = await self.model.generate(
-                    prompt.prefix,
+                    prompt.get_normalized_prefix(),
                     prompt.suffix,
                     file_name,
                     lang.lower(),
@@ -175,26 +240,36 @@ class CodeCompletions:
                 res = None
         else:
             res = await self.model.generate(
-                prompt.prefix, prompt.suffix, stream, **kwargs
+                prompt.get_normalized_prefix(), prompt.suffix, stream, **kwargs
             )
 
-        if res:
-            if isinstance(res, AsyncIterator):
-                return self._handle_stream(res, user)
+        if isinstance(res, AsyncIterator):
+            return self._replay(await anext(res, None), res)
 
-            return await self._handle_sync(prompt, res, lang_id, user)
+        return res
 
-        return CodeSuggestionsOutput(
-            text="",
-            score=0,
-            model_metadata=self._model_metadata(),
-            lang_id=lang_id,
-            metadata=CodeSuggestionsOutput.Metadata(
-                tokens_consumption_metadata=self._get_tokens_consumption_metadata(
-                    prompt
-                ),
-            ),
+    def _switch_to_fallback(self, fallback_factory: FallbackFactory) -> None:
+        primary_model = self._model_metadata().name
+        self.model, self.model_metadata, self.post_processor = fallback_factory()
+
+        FALLBACK_COUNTER.labels(
+            primary_model=primary_model, fallback_model=self._model_metadata().name
+        ).inc()
+        log.warning(
+            "Code completion fell back after a rate limit error",
+            primary_model=primary_model,
+            fallback_model=self._model_metadata().name,
         )
+
+    @staticmethod
+    async def _replay(
+        first: Optional[TextGenModelChunk], rest: AsyncIterator[TextGenModelChunk]
+    ) -> AsyncIterator[TextGenModelChunk]:
+        if first is not None:
+            yield first
+
+        async for chunk in rest:
+            yield chunk
 
     async def _handle_stream(
         self,
@@ -238,7 +313,7 @@ class CodeCompletions:
             score=response.score,
             model_metadata=self._model_metadata(),
             lang_id=lang_id,
-            metadata=CodeSuggestionsOutput.Metadata(
+            metadata=CodeSuggestionsMetadata(
                 tokens_consumption_metadata=tokens_consumption_metadata,
             ),
         )
@@ -254,8 +329,8 @@ class CodeCompletions:
         self,
         response_text: str,
         prompt: Prompt,
-        lang_id: LanguageId,
-        score: float,
+        lang_id: LanguageId | None,
+        score: float | None,
         max_output_tokens_used: bool,
     ):
         if self.post_processor:
@@ -286,11 +361,10 @@ class CodeCompletions:
                 else 0
             )
 
+            reported_input_tokens = getattr(response.metadata, "input_tokens", None)
             input_tokens = (
-                response.metadata.input_tokens
-                if response.metadata
-                and isinstance(getattr(response.metadata, "input_tokens", None), int)
-                and response.metadata.input_tokens > 0
+                reported_input_tokens
+                if isinstance(reported_input_tokens, int) and reported_input_tokens > 0
                 else estimated_input_tokens
             )
 

@@ -120,6 +120,31 @@ def test_load_llm_definitions(selection_config):
     }
 
 
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [
+        ({"supports_vision": True}, True),
+        ({"supports_vision": False}, False),
+        ({}, None),
+    ],
+    ids=["declared-true", "declared-false", "absent"],
+)
+def test_supports_vision_reads_the_declared_value_or_none(declared, expected):
+    # Absent is a distinct state from false: it means "ask litellm's registry",
+    # while false means images are stripped before the request.
+    definition = ChatLiteLLMDefinition.model_validate(
+        {
+            "name": "Model",
+            "gitlab_identifier": "gitlab-model",
+            "max_context_tokens": 1000,
+            "params": {"model": "provider-model"},
+            **declared,
+        }
+    )
+
+    assert definition.supports_vision is expected
+
+
 @pytest.mark.usefixtures("mock_fs")
 def test_get_unit_primitive_config(selection_config):
     assert list(selection_config.get_unit_primitive_config()) == [
@@ -579,6 +604,25 @@ def test_default_model_entry_weight_all_or_none_validation():
 
 
 @pytest.mark.usefixtures("mock_fs")
+def test_default_model_entry_negative_weight_is_rejected():
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        DefaultModelEntry(identifier="gitlab-model-1", weight=-1)
+
+
+def test_default_model_entry_all_zero_weights_are_rejected():
+    with pytest.raises(
+        ValidationError, match="at least one default_models weight must be above 0"
+    ):
+        UnitPrimitiveConfig(
+            feature_setting="all_zero",
+            unit_primitives=["complete_code"],
+            default_models=[
+                DefaultModelEntry(identifier="gitlab-model-1", weight=0),
+                DefaultModelEntry(identifier="gitlab-model-2", weight=0),
+            ],
+        )
+
+
 def test_default_model_entry_no_weights_passes_validation():
     """UnitPrimitiveConfig is valid when no default_models entries have weights."""
     upc = UnitPrimitiveConfig(
@@ -1217,34 +1261,50 @@ def test_validate_rejects_tag_models_missing_from_models_yml(
         selection_config.validate()
 
 
+def test_tag_entry_rejects_removed_candidates_field(selection_config, write_tag_policy):
+    """`candidates` was removed; a leftover key must fail loudly rather than be ignored."""
+    write_tag_policy(
+        test_model_size={
+            "small": {"models": ["small-model"], "candidates": ["large-model"]}
+        }
+    )
+
+    with pytest.raises(ValueError, match="candidates"):
+        selection_config.get_unit_primitive_config_map()
+
+
 @pytest.mark.parametrize(
     ("goal", "expected"),
     [
         pytest.param(
-            "Fix the typo in the README", ("small", "typo"), id="small-keyword"
+            "Fix the typo in the README",
+            ("small", ["typo", "readme"]),
+            id="every-matched-keyword",
         ),
         pytest.param(
             "Plan the refactor of the auth module",
-            ("large", "refactor"),
+            ("large", ["refactor"]),
             id="large-keyword",
         ),
-        pytest.param("REFACTOR this", ("large", "refactor"), id="case-insensitive"),
+        pytest.param("REFACTOR this", ("large", ["refactor"]), id="case-insensitive"),
         pytest.param(
             "Refactor the parser and fix a typo",
-            ("large", "refactor"),
+            ("large", ["refactor"]),
             id="first-declared-tag-wins",
         ),
         pytest.param("Add pagination to the issues list", None, id="no-match"),
         pytest.param("", None, id="empty-goal"),
-        pytest.param("Fix two typos in the docs", ("small", "typo"), id="plural-form"),
-        pytest.param("Refactoring the parser", ("large", "refactor"), id="verb-form"),
+        pytest.param(
+            "Fix two typos in the docs", ("small", ["typo"]), id="plural-form"
+        ),
+        pytest.param("Refactoring the parser", ("large", ["refactor"]), id="verb-form"),
         pytest.param(
             "Renamed the helper for clarity",
-            ("small", "rename"),
+            ("small", ["rename"]),
             id="verb-form-e-final",
         ),
         pytest.param(
-            "Renaming the helpers", ("small", "rename"), id="progressive-e-final"
+            "Renaming the helpers", ("small", ["rename"]), id="progressive-e-final"
         ),
         pytest.param(
             "Improve the typography of the landing page",
@@ -1265,6 +1325,12 @@ def test_resolve_tag_for_goal(selection_config, write_tag_policy, goal, expected
     )
 
     assert selection_config.resolve_tag_for_goal("test_model_size", goal) == expected
+
+
+def test_resolve_tag_for_goal_without_keywords(selection_config, write_tag_policy):
+    write_tag_policy(test_model_size={"large": {"models": ["large-model"]}})
+
+    assert selection_config.resolve_tag_for_goal("test_model_size", "Refactor") is None
 
 
 def test_tag_entry_rejects_an_empty_model_list(selection_config, write_tag_policy):

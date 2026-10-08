@@ -2,6 +2,7 @@
 import asyncio
 import os
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, NoReturn, Optional
 from uuid import uuid4
@@ -84,6 +85,10 @@ from duo_workflow_service.gitlab.gitlab_api import (
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
+from duo_workflow_service.model_routing import (
+    route_default_model,
+    track_routing_decision,
+)
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.mcp_tools import (
     McpToolConfig,
@@ -146,6 +151,14 @@ class ToolAccessPolicies(BaseModel):
     allow: list[str] = []
     ask: list[str] = []
     deny: list[str] = []
+
+
+@dataclass(frozen=True)
+class GraphInvocation:
+    """The input and config one run of the compiled graph streams from."""
+
+    graph_input: Any
+    graph_config: RunnableConfig
 
 
 class AbstractWorkflow(ABC):
@@ -247,6 +260,10 @@ class AbstractWorkflow(ABC):
         self._preapproved_tools = preapproved_tools
         self._denied_tools: list[str] = []
         self._ask_tools: list[str] = []
+        # Admin per-tool `allow` verdicts from the JWT, kept apart from the client's
+        # own preapproved_tools so v1 flows honour governance without also adopting
+        # client-declared pre-approvals they never accepted before.
+        self._governance_allowed_tools: list[str] = []
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
         self._first_response_metric_recorded = False
@@ -354,8 +371,16 @@ class AbstractWorkflow(ABC):
             )
             self._first_response_metric_recorded = True
 
+    def _mcp_enabled(self) -> bool:
+        """Whether the root namespace allows MCP tools (``duo_workflow_mcp_enabled``).
+
+        When it does not, GitLab MCP server tools are withheld from the session, so callers must not assume they are
+        available even if Rails advertises them.
+        """
+        return bool(self._workflow_config.get("mcp_enabled", False))
+
     def _permitted_mcp_tools(self) -> list[McpToolConfig]:
-        if self._workflow_config.get("mcp_enabled", False):
+        if self._mcp_enabled():
             return self._mcp_tools
 
         if not strips_client_mcp_trust():
@@ -409,6 +434,7 @@ class AbstractWorkflow(ABC):
                     self._preapproved_tools = list(
                         set(policies.allow) - set(self._ask_tools)
                     )
+                    self._governance_allowed_tools = list(self._preapproved_tools)
                 if policies.deny:
                     self._denied_tools = list(
                         set(self._denied_tools) | set(policies.deny)
@@ -443,6 +469,7 @@ class AbstractWorkflow(ABC):
         )
         audit_collector = AuditEventCollector(
             client=audit_client,
+            workflow_id=self._workflow_id,
             buffer_size=self._audit_event_buffer_size,
             flush_interval_seconds=self._audit_event_flush_interval,
         )
@@ -556,6 +583,7 @@ class AbstractWorkflow(ABC):
                 allow_client_injected_mcp_tools=self._workflow_config.get(
                     "allow_client_injected_mcp_tools", False
                 ),
+                allowed_tools=self._governance_allowed_tools,
             )
 
             def on_gitlab_status_update(status: WorkflowStatusEventEnum):
@@ -635,18 +663,26 @@ class AbstractWorkflow(ABC):
                     )
                     status_event = WorkflowStatusEventEnum.START
 
+                await self._route_default_model(goal, status_event)
+
                 # Compile is CPU-bound process hence we're using a thread to avoid interrupting the gRPC server.
                 # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1468
                 # for more info.
                 compiled_graph = await asyncio.to_thread(
                     self._compile, goal, tools_registry, checkpointer
                 )
-                graph_input = await self.get_graph_input(
-                    goal, status_event, checkpoint_tuple
+                invocation = await self._resolve_graph_invocation(
+                    compiled_graph=compiled_graph,
+                    graph_config=graph_config,
+                    goal=goal,
+                    status_event=status_event,
+                    checkpoint_tuple=checkpoint_tuple,
                 )
+                # The failure handlers write through the config the graph ran with.
+                graph_config = invocation.graph_config
 
                 async for type, state in compiled_graph.astream(
-                    input=graph_input,
+                    input=invocation.graph_input,
                     config=graph_config,
                     stream_mode=["values", "messages", "updates"],
                 ):
@@ -853,6 +889,43 @@ class AbstractWorkflow(ABC):
         resolve to RESUME/START.
         """
         return None, WorkflowStatusEventEnum.RETRY
+
+    async def _route_default_model(self, goal: str, status_event: str) -> None:
+        # Route once, before the flow is built, so every turn uses the same model.
+        if status_event != WorkflowStatusEventEnum.START:
+            return
+        decision = await route_default_model(
+            goal,
+            self._http_client,
+            self._project,
+            self._additional_context,
+            self._user,
+            self._prompt_registry,
+        )
+        if decision:
+            track_routing_decision(
+                decision, self._workflow_id, self._internal_event_client
+            )
+
+    async def _resolve_graph_invocation(
+        self,
+        *,
+        compiled_graph: Any,
+        graph_config: RunnableConfig,
+        goal: str,
+        status_event: str,
+        checkpoint_tuple: Any,
+    ) -> GraphInvocation:
+        """Resolve what this run streams from, once the graph is compiled.
+
+        The default streams ``get_graph_input`` with ``graph_config`` unchanged. Override this to decide with the
+        compiled graph in hand, for example to read the checkpoint tip through ``aget_state``, or to point the run at
+        another checkpoint. An override hands the entries it does not handle to ``super()``, and derives any config it
+        returns from ``graph_config`` so the callbacks and the recursion limit carry over. The failure handlers receive
+        the returned config.
+        """
+        graph_input = await self.get_graph_input(goal, status_event, checkpoint_tuple)
+        return GraphInvocation(graph_input=graph_input, graph_config=graph_config)
 
     async def get_graph_input(
         self, goal: str, status_event: str, checkpoint_tuple: Any

@@ -139,6 +139,48 @@ class TestHumanInputComponent:
                 "test_human_input#fetch", router.route
             )
 
+    @pytest.mark.parametrize("interaction_type", ["approval", "input", "external"])
+    def test_attach_passes_interaction_type_as_request_type(
+        self, user, flow_type: GLReportingEventContext, interaction_type
+    ):
+        """Every accepted interaction_type reaches RequestNode as request_type."""
+        component = HumanInputComponent(
+            name="test_human_input",
+            sends_response_to="awesome_agent",
+            flow_id="test_flow",
+            flow_type=flow_type,
+            user=user,
+            message_template="Test message template",
+            interaction_type=interaction_type,
+        )
+
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.human_input.component.RequestNode"
+            ) as mock_request_node,
+            patch(
+                "duo_workflow_service.agent_platform.v1.components.human_input.component.FetchNode"
+            ),
+        ):
+            component.attach(Mock(), Mock())
+
+        assert mock_request_node.call_args[1]["request_type"] == interaction_type
+
+    def test_rejects_unknown_interaction_type(
+        self, user, flow_type: GLReportingEventContext
+    ):
+        """An interaction_type outside approval/input/external fails validation."""
+        with pytest.raises(ValueError, match="interaction_type"):
+            HumanInputComponent(
+                name="test_human_input",
+                sends_response_to="awesome_agent",
+                flow_id="test_flow",
+                flow_type=flow_type,
+                user=user,
+                message_template="Test message template",
+                interaction_type="elsewhere",  # type: ignore[arg-type]
+            )
+
     def test_attach_passes_default_cancelled_turn_key(
         self, user, flow_type: GLReportingEventContext
     ):

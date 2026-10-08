@@ -1,11 +1,15 @@
 import json
 from typing import Any, ClassVar, Optional, Type
+from urllib.parse import urlencode
 
 import structlog
 from langchain_core.tools import ToolException
 from packaging.version import Version
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    uncompress_checkpoint,
+)
 from duo_workflow_service.gitlab.gitlab_workflow_params import fetch_workflow_config
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
@@ -17,6 +21,10 @@ MAX_UI_CHAT_LOG_ENTRIES = 20
 # Maximum characters for tool_response strings in returned log entries.
 # Agent and user message content is not truncated.
 MAX_TOOL_RESPONSE_CHARS = 300
+
+# The channels _format_checkpoint_context reads. Rails versions without the
+# `channels` filter ignore it and return every channel.
+CHECKPOINT_CHANNELS = ("status", "goal", "context", "ui_chat_log")
 
 
 class GetSessionContextInput(BaseModel):
@@ -64,8 +72,15 @@ class GetSessionContext(DuoBaseTool):
     async def _execute(self, session_id: int, **_kwargs: Any) -> str:
         record = await fetch_workflow_config(self.gitlab_client, str(session_id))
 
+        query = urlencode(
+            [
+                ("per_page", 1),
+                *(("channels[]", channel) for channel in CHECKPOINT_CHANNELS),
+                ("accept_compressed", "true"),
+            ]
+        )
         response = await self.gitlab_client.aget(
-            path=f"/api/v4/ai/duo_workflows/workflows/{session_id}/checkpoints?per_page=1",
+            path=f"/api/v4/ai/duo_workflows/workflows/{session_id}/checkpoints?{query}",
             parse_json=True,
         )
 
@@ -73,7 +88,15 @@ class GetSessionContext(DuoBaseTool):
         if not checkpoints or len(checkpoints) == 0:
             raise ToolException("Unable to find checkpoint for this session")
 
-        context = self._format_checkpoint_context(checkpoints[0], session_id, record)
+        checkpoint = checkpoints[0]
+        if "compressed_checkpoint" in checkpoint:
+            # Plain dicts, as on the uncompressed path: a ToolMessage in
+            # ui_chat_log would make json.dumps fail.
+            checkpoint["checkpoint"] = uncompress_checkpoint(
+                checkpoint["compressed_checkpoint"], object_hook=None
+            )
+
+        context = self._format_checkpoint_context(checkpoint, session_id, record)
         return json.dumps(context)
 
     def format_display_message(
