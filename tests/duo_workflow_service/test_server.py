@@ -5572,6 +5572,50 @@ async def test_generate_token_keeps_binding_unrestricted_flows_for_any_caller(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("fake_restricted_model")
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_generate_token_refuses_restricted_flow_for_token_bound_to_other_flow(
+    mock_token_authority, mock_context
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_instance_user(extra={"flow_config_id": "developer"}))
+
+    with pytest.raises(grpc.RpcError):
+        await DuoWorkflowService().GenerateToken(
+            contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"),
+            mock_context,
+        )
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Caller token is not authorized for flow 'bl_security'",
+    )
+    mock_token_authority.return_value.encode.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_generate_token_binds_restricted_flow_for_token_bound_to_same_flow(
+    mock_token_authority, mock_context
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_instance_user(extra={"flow_config_id": "bl_security"}))
+
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"), mock_context
+    )
+
+    mock_context.abort.assert_not_called()
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["flow_config_id"] == "bl_security"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
 @pytest.mark.parametrize(
     ("flow_config_id", "header_realm", "expected_realm"),
     [

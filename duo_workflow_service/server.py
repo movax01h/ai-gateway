@@ -1203,6 +1203,18 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                         grpc.StatusCode.PERMISSION_DENIED,
                         f"Flow '{request.flow_config_id}' is only available on GitLab.com",
                     )
+                # A caller token already bound to a flow can't mint one for another flow.
+                caller_flow_config_id = (user.claims.extra or {}).get(
+                    FLOW_CONFIG_ID_CLAIM
+                )
+                if (
+                    caller_flow_config_id
+                    and caller_flow_config_id != request.flow_config_id
+                ):
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        f"Caller token is not authorized for flow '{request.flow_config_id}'",
+                    )
                 # The caller's signed realm claim is SaaS; don't trust the header here.
                 gitlab_realm = SAAS_REALM
             extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
