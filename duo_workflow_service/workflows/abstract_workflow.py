@@ -44,8 +44,8 @@ from duo_workflow_service.audit_events.collector import AuditEventCollector
 from duo_workflow_service.audit_events.context import audit_collector_context
 from duo_workflow_service.audit_events.event_types import SessionStartedEvent
 from duo_workflow_service.checkpointer.content_retention import (
-    METADATA_RETENTION,
     ContentRetention,
+    is_metadata_only,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
@@ -297,7 +297,7 @@ class AbstractWorkflow(ABC):
             # By default, tracing follows extended_logging. Only disable if LANGSMITH_TRACING_V2 is explicitly "false"
             langsmith_tracing_v2_env = os.getenv("LANGSMITH_TRACING_V2", "").lower()
             # A metadata-retention flow sends no trace and logs no LLM request body, whatever the logging settings.
-            metadata_only = self._content_retention() == METADATA_RETENTION
+            metadata_only = is_metadata_only(self._content_retention())
             tracing_enabled = (
                 extended_logging
                 and (langsmith_tracing_v2_env != "false")
