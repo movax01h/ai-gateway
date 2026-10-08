@@ -196,8 +196,17 @@ def strip_image_payloads(content: Any) -> Any:
 
 
 class ImageLimitKind(StrEnum):
+    """Why the provider rejected a request that carried images.
+
+    ``single_image`` and ``request`` are read from Anthropic's wording and pick the scope
+    order and the note for the model. ``unclassified`` is every other 400 or 413: the
+    rejection still recovers, since the newest images are the only unproven content in
+    the request, but the note cannot name a cause.
+    """
+
     SINGLE_IMAGE = "single_image"
     REQUEST = "request"
+    UNCLASSIFIED = "unclassified"
 
 
 class ImageScope(StrEnum):
@@ -206,14 +215,18 @@ class ImageScope(StrEnum):
 
 
 def image_limit_kind(status_code: int, message: str) -> Optional[ImageLimitKind]:
-    """``single_image`` when Anthropic names one oversized image, ``request`` for any other image-limit rejection.
+    """Classify a provider rejection, or return ``None`` for a status the image fallback does not cover.
 
-    Anthropic names the rejected block ``...image.source.base64.data``; other providers' wording is unverified.
+    Only the wording decides between the kinds, never whether to recover: a 400 or 413
+    of any wording is ``unclassified`` at worst. Anthropic names the rejected block
+    ``...image.source.base64.data`` for size errors.
     """
     if status_code == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
         return ImageLimitKind.REQUEST
-    if status_code != HTTPStatus.BAD_REQUEST or "image.source.base64" not in message:
+    if status_code != HTTPStatus.BAD_REQUEST:
         return None
+    if "image.source.base64" not in message:
+        return ImageLimitKind.UNCLASSIFIED
     if "max allowed size" in message and "many-image" not in message:
         return ImageLimitKind.SINGLE_IMAGE
     return ImageLimitKind.REQUEST
