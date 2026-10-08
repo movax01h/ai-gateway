@@ -54,6 +54,7 @@ FROM base-image AS final
 RUN apt-get update && apt-get install -y --no-install-recommends \
     parallel \
     curl \
+    && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd aigateway
