@@ -9,7 +9,7 @@ import os
 import re
 import signal
 from itertools import chain
-from typing import AsyncIterable, AsyncIterator, Optional, cast, override
+from typing import Any, AsyncIterable, AsyncIterator, Optional, cast, override
 
 import aiohttp
 import grpc
@@ -178,6 +178,33 @@ WORKFLOW_TASK_NAME_PREFIX = "workflow:"
 DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S = 3.0
 # Cloud Run sends SIGKILL 10s after SIGTERM; drain plus the gRPC grace period must finish before that.
 DEFAULT_SHUTDOWN_KILL_DEADLINE_S = 10.0
+
+
+_WORKFLOW_ID_FORMS = re.compile(
+    r"(?:#|gid://gitlab/Ai::DuoWorkflows::Workflow/)?([1-9][0-9]{0,19})"
+)
+
+
+def _workflow_id_number(value: Any) -> Optional[int]:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and (match := _WORKFLOW_ID_FORMS.fullmatch(value)):
+        return int(match.group(1))
+    return None
+
+
+def _workflow_binding_matches(bound: Any, requested: str) -> bool:
+    """Compare a token's bound workflow id with the one the client asked to run.
+
+    Only a plain id, a `#`-prefixed id or a workflow global id is accepted, matched in full. Anything else, or a bound
+    id that is not positive, is a mismatch.
+    """
+    bound_id = _workflow_id_number(bound)
+    return (
+        bound_id is not None
+        and bound_id > 0
+        and bound_id == _workflow_id_number(requested)
+    )
 
 
 def _flow_config_digest(flow_config: Struct) -> str:
@@ -489,6 +516,24 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 await context.abort(
                     grpc.StatusCode.PERMISSION_DENIED,
                     "Workflow token is not authorized for the supplied flow config",
+                )
+
+        if (
+            not user.is_debug
+            and claims_extra is not None
+            and WORKFLOW_ID_CLAIM in claims_extra
+        ):
+            if not _workflow_binding_matches(
+                claims_extra[WORKFLOW_ID_CLAIM], start_req.workflowID
+            ):
+                log.warning(
+                    "Workflow token bound to a different workflow",
+                    bound_workflow_id=str(claims_extra[WORKFLOW_ID_CLAIM]),
+                    requested_workflow_id=start_req.workflowID[:64],
+                )
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    "Workflow token is not authorized for the requested workflow",
                 )
 
         workflow_definition = map_workflow_definition(
