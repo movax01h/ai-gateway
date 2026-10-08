@@ -1633,6 +1633,43 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `security_review 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> check_existing_review;
+    check_existing_review(check_existing_review<br>#91;DeterministicStepComponent#93;);
+    apply_triggered_label(apply_triggered_label<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_data(fetch_mr_data<br>#91;DeterministicStepComponent#93;);
+    build_review_context(build_review_context<br>#91;AgentComponent#93;);
+    prescan_codebase(prescan_codebase<br>#91;AgentComponent#93;);
+    perform_security_review(perform_security_review<br>#91;AgentComponent#93;);
+    validate_and_publish(validate_and_publish<br>#91;AgentComponent#93;);
+    apply_completed_label(apply_completed_label<br>#91;DeterministicStepComponent#93;);
+    respond_to_comment(respond_to_comment<br>#91;AgentComponent#93;);
+    check_existing_review -.->|"mention"| respond_to_comment;
+    check_existing_review -.->|"default_route"| apply_triggered_label;
+    apply_triggered_label --> fetch_mr_data;
+    fetch_mr_data -.->|"success"| build_review_context;
+    fetch_mr_data -.->|"default_route"| abort;
+    build_review_context --> prescan_codebase;
+    prescan_codebase --> perform_security_review;
+    perform_security_review --> validate_and_publish;
+    validate_and_publish --> apply_completed_label;
+    apply_completed_label --> __end__;
+    respond_to_comment --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `slack_assistant 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
