@@ -234,13 +234,18 @@ class TestDeepCodeReviewConfig:
         assert schema.model_fields["previous_findings"].is_required() is False
 
     def test_publish_confidence_gate_is_a_literal(self):
-        """The reviewer never self-censors; the volume/precision operating point lives in config, where it is logged and
-        counted."""
+        """The reviewer still reports every finding; the volume/precision operating point lives in config, where it is
+        logged and counted.
+
+        The reviewer gets the same value so its summary leaves out the findings the gate drops.
+        """
         components = self._components()
         gate = self._input(components["publish_review"], "min_confidence")
+        reviewer = self._input(components["review"], "min_confidence")
 
         assert gate["from"] == "4"
         assert gate["literal"] is True
+        assert reviewer == gate
 
 
 def test_1_0_0_reads_the_merge_request_from_the_resource_context():

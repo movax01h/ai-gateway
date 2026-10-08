@@ -82,6 +82,10 @@ components:
       - from: "context:inputs.code_review_context.last_reviewed_head_sha"
         as: "last_reviewed_head_sha"
         optional: true
+      # The publish step reuses this anchor, so the summary rule and the gate share one threshold.
+      - from: &min_confidence "4"
+        as: "min_confidence"
+        literal: true
     toolset:
       # The workload checks the repository out at this merge request's head, so
       # these read local disk instead of a round trip per file.
@@ -123,7 +127,7 @@ components:
       - from: "context:fetch_existing_discussions.tool_responses"
         as: "existing_discussions"
         optional: true
-      - from: "4"
+      - from: *min_confidence
         as: "min_confidence"
         literal: true
     ui_log_events:

@@ -71,7 +71,7 @@
         },
         "summary": {
             "type": "string",
-            "description": "Your review summary, in the first person. Open with your verdict on the change in one sentence, then name the kinds of issues you raised and roughly how much work they take to fix. If there were existing discussions, say in one sentence what was fixed since your last review and what still stands. When `findings` is empty, instead give 3-5 short bullets (each starting with `- `), each naming one thing you checked and what you found. Name what you checked, not how you checked it. Leave out finding counts and per-severity tallies: they are computed and rendered separately."
+            "description": "Your review summary, in the first person, written after every finding has its score. Findings below the publishing threshold in your instructions are never shown to the author: leave them out completely, as if you had not reported them, and never call anything low-confidence. Open with your verdict on the change in one sentence, then name the kinds of issues you raised and roughly how much work they take to fix. If there were existing discussions, say in one sentence what was fixed since your last review and what still stands. When `findings` is empty or no finding reaches the threshold, instead give 3-5 short bullets (each starting with `- `), each naming one thing you checked and what you found. Name what you checked, not how you checked it. Leave out finding counts and per-severity tallies: they are computed and rendered separately."
         },
         "previous_findings": {
             "type": "array",
