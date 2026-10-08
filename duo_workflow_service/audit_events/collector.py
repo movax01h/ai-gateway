@@ -7,8 +7,8 @@ import structlog
 from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.event_types import AuditEvent
 from duo_workflow_service.checkpointer.content_retention import (
-    METADATA_RETENTION,
     ContentRetention,
+    is_metadata_only,
 )
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
@@ -90,7 +90,7 @@ class AuditEventCollector:
     ):
         self._client = client
         self._workflow_id = workflow_id
-        self._metadata_only = content_retention == METADATA_RETENTION
+        self._metadata_only = is_metadata_only(content_retention)
         self._buffer: list[AuditEvent] = []
         self._buffer_bytes: int = 0
         self._buffer_size = buffer_size

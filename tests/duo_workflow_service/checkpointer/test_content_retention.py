@@ -14,6 +14,7 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig as V1FlowConfig,
 )
 from duo_workflow_service.checkpointer.content_retention import (
+    is_metadata_only,
     reduce_ui_chat_log,
     reduce_ui_chat_log_entry,
 )
@@ -168,6 +169,14 @@ def workflow_config_fixture():
 def checkpointer_fixture(http_client, workflow_id, workflow_type, workflow_config):
     # Built exactly as a metadata-retention flow builds it: no retention argument.
     return GitLabWorkflow(http_client, workflow_id, workflow_type, workflow_config)
+
+
+@pytest.mark.parametrize(
+    ("content_retention", "expected"),
+    [("metadata", True), ("full", False), (None, False)],
+)
+def test_is_metadata_only(content_retention, expected):
+    assert is_metadata_only(content_retention) is expected
 
 
 class TestReduction:

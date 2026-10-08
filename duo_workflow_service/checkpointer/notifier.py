@@ -12,8 +12,8 @@ from duo_workflow_service.agent_platform.node_naming import component_name_from_
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import UserOutputDisplayedEvent
 from duo_workflow_service.checkpointer.content_retention import (
-    METADATA_RETENTION,
     ContentRetention,
+    is_metadata_only,
     reduce_ui_chat_log,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow import (
@@ -134,7 +134,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
     ):
         self.outbox = outbox
         self.goal = goal
-        self._metadata_only = content_retention == METADATA_RETENTION
+        self._metadata_only = is_metadata_only(content_retention)
         self._workflow_id = workflow_id
         self.ui_chat_log: list[UiChatLog] = []
         self.status = WorkflowStatusEnum.NOT_STARTED
