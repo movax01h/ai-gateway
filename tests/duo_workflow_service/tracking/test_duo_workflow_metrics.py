@@ -516,10 +516,18 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 labels_result_mock.inc.assert_called_once_with(amount)
 
     def test_count_audit_events_dropped_per_event(self):
-        for reason, amount in [
-            ("retries_exhausted", 4),
-            ("version_unsupported", 7),
-            ("http_error", 2),
+        # Batch-level reasons leave event_type/field at their defaults; event_too_large
+        # carries the identified event's type and oversized field.
+        for reason, kwargs, expected_labels, amount in [
+            ("retries_exhausted", {}, {"event_type": "unknown", "field": "none"}, 4),
+            ("version_unsupported", {}, {"event_type": "unknown", "field": "none"}, 7),
+            ("http_error", {}, {"event_type": "unknown", "field": "none"}, 2),
+            (
+                "event_too_large",
+                {"event_type": "ai_llm_input_sent", "field": "prompt_content"},
+                {"event_type": "ai_llm_input_sent", "field": "prompt_content"},
+                1,
+            ),
         ]:
             with self.subTest(reason=reason):
                 labels_mock = cast(
@@ -529,9 +537,11 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 labels_result_mock = MagicMock()
                 labels_mock.return_value = labels_result_mock
 
-                self.metrics.count_audit_events_dropped(reason=reason, amount=amount)
+                self.metrics.count_audit_events_dropped(
+                    reason=reason, amount=amount, **kwargs
+                )
 
-                labels_mock.assert_called_once_with(reason=reason)
+                labels_mock.assert_called_once_with(reason=reason, **expected_labels)
                 labels_result_mock.inc.assert_called_once_with(amount)
 
     def test_count_audit_events_auto_flush_skipped(self):

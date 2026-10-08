@@ -236,7 +236,7 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
         self.audit_events_dropped_counter = Counter(
             "duo_workflow_audit_events_dropped_total",
             "Count of audit events dropped before delivery",
-            ["reason"],
+            ["reason", "event_type", "field"],
             registry=registry,
         )
 
@@ -493,7 +493,11 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
         self.audit_events_sent_counter.labels(result=result).inc(amount)
 
     def count_audit_events_dropped(
-        self, reason: str = "unknown", amount: int = 1
+        self,
+        reason: str = "unknown",
+        event_type: str = "unknown",
+        field: str = "none",
+        amount: int = 1,
     ) -> None:
         """Increment the audit events dropped counter.
 
@@ -502,18 +506,26 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
                 ``"http_error"`` (non-retryable HTTP status), ``"retries_exhausted"``,
                 ``"version_unsupported"``, ``"event_too_large"`` (a single event
                 exceeds the size cap), ``"cancelled"`` (final flush was cancelled).
+            event_type: Type of the dropped event. Set for ``event_too_large``, which
+                drops one identified event; ``"unknown"`` for batch-level drops that
+                span mixed event types.
+            field: Name of the oversized field. Set for ``event_too_large``; ``"none"``
+                for reasons not attributable to a single field.
             amount: Number of individual events dropped.
         """
-        self.audit_events_dropped_counter.labels(reason=reason).inc(amount)
+        self.audit_events_dropped_counter.labels(
+            reason=reason, event_type=event_type, field=field
+        ).inc(amount)
 
     def count_audit_events_truncated(
-        self, event_type: str = "unknown", field: str = "unknown"
+        self, event_type: str = "unknown", field: str = "none"
     ) -> None:
         """Increment the audit events truncated counter.
 
         Args:
             event_type: Type of the truncated audit event.
-            field: Name of the excerpted field.
+            field: Name of the excerpted field. Shares the ``"none"`` sentinel with
+                the dropped counter for consistency; callers always pass a real field.
         """
         self.audit_events_truncated_counter.labels(
             event_type=event_type, field=field
