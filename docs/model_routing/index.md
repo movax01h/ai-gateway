@@ -342,14 +342,16 @@ flowchart LR
     A[Always-large run<br/>Sonnet 4.6, done 2026-07-21] --> G
     B[Always-small run<br/>Haiku 4.5, done 2026-07-21] --> G
     C[Policy-driven pass<br/>policy picks per task] --> G
-    G{20% cheaper at<br/>evaluator-score parity?}
+    G{Cheaper at<br/>evaluator-score parity?}
     G -- yes --> H[Publish the scorecard,<br/>enable the flag]
     H --> I[19.5: flag on by default]
     G -- no --> J[Design rejected,<br/>numbers attached]
 ```
 
-The gate is unchanged from #2599: a routed policy ships only if it cuts token cost by 20% or more
-at evaluator-score parity with always-large on the holdout. Every run is pinned to an exact build,
+The gate follows
+[ai-assist#2599](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2599):
+a routed policy ships only if it cuts token cost at evaluator-score parity with always-large on
+the holdout. Every run is pinned to an exact build,
 `gl_commit`, `aigw_commit`, and `cef_docker_tag`, per the CEF
 [advanced usage guide](https://gitlab.com/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/prompt-library/-/blob/main/doc/server/advanced_usage.md).
 Each policy change therefore has a reproducible before and after, rather than one pass-or-fail

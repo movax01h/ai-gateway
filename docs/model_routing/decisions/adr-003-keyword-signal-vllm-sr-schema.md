@@ -32,7 +32,7 @@ not an alternative to it. What the RFC leaves open is what a decision record has
 where the signal lives and what shape the policy takes, and that is what this ADR settles. The
 RFC's own open action item, the
 [cost benefit ratio](https://gitlab.com/gitlab-org/gitlab/-/work_items/604084#how-to-build-it--three-options),
-is the number the 20% gate produces, so the evidence flows back the other way.
+is the number the evaluation gate produces, so the evidence flows back the other way.
 
 ## Decision
 
@@ -65,8 +65,8 @@ models_for_tags:
 - Keyword lists are reviewable data in a merge request, and they are routing hints, never a
   security boundary.
 - The decision costs a regex pass: no model call, no network call, identical on every install.
-- Learned signals are deferred until the 20% gate shows keyword rules leaving savings or quality
-  on the table.
+- Learned signals are deferred until the evaluation gate shows keyword rules leaving savings or
+  quality on the table.
 
 ## Alternatives considered
 
@@ -81,7 +81,7 @@ models_for_tags:
 - Learned complexity or embedding signals: could catch complexity that surface wording never
   signals, where a keyword list misses the goal's real shape. Rejected for v1 because they need an
   embedding runtime and calibration against labeled traffic, adding a dependency to every install
-  for a gain the 20% gate hasn't shown yet.
+  for a gain the evaluation gate hasn't shown yet.
 - LLM pre-flight classifier (Option B in
   [`gitlab-org/gitlab#604084`](https://gitlab.com/gitlab-org/gitlab/-/work_items/604084)): a quick
   classify step inside the flow, reacting per request instead of matching a fixed list, at the
