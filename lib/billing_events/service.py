@@ -115,7 +115,7 @@ class BillingEventService:
         llm_ops: list[LLMOperation] | None = None,
         tool_execs: ToolExecutions | None = None,
         orbit_called: bool = False,
-    ) -> None:
+    ) -> bool:
         """Track billing for a workflow execution with LLM operation metadata.
 
         LLM operations are retrieved in priority order:
@@ -137,6 +137,10 @@ class BillingEventService:
                 for new implementations.
             tool_execs: Optional explicit tool names to track.
             orbit_called: Whether any Orbit tools were called during the workflow session.
+
+        Returns:
+            True if the billing event was tracked, False if the client skipped it (for example, because billing
+            events are disabled).
 
         Raises:
             ValueError: If no LLM operations are available from any source
@@ -166,7 +170,7 @@ class BillingEventService:
         if workflow_id:
             metadata["workflow_id"] = workflow_id
 
-        self.client.track_billing_event(
+        return self.client.track_billing_event(
             user,
             event,
             category,

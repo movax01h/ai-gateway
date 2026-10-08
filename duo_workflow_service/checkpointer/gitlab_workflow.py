@@ -1061,7 +1061,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             try:
                 user: CloudConnectorUser = current_user.get()
                 tool_executions = get_tool_executions() or []
-                self._billing_event_service.track_billing(
+                tracked = self._billing_event_service.track_billing(
                     user,
                     self._workflow_type,
                     workflow_id=self._workflow_id,
@@ -1073,9 +1073,11 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     tool_execs=tool_executions,
                     orbit_called=self._orbit_called,
                 )
-                self._logger.info(
-                    "Successfully sent billing event for workflow %s", self._workflow_id
-                )
+                if tracked:
+                    self._logger.info(
+                        "Successfully sent billing event for workflow %s",
+                        self._workflow_id,
+                    )
             except Exception as e:
                 log_exception(
                     e,

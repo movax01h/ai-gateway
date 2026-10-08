@@ -157,7 +157,7 @@ class BillingEventsClient:
         unit_of_measure: str = "tokens",
         quantity: float = 1.0,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    ) -> bool:
         """Send billing event to Data Insights Platform.
 
         Args:
@@ -169,16 +169,21 @@ class BillingEventsClient:
                 'request'). Defaults to 'tokens'.
             quantity: Quantity of usage for this record. Must be greater than 0. Defaults to 1.0.
             metadata: Optional dictionary containing additional key-value pairs for the billing event context.
+
+        Returns:
+            True if the event was handed to the Snowplow tracker, False if it was skipped (billing events disabled or
+            invalid quantity) or the Snowplow call failed. A failure in the follow-up internal analytics event does not
+            change the result, because the billing event has already been sent by then.
         """
         if not self.enabled:
             self._logger.info("Billing events disabled")
-            return
+            return False
 
         self._logger.info("Tracking billing event", event_type=event.value)
 
         if quantity <= 0:
             self._logger.warning("Invalid quantity", quantity=quantity)
-            return
+            return False
 
         internal_context: EventContext = current_event_context.get()
 
@@ -250,7 +255,16 @@ class BillingEventsClient:
                 "Successfully called snowplow_tracker.track()",
                 event_id=event_id,
             )
+        except Exception as e:
+            self._logger.error(
+                "Failed to send billing event",
+                error=str(e),
+            )
+            return False
 
+        # The billing event has been sent at this point. The internal analytics event is best-effort and must not
+        # affect the result, otherwise a caller retrying on False could bill twice.
+        try:
             additional_properties = InternalEventAdditionalProperties(
                 label=event_id,
                 property=event.value,
@@ -267,6 +281,9 @@ class BillingEventsClient:
             )
         except Exception as e:
             self._logger.error(
-                "Failed to send billing event",
+                "Failed to send internal event for billing event",
+                event_id=event_id,
                 error=str(e),
             )
+
+        return True

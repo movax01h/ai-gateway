@@ -244,7 +244,7 @@ class TestBillingEventsClient:
             "organization_id": kwargs.get("organization_id"),
         }
 
-        client.track_billing_event(
+        tracked = client.track_billing_event(
             user=user,
             event=event,
             unit_of_measure=unit_of_measure,
@@ -253,6 +253,7 @@ class TestBillingEventsClient:
             category=category,
         )
 
+        assert tracked is True
         mock_dependencies["track"].assert_called_once()
         mock_dependencies["structured_event_init"].assert_called_once()
 
@@ -278,7 +279,7 @@ class TestBillingEventsClient:
         assert not hasattr(client, "snowplow_tracker")
 
         try:
-            client.track_billing_event(
+            tracked = client.track_billing_event(
                 user=user,
                 event=BillingEvent.AIGW_PROXY_USE,
                 category=__name__,
@@ -288,9 +289,11 @@ class TestBillingEventsClient:
         except Exception as e:
             pytest.fail(f"Disabled client raised an unexpected exception: {e}")
 
+        assert tracked is False
+
     def test_track_billing_event_negative_quantity(self, client, user):
         with mock.patch.object(client.snowplow_tracker, "track") as mock_track:
-            client.track_billing_event(
+            tracked = client.track_billing_event(
                 user=user,
                 event=BillingEvent.AIGW_PROXY_USE,
                 category=__name__,
@@ -298,6 +301,7 @@ class TestBillingEventsClient:
                 quantity=-100.0,
             )
             mock_track.assert_not_called()
+            assert tracked is False
 
     def test_track_billing_event_with_empty_metadata(
         self, client, user, mock_dependencies
@@ -471,7 +475,7 @@ class TestBillingEventsClient:
             mock_track.side_effect = Exception("Network error")
 
             try:
-                client.track_billing_event(
+                tracked = client.track_billing_event(
                     user=user,
                     event=BillingEvent.AIGW_PROXY_USE,
                     category=__name__,
@@ -480,6 +484,33 @@ class TestBillingEventsClient:
                 )
             except Exception as e:
                 pytest.fail(f"Failed to send billing event: {e}")
+
+            assert tracked is False
+
+    def test_track_billing_event_internal_event_exception(
+        self, client, user, mock_dependencies
+    ):
+        """Test that a failure in the internal analytics event still reports the billing event as tracked, since the
+        Snowplow billing event was already sent."""
+        current_event_context.set(EventContext())
+        client.internal_event_client.track_event.side_effect = Exception(
+            "Internal events down"
+        )
+
+        try:
+            tracked = client.track_billing_event(
+                user=user,
+                event=BillingEvent.AIGW_PROXY_USE,
+                category=__name__,
+                unit_of_measure="tokens",
+                quantity=100.0,
+            )
+        except Exception as e:
+            pytest.fail(f"Internal event failure leaked out: {e}")
+
+        assert tracked is True
+        mock_dependencies["track"].assert_called_once()
+        client.internal_event_client.track_event.assert_called_once()
 
     @pytest.mark.usefixtures("mock_dependencies")
     def test_internal_events_client_track_event_called_with_correct_parameters(

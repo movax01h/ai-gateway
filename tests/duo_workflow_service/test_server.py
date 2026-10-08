@@ -34,6 +34,7 @@ from litellm.exceptions import (
 from packaging.version import Version
 from pydantic import BaseModel, model_validator
 from pydantic import ValidationError as PydanticValidationError
+from structlog.testing import capture_logs
 
 from ai_gateway.config import (
     Config,
@@ -3373,6 +3374,55 @@ async def test_track_self_hosted_execute_workflow_billing_event(
             "orbit_called": False,
         },
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tracked", "expected_success_logs"),
+    [(True, 1), (False, 0)],
+)
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_logs_success_only_when_tracked(
+    _mock_container,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+    tracked,
+    expected_success_logs,
+):
+    """The success log is only emitted when the billing event was actually tracked, e.g. not when billing events are
+    disabled."""
+    auth_user.can = MagicMock(return_value=True)
+    billing_event_client.track_billing_event.return_value = tracked
+
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
+        yield contract_pb2.TrackSelfHostedClientEvent(
+            requestID="test-req-id",
+            workflowID="#1337",
+            featureQualifiedName="test_feature",
+            featureAiCatalogItem=True,
+        )
+
+    with capture_logs() as cap_logs:
+        result = servicer.TrackSelfHostedExecuteWorkflow(
+            mock_request_iterator(),
+            mock_context,
+            billing_service=billing_event_service,
+        )
+        actions = [action async for action in result]
+
+    assert [a.requestID for a in actions] == ["test-req-id"]
+    billing_event_client.track_billing_event.assert_called_once()
+    success_logs = [
+        log
+        for log in cap_logs
+        if log["event"] == "Successfully sent billing event for self-hosted LLM auth"
+    ]
+    assert len(success_logs) == expected_success_logs
 
 
 @pytest.mark.asyncio
