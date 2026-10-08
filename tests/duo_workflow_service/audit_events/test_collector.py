@@ -385,7 +385,10 @@ class TestByteBasedFlush:
             collector.capture(_sized_llm_event(5000))
 
         mock_metrics.count_audit_events_dropped.assert_called_once_with(
-            reason="event_too_large", amount=1
+            reason="event_too_large",
+            event_type="ai_llm_input_sent",
+            field="prompt_content",
+            amount=1,
         )
         mock_metrics.count_audit_events_captured.assert_not_called()
         assert len(collector._buffer) == 0

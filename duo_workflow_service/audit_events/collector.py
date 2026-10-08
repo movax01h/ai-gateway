@@ -69,7 +69,10 @@ class AuditEventCollector:
                 largest_field_bytes=largest_field_bytes,
             )
             duo_workflow_metrics.count_audit_events_dropped(
-                reason="event_too_large", amount=1
+                reason="event_too_large",
+                event_type=event.event_type.value,
+                field=largest_field or "none",
+                amount=1,
             )
             return
 
