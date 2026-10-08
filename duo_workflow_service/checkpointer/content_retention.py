@@ -13,6 +13,11 @@ ContentRetention = Literal["full", "metadata"]
 METADATA_RETENTION: ContentRetention = "metadata"
 
 
+def is_metadata_only(content_retention: Optional[str]) -> bool:
+    """Whether a flow with this ``content_retention`` keeps only the metadata of its run."""
+    return content_retention == METADATA_RETENTION
+
+
 # The only chat-log fields kept per entry.
 _KEPT_CHAT_LOG_FIELDS = (
     "message_type",
