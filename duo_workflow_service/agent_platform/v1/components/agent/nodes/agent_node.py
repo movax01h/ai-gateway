@@ -302,6 +302,18 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         "If the user needs it read, ask for a smaller copy."
     )
 
+    _IMAGE_REJECTED_SEEN_MESSAGE = (
+        "Older images were removed because the provider rejected the request "
+        "while they were in it. Rely on what you noted about them."
+    )
+
+    _IMAGE_REJECTED_LATEST_MESSAGE = (
+        "The images from the latest step were removed because the provider "
+        "rejected the request while they were in it. Reading them again will fail "
+        "the same way. If the user needs one read, ask for a smaller or re-saved "
+        "copy of the file."
+    )
+
     _MAX_IMAGE_LIMIT_RETRIES: int = 2
     # Consecutive text-only turns in schema mode under "auto" before the wrap-up is sent,
     # independent of max_cycles; a text-only reply to that wrap-up raises AgentStuckError.
@@ -804,8 +816,13 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     def _without_rejected_images(
         self, history: list, status_code: int, message: str, retries: int
     ) -> Optional[list]:
-        """Drop the images the model already answered first, or the current round's first when the provider names one
-        oversized image, which can only be new; then whatever is left.
+        """Retry a 400 or 413 without the images, whatever the provider's wording.
+
+        The newest images are the only unproven content in the request, so they go first
+        unless Anthropic names a many-image limit, which the images the model already
+        answered trip. The wording only picks the order and the note; a reworded error
+        degrades the note, not the session. A rejection unrelated to the images costs at
+        most two more requests before it surfaces, and only while images are live.
 
         The change lands in the saved history: one cache rewrite on the failed request, none after.
         """
@@ -813,9 +830,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         if kind is None or retries >= self._MAX_IMAGE_LIMIT_RETRIES:
             return None
         preferred = (
-            ImageScope.CURRENT
-            if kind is ImageLimitKind.SINGLE_IMAGE
-            else ImageScope.SEEN
+            ImageScope.SEEN if kind is ImageLimitKind.REQUEST else ImageScope.CURRENT
         )
         # The kind can change between attempts: once the seen images are gone the
         # request is under the many-image threshold and the per-image rule names the
@@ -827,7 +842,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         else:
             return None
         log.warning(
-            "Provider rejected the request over its image limit; retrying without images",
+            "Provider rejected a request with images; retrying without them",
             agent=self.name,
             status_code=status_code,
             kind=kind,
@@ -846,6 +861,12 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     def _image_limit_note(
         self, scope: ImageScope, kind: ImageLimitKind, message: str
     ) -> str:
+        if kind is ImageLimitKind.UNCLASSIFIED:
+            return (
+                self._IMAGE_REJECTED_SEEN_MESSAGE
+                if scope is ImageScope.SEEN
+                else self._IMAGE_REJECTED_LATEST_MESSAGE
+            )
         if scope is ImageScope.SEEN:
             return self._IMAGE_LIMIT_SEEN_MESSAGE
         if kind is not ImageLimitKind.SINGLE_IMAGE:

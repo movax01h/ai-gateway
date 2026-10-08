@@ -223,7 +223,32 @@ class TestImageLimitKind:
             pytest.param(
                 413, "request too large", ImageLimitKind.REQUEST, id="body_too_large"
             ),
-            pytest.param(400, "tools.0.name: invalid", None, id="other_400"),
+            pytest.param(
+                400,
+                "Error code: 400 - {'error': {'message': 'The image data you provided does not "
+                "represent a valid image. Please check your input and try again.', 'type': "
+                "'invalid_request_error', 'param': 'input', 'code': 'invalid_value'}}",
+                ImageLimitKind.UNCLASSIFIED,
+                id="openai_invalid_image",
+            ),
+            pytest.param(
+                400,
+                "Could not process image",
+                ImageLimitKind.UNCLASSIFIED,
+                id="anthropic_invalid_image",
+            ),
+            pytest.param(
+                400,
+                "Invalid 'input[2].content[1].image_url': image is too large (max 50 MB)",
+                ImageLimitKind.UNCLASSIFIED,
+                id="openai_size_wording_is_not_anthropics",
+            ),
+            pytest.param(
+                400,
+                "tools.0.name: invalid",
+                ImageLimitKind.UNCLASSIFIED,
+                id="any_other_400_is_unclassified_not_ignored",
+            ),
             pytest.param(500, "image.source.base64 oops", None, id="server_error"),
         ],
     )

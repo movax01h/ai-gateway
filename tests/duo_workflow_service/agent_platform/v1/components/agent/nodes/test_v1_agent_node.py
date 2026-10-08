@@ -3004,6 +3004,14 @@ _MANY_IMAGES_MESSAGE = (
     "messages.1.content.5.image.source.base64.data: At least one of the image "
     "dimensions exceed max allowed size for many-image requests: 2000 pixels"
 )
+_UNCLASSIFIED_MESSAGE = (
+    "Error code: 400 - {'error': {'message': 'The image data you provided does not "
+    "represent a valid image. Please check your input and try again.', 'type': "
+    "'invalid_request_error', 'param': 'input', 'code': 'invalid_value'}}"
+)
+_INVENTED_MESSAGE = (
+    "Error code: 400 - the request was declined for a reason worded tomorrow"
+)
 _ONE_IMAGE_MESSAGE = (
     "messages.1.content.3.image.source.base64.data: At least one of the image "
     "dimensions exceed max allowed size: 8000 pixels"
@@ -3131,6 +3139,99 @@ class TestAgentNodeImageLimitFallback:
             AgentNode._IMAGE_LIMIT_LATEST_MESSAGE,
         ]
 
+    @pytest.mark.parametrize(
+        "message",
+        [
+            pytest.param(_UNCLASSIFIED_MESSAGE, id="known_wording"),
+            pytest.param(_INVENTED_MESSAGE, id="wording_never_seen"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_an_unclassified_rejection_removes_the_current_round_first(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        message,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Recovery never depends on the provider's wording: the newest images are the only unproven content."""
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(message), mock_ai_message]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 2
+        assert _live_images(saved) == 2
+        assert saved[4].content[1]["type"] == "text"
+        assert saved[-2] == HumanMessage(
+            content=AgentNode._IMAGE_REJECTED_LATEST_MESSAGE
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_unclassified_rejection_then_takes_the_seen_images(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[
+                _image_limit_error(_INVENTED_MESSAGE),
+                _image_limit_error(_INVENTED_MESSAGE),
+                mock_ai_message,
+            ]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 3
+        assert _live_images(saved) == 0
+        assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
+            AgentNode._IMAGE_REJECTED_LATEST_MESSAGE,
+            AgentNode._IMAGE_REJECTED_SEEN_MESSAGE,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_rejection_unrelated_to_the_images_surfaces_after_the_loop(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """The structural retry costs at most two extra requests while images are live, then the error surfaces."""
+        unrelated = APIStatusError(
+            "tools.0.name: invalid", response=Mock(status_code=400), body=None
+        )
+        mock_prompt.ainvoke = AsyncMock(side_effect=unrelated)
+
+        with pytest.raises(ModelError) as raised:
+            await self._run(agent_node, base_flow_state, component_name, two_rounds)
+
+        assert raised.value.status_code == 400
+        assert "tools.0.name" in raised.value.message
+        assert mock_prompt.ainvoke.call_count == 3
+
     @pytest.mark.asyncio
     async def test_one_oversized_image_removes_the_current_round_first(
         self,
@@ -3250,15 +3351,20 @@ class TestAgentNodeImageLimitFallback:
         [
             pytest.param(
                 APIStatusError(
-                    "tools.0.name: invalid", response=Mock(status_code=400), body=None
+                    "invalid x-api-key", response=Mock(status_code=401), body=None
                 ),
                 [HumanMessage(content=[image_content_block("aW1n", "image/png")])],
-                id="another_400_with_images",
+                id="a_status_outside_400_and_413_with_images",
             ),
             pytest.param(
                 _image_limit_error(),
                 [HumanMessage(content="no images at all")],
                 id="image_limit_without_images",
+            ),
+            pytest.param(
+                _image_limit_error(_INVENTED_MESSAGE),
+                [HumanMessage(content="no images at all")],
+                id="unclassified_400_without_images",
             ),
         ],
     )
