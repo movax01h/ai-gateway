@@ -44,7 +44,7 @@ async def test_request_matches_recorded_schema(
 async def test_empty_assistant_text_is_not_replaced_by_a_placeholder(
     providers: FakeProviders, fake_vertex_auth
 ):
-    """litellm 1.85.0 rewrote empty assistant text into a visible placeholder, which leaked into Duo Chat (#2335)."""
+    """The litellm 1.85.0 release rewrote empty assistant text into a visible placeholder (#2335)."""
     await SCENARIOS["vertex_claude_empty_assistant_text"](providers)
 
     assert "Empty message content" not in json.dumps(providers.last.body)

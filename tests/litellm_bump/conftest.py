@@ -1,7 +1,7 @@
 """Fixtures for the litellm bump checks.
 
-These tests run litellm's real request-building and response-parsing code. Only the last step, the HTTP transport,
-is replaced. No request leaves the process and no provider credentials are needed.
+These tests run litellm's real request-building and response-parsing code. Only the last step, the HTTP transport, is
+replaced. No request leaves the process and no provider credentials are needed.
 """
 
 import json
@@ -143,8 +143,8 @@ def fake_aws_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
 def fake_vertex_auth_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip the Google OAuth token exchange, which litellm does outside httpx.
 
-    This replaces two private litellm methods. If litellm renames them, this fixture fails with an AttributeError.
-    That is a signal to review the Vertex auth path, not a regression in the service.
+    This replaces two private litellm methods. If litellm renames them, this fixture fails with an AttributeError. That
+    is a signal to review the Vertex auth path, not a regression in the service.
     """
     from litellm.llms.vertex_ai.vertex_llm_base import VertexBase
 
@@ -164,5 +164,8 @@ def fake_vertex_auth_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(name="update_schemas")
 def update_schemas_fixture() -> bool:
-    """True when the schema files should be rewritten instead of compared. Set UPDATE_LITELLM_SCHEMAS=1."""
+    """True when the schema files should be rewritten instead of compared.
+
+    Set UPDATE_LITELLM_SCHEMAS=1.
+    """
     return bool(os.environ.get("UPDATE_LITELLM_SCHEMAS"))  # pylint: disable=direct-environment-variable-reference
