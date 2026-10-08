@@ -747,6 +747,7 @@ ANTHROPIC_ONLY_MODEL_KWARGS = ("context_management", "thinking", "output_config"
 class Prompt(RunnableBinding[Any, BaseMessage]):
     name: str
     model_provider: str
+    model_vendor: Optional[str] = None
     model: Model
     unit_primitive: GitLabUnitPrimitive
     operation_type: LLMOperationType = "standard"
@@ -867,9 +868,19 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             ),
         )
 
+        # Only LiteLLM clients name the vendor (e.g. fireworks_ai); other clients
+        # (anthropic, openai, ...) are their own vendor.
+        custom_llm_provider = getattr(base_model, "custom_llm_provider", None)
+        model_vendor = (
+            custom_llm_provider
+            if isinstance(custom_llm_provider, str) and custom_llm_provider
+            else model_provider
+        )
+
         super().__init__(
             name=config.name,
             model_provider=model_provider,
+            model_vendor=model_vendor,
             model=model,
             unit_primitive=config.unit_primitive,
             operation_type=config.operation_type,
@@ -1045,6 +1056,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             model_name=self.reported_model_name,
             limits=self.limits,
             model_provider=self.model_provider,
+            model_vendor=self.model_vendor or "",
         )
 
     def set_limits(self, model_limits: ConfigModelLimits):

@@ -47,6 +47,7 @@ def llm_ops_from_context_fixture():
             "model_id": "context-model",
             "model_engine": "openai",
             "model_provider": "openai",
+            "model_vendor": "openai",
             "token_count": 999,
             "prompt_tokens": 500,
             "completion_tokens": 499,

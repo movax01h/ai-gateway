@@ -1985,6 +1985,41 @@ class TestPromptRequestedModel:
         assert entry["extra"]["model_name"] == "requested-model"
 
 
+class _FakeLiteLLMModel(FakeModel):
+    custom_llm_provider: Optional[str] = None
+
+
+class TestPromptModelVendor:
+    @pytest.fixture(name="custom_llm_provider")
+    def custom_llm_provider_fixture(self):
+        return None
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self, custom_llm_provider: Optional[str]):
+        model = _FakeLiteLLMModel(
+            model_engine="litellm",
+            model_name="fake-model",
+            responses=["Hi"],
+            custom_llm_provider=custom_llm_provider,
+        )
+        return lambda *args, **kwargs: model
+
+    @pytest.mark.parametrize(
+        ("model_provider", "custom_llm_provider", "expected_vendor"),
+        [
+            (ModelClassProvider.LITE_LLM, "fireworks_ai", "fireworks_ai"),
+            (ModelClassProvider.LITE_LLM_COMPLETION, "fireworks_ai", "fireworks_ai"),
+            (ModelClassProvider.LITE_LLM, None, "litellm"),
+            (ModelClassProvider.ANTHROPIC, None, "anthropic"),
+        ],
+    )
+    def test_instrumentator_reports_model_vendor(
+        self, prompt: Prompt, expected_vendor: str
+    ):
+        assert prompt.model_vendor == expected_vendor
+        assert prompt.instrumentator.model_vendor == expected_vendor
+
+
 @pytest.mark.skipif(
     # pylint: disable=direct-environment-variable-reference
     os.getenv("REAL_AI_REQUEST") is None,
