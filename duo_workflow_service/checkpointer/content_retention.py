@@ -44,5 +44,8 @@ def reduce_ui_chat_log_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
     return reduced
 
 
-def reduce_ui_chat_log(entries: Optional[list]) -> list[dict[str, Any]]:
+def reduce_ui_chat_log(
+    entries: Optional[list[Mapping[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Reduce every chat-log entry to its metadata; see ``reduce_ui_chat_log_entry``."""
     return [reduce_ui_chat_log_entry(entry) for entry in entries or []]

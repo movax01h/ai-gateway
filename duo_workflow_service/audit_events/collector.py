@@ -30,7 +30,7 @@ EXCERPT_BYTES = 8 * 1024
 # one a future event type adds, is emptied: prompts, responses, tool arguments and
 # results, displayed output, the goal and error messages.
 # Keep in sync with the Rails copy in ee/lib/ai/duo_workflows/content_retention.rb.
-METADATA_AUDIT_FIELDS = frozenset(
+_METADATA_AUDIT_FIELDS = frozenset(
     {
         # Envelope
         "id",
@@ -72,9 +72,9 @@ METADATA_AUDIT_FIELDS = frozenset(
 
 
 def strip_audit_event_content(event: AuditEvent) -> None:
-    """Empty every field of ``event`` outside METADATA_AUDIT_FIELDS, in place."""
+    """Empty every field of ``event`` outside _METADATA_AUDIT_FIELDS, in place."""
     for name in type(event).model_fields:
-        if name not in METADATA_AUDIT_FIELDS:
+        if name not in _METADATA_AUDIT_FIELDS:
             value = getattr(event, name)
             setattr(event, name, "" if isinstance(value, str) else None)
 
