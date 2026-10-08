@@ -1189,7 +1189,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
             else:
                 try:
-                    billing_service.track_billing(
+                    tracked = billing_service.track_billing(
                         user,
                         gl_context,
                         workflow_id=client_event.workflowID,
@@ -1204,11 +1204,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     if is_bill_once_feature:
                         billed_once_features.add(feature_prefix)
 
-                    log.info(
-                        "Successfully sent billing event for self-hosted LLM auth",
-                        request_id=client_event.requestID,
-                        workflow_id=client_event.workflowID,
-                    )
+                    if tracked:
+                        log.info(
+                            "Successfully sent billing event for self-hosted LLM auth",
+                            request_id=client_event.requestID,
+                            workflow_id=client_event.workflowID,
+                        )
                 except Exception as e:
                     log_exception(
                         e,

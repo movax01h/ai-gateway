@@ -419,6 +419,30 @@ class TestBillingEventService:
         assert metadata["execution_environment"] == ExecutionEnvironment.DAP.value
         assert len(metadata["llm_operations"]) == 1
 
+    @pytest.mark.parametrize("client_result", [True, False])
+    def test_track_billing_returns_client_result(
+        self,
+        billing_event_service,
+        billing_event_client,
+        user,
+        gl_context,
+        llm_operation,
+        client_result,
+    ):
+        """Test that track_billing reports whether the client actually tracked the event."""
+        billing_event_client.track_billing_event.return_value = client_result
+
+        tracked = billing_event_service.track_billing(
+            user,
+            gl_context,
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+            llm_ops=[llm_operation],
+        )
+
+        assert tracked is client_result
+
     def test_track_billing_emits_event_with_compaction_ops(
         self,
         billing_event_service,

@@ -2898,6 +2898,38 @@ async def test_track_workflow_completion_with_non_billable_status(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_llm_operations")
+@pytest.mark.parametrize(
+    ("tracked", "expected_success_logs"),
+    [(True, 1), (False, 0)],
+)
+async def test_track_workflow_completion_logs_success_only_when_tracked(
+    gitlab_workflow,
+    billing_event_service,
+    billing_event_client,
+    mock_user,
+    tracked,
+    expected_success_logs,
+):
+    """Test that the success log is only emitted when the billing event was actually tracked, e.g. not when billing
+    events are disabled."""
+    current_user.set(mock_user)
+    gitlab_workflow._billing_event_service = billing_event_service
+    billing_event_client.track_billing_event.return_value = tracked
+
+    with capture_logs() as cap_logs:
+        await gitlab_workflow._track_workflow_completion(WorkflowStatusEnum.FINISHED)
+
+    billing_event_client.track_billing_event.assert_called_once()
+    success_logs = [
+        log
+        for log in cap_logs
+        if log["event"].startswith("Successfully sent billing event for workflow")
+    ]
+    assert len(success_logs) == expected_success_logs
+
+
+@pytest.mark.asyncio
 async def test_track_workflow_completion_with_orbit_called(
     gitlab_workflow,
     workflow_id,
