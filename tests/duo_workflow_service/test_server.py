@@ -1709,6 +1709,164 @@ async def test_generate_token_binds_request_claim(
     assert extra_claims[claim] == value
 
 
+WORKFLOW_BINDING_ABORT = (
+    grpc.StatusCode.PERMISSION_DENIED,
+    "Workflow token is not authorized for the requested workflow",
+)
+
+
+async def _execute_workflow_with_id(servicer, mock_context, workflow_id):
+    """Drive ExecuteWorkflow far enough to pass (or trip) the binding guard.
+
+    Downstream failures are irrelevant here; the assertions below look only at
+    whether the guard aborted. `abort` is replaced with an AsyncMock because the
+    handler awaits it and the shared fixture supplies a plain MagicMock.
+    """
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    start_request = contract_pb2.StartWorkflowRequest(
+        workflowDefinition="software_development"
+    )
+    start_request.workflowID = workflow_id
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    try:
+        await anext(result)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
+def _binding_guard_aborted(mock_context) -> bool:
+    return any(
+        c.args == WORKFLOW_BINDING_ABORT for c in mock_context.abort.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,workflow_id",
+    [
+        ({"workflow_id": "42"}, "99"),
+        ({"workflow_id": "not-a-number"}, "42"),
+        ({"workflow_id": ""}, "42"),
+        ({"workflow_id": ""}, "0"),
+        ({"workflow_id": "0"}, "#0"),
+        ({"workflow_id": "42"}, "99?gid://gitlab/Ai::DuoWorkflows::Workflow/42"),
+        ({"workflow_id": "42"}, "99#gid://x/42"),
+        ({"workflow_id": "42"}, "gid://gitlab/Project/42"),
+        ({"workflow_id": "42"}, " 42 "),
+        ({"workflow_id": "42"}, "\u0664\u0662"),
+        ({"workflow_id": "42"}, "042"),
+        ({"workflow_id": "42"}, "4" * 5000),
+        ({"workflow_id": True}, "1"),
+        ({"workflow_id": 0}, "0"),
+        ({"workflow_id": -5}, "5"),
+        ({"workflow_id": None}, "42"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_mismatched_workflow_binding(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    workflow_id,
+):
+    await _execute_workflow_with_id(servicer, mock_context, workflow_id)
+
+    assert _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@patch("duo_workflow_service.server.log")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_logs_mismatched_workflow_binding(
+    _mock_resolve_flow,
+    mock_log,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "9" * 100)
+
+    assert _binding_guard_aborted(mock_context)
+    mock_log.warning.assert_any_call(
+        "Workflow token bound to a different workflow",
+        bound_workflow_id="42",
+        requested_workflow_id="9" * 64,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,workflow_id",
+    [
+        ({"workflow_id": "42"}, "42"),
+        ({"workflow_id": "42"}, "gid://gitlab/Ai::DuoWorkflows::Workflow/42"),
+        ({"workflow_id": "42"}, "#42"),
+        ({"workflow_id": 42}, "42"),
+        ({}, "42"),
+        (None, "42"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_allows_matching_workflow_token(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    workflow_id,
+):
+    await _execute_workflow_with_id(servicer, mock_context, workflow_id)
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_with_empty_id_never_reaches_the_binding_guard(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    """An empty workflowID is short-circuited by the usage-quota decorator.
+
+    It returns before ExecuteWorkflow's body runs, so no claim guard sees it and nothing is aborted. Asserted here so
+    the binding guard is not later widened to duplicate a check that already stops the request upstream.
+    """
+    await _execute_workflow_with_id(servicer, mock_context, "")
+
+    assert not _binding_guard_aborted(mock_context)
+    assert mock_context.abort.await_args_list == []
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_is_debug", [True])
+@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_exempts_debug_user_from_workflow_binding(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "99")
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "claim,claims_extra",
