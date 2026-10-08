@@ -536,11 +536,14 @@ configurable_unit_primitives:
     unit_primitives:
       - "duo_agent_platform"
     default_models:
-      - identifier: "claude_haiku_4_5_20251001_vertex"
+      - identifier: "claude_haiku_5_5_vertex"
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
       - "claude_haiku_4_5_20251001_vertex"
+      - "claude_haiku_5_5"
+      - "claude_haiku_5_5_bedrock"
+      - "claude_haiku_5_5_vertex"
       - "claude_sonnet_5"
       - "claude_sonnet_5_5"
       - "claude_sonnet_5_5_bedrock"
