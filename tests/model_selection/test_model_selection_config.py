@@ -1927,12 +1927,14 @@ def test_model_restrictions_load_from_file_and_reload_on_refresh(selection_confi
     MODEL_RESTRICTIONS_CONFIG_PATH.write_text(
         "restricted_models:\n"
         "  - identifier: gitlab-embedding-model\n"
-        "    flows: [some_flow]\n"
+        "    feature_settings: [some_flow]\n"
     )
     selection_config.refresh()
 
     assert selection_config.get_model_restrictions() == [
-        ModelRestriction(identifier="gitlab-embedding-model", flows=["some_flow"])
+        ModelRestriction(
+            identifier="gitlab-embedding-model", feature_settings=["some_flow"]
+        )
     ]
     assert selection_config.restricted_flows_for(["gitlab-embedding-model"]) == {
         "some_flow"
