@@ -425,6 +425,19 @@ def _extract_error_message(error: BaseException) -> str:
     return message
 
 
+def _find_restricted_model_access_error(
+    error: Optional[BaseException],
+) -> Optional[RestrictedModelAccessError]:
+    """Return the first RestrictedModelAccessError in the error's cause/context chain, if any."""
+    seen: set[int] = set()
+    while error is not None and id(error) not in seen:
+        if isinstance(error, RestrictedModelAccessError):
+            return error
+        seen.add(id(error))
+        error = getattr(error, "__cause__", None) or getattr(error, "__context__", None)
+    return None
+
+
 def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
     """Whether the caller token is GitLab.com's own instance token.
 
@@ -849,13 +862,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # itself was wrong, not the system state.
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(str(workflow.last_error))
-            elif isinstance(
-                restricted_error := (
-                    workflow.last_error
-                    if isinstance(workflow.last_error, RestrictedModelAccessError)
-                    else getattr(workflow.last_error, "__cause__", None)
-                ),
-                RestrictedModelAccessError,
+            elif restricted_error := _find_restricted_model_access_error(
+                workflow.last_error
             ):
                 context.set_code(grpc.StatusCode.PERMISSION_DENIED)
                 context.set_details(str(restricted_error))

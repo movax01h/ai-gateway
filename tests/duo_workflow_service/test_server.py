@@ -1201,6 +1201,17 @@ def _chained(error: BaseException, cause: BaseException) -> BaseException:
     return error
 
 
+def _with_context(error: BaseException, context: BaseException) -> BaseException:
+    error.__context__ = context
+    return error
+
+
+def _cyclic_error() -> BaseException:
+    first, second = RuntimeError("first"), RuntimeError("second")
+    first.__cause__, second.__cause__ = second, first
+    return first
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "workflow_error,successful_execution,stop_reason,expected_status,expected_detail_prefix",
@@ -1326,6 +1337,32 @@ def _chained(error: BaseException, cause: BaseException) -> BaseException:
             None,
             grpc.StatusCode.PERMISSION_DENIED,
             "Model not available for this flow",
+        ),
+        (
+            _chained(
+                RuntimeError("outer"),
+                _chained(ValueError("inner"), RestrictedModelAccessError()),
+            ),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            "Model not available for this flow",
+        ),
+        (
+            _with_context(
+                RuntimeError("raised in except"), RestrictedModelAccessError()
+            ),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            "Model not available for this flow",
+        ),
+        (
+            _cyclic_error(),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: RuntimeError",
         ),
     ],
 )
