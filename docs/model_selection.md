@@ -530,6 +530,9 @@ A restricted model is refused everywhere else, including the proxy endpoints. On
 can list it in `unit_primitives.yml`. `validate-model-selection-config` rejects an unknown identifier, empty or
 duplicate flows, and duplicate entries.
 
+The validation counts a feature as one of the flow's features when its `feature_setting` equals the flow config ID
+(for example, `bl_security`). This is a naming convention: if the names differ, validation rejects the entry (fail-safe).
+
 ## Model deprecations
 
 There are two kinds of model deprecation, depending on whether the model is going away everywhere or only for a

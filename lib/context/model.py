@@ -19,9 +19,10 @@ current_model_metadata_context: ContextVar[Optional[Any]] = ContextVar(
     "current_model_metadata_context", default=None
 )
 
-# Flow config id this request is authorized for; a restricted model (one with
-# `restricted_to_flows`) is usable only when it is in that list. None means no
-# restricted model may be used. Nothing sets it yet, so restricted models are denied.
+# The single flow config id this request is authorized for. A restricted model
+# (see ai_gateway/model_selection/model_restrictions.yml) is usable only when this
+# id is one of that model's `flows`. None means no restricted model may be used.
+# Nothing sets it yet, so restricted models are denied.
 restricted_access_ctx: ContextVar[Optional[str]] = ContextVar(
     "restricted_access_ctx", default=None
 )
