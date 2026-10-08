@@ -6,7 +6,7 @@
     "properties": {
         "decision": {
             "type": "string",
-            "description": "Use 'needs_input' when you posted one or more clarifying questions this turn - or confirmed that an equivalent question you posted earlier is still unresolved, in which case you stop without posting a duplicate - and are stopping before research is complete. Use 'needs_context' when you posted a request for the work item to be given more context this turn - or confirmed that such a request you posted earlier is still waiting - because the description is too thin to research. Use 'ready' when you have enough context to hand off to planning - 'findings' then carries everything the planner needs.",
+            "description": "Use 'needs_input' when you posted one or more clarifying questions this turn - or confirmed that an equivalent question you posted earlier is still unresolved, in which case you stop without posting a duplicate - and are stopping before research is complete. Use 'needs_context' when you posted a request for the work item to be given more context this turn because the description is too thin to research. Use 'ready' when you have enough context to hand off to planning - 'findings' then carries everything the planner needs.",
             "enum": ["ready", "needs_input", "needs_context"],
             "examples": ["ready", "needs_input", "needs_context"]
         },

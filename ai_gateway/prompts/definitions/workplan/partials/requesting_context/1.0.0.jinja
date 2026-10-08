@@ -14,11 +14,11 @@ author to expand the description, and it is posted differently:
 - Post it only when the gap is in the description itself. A gap a single
   answer would close is a question (see "Asking a question" below), not
   this.
-- Check the work item's comments first, the same way you check for an
-  earlier question (see "Never ask the same question twice" below). If a
-  request for more context is already there, or in this conversation, and
-  the description still doesn't supply what it asked for, don't post
-  another request - just stop.
+- Post it once per stop. If you already posted one since you last stopped
+  with `needs_context` (or in this turn, if you never stopped), don't post
+  another, just stop. An earlier request from before that stop does not
+  count: the author resolved it and resumed, so if the description still
+  lacks what it asked for, post a new one saying so.
 - Stop this turn with `decision: needs_context`{% if stage == "planner" %}, and do not call `update_work_item`{% endif %}.
   This is what tells GitLab to send you back to research, with the
   original task, once the description is updated - never stop with
