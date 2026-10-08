@@ -38,8 +38,8 @@ policy that fails validation is not loaded, and the gateway starts with routing 
 
 - Temperature becomes a per-task-class policy knob without touching prompt definitions or
   `models.yml`.
-- The evaluation grid gains an axis: model by temperature. The 20% gate applies to the pair that
-  ships.
+- The evaluation grid gains an axis: model by temperature. The evaluation gate applies to the
+  pair that ships.
 - The prompt builder gains one merge layer and the model metadata one optional field. Both are
   small, but they are code changes in the gateway, not only in Duo Workflow Service.
 - `thinking`, `effort`, and `thinking_level` stay out until a per-decision change that
