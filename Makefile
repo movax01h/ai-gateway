@@ -7,6 +7,7 @@ LINTS_DIR := ${ROOT_DIR}/lints
 SCRIPTS_DIR := ${ROOT_DIR}/scripts
 TESTS_DIR := ${ROOT_DIR}/tests
 INTEGRATION_TESTS_DIR := ${ROOT_DIR}/integration_tests
+LITELLM_PARAM_TESTS_DIR := ${ROOT_DIR}/litellm_param_tests
 
 PYTEST_SLOWEST_TESTS_COUNT ?= 10
 
@@ -18,7 +19,8 @@ LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	${LINTS_DIR} \
 	${SCRIPTS_DIR} \
 	${TESTS_DIR} \
-	${INTEGRATION_TESTS_DIR}
+	${INTEGRATION_TESTS_DIR} \
+	${LITELLM_PARAM_TESTS_DIR}
 
 EDITORCONFIG_LINT_WORKING_DIR ?=
 CODESPELL_LINT_WORKING_DIR ?=
@@ -279,6 +281,13 @@ UNDERCOVERAGE_DIFF_RANGE_NOTATION ?= ...
 test-undercoverage: install-test-deps
 	@echo "Checking test coverage of changed lines..."
 	@poetry run diff-cover .test-reports/coverage.xml --compare-branch=$(UNDERCOVERAGE_COMPARE_BRANCH) --diff-range-notation=$(UNDERCOVERAGE_DIFF_RANGE_NOTATION) --show-uncovered --fail-under=100
+
+.PHONY: test-litellm-params
+# Checks that litellm accepts the parameters our code sends for every litellm entry in models.yml. It runs litellm's real
+# code against a fake HTTP transport, so it needs no credentials and no network. See docs/litellm_param_tests.md.
+# LITELLM_LOCAL_MODEL_COST_MAP must be set before pytest starts: litellm reads it when it is imported.
+test-litellm-params: install-test-deps
+	@LITELLM_LOCAL_MODEL_COST_MAP=True poetry run pytest litellm_param_tests/ -p no:cacheprovider -v --tb=short
 
 .PHONY: test-integration
 # `integration_tests/` drives a deployed AI Gateway over HTTP. The Duo Workflow Service tests in

@@ -310,33 +310,32 @@ check-duo-workflow-docs:
         - scripts/generate_graph_docs.py
         - docs/duo_workflow_service_graphs.md
 
-# Optional check for litellm bump merge requests opened by Renovate. A passed job means the new litellm version
-# builds the requests we expect for the providers on the startup probe path, and our patches still take effect.
-# The job needs no credentials, because Renovate pipelines run in a fork. See docs/litellm_upgrades.md.
-.litellm-bump:rules:
+# Optional check for litellm bump merge requests opened by Renovate. A passed job means litellm still accepts the
+# parameters our code sends for every litellm entry in models.yml. Renovate pipelines run in a fork, so the job needs
+# no credentials and sends no requests. See docs/litellm_param_tests.md.
+.litellm-params:rules:
   rules:
     # Note: this whole file is included with `rules: *skip-when-expedited-include`,
-    # so a merge request labeled `pipeline::expedited` skips these jobs.
+    # so a merge request labeled `pipeline::expedited` skips this job.
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^renovate\/litellm/
       changes:
         - poetry.lock
         - pyproject.toml
-      allow_failure: true
+      when: on_success
     # Anyone can run the check by hand on any merge request.
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
-      allow_failure: true
 
-tests:litellm-bump-check:
-  extends:
-    - .poetry
-    - .litellm-bump:rules
+tests:litellm-params:
+  extends: .poetry
   stage: test
   needs:
     - install
+  allow_failure: true
+  rules: !reference [.litellm-params:rules, rules]
   variables:
-    # Without this, litellm downloads its model cost map from GitHub on import.
+    # litellm reads this when it is imported, so it must be set before pytest starts.
     LITELLM_LOCAL_MODEL_COST_MAP: "True"
   script:
     - poetry run pip show litellm | grep -E '^(Name|Version)'
-    - poetry run pytest tests/litellm_bump -v
+    - make test-litellm-params
