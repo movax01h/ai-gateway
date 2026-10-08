@@ -161,6 +161,7 @@ skip = """
 ./tmp,\
 ./vendor,\
 Gemfile.lock,\
+go.sum,\
 node_modules,\
 package-lock.json,\
 poetry.lock
