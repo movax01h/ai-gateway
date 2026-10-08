@@ -895,7 +895,9 @@ FAKE_RESTRICTED_MODEL = {
 def model_restrictions_fixture():
     """Serve these restrictions instead of model_restrictions.yml; tests may append."""
     restrictions = [
-        ModelRestriction(identifier="fake_restricted_model", flows=["bl_security"])
+        ModelRestriction(
+            identifier="fake_restricted_model", feature_settings=["bl_security"]
+        )
     ]
     with patch.object(
         ModelSelectionConfig, "get_model_restrictions", return_value=restrictions

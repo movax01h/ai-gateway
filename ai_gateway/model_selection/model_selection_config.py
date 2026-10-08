@@ -203,17 +203,18 @@ LLMDefinition = Annotated[
 
 
 class ModelRestriction(BaseModel):
-    """A model usable only by the given flows; see model_restrictions.yml.
+    """A model usable only by the given feature settings; see model_restrictions.yml.
 
-    ``flows`` are flow config ids (e.g. "bl_security"). The model is usable only by a
-    request authorized for one of them (restricted_access_ctx) and is denied everywhere
-    else; see ensure_restricted_model_access.
+    ``feature_settings`` are feature setting names; for a flow, that is its flow config id
+    (e.g. "bl_security"). The model is usable only by a request authorized for one of
+    them (restricted_access_ctx) and is denied everywhere else; see
+    ensure_restricted_model_access.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     identifier: str
-    flows: list[str]
+    feature_settings: list[str]
 
 
 class ModelTagEntry(BaseModel):
@@ -438,10 +439,10 @@ class ModelSelectionConfig:
 
     def _restricted_flows_by_identifier(self) -> dict[str, frozenset[str]]:
         # validate() rejects duplicate identifiers; should one slip through, only the
-        # flows every entry allows are kept (fail closed).
+        # feature settings every entry allows are kept (fail closed).
         flows: dict[str, frozenset[str]] = {}
         for restriction in self.get_model_restrictions():
-            entry = frozenset(restriction.flows)
+            entry = frozenset(restriction.feature_settings)
             flows[restriction.identifier] = (
                 flows.get(restriction.identifier, entry) & entry
             )
@@ -630,11 +631,12 @@ class ModelSelectionConfig:
             if r.identifier not in known
         ]
         errors.extend(
-            f"Restricted model '{r.identifier}': flows is empty or has empty or duplicate entries"
+            f"Restricted model '{r.identifier}': feature_settings is empty or has empty or "
+            "duplicate entries"
             for r in restrictions
-            if not r.flows
-            or any(not flow.strip() for flow in r.flows)
-            or len(set(r.flows)) != len(r.flows)
+            if not r.feature_settings
+            or any(not setting.strip() for setting in r.feature_settings)
+            or len(set(r.feature_settings)) != len(r.feature_settings)
         )
         errors.extend(
             f"Restricted model '{i}' is listed more than once in model_restrictions.yml"
@@ -642,8 +644,8 @@ class ModelSelectionConfig:
         )
         flows_by_identifier = self._restricted_flows_by_identifier()
         for config in unit_primitive_configs:
-            # A feature's feature_setting names its flow by convention, so a restricted
-            # model may be listed by the features of its own flows only.
+            # A restricted model may be listed only by the features whose
+            # feature_setting is one of its feature_settings.
             restricted = {
                 i
                 for i, flows in flows_by_identifier.items()

@@ -188,12 +188,13 @@ def test_legacy_client_models_are_never_restricted():
 def _config_with(
     definition: dict,
     model_restrictions: list[ModelRestriction],
-    flows: list[str] | None = None,
+    feature_settings: list[str] | None = None,
 ) -> ModelSelectionConfig:
-    """Build a config with ``definition`` env-injected and restricted to ``flows``."""
+    """Build a config with ``definition`` env-injected and restricted to ``feature_settings``."""
     model_restrictions.append(
         ModelRestriction(
-            identifier=definition["gitlab_identifier"], flows=flows or ["bl_security"]
+            identifier=definition["gitlab_identifier"],
+            feature_settings=feature_settings or ["bl_security"],
         )
     )
     return ModelSelectionConfig(
@@ -324,16 +325,18 @@ def test_validate_allows_restricted_model_in_its_own_flow_feature(
 
 
 @pytest.mark.parametrize(
-    "flows", [[], ["bl_security", ""], ["bl_security", "bl_security"]]
+    "feature_settings", [[], ["bl_security", ""], ["bl_security", "bl_security"]]
 )
-def test_validate_rejects_empty_or_duplicate_restricted_flows(
+def test_validate_rejects_empty_or_duplicate_restricted_feature_settings(
     config: ModelSelectionConfig,
     model_restrictions: list[ModelRestriction],
-    flows: list[str],
+    feature_settings: list[str],
 ):
-    model_restrictions[0].flows = flows
+    model_restrictions[0].feature_settings = feature_settings
 
-    with pytest.raises(ValueError, match="empty or duplicate entries"):
+    with pytest.raises(
+        ValueError, match="feature_settings is empty or has empty or duplicate entries"
+    ):
         config.validate()
 
 
@@ -341,7 +344,7 @@ def test_validate_rejects_restriction_on_unknown_model(
     config: ModelSelectionConfig, model_restrictions: list[ModelRestriction]
 ):
     model_restrictions.append(
-        ModelRestriction(identifier="no_such_model", flows=["bl_security"])
+        ModelRestriction(identifier="no_such_model", feature_settings=["bl_security"])
     )
 
     with pytest.raises(
@@ -354,7 +357,9 @@ def test_validate_rejects_duplicate_restrictions(
     config: ModelSelectionConfig, model_restrictions: list[ModelRestriction]
 ):
     model_restrictions.append(
-        ModelRestriction(identifier="fake_restricted_model", flows=["other_flow"])
+        ModelRestriction(
+            identifier="fake_restricted_model", feature_settings=["other_flow"]
+        )
     )
 
     with pytest.raises(ValueError, match="listed more than once"):
@@ -379,7 +384,7 @@ def test_request_matching_two_restricted_models_needs_a_flow_both_allow(
             "params": {"model": "claude-other-restricted-1"},
         },
         model_restrictions,
-        flows=["other_flow"],
+        feature_settings=["other_flow"],
     )
     request = {
         "identifiers": ["fake_restricted_model"],
