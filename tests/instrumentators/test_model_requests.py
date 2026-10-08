@@ -123,6 +123,7 @@ class TestWatchContainer:
                 "model_id": "test_model",
                 "model_engine": "test_provider",
                 "model_provider": "test_provider",
+                "model_vendor": "test_provider",
                 "prompt_tokens": 10,
                 "completion_tokens": 15,
                 "agent_name": None,
@@ -135,6 +136,7 @@ class TestWatchContainer:
                 "model_id": "test_model",
                 "model_engine": "test_provider",
                 "model_provider": "test_provider",
+                "model_vendor": "test_provider",
                 "prompt_tokens": 5,
                 "completion_tokens": 10,
                 "agent_name": None,
@@ -147,6 +149,7 @@ class TestWatchContainer:
                 "model_id": "mymodel",
                 "model_engine": "test_provider",
                 "model_provider": "test_provider",
+                "model_vendor": "test_provider",
                 "prompt_tokens": 1,
                 "completion_tokens": 2,
                 "agent_name": None,
@@ -221,6 +224,7 @@ class TestWatchContainer:
                 "model_id": "test_model",
                 "model_engine": "test_provider",
                 "model_provider": "test_provider",
+                "model_vendor": "test_provider",
                 "prompt_tokens": 1,
                 "completion_tokens": 2,
                 "agent_name": None,
@@ -241,6 +245,7 @@ class TestWatchContainer:
             model_provider=container.model_provider,
             additional_properties=InternalEventAdditionalProperties(
                 label="cache_details",
+                model_vendor=container.model_vendor,
                 property=None,
                 value=None,
                 cache_read=4,
@@ -250,6 +255,31 @@ class TestWatchContainer:
                 **expected_extra_kwargs,
             ),
         )
+
+    @pytest.mark.parametrize(
+        ("model_vendor", "expected_vendor"),
+        [("fireworks_ai", "fireworks_ai"), ("", "test_provider")],
+    )
+    @mock.patch("prometheus_client.Counter.labels")
+    def test_register_token_usage_records_model_vendor(
+        self, _mock_counters, model_vendor, expected_vendor
+    ):
+        container = ModelRequestInstrumentator.WatchContainer(
+            model_provider="test_provider",
+            model_vendor=model_vendor,
+            labels={"model_engine": "test_engine", "model_name": "test_model"},
+            streaming=False,
+            limits=None,
+        )
+        init_token_usage()
+        init_llm_operations()
+
+        container.register_token_usage(
+            "test_model", {"input_tokens": 10, "output_tokens": 15, "total_tokens": 25}
+        )
+
+        [operation] = llm_operations.get()
+        assert operation["model_vendor"] == expected_vendor
 
     def test_register_token_usage_without_init(self, container):
         container.register_token_usage(
@@ -281,6 +311,7 @@ class TestWatchContainer:
                     "model_id": "test_model",
                     "model_engine": "test_provider",
                     "model_provider": "test_provider",
+                    "model_vendor": "test_provider",
                     "prompt_tokens": 10,
                     "completion_tokens": 15,
                     "agent_name": None,
@@ -312,6 +343,7 @@ class TestWatchContainer:
                 "model_id": "test_model",
                 "model_engine": "test_provider",
                 "model_provider": "test_provider",
+                "model_vendor": "test_provider",
                 "prompt_tokens": 10,
                 "completion_tokens": 15,
                 "agent_name": "planning_agent",
@@ -344,6 +376,7 @@ class TestWatchContainer:
                 "model_id": "test_model",
                 "model_engine": "test_provider",
                 "model_provider": "test_provider",
+                "model_vendor": "test_provider",
                 "prompt_tokens": 10,
                 "completion_tokens": 15,
                 "agent_name": "compactor",

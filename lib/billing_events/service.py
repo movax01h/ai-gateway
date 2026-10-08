@@ -49,6 +49,7 @@ class LLMOperation(BaseModel):
         model_id: Identifier of the LLM model used
         model_engine: Engine that executed the model (e.g., 'litellm', 'anthropic')
         model_provider: Provider of the model (e.g., 'anthropic', 'openai')
+        model_vendor: Vendor serving the model (e.g., 'anthropic', 'fireworks_ai', 'bedrock'), if known
         prompt_tokens: Number of tokens in the prompt
         completion_tokens: Number of tokens in the completion
         agent_name: Name of the agent that triggered this operation, if any
@@ -61,6 +62,7 @@ class LLMOperation(BaseModel):
     model_id: str
     model_engine: str
     model_provider: str
+    model_vendor: str | None = None
     prompt_tokens: int
     completion_tokens: int
     agent_name: str | None = None

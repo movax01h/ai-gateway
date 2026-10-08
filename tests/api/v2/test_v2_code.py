@@ -2384,6 +2384,7 @@ class TestCodeGenerations:
                 "model_id": "mistral",
                 "model_engine": "anthropic",
                 "model_provider": "litellm",
+                "model_vendor": "fireworks_ai",
                 "token_count": 10,
                 "prompt_tokens": 6,
                 "completion_tokens": 4,
@@ -2411,6 +2412,7 @@ class TestCodeGenerations:
                         "content_below_cursor": "\n",
                     },
                     "model_provider": "litellm",
+                    "model_vendor": "fireworks_ai",
                     "model_name": "mistral",
                 },
             )
