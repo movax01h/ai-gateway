@@ -33,7 +33,10 @@ from pydantic import BaseModel, ConfigDict
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2
-from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
+from duo_workflow_service.agent_platform.constants import (
+    METADATA_ONLY_FLOWS,
+    RECURSION_LIMIT,
+)
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -353,6 +356,17 @@ class AbstractWorkflow(ABC):
     def _recursion_limit(self):
         return RECURSION_LIMIT
 
+    def _registry_flow_id(self) -> Optional[str]:
+        """The Flow Registry id of the config this workflow runs.
+
+        ``None`` unless the workflow runs a config loaded from the registry, so an inline config cannot claim one.
+        """
+        return None
+
+    def _is_metadata_only(self) -> bool:
+        """Whether the session exposes only run metadata: no model or user text in the live stream or audit events."""
+        return self._registry_flow_id() in METADATA_ONLY_FLOWS
+
     async def _tag_langsmith_hard_limit(self) -> None:
         """Attach a LangSmith tag and metadata to the current trace when the hard recursion limit is hit.
 
@@ -472,6 +486,7 @@ class AbstractWorkflow(ABC):
             workflow_id=self._workflow_id,
             buffer_size=self._audit_event_buffer_size,
             flush_interval_seconds=self._audit_event_flush_interval,
+            metadata_only=self._is_metadata_only(),
         )
         await audit_collector.start()
         audit_collector_context.set(audit_collector)
@@ -522,7 +537,10 @@ class AbstractWorkflow(ABC):
         last_state = None
         compiled_graph = None
         self.checkpoint_notifier = UserInterface(
-            outbox=self._outbox, goal=goal, node_event_log=node_event_log
+            outbox=self._outbox,
+            goal=goal,
+            node_event_log=node_event_log,
+            metadata_only=self._is_metadata_only(),
         )
 
         try:

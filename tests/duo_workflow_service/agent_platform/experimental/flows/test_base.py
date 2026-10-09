@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
 import pytest
+from google.protobuf import struct_pb2
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
@@ -40,7 +41,12 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.flow_request import RegistryFlowRequest
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
+from duo_workflow_service.workflows.registry import (
+    _load_flow_from_inline_config,
+    resolve_flow,
+)
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
@@ -904,6 +910,91 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_tools_registry.toolset.assert_called_once_with(
             ["read_file", mcp_tool_name], tool_options={}
         )
+
+    @contextmanager
+    def _run_patches(self):
+        prefix = "duo_workflow_service.workflows.abstract_workflow"
+        checkpointer = Mock(initial_status_event=WorkflowStatusEventEnum.START)
+        checkpointer.aget_tuple = AsyncMock(return_value=None)
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.base.load_component_class",
+                return_value=MagicMock(return_value=self.mock_component("c")),
+            ),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+            patch(f"{prefix}.GitLabWorkflow") as gitlab_workflow,
+            patch(
+                f"{prefix}.UserInterface",
+                return_value=MagicMock(spec=UserInterface, ui_chat_log=[]),
+            ) as user_interface,
+            patch(f"{prefix}.AuditEventCollector") as audit_collector,
+        ):
+            gitlab_workflow.return_value.__aenter__.return_value = checkpointer
+            audit_collector.return_value.start = AsyncMock()
+            audit_collector.return_value.close = AsyncMock()
+            yield gitlab_workflow, user_interface, audit_collector
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_state_graph", "mock_tools_registry")
+    async def test_bl_security_from_the_registry_runs_metadata_only(
+        self, mock_flow_metadata, user, flow_type
+    ):
+        """bl_security resolved as the service resolves it is metadata-only; checkpoints stay complete."""
+        resolved = resolve_flow(
+            RegistryFlowRequest(
+                config_id="bl_security", schema_version="experimental", version="1.0.0"
+            )
+        )
+        with self._run_patches() as (gitlab_workflow, user_interface, audit_collector):
+            flow = resolved.factory(
+                workflow_id="wf-bl",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                audit_event_enabled=True,
+            )
+            await flow.run("scan")
+
+        assert flow._registry_flow_id() == "bl_security"
+        assert flow._is_metadata_only() is True
+        for cls in (user_interface, audit_collector):
+            assert cls.call_args.kwargs["metadata_only"] is True
+        assert "metadata_only" not in gitlab_workflow.call_args.kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_state_graph", "mock_tools_registry")
+    async def test_an_inline_copy_of_bl_security_is_not_metadata_only(
+        self, mock_flow_metadata, user, flow_type
+    ):
+        """An inline config cannot claim a registry id, even when it names itself bl_security."""
+        struct = struct_pb2.Struct()
+        struct.update(
+            {
+                "version": "experimental",
+                "environment": "ambient",
+                "name": "bl_security",
+                "config_id": "bl_security",
+                "_config_id": "bl_security",
+                "flow": {"entry_point": "c"},
+                "components": [{"name": "c", "type": "AgentComponent"}],
+                "routers": [{"from": "c", "to": "end"}],
+            }
+        )
+        factory = _load_flow_from_inline_config(struct, "experimental")
+        with self._run_patches() as (_, user_interface, audit_collector):
+            flow = factory(
+                workflow_id="wf-inline",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                audit_event_enabled=True,
+            )
+            await flow.run("scan")
+
+        assert flow._registry_flow_id() is None
+        assert flow._is_metadata_only() is False
+        for cls in (user_interface, audit_collector):
+            assert cls.call_args.kwargs["metadata_only"] is False
 
     def test_process_additional_context_empty_list(self, flow_instance):
         """Test _process_additional_context with empty list."""

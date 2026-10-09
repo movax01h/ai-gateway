@@ -1212,6 +1212,18 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "catalog_items": flow._catalog_items,
         }
 
+    def test_registry_flow_id_comes_from_the_registry_load(
+        self, flow_instance, sample_flow_config
+    ):
+        assert flow_instance._registry_flow_id() is None
+        assert flow_instance._is_metadata_only() is False
+
+        # pylint: disable-next=protected-access
+        sample_flow_config._config_id = "bl_security"
+
+        assert flow_instance._registry_flow_id() == "bl_security"
+        assert flow_instance._is_metadata_only() is True
+
     def test_process_additional_context_empty_list(self, flow_instance):
         """Test _process_additional_context with empty list."""
         result = flow_instance._process_additional_context([])

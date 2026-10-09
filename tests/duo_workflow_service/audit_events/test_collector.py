@@ -11,9 +11,19 @@ from duo_workflow_service.audit_events.collector import (
     AuditEventCollector,
 )
 from duo_workflow_service.audit_events.event_types import (
+    AuditEvent,
     LlmInputSentEvent,
+    LlmRequestFailedEvent,
+    LlmResponseReceivedEvent,
+    SessionEndedEvent,
+    SessionStartedEvent,
+    ToolExecutionFailedEvent,
+    ToolExecutionRetriedEvent,
     ToolInvokedEvent,
     ToolResponseReceivedEvent,
+    UserInputReceivedEvent,
+    UserOutputDisplayedEvent,
+    WebSearchInvokedEvent,
 )
 from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
 from tests.duo_workflow_service.audit_events.conftest import make_audit_event
@@ -760,3 +770,159 @@ class TestLargestField:
         event = MagicMock()
         event.to_cloudevent.return_value = {"data": {}}
         assert AuditEventCollector._largest_field(event) == (None, 0)
+
+
+SECRET = "SECRET-MODEL-TEXT"
+
+# One instance of every event type, each carrying model or user text.
+_TEXT_EVENTS = [
+    SessionStartedEvent(workflow_id="wf-1", workflow_type="bl", goal=SECRET),
+    SessionEndedEvent(workflow_id="wf-1", status="failure", error_message=SECRET),
+    UserInputReceivedEvent(
+        workflow_id="wf-1", input_type="t", content=SECRET, content_length=17
+    ),
+    LlmInputSentEvent(workflow_id="wf-1", model_name="m", prompt_content=SECRET),
+    LlmResponseReceivedEvent(
+        workflow_id="wf-1",
+        model_name="m",
+        response_content=SECRET,
+        prompt_token_count=10,
+        completion_token_count=5,
+        finish_reason="stop",
+        latency_ms=1.5,
+    ),
+    UserOutputDisplayedEvent(
+        workflow_id="wf-1", output_type="agent", content=SECRET, content_length=17
+    ),
+    ToolInvokedEvent(
+        workflow_id="wf-1",
+        tool_name="read_file",
+        tool_args={"path": SECRET},
+    ),
+    ToolResponseReceivedEvent(
+        workflow_id="wf-1",
+        tool_name="read_file",
+        response_content=SECRET,
+        response_length=17,
+    ),
+    ToolExecutionFailedEvent(
+        workflow_id="wf-1",
+        tool_name="read_file",
+        error_type="ValueError",
+        error_message=SECRET,
+    ),
+    ToolExecutionRetriedEvent(
+        workflow_id="wf-1",
+        tool_name="read_file",
+        attempt_number=2,
+        max_attempts=3,
+        previous_error=SECRET,
+    ),
+    LlmRequestFailedEvent(
+        workflow_id="wf-1", model_name="m", error_type="Timeout", error_message=SECRET
+    ),
+]
+
+
+class TestMetadataRetention:
+    def test_every_event_type_is_covered(self):
+        assert {type(e) for e in _TEXT_EVENTS} | {WebSearchInvokedEvent} == set(
+            AuditEvent.__subclasses__()
+        )
+
+    @pytest.mark.parametrize("event", _TEXT_EVENTS, ids=lambda e: type(e).__name__)
+    def test_captured_events_carry_no_text(self, mock_client, event):
+        collector = AuditEventCollector(client=mock_client, metadata_only=True)
+
+        collector.capture(event)
+
+        assert SECRET not in json.dumps(collector._buffer[0].to_cloudevent())
+
+    def test_metadata_fields_are_kept(self, mock_client):
+        collector = AuditEventCollector(client=mock_client, metadata_only=True)
+        event = LlmResponseReceivedEvent(
+            workflow_id="wf-1",
+            model_name="claude",
+            response_content=SECRET,
+            prompt_token_count=10,
+            completion_token_count=5,
+            finish_reason="stop",
+            latency_ms=1.5,
+        )
+
+        collector.capture(event)
+
+        data = event.to_cloudevent()["data"]
+        assert data["response_content"] == ""
+        assert (
+            data["model_name"],
+            data["prompt_token_count"],
+            data["completion_token_count"],
+            data["finish_reason"],
+            data["latency_ms"],
+        ) == ("claude", 10, 5, "stop", 1.5)
+
+    @pytest.mark.parametrize(
+        "event,kept",
+        [
+            (
+                ToolInvokedEvent(
+                    workflow_id="wf-1",
+                    tool_name="t",
+                    tool_args={"path": SECRET},
+                    policy_ref={"origin": "customer_policy", "hash": "abc"},
+                ),
+                {"policy_ref": {"origin": "customer_policy", "hash": "abc"}},
+            ),
+            (
+                UserInputReceivedEvent(
+                    workflow_id="wf-1",
+                    input_type="t",
+                    content=SECRET,
+                    content_length=17,
+                ),
+                {"content_length": 17},
+            ),
+            (
+                ToolResponseReceivedEvent(
+                    workflow_id="wf-1",
+                    tool_name="t",
+                    response_content=SECRET,
+                    response_length=17,
+                    response_content_truncated=True,
+                    response_content_bytes=99,
+                ),
+                {
+                    "response_length": 17,
+                    "response_content_truncated": True,
+                    "response_content_bytes": 99,
+                },
+            ),
+            (
+                LlmInputSentEvent(
+                    workflow_id="wf-1",
+                    model_name="m",
+                    prompt_content=SECRET,
+                    prompt_content_truncated=True,
+                    prompt_content_bytes=99,
+                ),
+                {"prompt_content_truncated": True, "prompt_content_bytes": 99},
+            ),
+        ],
+    )
+    def test_audit_metadata_fields_are_kept(self, mock_client, event, kept):
+        collector = AuditEventCollector(client=mock_client, metadata_only=True)
+
+        collector.capture(event)
+
+        assert {name: getattr(event, name) for name in kept} == kept
+        assert SECRET not in json.dumps(event.to_cloudevent())
+
+    def test_a_full_flow_keeps_text(self, collector):
+        event = LlmInputSentEvent(
+            workflow_id="wf-1", model_name="m", prompt_content=SECRET
+        )
+
+        collector.capture(event)
+
+        assert event.prompt_content == SECRET

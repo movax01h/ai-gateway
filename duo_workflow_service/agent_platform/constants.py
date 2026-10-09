@@ -15,3 +15,9 @@ RECURSION_LIMIT = 600
 # assistant. The registry forks on it to pick the chat executor, and
 # ``AgentComponent`` fills the chat-surface defaults under it.
 CHAT_PARTIAL_ENVIRONMENT = "chat-partial"
+
+# Registry flows that expose only the metadata of their runs: which steps and tools
+# ran, their status and timing. The live stream and audit events carry no model or
+# user text for them. Rails restricts its session read APIs for the same flows
+# through its own setting.
+METADATA_ONLY_FLOWS: frozenset[str] = frozenset({"bl_security"})

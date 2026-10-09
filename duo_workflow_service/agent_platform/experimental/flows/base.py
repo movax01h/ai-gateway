@@ -160,6 +160,10 @@ class Flow(AbstractWorkflow):
     # pylint: enable=dangerous-default-value
 
     @override
+    def _registry_flow_id(self) -> Optional[str]:
+        return self._config.config_id
+
+    @override
     def get_workflow_state(self, goal: str) -> FlowState:  # type: ignore[override]
         initial_ui_chat_log = UiChatLog(
             message_type=MessageTypeEnum.TOOL,
