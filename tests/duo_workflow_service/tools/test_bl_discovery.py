@@ -9,6 +9,8 @@ import fnmatch
 import hashlib
 import json
 import re
+import shutil
+import subprocess
 
 import pytest
 import structlog.testing
@@ -188,6 +190,78 @@ class TestFindFilesPatterns:
         assert bl._wire_pattern("**/app/*.rb") == "**/app/*.rb"
         assert bl._wire_pattern("*_controller.rb") == "*_controller.rb"
 
+    def test_no_builtin_glob_starts_with_a_wildcard_directory(self):
+        # Built-in AUTHZ_GLOBS only (tuner-supplied globs reach `_wire_pattern` unchanged).
+        # `*/x/**` is wired as `**/*/x/**`, which needs a parent directory and so misses a top-level `x/`.
+        assert [g for g in bl.AUTHZ_GLOBS if g.startswith("*/")] == []
+
+    # (glob, top-level sample, nested sample, wrong-extension sample or None), typed by hand.
+    @pytest.mark.parametrize(
+        "glob,top,nested,wrong",
+        [
+            ("routes/**/*", "routes/x.ts", "server/routes/x.ts", None),
+            ("controllers/**/*", "controllers/x.ts", "server/controllers/x.ts", None),
+            ("services/**/*", "services/x.ts", "server/services/x.ts", None),
+            ("api/**/*", "api/x.ts", "server/api/x.ts", None),
+            ("endpoints/**/*", "endpoints/x.ts", "server/endpoints/x.ts", None),
+            ("handlers/**/*", "handlers/x.ts", "server/handlers/x.ts", None),
+            ("models/**/*", "models/x.ts", "server/models/x.ts", None),
+            ("policies/**/*", "policies/x.ts", "server/policies/x.ts", None),
+            ("middlewares/**/*", "middlewares/x.ts", "server/middlewares/x.ts", None),
+            ("rest/**/*", "rest/x.ts", "server/rest/x.ts", None),
+            ("schemas/**/*", "schemas/x.ts", "server/schemas/x.ts", None),
+            ("functions/**/*", "functions/x.ts", "server/functions/x.ts", None),
+            ("views/**/*.py", "views/x.py", "server/views/x.py", "views/x.js"),
+            ("api/**/*.py", "api/x.py", "server/api/x.py", "api/x.js"),
+            (
+                "resources/**/*.py",
+                "resources/x.py",
+                "server/resources/x.py",
+                "resources/x.js",
+            ),
+            ("models/**/*.py", "models/x.py", "server/models/x.py", "models/x.js"),
+            ("graphql/**/*.py", "graphql/x.py", "server/graphql/x.py", "graphql/x.js"),
+            ("routers/**/*.go", "routers/x.go", "server/routers/x.go", "routers/x.rs"),
+            ("models/**/*.go", "models/x.go", "server/models/x.go", "models/x.rs"),
+            (
+                "services/**/*.go",
+                "services/x.go",
+                "server/services/x.go",
+                "services/x.rs",
+            ),
+        ],
+    )
+    def test_each_directory_glob_matches_top_level_and_nested(
+        self, glob, top, nested, wrong
+    ):
+        assert glob in bl.AUTHZ_GLOBS
+        wire = bl._wire_pattern(glob)
+        assert _glob_match(top, wire) and _glob_match(nested, wire)
+        assert wrong is None or not _glob_match(wrong, wire)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "routes/x.ts",
+            "models/m.ts",
+            "controllers/c.ts",
+            "services/s.ts",
+            "api/a.ts",
+            "handlers/h.ts",
+            "policies/p.ts",
+            "middlewares/m.ts",
+            "server/routes/r.ts",
+            "apps/web/controllers/c.ts",
+        ],
+    )
+    def test_role_directories_are_found_at_top_level_and_nested(self, path):
+        role = [
+            g
+            for g in bl.AUTHZ_GLOBS
+            if g.endswith("/**/*") and not g.startswith("app/") and "/" in g
+        ]
+        assert [g for g in role if _glob_match(path, bl._wire_pattern(g))]
+
     def test_execute_fires_each_glob_once_and_never_the_whole_tree(self, monkeypatch):
         calls = _install(monkeypatch, [], faithful=True)
         _execute(files_per_unit=4, max_units=20)
@@ -210,6 +284,33 @@ class TestFindFilesPatterns:
             named = [i for i, s in enumerate(dirs) if s not in ("x",)]
             dirs[named[-1]] = "not_" + dirs[named[-1]]
             assert not _glob_match("/".join(dirs + [name]), wire), glob
+
+    @pytest.mark.skipif(shutil.which("rg") is None, reason="needs ripgrep")
+    def test_glob_model_agrees_with_real_ripgrep_for_every_authz_glob(self, tmp_path):
+        # `_glob_match` is hand-written; the executor runs `rg --files -g <pattern>`.
+        # Per glob: a top-level, a nested and a wrong-extension sample.
+        tree = {"notes.txt"}
+        for glob in bl.AUTHZ_GLOBS:
+            segs = glob.split("/")
+            dirs = [s.replace("*", "x") for s in segs[:-1] if s != "**"]
+            name = segs[-1].replace("*", "x")
+            wrong = name.rsplit(".", 1)[0] + ".zzz"
+            for d in (dirs, ["server"] + dirs, dirs + ["sub", "deeper"]):
+                tree |= {"/".join(d + [name]), "/".join(d + [wrong])}
+        for path in tree:
+            (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / path).touch()
+        for glob in bl.AUTHZ_GLOBS:
+            wire = bl._wire_pattern(glob)
+            out = subprocess.run(
+                ["rg", "--files", "-g", wire, "--path-separator", "/", "--", "."],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout
+            found = {line.removeprefix("./") for line in out.splitlines()}
+            assert found == {p for p in tree if _glob_match(p, wire)}, glob
 
     def test_framework_documented_nested_layouts_are_all_discovered(self, monkeypatch):
         tree = [
@@ -359,10 +460,10 @@ def test_a_language_net_is_present_and_extension_scoped(glob, path):
         "svc/orders/schemas/order_schema.py",
     ],
 )
-def test_a_role_directory_glob_reaches_a_per_module_layout(path):
-    # The role nouns with any parent and any extension.
+def test_a_non_app_role_directory_glob_reaches_a_per_module_layout(path):
+    # The non-`app/` role nouns nested under any parent module, any extension.
     role_globs = [
-        g for g in bl.AUTHZ_GLOBS if g.startswith("*/") and g.endswith("/**/*")
+        g for g in bl.AUTHZ_GLOBS if g.endswith("/**/*") and not g.startswith("app/")
     ]
     assert [g for g in role_globs if _glob_match(path, bl._wire_pattern(g))]
 
