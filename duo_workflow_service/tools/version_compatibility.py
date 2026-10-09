@@ -26,6 +26,7 @@ LABELS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
 SUGGESTED_REVIEWERS_ENDPOINT_VERSION = Version("19.4.0")
 CLIENT_MCP_TRUST_STRIPPED_VERSION = Version("19.5.0")
 VULNERABILITY_TRACKED_REF_VERSION = Version("19.5.0")
+ASCP_SECURITY_BOUNDARY_VERSION = Version("19.5.0")
 
 # Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
 # parse, such as a GDK's `19.3.0-pre-g1234abcd`.
@@ -151,6 +152,13 @@ def supports_vulnerability_tracked_ref() -> bool:
     """
     return _padded_release(get_gitlab_version()) >= _padded_release(
         VULNERABILITY_TRACKED_REF_VERSION
+    )
+
+
+def supports_ascp_security_boundary() -> bool:
+    """Check if ``AscpSecurityContextCreateInput`` accepts ``securityBoundary`` (GitLab >= 19.5)."""
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        ASCP_SECURITY_BOUNDARY_VERSION
     )
 
 
