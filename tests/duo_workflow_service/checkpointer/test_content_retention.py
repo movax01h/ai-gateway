@@ -7,14 +7,17 @@ import pytest
 from google.protobuf import struct_pb2
 from langgraph.checkpoint.base import CheckpointMetadata
 
+from duo_workflow_service.agent_platform.constants import METADATA_ONLY_FLOWS
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig as V1FlowConfig,
 )
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    PartialFlowConfig as V1PartialFlowConfig,
+)
 from duo_workflow_service.checkpointer.content_retention import (
-    is_metadata_only,
     reduce_ui_chat_log,
     reduce_ui_chat_log_entry,
 )
@@ -167,16 +170,8 @@ def workflow_config_fixture():
 
 @pytest.fixture(name="checkpointer")
 def checkpointer_fixture(http_client, workflow_id, workflow_type, workflow_config):
-    # Built exactly as a metadata-retention flow builds it: no retention argument.
+    # Built exactly as a metadata-only flow builds it: no metadata_only argument.
     return GitLabWorkflow(http_client, workflow_id, workflow_type, workflow_config)
-
-
-@pytest.mark.parametrize(
-    ("content_retention", "expected"),
-    [("metadata", True), ("full", False), (None, False)],
-)
-def test_is_metadata_only(content_retention, expected):
-    assert is_metadata_only(content_retention) is expected
 
 
 class TestReduction:
@@ -231,82 +226,77 @@ class TestReduction:
         assert "message_id" not in reduce_ui_chat_log_entry(entry)
 
 
-class TestFlowConfig:
-    def test_bl_security_declares_metadata_retention(self):
-        assert (
-            FlowConfig.from_yaml_config("bl_security", "1.0.0").content_retention
-            == "metadata"
-        )
+class TestRegistryIdentity:
+    """A flow is metadata-only by its registry id, which only a registry load can set."""
 
-    def test_every_bl_security_version_declares_metadata_retention(self):
-        versions = sorted((FlowConfig.DIRECTORY_PATH / "bl_security").glob("*.yml"))
+    def test_bl_security_is_metadata_only(self):
+        assert "bl_security" in METADATA_ONLY_FLOWS
+
+    @pytest.mark.parametrize("flow_id", sorted(METADATA_ONLY_FLOWS))
+    def test_every_metadata_only_flow_is_a_registry_flow(self, flow_id):
+        # A misspelt id would silently leave the real flow exposing its text.
+        versions = sorted((FlowConfig.DIRECTORY_PATH / flow_id).glob("*.yml"))
 
         assert versions
         for path in versions:
-            config = FlowConfig.from_yaml_config("bl_security", path.stem)
-            assert config.content_retention == "metadata", path.name
+            config = FlowConfig.from_yaml_config(flow_id, path.stem)
+            assert config.config_id == flow_id, path.name
+            assert config.config_version == path.stem
 
-    def test_defaults_to_full(self):
+    def test_a_config_built_directly_has_no_registry_id(self):
         config = FlowConfig(
             flow={}, components=[], routers=[], environment="ambient", version="v1"
         )
 
-        assert config.content_retention == "full"
+        assert config.config_id is None
+        assert config.config_version is None
 
-    @pytest.mark.parametrize(
-        "environment,component",
-        [
-            ("chat", {"name": "a", "type": "AgentComponent"}),
-            ("ambient", {"name": "h", "type": "HumanInputComponent"}),
-            (
-                "ambient",
-                {"name": "a", "type": "AgentComponent", "require_tool_approval": True},
-            ),
-        ],
-    )
-    def test_metadata_is_allowed_for_a_flow_that_can_pause(
-        self, environment, component
-    ):
-        # Checkpoints stay complete, so a paused session can resume.
+    def test_input_cannot_set_the_registry_id(self):
         config = FlowConfig(
-            flow={},
-            components=[component],
-            routers=[],
-            environment=environment,
-            version="experimental",
-            content_retention="metadata",
-        )
-
-        assert config.content_retention == "metadata"
-
-    def test_v1_flow_configs_ignore_it(self):
-        config = V1FlowConfig(
             flow={},
             components=[],
             routers=[],
             environment="ambient",
-            version="v1",
-            content_retention="metadata",
+            version="experimental",
+            config_id="bl_security",
+            _config_id="bl_security",
         )
 
-        assert not hasattr(config, "content_retention")
+        assert config.config_id is None
+        assert "config_id" not in config.model_dump()
+        assert "_config_id" not in config.model_dump()
 
     @pytest.mark.parametrize("schema_version", ["experimental", "v1"])
-    def test_an_inline_config_may_not_set_it(self, schema_version):
+    def test_an_inline_config_has_no_registry_id(self, schema_version):
         struct = struct_pb2.Struct()
         struct.update(
             {
                 "version": schema_version,
                 "environment": "ambient",
+                "name": "bl_security",
+                "config_id": "bl_security",
                 "components": [],
                 "routers": [],
                 "flow": {"entry_point": "a"},
-                "content_retention": "metadata",
             }
         )
 
-        with pytest.raises(ValueError, match="only supported for bundled flows"):
-            _load_flow_from_inline_config(struct, schema_version)
+        factory = _load_flow_from_inline_config(struct, schema_version)
+
+        assert factory.keywords["config"].config_id is None
+
+    def test_the_registry_id_survives_completing_a_partial_config(self):
+        partial = V1PartialFlowConfig.from_yaml_config(
+            "duo_permissions_assistant", "1.0.0"
+        )
+        assert partial.environment == "chat-partial"
+
+        config = partial.to_config()
+
+        assert isinstance(config, V1FlowConfig)
+        assert not isinstance(config, V1PartialFlowConfig)
+        assert config.config_id == "duo_permissions_assistant"
+        assert config.config_version == "1.0.0"
 
 
 class TestCheckpointsStayComplete:
@@ -360,9 +350,7 @@ class TestCheckpointsStayComplete:
 
 class TestLiveStream:
     def test_checkpoint_carries_no_text(self):
-        notifier = UserInterface(
-            outbox=Mock(), goal=SECRET, content_retention="metadata"
-        )
+        notifier = UserInterface(outbox=Mock(), goal=SECRET, metadata_only=True)
         notifier.status = WorkflowStatusEnum.EXECUTION
         notifier.ui_chat_log = [_chat_entry()]
         notifier.steps = [{"id": "1", "description": SECRET, "status": "In Progress"}]

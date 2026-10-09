@@ -829,18 +829,14 @@ class TestMetadataRetention:
 
     @pytest.mark.parametrize("event", _TEXT_EVENTS, ids=lambda e: type(e).__name__)
     def test_captured_events_carry_no_text(self, mock_client, event):
-        collector = AuditEventCollector(
-            client=mock_client, content_retention="metadata"
-        )
+        collector = AuditEventCollector(client=mock_client, metadata_only=True)
 
         collector.capture(event)
 
         assert SECRET not in json.dumps(collector._buffer[0].to_cloudevent())
 
     def test_metadata_fields_are_kept(self, mock_client):
-        collector = AuditEventCollector(
-            client=mock_client, content_retention="metadata"
-        )
+        collector = AuditEventCollector(client=mock_client, metadata_only=True)
         event = LlmResponseReceivedEvent(
             workflow_id="wf-1",
             model_name="claude",
@@ -912,16 +908,14 @@ class TestMetadataRetention:
         ],
     )
     def test_audit_metadata_fields_are_kept(self, mock_client, event, kept):
-        collector = AuditEventCollector(
-            client=mock_client, content_retention="metadata"
-        )
+        collector = AuditEventCollector(client=mock_client, metadata_only=True)
 
         collector.capture(event)
 
         assert {name: getattr(event, name) for name in kept} == kept
         assert SECRET not in json.dumps(event.to_cloudevent())
 
-    def test_full_retention_keeps_text(self, collector):
+    def test_a_full_flow_keeps_text(self, collector):
         event = LlmInputSentEvent(
             workflow_id="wf-1", model_name="m", prompt_content=SECRET
         )

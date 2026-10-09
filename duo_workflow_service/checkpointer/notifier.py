@@ -11,11 +11,7 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import UserOutputDisplayedEvent
-from duo_workflow_service.checkpointer.content_retention import (
-    ContentRetention,
-    is_metadata_only,
-    reduce_ui_chat_log,
-)
+from duo_workflow_service.checkpointer.content_retention import reduce_ui_chat_log
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
@@ -130,11 +126,11 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         goal: str,
         workflow_id: str = "",
         node_event_log: Optional[NodeEventLog] = None,
-        content_retention: ContentRetention = "full",
+        metadata_only: bool = False,
     ):
         self.outbox = outbox
         self.goal = goal
-        self._metadata_only = is_metadata_only(content_retention)
+        self._metadata_only = metadata_only
         self._workflow_id = workflow_id
         self.ui_chat_log: list[UiChatLog] = []
         self.status = WorkflowStatusEnum.NOT_STARTED

@@ -251,6 +251,10 @@ class Flow(AbstractWorkflow):
                         )
 
     @override
+    def _registry_flow_id(self) -> Optional[str]:
+        return self._config.config_id
+
+    @override
     def get_workflow_state(  # type: ignore[override]
         self,
         goal: str,

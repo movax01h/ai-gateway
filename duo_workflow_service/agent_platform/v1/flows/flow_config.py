@@ -4,7 +4,7 @@ from typing import Callable, ClassVar, List, Literal, Optional, Self, override
 
 import structlog
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
@@ -165,6 +165,23 @@ class BaseFlowConfig(BaseModel):
     description: Optional[str] = None
     product_group: Optional[str] = None
 
+    # The registry flow id and concrete version this config was loaded from. Set only by
+    # ``from_yaml_config``, so a config built from caller-supplied data (an inline flow)
+    # cannot claim a registry identity. Private attributes are not part of the schema:
+    # input cannot set them and ``model_dump`` does not emit them.
+    _config_id: Optional[str] = PrivateAttr(default=None)
+    _config_version: Optional[str] = PrivateAttr(default=None)
+
+    @property
+    def config_id(self) -> Optional[str]:
+        """The registry flow id this config was loaded from; ``None`` when not loaded from the registry."""
+        return self._config_id
+
+    @property
+    def config_version(self) -> Optional[str]:
+        """The concrete version this config was loaded from; ``None`` when not loaded from the registry."""
+        return self._config_version
+
     def input_json_schemas_by_category(self):
         json_schemas_by_category: dict[str, dict] = {}
         if not self.flow.inputs:
@@ -234,8 +251,9 @@ class BaseFlowConfig(BaseModel):
                 Path traversal is prevented by _safe_resolve.
 
         Returns:
-            The loaded config, with ``resolved_version`` set to the concrete semver the
-            constraint resolved to (e.g. "2.1.0").
+            The loaded config, with ``resolved_version`` and ``config_version`` set to the
+            concrete semver the constraint resolved to (e.g. "2.1.0"), and ``config_id``
+            set to ``flow_id``.
         """
         version_query = flow_version or DEFAULT_FLOW_VERSION
 
@@ -288,13 +306,17 @@ class BaseFlowConfig(BaseModel):
         try:
             with open(yaml_path, "r", encoding="utf-8") as file:
                 yaml_content = yaml.safe_load(file)
-            return cls(**yaml_content, resolved_version=version)
+            config = cls(**yaml_content, resolved_version=version)
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"{flow_id}/{version} file not found at {yaml_path}"
             )
         except yaml.YAMLError as e:
             raise yaml.YAMLError(f"Error parsing YAML file: {e}") from e
+
+        config._config_id = flow_id
+        config._config_version = version
+        return config
 
 
 def list_flow_configs(flow_config_cls: type[BaseFlowConfig]) -> List[dict[str, str]]:
@@ -411,7 +433,8 @@ class PartialFlowConfig(FlowConfig):
         Declared values are kept.
 
         Returns:
-            A ``FlowConfig``. This config is not mutated.
+            A ``FlowConfig`` that keeps this config's ``config_id`` and ``config_version``.
+            This config is not mutated.
         """
         flow = self.flow
         entry_point = flow.entry_point if flow else None
@@ -422,13 +445,18 @@ class PartialFlowConfig(FlowConfig):
                 inputs=flow.inputs if flow else None,
             )
 
-        return FlowConfig.model_validate(
+        config = FlowConfig.model_validate(
             {
                 **dict(self),
                 "flow": flow,
                 "routers": self.routers or [{"from": entry_point, "to": "end"}],
             }
         )
+        # Validation builds the config from public fields only, so carry the private
+        # registry identity over explicitly.
+        config._config_id = self._config_id
+        config._config_version = self._config_version
+        return config
 
 
 def load_component_class(

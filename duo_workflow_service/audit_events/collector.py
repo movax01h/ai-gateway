@@ -6,10 +6,6 @@ import structlog
 
 from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.event_types import AuditEvent
-from duo_workflow_service.checkpointer.content_retention import (
-    ContentRetention,
-    is_metadata_only,
-)
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
 
@@ -26,7 +22,7 @@ DRAIN_TIMEOUT_SECONDS = 3.0
 # An excerpted field keeps this much of its start and of its end.
 EXCERPT_BYTES = 8 * 1024
 
-# The fields an event keeps under metadata retention. Any other field, including
+# The fields an event keeps for a metadata-only flow. Any other field, including
 # one a future event type adds, is emptied: prompts, responses, tool arguments and
 # results, displayed output, the goal and error messages.
 # Keep in sync with the Rails copy in ee/lib/ai/duo_workflows/content_retention.rb.
@@ -86,11 +82,11 @@ class AuditEventCollector:
         workflow_id: str = "",
         buffer_size: int = 100,
         flush_interval_seconds: float = 10.0,
-        content_retention: ContentRetention = "full",
+        metadata_only: bool = False,
     ):
         self._client = client
         self._workflow_id = workflow_id
-        self._metadata_only = is_metadata_only(content_retention)
+        self._metadata_only = metadata_only
         self._buffer: list[AuditEvent] = []
         self._buffer_bytes: int = 0
         self._buffer_size = buffer_size

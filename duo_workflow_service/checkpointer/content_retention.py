@@ -1,22 +1,12 @@
 """Content retention: what a session exposes of the text it produced.
 
-A flow whose config sets ``content_retention: metadata`` exposes the shape of the run (which steps and tools ran, their
-status and timing) but none of the model or user text. The live stream and the audit collector apply it at their exits,
-so it is an allowlist: a field not named here is dropped. Saved checkpoints stay complete so the session can resume;
-GitLab reduces them when it serves them to anyone but Duo Workflow Service.
+A registry flow listed in ``METADATA_ONLY_FLOWS`` exposes the shape of the run (which steps and tools ran, their status
+and timing) but none of the model or user text. The live stream and the audit collector apply it at their exits, so it
+is an allowlist: a field not named here is dropped. Saved checkpoints stay complete so the session can resume; GitLab
+reduces them when it serves them to anyone but Duo Workflow Service.
 """
 
-from typing import Any, Literal, Mapping, Optional
-
-ContentRetention = Literal["full", "metadata"]
-
-METADATA_RETENTION: ContentRetention = "metadata"
-
-
-def is_metadata_only(content_retention: Optional[str]) -> bool:
-    """Whether a flow with this ``content_retention`` keeps only the metadata of its run."""
-    return content_retention == METADATA_RETENTION
-
+from typing import Any, Mapping, Optional
 
 # The only chat-log fields kept per entry.
 _KEPT_CHAT_LOG_FIELDS = (
