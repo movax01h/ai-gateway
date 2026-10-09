@@ -80,7 +80,6 @@ USE_CASES_MODELS_MAP = {
     },
     KindUseCase.CODE_GENERATIONS: {
         KindVertexTextModel.CODE_BISON_002,
-        KindVertexTextModel.GEMINI_2_5_FLASH,
         KindLiteLlmModel.CODEGEMMA,
         KindLiteLlmModel.CODELLAMA,
         KindLiteLlmModel.CODESTRAL,
@@ -109,7 +108,7 @@ SAAS_PROMPT_MODEL_MAP = {
     },
     "1.2.0-dev": {
         "model_provider": ModelProvider.VERTEX_AI,
-        "model_version": KindVertexTextModel.GEMINI_2_5_FLASH,
+        "model_version": KindAnthropicModel.CLAUDE_SONNET_4_6_VERTEX,
     },
     "1.2.0": {
         "model_provider": ModelProvider.VERTEX_AI,
