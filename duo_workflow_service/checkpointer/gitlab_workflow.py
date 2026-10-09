@@ -1072,6 +1072,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     quantity=1,
                     tool_execs=tool_executions,
                     orbit_called=self._orbit_called,
+                    source=self._workflow_config.get("source_type"),
                 )
                 if tracked:
                     self._logger.info(

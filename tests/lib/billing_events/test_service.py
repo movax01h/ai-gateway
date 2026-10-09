@@ -111,6 +111,30 @@ class TestBillingEventService:
             },
         )
 
+    @pytest.mark.parametrize("source", ["merge_request_code_conflict", None])
+    def test_track_billing_with_source(
+        self,
+        billing_event_service,
+        billing_event_client,
+        user,
+        gl_context,
+        llm_operation,
+        source,
+    ):
+        """Test that source is added to metadata only when provided."""
+        billing_event_service.track_billing(
+            user,
+            gl_context,
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+            llm_ops=[llm_operation],
+            source=source,
+        )
+
+        metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+        assert metadata.get("source") == source
+
     def test_track_billing_with_multiple_operations(
         self,
         billing_event_service,

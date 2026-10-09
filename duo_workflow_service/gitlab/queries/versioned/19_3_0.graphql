@@ -65,6 +65,7 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
             }
             archived
             stalled
+            sourceType @gl_introduced(version: "19.4.0")
         }
     }
 }

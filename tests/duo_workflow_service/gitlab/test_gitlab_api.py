@@ -235,6 +235,40 @@ async def test_fetch_workflow_and_container_data_with_empty_languages():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source_type,expected",
+    [
+        ("MERGE_REQUEST_CODE_CONFLICT", "merge_request_code_conflict"),
+        (None, None),
+    ],
+)
+async def test_fetch_workflow_and_container_data_source_type(source_type, expected):
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "webUrl": "http://example.com/test-project",
+                    },
+                    "sourceType": source_type,
+                }
+            ]
+        }
+    }
+
+    _, _, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["source_type"] == expected
+
+
+@pytest.mark.asyncio
 async def test_fetch_workflow_and_project_data_with_missing_languages(
     workflow_and_project_data,
 ):
