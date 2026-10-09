@@ -1350,12 +1350,12 @@ def _cyclic_error() -> BaseException:
         ),
         (
             _with_context(
-                RuntimeError("raised in except"), RestrictedModelAccessError()
+                RuntimeError("unrelated error in except"), RestrictedModelAccessError()
             ),
             False,
             None,
-            grpc.StatusCode.PERMISSION_DENIED,
-            "Model not available for this flow",
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: RuntimeError",
         ),
         (
             _cyclic_error(),

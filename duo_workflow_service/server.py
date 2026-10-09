@@ -428,13 +428,17 @@ def _extract_error_message(error: BaseException) -> str:
 def _find_restricted_model_access_error(
     error: Optional[BaseException],
 ) -> Optional[RestrictedModelAccessError]:
-    """Return the first RestrictedModelAccessError in the error's cause/context chain, if any."""
+    """Return the first RestrictedModelAccessError in the error's explicit cause chain, if any.
+
+    `__context__` is not followed: Python sets it on any exception raised inside an except block, so an unrelated
+    failure would be reported as a denial.
+    """
     seen: set[int] = set()
     while error is not None and id(error) not in seen:
         if isinstance(error, RestrictedModelAccessError):
             return error
         seen.add(id(error))
-        error = getattr(error, "__cause__", None) or getattr(error, "__context__", None)
+        error = error.__cause__
     return None
 
 
