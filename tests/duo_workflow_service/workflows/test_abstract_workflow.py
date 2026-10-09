@@ -1719,13 +1719,13 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("content_retention", "expected_tracing", "expected_request_logging"),
-    [("full", True, True), ("metadata", False, False)],
+    ("registry_flow_id", "expected_tracing", "expected_request_logging"),
+    [(None, True, True), ("developer", True, True), ("bl_security", False, False)],
 )
-async def test_metadata_retention_disables_tracing_and_request_logging(
-    content_retention, expected_tracing, expected_request_logging, user
+async def test_metadata_only_flow_disables_tracing_and_request_logging(
+    registry_flow_id, expected_tracing, expected_request_logging, user
 ):
-    """A metadata-retention flow sends no LangSmith trace and logs no LLM request body, even with both switched on."""
+    """A metadata-only flow sends no LangSmith trace and logs no LLM request body, even with both switched on."""
     observed = {}
 
     async def compile_and_run_graph(**_kwargs):
@@ -1744,9 +1744,7 @@ async def test_metadata_retention_disables_tracing_and_request_logging(
         with (
             patch.dict(os.environ, {"LANGSMITH_TRACING_V2": "true"}, clear=False),
             patch("ai_gateway.structured_logging.ENABLE_REQUEST_LOGGING", True),
-            patch.object(
-                workflow, "_content_retention", return_value=content_retention
-            ),
+            patch.object(workflow, "_registry_flow_id", return_value=registry_flow_id),
             patch.object(
                 workflow, "_compile_and_run_graph", side_effect=compile_and_run_graph
             ),

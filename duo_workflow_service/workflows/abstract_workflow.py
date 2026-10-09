@@ -295,8 +295,8 @@ class AbstractWorkflow(ABC):
 
             # By default, tracing follows extended_logging. Only disable if LANGSMITH_TRACING_V2 is explicitly "false"
             langsmith_tracing_v2_env = os.getenv("LANGSMITH_TRACING_V2", "").lower()
-            # A metadata-retention flow sends no trace and logs no LLM request body, whatever the logging settings.
-            metadata_only = is_metadata_only(self._content_retention())
+            # A metadata-only flow sends no trace and logs no LLM request body, whatever the logging settings.
+            metadata_only = self._is_metadata_only()
             tracing_enabled = (
                 extended_logging
                 and (langsmith_tracing_v2_env != "false")

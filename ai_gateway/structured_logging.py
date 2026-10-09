@@ -19,7 +19,7 @@ access_logger = structlog.stdlib.get_logger("api.access")
 ENABLE_REQUEST_LOGGING = False
 CUSTOM_MODELS_ENABLED = False
 
-# Set while a DWS flow with `content_retention: metadata` runs. It overrides every switch below, so no request body
+# Set while a metadata-only DWS flow runs. It overrides every switch below, so no request body
 # reaches the logs for that run.
 request_data_logging_suppressed: ContextVar[bool] = ContextVar(
     "request_data_logging_suppressed", default=False
