@@ -938,8 +938,8 @@ prompts:
         recommendation markdown described under "Final answer" below. When a
         gate fired the score MUST be the capped value, never
         aggregate_uncapped. The feedback is the same three recommendations
-        you write in your final answer, as a single `## Recommendation`
-        markdown section with exactly three list items, most impactful
+        you write in your final answer, as a markdown list of exactly
+        three items with no heading or title before it, most impactful
         first; the blocking amendment (when a gate fired) is item 1 and is
         marked `**blocking**`, the others `**non-blocking**`. Omit the
         `readiness_score_feedback` argument (write the score alone) only
@@ -959,7 +959,7 @@ prompts:
         discarded_pros, never fabricating an issue to reach the count). The
         `readiness_score_feedback` argument you just passed to
         `update_work_item` is this same recommendation list as a
-        `## Recommendation` markdown section — the widget shows it beside
+        markdown list with no heading — the widget shows it beside
         the score, so the author can see why the plan scored what it did
         and what to change. If the `update_work_item` call failed, or you
         stopped early on a partial ensemble, say so plainly instead.

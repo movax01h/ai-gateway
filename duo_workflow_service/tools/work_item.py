@@ -734,7 +734,7 @@ class UpdateWorkItem(WorkItemBaseTool):
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="add")
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="mark_as_done", todo_id="gid://gitlab/Todo/123")
     - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score=72)
-    - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score_feedback="## Recommendation\n\n- **blocking**: Name the migration file\n- **non-blocking**: Add a regression test\n- **non-blocking**: Expand rollback notes")
+    - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score_feedback="- **blocking**: Name the migration file\n- **non-blocking**: Add a regression test\n- **non-blocking**: Expand rollback notes")
     - update_work_item(project_id='namespace/project', work_item_iid=42, agent_plan="## Why\nFoo can't bar.\n## What\nMake Foo bar.\n## How\nAdd `Foo#bar` calling `Baz.qux`.")
     """
     args_schema: Type[BaseModel] = UpdateWorkItemInput

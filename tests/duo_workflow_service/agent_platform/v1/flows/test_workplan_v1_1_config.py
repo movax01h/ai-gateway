@@ -358,8 +358,9 @@ class TestWorkplanV110SupervisorWiring:
         assert "readiness_score_feedback" in system
         # The Turn 3 call must pass both arguments, not the score alone.
         assert "`readiness_score` and `readiness_score_feedback`" in system
-        # And the feedback must be the recommendation markdown, not free text.
-        assert "## Recommendation" in system
+        # And the feedback must be a bare markdown list, with no heading.
+        assert "markdown list with no heading" in system
+        assert "## Recommendation" not in system
 
 
 class TestWorkplanV110GraphBuilds:
