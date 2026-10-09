@@ -545,6 +545,12 @@ tight `sleep && glab ci get` loops. A parent pipeline stays `running` while a
 all its own jobs have finished; check the bridge status before concluding the
 pipeline is stuck.
 
+MR pipelines run on the merged result (`refs/merge-requests/<iid>/merge`), not
+your pushed commit, so find them via the MR: `glab ci get --merge-request <iid>`
+or `glab api projects/:id/merge_requests/<iid>/pipelines`. Looking a pipeline up
+by your commit SHA can instead return a `duo_workflow` pipeline
+(`refs/workloads/...`) with only a `workload` job.
+
 ## Project-Specific Details
 
 ### Prompt Management
