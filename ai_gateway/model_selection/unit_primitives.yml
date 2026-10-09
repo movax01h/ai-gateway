@@ -28,7 +28,6 @@ configurable_unit_primitives:
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_bedrock"
       - "claude_sonnet_4_6_vertex"
-      - "gemini_2_5_flash_vertex"
   - feature_setting: "code_completions"
     unit_primitives:
       - "complete_code"
@@ -483,13 +482,6 @@ configurable_unit_primitives:
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
-  - feature_setting: "measure_comment_temperature"
-    unit_primitives:
-      - "measure_comment_temperature"
-    default_models:
-      - identifier: "gemini_2_5_flash_vertex"
-    selectable_models:
-      - "gemini_2_5_flash_vertex"
   - feature_setting: "workflow"
     unit_primitives:
       - "duo_agent_platform"

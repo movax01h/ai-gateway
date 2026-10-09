@@ -308,9 +308,6 @@ ai_gateway/prompts/definitions/list_available_tools/user
 ai_gateway/prompts/definitions/local_code_review/base
 ai_gateway/prompts/definitions/local_code_review/system
 ai_gateway/prompts/definitions/local_code_review/user
-ai_gateway/prompts/definitions/measure_comment_temperature/base
-ai_gateway/prompts/definitions/measure_comment_temperature/system
-ai_gateway/prompts/definitions/measure_comment_temperature/user
 ai_gateway/prompts/definitions/model_configuration/check/base
 ai_gateway/prompts/definitions/model_configuration/check/system
 ai_gateway/prompts/definitions/model_configuration/check/user

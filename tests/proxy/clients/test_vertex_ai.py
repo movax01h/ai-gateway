@@ -331,18 +331,6 @@ class TestStreamFlagDetection:
                 {"instances": [{"content": "test"}]},
                 True,
             ),
-            (
-                "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
-                "locations/LOCATION/publishers/google/models/gemini-2.5-flash:streamGenerateContent",
-                {"contents": [{"role": "user", "parts": [{"text": "test"}]}]},
-                True,
-            ),
-            (
-                "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
-                "locations/LOCATION/publishers/google/models/gemini-2.5-flash:generateContent",
-                {"contents": [{"role": "user", "parts": [{"text": "test"}]}]},
-                False,
-            ),
             # Anthropic models - stream based on request body
             (
                 "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
@@ -403,8 +391,8 @@ class TestUpstreamPathGeneration:
             ),
             (
                 "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
-                "locations/LOCATION/publishers/google/models/gemini-2.5-flash:streamGenerateContent",
-                "/publishers/google/models/gemini-2.5-flash:streamGenerateContent",
+                "locations/LOCATION/publishers/google/models/codestral-2501:streamRawPredict",
+                "/publishers/google/models/codestral-2501:streamRawPredict",
             ),
             # Anthropic models
             (
