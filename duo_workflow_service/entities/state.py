@@ -185,6 +185,11 @@ def render_for_display(content: Any, tool_name: str) -> str:
 TIER_ACCESS_DENIED_SUB_TYPE = "tier_access_denied"
 
 
+class SourceLink(TypedDict):
+    title: str
+    url: str
+
+
 class ToolInfo(TypedDict):
     name: str
     args: dict[str, Any]
@@ -193,12 +198,17 @@ class ToolInfo(TypedDict):
     # compaction store the message. A list or dict here drops the whole chat
     # log on the client.
     #
-    # The web frontend (duo_agentic_chat in the monolith) reads only the
-    # message shape, `tool_response.content` and `.status`, and today only
-    # sees legacy executor cards. When agentic chat moves onto v1 flows
-    # (#2780), the cards build_tool_info writes must either be wrapped, with
-    # a real status, or the frontend taught the string shape.
+    # The web frontend (duo_agentic_chat in the monolith) reads the message
+    # shape, `tool_response.content` and `.status`, for legacy executor cards.
+    # Server tool cards (web search) are the exception: it reads their links
+    # from `sources`, and from `tool_response` only when `sources` is absent
+    # (chats saved before it, or older gateways). When agentic chat moves onto
+    # v1 flows (#2780), the other cards build_tool_info writes must either be
+    # wrapped, with a real status, or the frontend taught the string shape.
     tool_response: NotRequired[Union[str, ToolMessage]]
+    # Server tool sources as `{title, url}`, for the web frontend; clients that
+    # don't know the key drop it, so `tool_response` stays the display text.
+    sources: NotRequired[list[SourceLink]]
     suggested_patterns: NotRequired[list[str]]
     # Semantic version of the tool that produced this entry (from
     # ``DuoBaseTool.tool_version``). Lets the client version the tool→component

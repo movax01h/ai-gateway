@@ -132,6 +132,7 @@ def test_build_ui_chat_log_omits_an_empty_tool_response(content):
 
     assert entry["status"] == ToolStatus.SUCCESS
     assert "tool_response" not in entry["tool_info"]
+    assert "sources" not in entry["tool_info"]
 
 
 def test_build_ui_chat_log_result_never_carries_raw_content():
@@ -180,6 +181,84 @@ def test_build_ui_chat_log_lists_the_sources_by_title_and_url():
     assert entry["tool_info"]["tool_response"] == (
         "A: https://docs.example/a\nhttps://docs.example/b"
     )
+
+
+_ANTHROPIC_SOURCES = [
+    {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"},
+    {
+        "type": "web_search_tool_result",
+        "tool_use_id": "srvtu_1",
+        "content": [
+            {
+                "type": "web_search_result",
+                "url": "https://docs.example/a",
+                "title": "A",
+                "encrypted_content": "Q" * 40,
+                "page_age": "1 day",
+            },
+            {"type": "web_search_result", "url": "javascript:alert(1)", "title": "X"},
+            {"type": "web_search_result", "url": "ftp://docs.example/c", "title": "Z"},
+            {"type": "web_search_result", "url": "data:text/html,x", "title": "D"},
+            {"type": "web_search_result", "url": "http://[not-closed", "title": "Y"},
+            {"type": "web_search_result", "url": "HTTPS://docs.example/b"},
+            {"type": "web_search_result", "url": "https://docs.example/e", "title": ""},
+        ],
+    },
+]
+_OPENAI_SOURCES = [
+    {
+        "type": "web_search_call",
+        "id": "ws_1",
+        "status": "completed",
+        "action": {
+            "type": "search",
+            "sources": [
+                {"type": "url", "url": "https://docs.example/a", "title": "A"},
+                {"type": "url", "url": "javascript:alert(1)", "title": "X"},
+                {"type": "url", "url": "ftp://docs.example/c", "title": "Z"},
+                {"type": "url", "url": "data:text/html,x", "title": "D"},
+                {"type": "url", "url": "http://[not-closed", "title": "Y"},
+                {"type": "url", "url": "HTTPS://docs.example/b"},
+                {"type": "url", "url": "https://docs.example/e", "title": ""},
+            ],
+        },
+    }
+]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(_ANTHROPIC_SOURCES, id="anthropic"),
+        pytest.param(_OPENAI_SOURCES, id="openai"),
+    ],
+)
+def test_build_ui_chat_log_carries_the_sources_for_the_web_card(content):
+    entry = ServerToolResults(content).build_ui_chat_log(content[0])
+
+    # Only title and http(s) url, scheme in any case; a malformed url must not raise.
+    # A missing or empty title falls back to the url.
+    assert entry["tool_info"]["sources"] == [
+        {"title": "A", "url": "https://docs.example/a"},
+        {"title": "Y", "url": "http://[not-closed"},
+        {"title": "HTTPS://docs.example/b", "url": "HTTPS://docs.example/b"},
+        {"title": "https://docs.example/e", "url": "https://docs.example/e"},
+    ]
+    assert isinstance(entry["tool_info"]["tool_response"], str)
+    assert_client_valid_tool_info(entry["tool_info"])
+
+
+def test_build_ui_chat_log_has_no_sources_for_a_failed_search():
+    """Anthropic returns one error object, not a list, when a search fails."""
+    error = {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"}
+    content = [
+        {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"},
+        {"type": "web_search_tool_result", "tool_use_id": "srvtu_1", "content": error},
+    ]
+
+    entry = ServerToolResults(content).build_ui_chat_log(content[0])
+
+    assert "sources" not in entry["tool_info"]
 
 
 @pytest.mark.parametrize(

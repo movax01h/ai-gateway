@@ -10,6 +10,7 @@ import structlog
 from duo_workflow_service.entities import _openai_web_search as openai_web_search
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
+    SourceLink,
     ToolStatus,
     UiChatLog,
     build_tool_info,
@@ -50,6 +51,20 @@ def _is_server_tool_call_block(block: Any) -> TypeGuard[dict]:
     return _is_anthropic_server_tool_use_block(
         block
     ) or openai_web_search.is_call_block(block)
+
+
+def _source_links(tool_response: Any) -> list[SourceLink]:
+    """``{title, url}`` per http(s) source; no snippets or encrypted payloads."""
+    items = tool_response if isinstance(tool_response, list) else []
+    links: list[SourceLink] = []
+    for item in items:
+        url = item.get("url") if isinstance(item, dict) else None
+        if isinstance(url, str) and url.lower().startswith(("https://", "http://")):
+            title = item.get("title")
+            if not (isinstance(title, str) and title):
+                title = url
+            links.append({"title": title, "url": url})
+    return links
 
 
 def text_segment_id(message_id: Optional[str], tool_count: int) -> Optional[str]:
@@ -174,6 +189,11 @@ class ServerToolResults:
             status = ToolStatus.SUCCESS if result else ToolStatus.PENDING
             tool_response = (result or {}).get("content")
 
+        # Empty means no key on both paths; `status` already says the search ran.
+        tool_info = build_tool_info(name, args, tool_response or None)
+        if links := _source_links(tool_response):
+            tool_info["sources"] = links
+
         return UiChatLog(
             message_type=MessageTypeEnum.TOOL,
             message_sub_type=name,
@@ -181,8 +201,7 @@ class ServerToolResults:
             timestamp=datetime.now(timezone.utc).isoformat(),
             status=status,
             correlation_id=None,
-            # Empty means no key on both paths; `status` already says the search ran.
-            tool_info=build_tool_info(name, args, tool_response or None),
+            tool_info=tool_info,
             additional_context=None,
             message_id=call_block.get("id"),
             component_name=component_name,
