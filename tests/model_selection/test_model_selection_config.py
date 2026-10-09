@@ -12,10 +12,12 @@ from pydantic import SecretStr, ValidationError
 from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.model_selection.model_selection_config import (
+    MODEL_RESTRICTIONS_CONFIG_PATH,
     ChatAnthropicDefinition,
     ChatLiteLLMDefinition,
     CompletionLiteLLMDefinition,
     EmbeddingLiteLLMDefinition,
+    ModelRestriction,
     ModelSelectionConfig,
     ModelTagEntry,
     UnitPrimitiveConfig,
@@ -90,6 +92,15 @@ def mock_fs_fixture(fs: FakeFilesystem):
 
 
 # editorconfig-checker-enable
+
+
+@pytest.fixture(autouse=True)
+def empty_model_restrictions(request):
+    """Give every test that fakes the filesystem an empty model_restrictions.yml."""
+    if "fs" in request.fixturenames:
+        request.getfixturevalue("fs").create_file(
+            MODEL_RESTRICTIONS_CONFIG_PATH, contents="restricted_models: []\n"
+        )
 
 
 @pytest.mark.usefixtures("mock_fs")
@@ -1900,3 +1911,32 @@ class TestEnvModelReleases:
         assert len(error_logs) == 1
         assert error_logs[0]["errors"] == [{"type": "RuntimeError", "msg": "boom"}]
         assert sentinel not in str(cap_logs)
+
+
+def test_shipped_model_restrictions_load():
+    config = ModelSelectionConfig(default_models_override={})
+
+    assert isinstance(config.get_model_restrictions(), list)
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_restrictions_load_from_file_and_reload_on_refresh(selection_config):
+    assert not selection_config.get_model_restrictions()
+    assert selection_config.restricted_flows_for(["gitlab-embedding-model"]) is None
+
+    MODEL_RESTRICTIONS_CONFIG_PATH.write_text(
+        "restricted_models:\n"
+        "  - identifier: gitlab-embedding-model\n"
+        "    feature_settings: [some_flow]\n"
+    )
+    selection_config.refresh()
+
+    assert selection_config.get_model_restrictions() == [
+        ModelRestriction(
+            identifier="gitlab-embedding-model", feature_settings=["some_flow"]
+        )
+    ]
+    assert selection_config.restricted_flows_for(["gitlab-embedding-model"]) == {
+        "some_flow"
+    }
+    selection_config.validate()

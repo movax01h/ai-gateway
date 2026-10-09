@@ -49,6 +49,10 @@ models:
     )
 
     fs.create_file(
+        model_selection_dir / "model_restrictions.yml",
+        contents="restricted_models: []\n",
+    )
+    fs.create_file(
         model_selection_dir / "unit_primitives.yml",
         contents="""---
 configurable_unit_primitives:

@@ -18,6 +18,7 @@ from ai_gateway.api.server import (
     assume_role_exception_handler,
     custom_http_exception_handler,
     model_api_exception_handler,
+    restricted_model_access_exception_handler,
     setup_custom_exception_handlers,
     setup_gcp_service_account,
     validation_exception_handler,
@@ -29,6 +30,7 @@ from ai_gateway.config import (
     ConfigInternalEvent,
 )
 from ai_gateway.container import ContainerApplication
+from ai_gateway.model_selection import RestrictedModelAccessError
 from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.structured_logging import setup_logging
@@ -399,6 +401,9 @@ def test_setup_custom_exception_handlers(app, monkeypatch):
         mock.call(ModelAPIError, model_api_exception_handler),
         mock.call(AssumeRoleError, assume_role_exception_handler),
         mock.call(RequestValidationError, validation_exception_handler),
+        mock.call(
+            RestrictedModelAccessError, restricted_model_access_exception_handler
+        ),
     ]
 
 
@@ -420,6 +425,19 @@ def test_custom_http_exception_handler(app):
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Test Exception"}
+
+
+def test_restricted_model_access_exception_handler(app):
+    @app.get("/test")
+    def test_route():
+        raise RestrictedModelAccessError()
+
+    setup_custom_exception_handlers(app)
+
+    response = TestClient(app).get("/test")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Model not available for this flow"}
 
 
 def test_model_exception_handler(app):

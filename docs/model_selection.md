@@ -513,6 +513,26 @@ This is useful when you want to validate a new model internally without exposing
 The actual access control happens in the client (GitLab Rails), which checks whether the user is a GitLab team member.
 GitLab team members see both the regular and developer models, while everyone else only sees the regular ones.
 
+## Restricted models
+
+To allow a model only in specific features, add it to `ai_gateway/model_selection/model_restrictions.yml`
+instead of changing its entry in `models.yml`:
+
+```yaml
+# ai_gateway/model_selection/model_restrictions.yml
+restricted_models:
+  - identifier: "claude_example_model" # a gitlab_identifier from models.yml or an env-injected release
+    feature_settings: ["bl_security"]  # feature settings allowed to use it (for a flow, its flow config id)
+```
+
+A restricted model is refused everywhere else, including the proxy endpoints. Only features whose `feature_setting`
+is one of its `feature_settings` can list it in `unit_primitives.yml`. `validate-model-selection-config` rejects an
+unknown identifier, empty or duplicate `feature_settings`, and duplicate entries.
+
+At request time, the model is usable only when the flow config ID the request is authorized for (from a signed flow
+claim) is one of its `feature_settings`. A flow's feature setting is its flow config ID (for example,
+`bl_security`). This is a naming convention: if the names differ, validation rejects the entry (fail-safe).
+
 ## Model deprecations
 
 There are two kinds of model deprecation, depending on whether the model is going away everywhere or only for a

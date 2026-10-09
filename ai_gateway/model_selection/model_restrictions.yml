@@ -1,0 +1,10 @@
+# Models that only specific feature settings may use. Any other use is refused.
+#
+# Each entry names a model by its gitlab_identifier (from models.yml, or from an
+# env-injected release) and the feature settings allowed to use it. For a flow, its
+# feature setting is its flow config id (e.g. bl_security):
+#
+#   restricted_models:
+#     - identifier: <gitlab_identifier>
+#       feature_settings: [<feature setting>, ...]
+restricted_models: []

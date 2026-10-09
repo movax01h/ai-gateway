@@ -42,6 +42,7 @@ from ai_gateway.api.v4 import api_router as http_api_router_v4
 from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.instrumentators.threads import monitor_threads
+from ai_gateway.model_selection import RestrictedModelAccessError
 from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.profiling import setup_profiling
@@ -240,6 +241,15 @@ async def model_api_exception_handler(request: Request, exc: ModelAPIError) -> R
     return await http_exception_handler(request, wrapped_exception)
 
 
+async def restricted_model_access_exception_handler(
+    request: Request, exc: RestrictedModelAccessError
+) -> Response:
+    return await http_exception_handler(
+        request,
+        StarletteHTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)),
+    )
+
+
 async def validation_exception_handler(
     request: Request,  # pylint: disable=unused-argument
     exc: RequestValidationError,
@@ -286,6 +296,10 @@ def setup_custom_exception_handlers(app: FastAPI):
     )
     app.add_exception_handler(
         RequestValidationError, cast(ExceptionHandler, validation_exception_handler)
+    )
+    app.add_exception_handler(
+        RestrictedModelAccessError,
+        cast(ExceptionHandler, restricted_model_access_exception_handler),
     )
 
 
