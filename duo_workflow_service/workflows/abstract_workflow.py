@@ -34,7 +34,10 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.structured_logging import request_data_logging_suppressed
 from contract import contract_pb2
-from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
+from duo_workflow_service.agent_platform.constants import (
+    METADATA_ONLY_FLOWS,
+    RECURSION_LIMIT,
+)
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -43,10 +46,6 @@ from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.collector import AuditEventCollector
 from duo_workflow_service.audit_events.context import audit_collector_context
 from duo_workflow_service.audit_events.event_types import SessionStartedEvent
-from duo_workflow_service.checkpointer.content_retention import (
-    ContentRetention,
-    is_metadata_only,
-)
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
@@ -368,9 +367,16 @@ class AbstractWorkflow(ABC):
     def _recursion_limit(self):
         return RECURSION_LIMIT
 
-    def _content_retention(self) -> ContentRetention:
-        """What the session exposes: ``metadata`` drops model and user text from the live stream and audit events."""
-        return "full"
+    def _registry_flow_id(self) -> Optional[str]:
+        """The Flow Registry id of the config this workflow runs.
+
+        ``None`` unless the workflow runs a config loaded from the registry, so an inline config cannot claim one.
+        """
+        return None
+
+    def _is_metadata_only(self) -> bool:
+        """Whether the session exposes only run metadata: no model or user text in the live stream or audit events."""
+        return self._registry_flow_id() in METADATA_ONLY_FLOWS
 
     async def _tag_langsmith_hard_limit(self) -> None:
         """Attach a LangSmith tag and metadata to the current trace when the hard recursion limit is hit.
@@ -491,7 +497,7 @@ class AbstractWorkflow(ABC):
             workflow_id=self._workflow_id,
             buffer_size=self._audit_event_buffer_size,
             flush_interval_seconds=self._audit_event_flush_interval,
-            content_retention=self._content_retention(),
+            metadata_only=self._is_metadata_only(),
         )
         await audit_collector.start()
         audit_collector_context.set(audit_collector)
@@ -545,7 +551,7 @@ class AbstractWorkflow(ABC):
             outbox=self._outbox,
             goal=goal,
             node_event_log=node_event_log,
-            content_retention=self._content_retention(),
+            metadata_only=self._is_metadata_only(),
         )
 
         try:

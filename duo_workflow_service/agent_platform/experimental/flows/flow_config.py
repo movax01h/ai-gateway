@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Callable, ClassVar, List, Literal, Optional
+from typing import Callable, ClassVar, List, Optional
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
@@ -33,10 +33,6 @@ class FlowConfig(BaseFlowConfig):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
     prompts: Optional[list[InMemoryPromptConfig]] = None
     response_schemas: Optional[list[InlineResponseSchemaConfig]] = None
-    # "metadata" keeps step names and statuses but no model or user text in the live
-    # stream and audit events. Checkpoints stay complete so the session can resume.
-    # Only for DWS-bundled flows: an inline (Rails-sent) config may not set it.
-    content_retention: Literal["full", "metadata"] = "full"
 
     def should_auto_inject_mcp_tools(self) -> bool:
         """Return whether MCP tools should be automatically injected into this flow's toolset.

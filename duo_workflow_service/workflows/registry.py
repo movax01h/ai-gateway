@@ -242,9 +242,6 @@ def _convert_struct_to_flow_config(
             f"Supported versions: {list(_FLOW_BY_VERSIONS.keys())}"
         ) from None
     config_dict: Dict[str, Any] = MessageToDict(struct)
-    if "content_retention" in config_dict:
-        # Honoured only for flows bundled with DWS, not for configs Rails sends.
-        raise ValueError("content_retention is only supported for bundled flows")
     _normalize_prompt_template_order(config_dict)
 
     if flow_config_schema_version != config_dict["version"]:
