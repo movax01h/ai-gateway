@@ -28,8 +28,12 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 )
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.flow_request import RegistryFlowRequest
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.workflows.registry import _load_flow_from_inline_config
+from duo_workflow_service.workflows.registry import (
+    _load_flow_from_inline_config,
+    resolve_flow,
+)
 
 SECRET = "SECRET-MODEL-TEXT"
 
@@ -242,6 +246,27 @@ class TestRegistryIdentity:
             config = FlowConfig.from_yaml_config(flow_id, path.stem)
             assert config.config_id == flow_id, path.name
             assert config.config_version == path.stem
+
+    @pytest.mark.parametrize(
+        "config_id", ["./bl_security", "bl_security/", "x/../bl_security", ".", ".."]
+    )
+    def test_the_registry_rejects_a_flow_id_that_is_not_a_bare_name(self, config_id):
+        # Such an id could load bl_security under an id that is not in METADATA_ONLY_FLOWS.
+        request = RegistryFlowRequest(
+            config_id=config_id, schema_version="experimental", version="1.0.0"
+        )
+
+        with pytest.raises(ValueError, match="Failed to load flow"):
+            resolve_flow(request)
+
+    def test_the_registry_loads_bl_security_by_its_bare_id(self):
+        resolved = resolve_flow(
+            RegistryFlowRequest(
+                config_id="bl_security", schema_version="experimental", version="1.0.0"
+            )
+        )
+
+        assert resolved.factory.keywords["config"].config_id in METADATA_ONLY_FLOWS
 
     def test_a_config_built_directly_has_no_registry_id(self):
         config = FlowConfig(

@@ -317,7 +317,7 @@ class TestFlowConfig:
     ):
         """Test that path traversal attempts are blocked."""
         with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
-            with pytest.raises(ValueError, match="Path traversal detected"):
+            with pytest.raises(ValueError, match="is not a bare name"):
                 FlowConfig.from_yaml_config(malicious_path)
 
     @pytest.mark.parametrize(
