@@ -130,6 +130,19 @@ class TestWorkplanRouterWiring:
         assert config.flow.entry_point == "research"
 
 
+class TestWorkplanGatesAreAnsweredExternally:
+    """Replies come from the work item, so the session page must not render approval buttons for any gate."""
+
+    @pytest.mark.parametrize("version", ["1.0.0", "1.1.0", "1.2.0"])
+    @pytest.mark.parametrize(
+        "gate_name", ["research_gate", "plan_gate", "context_gate"]
+    )
+    def test_gate_interaction_type_is_external(self, version, gate_name):
+        config = FlowConfig.from_yaml_config("workplan", version)
+
+        assert _component(config, gate_name)["interaction_type"] == "external"
+
+
 class TestWorkplanQuestionToolingIsAvailable:
     """Guard the tools both stages' prompts depend on to ask a question well.
 
