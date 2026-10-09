@@ -45,7 +45,7 @@ components:
   - name: research_gate
     type: HumanInputComponent
     sends_response_to: research
-    interaction_type: input
+    interaction_type: external
     message_template: |
       Waiting on a reply. There are one or more open questions posted as
       comments on the work item - reply and resolve each thread to resume
@@ -90,7 +90,7 @@ components:
   - name: plan_gate
     type: HumanInputComponent
     sends_response_to: planner
-    interaction_type: input
+    interaction_type: external
     message_template: |
       Waiting on a reply. There are one or more open questions posted as
       comments on the work item - reply and resolve each thread to resume
@@ -105,7 +105,7 @@ components:
   - name: context_gate
     type: HumanInputComponent
     sends_response_to: research
-    interaction_type: input
+    interaction_type: external
     message_template: |
       Waiting on more context. The work item's description needs to be
       expanded - update it, then resume to research it again.
