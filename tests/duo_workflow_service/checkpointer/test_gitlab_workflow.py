@@ -2978,6 +2978,37 @@ async def test_track_workflow_completion_with_orbit_called(
     )
 
 
+@pytest.mark.asyncio
+async def test_track_workflow_completion_with_source_type(
+    gitlab_workflow,
+    workflow_config,
+    billing_event_service,
+    billing_event_client,
+    mock_user,
+):
+    """Test that the workflow source_type is passed to billing metadata as source."""
+    current_user.set(mock_user)
+    gitlab_workflow._billing_event_service = billing_event_service
+    workflow_config["source_type"] = "merge_request_code_conflict"
+    llm_operations.set(
+        [
+            {
+                "token_count": 100,
+                "model_id": "claude-3-sonnet",
+                "model_engine": "anthropic",
+                "model_provider": "anthropic",
+                "prompt_tokens": 80,
+                "completion_tokens": 20,
+            },
+        ]
+    )
+
+    await gitlab_workflow._track_workflow_completion(WorkflowStatusEnum.FINISHED)
+
+    metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+    assert metadata["source"] == "merge_request_code_conflict"
+
+
 class TestGetOrbitToolCalls:
     def test_no_tool_calls(self):
         checkpoint = {"channel_values": {"ui_chat_log": []}}

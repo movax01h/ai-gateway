@@ -74,6 +74,7 @@ class WorkflowConfig(TypedDict):
     archived: bool
     stalled: bool
     features: NotRequired[WorkflowFeatures]
+    source_type: NotRequired[Optional[str]]
 
 
 def _group_allows_web_search(project_data: dict, namespace_data: dict) -> bool:
@@ -175,6 +176,10 @@ async def fetch_workflow_and_container_data(
         )
 
     status_check = project_data.get("duoWorkflowStatusCheck") or {}
+    # lowercase it to match the Rails source_type values used in agent_platform_session_created events.
+    source_type = (
+        workflow.get("sourceType").lower() if workflow.get("sourceType") else None
+    )
 
     workflow_config = WorkflowConfig(
         workflow_id=workflow_id,
@@ -201,6 +206,7 @@ async def fetch_workflow_and_container_data(
         prompt_injection_protection_level=prompt_injection_protection_level,
         archived=workflow.get("archived", None),
         stalled=workflow.get("stalled", None),
+        source_type=source_type,
         features={
             "foundational_flows": {
                 "enabled": status_check.get("foundationalFlowsEnabled", True),
