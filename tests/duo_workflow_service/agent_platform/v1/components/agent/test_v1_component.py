@@ -5,8 +5,10 @@ from typing import ClassVar, Literal
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
+from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ai_gateway.response_schemas import (
@@ -32,6 +34,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
 from duo_workflow_service.agent_platform.v1.state import (
+    FlowEvent,
     FlowEventType,
     FlowState,
     FlowStateKeys,
@@ -2338,6 +2341,77 @@ class TestAgentComponentToolApprovalExecutionFlow:
         nodes["tool_approval_fetch"].run.assert_called_once()
         nodes["agent"].run.assert_called_once()
         nodes["tools"].run.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_approval_request_node_cls")
+    async def test_a_message_at_a_pending_approval_reaches_the_agent_as_feedback(
+        self,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        mock_final_response_node_cls,
+        mock_router,
+        mock_internal_event_client,
+        base_flow_state,
+        component_name,
+        agent_component_with_tool_approval,
+    ):
+        """A message sent instead of a decision resumes the real fetch node, which sends it back to the agent."""
+        pending_call = AIMessage(
+            content="",
+            tool_calls=[{"id": "call_1", "name": "read_file", "args": {}}],
+        )
+        state = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {component_name: [pending_call]},
+            FlowStateKeys.CONTEXT: {
+                **base_flow_state[FlowStateKeys.CONTEXT],
+                component_name: {
+                    "tool_approval_requests": [{"id": "call_1", "name": "read_file"}]
+                },
+            },
+        }
+        agent_run = mock_agent_node_cls.return_value.run
+        agent_run.return_value = {
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [AIMessage(content="Reading the other file.")]
+            },
+        }
+        mock_final_response_node_cls.return_value.run.return_value = {}
+        mock_router.route.return_value = END
+
+        graph = StateGraph(FlowState)
+        agent_component_with_tool_approval.attach(graph, mock_router)
+        graph.set_entry_point(f"{component_name}#tool_approval_fetch")
+        compiled = graph.compile(checkpointer=InMemorySaver())
+        config = {"configurable": {"thread_id": "message-at-approval"}}
+
+        await compiled.ainvoke(state, config)
+        assert (await compiled.aget_state(config)).next == (
+            f"{component_name}#tool_approval_fetch",
+        )
+
+        await compiled.ainvoke(
+            Command(
+                resume=FlowEvent(
+                    event_type=FlowEventType.RESPONSE, message="use a different file"
+                )
+            ),
+            config,
+        )
+
+        history = agent_run.call_args.args[0][FlowStateKeys.CONVERSATION_HISTORY][
+            component_name
+        ]
+        assert [type(message) for message in history] == [
+            AIMessage,
+            ToolMessage,
+            HumanMessage,
+        ]
+        assert history[1].tool_call_id == "call_1"
+        assert history[2].content == "use a different file"
+        mock_tool_node_cls.return_value.run.assert_not_called()
+        (resolution,) = mock_internal_event_client.track_event.call_args_list
+        assert resolution.kwargs["additional_properties"].property == "message"
 
     def test_missing_decision_raises_routing_error(
         self,
