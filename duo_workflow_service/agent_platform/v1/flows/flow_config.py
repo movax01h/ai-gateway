@@ -255,6 +255,11 @@ class BaseFlowConfig(BaseModel):
             concrete semver the constraint resolved to (e.g. "2.1.0"), and ``config_id``
             set to ``flow_id``.
         """
+        # A registry id is a bare directory name. A path that resolves to the same
+        # directory would load the flow under an id it does not match.
+        if flow_id in ("", ".", "..") or Path(flow_id).name != flow_id:
+            raise ValueError(f"Invalid flow id: '{flow_id}' is not a bare name")
+
         version_query = flow_version or DEFAULT_FLOW_VERSION
 
         # Version candidates from the feature root (ai/features/<domain>/<feature>/config/)
