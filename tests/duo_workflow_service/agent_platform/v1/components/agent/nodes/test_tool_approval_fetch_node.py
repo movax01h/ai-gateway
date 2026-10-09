@@ -26,6 +26,7 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     default_ui_log_writer_class,
 )
 from duo_workflow_service.entities import MessageTypeEnum, WorkflowStatusEnum
+from duo_workflow_service.errors.typing import InvalidRequestException
 from lib.context.approval_sources import (
     approval_sources,
     get_approval_policy_ref,
@@ -284,14 +285,20 @@ class TestToolApprovalFetchNodeModify:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("conversation_history_key")
+    @pytest.mark.parametrize(
+        "event_type",
+        [FlowEventType.MODIFY, FlowEventType.RESPONSE],
+        ids=["modify", "a_message_instead_of_a_decision"],
+    )
     async def test_modify_adds_rejection_messages_and_user_feedback(
         self,
         tool_approval_fetch_node,
         base_flow_state,
         component_name,
         mock_ai_message_with_tool_calls,
+        event_type,
     ):
-        """Test that MODIFY event adds rejection ToolMessages + HumanMessage with feedback."""
+        """MODIFY, and a message sent instead of a decision, reject the calls and add the user's feedback."""
         # Setup state with conversation history
         state = base_flow_state.copy()
         state[FlowStateKeys.CONVERSATION_HISTORY] = {
@@ -305,10 +312,16 @@ class TestToolApprovalFetchNodeModify:
             "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = FlowEvent(
-                event_type=FlowEventType.MODIFY, message=user_feedback
+                event_type=event_type, message=user_feedback
             )
 
             result = await tool_approval_fetch_node.run(state)
+
+            # The router sends a MODIFY back to the agent with the feedback
+            assert (
+                result["context"]["test_agent"]["tool_approval_decision"]
+                == FlowEventType.MODIFY
+            )
 
             # Should include conversation history with rejection messages + user feedback
             assert "conversation_history" in result
@@ -409,58 +422,43 @@ class TestToolApprovalFetchNodeModify:
         assert entry["component_name"] == component_name
 
     @pytest.mark.asyncio
-    async def test_modify_without_message_raises_error(
+    @pytest.mark.parametrize(
+        "event",
+        [
+            FlowEvent(event_type=FlowEventType.MODIFY),
+            FlowEvent(event_type=FlowEventType.MODIFY, message=""),
+            FlowEvent(event_type=FlowEventType.RESPONSE),
+            FlowEvent(event_type=FlowEventType.RESPONSE, message=""),
+        ],
+        ids=[
+            "modify_no_message",
+            "modify_empty_message",
+            "response_no_message",
+            "response_empty_message",
+        ],
+    )
+    async def test_feedback_without_a_message_is_an_invalid_request(
         self,
         tool_approval_fetch_node,
         base_flow_state,
         component_name,
         mock_ai_message_with_tool_calls,
+        event,
     ):
-        """Test that MODIFY event without message raises ValueError."""
-        # Setup state with conversation history
+        """An empty answer, such as a reconnect's, leaves the approval pending instead of failing the session."""
         state = base_flow_state.copy()
         state[FlowStateKeys.CONVERSATION_HISTORY] = {
             component_name: [mock_ai_message_with_tool_calls]
         }
 
-        # Mock the interrupt to return MODIFY event without message
         with patch(
-            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
-        ) as mock_interrupt:
-            mock_interrupt.return_value = FlowEvent(event_type=FlowEventType.MODIFY)
-
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt",
+            return_value=event,
+        ):
             with pytest.raises(
-                ValueError,
-                match="MODIFY event must include a message with user feedback",
-            ):
-                await tool_approval_fetch_node.run(state)
-
-    @pytest.mark.asyncio
-    async def test_modify_with_empty_message_raises_error(
-        self,
-        tool_approval_fetch_node,
-        base_flow_state,
-        component_name,
-        mock_ai_message_with_tool_calls,
-    ):
-        """Test that MODIFY event with empty message raises ValueError."""
-        # Setup state with conversation history
-        state = base_flow_state.copy()
-        state[FlowStateKeys.CONVERSATION_HISTORY] = {
-            component_name: [mock_ai_message_with_tool_calls]
-        }
-
-        # Mock the interrupt to return MODIFY event with empty message
-        with patch(
-            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
-        ) as mock_interrupt:
-            mock_interrupt.return_value = FlowEvent(
-                event_type=FlowEventType.MODIFY, message=""
-            )
-
-            with pytest.raises(
-                ValueError,
-                match="MODIFY event must include a message with user feedback",
+                InvalidRequestException,
+                match=f"{event['event_type'].value.upper()} event must include a non-empty message. "
+                "The workflow remains paused",
             ):
                 await tool_approval_fetch_node.run(state)
 
@@ -514,7 +512,7 @@ class TestToolApprovalFetchNodeUnknownEvent:
 
             with pytest.raises(
                 ValueError,
-                match="Unexpected event type for tool approval: unknown_type. Expected APPROVE, REJECT, or MODIFY.",
+                match="Unexpected event type for tool approval: unknown_type. Expected APPROVE, REJECT, MODIFY, or RESPONSE.",
             ):
                 await tool_approval_fetch_node.run(state)
 
@@ -621,33 +619,45 @@ class TestToolApprovalFetchNodeTracking:
         )
 
     @pytest.mark.asyncio
-    async def test_modify_tracks_modification_and_omits_user_feedback(
+    @pytest.mark.parametrize(
+        ("event_type", "outcome"),
+        [
+            (FlowEventType.MODIFY, "modification"),
+            # Taken like MODIFY, but tracked apart: it is not an explicit decision.
+            (FlowEventType.RESPONSE, "message"),
+        ],
+        ids=["modify", "a_message_instead_of_a_decision"],
+    )
+    async def test_feedback_tracks_its_outcome_and_omits_user_feedback(
         self,
         tracking_fetch_node,
         state_with_tool_calls,
         mock_internal_event_client,
         flow_id,
         flow_type,
+        event_type,
+        outcome,
     ):
-        """MODIFY tracks outcome modification; user feedback text never appears in the payload."""
+        """MODIFY and a message each track their own outcome; user feedback text never appears in the payload."""
         feedback = "please use --dry-run instead of --force"
         with patch(
             "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = FlowEvent(
-                event_type=FlowEventType.MODIFY, message=feedback
+                event_type=event_type, message=feedback
             )
 
             await tracking_fetch_node.run(state_with_tool_calls)
 
         assert mock_internal_event_client.track_event.call_count == 2
-        mock_internal_event_client.track_event.assert_any_call(
-            event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED.value,
-            additional_properties=self._expected_properties(
-                flow_type, flow_id, "test_tool", "modification"
-            ),
-            category=flow_type.value,
-        )
+        for tool_name in ("test_tool", "another_tool"):
+            mock_internal_event_client.track_event.assert_any_call(
+                event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED.value,
+                additional_properties=self._expected_properties(
+                    flow_type, flow_id, tool_name, outcome
+                ),
+                category=flow_type.value,
+            )
         # Privacy: the user feedback and tool args must never appear in payloads
         all_calls = str(mock_internal_event_client.track_event.call_args_list)
         assert feedback not in all_calls

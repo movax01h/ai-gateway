@@ -73,3 +73,4 @@ class EventPropertyEnum(StrEnum):
     WORKFLOW_TOOL_APPROVAL_APPROVAL = "approval"
     WORKFLOW_TOOL_APPROVAL_REJECTION = "rejection"
     WORKFLOW_TOOL_APPROVAL_MODIFICATION = "modification"
+    WORKFLOW_TOOL_APPROVAL_MESSAGE = "message"

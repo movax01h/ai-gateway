@@ -27,6 +27,7 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
+from duo_workflow_service.errors.typing import InvalidRequestException
 from lib.context import record_approval_policy_ref, record_approval_source
 from lib.internal_events.event_enum import EventEnum, EventPropertyEnum
 
@@ -36,7 +37,9 @@ class ToolApprovalFetchNode:
 
     This node:
     1. Interrupts workflow execution via interrupt()
-    2. Waits for APPROVE, REJECT, or MODIFY event
+    2. Waits for APPROVE, REJECT, or MODIFY event. A RESPONSE, a message sent
+        instead of a decision, is taken as MODIFY. A MODIFY or RESPONSE without
+        a message is an invalid request that leaves the approval pending.
     3. If approved: Continues to tool execution
     4. If rejected: Adds rejection ToolMessages to conversation history
     5. If modified: Adds rejection ToolMessages + user feedback HumanMessage,
@@ -208,25 +211,36 @@ class ToolApprovalFetchNode:
             decision_dict = approval_decision_iokey.to_nested_dict(FlowEventType.REJECT)
             return {**history_dict, **status_dict, **decision_dict}
 
-        if event["event_type"] == FlowEventType.MODIFY:
-            # User rejected with feedback. This node owns the `ui_chat_log`
-            # entry for that feedback: the flow base only translates the
-            # transport payload into a MODIFY event, so emitting it here keeps
-            # the message recorded exactly once, attributed to the component
-            # that owned the interrupt.
+        if event["event_type"] in (FlowEventType.MODIFY, FlowEventType.RESPONSE):
+            # User rejected with feedback, or sent a message instead of a
+            # decision, which is taken the same way. This node owns the
+            # `ui_chat_log` entry for that feedback: the flow base only
+            # translates the transport payload into the event, so emitting it
+            # here keeps the message recorded exactly once, attributed to the
+            # component that owned the interrupt.
+            if not event.get("message"):
+                # Matches HumanInput's FetchNode: an empty answer, such as a
+                # reconnect's, leaves the approval pending instead of failing
+                # the session.
+                event_name = event["event_type"].value.upper()
+                raise InvalidRequestException(
+                    f"{event_name} event must include a non-empty message. "
+                    "The workflow remains paused; please provide real user input to continue."
+                )
+
             last_message = existing_history[-1]
 
             if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
                 # Should not happen - request node validated this
                 raise RuntimeError("No tool calls found to reject")
 
-            if "message" not in event or not event["message"]:
-                raise ValueError(
-                    "MODIFY event must include a message with user feedback"
-                )
-
             self._track_approval_resolved(
-                state, EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_MODIFICATION
+                state,
+                (
+                    EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_MODIFICATION
+                    if event["event_type"] == FlowEventType.MODIFY
+                    else EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_MESSAGE
+                ),
             )
 
             rejection_messages = self._build_rejection_messages(last_message.tool_calls)
@@ -259,5 +273,5 @@ class ToolApprovalFetchNode:
         # For any other event type, raise error
         raise ValueError(
             f"Unexpected event type for tool approval: {event['event_type']}. "
-            f"Expected APPROVE, REJECT, or MODIFY."
+            f"Expected APPROVE, REJECT, MODIFY, or RESPONSE."
         )
