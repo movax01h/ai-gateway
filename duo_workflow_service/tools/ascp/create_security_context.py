@@ -7,9 +7,15 @@ from pydantic.alias_generators import to_camel
 from duo_workflow_service.tools.ascp.queries import (
     CREATE_ASCP_SECURITY_CONTEXT_MUTATION,
 )
-from duo_workflow_service.tools.ascp.types import AscpSeverityLiteral
+from duo_workflow_service.tools.ascp.types import (
+    AscpSecurityBoundaryLiteral,
+    AscpSeverityLiteral,
+)
 from duo_workflow_service.tools.ascp.utils import parse_graphql_errors
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.version_compatibility import (
+    supports_ascp_security_boundary,
+)
 
 
 class AscpSecurityGuidelineInput(BaseModel):
@@ -90,6 +96,14 @@ class CreateAscpSecurityContextInput(BaseModel):
             "(PII, credentials, secrets, tokens)."
         ),
     )
+    security_boundary: Optional[list[AscpSecurityBoundaryLiteral]] = Field(
+        default=None,
+        description=(
+            "Security boundaries the component sits on. Any of: "
+            '"NETWORK_ACCESS", "USER_INPUT", "PARTNER_BOUNDARY", '
+            '"TRUSTED_SERVICE", "INTERNAL_ONLY", "ISOLATED".'
+        ),
+    )
 
 
 class CreateAscpSecurityContext(DuoBaseTool):
@@ -132,6 +146,8 @@ class CreateAscpSecurityContext(DuoBaseTool):
         input_data = CreateAscpSecurityContextInput.model_validate(kwargs).model_dump(
             by_alias=True, exclude_none=True
         )
+        if not supports_ascp_security_boundary():
+            input_data.pop("securityBoundary", None)
         variables = {"input": input_data}
 
         response = await self.gitlab_client.graphql(

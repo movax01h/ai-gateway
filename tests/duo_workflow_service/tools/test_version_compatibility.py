@@ -20,6 +20,7 @@ from duo_workflow_service.tools.version_compatibility import (
     get_gitlab_version,
     supports_agent_plan_readiness,
     supports_agent_plan_widget,
+    supports_ascp_security_boundary,
     supports_development_widget,
     supports_discussion_id_field,
     supports_glql_schema_endpoint,
@@ -153,6 +154,10 @@ class TestVersionCompatibilityFunctions:
             (supports_vulnerability_tracked_ref, "19.4.9", False),
             (supports_vulnerability_tracked_ref, "18.10.0", False),
             (supports_vulnerability_tracked_ref, "18.6.0", False),
+            # supports_ascp_security_boundary (threshold: 19.5.0)
+            (supports_ascp_security_boundary, "19.5.0", True),
+            (supports_ascp_security_boundary, "19.4.1", False),
+            (supports_ascp_security_boundary, "18.6.0", False),
             # supports_group_level_custom_instructions (threshold: 19.0.0)
             (supports_group_level_custom_instructions, "19.0.0", True),
             (supports_group_level_custom_instructions, "19.1.0", True),

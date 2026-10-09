@@ -134,10 +134,18 @@ prompts:
           - `authentication_model`: "true" or "false" — whether the component requires authentication
           - `authorization_model`: "elevated" or "standard" — whether the component requires elevated privileges
           - `data_sensitivity`: "true" or "false" — whether the component handles sensitive data (PII, credentials, secrets, tokens)
+          - `security_boundary`: array (e.g. ["NETWORK_ACCESS", "USER_INPUT"]), never a bare string — one or more of "NETWORK_ACCESS", "USER_INPUT", "PARTNER_BOUNDARY", "TRUSTED_SERVICE", "INTERNAL_ONLY", "ISOLATED" — the trust boundaries this component sits on. Never return a value outside this list.
+            Judge the component's entry points (API routes, UI fields, message queues, etc.) by what they are exposed to. Values are not exclusive; pick every one that applies:
+            - NETWORK_ACCESS: directly reachable from a network (edge APIs, web apps, auth endpoints)
+            - USER_INPUT: processes untrusted input from any user, internal or external (form handlers, upload processors, search)
+            - PARTNER_BOUNDARY: B2B or third-party integrations (incoming webhooks, partner APIs)
+            - TRUSTED_SERVICE: service-to-service calls inside the trust boundary (mTLS internal APIs)
+            - INTERNAL_ONLY: reachable only by authenticated employees or admins (internal tools, admin panels)
+            - ISOLATED: no network ingress (air-gapped systems, batch jobs, offline processors). Never combine with NETWORK_ACCESS, PARTNER_BOUNDARY, or TRUSTED_SERVICE, which all mean the component accepts inbound connections. Outbound calls the component makes (for example `git fetch` or calling an external API) are not ingress and do not count as NETWORK_ACCESS.
           - `guidelines`: array of 3-7 guidelines, each with:
             - `name`: short policy name (e.g., "Authentication Required for Write Operations")
             - `operation`: the operation type (e.g., "READ", "WRITE", "DELETE", "AUTHENTICATE", "EXECUTE")
-            - `security_boundary`: conditions that must hold for the operation to be permitted
+            - `security_boundary`: free-text conditions that must hold for the operation to be permitted (a string, not the component-level enum array)
             - `severity_if_violated`: "LOW", "MEDIUM", "HIGH", or "CRITICAL"
 
         **Severity guidance:**
