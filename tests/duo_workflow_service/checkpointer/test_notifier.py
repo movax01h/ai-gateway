@@ -1899,6 +1899,7 @@ def test_server_tool_use_creates_pending_card(checkpoint_notifier):
     assert len(tool_entries) == 1
     entry = tool_entries[0]
     assert entry["status"] == ToolStatus.PENDING
+    assert "sources" not in entry["tool_info"]
     assert entry["message_sub_type"] == "web_search"
     assert entry["message_id"] == "srvtu_1"
     assert entry["tool_info"]["name"] == "web_search"
@@ -1917,6 +1918,7 @@ def test_server_tool_result_flips_pending_card_to_success(checkpoint_notifier):
     # Rendered as a string: the CLI and IDE validate tool_response as one and
     # drop the whole chat log otherwise.
     assert entry["tool_info"]["tool_response"] == "https://x"
+    assert entry["tool_info"]["sources"] == [{"title": "https://x", "url": "https://x"}]
     assert_client_valid_tool_info(entry["tool_info"])
 
 

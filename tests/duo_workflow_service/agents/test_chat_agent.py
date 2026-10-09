@@ -2332,6 +2332,9 @@ class TestServerToolResponse:
         # Rendered as a string: the CLI and IDE validate tool_response as one
         # and drop the whole chat log otherwise.
         assert tool["tool_info"]["tool_response"] == "https://x"
+        assert tool["tool_info"]["sources"] == [
+            {"title": "https://x", "url": "https://x"}
+        ]
         assert_client_valid_tool_info(tool["tool_info"])
         assert summary["message_id"] == "agent-msg-id:seg1"
         assert summary["content"] == " Here is what I found."
