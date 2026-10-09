@@ -2007,6 +2007,39 @@ def test_multiple_server_tools_match_their_results(checkpoint_notifier):
     assert all(e["status"] == ToolStatus.SUCCESS for e in tool_entries)
 
 
+def test_server_tool_card_gains_args_as_input_streams(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        AIMessageChunk(
+            id="resp_1",
+            content=[
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_fetch",
+                    "input": {},
+                    "index": 0,
+                }
+            ],
+        )
+    )
+    for partial_json in ('{"url": "https:', '//x"}'):
+        checkpoint_notifier._append_chunk_to_ui_chat_log(
+            AIMessageChunk(
+                id="resp_1",
+                content=[
+                    {
+                        "type": "input_json_delta",
+                        "partial_json": partial_json,
+                        "index": 0,
+                    }
+                ],
+            )
+        )
+
+    [card] = _tool_entries(checkpoint_notifier)
+    assert card["tool_info"]["args"] == {"url": "https://x"}
+
+
 def test_client_tool_use_block_creates_no_server_card(checkpoint_notifier):
     checkpoint_notifier._append_chunk_to_ui_chat_log(
         AIMessageChunk(

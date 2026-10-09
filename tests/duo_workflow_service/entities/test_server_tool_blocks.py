@@ -71,6 +71,27 @@ def test_build_ui_chat_log_anthropic_pending_without_result():
     assert "tool_response" not in entry["tool_info"]
 
 
+@pytest.mark.parametrize(
+    ("partial_json", "args"),
+    [
+        ('{"url": "https://x"}', {"url": "https://x"}),
+        ('{"url": "https:', {}),
+    ],
+)
+def test_build_ui_chat_log_anthropic_reads_streamed_input(partial_json, args):
+    use_block = {
+        "type": "server_tool_use",
+        "id": "srvtu_1",
+        "name": "web_fetch",
+        "input": {},
+        "partial_json": partial_json,
+    }
+
+    entry = ServerToolResults([use_block]).build_ui_chat_log(use_block)
+
+    assert entry["tool_info"]["args"] == args
+
+
 def test_build_ui_chat_log_anthropic_success_with_result():
     result_content = [{"type": "web_search_result", "url": "https://x", "title": "X"}]
     content = [

@@ -22,11 +22,11 @@ _STATUSES: dict[str, ToolStatus] = {
     "failed": ToolStatus.FAILURE,
 }
 
-# Three actions under one block type; reading a page and searching within it are one card.
+# Three actions under one block type; `open_page` fetches the page, `find_in_page` searches within it.
 _ACTION_TOOL_NAMES: dict[str, str] = {
     "search": "web_search",
     "open_page": "web_fetch",
-    "find_in_page": "web_fetch",
+    "find_in_page": "find_in_page",
 }
 
 
@@ -108,6 +108,19 @@ def _merge_items_into_results(
         results[key] = result
 
 
+def _call_sources(call_block: dict) -> list[dict]:
+    """Return reported sources, adding the action URL for completed non-search page actions."""
+    action = _action(call_block)
+    sources = list(action.get("sources") or [])
+    if (
+        _tool_name(action) != "web_search"
+        and call_block.get("status") == "completed"
+        and action.get("url")
+    ):
+        sources.append({"url": action["url"]})
+    return sources
+
+
 def results_by_call_id(content: list) -> dict[str, list[dict]]:
     """The sources each call found, keyed by call id."""
     titles = _page_titles(content)
@@ -121,9 +134,7 @@ def results_by_call_id(content: list) -> dict[str, list[dict]]:
             if not block.get("id"):
                 continue
             results = by_call.setdefault(block["id"], {})
-            _merge_items_into_results(
-                results, _action(block).get("sources") or [], titles
-            )
+            _merge_items_into_results(results, _call_sources(block), titles)
             claimed.update(results)
             last = results
         elif last is not None:
