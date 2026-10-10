@@ -180,16 +180,19 @@ gitlab_script() {
 # caproni processes repository hooks in alphabetical order, so this
 # (ai-gateway) hook fires BEFORE gitlab's own edit_mode_start hooks. The
 # Rails steps below need config/database.yml etc., which gitlab's
-# .gitlab/caproni/setup.sh copies from the cluster. Run it now if the config
-# is missing (the script is idempotent — it re-runs harmlessly when gitlab's
-# own hook fires later in the same `caproni run`).
+# .gitlab/caproni/setup.sh copies from the cluster.
+#
+# Always run it, even when config/database.yml already exists: a copy left
+# over from a previous cluster carries that cluster's database credentials,
+# and every Rails step below would then fail password authentication. The
+# script is idempotent — it re-runs harmlessly when gitlab's own hook fires
+# later in the same `caproni run` — and this block is only reached when Duo
+# seeding is not skipped, so the extra sync is cheap by comparison.
 # ---------------------------------------------------------------------------
 
-if [[ ! -f "$GITLAB_DIR/config/database.yml" ]]; then
-  echo ""
-  echo "==> GitLab config not synced yet – running gitlab's .gitlab/caproni/setup.sh first..."
-  gitlab_script setup.sh
-fi
+echo ""
+echo "==> Syncing GitLab config from the cluster (gitlab's .gitlab/caproni/setup.sh)..."
+gitlab_script setup.sh
 
 # The Rails steps below also need the local checkout's migrations applied:
 # the development database is cloned from the chart's stable release, while
