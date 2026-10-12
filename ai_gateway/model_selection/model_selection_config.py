@@ -817,6 +817,12 @@ class ModelSelectionConfig:
                 allowed = flows if allowed is None else allowed & flows
         return allowed
 
+    def all_restricted_flows(self) -> frozenset[str]:
+        """Return every flow id that some restricted model is restricted to."""
+        return frozenset(
+            flow for _, flows in self._restricted_definitions() for flow in flows
+        )
+
     def get_model(self, model_id: str) -> LLMDefinition:
         if is_feature_enabled(FeatureFlag.AI_MODEL_RELEASE):
             if model := self._env_llm_definitions.get(model_id):

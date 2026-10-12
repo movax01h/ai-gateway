@@ -39,6 +39,11 @@ from pydantic import ValidationError as PydanticValidationError
 import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.config import Config, get_config, setup_litellm
 from ai_gateway.container import ContainerApplication
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    RestrictedModelAccessError,
+    ensure_restricted_model_access,
+)
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
@@ -70,6 +75,7 @@ from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.gitlab.gitlab_api import extract_id_from_global_id
 from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
+    oidc_gitlab_url,
 )
 from duo_workflow_service.interceptors.authentication_interceptor import (
     current_user as current_user_context_var,
@@ -143,6 +149,7 @@ from lib.billing_events import (
 )
 from lib.container_wiring import wire_and_validate
 from lib.context import client_capabilities, language_server_version
+from lib.context.model import current_model_metadata_context, restricted_access_ctx
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
@@ -158,8 +165,16 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 # DWS @inject sites resolving with no per-module bookkeeping.
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
 FLOW_CONFIG_ID_CLAIM = "flow_config_id"
+# Set by GenerateToken only after the caller passed the restricted-flow instance check.
+RESTRICTED_FLOW_VERIFIED_CLAIM = "restricted_flow_verified"
 FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
 WORKFLOW_ID_CLAIM = "workflow_id"
+SAAS_REALM = "saas"
+# Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
+# these may mint workflow tokens for a flow that restricted models are restricted to,
+# and ExecuteWorkflow accepts their instance token's flow claim for restricted models.
+# Empty means no instance qualifies.
+RESTRICTED_FLOW_INSTANCE_UIDS_ENV = "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS"
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
@@ -440,6 +455,72 @@ def _extract_error_message(error: BaseException) -> str:
     return message
 
 
+def _find_restricted_model_access_error(
+    error: Optional[BaseException],
+) -> Optional[RestrictedModelAccessError]:
+    """Return the first RestrictedModelAccessError in the error's explicit cause chain, if any.
+
+    `__context__` is not followed: Python sets it on any exception raised inside an except block, so an unrelated
+    failure would be reported as a denial.
+    """
+    seen: set[int] = set()
+    while error is not None and id(error) not in seen:
+        if isinstance(error, RestrictedModelAccessError):
+            return error
+        seen.add(id(error))
+        error = error.__cause__
+    return None
+
+
+def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
+    """Whether the caller token is GitLab.com's own instance token.
+
+    Requires the token to be signed by the configured GitLab OIDC issuer, to carry the SaaS realm claim, and its subject
+    to be an allowlisted instance UUID. An empty allowlist matches nothing.
+    """
+    claims = user.claims
+    if user.is_debug or not claims:
+        return False
+    allowlist = {
+        uid.strip()
+        for uid in os.environ.get(RESTRICTED_FLOW_INSTANCE_UIDS_ENV, "").split(",")
+        if uid.strip()
+    }
+    return (
+        bool(claims.issuer)
+        and claims.issuer.rstrip("/") == oidc_gitlab_url().rstrip("/")
+        and claims.gitlab_realm == SAAS_REALM
+        and claims.subject in allowlist
+    )
+
+
+def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
+    """Return the signed flow id a workflow token may use restricted models for.
+
+    The token must carry a flow_config_id claim and be either one this service minted (see GenerateToken) with the SaaS
+    realm claim and the restricted_flow_verified claim, or GitLab.com's allowlisted instance token (see
+    _is_gitlab_com_instance_token). Debug users never qualify.
+
+    The SaaS realm claim alone doesn't prove the instance check ran: GenerateToken copies the caller's x-gitlab-realm
+    header for flows that weren't restricted when the token was minted. Only the restricted_flow_verified claim, set
+    after that check passed, does.
+    """
+    claims = user.claims
+    if user.is_debug or not claims or not claims.extra:
+        return None
+    flow_config_id = claims.extra.get(FLOW_CONFIG_ID_CLAIM)
+    if not isinstance(flow_config_id, str) or not flow_config_id:
+        return None
+    issued_by_dws = (
+        claims.issuer == CloudConnectorConfig().service_name
+        and claims.gitlab_realm == SAAS_REALM
+        and claims.extra.get(RESTRICTED_FLOW_VERIFIED_CLAIM) is True
+    )
+    if not issued_by_dws and not _is_gitlab_com_instance_token(user):
+        return None
+    return flow_config_id
+
+
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # Set to 10 seconds to provide a reasonable balance between:
     # - Giving tasks enough time to properly clean up resources
@@ -559,6 +640,34 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     grpc.StatusCode.PERMISSION_DENIED,
                     f"Unauthorized to execute {workflow_definition or 'workflow'}",
                 )
+
+        # Restricted models (model_restrictions.yml) are usable only by the flows they are
+        # restricted to, on a signed flow claim; no debug bypass. Prompt construction
+        # enforces this for every model; the request's default model is checked here
+        # so a denied run fails before any workflow setup.
+        authorized_flow = _restricted_access_flow(user)
+        restricted_access_ctx.set(authorized_flow)
+        if (default_metadata := current_model_metadata_context.get()) is not None:
+            llm_definition = default_metadata.llm_definition
+            try:
+                ensure_restricted_model_access(
+                    identifiers=[
+                        llm_definition.gitlab_identifier,
+                        getattr(default_metadata, "name", None),
+                    ],
+                    models=[
+                        default_metadata.to_params().get("model"),
+                        llm_definition.params.model,
+                    ],
+                )
+            except RestrictedModelAccessError as e:
+                log.warning(
+                    "Restricted model denied at workflow start",
+                    flow_config_id=authorized_flow,
+                    gitlab_realm=user.claims.gitlab_realm if user.claims else None,
+                    model=llm_definition.gitlab_identifier,
+                )
+                await context.abort(grpc.StatusCode.PERMISSION_DENIED, str(e))
 
         workflow_id = start_req.workflowID
         set_workflow_id(workflow_id)
@@ -810,6 +919,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # itself was wrong, not the system state.
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(str(workflow.last_error))
+            elif restricted_error := _find_restricted_model_access_error(
+                workflow.last_error
+            ):
+                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                context.set_details(str(restricted_error))
             elif workflow.last_error:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(
@@ -1130,7 +1244,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         gitlab_realm = metadata.get("x-gitlab-realm")
         gitlab_instance_id = metadata.get("x-gitlab-instance-id")
 
-        extra_claims = {}
+        extra_claims: dict[str, Any] = {}
 
         if hasattr(user, "claims") and user.claims:
             extra_claims = instance_uid_claim(user.claims)
@@ -1140,7 +1254,33 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     if claim in incoming_extra:
                         extra_claims[claim] = incoming_extra[claim]
 
+        # A flow that restricted models are restricted to is available only on
+        # GitLab.com: other callers are refused rather than given an unbound token.
         if request.flow_config_id:
+            if (
+                request.flow_config_id
+                in ModelSelectionConfig.instance().all_restricted_flows()
+            ):
+                if not _is_gitlab_com_instance_token(user):
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        f"Flow '{request.flow_config_id}' is only available on GitLab.com",
+                    )
+                # A caller token already bound to a flow can't mint one for another flow.
+                caller_flow_config_id = (user.claims.extra or {}).get(
+                    FLOW_CONFIG_ID_CLAIM
+                )
+                if (
+                    caller_flow_config_id
+                    and caller_flow_config_id != request.flow_config_id
+                ):
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        f"Caller token is not authorized for flow '{request.flow_config_id}'",
+                    )
+                # The caller's signed realm claim is SaaS; don't trust the header here.
+                gitlab_realm = SAAS_REALM
+                extra_claims[RESTRICTED_FLOW_VERIFIED_CLAIM] = True
             extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
 
         if request.HasField("flow_config"):
