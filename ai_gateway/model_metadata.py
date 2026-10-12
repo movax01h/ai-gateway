@@ -64,6 +64,10 @@ class BaseModelMetadata(BaseModel):
     def to_params(self) -> Dict[str, Any]:
         pass
 
+    @property
+    def resolved_identifier(self) -> str:
+        return self.llm_definition.gitlab_identifier
+
     def add_user(self, user: StarletteUser):
         self._user = user
 
@@ -147,11 +151,59 @@ class ModelMetadata(BaseModelMetadata):
             )
         return self
 
+    @model_validator(mode="after")
+    def _warn_openai_like_remap(self) -> "ModelMetadata":
+        provider, _, model_name = (self.identifier or "").partition("/")
+        if provider == "openai_like" and model_name:
+            log.warning(
+                "Remapping the 'openai_like' provider to 'openai'",
+                identifier=self.identifier,
+            )
+        return self
+
+    def _resolved_provider_and_model(self) -> tuple[Optional[str], Optional[str]]:
+        if not self.identifier:
+            return None, None
+
+        segment_1, _, segment_2 = self.identifier.partition("/")
+        if not segment_2:
+            # litellm.embedding() does not allow 'custom_openai' as 'custom_llm_provider'
+            # left blank to use the values defined in ai_gateway/model_selection/models.yml
+            if (
+                self.llm_definition.model_class_provider
+                == ModelClassProvider.LITE_LLM_EMBEDDING
+            ):
+                return None, self.identifier
+
+            return "custom_openai", self.identifier
+
+        provider, model_name = segment_1, segment_2
+
+        # LiteLLM sends `openai_like` extra_headers in the JSON body, dropping the user identity
+        # header. Mapping to `openai` to send the same request with real headers.
+        # See https://github.com/BerriAI/litellm/issues/44300.
+        if provider == "openai_like":
+            provider = "openai"
+
+        return provider, model_name
+
     def _resolved_provider(self) -> Optional[str]:
-        if self.identifier:
-            provider, _, model_name = self.identifier.partition("/")
-            return provider if model_name else "custom_openai"
-        return getattr(self.llm_definition.params, "custom_llm_provider", None)
+        provider, _ = self._resolved_provider_and_model()
+        return provider or getattr(
+            self.llm_definition.params, "custom_llm_provider", None
+        )
+
+    @property
+    @override
+    def resolved_identifier(self) -> str:
+        """The identifier with the provider actually used, e.g. `openai_like` becomes `openai`."""
+        provider, model_name = self._resolved_provider_and_model()
+        if not model_name:
+            return self.llm_definition.gitlab_identifier
+        if provider:
+            return f"{provider}/{model_name}"
+
+        return model_name
 
     @override
     def to_params(self) -> Dict[str, Any]:
@@ -167,23 +219,13 @@ class ModelMetadata(BaseModelMetadata):
         if self.endpoint:
             params["api_base"] = str(self.endpoint).removesuffix("/")
 
-        if self.identifier:
-            provider, _, model_name = self.identifier.partition("/")
-            if model_name:
-                params["custom_llm_provider"] = provider
-                params["model"] = model_name
-
-                if provider in PROVIDERS_WITHOUT_API_BASE:
-                    params.pop("api_base", None)
-            else:
-                # litellm.embedding() does not allow 'custom_openai' as 'custom_llm_provider'
-                # left blank to use the values defined in ai_gateway/model_selection/models.yml
-                if (
-                    self.llm_definition.model_class_provider
-                    != ModelClassProvider.LITE_LLM_EMBEDDING
-                ):
-                    params["custom_llm_provider"] = "custom_openai"
-                params["model"] = self.identifier
+        provider, model_name = self._resolved_provider_and_model()
+        if provider:
+            params["custom_llm_provider"] = provider
+            if provider in PROVIDERS_WITHOUT_API_BASE:
+                params.pop("api_base", None)
+        if model_name:
+            params["model"] = model_name
 
         managed_provider = getattr(
             self.llm_definition.params, "custom_llm_provider", None

@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import HttpUrl
+from structlog.testing import capture_logs
 
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
@@ -539,6 +540,100 @@ class TestModelMetadataToParams:
             "model": "text-embedding-3-small",
             "custom_llm_provider": "openai",
         }
+
+    def test_embedding_with_openai_like_provider_remapped_to_openai(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "embedding_model",
+                "endpoint": HttpUrl("https://proxy.internal/v1"),
+                "identifier": "openai_like/text-embedding-3-small",
+            }
+        )
+
+        assert model_metadata.to_params() == {
+            "api_base": "https://proxy.internal/v1",
+            "model": "text-embedding-3-small",
+            "custom_llm_provider": "openai",
+        }
+
+    def test_with_openai_like_provider_remapped_to_openai(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "gitlab_model1",
+                "endpoint": HttpUrl("https://proxy.internal/v1"),
+                "identifier": "openai_like/some-model",
+            }
+        )
+
+        params = model_metadata.to_params()
+        assert params["custom_llm_provider"] == "openai"
+        assert params["model"] == "some-model"
+        assert params["api_base"] == "https://proxy.internal/v1"
+
+    def test_openai_like_remap_logged_once(self):
+        with capture_logs() as cap_logs:
+            model_metadata = create_model_metadata(
+                {
+                    "provider": "litellm",
+                    "name": "embedding_model",
+                    "endpoint": HttpUrl("https://proxy.internal/v1"),
+                    "identifier": "openai_like/text-embedding-3-small",
+                }
+            )
+            model_metadata.to_params()
+            model_metadata.to_params()
+            _ = model_metadata.resolved_identifier
+
+        remap_logs = [
+            log
+            for log in cap_logs
+            if log["event"] == "Remapping the 'openai_like' provider to 'openai'"
+        ]
+        assert len(remap_logs) == 1
+        assert remap_logs[0]["log_level"] == "warning"
+
+
+class TestModelMetadataResolvedIdentifier:
+    @pytest.mark.parametrize(
+        ("identifier", "expected_identifier"),
+        [
+            ("openai/text-embedding-3-small", "openai/text-embedding-3-small"),
+            ("openai_like/text-embedding-3-small", "openai/text-embedding-3-small"),
+            ("text-embedding-005", "text-embedding-005"),
+        ],
+        ids=["with-provider", "openai_like-reported-as-openai", "without-provider"],
+    )
+    def test_custom_model(self, identifier, expected_identifier):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "litellm",
+                "name": "embedding_model",
+                "endpoint": HttpUrl("https://proxy.internal/v1"),
+                "identifier": identifier,
+            }
+        )
+
+        assert model_metadata.resolved_identifier == expected_identifier
+
+    def test_gitlab_model(self):
+        model_metadata = create_model_metadata(
+            {"provider": "gitlab", "identifier": "embedding_model"}
+        )
+
+        assert model_metadata.resolved_identifier == "embedding_model"
+
+    def test_non_litellm_model(self):
+        model_metadata = create_model_metadata(
+            {
+                "provider": "amazon_q",
+                "name": "amazon_q",
+                "role_arn": "arn:aws:iam::123456789012:role/example-role",
+            }
+        )
+
+        assert model_metadata.resolved_identifier == "amazon_q"
 
 
 ROLE_ARN = "arn:aws:iam::123456789012:role/runtime-role"
