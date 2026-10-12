@@ -5515,6 +5515,30 @@ async def test_generate_token_binds_restricted_flow_for_gitlab_com(
         "extra_claims"
     ]
     assert extra_claims["flow_config_id"] == "bl_security"
+    assert extra_claims["restricted_flow_verified"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_generate_token_does_not_verify_unrestricted_flow_with_saas_header(
+    mock_token_authority, mock_context
+):
+    """A header-chosen SaaS realm on an unrestricted flow never yields the verified claim."""
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_instance_user(subject="other-uid"))
+    mock_context.invocation_metadata.return_value = [("x-gitlab-realm", "saas")]
+
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="developer"), mock_context
+    )
+
+    assert mock_token_authority.return_value.encode.call_args.args[1] == "saas"
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert "restricted_flow_verified" not in extra_claims
 
 
 @pytest.mark.asyncio
@@ -5711,9 +5735,12 @@ def _workflow_token_user(
     issuer: str = "gitlab-duo-workflow-service",
     extra: dict | None = None,
     subject: str = "",
+    restricted_flow_verified: bool = True,
 ) -> CloudConnectorUser:
     if extra is None:
         extra = {"flow_config_id": flow_config_id} if flow_config_id else {}
+        if flow_config_id and restricted_flow_verified:
+            extra["restricted_flow_verified"] = True
     return CloudConnectorUser(
         authenticated=True,
         is_debug=is_debug,
@@ -5833,6 +5860,11 @@ async def test_execute_workflow_allows_restricted_model_for_authorized_flow(
             _workflow_token_user(flow_config_id=None, subject=GITLAB_COM_INSTANCE_UID),
             "bl_security",
             id="dws-token-with-gitlab-com-subject-no-claim",
+        ),
+        pytest.param(
+            _workflow_token_user(restricted_flow_verified=False),
+            "bl_security",
+            id="dws-token-without-verified-claim",
         ),
     ],
 )
@@ -6070,6 +6102,18 @@ async def test_execute_workflow_denies_restricted_model_on_malformed_flow_claim(
 )
 @patch.dict(os.environ, RESTRICTED_MODEL_ENV)
 def test_restricted_access_flow_ignores_malformed_flow_claim(extra):
+    assert _restricted_access_flow(_workflow_token_user(extra=extra)) is None
+
+
+@pytest.mark.parametrize(
+    "verified", [None, False, "true"], ids=["missing", "false", "not-a-bool"]
+)
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+def test_restricted_access_flow_requires_verified_claim_on_dws_token(verified):
+    """A DWS-minted SaaS-realm flow token without restricted_flow_verified is True grants nothing."""
+    extra = {"flow_config_id": "bl_security"}
+    if verified is not None:
+        extra["restricted_flow_verified"] = verified
     assert _restricted_access_flow(_workflow_token_user(extra=extra)) is None
 
 

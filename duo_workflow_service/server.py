@@ -164,6 +164,8 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 # DWS @inject sites resolving with no per-module bookkeeping.
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
 FLOW_CONFIG_ID_CLAIM = "flow_config_id"
+# Set by GenerateToken only after the caller passed the restricted-flow instance check.
+RESTRICTED_FLOW_VERIFIED_CLAIM = "restricted_flow_verified"
 FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
 WORKFLOW_ID_CLAIM = "workflow_id"
 SAAS_REALM = "saas"
@@ -468,8 +470,12 @@ def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
     """Return the signed flow id a workflow token may use restricted models for.
 
     The token must carry a flow_config_id claim and be either one this service minted (see GenerateToken) with the SaaS
-    realm claim, or GitLab.com's allowlisted instance token (see _is_gitlab_com_instance_token). Debug users never
-    qualify.
+    realm claim and the restricted_flow_verified claim, or GitLab.com's allowlisted instance token (see
+    _is_gitlab_com_instance_token). Debug users never qualify.
+
+    The SaaS realm claim alone doesn't prove the instance check ran: GenerateToken copies the caller's x-gitlab-realm
+    header for flows that weren't restricted when the token was minted. Only the restricted_flow_verified claim, set
+    after that check passed, does.
     """
     claims = user.claims
     if user.is_debug or not claims or not claims.extra:
@@ -480,6 +486,7 @@ def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
     issued_by_dws = (
         claims.issuer == CloudConnectorConfig().service_name
         and claims.gitlab_realm == SAAS_REALM
+        and claims.extra.get(RESTRICTED_FLOW_VERIFIED_CLAIM) is True
     )
     if not issued_by_dws and not _is_gitlab_com_instance_token(user):
         return None
@@ -1229,6 +1236,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     )
                 # The caller's signed realm claim is SaaS; don't trust the header here.
                 gitlab_realm = SAAS_REALM
+                extra_claims[RESTRICTED_FLOW_VERIFIED_CLAIM] = True
             extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
 
         if request.HasField("flow_config"):
