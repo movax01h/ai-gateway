@@ -1814,3 +1814,161 @@ class TestCompletionContextMaxPercentForModelMetadata:
         metadata = self._model_metadata("anthropic")
 
         assert completion_context_max_percent_for_model_metadata(metadata) is None
+
+
+class TestSelfHostedIdentifierMatching:
+    @pytest.fixture(name="family")
+    def family_fixture(self):
+        return ChatLiteLLMDefinition(
+            gitlab_identifier="claude_3",
+            name="Self-Hosted Claude",
+            max_context_tokens=200000,
+            params={"temperature": 0.0, "max_tokens": 64000},
+            prompt_params={"timeout": 10},
+        )
+
+    @pytest.fixture(name="matched")
+    def matched_fixture(self):
+        return ChatLiteLLMDefinition(
+            gitlab_identifier="claude_sonnet_4_6_bedrock",
+            name="Claude Sonnet 4.6",
+            max_context_tokens=1000000,
+            supports_assistant_prefill=True,
+            supports_vision=True,
+            use_model_max_tokens=True,
+            params={
+                "model": "bedrock/global.anthropic.claude-sonnet-4-6",
+                "custom_llm_provider": "bedrock",
+                "temperature": 0.5,
+                "max_tokens": 128000,
+            },
+            prompt_params={"vertex_location": "global"},
+        )
+
+    @pytest.fixture(name="patch_config")
+    def patch_config_fixture(self, family):
+        def _patch(found):
+            return patch.multiple(
+                ModelSelectionConfig,
+                get_model=mock.Mock(return_value=family),
+                find_by_identifier=mock.Mock(return_value=found),
+            )
+
+        return _patch
+
+    def test_match_copies_selected_fields(self, family, matched, patch_config):
+        with patch_config(matched):
+            result = create_model_metadata(
+                {
+                    "provider": "openai",
+                    "name": "claude_3",
+                    "identifier": "bedrock/eu.anthropic.claude-sonnet-4-6",
+                }
+            )
+
+        definition = result.llm_definition
+        # Copied from the matched entry
+        assert definition.max_context_tokens == 1000000
+        assert definition.use_model_max_tokens is True
+        assert definition.params.max_tokens == 128000
+        assert definition.params.temperature == 0.5
+        # Kept from the family entry
+        assert definition.supports_assistant_prefill is False
+        assert definition.supports_vision is None
+        assert definition.gitlab_identifier == "claude_3"
+        assert result.name == "claude_3"
+        assert definition.params.model is None
+        assert definition.params.custom_llm_provider is None
+        assert definition.prompt_params == family.prompt_params
+        # The cached family entry is not changed
+        assert family.max_context_tokens == 200000
+        assert family.params.max_tokens == 64000
+
+    def test_unset_matched_params_keep_family_value(
+        self, family, matched, patch_config
+    ):
+        matched.params.temperature = None
+
+        with patch_config(matched):
+            result = create_model_metadata(
+                {
+                    "provider": "openai",
+                    "name": "claude_3",
+                    "identifier": "vertex_ai/gemini-3.7-flash",
+                }
+            )
+
+        assert result.llm_definition.params.temperature == family.params.temperature
+
+    @pytest.mark.parametrize(
+        ("matched_flags", "expected"),
+        [
+            # Not set on the matched entry: the family `true` stays
+            ({}, True),
+            # Set to `false` on the matched entry: it is copied
+            ({"strip_reasoning": False}, False),
+        ],
+    )
+    def test_capability_flags_copied_only_when_set(self, matched_flags, expected):
+        family = ChatLiteLLMDefinition(
+            gitlab_identifier="qwen",
+            name="Self-Hosted Qwen",
+            max_context_tokens=262144,
+            strip_reasoning=True,
+            params={"temperature": 0.0},
+        )
+        matched = ChatLiteLLMDefinition(
+            gitlab_identifier="qwen_vertex",
+            name="Qwen Vertex",
+            max_context_tokens=1000000,
+            params={"model": "qwen3", "custom_llm_provider": "vertex_ai"},
+            **matched_flags,
+        )
+
+        with patch.multiple(
+            ModelSelectionConfig,
+            get_model=mock.Mock(return_value=family),
+            find_by_identifier=mock.Mock(return_value=matched),
+        ):
+            result = create_model_metadata(
+                {
+                    "provider": "openai",
+                    "name": "qwen",
+                    "identifier": "vertex_ai/qwen3",
+                }
+            )
+
+        assert result.llm_definition.strip_reasoning is expected
+        assert result.llm_definition.max_context_tokens == 1000000
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            # No match: the family entry is used without changes
+            {
+                "provider": "openai",
+                "name": "claude_3",
+                "identifier": "custom_openai/my-model",
+            },
+            # No identifier
+            {"provider": "openai", "name": "claude_3"},
+        ],
+    )
+    def test_family_used_when_not_matched(self, family, patch_config, data):
+        with patch_config(None):
+            result = create_model_metadata(data)
+
+        assert result.llm_definition == family
+
+    def test_gitlab_request_without_name_is_not_matched(self, family, matched):
+        with patch.multiple(
+            ModelSelectionConfig,
+            get_model=mock.Mock(return_value=family),
+            find_by_identifier=mock.Mock(return_value=matched),
+        ):
+            result = create_model_metadata(
+                {"provider": "gitlab", "identifier": "claude_3"}
+            )
+            ModelSelectionConfig.find_by_identifier.assert_not_called()
+
+        assert result.llm_definition == family

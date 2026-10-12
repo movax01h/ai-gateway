@@ -439,11 +439,69 @@ def _is_custom_wire_provider(provider: str) -> bool:
         return True
 
 
+# Fields copied from a matched models.yml entry onto a self-hosted family entry.
+# Never copy `gitlab_identifier` (prompt selection), `params.model` or
+# `params.custom_llm_provider` (routing comes from the customer identifier), or
+# `prompt_params` (they would override prompt-definition params).
+MATCHED_DEFINITION_FIELDS = (
+    "max_context_tokens",
+    "requires_single_system_message",
+    "strip_reasoning",
+    "use_model_max_tokens",
+)
+MATCHED_PARAMS_FIELDS = ("max_tokens", "temperature", "top_p", "top_k")
+
+
+def _apply_matched_definition(
+    configs: ModelSelectionConfig, family: LLMDefinition, identifier: str
+) -> LLMDefinition:
+    """Copy limits, capabilities, and tuning from the models.yml entry that matches the identifier.
+
+    Returns the family definition without changes when no entry matches.
+    """
+    matched = configs.find_by_identifier(identifier)
+    if matched is None:
+        log.info(
+            "No models.yml match for self-hosted identifier",
+            identifier=identifier,
+            family=family.gitlab_identifier,
+        )
+        return family
+
+    # A params field that the matched entry does not set keeps the family value.
+    params_update = {
+        field: value
+        for field in MATCHED_PARAMS_FIELDS
+        if (value := getattr(matched.params, field)) is not None
+    }
+    # A top-level field is copied only when the matched entry sets it in YAML.
+    update: dict[str, Any] = {
+        field: getattr(matched, field)
+        for field in MATCHED_DEFINITION_FIELDS
+        if field in matched.model_fields_set
+    }
+    update["params"] = family.params.model_copy(update=params_update)
+
+    log.info(
+        "Matched self-hosted identifier to models.yml entry",
+        identifier=identifier,
+        family=family.gitlab_identifier,
+        matched=matched.gitlab_identifier,
+    )
+    return family.model_copy(update=update)
+
+
 def _create_gitlab_metadata(data: dict[str, Any]) -> ModelMetadata:
     configs = ModelSelectionConfig.instance()
 
     if name := data.get("name"):
         llm_definition = configs.get_model(name)
+        # Only self-hosted requests send `name` (the family). `.com` requests
+        # have no `name`, so they never reach this match.
+        if identifier := data.get("identifier"):
+            llm_definition = _apply_matched_definition(
+                configs, llm_definition, identifier
+            )
     else:
         # When there's no name it means we're in presence of a GitLab-provider metadata, which may pass a
         # "feature_setting" or "identifier" to deduce the model from them. These values are not expected in the rest

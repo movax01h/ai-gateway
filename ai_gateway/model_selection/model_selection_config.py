@@ -23,6 +23,10 @@ from ai_gateway.config import (
     ModelReleasesPayload,
     get_config,
 )
+from ai_gateway.model_selection.identifier_matching import (
+    MatchKey,
+    normalize_identifier,
+)
 from ai_gateway.model_selection.keyword_bm25 import KeywordBM25
 from ai_gateway.model_selection.models import (
     BaseModelParams,
@@ -202,6 +206,44 @@ LLMDefinition = Annotated[
 ]
 
 
+_MODEL_CLASS_MATCH_PROVIDERS: dict[ModelClassProvider, str] = {
+    ModelClassProvider.ANTHROPIC: "anthropic",
+    ModelClassProvider.GOOGLE_GENAI: "vertex_ai",
+    ModelClassProvider.OPENAI: "openai",
+}
+
+
+def _match_identifier(definition: LLMDefinition) -> Optional[str]:
+    """Return the self-hosted style identifier (``<provider>/<model>``) for a definition.
+
+    The provider comes from the model class when it calls one provider directly (see
+    ``_MODEL_CLASS_MATCH_PROVIDERS``), else from ``params.custom_llm_provider``.
+    """
+    provider = _MODEL_CLASS_MATCH_PROVIDERS.get(
+        definition.model_class_provider
+    ) or getattr(definition.params, "custom_llm_provider", None)
+
+    model = definition.params.model
+    if not provider or not model:
+        return None
+
+    # Bedrock entries include the provider in `params.model`, Vertex entries do not.
+    return f"{provider}/{model.removeprefix(f'{provider}/')}"
+
+
+def _build_match_index(
+    definitions: Iterable[LLMDefinition],
+) -> dict[MatchKey, LLMDefinition]:
+    index: dict[MatchKey, LLMDefinition] = {}
+    for definition in definitions:
+        identifier = _match_identifier(definition)
+        key = normalize_identifier(identifier) if identifier else None
+        if key:
+            # When two definitions give the same key, the first one wins.
+            index.setdefault(key, definition)
+    return index
+
+
 class ModelRestriction(BaseModel):
     """A model usable only by the given feature settings; see model_restrictions.yml.
 
@@ -311,6 +353,8 @@ class ModelSelectionConfig:
         self._prompt_params_override: dict[str, dict] = prompt_params_override or {}
         self._env_llm_definitions: dict[str, LLMDefinition] = {}
         self._env_feature_attachments: dict[str, ModelReleaseFeatureAttachment] = {}
+        self._match_index: Optional[dict[MatchKey, LLMDefinition]] = None
+        self._resolved_match_index: Optional[dict[MatchKey, LLMDefinition]] = None
         if model_releases:
             self._load_env_releases(model_releases)
 
@@ -691,6 +735,8 @@ class ModelSelectionConfig:
         """Refresh the configuration by reloading from source files."""
         self._llm_definitions = None
         self._unit_primitive_configs = None
+        self._match_index = None
+        self._resolved_match_index = None
         self._model_restrictions = None
 
     def get_proxy_models_for_provider(self, provider: str) -> list[str]:
@@ -778,6 +824,34 @@ class ModelSelectionConfig:
         if model := self.get_llm_definitions().get(model_id, None):
             return model
         raise ValueError(f"Invalid model identifier: {model_id}")
+
+    def find_by_identifier(self, identifier: str) -> Optional[LLMDefinition]:
+        """Find the definition whose model matches a self-hosted identifier.
+
+        Args:
+            identifier: A self-hosted identifier, for example ``bedrock/eu.anthropic.claude-sonnet-4-6``.
+
+        Returns:
+            The matching definition, or ``None`` when the identifier cannot be matched.
+        """
+        key = normalize_identifier(identifier)
+        if key is None:
+            return None
+
+        # Env-injected definitions apply per request, so keep a separate index that
+        # includes them, the same way `get_resolved_llm_definitions` does.
+        if self._env_llm_definitions and is_feature_enabled(
+            FeatureFlag.AI_MODEL_RELEASE
+        ):
+            if self._resolved_match_index is None:
+                self._resolved_match_index = _build_match_index(
+                    self.get_resolved_llm_definitions().values()
+                )
+            return self._resolved_match_index.get(key)
+
+        if self._match_index is None:
+            self._match_index = _build_match_index(self.get_llm_definitions().values())
+        return self._match_index.get(key)
 
     def get_model_for_feature(self, feature_setting_name: str) -> LLMDefinition:
         if feature_setting := self.get_resolved_unit_primitive_config_map().get(
