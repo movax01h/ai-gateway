@@ -1913,6 +1913,142 @@ class TestEnvModelReleases:
         assert sentinel not in str(cap_logs)
 
 
+# editorconfig-checker-disable
+@pytest.fixture(name="match_fs")
+def match_fs_fixture(fs: FakeFilesystem):
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent("""
+            models:
+              - name: Sonnet Bedrock
+                gitlab_identifier: sonnet_bedrock
+                model_class_provider: litellm
+                max_context_tokens: 1000000
+                params:
+                  model: bedrock/global.anthropic.claude-sonnet-4-6
+                  custom_llm_provider: bedrock
+              - name: Sonnet Vertex
+                gitlab_identifier: sonnet_vertex
+                model_class_provider: litellm
+                max_context_tokens: 1000000
+                params:
+                  model: claude-sonnet-4-6
+                  custom_llm_provider: vertex_ai
+              - name: Sonnet Anthropic
+                gitlab_identifier: sonnet_anthropic
+                model_class_provider: anthropic
+                max_context_tokens: 1000000
+                params:
+                  model: claude-sonnet-4-6
+              - name: Gemini Flash
+                gitlab_identifier: gemini_flash
+                model_class_provider: google_genai
+                max_context_tokens: 1000000
+                params:
+                  model: gemini-3.7-flash
+              - name: Gemini Flash Low
+                gitlab_identifier: gemini_flash_low
+                model_class_provider: google_genai
+                max_context_tokens: 1000000
+                params:
+                  model: gemini-3.7-flash
+              - name: Self-Hosted Claude
+                gitlab_identifier: claude_3
+                model_class_provider: litellm
+                max_context_tokens: 200000
+                params:
+                  temperature: 0.0
+            """),
+    )
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents="configurable_unit_primitives: []\n",
+    )
+
+
+# editorconfig-checker-enable
+
+
+@pytest.mark.usefixtures("match_fs")
+class TestFindByIdentifier:
+    def teardown_method(self):
+        current_feature_flag_context.set(set())
+
+    @pytest.mark.parametrize(
+        ("identifier", "expected"),
+        [
+            ("bedrock/eu.anthropic.claude-sonnet-4-6", "sonnet_bedrock"),
+            ("bedrock/converse/us.anthropic.claude-sonnet-4-6", "sonnet_bedrock"),
+            ("vertex_ai/claude-sonnet-4-6@default", "sonnet_vertex"),
+            ("vertex_ai/gemini-3.7-flash", "gemini_flash"),  # first entry wins
+            ("bedrock/eu.anthropic.claude-opus-4-6", None),
+            ("anthropic/claude-sonnet-4-6", "sonnet_anthropic"),
+            ("azure/claude-sonnet-4-6", None),  # no normalizer
+            ("custom_openai/claude-sonnet-4-6", None),
+            ("claude-sonnet-4-6", None),
+        ],
+    )
+    def test_find_by_identifier(self, identifier, expected):
+        config = ModelSelectionConfig(default_models_override={})
+
+        result = config.find_by_identifier(identifier)
+
+        assert (result.gitlab_identifier if result else None) == expected
+
+    def test_refresh_clears_the_index(self, fs: FakeFilesystem):
+        config = ModelSelectionConfig(default_models_override={})
+        assert config.find_by_identifier("vertex_ai/claude-sonnet-4-6") is not None
+
+        models_yml = (
+            Path(__file__).parent.parent.parent
+            / "ai_gateway"
+            / "model_selection"
+            / "models.yml"
+        )
+        fs.remove_object(str(models_yml))
+        fs.create_file(models_yml, contents="models: []\n")
+        config.refresh()
+
+        assert config.find_by_identifier("vertex_ai/claude-sonnet-4-6") is None
+
+    @pytest.mark.parametrize(
+        ("flags", "expected"),
+        [
+            ({"ai_model_release"}, "env_opus_vertex"),
+            (set(), None),
+        ],
+    )
+    def test_env_releases_follow_the_feature_flag(self, flags, expected):
+        payload = json.dumps(
+            {
+                "models": [
+                    {
+                        "name": "Env Opus Vertex",
+                        "gitlab_identifier": "env_opus_vertex",
+                        "model_class_provider": "litellm",
+                        "max_context_tokens": 1000000,
+                        "params": {
+                            "model": "claude-opus-9",
+                            "custom_llm_provider": "vertex_ai",
+                        },
+                    }
+                ],
+                "feature_attachments": {},
+            }
+        )
+        config = ModelSelectionConfig(
+            default_models_override={}, model_releases=payload
+        )
+        current_feature_flag_context.set(flags)
+
+        result = config.find_by_identifier("vertex_ai/claude-opus-9@default")
+
+        assert (result.gitlab_identifier if result else None) == expected
+
+
 def test_shipped_model_restrictions_load():
     config = ModelSelectionConfig(default_models_override={})
 
