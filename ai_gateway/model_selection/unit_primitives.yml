@@ -496,10 +496,10 @@ configurable_unit_primitives:
     unit_primitives:
       - "complete_code"
     default_models:
-      - identifier: "claude_sonnet_4_5_20250929_vertex"
+      - identifier: "claude_sonnet_5_5_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
+      - "claude_sonnet_5_5_bedrock"
+      - "claude_sonnet_5_5_vertex"
   - feature_setting: "embeddings_code"
     unit_primitives:
       - "generate_embeddings_codebase"
