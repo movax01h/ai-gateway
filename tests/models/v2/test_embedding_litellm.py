@@ -388,25 +388,24 @@ class TestEmbeddingLiteLLMAsyncInvoke:
     @pytest.mark.parametrize(
         ("custom_llm_provider", "api_base", "api_key", "expected_api_key"),
         [
-            # LiteLLM sends nothing without a key for these two, so stand one in.
+            # LiteLLM sends nothing without a key, so stand one in.
             ("openai", "http://custom/v1", None, "dummy_key"),
-            ("openai_like", "http://custom/v1", None, "dummy_key"),
             # `openai` without an api_base targets api.openai.com, where the operator's own
             # credential applies - a placeholder must not shadow it.
             ("openai", None, None, None),
-            # vertex_ai and bedrock carry their own credentials.
-            ("vertex_ai", "http://custom/v1", None, None),
             # A key from the model configuration always wins over the placeholder.
             ("openai", "http://custom/v1", "admin-token", "admin-token"),
-            ("openai_like", "http://custom/v1", "admin-token", "admin-token"),
+            # `openai_like` is unsupported without a key; ModelMetadata remaps it to `openai`.
+            ("openai_like", "http://custom/v1", None, None),
+            # vertex_ai and bedrock carry their own credentials.
+            ("vertex_ai", "http://custom/v1", None, None),
         ],
         ids=[
             "openai-custom-endpoint",
-            "openai_like-custom-endpoint",
             "openai-no-api-base",
-            "vertex_ai-self-authenticating",
             "openai-configured-key",
-            "openai_like-configured-key",
+            "openai_like-no-key",
+            "vertex_ai-self-authenticating",
         ],
     )
     async def test_async_invoke_api_key(
@@ -642,8 +641,8 @@ class TestEmbeddingLiteLLMUserIdentityHeader:
 
         This pins a known LiteLLM limitation, not behavior we want.
 
-        We may drop support for `openai_like` in the future, in which case this test can be removed.
-        See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3041.
+        ModelMetadata.to_params remaps `openai_like` to `openai`, but callers that bypass model
+        metadata can still pass `openai_like` with an API key.
 
         Alternately, if a LiteLLM upgrade starts sending extra_headers as real HTTP headers
         for `openai_like`, this test fails on a good change: change or remove it.
@@ -657,7 +656,9 @@ class TestEmbeddingLiteLLMUserIdentityHeader:
         )
 
         await model.ainvoke(
-            input={"contents": ["test text"]}, api_base="http://custom/v1"
+            input={"contents": ["test text"]},
+            api_base="http://custom/v1",
+            api_key="admin-token",
         )
 
         assert recorded_http_requests, "no HTTP request was issued"

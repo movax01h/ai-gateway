@@ -147,6 +147,7 @@ class BaseTestCodeEmbeddings:
             "expected_custom_llm_provider",
             "expected_llm_model",
             "expected_api_key",
+            "reported_model_identifier",
         ),
         [
             (
@@ -155,6 +156,7 @@ class BaseTestCodeEmbeddings:
                 "openai",
                 "test-embedding-002",
                 "dummy_key",
+                "openai/test-embedding-002",
             ),
             (
                 "openai/test-embedding-002",
@@ -162,6 +164,15 @@ class BaseTestCodeEmbeddings:
                 "openai",
                 "test-embedding-002",
                 "test-api-key",
+                "openai/test-embedding-002",
+            ),
+            (
+                "openai_like/test-embedding-002",
+                None,
+                "openai",
+                "test-embedding-002",
+                "dummy_key",
+                "openai/test-embedding-002",
             ),
             (
                 "test-embedding-001",
@@ -169,6 +180,7 @@ class BaseTestCodeEmbeddings:
                 "openai",
                 "test-embedding-001",
                 "dummy_key",
+                "test-embedding-001",
             ),
             (
                 "test-embedding-001",
@@ -176,6 +188,7 @@ class BaseTestCodeEmbeddings:
                 "openai",
                 "test-embedding-001",
                 "test-api-key",
+                "test-embedding-001",
             ),
         ],
     )
@@ -186,6 +199,7 @@ class BaseTestCodeEmbeddings:
         expected_custom_llm_provider,
         expected_llm_model,
         expected_api_key,
+        reported_model_identifier,
         mock_client: TestClient,
         mock_litellm_aembedding: AsyncMock,
         mock_litellm_aembedding_response: AsyncMock,
@@ -220,7 +234,7 @@ class BaseTestCodeEmbeddings:
         assert response_json["model"] == {
             "engine": "litellm_embedding",
             "name": expected_llm_model,
-            "identifier": model_identifier,
+            "identifier": reported_model_identifier,
         }
         assert response_json["predictions"] == mock_litellm_aembedding_response.data
 

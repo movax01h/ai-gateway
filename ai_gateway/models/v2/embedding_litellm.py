@@ -28,11 +28,7 @@ logger = logging.getLogger(__name__)
 DUMMY_API_KEY = "dummy_key"
 
 # Self-hosted OpenAI-compatible providers that get a dummy API key when none is configured.
-# Note: `openai_like` loses per-user attribution because LiteLLM sends its `extra_headers`
-# in the JSON body instead of as HTTP headers. We need to decide whether to reject or remap
-# this provider, or wait for the litellm fix in https://github.com/BerriAI/litellm/issues/44300.
-# See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3041.
-PROVIDERS_REQUIRING_API_KEY = frozenset({"openai", "openai_like"})
+PROVIDERS_REQUIRING_API_KEY = frozenset({"openai"})
 
 
 class EmbeddingBadRequestError(Exception):
