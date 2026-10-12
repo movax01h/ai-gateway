@@ -9,7 +9,7 @@ import os
 import re
 import signal
 from itertools import chain
-from typing import AsyncIterable, AsyncIterator, Optional, cast, override
+from typing import Any, AsyncIterable, AsyncIterator, Optional, cast, override
 
 import aiohttp
 import grpc
@@ -1198,7 +1198,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         gitlab_realm = metadata.get("x-gitlab-realm")
         gitlab_instance_id = metadata.get("x-gitlab-instance-id")
 
-        extra_claims = {}
+        extra_claims: dict[str, Any] = {}
 
         if hasattr(user, "claims") and user.claims:
             extra_claims = {
