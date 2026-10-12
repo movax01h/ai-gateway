@@ -150,6 +150,7 @@
       "type": "string"
     },
     "FlowConfigInput": {
+      "additionalProperties": false,
       "properties": {
         "category": {
           "title": "Category",
@@ -183,6 +184,7 @@
       "type": "object"
     },
     "FlowConfigInputSchema": {
+      "additionalProperties": false,
       "properties": {
         "type": {
           "title": "Type",
@@ -232,6 +234,7 @@
       "type": "object"
     },
     "FlowConfigMetadata": {
+      "additionalProperties": false,
       "properties": {
         "entry_point": {
           "anyOf": [
@@ -701,6 +704,7 @@
       "type": "object"
     }
   },
+  "additionalProperties": false,
   "properties": {
     "flow": {
       "$ref": "#/$defs/FlowConfigMetadata"
