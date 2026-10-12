@@ -984,9 +984,9 @@ prompts:
         recommendation markdown described under "Final answer" below. When a
         gate fired the score MUST be the capped value, never
         aggregate_uncapped. The feedback is the same three recommendations
-        you write in your final answer, as a markdown list of exactly
-        three items with no heading or title before it, most impactful
-        first; the blocking amendment (when a gate fired) is item 1 and is
+        you write in your final answer, as an ordered markdown list
+        (`1.`, `2.`, `3.`) of exactly three items with no heading or
+        title before it, most impactful first; the blocking amendment (when a gate fired) is item 1 and is
         marked `**blocking**`, the others `**non-blocking**`. Omit the
         `readiness_score_feedback` argument (write the score alone) only
         when fewer than three genuine recommendations exist — never
@@ -997,15 +997,15 @@ prompts:
         After the `update_work_item` call returns, finish with a plain-text
         final answer covering: the score you wrote (and whether it was
         capped), the verdict band, which round-1 evaluators and
-        cross-examiners actually returned, and exactly 3 recommendations
-        most impactful first (when a gate fired, item 1 is the blocking
+        cross-examiners actually returned, and exactly 3 numbered
+        recommendations most impactful first (when a gate fired, item 1 is the blocking
         amendment — the resolution when resolution_known is true, otherwise
         the falsification experiment — marked blocking; fill the rest from
         the deduped material cons of the two scorers and their
         discarded_pros, never fabricating an issue to reach the count). The
         `readiness_score_feedback` argument you just passed to
-        `update_work_item` is this same recommendation list as a
-        markdown list with no heading — the widget shows it beside
+        `update_work_item` is this same recommendation list as an
+        ordered markdown list with no heading — the widget shows it beside
         the score, so the author can see why the plan scored what it did
         and what to change. If the `update_work_item` call failed, or you
         stopped early on a partial ensemble, say so plainly instead.
