@@ -70,6 +70,8 @@ class KindGitLabModel(StrEnum):
     CODESTRAL_2508_VERTEX = "codestral_2508_vertex"
     CLAUDE_4_5_SONNET = "claude_sonnet_4_5_20250929"
     CLAUDE_4_5_SONNET_VERTEX = "claude_sonnet_4_5_20250929_vertex"
+    CLAUDE_5_5_SONNET = "claude_sonnet_5_5"
+    CLAUDE_5_5_SONNET_VERTEX = "claude_sonnet_5_5_vertex"
     GITLAB_DEFAULT_MODEL = ""
 
 

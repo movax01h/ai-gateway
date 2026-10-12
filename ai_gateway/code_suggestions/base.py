@@ -77,6 +77,8 @@ USE_CASES_MODELS_MAP = {
         KindGitLabModel.GITLAB_DEFAULT_MODEL,
         KindGitLabModel.CLAUDE_4_5_SONNET,
         KindGitLabModel.CLAUDE_4_5_SONNET_VERTEX,
+        KindGitLabModel.CLAUDE_5_5_SONNET,
+        KindGitLabModel.CLAUDE_5_5_SONNET_VERTEX,
     },
     KindUseCase.CODE_GENERATIONS: {
         KindVertexTextModel.CODE_BISON_002,

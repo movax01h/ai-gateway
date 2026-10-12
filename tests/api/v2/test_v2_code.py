@@ -2029,6 +2029,12 @@ class TestGitLabModelProvider:
                 "Anthropic",
                 {"temperature": 0.0, "max_tokens": 4096},
             ),
+            ("claude_sonnet_5_5", "Anthropic", {"max_tokens": 4096}),
+            (
+                "claude_sonnet_5_5_vertex",
+                "Gemini Enterprise Agent Platform",
+                {"max_tokens": 4096},
+            ),
         ],
     )
     def test_gitlab_identifier_preserved_for_different_models(
