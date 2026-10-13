@@ -22,7 +22,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ModelTagEntry,
     UnitPrimitiveConfig,
 )
-from ai_gateway.model_selection.types import DefaultModelEntry
+from ai_gateway.model_selection.types import DefaultModelEntry, DevConfig
 from lib.feature_flags.context import current_feature_flag_context
 
 
@@ -1911,6 +1911,44 @@ class TestEnvModelReleases:
         assert len(error_logs) == 1
         assert error_logs[0]["errors"] == [{"type": "RuntimeError", "msg": "boom"}]
         assert sentinel not in str(cap_logs)
+
+
+class TestAllowedModelsForFeature:
+    @pytest.mark.usefixtures("mock_fs")
+    def test_unions_default_selectable_and_beta_models(self, selection_config):
+        assert selection_config.allowed_models_for_feature("test_config") == {
+            "gitlab-model-1",
+            "gitlab-model-2",
+        }
+
+    def test_includes_dev_and_tag_models(self, selection_config):
+        config = UnitPrimitiveConfig(
+            feature_setting="with_extras",
+            unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+            default_models=["default-model"],
+            selectable_models=["selectable-model"],
+            models_for_tags={"small": ModelTagEntry(models=["tag-model"])},
+            dev=DevConfig(selectable_models=["dev-model"]),
+        )
+
+        with patch.object(
+            selection_config,
+            "get_resolved_unit_primitive_config_map",
+            return_value={"with_extras": config},
+        ):
+            allowed = selection_config.allowed_models_for_feature("with_extras")
+
+        assert allowed == {
+            "default-model",
+            "selectable-model",
+            "tag-model",
+            "dev-model",
+        }
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_rejects_an_unknown_feature(self, selection_config):
+        with pytest.raises(ValueError, match="Invalid feature setting: nope"):
+            selection_config.allowed_models_for_feature("nope")
 
 
 # editorconfig-checker-disable

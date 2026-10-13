@@ -863,6 +863,32 @@ class ModelSelectionConfig:
             return self.get_model(chosen)
         raise ValueError(f"Invalid feature setting: {feature_setting_name}")
 
+    def allowed_models_for_feature(self, feature_setting_name: str) -> frozenset[str]:
+        """Return every model identifier a feature may serve.
+
+        The set is the union of the feature's default, selectable, beta, dev and tag models, read
+        from the resolved config so env-injected releases count when their flag is on.
+
+        Raises:
+            ValueError: If the feature setting does not exist.
+        """
+        config = self.get_resolved_unit_primitive_config_map().get(feature_setting_name)
+        if config is None:
+            raise ValueError(f"Invalid feature setting: {feature_setting_name}")
+        return frozenset(
+            chain(
+                config.default_model_identifiers,
+                config.selectable_models,
+                config.beta_models,
+                config.dev.selectable_models if config.dev else [],
+                (
+                    model_id
+                    for entry in config.models_for_tags.values()
+                    for model_id in entry.models
+                ),
+            )
+        )
+
     def resolve_tag_for_goal(
         self, feature_setting_name: str, goal: str
     ) -> Optional[tuple[str, list[str]]]:
