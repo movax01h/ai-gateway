@@ -288,10 +288,6 @@ ai_gateway/prompts/definitions/fix_pipeline_experiment/user
 ai_gateway/prompts/definitions/fix_pipeline_new_mr_comment/base
 ai_gateway/prompts/definitions/fix_pipeline_new_mr_comment/system
 ai_gateway/prompts/definitions/fix_pipeline_new_mr_comment/user
-ai_gateway/prompts/definitions/generate_commit_message/amazon_q
-ai_gateway/prompts/definitions/generate_commit_message/base
-ai_gateway/prompts/definitions/generate_commit_message/system
-ai_gateway/prompts/definitions/generate_commit_message/user
 ai_gateway/prompts/definitions/generate_session_title/base
 ai_gateway/prompts/definitions/generate_session_title/system
 ai_gateway/prompts/definitions/generate_session_title/user
