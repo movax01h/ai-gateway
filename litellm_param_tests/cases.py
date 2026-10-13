@@ -21,9 +21,7 @@ PROMPT_ID = {
 }
 
 # Entries that are not run. Each needs a reason, and the entry must still exist in models.yml.
-SKIPS: dict[str, str] = {
-    "gemini_2_5_flash_vertex": "deprecated, removal 19.5",
-}
+SKIPS: dict[str, str] = {}
 
 # (route, parameter set) pairs that are not run, with a reason. A route is the entry's custom_llm_provider, and None means
 # a self-hosted family. Add a pair only when a provider legitimately rejects a set that production never sends to it.
