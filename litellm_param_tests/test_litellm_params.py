@@ -47,7 +47,7 @@ async def test_litellm_accepts_parameters(harness, net, entry, pset):
 
     try:
         await fakenet.run_guarded(
-            cases.run_case(harness, entry, pset), net, CASE_TIMEOUT_SECONDS
+            cases.run_case(harness, entry, pset), net, _CASE_TIMEOUT_SECONDS
         )
     except (fakenet.OutboundConnectionBlocked, Exception) as error:  # pylint: disable=broad-exception-caught
         # langchain can re-raise the blocked-connection error as a different type, so always report the addresses.
@@ -167,7 +167,7 @@ async def test_a_real_connection_attempt_fails_fast_with_its_address(
     started = time.monotonic()
     with pytest.raises(fakenet.OutboundConnectionBlocked):
         await fakenet.run_guarded(
-            cases.run_case(harness, entry, pset), net, CASE_TIMEOUT_SECONDS
+            cases.run_case(harness, entry, pset), net, _CASE_TIMEOUT_SECONDS
         )
 
     assert net.socket_attempts, (
@@ -191,7 +191,7 @@ async def test_an_unmatched_url_is_reported_with_the_url(harness, net, monkeypat
     started = time.monotonic()
     with pytest.raises(Exception):  # litellm raises its own error type for a 400
         await fakenet.run_guarded(
-            cases.run_case(harness, entry, pset), net, CASE_TIMEOUT_SECONDS
+            cases.run_case(harness, entry, pset), net, _CASE_TIMEOUT_SECONDS
         )
 
     assert time.monotonic() - started < 10
