@@ -5099,6 +5099,31 @@ async def test_flow_versioning_identity_not_stamped_when_resolution_fails(
             "BedrockException",
             id="bedrock_validation_error_collapses_to_stable_label",
         ),
+        pytest.param(
+            (
+                "litellm.BadRequestError: Fireworks_aiException - "
+                '{"error":{"object":"error","type":"invalid_request_error",'
+                '"code":"invalid_request_error","message":"2 request validation '
+                "errors: Input should be a valid string, field: "
+                "'messages[2].content.str', value: [{'text': 'Hi', 'type': 'text', "
+                "'index': 0}]; Extra inputs are not permitted, field: "
+                "'messages[2].content.list[ChatMessageContent][0].index', "
+                'value: 0"}}'
+            ),
+            "Fireworks_aiException - validation error",
+            id="fireworks_validation_errors_collapse_to_stable_label",
+        ),
+        pytest.param(
+            (
+                "litellm.BadRequestError: Fireworks_aiException - "
+                '{"error":{"object":"error","type":"invalid_request_error",'
+                '"code":"invalid_request_error","message":"1 request validation '
+                "error: Input should be a valid string, field: "
+                "'messages[1].content.str', value: []\"}}"
+            ),
+            "Fireworks_aiException - validation error",
+            id="fireworks_single_validation_error_collapses_to_stable_label",
+        ),
     ],
 )
 def test_extract_error_message_litellm_bad_request(message, expected):
