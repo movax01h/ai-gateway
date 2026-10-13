@@ -37,6 +37,11 @@ SET_SKIPS: dict[tuple[str | None, str], str] = {
     ),
 }
 
+# litellm 1.85.0 rewrote empty assistant text into "[System: Empty message content sanitised to satisfy protocol]". It
+# leaked into Duo Chat (#2335), and ai_gateway/models/v2/litellm_empty_text_patch.py works around it. No request body
+# may contain the placeholder.
+EMPTY_TEXT_PLACEHOLDER = "Empty message content"
+
 SELFHOSTED_BASE = "http://fake-selfhosted.invalid/v1"
 
 
@@ -68,6 +73,12 @@ CHAT_SETS = [
     ParamSet(
         "tool_calls_without_tools",
         "tool_calls sent without tools (#2121)",
+        history=True,
+    ),
+    ParamSet(
+        "tool_calls_with_tools",
+        "an assistant turn with a tool call and empty text must not become a placeholder (#2335)",
+        tools=True,
         history=True,
     ),
     ParamSet(

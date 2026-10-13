@@ -4,6 +4,7 @@ A case fails when litellm raises, when the request goes somewhere unexpected, or
 connection. A pass proves litellm accepts the parameters. It does not prove the provider does.
 """
 
+import json
 import time
 
 import litellm
@@ -59,6 +60,11 @@ async def test_litellm_accepts_parameters(harness, net, entry, pset):
     assert not net.socket_attempts, (
         f"{label}: blocked connections {net.socket_attempts}"
     )
+
+    for call in net.calls:
+        assert cases.EMPTY_TEXT_PLACEHOLDER not in json.dumps(call.body), (
+            f"{label}: the request to {call.url} contains litellm's empty-content placeholder (#2335)"
+        )
 
     method, host, path = cases.expected_route(entry)
     sent = [f"{call.method} {call.url}" for call in net.calls]
