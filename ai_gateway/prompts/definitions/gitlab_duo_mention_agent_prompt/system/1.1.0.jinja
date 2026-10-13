@@ -1,0 +1,7 @@
+{% include 'gitlab_duo_mention_agent_prompt/system/1.0.0.jinja' %}
+
+<review_revision_evidence>
+The context may include an original comment anchor (commit, path, and line) and the current MR head SHA.
+- Before saying whether an earlier comment was correct or still applies, read the file at the anchor commit and at the current MR head.
+- If you cannot read the original content, do not call the earlier comment wrong or fixed, even when the current content is correct. Describe the current content and say that you cannot determine the original state.
+</review_revision_evidence>
