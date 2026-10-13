@@ -30,9 +30,9 @@ dependency setup process powered by [Dependency Injector](https://python-depende
 Here is an example of process flow:
 
 1. You add a new application setting `AIGW_AWESOME_FEATURE__MAX_TOKENS` in `example.env`.
-   `example.env` is the template of application settings, which is copied to `.env` as an actual settings during [the installation process](../ai_gateway/README.md#how-to-run-the-server-locally).
-1. This is interpreted as `ConfigAwesomeFeature` pydantic group object, which has an field named `max_tokens`.
-   You can access to the value via `config.awesome_feature.max_tokens`.
+   `example.env` is the template of application settings, which is copied to `.env` as actual settings during [the installation process](../ai_gateway/README.md#how-to-run-the-server-locally).
+1. This is interpreted as `ConfigAwesomeFeature` pydantic group object, which has a field named `max_tokens`.
+   You can access the value via `config.awesome_feature.max_tokens`.
 1. This config object is passed to `ContainerAwesomeFeature` that defines how it should initialize your business logic class `AwesomeFeature`
    in application runtime. The simplest example is [FactoryProvider](https://python-dependency-injector.ets-labs.org/providers/factory.html).
 1. This provider is defined as one of the FastAPI's endpoint [dependencies](https://fastapi.tiangolo.com/tutorial/dependencies/).
