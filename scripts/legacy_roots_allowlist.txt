@@ -415,10 +415,6 @@ ai_gateway/prompts/definitions/summarize_duo_workflow/amazon_q
 ai_gateway/prompts/definitions/summarize_duo_workflow/base
 ai_gateway/prompts/definitions/summarize_duo_workflow/system
 ai_gateway/prompts/definitions/summarize_duo_workflow/user
-ai_gateway/prompts/definitions/summarize_review/amazon_q
-ai_gateway/prompts/definitions/summarize_review/base
-ai_gateway/prompts/definitions/summarize_review/system
-ai_gateway/prompts/definitions/summarize_review/user
 ai_gateway/prompts/definitions/validate_sast_fix_has_changes/base
 ai_gateway/prompts/definitions/validate_sast_fix_has_changes/system
 ai_gateway/prompts/definitions/validate_sast_fix_has_changes/user
