@@ -419,10 +419,6 @@ ai_gateway/prompts/definitions/summarize_duo_workflow/amazon_q
 ai_gateway/prompts/definitions/summarize_duo_workflow/base
 ai_gateway/prompts/definitions/summarize_duo_workflow/system
 ai_gateway/prompts/definitions/summarize_duo_workflow/user
-ai_gateway/prompts/definitions/summarize_new_merge_request/amazon_q
-ai_gateway/prompts/definitions/summarize_new_merge_request/base
-ai_gateway/prompts/definitions/summarize_new_merge_request/system
-ai_gateway/prompts/definitions/summarize_new_merge_request/user
 ai_gateway/prompts/definitions/summarize_review/amazon_q
 ai_gateway/prompts/definitions/summarize_review/base
 ai_gateway/prompts/definitions/summarize_review/system
