@@ -7,6 +7,13 @@ from lib.jwt import instance_uid_claim, trusted_instance_id
 GATEWAY_ISSUER = "gitlab-ai-gateway"
 
 
+@pytest.fixture(name="gateway_service_name", autouse=True)
+def gateway_service_name_fixture(monkeypatch):
+    # The Cloud Connector service name is process-global; other tests (for example the
+    # Duo Workflow Service `run()` tests) can leave it set to another service's name.
+    monkeypatch.setenv("CLOUD_CONNECTOR_SERVICE_NAME", GATEWAY_ISSUER)
+
+
 def _claims(**overrides):
     values = {
         "issuer": "https://gitlab.example.com",
