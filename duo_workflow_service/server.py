@@ -378,6 +378,19 @@ def _extract_error_message(error: BaseException) -> str:
         # regex won't match and we fall through.
         if re.search(r"BedrockException - \{.*\}", raw, flags=re.DOTALL):
             message = "BedrockException"
+        elif re.search(
+            r"Fireworks_aiException - \{.*\d+ request validation errors?: .*\}",
+            raw,
+            flags=re.DOTALL,
+        ):
+            # Fireworks request validation errors embed a per-request payload listing
+            # every offending field along with its value (often the full conversation
+            # content), e.g. "Fireworks_aiException - {\"error\":{...,\"message\":\"51
+            # request validation errors: Input should be a valid string, field:
+            # 'messages[4].content.str', value: [...]\"}}". The count, indices and
+            # values vary per request and fragment error grouping, so collapse it to a
+            # stable message.
+            message = "Fireworks_aiException - validation error"
         else:
             # Find the JSON bytes repr anywhere in the string, e.g.:
             # "Vertex_aiException BadRequestError - b'{...}'"
