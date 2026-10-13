@@ -162,19 +162,6 @@ def _amazon_q_role_arn(
     return None
 
 
-def _selectable_completion_models() -> set[str]:
-    completions = (
-        ModelSelectionConfig.instance().get_resolved_unit_primitive_config_map()[
-            "code_completions"
-        ]
-    )
-    return {
-        *completions.default_model_identifiers,
-        *completions.selectable_models,
-        *completions.beta_models,
-    }
-
-
 async def code_suggestions(
     request: Request,
     payload: Any,
@@ -292,7 +279,10 @@ async def code_completion(
         if (
             model_metadata is not None
             and model_metadata.provider == "gitlab"
-            and model_metadata.name not in _selectable_completion_models()
+            and model_metadata.name
+            not in ModelSelectionConfig.instance().allowed_models_for_feature(
+                "code_completions"
+            )
         ):
             request_log.warning(
                 "Ignoring model_metadata that is not selectable for code completions",
