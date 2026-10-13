@@ -1163,10 +1163,13 @@ _CHAT_CLASSES = frozenset(
     }
 )
 
+# Only litellm requests pass through the image gate.
+_GATED_CLASSES = frozenset({ModelClassProvider.LITE_LLM})
+
 # Every chat model in models.yml is expected to see images unless listed here.
 # Computed with the gate's own layers, so a litellm bump that flips a model, or a
-# new model litellm does not know, fails by name. Once !7167 lands its flags,
-# Minimax and Qwen leave this list.
+# new gated model litellm does not know, fails by name. Once !7167 lands its
+# flags, Minimax and Qwen leave this list.
 _NON_VISION_OR_UNKNOWN: dict[str, Optional[bool]] = {
     "minimax_m3_fireworks": False,  # litellm is wrong; live-verified vision
     "glm_5_3_fireworks": False,
@@ -1222,7 +1225,11 @@ class TestShippedCatalogueVisionVerdicts:
         expected = definition.supports_vision
         if expected is None:
             expected = _NON_VISION_OR_UNKNOWN.get(identifier, True)
-        assert verdict is expected, (
+        allowed = {expected}
+        if expected is True and definition.model_class_provider not in _GATED_CLASSES:
+            # Ungated models only fail on a definite "no"; unknown leaves images alone.
+            allowed.add(None)
+        assert verdict in allowed, (
             f"{identifier}: flag+litellm say {verdict!r}, expected {expected!r} "
             f"(model={model!r}, provider={provider!r})"
         )

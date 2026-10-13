@@ -919,6 +919,21 @@ models:
       thinking_level: "high"
       streaming: "true"
 
+  - name: "Gemini 4 Argon"
+    provider: "Gemini Enterprise Agent Platform"
+    gitlab_identifier: "gemini_4_argon_vertex"
+    description: "Google's frontier Gemini model for coding, agentic, and complex reasoning tasks."
+    cost_indicator: "$$$"
+    max_context_tokens: 1_000_000
+    model_class_provider: google_genai
+    family:
+      - gemini
+    params:
+      model: "gemini-4-argon"
+      max_tokens: 65_536
+      thinking_level: "medium"
+      streaming: "true"
+
   - name: "GPT-6 Astra"
     provider: "OpenAI"
     gitlab_identifier: "gpt_6_astra"
