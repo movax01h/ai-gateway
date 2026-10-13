@@ -20,6 +20,7 @@ from ai_gateway.models.v2 import (
     litellm_empty_text_patch,  # noqa: F401  (applies the monkey-patch)
 )
 from ai_gateway.models.v2._model_compat import (
+    flatten_assistant_content,
     hoist_tool_result_images,
     normalize_image_blocks,
     remove_trailing_assistant_message,
@@ -334,6 +335,10 @@ class ChatLiteLLM(_LChatLiteLLM):
         # the prefill rewrite, since the hoist can append a user message.
         message_dicts = hoist_tool_result_images(
             message_dicts, self.custom_llm_provider, model_name
+        )
+        # Before the prefill rewrite, so a trailing assistant turn is already text.
+        message_dicts = flatten_assistant_content(
+            message_dicts, self.custom_llm_provider
         )
         if not supports_assistant_prefill(model_name):
             payload = remove_trailing_assistant_message({"messages": message_dicts})

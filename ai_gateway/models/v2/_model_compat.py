@@ -245,6 +245,54 @@ def _split_tool_images(content: list) -> tuple[list, list[dict]]:
     return kept, images
 
 
+# Providers whose endpoint validates assistant content strictly: a string, or a
+# list of bare {"type": "text", "text": ...} blocks. A conversation started on
+# another provider carries content blocks this endpoint rejects, e.g. Anthropic
+# `tool_use` / `thinking`, OpenAI `reasoning` / `function_call`, and the
+# streaming `index` key on every block.
+_ASSISTANT_TEXT_ONLY_PROVIDERS = frozenset({"fireworks_ai"})
+
+
+def flatten_assistant_content(
+    messages: list[dict], custom_llm_provider: Optional[str]
+) -> list[dict]:
+    """Collapse list-shaped assistant content into a string of its text blocks.
+
+    Tool calls are unaffected: the converter rebuilds ``tool_calls`` from ``AIMessage.tool_calls``, so ``tool_use`` and
+    ``function_call`` blocks in the content are duplicates. Reasoning blocks are provider-specific and dropped.
+    Request-time only, never persisted.
+
+    Args:
+        messages: Message dicts from the LiteLLM converter.
+        custom_llm_provider: litellm provider tag used for the gate.
+
+    Returns:
+        A new list with assistant content flattened, or ``messages`` itself when the gate is closed.
+    """
+    if custom_llm_provider not in _ASSISTANT_TEXT_ONLY_PROVIDERS:
+        return messages
+
+    return [
+        (
+            {**message, "content": _join_text_blocks(message["content"])}
+            if message.get("role") == "assistant"
+            and isinstance(message.get("content"), list)
+            else message
+        )
+        for message in messages
+    ]
+
+
+def _join_text_blocks(content: list) -> str:
+    return "".join(
+        block["text"]
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    )
+
+
 # No model identifier: the model repeats what it reads, and a deployment path is noise to the user.
 IMAGE_OMITTED_NOTICE = (
     "[image omitted: the selected model does not support image input]"
