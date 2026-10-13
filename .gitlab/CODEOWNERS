@@ -30,7 +30,6 @@
 /ai_gateway/prompts/definitions/recommend_reviewers_assign/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/recommend_reviewers_post/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/summarize_review/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/summarize_new_merge_request/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/risk_classification_claims/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/ (see work item 2853)
@@ -74,7 +73,6 @@
 /ai_gateway/prompts/definitions/recommend_reviewers_assign/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/recommend_reviewers_post/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/summarize_review/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/summarize_new_merge_request/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/risk_classification_claims/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/
