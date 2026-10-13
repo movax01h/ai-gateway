@@ -1132,6 +1132,74 @@ async def test_infra_stop_leaves_rails_status_untouched(
 
 
 @pytest.mark.asyncio
+async def test_infra_stop_still_emits_billing_event(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+    billing_event_service,
+    billing_event_client,
+    mock_user,
+    mock_llm_operations,
+):
+    """Tokens consumed before an infrastructure-initiated stop are still billable.
+
+    The client's reconnect re-enters the checkpointer and resets the per-session LLM operation counters, so the billing
+    event must be emitted on the way out even though the Rails workflow status is deliberately left untouched.
+    """
+    current_user.set(mock_user)
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": "running",
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": False,
+        "archived": False,
+        "stalled": False,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._billing_event_service = billing_event_service
+    status_handler_mock = AsyncMock()
+    gitlab_workflow._status_handler = status_handler_mock
+
+    with pytest.raises(asyncio.CancelledError):
+        async with gitlab_workflow:
+            llm_operations.set(mock_llm_operations)
+            raise asyncio.CancelledError(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST)
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert WorkflowStatusEventEnum.STOP not in status_calls
+    assert WorkflowStatusEventEnum.DROP not in status_calls
+
+    billing_event_client.track_billing_event.assert_called_once_with(
+        mock_user,
+        BillingEvent.DAP_FLOW_ON_COMPLETION,
+        "GitLabWorkflow",
+        unit_of_measure="request",
+        quantity=1,
+        metadata={
+            "workflow_id": workflow_id,
+            "feature_qualified_name": workflow_type.feature_qualified_name,
+            "feature_ai_catalog_item": workflow_type.feature_ai_catalog_item,
+            "execution_environment": ExecutionEnvironment.DAP.value,
+            "llm_operations": mock_llm_operations,
+            "tool_names": [],
+            "orbit_called": False,
+        },
+    )
+
+
+@pytest.mark.asyncio
 async def test_user_stop_still_persists_stopped_status(
     http_client,
     workflow_id,
