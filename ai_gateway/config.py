@@ -500,6 +500,16 @@ class ConfigModelSelection(BaseModel):
             "gitlab_identifier when the ai_model_release feature flag is enabled."
         ),
     )
+    feature_allowlist_mode: Literal["off", "log", "fallback", "enforce"] = Field(
+        default="log",
+        description=(
+            "How client-supplied model metadata that names a GitLab-managed model is checked "
+            "against the feature's allowlist (default, selectable, beta, dev and tag models). "
+            "'off': no check. 'log': log mismatches only. 'fallback': serve the feature's "
+            "default model instead, and drop client endpoint, key and model overrides. "
+            "'enforce': reject the request (HTTP 403, gRPC PERMISSION_DENIED)."
+        ),
+    )
 
 
 class ConfigFeatureFlags(BaseModel):

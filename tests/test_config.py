@@ -936,6 +936,10 @@ def test_config_bedrock_guardrail_identifier_at_max_length():
                 }
             ),
         ),
+        (
+            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE": "enforce"},
+            ConfigModelSelection(feature_allowlist_mode="enforce"),
+        ),
     ],
 )
 def test_config_model_selection(values: dict, expected: ConfigModelSelection):
@@ -943,6 +947,20 @@ def test_config_model_selection(values: dict, expected: ConfigModelSelection):
         config = Config(_env_file=None)
 
         assert config.model_selection == expected
+
+
+def test_config_model_selection_feature_allowlist_mode_defaults_to_log():
+    with mock.patch.dict(os.environ, {}, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.model_selection.feature_allowlist_mode == "log"
+
+
+def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode():
+    values = {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE": "strict"}
+    with mock.patch.dict(os.environ, values, clear=True):
+        with pytest.raises(ValidationError):
+            Config(_env_file=None)
 
 
 def test_config_model_releases_not_revealed_in_repr():
