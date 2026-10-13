@@ -250,7 +250,7 @@ class TestJinjaIncludeLoader:
     def test_legacy_include_still_resolves(self):
         # An existing definitions/ template resolves through the same ChoiceLoader.
         source, _, _ = base.jinja_loader.get_source(
-            base.jinja_env, "generate_commit_message/system/1.0.0.jinja"
+            base.jinja_env, "conversation_compaction/system/1.0.0.jinja"
         )
         assert source
 
