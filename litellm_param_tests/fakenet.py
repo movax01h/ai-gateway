@@ -160,7 +160,7 @@ class FakeNet:
         )
 
     def matching(self, method: str, host: str, path: str) -> list[Call]:
-        """Return the recorded calls that match a route, ignoring HuggingFace template lookups."""
+        """Return the recorded calls whose method, host and path match the given route."""
         return [
             call
             for call in self.calls

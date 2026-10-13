@@ -16,7 +16,7 @@ from litellm_param_tests import cases, fakenet
 pytestmark = pytest.mark.asyncio
 
 ENTRIES = cases.load_entries()
-CASE_TIMEOUT_SECONDS = 30
+_CASE_TIMEOUT_SECONDS = 30
 
 
 def _matrix() -> list:
