@@ -1,3 +1,8 @@
+from .errors import (
+    FeatureSettingRequiredError,
+    ModelNotAllowedForFeatureError,
+    ModelSelectionError,
+)
 from .model_selection_config import (
     LLMDefinition,
     ModelSelectionConfig,
@@ -10,8 +15,11 @@ from .model_selection_config import (
 )
 
 __all__ = [
+    "FeatureSettingRequiredError",
     "LLMDefinition",
+    "ModelNotAllowedForFeatureError",
     "ModelSelectionConfig",
+    "ModelSelectionError",
     "ModelTagEntry",
     "PromptParams",
     "RestrictedModelAccessError",
