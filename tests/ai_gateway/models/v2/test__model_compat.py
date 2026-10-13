@@ -24,6 +24,7 @@ from ai_gateway.models.v2._model_compat import (
     TOOL_IMAGES_BANNER,
     _model_supports_vision,
     current_model_supports_vision,
+    flatten_assistant_content,
     hoist_tool_result_images,
     normalize_image_blocks,
     strip_image_blocks_for_non_vision_model,
@@ -512,6 +513,173 @@ class TestChatLiteLLMHoistIntegration:
 # Carries an explicit supports_vision: false in litellm's registry; the
 # precondition test below fails if a litellm bump changes that.
 NON_VISION_MODEL = "o3-mini"
+
+
+# Assistant content as produced by other providers, from the Fireworks request
+# validation errors in work item #3202.
+ANTHROPIC_TOOL_USE_BLOCK = {
+    "id": "toolu_015kW8h1YrRWCpffWfmwQkhw",
+    "input": {},
+    "name": "get_merge_request",
+    "type": "tool_use",
+    "caller": {"type": "direct"},
+    "index": 1,
+    "partial_json": '{"url": "https://gitlab.com/group/project/-/merge_requests/1"}',
+}
+ANTHROPIC_THINKING_BLOCK = {
+    "type": "thinking",
+    "thinking": "Let me check the MR.",
+    "signature": "sig",
+    "estimated_tokens": 5,
+    "index": 0,
+}
+OPENAI_REASONING_BLOCK = {
+    "id": "rs_1",
+    "type": "reasoning",
+    "summary": [{"type": "summary_text", "text": "Thinking about it"}],
+    "content": None,
+    "encrypted_content": "gAAAA",
+    "phase": None,
+    "index": 0,
+}
+OPENAI_FUNCTION_CALL_BLOCK = {
+    "type": "function_call",
+    "name": "read_file",
+    "arguments": "{}",
+    "call_id": "call_1",
+    "index": 2,
+}
+
+
+class TestFlattenAssistantContent:
+    """Pure-function behavior of the assistant content flattening."""
+
+    @pytest.mark.parametrize(
+        "content,expected",
+        [
+            pytest.param(
+                [{"type": "text", "text": "Done.", "index": 0}],
+                "Done.",
+                id="streamed_text_block_with_index",
+            ),
+            pytest.param(
+                [
+                    ANTHROPIC_THINKING_BLOCK,
+                    {"type": "text", "text": "Checking ", "index": 1},
+                    {"type": "text", "text": "the MR.", "index": 2},
+                    ANTHROPIC_TOOL_USE_BLOCK,
+                ],
+                "Checking the MR.",
+                id="anthropic_thinking_and_tool_use_dropped",
+            ),
+            pytest.param(
+                [
+                    OPENAI_REASONING_BLOCK,
+                    {
+                        "type": "text",
+                        "text": "Reading it.",
+                        "id": "msg_1",
+                        "phase": None,
+                    },
+                    OPENAI_FUNCTION_CALL_BLOCK,
+                ],
+                "Reading it.",
+                id="openai_reasoning_and_function_call_dropped",
+            ),
+            pytest.param(
+                [ANTHROPIC_TOOL_USE_BLOCK],
+                "",
+                id="tool_use_only_becomes_empty_string",
+            ),
+            pytest.param("already a string", "already a string", id="string_kept"),
+        ],
+    )
+    def test_assistant_content_is_flattened(self, content, expected):
+        messages = flatten_assistant_content(
+            [{"role": "assistant", "content": content}], "fireworks_ai"
+        )
+
+        assert messages == [{"role": "assistant", "content": expected}]
+
+    def test_other_roles_and_keys_are_kept(self):
+        user_content = [{"type": "text", "text": "hi", "index": 0}]
+        tool_calls = [{"id": "call_1", "type": "function"}]
+
+        messages = flatten_assistant_content(
+            [
+                {"role": "user", "content": user_content},
+                {
+                    "role": "assistant",
+                    "content": [ANTHROPIC_TOOL_USE_BLOCK],
+                    "tool_calls": tool_calls,
+                },
+            ],
+            "fireworks_ai",
+        )
+
+        assert messages == [
+            {"role": "user", "content": user_content},
+            {"role": "assistant", "content": "", "tool_calls": tool_calls},
+        ]
+
+    @pytest.mark.parametrize(
+        "provider", ["anthropic", "vertex_ai", "openai", "bedrock", None]
+    )
+    def test_other_providers_are_untouched(self, provider):
+        messages = [{"role": "assistant", "content": [ANTHROPIC_TOOL_USE_BLOCK]}]
+
+        assert flatten_assistant_content(messages, provider) is messages
+
+
+class TestChatLiteLLMFlattenIntegration:
+    """History from another provider must reach Fireworks as plain assistant text."""
+
+    def convert(self, provider, messages):
+        chat = ChatLiteLLM(
+            model="accounts/fireworks/models/kimi-k3", custom_llm_provider=provider
+        )
+        message_dicts, _ = chat._create_message_dicts(messages, stop=None)
+        return message_dicts
+
+    def anthropic_history(self):
+        return [
+            HumanMessage(content="review the MR"),
+            AIMessage(
+                content=[
+                    ANTHROPIC_THINKING_BLOCK,
+                    {"type": "text", "text": "Fetching the MR.", "index": 1},
+                    ANTHROPIC_TOOL_USE_BLOCK,
+                ],
+                tool_calls=[
+                    {
+                        "name": "get_merge_request",
+                        "args": {
+                            "url": "https://gitlab.com/group/project/-/merge_requests/1"
+                        },
+                        "id": "toolu_015kW8h1YrRWCpffWfmwQkhw",
+                    }
+                ],
+            ),
+            ToolMessage(content="MR !1", tool_call_id="toolu_015kW8h1YrRWCpffWfmwQkhw"),
+            AIMessage(content=[{"type": "text", "text": "Looks good.", "index": 0}]),
+            HumanMessage(content="thanks"),
+        ]
+
+    def test_fireworks_receives_string_assistant_content(self):
+        message_dicts = self.convert("fireworks_ai", self.anthropic_history())
+
+        assert message_dicts[1]["content"] == "Fetching the MR."
+        assert message_dicts[1]["tool_calls"][0]["id"] == (
+            "toolu_015kW8h1YrRWCpffWfmwQkhw"
+        )
+        assert message_dicts[2]["content"] == "MR !1"
+        assert message_dicts[3]["content"] == "Looks good."
+
+    def test_other_providers_keep_content_blocks(self):
+        message_dicts = self.convert("openai", self.anthropic_history())
+
+        assert isinstance(message_dicts[1]["content"], list)
+        assert isinstance(message_dicts[3]["content"], list)
 
 
 class TestStripImageBlocksForNonVisionModel:
