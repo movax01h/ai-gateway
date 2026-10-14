@@ -229,7 +229,7 @@ class VertexAISearch(Searcher):
             if md5 not in pages:
                 pages[md5] = {
                     "source_url": result.metadata["source_url"],
-                    "source_title": result.metadata["title"],
+                    "source_title": result.metadata.get("title"),
                 }
 
             snippets_grouped[md5].append(result.content)
