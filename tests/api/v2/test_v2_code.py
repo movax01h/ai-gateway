@@ -1505,6 +1505,53 @@ class TestCodeCompletions:
         else:
             assert forwarded == {"identifier": None, "endpoint": None, "api_key": None}
 
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        ("model_provider", "model_name", "expect_forwarded"),
+        [
+            ("vertex-ai", "codestral-2508", False),
+            ("gitlab", "codestral_2508_vertex", False),
+            ("litellm", "codestral", True),
+        ],
+    )
+    @pytest.mark.usefixtures("mock_prompt_ainvoke")
+    def test_model_iam_role_forwarded_only_for_custom_models(
+        self,
+        mock_client: Mock,
+        model_provider: str,
+        model_name: str,
+        expect_forwarded: bool,
+    ):
+        iam_role = "arn:aws:iam::123456789012:role/my-bedrock-role"
+        params = {
+            "prompt_version": 2,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": model_provider,
+            "model_name": model_name,
+            "model_endpoint": "http://localhost:4000/",
+            "model_identifier": "bedrock/anthropic.claude-3-5-sonnet",
+            "model_iam_role": iam_role,
+        }
+
+        with (
+            patch("ai_gateway.model_metadata.get_config") as mock_get_config,
+            patch("ai_gateway.model_metadata.get_assumed_role_credentials"),
+            patch(
+                "ai_gateway.api.v2.code.completions.create_model_metadata",
+                wraps=create_model_metadata,
+            ) as mock_create_model_metadata,
+        ):
+            mock_get_config.return_value.custom_models.enabled = True
+            response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        data = mock_create_model_metadata.call_args.args[0]
+        assert data.get("iam_role") == (iam_role if expect_forwarded else None)
+
     @pytest.mark.parametrize("mock_model_responses", [False])
     @pytest.mark.parametrize(
         ("cache_header_value", "expected_using_cache"),
@@ -2656,3 +2703,56 @@ class TestCustomModelsSSRF:
                     },
                 },
             )
+
+
+class TestCompletionsIamRoleWithCustomModelsDisabled:
+    @pytest.fixture(name="config_values")
+    def config_values_fixture(self, assets_dir):
+        return {
+            "custom_models": {
+                "enabled": False,
+            },
+            "self_signed_jwt": {
+                "signing_key": open(assets_dir / "keys" / "signing_key.pem").read(),
+            },
+        }
+
+    @pytest.fixture(name="scopes")
+    def scopes_fixture(self):
+        return ["complete_code"]
+
+    @pytest.mark.parametrize("model_provider", ["litellm", "codestral"])
+    def test_model_iam_role_rejected(self, mock_client: TestClient, model_provider):
+        with patch("ai_gateway.model_metadata.get_config") as mock_get_config:
+            mock_get_config.return_value.custom_models.enabled = False
+            response = self._post(mock_client, model_provider)
+
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+        assert response.json() == {
+            "detail": "iam_role is only supported when custom models are enabled"
+        }
+
+    @staticmethod
+    def _post(mock_client: TestClient, model_provider: str):
+        return mock_client.post(
+            "/code/completions",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+                "X-GitLab-Global-User-Id": "1234",
+            },
+            json={
+                "model_provider": model_provider,
+                "model_name": "codestral",
+                "model_identifier": "bedrock/anthropic.claude-3-5-sonnet",
+                "model_iam_role": "arn:aws:iam::123456789012:role/r",
+                "prompt_version": 2,
+                "current_file": {
+                    "file_name": "t.py",
+                    "content_above_cursor": "x",
+                    "content_below_cursor": "",
+                },
+            },
+        )
