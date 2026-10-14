@@ -18,6 +18,10 @@ AI Gateway can call Amazon Bedrock models using temporary credentials from
 (`arn:<partition>:iam::<12-digit account>:role/<path/name>`); a malformed value
 is rejected when the metadata is parsed.
 
+The v2 code completions endpoint (`POST /v2/code/completions`) takes the same role as the
+flat request field `model_iam_role`. It is forwarded as `iam_role` for custom model
+providers (`litellm`, `codestral`) only, and follows every rule below.
+
 The gateway sets the `ExternalId` of the `sts:AssumeRole` call itself, from the instance
 identity in the verified JWT, in this order:
 

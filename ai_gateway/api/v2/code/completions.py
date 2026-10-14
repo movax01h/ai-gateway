@@ -53,7 +53,11 @@ from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessorOperation,
     create_custom_model_post_processor,
 )
-from ai_gateway.model_metadata import TypeModelMetadata, create_model_metadata
+from ai_gateway.model_metadata import (
+    IamRoleNotAllowedError,
+    TypeModelMetadata,
+    create_model_metadata,
+)
 from ai_gateway.models import KindLiteLlmModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import BasePromptRegistry
@@ -460,12 +464,18 @@ def _resolve_agent_code_completions(
             endpoint=payload.model_endpoint,
             api_key=payload.model_api_key,
             identifier=payload.model_identifier,
+            iam_role=payload.model_iam_role,
         )
 
-    model_metadata = create_model_metadata(
-        model_metadata_data,
-        mock_model_responses=config.mock_model_responses(),
-    )
+    try:
+        model_metadata = create_model_metadata(
+            model_metadata_data,
+            mock_model_responses=config.mock_model_responses(),
+        )
+    except IamRoleNotAllowedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
 
     # Create post processor based on model provider and name
     post_processor = _create_post_processor_for_model(
