@@ -327,7 +327,13 @@ class AbstractWorkflow(ABC):
                     finally:
                         self._outbox.close()
             finally:
-                request_data_logging_suppressed.reset(suppress_token)
+                try:
+                    request_data_logging_suppressed.reset(suppress_token)
+                except ValueError:
+                    # When the coroutine is closed by garbage collection (GeneratorExit),
+                    # this finally block can run in a different Context than the one
+                    # that created the token, and reset() raises ValueError.
+                    pass
 
     @abstractmethod
     async def _handle_workflow_failure(
