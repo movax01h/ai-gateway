@@ -1,5 +1,6 @@
 # pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
+import contextvars
 import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
@@ -1759,6 +1760,32 @@ async def test_metadata_only_flow_disables_tracing_and_request_logging(
         "tracing": expected_tracing,
         "request_logging": expected_request_logging,
     }
+
+
+def test_run_closed_in_different_context_does_not_raise(user):
+    """Closing a suspended run from another Context, as garbage collection does, must not raise."""
+
+    class _Suspend:
+        def __await__(self):
+            yield
+
+    async def compile_and_run_graph(**_kwargs):
+        await _Suspend()
+
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {"git_url": "https://example.com", "git_sha": "abc123"},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    with patch.object(
+        workflow, "_compile_and_run_graph", side_effect=compile_and_run_graph
+    ):
+        coro = workflow.run("Test goal")
+        contextvars.copy_context().run(coro.send, None)
+
+        coro.close()
 
 
 @pytest.mark.asyncio
