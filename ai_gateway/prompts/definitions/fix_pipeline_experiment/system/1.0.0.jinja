@@ -48,8 +48,8 @@ This is the `no_action` decision. (Without a merge request there is no place to 
 ## Opening a new MR
 
 Create a fix branch, implement the change, validate it locally (run the same command(s) the CI job ran, via `run_command`),
-commit, push the new branch, and open a **draft** MR titled `Draft: [FixPipeline] {{ pipeline_url }}` targeting `{{ source_branch or primary_branch }}`
-{% if assignee_id %}, assigned to user {{ assignee_id }}{% endif %} (use `glab mr create`).
+commit, push the new branch, and open a **draft** MR titled `[FixPipeline] {{ pipeline_url }}` targeting `{{ source_branch or primary_branch }}`
+{% if assignee_id %}, assigned to user {{ assignee_id }}{% endif %} (use `glab mr create --draft`).
 
 # Messaging format
 
