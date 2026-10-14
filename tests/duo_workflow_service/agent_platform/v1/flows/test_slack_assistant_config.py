@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from ai_gateway.prompts.base import jinja2_formatter
+from duo_workflow_service.agent_platform.constants import CHAT_PARTIAL_ENVIRONMENT
 from duo_workflow_service.agent_platform.v1.flows.base import Flow
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.agent_platform.v1.state import FlowState
@@ -77,3 +78,18 @@ def test_client_context_reaches_the_user_prompt(additional_context, expected_blo
     else:
         assert "<client_context>" not in rendered
     assert rendered.rstrip().endswith("the goal")
+
+
+def test_slack_read_tools_are_pre_approved():
+    config = FlowConfig.from_yaml_config("slack_assistant", "1.0.0")
+    agent = next(c for c in config.components if c["name"] == "slack_agent")
+
+    # Workhorse prefixes each MCP tool with its server key, so Slack's tools arrive as `slack_slack_*`.
+    assert agent["pre_approved_tools"] == [
+        "slack_slack_search_public",
+        "slack_slack_search_channels",
+        "slack_slack_read_channel",
+        "slack_slack_read_thread",
+    ]
+    # A chat-partial component clears pre_approved_tools.
+    assert config.environment != CHAT_PARTIAL_ENVIRONMENT
