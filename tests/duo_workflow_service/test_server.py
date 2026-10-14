@@ -51,6 +51,7 @@ from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import (
+    MissingAdditionalContextError,
     NotifiableAgentException,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
@@ -1316,6 +1317,28 @@ def _cyclic_error() -> BaseException:
             None,
             grpc.StatusCode.INVALID_ARGUMENT,
             "RESPONSE event must include a non-empty message.",
+        ),
+        (
+            MissingAdditionalContextError(
+                "Missing required input 'context:inputs.issue_context.iid': "
+                "'issue_context' not found in state.",
+                category="issue_context",
+            ),
+            False,
+            None,
+            grpc.StatusCode.INVALID_ARGUMENT,
+            "Missing required input 'context:inputs.issue_context.iid': "
+            "'issue_context' not found in state.",
+        ),
+        (
+            KeyError(
+                "Missing required input 'context:issue_iid': "
+                "'issue_iid' not found in state."
+            ),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: KeyError:",
         ),
         (
             WorkflowAlreadyFinishedException(
