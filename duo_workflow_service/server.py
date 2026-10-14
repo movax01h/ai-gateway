@@ -165,6 +165,8 @@ from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 # DWS @inject sites resolving with no per-module bookkeeping.
 CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
 FLOW_CONFIG_ID_CLAIM = "flow_config_id"
+FLOW_VERSION_CLAIM = "flow_version"
+FLOW_CONFIG_SCHEMA_VERSION_CLAIM = "flow_config_schema_version"
 # Set by GenerateToken only after the caller passed the restricted-flow instance check.
 RESTRICTED_FLOW_VERIFIED_CLAIM = "restricted_flow_verified"
 FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
@@ -227,6 +229,21 @@ def _flow_config_digest(flow_config: Struct) -> str:
         MessageToDict(flow_config), sort_keys=True, separators=(",", ":")
     )
     return hashlib.sha256(canonical_json.encode()).hexdigest()
+
+
+async def _require_registry_claim(
+    context: grpc.ServicerContext,
+    claims_extra: dict[str, Any],
+    claim: str,
+    actual: Optional[str],
+    message: str,
+) -> None:
+    if claim not in claims_extra:
+        return
+
+    authorized = claims_extra[claim]
+    if not isinstance(authorized, str) or not authorized or authorized != actual:
+        await context.abort(grpc.StatusCode.PERMISSION_DENIED, message)
 
 
 # Mapping as in some versions of GitLab.com these are hard-coded as `experimental`
@@ -563,22 +580,34 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
 
         claims_extra = user.claims.extra if user.claims else None
-        if (
-            not user.is_debug
-            and claims_extra is not None
-            and FLOW_CONFIG_ID_CLAIM in claims_extra
-        ):
-            authorized_flow_config_id = claims_extra[FLOW_CONFIG_ID_CLAIM]
-            if (
-                not isinstance(authorized_flow_config_id, str)
-                or not authorized_flow_config_id
-                or not isinstance(flow_request, RegistryFlowRequest)
-                or authorized_flow_config_id != flow_request.config_id
-            ):
-                await context.abort(
-                    grpc.StatusCode.PERMISSION_DENIED,
-                    "Workflow token is not authorized for the requested flow",
-                )
+        if not user.is_debug and claims_extra is not None:
+            registry = (
+                flow_request if isinstance(flow_request, RegistryFlowRequest) else None
+            )
+            await _require_registry_claim(
+                context,
+                claims_extra,
+                FLOW_CONFIG_ID_CLAIM,
+                registry.config_id if registry else None,
+                "Workflow token is not authorized for the requested flow",
+            )
+            # Compared as the unresolved string (e.g. "^3.0.0") Rails sent to both
+            # the token and the executor; legacy requests normalize to 1.0.0.
+            await _require_registry_claim(
+                context,
+                claims_extra,
+                FLOW_VERSION_CLAIM,
+                registry.version if registry else None,
+                "Workflow token is not authorized for the requested flow version",
+            )
+            # The same config ID and version can exist under both v1 and experimental.
+            await _require_registry_claim(
+                context,
+                claims_extra,
+                FLOW_CONFIG_SCHEMA_VERSION_CLAIM,
+                registry.schema_version if registry else None,
+                "Workflow token is not authorized for the requested flow schema version",
+            )
 
         if (
             not user.is_debug
@@ -1282,6 +1311,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 gitlab_realm = SAAS_REALM
                 extra_claims[RESTRICTED_FLOW_VERIFIED_CLAIM] = True
             extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
+
+        if request.flow_version:
+            extra_claims[FLOW_VERSION_CLAIM] = request.flow_version
+
+        if request.flow_config_schema_version:
+            extra_claims[FLOW_CONFIG_SCHEMA_VERSION_CLAIM] = (
+                request.flow_config_schema_version
+            )
 
         if request.HasField("flow_config"):
             extra_claims[FLOW_CONFIG_DIGEST_CLAIM] = _flow_config_digest(

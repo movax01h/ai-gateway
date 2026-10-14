@@ -360,6 +360,10 @@ message GenerateTokenRequest {
     optional google.protobuf.Struct flow_config = 3 [json_name = "flow_config"];
     // workflowID identifies the workflow run this token is issued for.
     optional string workflowID = 4;
+    // flow_version is the foundational flow version authorized for this token.
+    optional string flow_version = 5 [json_name = "flowVersion"];
+    // flow_config_schema_version is the foundational flow schema version authorized for this token.
+    optional string flow_config_schema_version = 6 [json_name = "flowConfigSchemaVersion"];
 }
 
 // GenerateTokenResponse returns the generated token and its expiry information.
