@@ -1758,6 +1758,8 @@ async def test_generate_token_without_inline_flow_config_has_no_digest_binding(
     "field,claim,value",
     [
         ("flow_config_id", "flow_config_id", "developer"),
+        ("flow_version", "flow_version", "^3.0.0"),
+        ("flow_config_schema_version", "flow_config_schema_version", "experimental"),
         ("workflowID", "workflow_id", "42"),
     ],
 )
@@ -1947,6 +1949,10 @@ async def test_execute_workflow_exempts_debug_user_from_workflow_binding(
     [
         ("flow_config_id", None),
         ("flow_config_id", {"flow_config_id": "developer"}),
+        ("flow_version", None),
+        ("flow_version", {"flow_version": "^3.0.0"}),
+        ("flow_config_schema_version", None),
+        ("flow_config_schema_version", {"flow_config_schema_version": "v1"}),
         ("workflow_id", None),
         ("workflow_id", {"workflow_id": "42"}),
     ],
@@ -2141,6 +2147,8 @@ async def test_generate_token_propagates_gitlab_root_namespace_id_end_to_end(
     "field,claim,value",
     [
         ("flow_config_id", "flow_config_id", "developer"),
+        ("flow_version", "flow_version", "^3.0.0"),
+        ("flow_config_schema_version", "flow_config_schema_version", "experimental"),
         ("workflowID", "workflow_id", "42"),
     ],
 )
@@ -4555,6 +4563,427 @@ async def test_execute_workflow_debug_user_bypasses_flow_binding(
         await anext(result)
 
     mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,flow_version",
+    [
+        pytest.param(
+            {"flow_config_id": "developer"}, "^3.0.0", id="no-version-binding"
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": "^3.0.0"},
+            "^3.0.0",
+            id="version-range-binding",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": "1.1.0"},
+            "1.1.0",
+            id="exact-version-binding",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_with_flow_version_happy_path(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    claims_extra,
+    flow_version,
+):
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion=flow_version,
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_flow.assert_called_once_with(
+        RegistryFlowRequest(
+            config_id="developer", schema_version="v1", version=flow_version
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,start_request",
+    [
+        pytest.param(
+            {"flow_config_id": "workplan", "flow_version": "1.0.0"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="workplan",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.1.0",
+            ),
+            id="flag-gated-version-swap",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": "^3.0.0"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^2.0.0",
+            ),
+            id="major-version-swap",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": "^3.0.0"},
+            contract_pb2.StartWorkflowRequest(workflowDefinition="developer/v1"),
+            id="legacy-definition-downgrade",
+        ),
+        pytest.param(
+            {"flow_version": "^3.0.0"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfig=struct_pb2.Struct(
+                    fields={"version": struct_pb2.Value(string_value="v1")}
+                ),
+                flowConfigSchemaVersion="v1",
+            ),
+            id="inline-flow-config",
+        ),
+        pytest.param(
+            {"flow_version": "^3.0.0"},
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="software_development"
+            ),
+            id="legacy-workflow",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": ""},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="empty-claim",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": 3},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="3",
+            ),
+            id="non-string-claim",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": None},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="null-claim",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_unauthorized_flow_version(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    start_request,
+):
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the requested flow version",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_is_debug", [True])
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {
+            "flow_config_id": "developer",
+            "flow_version": "^3.0.0",
+            "flow_config_schema_version": "experimental",
+        }
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_debug_user_bypasses_flow_version_binding(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    user_is_debug,
+    claims_extra,
+):
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,start_request,expected",
+    [
+        pytest.param(
+            {
+                "flow_config_id": "fix_pipeline",
+                "flow_version": "1.0.0",
+                "flow_config_schema_version": "experimental",
+            },
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="fix_pipeline",
+                flowConfigSchemaVersion="experimental",
+                flowVersion="1.0.0",
+            ),
+            RegistryFlowRequest(
+                config_id="fix_pipeline", schema_version="experimental", version="1.0.0"
+            ),
+            id="experimental-binding",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": "v1"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            RegistryFlowRequest(
+                config_id="developer", schema_version="v1", version="^3.0.0"
+            ),
+            id="v1-binding",
+        ),
+        pytest.param(
+            {
+                "flow_config_id": "duo_planner",
+                "flow_config_schema_version": "experimental",
+            },
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="duo_planner/experimental"
+            ),
+            RegistryFlowRequest(
+                config_id="duo_planner", schema_version="experimental", version="1.0.0"
+            ),
+            id="legacy-definition-before-billing-mapping",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_with_flow_config_schema_version_binding(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    claims_extra,
+    start_request,
+    expected,
+):
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_flow.assert_called_once_with(expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,start_request",
+    [
+        pytest.param(
+            {
+                "flow_config_id": "fix_pipeline",
+                "flow_version": "1.0.0",
+                "flow_config_schema_version": "experimental",
+            },
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="fix_pipeline",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+            id="experimental-to-v1-swap",
+        ),
+        pytest.param(
+            {
+                "flow_config_id": "resolve_dependency_bump",
+                "flow_version": "1.0.0",
+                "flow_config_schema_version": "v1",
+            },
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="resolve_dependency_bump",
+                flowConfigSchemaVersion="experimental",
+                flowVersion="1.0.0",
+            ),
+            id="v1-to-experimental-swap",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": "v1"},
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="developer/experimental"
+            ),
+            id="legacy-definition-swap",
+        ),
+        pytest.param(
+            {"flow_config_schema_version": "v1"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfig=struct_pb2.Struct(
+                    fields={"version": struct_pb2.Value(string_value="v1")}
+                ),
+                flowConfigSchemaVersion="v1",
+            ),
+            id="inline-flow-config",
+        ),
+        pytest.param(
+            {"flow_config_schema_version": "v1"},
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="software_development"
+            ),
+            id="legacy-workflow",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": ""},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="empty-claim",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": 1},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="non-string-claim",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": None},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="null-claim",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_unauthorized_flow_config_schema_version(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    start_request,
+):
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the requested flow schema version",
+    )
+    mock_resolve_flow.assert_not_called()
 
 
 @pytest.mark.asyncio

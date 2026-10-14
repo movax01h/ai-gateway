@@ -445,7 +445,15 @@ export interface GenerateTokenRequest {
     | { [key: string]: any }
     | undefined;
   /** workflowID identifies the workflow run this token is issued for. */
-  workflowID?: string | undefined;
+  workflowID?:
+    | string
+    | undefined;
+  /** flow_version is the foundational flow version authorized for this token. */
+  flow_version?:
+    | string
+    | undefined;
+  /** flow_config_schema_version is the foundational flow schema version authorized for this token. */
+  flow_config_schema_version?: string | undefined;
 }
 
 /** GenerateTokenResponse returns the generated token and its expiry information. */
@@ -3539,7 +3547,14 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
 };
 
 function createBaseGenerateTokenRequest(): GenerateTokenRequest {
-  return { workflowDefinition: undefined, flow_config_id: undefined, flow_config: undefined, workflowID: undefined };
+  return {
+    workflowDefinition: undefined,
+    flow_config_id: undefined,
+    flow_config: undefined,
+    workflowID: undefined,
+    flow_version: undefined,
+    flow_config_schema_version: undefined,
+  };
 }
 
 export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
@@ -3555,6 +3570,12 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     }
     if (message.workflowID !== undefined) {
       writer.uint32(34).string(message.workflowID);
+    }
+    if (message.flow_version !== undefined) {
+      writer.uint32(42).string(message.flow_version);
+    }
+    if (message.flow_config_schema_version !== undefined) {
+      writer.uint32(50).string(message.flow_config_schema_version);
     }
     return writer;
   },
@@ -3598,6 +3619,22 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
           message.workflowID = reader.string();
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.flow_version = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.flow_config_schema_version = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3613,6 +3650,10 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
       flow_config_id: isSet(object.flow_config_id) ? globalThis.String(object.flow_config_id) : undefined,
       flow_config: isObject(object.flow_config) ? object.flow_config : undefined,
       workflowID: isSet(object.workflowID) ? globalThis.String(object.workflowID) : undefined,
+      flow_version: isSet(object.flow_version) ? globalThis.String(object.flow_version) : undefined,
+      flow_config_schema_version: isSet(object.flow_config_schema_version)
+        ? globalThis.String(object.flow_config_schema_version)
+        : undefined,
     };
   },
 
@@ -3630,6 +3671,12 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     if (message.workflowID !== undefined) {
       obj.workflowID = message.workflowID;
     }
+    if (message.flow_version !== undefined) {
+      obj.flow_version = message.flow_version;
+    }
+    if (message.flow_config_schema_version !== undefined) {
+      obj.flow_config_schema_version = message.flow_config_schema_version;
+    }
     return obj;
   },
 
@@ -3642,6 +3689,8 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     message.flow_config_id = object.flow_config_id ?? undefined;
     message.flow_config = object.flow_config ?? undefined;
     message.workflowID = object.workflowID ?? undefined;
+    message.flow_version = object.flow_version ?? undefined;
+    message.flow_config_schema_version = object.flow_config_schema_version ?? undefined;
     return message;
   },
 };
