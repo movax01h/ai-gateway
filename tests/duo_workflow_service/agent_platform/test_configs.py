@@ -59,7 +59,7 @@ V1_CATALOG_ITEM_CONFIGS = [
 
 TOOL_NAME_PATTERN = re.compile(r"[a-z0-9_]+")
 
-MCP_TOOL_NAME_PREFIXES = ("orbit_",)
+MCP_TOOL_NAME_PREFIXES = ("orbit_", "slack_")
 
 # Read off the model rather than restated here, so adding a flow environment automatically
 # extends the tests below instead of leaving the new value silently uncovered.

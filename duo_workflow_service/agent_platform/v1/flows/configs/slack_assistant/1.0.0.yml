@@ -13,6 +13,11 @@ components:
     type: AgentComponent
     prompt_id: "slack_agent_prompt"
     require_tool_approval: true
+    pre_approved_tools:
+      - "slack_slack_search_public"
+      - "slack_slack_search_channels"
+      - "slack_slack_read_channel"
+      - "slack_slack_read_thread"
     inputs:
       - from: "context:goal"
         as: "goal"
