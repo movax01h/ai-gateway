@@ -44,3 +44,21 @@ class NotifiableAgentException(Exception):
         super().__init__(ui_message)
         self.ui_message = ui_message
         self.internal_detail = internal_detail
+
+
+class MissingAdditionalContextError(KeyError):
+    """Raised when a required flow input reads an additional context category the caller did not supply.
+
+    Additional context is exposed under ``context:inputs.<category>``, so a missing category means the request lacked
+    input the flow requires, not a service fault. Subclasses ``KeyError`` so existing handling of missing inputs keeps
+    working.
+
+    Args:
+        message: The full missing-input message.
+        category: The additional context category that was not supplied.
+    """
+
+    def __init__(self, message: str, category: str) -> None:
+        super().__init__(message)
+        self.message = message
+        self.category = category

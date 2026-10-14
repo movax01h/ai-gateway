@@ -46,7 +46,10 @@ from ai_gateway.model_selection import (
 )
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
-from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    FlowValidationError,
+    MissingAdditionalContextError,
+)
 from duo_workflow_service.agent_platform.utils.validation import FlowValidator
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     discover_feature_flow_configs,
@@ -968,6 +971,16 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # itself was wrong, not the system state.
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(str(workflow.last_error))
+            elif workflow.last_error and isinstance(
+                workflow.last_error, MissingAdditionalContextError
+            ):
+                # A required flow input reads an additional context category the
+                # caller never supplied: the request lacked input the flow needs, not
+                # a service fault. Unlike InvalidRequestException the run had already
+                # started, so the workflow still fails as usual; only the gRPC status
+                # tells the caller its input was wrong.
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(workflow.last_error.message)
             elif restricted_error := _find_restricted_model_access_error(
                 workflow.last_error
             ):
