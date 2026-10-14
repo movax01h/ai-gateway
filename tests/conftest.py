@@ -658,6 +658,15 @@ def pin_default_model_to_first_entry():
 
 
 @pytest.fixture(autouse=True)
+def disable_anthropic_default_credentials():
+    # `AsyncAnthropic()` runs the SDK's default credential chain when no static credential is
+    # given, reading `ANTHROPIC_PROFILE` and `~/.config/anthropic/configs/*.json`. A developer's
+    # own profile then leaks into tests and can fail them (e.g. a non-https `base_url`).
+    with patch("anthropic._client.default_credentials", return_value=None):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def reset_litellm_settings():
     # This fixture will reset the litellm settings before and after each test
     original_module_level_aclient = litellm.module_level_aclient
