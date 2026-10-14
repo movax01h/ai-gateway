@@ -935,6 +935,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     "untouched so the session stays running for reconnect.",
                     workflow_id=self._workflow_id,
                 )
+                if not self._offline_mode:
+                    self._track_billing_event()
                 return False
 
             if str(exc_value) == AIO_CANCEL_STOP_WORKFLOW_REQUEST:
@@ -1051,6 +1053,37 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
             additional_properties=properties,
         )
 
+    def _track_billing_event(self) -> None:
+        """Emit the billing event for the LLM operations consumed in this session."""
+        try:
+            user: CloudConnectorUser = current_user.get()
+            tool_executions = get_tool_executions() or []
+            tracked = self._billing_event_service.track_billing(
+                user,
+                self._workflow_type,
+                workflow_id=self._workflow_id,
+                event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+                execution_env=ExecutionEnvironment.DAP,
+                category=self.__class__.__name__,
+                unit_of_measure="request",
+                quantity=1,
+                tool_execs=tool_executions,
+                orbit_called=self._orbit_called,
+                source=self._workflow_config.get("source_type"),
+            )
+            if tracked:
+                self._logger.info(
+                    "Successfully sent billing event for workflow %s",
+                    self._workflow_id,
+                )
+        except Exception as e:
+            log_exception(
+                e,
+                extra={
+                    "context": "Error sending billing event for workflow",
+                },
+            )
+
     async def _track_workflow_completion(
         self, status: str, exc_type=None, exc_value=None
     ) -> None:
@@ -1058,34 +1091,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
 
         # Track billing event for workflow completion
         if status in BILLABLE_STATUSES:
-            try:
-                user: CloudConnectorUser = current_user.get()
-                tool_executions = get_tool_executions() or []
-                tracked = self._billing_event_service.track_billing(
-                    user,
-                    self._workflow_type,
-                    workflow_id=self._workflow_id,
-                    event=BillingEvent.DAP_FLOW_ON_COMPLETION,
-                    execution_env=ExecutionEnvironment.DAP,
-                    category=self.__class__.__name__,
-                    unit_of_measure="request",
-                    quantity=1,
-                    tool_execs=tool_executions,
-                    orbit_called=self._orbit_called,
-                    source=self._workflow_config.get("source_type"),
-                )
-                if tracked:
-                    self._logger.info(
-                        "Successfully sent billing event for workflow %s",
-                        self._workflow_id,
-                    )
-            except Exception as e:
-                log_exception(
-                    e,
-                    extra={
-                        "context": "Error sending billing event for workflow",
-                    },
-                )
+            self._track_billing_event()
         else:
             self._logger.info(
                 f"Billing Status '{status}' does not match billing event conditions"
