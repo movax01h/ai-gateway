@@ -59,7 +59,7 @@ setup_script:
   - lefthook install
 
   # Install Anthropic Sandbox Runtime
-  - npm install -g @anthropic-ai/sandbox-runtime@0.0.20
+  - npm install -g @anthropic-ai/sandbox-runtime@0.0.77
   - test -s "$(npm root -g)/@anthropic-ai/sandbox-runtime/package.json"
 
   # Verify installations
