@@ -25,6 +25,10 @@ AGENT_PLAN_READINESS_VERSION = Version("19.4.0")
 LABELS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
 SUGGESTED_REVIEWERS_ENDPOINT_VERSION = Version("19.4.0")
 CLIENT_MCP_TRUST_STRIPPED_VERSION = Version("19.5.0")
+CLIENT_MCP_TRUST_STRIPPED_BACKPORT_VERSIONS: dict[tuple[int, ...], Version] = {
+    (19, 3): Version("19.3.6"),
+    (19, 4): Version("19.4.3"),
+}
 VULNERABILITY_TRACKED_REF_VERSION = Version("19.5.0")
 ASCP_SECURITY_BOUNDARY_VERSION = Version("19.5.0")
 
@@ -62,7 +66,11 @@ def get_gitlab_version() -> Version:
 
 def strips_client_mcp_trust() -> bool:
     """Whether Workhorse clears the trusted flag on client-supplied MCP tools."""
-    return get_gitlab_version() >= CLIENT_MCP_TRUST_STRIPPED_VERSION
+    version = get_gitlab_version()
+    floor = CLIENT_MCP_TRUST_STRIPPED_BACKPORT_VERSIONS.get(
+        version.release[:2], CLIENT_MCP_TRUST_STRIPPED_VERSION
+    )
+    return version >= floor
 
 
 def supports_hierarchy_widget() -> bool:

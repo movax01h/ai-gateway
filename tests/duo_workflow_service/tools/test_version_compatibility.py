@@ -18,6 +18,7 @@ from duo_workflow_service.tools.version_compatibility import (
     NOTE_RESOLVABLE_AND_RESOLVED_FIELDS_VERSION,
     VULNERABILITY_TRACKED_REF_VERSION,
     get_gitlab_version,
+    strips_client_mcp_trust,
     supports_agent_plan_readiness,
     supports_agent_plan_widget,
     supports_ascp_security_boundary,
@@ -249,6 +250,35 @@ class TestVersionCompatibilityFunctions:
         """End to end from the header string, without mocking the parser."""
         mock_gitlab_version.get.return_value = reported
         assert supports_vulnerability_tracked_ref() is expected
+
+    @pytest.mark.parametrize(
+        "reported,expected",
+        [
+            ("19.5.0", True),
+            ("19.5", True),
+            ("19.6.0-pre", True),
+            ("19.10.0", True),
+            ("20.0.0", True),
+            ("19.5.0-pre", False),
+            ("19.4.3", True),
+            ("19.4.3-pre", False),
+            ("19.4.2", False),
+            ("19.4", False),
+            ("19.3.6", True),
+            ("19.3.6-internal0", True),
+            ("19.3.5", False),
+            ("19.3.3", False),
+            ("19.3", False),
+            ("19.2.9", False),
+            (None, False),
+        ],
+    )
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
+    def test_strips_client_mcp_trust_reads_raw_version_strings(
+        self, mock_gitlab_version, reported, expected
+    ):
+        mock_gitlab_version.get.return_value = reported
+        assert strips_client_mcp_trust() is expected
 
 
 class TestVersionConstants:
