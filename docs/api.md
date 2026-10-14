@@ -68,7 +68,7 @@ The v4 endpoint takes a `prompt_components` list (1 to 100 items). Move your v2 
 - The keys of `current_file` (`file_name`, `content_above_cursor`, `content_below_cursor`, `language_identifier`) become top-level keys of the `payload` of the `code_editor_completion` or `code_editor_generation` component.
 - In v2 the endpoint chose the task: `/v2/completions` and `/v2/code/completions` for completion, `/v2/code/generations` for generation. In v4 the component type does: `code_editor_completion` or `code_editor_generation`.
 - `context` items become extra `code_context` components with `type`, `name`, and `content`.
-- For self-hosted models, `model_provider`, `model_name`, `model_endpoint`, `model_api_key`, and `model_identifier` move into the top-level `model_metadata` as `provider`, `name`, `endpoint`, `api_key`, and `identifier`.
+- For self-hosted models, `model_provider`, `model_name`, `model_endpoint`, `model_api_key`, `model_identifier`, and `model_iam_role` move into the top-level `model_metadata` as `provider`, `name`, `endpoint`, `api_key`, `identifier`, and `iam_role`.
 - `prompt_version` has no meaning for completions. Generations may still pass `prompt_id` and `prompt_version` in the component payload.
 - Completion responses return `tokens_consumption_metadata` inside `model` and `metadata.model`, as v2 did inside `model`.
 
@@ -408,6 +408,7 @@ third-party model provider.
 | `model_endpoint`                     | string | no       | The endpoint for the model. | `https://api.example.com/v3` |
 | `model_api_key`                     | string | no       | The API key for the model. | `x3iJ-this-Is-key34EXam!pl3` |
 | `model_identifier`                     | string | no       | The identifier for the model. | `36381667` |
+| `model_iam_role`                     | string | no       | The ARN of an AWS IAM role to assume for Amazon Bedrock. Used only for the `litellm` and `codestral` providers when custom models are enabled. See [Amazon Bedrock assume role](bedrock_assume_role.md). | `arn:aws:iam::123456789012:role/my-bedrock-role` |
 | `current_file`                      | hash   | yes      | The data of the current file.                                                                                    |                           |
 | `current_file.file_name`            | string | yes      | The name of the current file (max_len: **255**).                                                                 | `README.md`               |
 | `current_file.language_identifier`  | string | no       | The language identifier defined from editor (max_len: **255**). This overrides language detected from file name. | `python`                  |
@@ -494,6 +495,7 @@ This accepts a pre-built `prompt` and forwards it directly to third-party provid
 | `model_endpoint`                     | string | no       | The endpoint for the model. | `https://api.example.com/v3` |
 | `model_api_key`                     | string | no       | The API key for the model. | `x3iJ-this-Is-key34EXam!pl3` |
 | `model_identifier`                     | string | no       | The identifier for the model. | `36381667` |
+| `model_iam_role`                     | string | no       | The ARN of an AWS IAM role to assume for Amazon Bedrock. Used only for the `litellm` and `codestral` providers when custom models are enabled. See [Amazon Bedrock assume role](bedrock_assume_role.md). | `arn:aws:iam::123456789012:role/my-bedrock-role` |
 | `current_file`                      | hash   | yes      | The data of the current file                                                   |                                      |
 | `current_file.file_name`            | string | yes      | The name of the current file (max_len: **255**)                                | `README.md`                          |
 | `current_file.content_above_cursor` | string | yes      | The content above cursor (max_len: **100,000**)                                | `import numpy as np`                 |
@@ -601,6 +603,7 @@ This accepts a pre-built `prompt` and forwards it directly to a third-party prov
 | `model_endpoint`                     | string | no       | The endpoint for the model. | `https://api.example.com/v3` |
 | `model_api_key`                     | string | no       | The API key for the model. | `x3iJ-this-Is-key34EXam!pl3` |
 | `model_identifier`                     | string | no       | The identifier for the model. | `36381667` |
+| `model_iam_role`                     | string | no       | The ARN of an AWS IAM role to assume for Amazon Bedrock. Used only for the `litellm` and `codestral` providers when custom models are enabled. See [Amazon Bedrock assume role](bedrock_assume_role.md). | `arn:aws:iam::123456789012:role/my-bedrock-role` |
 | `current_file`                      | hash   | yes      | The data of the current file                                                   |                                      |
 | `current_file.file_name`            | string | yes      | The name of the current file (max_len: **255**)                                | `README.md`                          |
 | `current_file.content_above_cursor` | string | yes      | The content above cursor (max_len: **100,000**)                                | `import numpy as np`                 |
