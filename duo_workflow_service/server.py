@@ -363,6 +363,13 @@ def _collapse_message_patterns(raw: str) -> str | None:
         # keep only the stable leading sentence. Any leading prefix (e.g. a LiteLLM
         # wrapper) is preserved.
         return raw[: openai_match.end()]
+    if re.search(r"Missing required input '.*?' not found in state\.", raw):
+        # Flow state inputs raise KeyError("Missing required input
+        # 'context:issue_iid': 'issue_iid' not found in state. If this is populated
+        # from a flow's additional_context, ..."). The input path and missing key
+        # vary per flow and fragment error grouping, so collapse it to a stable
+        # message.
+        return "Missing required input not found in state"
     return None
 
 

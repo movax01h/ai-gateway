@@ -5807,6 +5807,35 @@ def test_extract_error_message_additional_context_schema_error_is_collapsed():
 
 
 @pytest.mark.parametrize(
+    "target,subkeys,key",
+    [
+        pytest.param("context", "issue_iid", "issue_iid", id="context_input"),
+        pytest.param(
+            "context",
+            "inputs.prep_probe_alpha.field_one",
+            "prep_probe_alpha",
+            id="nested_context_input",
+        ),
+        pytest.param(
+            "conversation_history", "after_gate", "after_gate", id="history_input"
+        ),
+    ],
+)
+def test_extract_error_message_missing_required_input_is_collapsed(
+    target, subkeys, key
+):
+    # The input path and missing key vary per flow and fragment error grouping, so
+    # only a stable message should be surfaced.
+    error = KeyError(
+        f"Missing required input '{target}:{subkeys}': '{key}' not found in state. "
+        "If this is populated from a flow's additional_context, confirm "
+        "the caller supplied that category, or mark this input "
+        "'optional: true' if it may legitimately be absent."
+    )
+    assert _extract_error_message(error) == "Missing required input not found in state"
+
+
+@pytest.mark.parametrize(
     "message,expected",
     [
         pytest.param(
