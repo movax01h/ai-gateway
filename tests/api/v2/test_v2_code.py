@@ -1539,7 +1539,9 @@ class TestCodeCompletions:
 
         with (
             patch("ai_gateway.model_metadata.get_config") as mock_get_config,
-            patch("ai_gateway.model_metadata.get_assumed_role_credentials"),
+            patch(
+                "ai_gateway.model_metadata.get_assumed_role_credentials"
+            ) as mock_assume_role,
             patch(
                 "ai_gateway.api.v2.code.completions.create_model_metadata",
                 wraps=create_model_metadata,
@@ -1551,6 +1553,10 @@ class TestCodeCompletions:
         assert response.status_code == 200
         data = mock_create_model_metadata.call_args.args[0]
         assert data.get("iam_role") == (iam_role if expect_forwarded else None)
+        if expect_forwarded:
+            mock_assume_role.assert_called_with(iam_role, external_id="1234")
+        else:
+            mock_assume_role.assert_not_called()
 
     @pytest.mark.parametrize("mock_model_responses", [False])
     @pytest.mark.parametrize(
