@@ -41,7 +41,7 @@ def mock_session():
 
 @pytest.fixture
 def service(mock_session):
-    service = UnifiedEventService()
+    service = UnifiedEventService(enabled=True)
     service._session = mock_session
     service._executor = InlineExecutor()
     return service
@@ -89,6 +89,26 @@ def tracked_events():
 
 
 class TestUnifiedEventServiceTrack:
+    def test_disabled_does_not_post(self, mock_session, event_context, tracked_events):
+        svc = UnifiedEventService()
+        svc._session = mock_session
+        svc._executor = InlineExecutor()
+
+        svc.track("request_duo_chat")
+
+        mock_session.post.assert_not_called()
+        assert "request_duo_chat" not in tracked_events
+
+    def test_custom_sidecar_url(self, mock_session, event_context, tracked_events):
+        svc = UnifiedEventService(sidecar_url="http://custom:9999", enabled=True)
+        svc._session = mock_session
+        svc._executor = InlineExecutor()
+
+        svc.track("request_duo_chat")
+
+        url = mock_session.post.call_args.args[0]
+        assert url == "http://custom:9999/v1/events"
+
     def test_posts_single_event_to_sidecar(
         self, service, mock_session, posted_body, event_context, tracked_events
     ):
@@ -96,7 +116,7 @@ class TestUnifiedEventServiceTrack:
 
         assert mock_session.post.call_count == 1
         url = mock_session.post.call_args.args[0]
-        assert url == f"{UnifiedEventService.SIDECAR_URL}/v1/events"
+        assert url == f"{UnifiedEventService.DEFAULT_SIDECAR_URL}/v1/events"
         assert (
             mock_session.post.call_args.kwargs["timeout"]
             == UnifiedEventService.REQUEST_TIMEOUT

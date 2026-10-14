@@ -183,6 +183,14 @@ class ConfigInternalEvent(BaseModel):
     api_key: Optional[SecretStr] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
+    sidecar_enabled: bool = Field(
+        default=False,
+        description="Send unified events to the events sidecar.",
+    )
+    sidecar_url: str = Field(
+        default="http://localhost:8130",
+        description="Base URL of the events sidecar.",
+    )
 
 
 class ConfigBillingEvent(BaseModel):
