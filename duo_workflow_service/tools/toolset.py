@@ -58,8 +58,9 @@ class Toolset(collections.abc.Mapping):
             approval_policy: Optional policy consulted for per-call approval
                 decisions (e.g. session approvals persisted on the GitLab instance).
             denied_tools: Optional set of tool names stripped from this toolset by
-                governance deny rules. Used only for tracking when the LLM still
-                attempts to call one of them; never affects execution.
+                governance deny rules. Agent platform v1 tool nodes halt the flow with
+                ToolBlockedByAdministratorError when the LLM calls one. Legacy executors
+                only track the call.
         """
         self._all_tools = all_tools
         self._pre_approved = pre_approved

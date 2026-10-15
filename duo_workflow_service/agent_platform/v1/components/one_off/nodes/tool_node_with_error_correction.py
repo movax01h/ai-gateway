@@ -1,12 +1,15 @@
 import json
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 import structlog
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    ToolBlockedByAdministratorError,
+)
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -342,6 +345,14 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
 
         return result
 
+    def _halt_on_denied_tools(self, tool_names: list[str]) -> NoReturn:
+        for tool_name in tool_names:
+            self._tracker.track_tool_governance_event(
+                event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
+                tool_name=tool_name,
+            )
+        raise ToolBlockedByAdministratorError(tool_names)
+
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Execute tools with error correction tracking."""
         result: dict[str, Any] = {}
@@ -352,6 +363,8 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
         )
 
         if len(self._toolset) == 0:
+            if self._toolset.denied_tools:
+                self._halt_on_denied_tools(sorted(self._toolset.denied_tools))
             return self._handle_empty_toolset(conversation_history)
 
         # Get current context for error tracking
@@ -370,6 +383,15 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
             return self._handle_no_tool_calls(
                 conversation_history, context, context_dict, attempts
             )
+
+        blocked_names = [
+            tool_call["name"]
+            for tool_call in tool_calls
+            if tool_call["name"] not in self._toolset
+            and tool_call["name"] in self._toolset.denied_tools
+        ]
+        if blocked_names:
+            self._halt_on_denied_tools(blocked_names)
 
         # Execute all tool calls
         tool_responses, result = await self._execute_all_tool_calls(

@@ -134,13 +134,22 @@ async def persist_error_to_ui_chat_log(
         additional_context=None,
     )
 
+    settled_logs = [
+        (
+            {**entry, "status": ToolStatus.FAILURE}
+            if entry.get("status") == ToolStatus.PENDING
+            else entry
+        )
+        for entry in existing_logs
+    ]
+
     try:
         # We pass the full ui_chat_log list (existing + error)
         # because aupdate_state does not reliably apply the
         # _ui_chat_log_reducer after a graph failure.
         await compiled_graph.aupdate_state(
             graph_config,
-            {"ui_chat_log": Overwrite(value=existing_logs + [error_log])},
+            {"ui_chat_log": Overwrite(value=settled_logs + [error_log])},
         )
     except Exception as exc:
         log.warning(
