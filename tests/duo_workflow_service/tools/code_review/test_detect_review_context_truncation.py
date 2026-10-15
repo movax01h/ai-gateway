@@ -4,6 +4,7 @@ from duo_workflow_service.security.scanner_factory import apply_security_scannin
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.code_review.detect_review_context_truncation import (
     DetectReviewContextTruncation,
+    DetectReviewContextTruncationInput,
 )
 from duo_workflow_service.tools.tool_output_manager import (
     TruncationConfig,
@@ -66,3 +67,13 @@ async def test_detect_review_context_truncation_reads_the_share_shown(metadata):
 
     assert result["truncated"] is True
     assert 0 < result["percent_shown"] < 99
+
+
+def test_detect_review_context_truncation_display_message(metadata):
+    tool = DetectReviewContextTruncation(metadata=metadata)
+
+    message = tool.format_display_message(
+        DetectReviewContextTruncationInput(review_context=None)
+    )
+
+    assert message == "Check whether the merge request was too large to review in full"
