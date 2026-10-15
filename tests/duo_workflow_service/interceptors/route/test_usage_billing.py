@@ -114,6 +114,33 @@ class TestSelfHostedBillingPromptCallbackHandler:
 
         assert action.trackLlmCallForSelfHosted.featureAiCatalogItem is True
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source_type", "expected"),
+        [
+            (None, ""),
+            (lambda: None, ""),
+            (lambda: "merge_request_code_conflict", "merge_request_code_conflict"),
+        ],
+        ids=["no_getter", "getter_returns_none", "getter_returns_value"],
+    )
+    async def test_on_before_llm_call_sets_source_type(
+        self,
+        workflow_id,
+        gl_reporting_event_context,
+        mock_outbox,
+        source_type,
+        expected,
+    ):
+        handler = SelfHostedBillingPromptCallbackHandler(
+            workflow_id, gl_reporting_event_context, mock_outbox, source_type
+        )
+
+        await handler.on_before_llm_call()
+
+        action = mock_outbox.put_action_and_wait_for_response.call_args[0][0]
+        assert action.trackLlmCallForSelfHosted.sourceType == expected
+
 
 class TestPromptRegistrySelfHostedBillingSupport:
     """Test PromptRegistrySelfHostedBillingSupport wrapper class."""
@@ -415,6 +442,7 @@ class TestIntegrationScenarios:
                 self._workflow_type = gl_reporting_event_context
                 self._outbox = mock_outbox
                 self._prompt_registry = mock_prompt_registry
+                self._workflow_config = {}
 
             def _compile(self):
                 pass
@@ -427,6 +455,8 @@ class TestIntegrationScenarios:
 
         # Create workflow instance
         workflow = TestWorkflow()
+        # The workflow config is replaced after __init__, when it is fetched in run()
+        workflow._workflow_config = {"source_type": "merge_request_code_conflict"}
 
         # Get a prompt (simulating workflow execution)
         workflow._prompt_registry.get("test_prompt", "1.0.0")
@@ -442,6 +472,9 @@ class TestIntegrationScenarios:
         mock_outbox.put_action_and_wait_for_response.assert_called_once()
         action = mock_outbox.put_action_and_wait_for_response.call_args[0][0]
         assert action.trackLlmCallForSelfHosted.workflowID == workflow_id
+        assert (
+            action.trackLlmCallForSelfHosted.sourceType == "merge_request_code_conflict"
+        )
 
     @pytest.mark.asyncio
     async def test_billing_disabled_no_tracking(

@@ -3717,6 +3717,53 @@ async def test_track_self_hosted_execute_workflow_billing_event(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("source_type", "expected_source"),
+    [
+        ("merge_request_code_conflict", "merge_request_code_conflict"),
+        ("", None),
+        ("Not A Source!", None),
+        ("a" * 65, None),
+        ("merge_request_code_conflict\n", None),
+    ],
+    ids=["valid", "empty", "invalid_characters", "too_long", "trailing_newline"],
+)
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_billing_event_source(
+    _mock_container,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+    source_type,
+    expected_source,
+):
+    auth_user.can = MagicMock(return_value=True)
+
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
+        yield contract_pb2.TrackSelfHostedClientEvent(
+            requestID="test-req-id",
+            workflowID="#1337",
+            featureQualifiedName="test_feature",
+            sourceType=source_type,
+        )
+
+    result = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_service=billing_event_service,
+    )
+
+    _ = [action async for action in result]
+
+    metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+    assert metadata.get("source") == expected_source
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("tracked", "expected_success_logs"),
     [(True, 1), (False, 0)],
 )

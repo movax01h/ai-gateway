@@ -198,6 +198,9 @@ _PROPAGATED_EXTRA_CLAIMS = {
 MAX_METADATA_SIZE = 24 * 1024
 
 WORKFLOW_TASK_NAME_PREFIX = "workflow:"
+# Self-hosted billing events carry a source set by customer-run components, so only
+# values shaped like Rails source_type enum names are kept.
+SELF_HOSTED_SOURCE_TYPE_PATTERN = re.compile(r"[a-z0-9_]{1,64}")
 DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S = 3.0
 # Cloud Run sends SIGKILL 10s after SIGTERM; drain plus the gRPC grace period must finish before that.
 DEFAULT_SHUTDOWN_KILL_DEADLINE_S = 10.0
@@ -1423,10 +1426,17 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         billed_once_features: set[str] = set()
 
         async for client_event in request_iterator:
+            source = (
+                client_event.sourceType
+                if SELF_HOSTED_SOURCE_TYPE_PATTERN.fullmatch(client_event.sourceType)
+                else None
+            )
+
             log.info(
                 "Received self-hosted client event",
                 request_id=client_event.requestID,
                 workflow_id=client_event.workflowID,
+                source=source,
             )
 
             gl_context = GLReportingEventContext.from_workflow_definition(
@@ -1460,6 +1470,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                         unit_of_measure="request",
                         quantity=1,
                         llm_ops=SelfHostedLLMOperations.get_operations(),
+                        source=source,
                     )
 
                     if is_bill_once_feature:

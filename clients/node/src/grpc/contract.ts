@@ -350,6 +350,8 @@ export interface TrackLlmCallForSelfHosted {
   featureQualifiedName: string;
   /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
+  /** sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown. */
+  sourceType: string;
 }
 
 /** RunShellCommand requests execution of a raw shell command string. */
@@ -873,6 +875,8 @@ export interface TrackSelfHostedClientEvent {
   featureQualifiedName: string;
   /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
+  /** sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown. */
+  sourceType: string;
 }
 
 /** TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event. */
@@ -2761,7 +2765,7 @@ export const ScheduleNotification: MessageFns<ScheduleNotification> = {
 };
 
 function createBaseTrackLlmCallForSelfHosted(): TrackLlmCallForSelfHosted {
-  return { workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false };
+  return { workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false, sourceType: "" };
 }
 
 export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = {
@@ -2774,6 +2778,9 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
     }
     if (message.featureAiCatalogItem !== false) {
       writer.uint32(24).bool(message.featureAiCatalogItem);
+    }
+    if (message.sourceType !== "") {
+      writer.uint32(34).string(message.sourceType);
     }
     return writer;
   },
@@ -2809,6 +2816,14 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
           message.featureAiCatalogItem = reader.bool();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.sourceType = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2825,6 +2840,7 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
       featureAiCatalogItem: isSet(object.featureAiCatalogItem)
         ? globalThis.Boolean(object.featureAiCatalogItem)
         : false,
+      sourceType: isSet(object.sourceType) ? globalThis.String(object.sourceType) : "",
     };
   },
 
@@ -2839,6 +2855,9 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
     if (message.featureAiCatalogItem !== false) {
       obj.featureAiCatalogItem = message.featureAiCatalogItem;
     }
+    if (message.sourceType !== "") {
+      obj.sourceType = message.sourceType;
+    }
     return obj;
   },
 
@@ -2850,6 +2869,7 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
     message.workflowID = object.workflowID ?? "";
     message.featureQualifiedName = object.featureQualifiedName ?? "";
     message.featureAiCatalogItem = object.featureAiCatalogItem ?? false;
+    message.sourceType = object.sourceType ?? "";
     return message;
   },
 };
@@ -6122,7 +6142,7 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
 };
 
 function createBaseTrackSelfHostedClientEvent(): TrackSelfHostedClientEvent {
-  return { requestID: "", workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false };
+  return { requestID: "", workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false, sourceType: "" };
 }
 
 export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> = {
@@ -6138,6 +6158,9 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
     }
     if (message.featureAiCatalogItem !== false) {
       writer.uint32(32).bool(message.featureAiCatalogItem);
+    }
+    if (message.sourceType !== "") {
+      writer.uint32(42).string(message.sourceType);
     }
     return writer;
   },
@@ -6181,6 +6204,14 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
           message.featureAiCatalogItem = reader.bool();
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.sourceType = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -6198,6 +6229,7 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
       featureAiCatalogItem: isSet(object.featureAiCatalogItem)
         ? globalThis.Boolean(object.featureAiCatalogItem)
         : false,
+      sourceType: isSet(object.sourceType) ? globalThis.String(object.sourceType) : "",
     };
   },
 
@@ -6215,6 +6247,9 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
     if (message.featureAiCatalogItem !== false) {
       obj.featureAiCatalogItem = message.featureAiCatalogItem;
     }
+    if (message.sourceType !== "") {
+      obj.sourceType = message.sourceType;
+    }
     return obj;
   },
 
@@ -6227,6 +6262,7 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
     message.workflowID = object.workflowID ?? "";
     message.featureQualifiedName = object.featureQualifiedName ?? "";
     message.featureAiCatalogItem = object.featureAiCatalogItem ?? false;
+    message.sourceType = object.sourceType ?? "";
     return message;
   },
 };

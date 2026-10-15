@@ -67,8 +67,9 @@ rejected immediately and no LLM calls can proceed.
 ### 2. Self-hosted DWS signals each LLM call — emit billing event per LLM call
 
 Before each LLM call, the self-hosted DWS sends a lightweight billing signal to Workhorse
-over the existing workflow stream. The signal carries the workflow ID and the feature being
-invoked. Workhorse forwards it to Cloud DWS, which records a billing event. Because the LLM
+over the existing workflow stream. The signal carries the workflow ID, the feature being
+invoked, and the workflow's source type (the entry point that started the session, when GitLab
+provides one). Workhorse forwards it to Cloud DWS, which records a billing event. Because the LLM
 runs on customer infrastructure, Cloud DWS uses standardized placeholder values instead of
 real token counts.
 
@@ -118,6 +119,7 @@ class SelfHostedBillingPromptCallbackHandler(BasePromptCallbackHandler):
                 workflowID=self.workflow_id,
                 featureQualifiedName=self.gl_reporting_event_context.feature_qualified_name,
                 featureAiCatalogItem=self.gl_reporting_event_context.feature_ai_catalog_item or False,
+                sourceType=(self.source_type and self.source_type()) or "",
             )
         )
         await self.outbox.put_action_and_wait_for_response(action)
@@ -148,6 +150,11 @@ with `unit_of_measure="request"` and a quantity of `1` per LLM call.
 since the actual model runs on customer infrastructure and its token counts are not available
 to Cloud DWS. The placeholder operations are passed explicitly to
 `BillingEventService.track_billing` via the `llm_ops` parameter at the call site.
+
+When the event carries a source type, Cloud DWS adds it to the billing event as
+`metadata.source`. Cloud DWS drops values that are not lowercase letters, digits, and
+underscores, or that are longer than 64 characters, because the value comes from components
+that run on customer infrastructure.
 
 ## Usage quota check
 
