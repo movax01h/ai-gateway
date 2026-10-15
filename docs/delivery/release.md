@@ -52,6 +52,20 @@ FIPS images are available at:
 
 Prefer pulling from the GitLab Container Registry. DockerHub is a mirror and may not be reachable in restricted environments.
 
+### `latest` tag
+
+The GitLab Container Registry also publishes `model-gateway/self-hosted-fips:latest`, which always points at the highest released `self-hosted-vX.Y.Z-ee` FIPS image:
+
+```plaintext
+registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway/self-hosted-fips:latest
+```
+
+- It moves only on `self-hosted-vX.Y.Z-ee` release tags, never on commits to `main`.
+- It only moves forward. Patch releases on older stable branches (backports) get their versioned tag but do not move `latest`.
+- It is signed with cosign, like the versioned tags.
+
+Use `latest` where a fixed reference to the current release is needed, such as vulnerability scanning configuration. For deployments that must not change underneath you, pin a versioned tag instead.
+
 ### Verifying image signatures
 
 Tagged `self-hosted-fips` images in the GitLab Container Registry are signed with
@@ -64,6 +78,15 @@ cosign verify \
   --certificate-oidc-issuer https://gitlab.com \
   --certificate-identity "https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist//.gitlab-ci.yml@refs/tags/self-hosted-v19.2.0-ee" \
   registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway/self-hosted-fips:self-hosted-v19.2.0-ee
+```
+
+To verify `latest`, which does not name its release tag, match any release tag identity:
+
+```shell
+cosign verify \
+  --certificate-oidc-issuer https://gitlab.com \
+  --certificate-identity-regexp '^https://gitlab\.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist//\.gitlab-ci\.yml@refs/tags/self-hosted-v[0-9]+\.[0-9]+\.[0-9]+-ee$' \
+  registry.gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/model-gateway/self-hosted-fips:latest
 ```
 
 The double slash before `.gitlab-ci.yml` is required. Signatures are stored beside the image as a
