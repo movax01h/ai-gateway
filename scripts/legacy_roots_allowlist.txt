@@ -149,10 +149,6 @@ ai_gateway/prompts/definitions/chat/write_tests/llama3
 ai_gateway/prompts/definitions/chat/write_tests/mistral
 ai_gateway/prompts/definitions/chat/write_tests/system
 ai_gateway/prompts/definitions/chat/write_tests/user
-ai_gateway/prompts/definitions/classify_code_review_mention_intent/amazon_q
-ai_gateway/prompts/definitions/classify_code_review_mention_intent/base
-ai_gateway/prompts/definitions/classify_code_review_mention_intent/system
-ai_gateway/prompts/definitions/classify_code_review_mention_intent/user
 ai_gateway/prompts/definitions/classify_goal_tier/base
 ai_gateway/prompts/definitions/code_review_prescan/base
 ai_gateway/prompts/definitions/code_review_prescan/system

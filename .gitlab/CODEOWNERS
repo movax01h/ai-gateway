@@ -22,7 +22,6 @@
 /ai_gateway/prompts/definitions/code_review_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/explore_directories_for_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/classify_code_review_mention_intent/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
 /duo_workflow_service/agent_platform/v1/flows/configs/recommend_reviewers/ @kinsingh @wanpol @iamphill @marc_shaw
@@ -67,7 +66,6 @@
 /ai_gateway/prompts/definitions/code_review_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/explore_directories_for_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/classify_code_review_mention_intent/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
 /duo_workflow_service/agent_platform/v1/flows/configs/recommend_reviewers/ @kinsingh @wanpol @iamphill @marc_shaw
