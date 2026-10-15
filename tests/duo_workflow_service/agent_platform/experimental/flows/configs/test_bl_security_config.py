@@ -559,6 +559,33 @@ class TestScopeMatchesTheReportAllowlist:
         assert _cwes(requested) == set(report.IN_SCOPE_CWES)
 
 
+CONTENT_HANDLING_TAG = re.compile(
+    r"<content_handling>(.*?)</content_handling>", re.DOTALL
+)
+
+
+class TestEveryPromptTreatsRepositoryContentAsData:
+    """Every prompt reads attacker-controllable repository content, so each carries the directive."""
+
+    @pytest.mark.parametrize(
+        "prompt_id", [p.prompt_id for p in _config().prompts or []]
+    )
+    def test_the_system_prompt_has_a_content_handling_block(self, prompt_id):
+        block = CONTENT_HANDLING_TAG.search(_prompt_system(prompt_id))
+        assert block, f"{prompt_id} has no <content_handling> block"
+        assert block.group(1).strip(), (
+            f"{prompt_id} has an empty <content_handling> block"
+        )
+
+    def test_every_prompt_carries_the_same_block(self):
+        blocks = {
+            p.prompt_id: " ".join(match.group(1).split())
+            for p in _config().prompts or []
+            if (match := CONTENT_HANDLING_TAG.search(_prompt_system(p.prompt_id)))
+        }
+        assert len(set(blocks.values())) == 1, blocks
+
+
 class TestResponseSchemas:
     """The answer tools the fan-out stages end on, and the fields the pipeline reads from them."""
 
