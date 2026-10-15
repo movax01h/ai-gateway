@@ -5,7 +5,7 @@ import os
 import signal
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterable, List, Optional, cast
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import grpc
 import litellm
@@ -1932,6 +1932,53 @@ async def test_execute_workflow_allows_matching_workflow_token(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [{"binds_workflow": True}])
+@patch("duo_workflow_service.server.log")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_logs_unbound_token_from_a_binding_instance(
+    mock_resolve_flow,
+    mock_log,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "9" * 100)
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+    mock_log.info.assert_any_call(
+        "Workflow token without a workflow binding",
+        token_issuer=ANY,
+        requested_workflow_id="9" * 64,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {},
+        {"binds_workflow": "true"},
+        {"binds_workflow": False},
+        {"binds_workflow": True, "workflow_id": "42"},
+    ],
+)
+@patch("duo_workflow_service.server.log")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_does_not_log_unbound_token_otherwise(
+    mock_resolve_flow,
+    mock_log,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "42")
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+    logged = [call.args[0] for call in mock_log.info.call_args_list if call.args]
+    assert "Workflow token without a workflow binding" not in logged
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
 @patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_with_empty_id_never_reaches_the_binding_guard(
@@ -2101,6 +2148,34 @@ async def test_generate_token_propagates_gitlab_root_namespace_id(
         )
     else:
         assert "gitlab_root_namespace_id" not in kwargs["extra_claims"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [{"binds_workflow": True}, {}],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_propagates_binds_workflow(
+    _mock_generate_token_response,
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claims_extra,
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims.get("binds_workflow") == claims_extra.get("binds_workflow")
 
 
 @pytest.mark.asyncio
