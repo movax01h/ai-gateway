@@ -453,32 +453,26 @@ class AbstractWorkflow(ABC):
                     )
                     self._preapproved_tools = []
                     return
-                # Ask needs a human to answer; without one (headless/CI, no
-                # timeout on a pending approval) treat it as absent so behaviour
-                # there is unchanged by this claim. Default False (cannot ask)
-                # matches WorkflowConfig's own construction defaults.
                 can_ask_user = self._workflow_config.get(
                     "allow_agent_to_request_user", False
                 )
-                self._ask_tools = list(set(policies.ask)) if can_ask_user else []
+                ask = set(policies.ask)
+                deny = set(policies.deny) if can_ask_user else set(policies.deny) | ask
+                self._ask_tools = list(ask) if can_ask_user else []
                 # The JWT allow-list is the ceiling: client-supplied preapproved_tools
                 # cannot widen it, else a custom container bypasses Ask/Deny governance.
                 # `ask` counts as active so an "ask everything" policy (empty allow and
                 # deny) still enforces the ceiling.
                 governance_active = (
-                    bool(policies.allow) or bool(policies.deny) or bool(self._ask_tools)
+                    bool(policies.allow) or bool(deny) or bool(self._ask_tools)
                 )
                 if governance_active:
                     # deny > ask > allow, matching Rails' resolution order, so a tool
                     # named in both allow and ask still reaches the user.
-                    self._preapproved_tools = list(
-                        set(policies.allow) - set(self._ask_tools)
-                    )
+                    self._preapproved_tools = list(set(policies.allow) - ask)
                     self._governance_allowed_tools = list(self._preapproved_tools)
-                if policies.deny:
-                    self._denied_tools = list(
-                        set(self._denied_tools) | set(policies.deny)
-                    )
+                if deny:
+                    self._denied_tools = list(set(self._denied_tools) | deny)
 
     def _extract_trace_output(self, state: dict | None) -> str | None:
         """Extract the final response content from ui_chat_log for LangSmith tracing.
