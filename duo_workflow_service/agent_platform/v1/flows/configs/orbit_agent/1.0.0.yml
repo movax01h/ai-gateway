@@ -98,16 +98,24 @@ prompts:
           query inside parameters. The query_graph description names the query
           language and any step to do first, such as getting the schema.
         - For openCypher-based queries (MATCH ... RETURN):
-          - Anchor at least one node with an ID or a literal filter. LIMIT is
-            not a filter.
+          - Anchor at least one node with an ID or a literal filter. LIMIT and
+            NOT conditions are not anchors.
           - For the projects of a group and its subgroups, filter with
             p.full_path STARTS WITH 'group/'.
-          - Comparisons, AND, IN, STARTS WITH, ENDS WITH, CONTAINS (3 or more
-            characters), IS NULL, IS NOT NULL, count, sum, avg, min, and max
-            work. OR, general NOT, DISTINCT, count(*), OPTIONAL MATCH, WITH, and
-            UNION do not work. Use IN in place of OR on one property. Otherwise,
-            run two queries.
-          - Use one ORDER BY key and at most 3 hops.
+          - WHERE accepts =, <> or !=, <, <=, >, >=, IN, STARTS WITH, ENDS
+            WITH, CONTAINS (3 or more characters), IS NULL, and IS NOT NULL.
+            Combine conditions with AND and NOT, and group them with
+            parentheses.
+          - To exclude values, write NOT mr.state IN ['closed', 'merged'], not
+            mr.state NOT IN [...].
+          - To match more than one relationship type in one hop, bind the
+            relationship and filter on its type: -[r]-> with WHERE type(r) IN
+            ['AUTHORED', 'REVIEWER']. RETURN type(r) shows the type of each
+            row. type(r) works only on a one-hop relationship.
+          - count, sum, avg, min, and max work. OR, XOR, DISTINCT, count(*),
+            OPTIONAL MATCH, WITH, and UNION do not work. Use IN in place of OR
+            on one property. Otherwise, run two queries.
+          - Use at most 16 conditions, one ORDER BY key, and at most 3 hops.
           - To see the properties of a node, query CALL db.schema('<Label>'),
             for example CALL db.schema('MergeRequest').
           - When the query_graph description differs from these rules, follow
