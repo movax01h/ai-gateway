@@ -355,10 +355,6 @@ ai_gateway/prompts/definitions/resolve_vulnerability/amazon_q
 ai_gateway/prompts/definitions/resolve_vulnerability/base
 ai_gateway/prompts/definitions/resolve_vulnerability/system
 ai_gateway/prompts/definitions/resolve_vulnerability/user
-ai_gateway/prompts/definitions/review_merge_request/amazon_q
-ai_gateway/prompts/definitions/review_merge_request/base
-ai_gateway/prompts/definitions/review_merge_request/system
-ai_gateway/prompts/definitions/review_merge_request/user
 ai_gateway/prompts/definitions/review_merge_request_dap/base
 ai_gateway/prompts/definitions/review_merge_request_dap/system
 ai_gateway/prompts/definitions/review_merge_request_dap/user
