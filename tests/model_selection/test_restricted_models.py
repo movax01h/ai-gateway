@@ -16,6 +16,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ModelRestriction,
     ModelTagEntry,
 )
+from ai_gateway.model_selection.models import ChatAnthropicParams
 from ai_gateway.model_selection.types import DevConfig
 from ai_gateway.models.anthropic import KindAnthropicModel
 from ai_gateway.models.litellm import KindGitLabModel, KindLiteLlmModel
@@ -370,6 +371,74 @@ def test_validate_rejects_duplicate_restrictions(
 
 
 def test_validate_accepts_shipped_config(config: ModelSelectionConfig):
+    config.validate()
+
+
+def _set_fallbacks(monkeypatch, definition, fallbacks) -> None:
+    # model_copy: works whether or not the params class declares `fallbacks` yet.
+    params = definition.params.model_copy(update={"fallbacks": fallbacks})
+    monkeypatch.setattr(definition, "params", params)
+
+
+@pytest.mark.parametrize("fallbacks", ["default", [{"model": "claude-opus-4-8"}]])
+def test_validate_rejects_fallbacks_on_restricted_model(
+    config: ModelSelectionConfig, fake_restricted_model, monkeypatch, fallbacks
+):
+    _set_fallbacks(monkeypatch, fake_restricted_model, fallbacks)
+
+    with pytest.raises(
+        ValueError,
+        match="Restricted model 'fake_restricted_model' cannot set fallbacks: "
+        "remove fallbacks from its params",
+    ):
+        config.validate()
+
+
+@pytest.mark.parametrize(
+    "model", ["claude-fake-restricted-1", "anthropic/claude-fake-restricted-1@20261001"]
+)
+def test_validate_rejects_restricted_model_in_fallbacks(
+    config: ModelSelectionConfig, monkeypatch, model: str
+):
+    definition = config.get_llm_definitions()["claude_sonnet_4_5_20250929"]
+    _set_fallbacks(monkeypatch, definition, [{"model": model}])
+
+    with pytest.raises(
+        ValueError,
+        match=rf"'claude_sonnet_4_5_20250929' cannot list restricted model '{re.escape(model)}' "
+        r"in fallbacks: remove it from the fallbacks in its params",
+    ):
+        config.validate()
+
+
+def test_validate_rejects_restricted_model_in_env_release_fallbacks(
+    config: ModelSelectionConfig, monkeypatch
+):
+    definition = config.get_llm_definitions()["claude_sonnet_4_5_20250929"]
+    release = definition.model_copy(update={"gitlab_identifier": "released_model"})
+    _set_fallbacks(monkeypatch, release, [{"model": "claude-fake-restricted-1"}])
+    monkeypatch.setitem(config._env_llm_definitions, "released_model", release)
+
+    with pytest.raises(
+        ValueError, match="'released_model' cannot list restricted model"
+    ):
+        config.validate()
+
+
+@pytest.mark.xfail(
+    strict=True, reason="ChatAnthropicParams.fallbacks is added by ai-assist MR 7312"
+)
+def test_anthropic_params_declare_fallbacks():
+    assert "fallbacks" in ChatAnthropicParams.model_fields
+
+
+@pytest.mark.parametrize("fallbacks", ["default", [{"model": "claude-opus-4-8"}]])
+def test_validate_allows_unrestricted_fallbacks(
+    config: ModelSelectionConfig, monkeypatch, fallbacks
+):
+    definition = config.get_llm_definitions()["claude_sonnet_4_5_20250929"]
+    _set_fallbacks(monkeypatch, definition, fallbacks)
+
     config.validate()
 
 

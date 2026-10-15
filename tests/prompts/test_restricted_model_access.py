@@ -175,3 +175,42 @@ def test_restricted_model_reached_only_by_metadata_name_is_denied(
 
     with pytest.raises(RestrictedModelAccessError):
         _build_prompt(model_factory, _prompt_config(None), metadata)
+
+
+def _fallback_metadata(llm_definition: LLMDefinition, fallbacks) -> ModelMetadata:
+    # model_copy: works whether or not the params class declares `fallbacks` yet.
+    llm_definition.params = llm_definition.params.model_copy(
+        update={"fallbacks": fallbacks}
+    )
+    return ModelMetadata(
+        provider="gitlab", name="mistral", llm_definition=llm_definition
+    )
+
+
+def test_restricted_model_reached_only_by_fallback_is_denied(
+    model_factory: TypeModelFactory, llm_definition: LLMDefinition
+):
+    metadata = _fallback_metadata(
+        llm_definition, [{"model": "claude-fake-restricted-1"}]
+    )
+
+    with pytest.raises(RestrictedModelAccessError):
+        _build_prompt(model_factory, _prompt_config(None), metadata)
+
+
+@pytest.mark.parametrize(
+    ("fallbacks", "authorized_flow"),
+    [
+        ([{"model": "mistral-large"}], None),
+        ("default", None),
+        ([{"model": "claude-fake-restricted-1"}], "bl_security"),
+    ],
+)
+def test_fallback_is_allowed_when_unrestricted_or_flow_is_authorized(
+    model_factory: TypeModelFactory, llm_definition: LLMDefinition, fallbacks
+):
+    metadata = _fallback_metadata(llm_definition, fallbacks)
+
+    prompt = _build_prompt(model_factory, _prompt_config(None), metadata)
+
+    assert prompt.name == "test_prompt"

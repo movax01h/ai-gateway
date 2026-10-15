@@ -711,6 +711,24 @@ class ModelSelectionConfig:
                     f"'{config.feature_setting}': remove it from {list_name}"
                     for model_id in sorted(restricted.intersection(ids))
                 )
+        # A fallback is another model reached by the same request, so restrictions apply to it too.
+        params_sources = (
+            "models.yml, AIGW_MODEL_SELECTION__MODEL_PARAMS "
+            "or AIGW_MODEL_SELECTION__MODEL_RELEASES"
+        )
+        errors.extend(
+            f"Restricted model '{d.gitlab_identifier}' cannot set fallbacks: "
+            f"remove fallbacks from its params ({params_sources})"
+            for d, _ in self._restricted_definitions()
+            if getattr(d.params, "fallbacks", None) is not None
+        )
+        errors.extend(
+            f"Model '{d.gitlab_identifier}' cannot list restricted model '{m}' in fallbacks: "
+            f"remove it from the fallbacks in its params ({params_sources})"
+            for d in chain(models.values(), self._env_llm_definitions.values())
+            for m in fallback_models(d.params)
+            if self.restricted_flows_for(models=[m]) is not None
+        )
         return errors
 
     def validate(self) -> None:
@@ -929,6 +947,14 @@ class ModelSelectionConfig:
 def _keyword_scorer(keywords: tuple[str, ...]) -> KeywordBM25:
     # Keywords come from static YAML, so build the BM25 statistics once per keyword list.
     return KeywordBM25(list(keywords))
+
+
+def fallback_models(params: Any) -> list[str]:
+    """Model names in an explicit ``fallbacks`` list on ``params``; ``"default"`` names none."""
+    fallbacks = getattr(params, "fallbacks", None)
+    if not isinstance(fallbacks, list):
+        return []
+    return [f["model"] for f in fallbacks if isinstance(f, dict) and f.get("model")]
 
 
 def ensure_restricted_model_access(
