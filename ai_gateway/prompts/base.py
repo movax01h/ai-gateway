@@ -83,6 +83,7 @@ from ai_gateway.model_selection import (
     PromptParams,
     ensure_restricted_model_access,
 )
+from ai_gateway.model_selection.model_selection_config import fallback_models
 from ai_gateway.model_selection.models import (
     BaseModelParams,
     ModelClassProvider,
@@ -784,7 +785,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
 
         llm_definition = model_metadata.llm_definition if model_metadata else None
         # Default-deny for restricted models, on every name the model can be reached
-        # by: the resolved definition, a custom-provider identifier, or a raw model string.
+        # by: the resolved definition, a custom-provider identifier, a raw model string, or a fallback.
         ensure_restricted_model_access(
             identifiers=[
                 llm_definition.gitlab_identifier if llm_definition else None,
@@ -795,6 +796,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 model_kwargs.get("model_id"),
                 config.model.params.model,
                 llm_definition.params.model if llm_definition else None,
+                *fallback_models(llm_definition.params if llm_definition else None),
             ],
         )
 
