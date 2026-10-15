@@ -594,6 +594,9 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
+      - "claude_opus_5_5"
+      - "claude_opus_5_5_bedrock"
+      - "claude_opus_5_5_vertex"
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_bedrock"
