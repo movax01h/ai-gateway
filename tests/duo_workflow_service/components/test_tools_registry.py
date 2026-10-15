@@ -352,6 +352,7 @@ _outbox = MagicMock(spec=Outbox)
                 "grep",
                 "extract_lines_from_text",
                 "finalize_code_review_findings",
+                "detect_review_context_truncation",
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
@@ -380,6 +381,7 @@ _outbox = MagicMock(spec=Outbox)
                 "mkdir",
                 "extract_lines_from_text",
                 "finalize_code_review_findings",
+                "detect_review_context_truncation",
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
@@ -568,6 +570,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         ),
         "extract_lines_from_text": tools.ExtractLinesFromText(metadata=tool_metadata),
         "finalize_code_review_findings": tools.FinalizeCodeReviewFindings(
+            metadata=tool_metadata
+        ),
+        "detect_review_context_truncation": tools.DetectReviewContextTruncation(
             metadata=tool_metadata
         ),
         "get_glql_schema": tools.GetGlqlSchema(metadata=tool_metadata),
@@ -952,6 +957,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "bl_write_sast_report",
         "extract_lines_from_text",
         "finalize_code_review_findings",
+        "detect_review_context_truncation",
         "run_tests",
         "bl_discover_and_cluster",
     }
@@ -1035,6 +1041,7 @@ async def test_registry_configuration_with_preapproved_tools(
         "bl_write_sast_report",
         "extract_lines_from_text",
         "finalize_code_review_findings",
+        "detect_review_context_truncation",
         "run_tests",
         "bl_discover_and_cluster",
     }

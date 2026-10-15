@@ -123,6 +123,7 @@ _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
     tools.Grep,
     tools.ExtractLinesFromText,
     tools.FinalizeCodeReviewFindings,
+    tools.DetectReviewContextTruncation,
 ]
 
 _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
