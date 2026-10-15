@@ -1,5 +1,5 @@
 lefthook 1.12.3 # datasource=github-releases depName=evilmartians/lefthook
-python 3.12.13 # datasource=github-tags depName=python/cpython
+python 3.12.15 # datasource=github-tags depName=python/cpython
 gcloud 517.0.0 # datasource=github-tags depName=GoogleCloudPlatform/cloud-sdk-docker
 poetry 2.4.1 # datasource=pypi depName=poetry
 vale 3.21.0 # datasource=github-releases depName=errata-ai/vale
