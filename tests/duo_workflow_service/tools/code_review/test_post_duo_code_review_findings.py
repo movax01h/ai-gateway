@@ -296,18 +296,18 @@ async def test_post_duo_code_review_findings_leaves_a_complete_summary_alone(
         ({"truncated": False, "percent_shown": None}, None),
         (
             {"truncated": True, "percent_shown": 20.5},
-            "**This merge request was too large to review in full.** I saw about 20% "
-            "of its diff, so this review does not cover the rest.",
+            "**This merge request was too large for a full review. This review covers "
+            "about 20% of the diff.**",
         ),
         (
             {"truncated": True, "percent_shown": 0.2},
-            "**This merge request was too large to review in full.** I saw about 1% "
-            "of its diff, so this review does not cover the rest.",
+            "**This merge request was too large for a full review. This review covers "
+            "about 1% of the diff.**",
         ),
         (
             {"truncated": True, "percent_shown": None},
-            "**This merge request was too large to review in full.** This review does "
-            "not cover all of its diff.",
+            "**This merge request was too large for a full review. This review does "
+            "not cover all of the diff.**",
         ),
     ],
     ids=["unknown", "complete", "truncated", "tiny_share", "share_unknown"],

@@ -101,13 +101,13 @@ def truncation_notice(review_truncation: Optional[Dict[str, Any]]) -> Optional[s
     if not review_truncation or not review_truncation.get("truncated"):
         return None
 
-    lead = "**This merge request was too large to review in full.**"
+    lead = "This merge request was too large for a full review."
     percent_shown = review_truncation.get("percent_shown")
     if percent_shown is None:
-        return f"{lead} This review does not cover all of its diff."
+        return f"**{lead} This review does not cover all of the diff.**"
     return (
-        f"{lead} I saw about {max(1, round(percent_shown))}% of its diff, "
-        "so this review does not cover the rest."
+        f"**{lead} This review covers about "
+        f"{max(1, round(percent_shown))}% of the diff.**"
     )
 
 
