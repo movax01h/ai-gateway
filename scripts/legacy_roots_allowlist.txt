@@ -249,7 +249,6 @@ ai_gateway/prompts/definitions/developer_agent_prompt/user
 ai_gateway/prompts/definitions/developer_planner/base
 ai_gateway/prompts/definitions/developer_planner/system
 ai_gateway/prompts/definitions/developer_planner/user
-ai_gateway/prompts/definitions/embeddings_code/base
 ai_gateway/prompts/definitions/ensure_clean_git_state/base
 ai_gateway/prompts/definitions/ensure_clean_git_state/system
 ai_gateway/prompts/definitions/ensure_clean_git_state/user

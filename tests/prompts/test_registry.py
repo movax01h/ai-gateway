@@ -28,7 +28,7 @@ from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
-from ai_gateway.prompts import LocalPromptRegistry, Prompt
+from ai_gateway.prompts import LocalPromptRegistry, Prompt, feature_roots
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
@@ -444,8 +444,16 @@ params:
     - Bar
 """,
     )
+    # embeddings_code lives under ai/features/, so fake it at the moved root.
     fs.create_file(
-        prompts_definitions_dir / "embeddings_code" / "base" / "1.0.0.yml",
+        ai_gateway_dir.parent
+        / "ai"
+        / "features"
+        / "semantic_search"
+        / "embeddings_code"
+        / "prompts"
+        / "base"
+        / "1.0.0.yml",
         contents="""
 ---
 name: Code Embeddings
@@ -455,8 +463,14 @@ prompt_template:
 """,
     )
 
-    with patch(
-        "ai_gateway.prompts.registry.LEGACY_MODEL_MAPPING", {"test": {"0.0.1": "haiku"}}
+    # Start from an empty feature-root registry so discovery only sees the fake
+    # tree, regardless of what earlier tests in the same worker registered.
+    with (
+        patch(
+            "ai_gateway.prompts.registry.LEGACY_MODEL_MAPPING",
+            {"test": {"0.0.1": "haiku"}},
+        ),
+        patch.dict(feature_roots._FEATURE_PROMPT_ROOTS, clear=True),
     ):
         yield
 
