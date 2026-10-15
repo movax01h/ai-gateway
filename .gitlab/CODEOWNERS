@@ -45,6 +45,10 @@
 # Semantic Code Search under /ai/features/semantic_search/
 /ai/features/semantic_search/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/semantic-code-search
 
+# Legacy non-agentic Duo features
+/ai/features/utilities/generate_commit_message @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
+/ai/features/utilities/generate_description @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
+
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/duo-workflow-service
@@ -88,6 +92,10 @@
 
 # Semantic Code Search under /ai/features/semantic_search/
 /ai/features/semantic_search/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/semantic-code-search
+
+# Legacy non-agentic Duo features
+/ai/features/utilities/generate_commit_message @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
+/ai/features/utilities/generate_description @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 
 # Fix Pipeline prompts and response schemas
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
