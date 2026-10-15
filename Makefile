@@ -326,13 +326,13 @@ ingest:
 .PHONY: duo-workflow-docs
 duo-workflow-docs:
 	@echo "Generating Duo Workflow Service graph documentation..."
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run python scripts/generate_graph_docs.py ${DOC_DIR}/duo_workflow_service_graphs.md
 
 .PHONY: duo-workflow-flow-schema
 duo-workflow-flow-schema:
 	@echo "Generating Duo Agent Platform flow config JSON Schema..."
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run python -m duo_workflow_service.schemas.v1.flow_config_schema
 
 .PHONY: check-duo-workflow-flow-schema
@@ -350,7 +350,7 @@ duo-workflow-service-reload:
 .PHONY: duo-workflow-service-dependencies
 duo-workflow-service-dependencies:
 	@echo "Generating Duo Workflow Service dependencies for CI configuration..."
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run python scripts/generate_dws_change_patterns.py
 
 .PHONY: duo-workflow-service-memray
