@@ -39,6 +39,11 @@ class FeatureFlag(StrEnum):
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/beta/dap_tool_image_input.yml
     # Rollout: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2806
     DAP_TOOL_IMAGE_INPUT = "dap_tool_image_input"
+    # Sends OpenAI tools with `strict: false`, so GPT no longer fills every optional argument, see
+    # ai_gateway/models/v2/openai.py. Definition (added in gitlab-org/gitlab!261800):
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/gitlab_com_derisk/dap_openai_non_strict_tools.yml
+    # Issue: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2766
+    DAP_OPENAI_NON_STRICT_TOOLS = "dap_openai_non_strict_tools"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:
