@@ -524,7 +524,7 @@ class SubmitMrReview(DuoBaseTool):
             line_ref = ""
             if c.new_line:
                 line_ref = f":`{c.new_line}`"
-            findings_section += f"**{i}.** `{c.file}`{line_ref}\n\n{self._fix_newlines(c.body)}\n\n---\n\n"
+            findings_section += f"**{i}.** {self._inline_code(c.file)}{line_ref}\n\n{self._fix_newlines(c.body)}\n\n---\n\n"
 
         if existing_summary:
             return (
@@ -555,8 +555,11 @@ class SubmitMrReview(DuoBaseTool):
             location = c.file
             if c.new_line:
                 location += f":{c.new_line}"
-            code = f"\n\n```\n{c.target_code}\n```" if c.target_code else ""
-            section += f"**{i}.** `{location}`{code}\n\n{self._fix_newlines(c.body)}\n\n---\n\n"
+            code = ""
+            if c.target_code:
+                fence = "`" * max(3, self._longest_backtick_run(c.target_code) + 1)
+                code = f"\n\n{fence}\n{c.target_code}\n{fence}"
+            section += f"**{i}.** {self._inline_code(location)}{code}\n\n{self._fix_newlines(c.body)}\n\n---\n\n"
 
         if existing_summary:
             return self._fix_newlines(existing_summary) + "\n\n---\n\n" + section
@@ -675,6 +678,25 @@ class SubmitMrReview(DuoBaseTool):
             parse_json=False,
         )
         self._process_http_response("create draft note", response, logger)
+
+    @staticmethod
+    def _longest_backtick_run(text: str) -> int:
+        return max((len(run) for run in re.findall(r"`+", text)), default=0)
+
+    @classmethod
+    def _inline_code(cls, text: str) -> str:
+        """Render text as a single-line inline code span.
+
+        Control and line-separator characters become spaces so the text stays on one line, a literal backslash-n gets a
+        zero-width space so `_fix_newlines` keeps it as text, and the delimiter is longer than any backtick run inside
+        the text.
+        """
+        text = re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]", " ", text)
+        text = text.replace("\\n", "\\\u200bn")
+        if "`" not in text:
+            return f"`{text}`"
+        fence = "`" * (cls._longest_backtick_run(text) + 1)
+        return f"{fence} {text} {fence}"
 
     @staticmethod
     def _fix_newlines(text: str) -> str:
