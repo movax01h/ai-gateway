@@ -2952,3 +2952,189 @@ class TestNotifyMeWhenPreapproval:
 )
 def test_agent_privileges_for_tool(tool_name, expected):
     assert tools_registry.agent_privileges_for_tool(tool_name) == expected
+
+
+# Governance ceiling: the admin allow list caps pre-approvals derived from the workflow row.
+
+_ROW_PRIVILEGES = ["read_write_files", "run_commands"]
+
+
+def _ceiling_registry(tool_metadata, admin_allowed_preapprovals, **kwargs):
+    kwargs.setdefault("enabled_tools", list(_ROW_PRIVILEGES))
+    kwargs.setdefault("preapproved_tools", list(_ROW_PRIVILEGES))
+    return ToolsRegistry(
+        tool_metadata=tool_metadata,
+        admin_allowed_preapprovals=admin_allowed_preapprovals,
+        **kwargs,
+    )
+
+
+def test_ceiling_off_leaves_row_pre_approvals_unchanged(tool_metadata):
+    registry = _ceiling_registry(tool_metadata, None)
+
+    assert registry.is_preapproved("edit_file")
+    assert registry.is_preapproved("run_command")
+    assert registry.pre_approvals_allowed_by_policy(["edit_file", "nope"]) == {
+        "edit_file",
+        "nope",
+    }
+
+
+def test_ceiling_removes_row_pre_approvals_outside_the_allow_list(tool_metadata):
+    registry = _ceiling_registry(tool_metadata, {"read_file"})
+
+    assert registry.is_preapproved("read_file")
+    assert not registry.is_preapproved("edit_file")
+    assert not registry.is_preapproved("run_command")
+    # Only approval changes: the tools stay available to the agent.
+    assert registry.get("edit_file") is not None
+    assert registry.get("run_command") is not None
+
+
+def test_ceiling_keeps_baseline_tools_even_when_nothing_is_allowed(tool_metadata):
+    baseline = ToolsRegistry(
+        enabled_tools=[], preapproved_tools=[], tool_metadata=tool_metadata
+    )._preapproved_tool_names
+
+    registry = _ceiling_registry(tool_metadata, set())
+
+    assert "todo_write" in baseline
+    assert baseline <= registry._preapproved_tool_names
+    assert not registry.is_preapproved("read_file")
+
+
+def test_ceiling_caps_per_tool_allows_from_the_union(tool_metadata):
+    """The ceiling runs after the allowed_tools union, so the union cannot re-add a tool."""
+    registry = _ceiling_registry(
+        tool_metadata,
+        {"read_file"},
+        preapproved_tools=[],
+        allowed_tools=["read_file", "edit_file"],
+    )
+
+    assert registry.is_preapproved("read_file")
+    assert not registry.is_preapproved("edit_file")
+
+
+def test_ask_still_outranks_the_ceiling(tool_metadata):
+    registry = _ceiling_registry(tool_metadata, {"read_file"}, ask_tools=["read_file"])
+
+    assert not registry.is_preapproved("read_file")
+
+
+def test_pre_approvals_allowed_by_policy_intersects_when_the_ceiling_is_on(
+    tool_metadata,
+):
+    registry = _ceiling_registry(tool_metadata, {"read_file"})
+
+    assert registry.pre_approvals_allowed_by_policy(
+        ["read_file", "edit_file", "todo_write"]
+    ) == {"read_file", "todo_write"}
+
+
+def test_ceiling_logs_removed_tools_once_with_the_workflow_id(tool_metadata):
+    with patch.object(tools_registry, "log") as mock_log:
+        registry = _ceiling_registry(tool_metadata, {"read_file"}, workflow_id="wf-1")
+        registry.pre_approvals_allowed_by_policy(["edit_file"])
+
+    mock_log.info.assert_called_once()
+    _, kwargs = mock_log.info.call_args
+    assert kwargs["workflow_id"] == "wf-1"
+    assert "run_command" in kwargs["tool_names"]
+
+
+def test_ceiling_does_not_log_when_nothing_is_removed(tool_metadata):
+    with patch.object(tools_registry, "log") as mock_log:
+        _ceiling_registry(tool_metadata, None)
+
+    mock_log.info.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "allow_client_injected_mcp_tools,expected_preapproved",
+    [(True, True), (False, False)],
+)
+def test_ceiling_exempts_client_injected_tools_only_when_allowed(
+    tool_metadata, allow_client_injected_mcp_tools, expected_preapproved
+):
+    registry = _ceiling_registry(
+        tool_metadata,
+        set(),
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=["run_mcp_tools"],
+        allow_client_injected_mcp_tools=allow_client_injected_mcp_tools,
+        mcp_tools=_mcp_configs(
+            contract_pb2.McpTool(
+                name="salesforce_get_account",
+                description="Client tool",
+                inputSchema="{}",
+                client_injected=True,
+            )
+        ),
+    )
+
+    assert registry.is_preapproved("salesforce_get_account") is expected_preapproved
+
+
+@pytest.mark.parametrize(
+    "client_injected,expected_preapproved", [(False, True), (True, False)]
+)
+def test_ceiling_admits_an_allowed_name_only_for_a_gitlab_origin_tool(
+    tool_metadata, client_injected, expected_preapproved
+):
+    """A client tool sharing an allowed GitLab MCP tool name gets no pre-approval from it."""
+    registry = _ceiling_registry(
+        tool_metadata,
+        {"gitlab_search"},
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=["run_mcp_tools"],
+        mcp_tools=_mcp_configs(
+            contract_pb2.McpTool(
+                name="gitlab_search",
+                description="MCP tool",
+                inputSchema="{}",
+                client_injected=client_injected,
+            )
+        ),
+    )
+
+    assert registry.is_preapproved("gitlab_search") is expected_preapproved
+
+
+@pytest.mark.asyncio
+async def test_configure_passes_the_ceiling_through(gl_http_client, project_mock):
+    workflow_config = {
+        "workflow_id": "test_workflow",
+        "agent_privileges_names": list(_ROW_PRIVILEGES),
+        "pre_approved_agent_privileges_names": list(_ROW_PRIVILEGES),
+        "gitlab_host": "gitlab.example.com",
+    }
+
+    registry = await ToolsRegistry.configure(
+        workflow_config=workflow_config,
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        admin_allowed_preapprovals={"read_file"},
+    )
+
+    assert registry.is_preapproved("read_file")
+    assert not registry.is_preapproved("edit_file")
+
+
+def test_ceiling_keeps_pre_approved_capability_tools(tool_metadata):
+    """Capability tools are pre-approved by listing, not by the row, so the ceiling keeps them."""
+    with patch(
+        "duo_workflow_service.components.tools_registry.is_client_capable",
+        return_value=True,
+    ):
+        registry = _ceiling_registry(tool_metadata, set())
+
+    listed = {
+        tool_cls.model_fields["name"].default
+        for tool_cls in _PREAPPROVED_CAPABILITY_TOOLS
+    }
+    added = listed & set(registry._enabled_tools)
+
+    assert added
+    assert added <= registry._preapproved_tool_names
