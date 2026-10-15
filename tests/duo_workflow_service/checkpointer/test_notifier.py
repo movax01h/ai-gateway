@@ -2435,3 +2435,57 @@ def test_checkpoint_ui_chat_log_bounding_incremental_client(
         assert wire_log[0]["message_id"] == _OMISSION_MARKER_ID
     else:
         assert not any(e["message_id"] == _OMISSION_MARKER_ID for e in wire_log)
+
+
+_METADATA_ONLY_SECRET = "SECRET-MODEL-TEXT"
+
+_METADATA_ONLY_KEPT_ENTRY_FIELDS = {
+    "message_id": "msg-1",
+    "message_type": "tool",
+    "message_sub_type": "read_file",
+    "status": "success",
+    "timestamp": "2026-10-06T00:00:00+00:00",
+    "correlation_id": "corr-1",
+    "component_name": "triage",
+}
+
+
+class TestLiveStream:
+    """A metadata-only flow streams checkpoints without model text."""
+
+    def test_checkpoint_carries_no_text(self):
+        notifier = UserInterface(
+            outbox=Mock(), goal=_METADATA_ONLY_SECRET, metadata_only=True
+        )
+        notifier.status = WorkflowStatusEnum.EXECUTION
+        notifier.ui_chat_log = [
+            {
+                **_METADATA_ONLY_KEPT_ENTRY_FIELDS,
+                "content": _METADATA_ONLY_SECRET,
+                "tool_info": {
+                    "name": "read_file",
+                    "args": {"file_path": _METADATA_ONLY_SECRET},
+                    "tool_response": _METADATA_ONLY_SECRET,
+                },
+                "additional_context": [{"content": _METADATA_ONLY_SECRET}],
+                "subsession_id": _METADATA_ONLY_SECRET,
+            }
+        ]
+        notifier.steps = [
+            {"id": "1", "description": _METADATA_ONLY_SECRET, "status": "In Progress"}
+        ]
+
+        checkpoint = notifier.most_recent_new_checkpoint()
+
+        assert checkpoint.goal == ""
+        assert loads(checkpoint.checkpoint)["channel_values"] == {
+            "ui_chat_log": [
+                {
+                    **_METADATA_ONLY_KEPT_ENTRY_FIELDS,
+                    "content": "",
+                    "additional_context": None,
+                    "tool_info": {"name": "read_file", "args": {}},
+                }
+            ],
+            "plan": {"steps": [{"id": "1", "status": "In Progress"}]},
+        }

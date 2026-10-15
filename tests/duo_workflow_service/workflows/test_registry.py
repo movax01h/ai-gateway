@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from duo_workflow_service.agent_platform import experimental, v1
 from duo_workflow_service.agent_platform.constants import (
     CHAT_PARTIAL_ENVIRONMENT,
+    METADATA_ONLY_FLOWS,
 )
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig as ExperimentalFlowConfig,
@@ -1071,3 +1072,47 @@ def test_engine_owned_config_requires_the_v1_schema():
 
     with pytest.raises(ValueError, match="v1 config schema"):
         engine_owned_factory(config)
+
+
+class TestRegistryIdentity:
+    """Only a registry load sets the id that makes a flow metadata-only."""
+
+    @pytest.mark.parametrize(
+        "config_id", ["./bl_security", "bl_security/", "x/../bl_security", ".", ".."]
+    )
+    def test_the_registry_rejects_a_flow_id_that_is_not_a_bare_name(self, config_id):
+        # Such an id could load bl_security under an id that is not in METADATA_ONLY_FLOWS.
+        request = RegistryFlowRequest(
+            config_id=config_id, schema_version="experimental", version="1.0.0"
+        )
+
+        with pytest.raises(ValueError, match="Failed to load flow"):
+            resolve_flow(request)
+
+    def test_the_registry_loads_bl_security_by_its_bare_id(self):
+        resolved = resolve_flow(
+            RegistryFlowRequest(
+                config_id="bl_security", schema_version="experimental", version="1.0.0"
+            )
+        )
+
+        assert resolved.factory.keywords["config"].config_id in METADATA_ONLY_FLOWS
+
+    @pytest.mark.parametrize("schema_version", ["experimental", "v1"])
+    def test_an_inline_config_has_no_registry_id(self, schema_version):
+        struct = struct_pb2.Struct()
+        struct.update(
+            {
+                "version": schema_version,
+                "environment": "ambient",
+                "name": "bl_security",
+                "config_id": "bl_security",
+                "components": [],
+                "routers": [],
+                "flow": {"entry_point": "a"},
+            }
+        )
+
+        factory = _load_flow_from_inline_config(struct, schema_version)
+
+        assert factory.keywords["config"].config_id is None

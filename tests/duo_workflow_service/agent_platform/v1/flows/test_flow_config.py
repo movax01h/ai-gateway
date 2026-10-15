@@ -569,6 +569,19 @@ class TestToConfig:
         assert config.flow is None
         assert config.routers is None
 
+    def test_the_registry_id_survives_completing_a_partial_config(self):
+        partial = PartialFlowConfig.from_yaml_config(
+            "duo_permissions_assistant", "1.0.0"
+        )
+        assert partial.environment == "chat-partial"
+
+        config = partial.to_config()
+
+        assert isinstance(config, FlowConfig)
+        assert not isinstance(config, PartialFlowConfig)
+        assert config.config_id == "duo_permissions_assistant"
+        assert config.config_version == "1.0.0"
+
 
 class TestLoadComponentClass:
     """Test load_component_class function with ComponentRegistry."""
