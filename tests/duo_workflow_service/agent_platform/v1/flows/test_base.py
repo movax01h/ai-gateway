@@ -1513,6 +1513,33 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         assert error_entry["message_id"].startswith("error-")
 
     @pytest.mark.asyncio
+    async def test_handle_workflow_failure_fails_pending_tool_cards(
+        self, flow_instance
+    ):
+        pending = {
+            "message_type": MessageTypeEnum.TOOL,
+            "message_id": "call-1",
+            "status": ToolStatus.PENDING,
+        }
+        done = {
+            "message_type": MessageTypeEnum.TOOL,
+            "message_id": "call-2",
+            "status": ToolStatus.SUCCESS,
+        }
+        notifier = MagicMock()
+        notifier.ui_chat_log = [pending, done]
+        flow_instance.checkpoint_notifier = notifier
+
+        graph = AsyncMock()
+
+        await flow_instance._handle_workflow_failure(RuntimeError("boom"), graph, {})
+
+        ui_chat_log = graph.aupdate_state.call_args[0][1]["ui_chat_log"].value
+        assert ui_chat_log[0] == {**pending, "status": ToolStatus.FAILURE}
+        assert ui_chat_log[1] == done
+        assert pending["status"] == ToolStatus.PENDING
+
+    @pytest.mark.asyncio
     async def test_handle_workflow_failure_does_not_leak_details(self, flow_instance):
         """Internal exception text must not appear in the UI log."""
         notifier = MagicMock()

@@ -7,6 +7,10 @@ from langchain_core.tools import BaseTool
 from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT,
+    ToolBlockedByAdministratorError,
+)
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -93,6 +97,7 @@ class ToolNode:
         session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
         identical_call_limit: int = 0,
         identical_call_max_wrap_up_retries: int = 3,
+        halt_on_denied_tool: bool = True,
     ):
         self.name = name
         self._toolset = toolset
@@ -103,6 +108,7 @@ class ToolNode:
         self._session_id_key = session_id_key
         self._identical_call_limit = identical_call_limit
         self._identical_call_max_wrap_up_retries = identical_call_max_wrap_up_retries
+        self._halt_on_denied_tool = halt_on_denied_tool
 
     async def run(self, state: FlowState) -> dict:
         history_iokey = self._conversation_history_key.to_iokey(state)
@@ -115,6 +121,21 @@ class ToolNode:
 
         last_message = conversation_history[-1]
         tool_calls = getattr(last_message, "tool_calls", [])
+
+        blocked_names = [
+            tool_call["name"]
+            for tool_call in tool_calls
+            if tool_call["name"] not in self._toolset
+            and tool_call["name"] in self._toolset.denied_tools
+        ]
+        if blocked_names:
+            for blocked_name in blocked_names:
+                self._tracker.track_tool_governance_event(
+                    event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
+                    tool_name=blocked_name,
+                )
+            if self._halt_on_denied_tool:
+                raise ToolBlockedByAdministratorError(blocked_names)
 
         # Identical-loop guard runs before the counters below so skipped calls are
         # not recorded as executed.
@@ -281,12 +302,11 @@ class ToolNode:
         tool_call_id = tool_call.get("id")
 
         if tool_name not in self._toolset:
-            if tool_name in self._toolset.denied_tools:
-                self._tracker.track_tool_governance_event(
-                    event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
-                    tool_name=tool_name,
-                )
-            response: str | list | dict = f"Tool {tool_name} not found"
+            response: str | list | dict = (
+                TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT.format(tool_name=tool_name)
+                if tool_name in self._toolset.denied_tools
+                else f"Tool {tool_name} not found"
+            )
         else:
             response = await self._execute_tool(
                 tool=self._toolset[tool_name],

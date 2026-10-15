@@ -6,7 +6,10 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 
-from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
+from duo_workflow_service.agent_platform.constants import (
+    INTERACTIVE_ENVIRONMENTS,
+    NODE_ROLE_SEPARATOR,
+)
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -692,6 +695,7 @@ class SupervisorAgentComponent(AgentComponentBase):
             session_id_key=DEFAULT_SESSION_ID_KEY,
             identical_call_limit=self.identical_tool_call_limit,
             identical_call_max_wrap_up_retries=self.max_wrap_up_retries,
+            halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",

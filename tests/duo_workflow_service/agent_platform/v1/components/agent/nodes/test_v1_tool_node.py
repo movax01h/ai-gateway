@@ -8,6 +8,10 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT,
+    ToolBlockedByAdministratorError,
+)
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -686,7 +690,7 @@ class TestToolNodeEventTracking:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_tool_call")
-    async def test_run_denied_tool_tracks_block_event(
+    async def test_run_denied_tool_tracks_block_event_and_halts(
         self,
         tool_node,
         flow_state_with_tool_calls,
@@ -696,11 +700,15 @@ class TestToolNodeEventTracking:
         flow_id,
         flow_type,
     ):
-        """A call to a tool stripped by governance deny rules tracks a block event."""
+        """A call to a tool stripped by governance deny rules tracks a block event and halts the flow."""
         mock_toolset.__contains__ = Mock(return_value=False)
         mock_toolset.denied_tools = {"test_tool"}
 
-        await tool_node.run(flow_state_with_tool_calls)
+        with pytest.raises(ToolBlockedByAdministratorError) as exc_info:
+            await tool_node.run(flow_state_with_tool_calls)
+
+        assert exc_info.value.tool_names == ["test_tool"]
+        mock_prompt_security.assert_not_called()
 
         mock_internal_event_client.track_event.assert_called_once_with(
             event_name=EventEnum.WORKFLOW_TOOL_BLOCKED.value,
@@ -712,9 +720,65 @@ class TestToolNodeEventTracking:
             ),
             category=flow_type.value,
         )
-        # Response text stays byte-identical
-        security_args = mock_prompt_security.call_args
-        assert security_args[1]["response"] == "Tool test_tool not found"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_call")
+    async def test_run_denied_tool_returns_blocked_result_when_not_halting(
+        self,
+        build_tool_node,
+        flow_state_with_tool_calls,
+        component_name,
+        mock_toolset,
+        mock_internal_event_client,
+        mock_prompt_security,
+    ):
+        tool_node = build_tool_node(halt_on_denied_tool=False)
+        mock_toolset.__contains__ = Mock(return_value=False)
+        mock_toolset.denied_tools = {"test_tool"}
+
+        result = await tool_node.run(flow_state_with_tool_calls)
+
+        assert component_name in result[FlowStateKeys.CONVERSATION_HISTORY]
+        assert mock_prompt_security.call_args.kwargs[
+            "response"
+        ] == TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT.format(tool_name="test_tool")
+        mock_internal_event_client.track_event.assert_called_once()
+        assert (
+            mock_internal_event_client.track_event.call_args[1]["event_name"]
+            == EventEnum.WORKFLOW_TOOL_BLOCKED.value
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_denied_tool_halts_before_sibling_calls_execute(
+        self,
+        tool_node,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+        mock_tool,
+        mock_internal_event_client,
+    ):
+        """A denied call in a batch halts the flow before any sibling call runs."""
+        mock_toolset.__contains__ = Mock(side_effect=lambda name: name == "test_tool")
+        mock_toolset.denied_tools = {"denied_tool"}
+        message = Mock(spec=AIMessage)
+        message.tool_calls = [
+            {"name": "test_tool", "args": {}, "id": "call_1"},
+            {"name": "denied_tool", "args": {}, "id": "call_2"},
+        ]
+        state = base_flow_state.copy()
+        state["conversation_history"] = {component_name: [message]}
+
+        with pytest.raises(ToolBlockedByAdministratorError) as exc_info:
+            await tool_node.run(state)
+
+        assert exc_info.value.tool_names == ["denied_tool"]
+        mock_tool.ainvoke.assert_not_called()
+        mock_internal_event_client.track_event.assert_called_once()
+        assert (
+            mock_internal_event_client.track_event.call_args[1]["event_name"]
+            == EventEnum.WORKFLOW_TOOL_BLOCKED.value
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_tool_call")
@@ -1947,19 +2011,11 @@ class TestToolNodeToolLoopTracking:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_tool_call")
-    @pytest.mark.parametrize(
-        "denied_tools",
-        [
-            pytest.param({"test_tool"}, id="stripped-by-deny-rules"),
-            pytest.param(set(), id="hallucinated-tool"),
-        ],
-    )
     async def test_ignores_calls_that_never_executed(
         self,
         tool_node,
         flow_state_with_tool_calls,
         mock_toolset,
-        denied_tools,
     ):
         """A call to a tool not in the toolset returns "not found" without running.
 
@@ -1967,7 +2023,7 @@ class TestToolNodeToolLoopTracking:
         orbit counters, which are also scoped to calls that actually ran.
         """
         mock_toolset.__contains__ = Mock(return_value=False)
-        mock_toolset.denied_tools = denied_tools
+        mock_toolset.denied_tools = set()
 
         await tool_node.run(flow_state_with_tool_calls)
 

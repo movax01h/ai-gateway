@@ -33,6 +33,7 @@ from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
 from duo_workflow_service.agent_platform.constants import (
     CHAT_PARTIAL_ENVIRONMENT,
+    INTERACTIVE_ENVIRONMENTS,
     NODE_ROLE_SEPARATOR,
 )
 from duo_workflow_service.agent_platform.utils.exceptions import (
@@ -676,6 +677,7 @@ class AgentComponentBase(BaseComponent):
             session_id_key=session_id_key,
             tracker=tracker,
             approval_requests_key=approval_requests_key,
+            halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
         )
 
         node_tool_approval_fetch = ToolApprovalFetchNode(
@@ -1153,6 +1155,7 @@ class AgentComponent(AgentComponentBase):
             session_id_key=self._session_id_key,
             identical_call_limit=self.identical_tool_call_limit,
             identical_call_max_wrap_up_retries=self.max_wrap_up_retries,
+            halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",

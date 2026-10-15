@@ -16,6 +16,8 @@ RECURSION_LIMIT = 600
 # ``AgentComponent`` fills the chat-surface defaults under it.
 CHAT_PARTIAL_ENVIRONMENT = "chat-partial"
 
+INTERACTIVE_ENVIRONMENTS = frozenset(("chat", CHAT_PARTIAL_ENVIRONMENT))
+
 # Registry flows that expose only the metadata of their runs: which steps and tools
 # ran, their status and timing. The live stream, audit events and tracing carry no
 # model or user text for them. Rails restricts its session read APIs for the same

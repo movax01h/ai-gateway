@@ -5,6 +5,10 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT,
+    ToolBlockedByAdministratorError,
+)
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -988,7 +992,7 @@ class TestToolApprovalRequestNodeTracking:
         mock_tracker.track_tool_governance_event.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_invalid_denied_tool_tracks_block_event(
+    async def test_invalid_denied_tool_tracks_block_event_and_halts(
         self,
         tracking_node,
         base_flow_state,
@@ -1008,15 +1012,99 @@ class TestToolApprovalRequestNodeTracking:
         state = base_flow_state.copy()
         state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
 
-        result = await tracking_node.run(state)
+        with pytest.raises(ToolBlockedByAdministratorError) as exc_info:
+            await tracking_node.run(state)
 
-        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+        assert exc_info.value.ui_message == ToolBlockedByAdministratorError.UI_MESSAGE
+        assert exc_info.value.tool_names == ["denied_tool"]
+        assert "rm" not in exc_info.value.internal_detail
         mock_tracker.track_tool_governance_event.assert_called_once_with(
             event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
             tool_name="denied_tool",
         )
         # Privacy: tool arguments must never appear in the tracking calls
         assert "rm" not in str(mock_tracker.track_tool_governance_event.call_args_list)
+
+    @pytest.mark.asyncio
+    async def test_invalid_denied_tool_returns_blocked_result_when_not_halting(
+        self,
+        conversation_history_key,
+        status_key,
+        approval_requests_key,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+        ui_history,
+        mock_tracker,
+    ):
+        node = ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=mock_toolset,
+            pre_approved_tools=[],
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=ui_history,
+            tracker=mock_tracker,
+            approval_requests_key=approval_requests_key,
+            halt_on_denied_tool=False,
+        )
+        denied_call = {"id": "call_1", "name": "denied_tool", "args": {}}
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [denied_call]
+        mock_toolset.denied_tools = {"denied_tool"}
+        mock_toolset.validate_tool_call.side_effect = MalformedToolCallError(
+            "Tool: 'denied_tool' not found", tool_call=denied_call
+        )
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        result = await node.run(state)
+
+        messages = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
+        assert messages[-1].content == TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT.format(
+            tool_name="denied_tool"
+        )
+        mock_tracker.track_tool_governance_event.assert_called_once_with(
+            event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
+            tool_name="denied_tool",
+        )
+
+    @pytest.mark.asyncio
+    async def test_denied_tool_halts_batch_mixed_with_unknown_tool(
+        self,
+        tracking_node,
+        base_flow_state,
+        component_name,
+        mock_toolset,
+        mock_tracker,
+    ):
+        """A denied call halts the flow even when the batch also holds a hallucinated call."""
+        denied_call = {"id": "call_1", "name": "denied_tool", "args": {}}
+        unknown_call = {"id": "call_2", "name": "unknown_tool", "args": {}}
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [denied_call, unknown_call]
+        mock_toolset.denied_tools = {"denied_tool"}
+
+        def _reject(call):
+            raise MalformedToolCallError(
+                f"Tool: '{call['name']}' not found", tool_call=call
+            )
+
+        mock_toolset.validate_tool_call.side_effect = _reject
+
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        with pytest.raises(ToolBlockedByAdministratorError) as exc_info:
+            await tracking_node.run(state)
+
+        assert exc_info.value.tool_names == ["denied_tool"]
+        mock_tracker.track_tool_governance_event.assert_called_once_with(
+            event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
+            tool_name="denied_tool",
+        )
 
     @pytest.mark.asyncio
     async def test_invalid_non_denied_tool_does_not_track_block_event(
