@@ -480,6 +480,7 @@ class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
     _ask_tool_names: set[str]
+    _policy_permitted_preapprovals: Optional[set[str]]
     _mcp_tool_names: list[str]
 
     @classmethod
@@ -496,6 +497,7 @@ class ToolsRegistry:
         ask_tools: Optional[list[str]] = None,
         allow_client_injected_mcp_tools: bool = False,
         allowed_tools: Optional[list[str]] = None,
+        admin_allowed_preapprovals: Optional[set[str]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -529,6 +531,7 @@ class ToolsRegistry:
             ask_tools=ask_tools or [],
             allow_client_injected_mcp_tools=allow_client_injected_mcp_tools,
             allowed_tools=allowed_tools or [],
+            admin_allowed_preapprovals=admin_allowed_preapprovals,
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
         )
@@ -546,6 +549,7 @@ class ToolsRegistry:
         ask_tools: Optional[list[str]] = None,
         allow_client_injected_mcp_tools: bool = False,
         allowed_tools: Optional[list[str]] = None,
+        admin_allowed_preapprovals: Optional[set[str]] = None,
     ):
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
 
@@ -566,7 +570,9 @@ class ToolsRegistry:
             **{tool.name: tool for tool in [tool_cls() for tool_cls in _DEFAULT_TOOLS]},
         }
 
-        self._preapproved_tool_names = set(self._enabled_tools.keys())
+        # Not privilege-derived, so the governance ceiling never strips them.
+        baseline_preapproved = set(self._enabled_tools.keys())
+        self._preapproved_tool_names = set(baseline_preapproved)
         self._denied_tools: set[str] = set(denied_tools or [])
         self._ask_tool_names: set[str] = set(ask_tools or [])
         self._mcp_tool_names = [tool["llm_name"] for tool in registered_mcp_tools]
@@ -650,13 +656,17 @@ class ToolsRegistry:
             # by itself.
             if tool_cls in _PREAPPROVED_CAPABILITY_TOOLS:
                 self._preapproved_tool_names.add(tool_name)
+                baseline_preapproved.add(tool_name)
 
         if allow_client_injected_mcp_tools:
-            self._preapproved_tool_names.update(
+            client_injected = {
                 name
                 for name, tool in self._enabled_tools.items()
                 if getattr(tool, "_client_injected", False)
-            )
+            }
+            self._preapproved_tool_names.update(client_injected)
+            # A client names its own MCP tools, so no admin allow list can rule on them.
+            baseline_preapproved.update(client_injected)
 
         # Per-tool admin `allow` rules pre-approve a tool even when its privilege group
         # is not pre-approved as a whole (a mixed group). Scoped to enabled tools so an
@@ -670,10 +680,41 @@ class ToolsRegistry:
             and not getattr(self._enabled_tools[name], "_client_injected", False)
         }
 
+        # The workflow row is writable by the session owner, so the pre-approvals derived
+        # from it are capped at what admin policy allows. `None` means the ceiling is off.
+        # An allowed name only admits a GitLab-origin tool, matching the union above.
+        if admin_allowed_preapprovals is None:
+            self._policy_permitted_preapprovals = None
+        else:
+            self._policy_permitted_preapprovals = {
+                name
+                for name in admin_allowed_preapprovals
+                if not getattr(self._enabled_tools.get(name), "_client_injected", False)
+            } | baseline_preapproved
+        removed = self._preapproved_tool_names - self.pre_approvals_allowed_by_policy(
+            self._preapproved_tool_names
+        )
+        if removed:
+            log.info(
+                "Removed tools from pre-approval: not permitted by admin policy",
+                workflow_id=workflow_id,
+                tool_names=sorted(removed),
+            )
+        self._preapproved_tool_names -= removed
+
         # Applied last so it outranks every pre-approval source above. Only binds where
         # a user can be prompted: headless sessions arrive with `ask_tools` already
         # emptied upstream, so an ask rule cannot force a prompt there.
         self._preapproved_tool_names -= self._ask_tool_names
+
+    def pre_approvals_allowed_by_policy(self, tool_names: Iterable[str]) -> set[str]:
+        """Reduce a pre-approval list, such as a flow config's, to what admin policy permits.
+
+        Returns the names unchanged when the ceiling is off for this session.
+        """
+        names = set(tool_names)
+        permitted = self._policy_permitted_preapprovals
+        return names if permitted is None else names & permitted
 
     def ask_listed_tool_names(self, tool_names: Iterable[str]) -> set[str]:
         """Return the subset of ``tool_names`` an admin `ask` rule forces to prompt."""
