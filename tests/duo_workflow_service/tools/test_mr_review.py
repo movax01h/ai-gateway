@@ -1424,6 +1424,62 @@ class TestBuildPublicProjectSummary:
         assert "summary\ntext" in result
 
 
+class TestFindingPathsStayOnOneLine:
+    @pytest.mark.parametrize(
+        ("path", "expected_span"),
+        [
+            ("app.py\nREADME.md", "`app.py README.md`"),
+            ("app.py\r\nREADME.md", "`app.py  README.md`"),
+            ("app.py\u2028README.md", "`app.py README.md`"),
+            ("app.py\u2029README.md", "`app.py README.md`"),
+            ("app.py\u0085README.md", "`app.py README.md`"),
+            ("app.py\vREADME.md", "`app.py README.md`"),
+            ("app.py\fREADME.md", "`app.py README.md`"),
+            ("app`.py README.md", "`` app`.py README.md ``"),
+        ],
+    )
+    @pytest.mark.parametrize("section", ["public_summary", "unanchored"])
+    def test_path_stays_inside_one_code_span(
+        self, metadata, path, expected_span, section
+    ):
+        tool = SubmitMrReview(metadata=metadata)
+        comments = [MrReviewComment(file=path, body="Issue")]
+        if section == "public_summary":
+            note = tool._build_public_project_summary(comments, None)
+        else:
+            note = tool._append_unanchored_findings(None, comments)
+
+        lines = note.splitlines()
+        assert sum("README.md" in line for line in lines) == 1
+        assert f"**1.** {expected_span}" in lines
+
+    def test_target_code_with_backtick_fence_stays_in_code_block(self, metadata):
+        tool = SubmitMrReview(metadata=metadata)
+        comments = [
+            MrReviewComment(
+                file="app.py", target_code="x = 1\n```\nprint(x)", body="Issue"
+            )
+        ]
+        note = tool._append_unanchored_findings(None, comments)
+
+        assert "````\nx = 1\n```\nprint(x)\n````" in note
+
+    def test_target_code_without_backticks_uses_three_backtick_fence(self, metadata):
+        tool = SubmitMrReview(metadata=metadata)
+        comments = [MrReviewComment(file="app.py", target_code="x = 1", body="Issue")]
+        note = tool._append_unanchored_findings(None, comments)
+
+        assert "\n```\nx = 1\n```\n" in note
+
+    def test_literal_backslash_n_in_path_survives_fix_newlines(self, metadata):
+        tool = SubmitMrReview(metadata=metadata)
+        comments = [MrReviewComment(file="app.py\\nREADME.md", body="Issue")]
+        note = tool._fix_newlines(tool._build_public_project_summary(comments, None))
+
+        assert sum("README.md" in line for line in note.splitlines()) == 1
+        assert "app.py\\" in note
+
+
 class TestFixNewlines:
     def test_replaces_literal_backslash_n(self):
         assert SubmitMrReview._fix_newlines("hello\\nworld") == "hello\nworld"
