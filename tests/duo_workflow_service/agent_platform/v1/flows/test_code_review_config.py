@@ -80,3 +80,21 @@ def test_3_0_0_reads_the_merge_request_from_the_resource_context():
         "context:inputs.agent_platform_resource_context.merge_request_id"
     }
     assert not category.input_schema["merge_request_id"].optional
+
+
+def test_4_0_0_publishes_schema_validated_findings():
+    config = FlowConfig.from_yaml_config(FLOW, "4.0.0")
+    components = {c["name"]: c for c in config.components}
+    review, publish = components["review"], components["publish_review"]
+    publish_inputs = {i["as"]: i for i in publish["inputs"]}
+    review_inputs = {i["as"]: i for i in review["inputs"]}
+
+    assert review["prompt_version"] == "^3.0.0"
+    assert review["response_schema_id"] == "code_review_findings"
+    assert review["toolset"] == []
+    assert publish["tool_name"] == "post_duo_code_review_findings"
+    assert not publish_inputs["findings"].get("optional", False)
+    assert (
+        publish_inputs["min_confidence"]["from"]
+        == review_inputs["min_confidence"]["from"]
+    )
