@@ -174,6 +174,8 @@ FLOW_CONFIG_SCHEMA_VERSION_CLAIM = "flow_config_schema_version"
 RESTRICTED_FLOW_VERIFIED_CLAIM = "restricted_flow_verified"
 FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
 WORKFLOW_ID_CLAIM = "workflow_id"
+# Rails sets this on every token it self-signs for DWS, so with no workflow_id the token is unbound.
+BINDS_WORKFLOW_CLAIM = "binds_workflow"
 SAAS_REALM = "saas"
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
 # these may mint workflow tokens for a flow that restricted models are restricted to,
@@ -183,6 +185,7 @@ RESTRICTED_FLOW_INSTANCE_UIDS_ENV = "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
+    BINDS_WORKFLOW_CLAIM,
     "tool_access_policies",
     "gitlab_root_namespace_id",
 }
@@ -651,22 +654,25 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     "Workflow token is not authorized for the supplied flow config",
                 )
 
-        if (
-            not user.is_debug
-            and claims_extra is not None
-            and WORKFLOW_ID_CLAIM in claims_extra
-        ):
-            if not _workflow_binding_matches(
-                claims_extra[WORKFLOW_ID_CLAIM], start_req.workflowID
-            ):
-                log.warning(
-                    "Workflow token bound to a different workflow",
-                    bound_workflow_id=str(claims_extra[WORKFLOW_ID_CLAIM]),
+        if not user.is_debug and claims_extra is not None:
+            if WORKFLOW_ID_CLAIM in claims_extra:
+                if not _workflow_binding_matches(
+                    claims_extra[WORKFLOW_ID_CLAIM], start_req.workflowID
+                ):
+                    log.warning(
+                        "Workflow token bound to a different workflow",
+                        bound_workflow_id=str(claims_extra[WORKFLOW_ID_CLAIM]),
+                        requested_workflow_id=start_req.workflowID[:64],
+                    )
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        "Workflow token is not authorized for the requested workflow",
+                    )
+            elif claims_extra.get(BINDS_WORKFLOW_CLAIM) is True:
+                log.info(
+                    "Workflow token without a workflow binding",
+                    token_issuer=user.claims.issuer if user.claims else None,
                     requested_workflow_id=start_req.workflowID[:64],
-                )
-                await context.abort(
-                    grpc.StatusCode.PERMISSION_DENIED,
-                    "Workflow token is not authorized for the requested workflow",
                 )
 
         workflow_definition = map_workflow_definition(
