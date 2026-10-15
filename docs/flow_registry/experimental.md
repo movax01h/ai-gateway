@@ -714,6 +714,7 @@ sibling is about to hit the same thing, so they propagate and fail the flow with
 | `NotifiableAgentException`, `NotifiableException` | Both carry a message meant for the user, which an error record buries. |
 | `SecurityException` | Prompt injection and its relatives. The result must never reach a model again. |
 | `InsufficientCredits`, `UsageQuotaError` | Out of credits or entitlements, or the quota check is unavailable. Every sibling fails the same way. |
+| `CheckpointAccessDeniedError` | GitLab refused a checkpoint with 401 or 403: the session lost access, for example because GitLab Duo was turned off. No sibling can save its work either. |
 
 ##### Every item failing is a bug, not a result
 

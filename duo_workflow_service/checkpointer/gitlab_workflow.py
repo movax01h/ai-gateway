@@ -69,6 +69,7 @@ from duo_workflow_service.checkpointer.utils.serializer import CheckpointSeriali
 from duo_workflow_service.checkpointer.write_mode import write_incremental_only
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
+    CheckpointAccessDeniedError,
     CheckpointFetchError,
     CheckpointSaveError,
     InvalidRequestException,
@@ -128,6 +129,10 @@ _logger = structlog.stdlib.get_logger("workflow_checkpointer")
 # checkpoint we sent: an expired token, a blocked account, or a workflow that no longer exists. Any other failure,
 # for example a 400 for content Postgres cannot store or a 5xx, points at our payload or at GitLab and stays an error.
 CHECKPOINT_SAVE_EXPECTED_FAILURE_STATUSES = frozenset({401, 403, 404})
+
+# Checkpoint save responses meaning the session has no access any more. Unlike a 5xx, no later save can succeed,
+# so the flow stops instead of spending model calls whose results cannot be saved.
+CHECKPOINT_SAVE_ACCESS_DENIED_STATUSES = frozenset({401, 403})
 
 # Substring of the ToolException raised when Workhorse aborts a `runHTTPRequest`
 # action because the upstream Rails response didn't fit within a single gRPC
@@ -1953,7 +1958,12 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 status_code=response.status_code,
                 response_body=response.body,
             )
-            raise CheckpointSaveError(f"Failed to save checkpoint: {response.body}")
+            error_class = (
+                CheckpointAccessDeniedError
+                if response.status_code in CHECKPOINT_SAVE_ACCESS_DENIED_STATUSES
+                else CheckpointSaveError
+            )
+            raise error_class(f"Failed to save checkpoint: {response.body}")
 
         if incremental_enabled:
             # Advance the delta bookkeeping only for a checkpoint the server

@@ -64,14 +64,14 @@ from lib.verbose_ai_logs import extended_logging_context
 # Concrete implementation for testing
 class MockGraph:
     async def astream(  # pylint: disable=unused-argument  # astream() signature
-        self, input, config, stream_mode
+        self, input, config, stream_mode, durability=None
     ):
         yield "updates", {"step1": {"key": "value"}}
 
 
 class MockGraphWithUiChatLog:
     async def astream(  # pylint: disable=unused-argument  # astream() signature
-        self, input, config, stream_mode
+        self, input, config, stream_mode, durability=None
     ):
         yield (
             "values",
@@ -110,12 +110,14 @@ class ConfigCapturingGraph:
     def __init__(self):
         self.captured_input: Any = "UNSET"
         self.captured_config: Any = None
+        self.captured_durability: Any = "UNSET"
 
     async def astream(  # pylint: disable=unused-argument  # astream() signature
-        self, input, config, stream_mode
+        self, input, config, stream_mode, durability=None
     ):
         self.captured_input = input
         self.captured_config = config
+        self.captured_durability = durability
         yield "updates", {"step1": {"key": "value"}}
 
 
@@ -1862,7 +1864,7 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
 
     class MockGraphWithMessages:
         async def astream(  # pylint: disable=unused-argument  # astream() signature
-            self, input, config, stream_mode
+            self, input, config, stream_mode, durability=None
         ):
             yield "updates", {"step1": {"key": "value"}}
             yield "values", {"status": "running", "ui_chat_log": []}
@@ -1935,7 +1937,7 @@ async def test_compile_and_run_graph_returns_none_when_no_ui_chat_log(
 
     class MockGraphWithEmptyUiChatLog:
         async def astream(  # pylint: disable=unused-argument  # astream() signature
-            self, input, config, stream_mode
+            self, input, config, stream_mode, durability=None
         ):
             yield "values", {"status": WorkflowStatusEnum.COMPLETED, "ui_chat_log": []}
 
@@ -1978,7 +1980,7 @@ async def test_compile_and_run_graph_notifiable_exception_handling(
 
     class MockGraphWithNotifiableException:
         async def astream(  # pylint: disable=unused-argument  # astream() signature
-            self, input, config, stream_mode
+            self, input, config, stream_mode, durability=None
         ):
             yield "updates", {"step1": {"key": "value"}}
             raise NotifiableException(
@@ -2090,7 +2092,7 @@ async def test_compile_and_run_graph_notifiable_agent_exception_handling(
 
     class MockGraphWithNotifiableAgentException:
         async def astream(  # pylint: disable=unused-argument  # astream() signature
-            self, input, config, stream_mode
+            self, input, config, stream_mode, durability=None
         ):
             yield "updates", {"step1": {"key": "value"}}
             raise NotifiableAgentException(
@@ -2376,6 +2378,44 @@ async def test_compile_and_run_graph_pins_graph_config_on_stop_recovery(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    ("registry_flow_id", "expected_durability"),
+    [
+        ("bl_security", "sync"),
+        ("developer", None),
+        (None, None),
+    ],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_checkpoint_durability(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    registry_flow_id,
+    expected_durability,
+    user,
+):
+    """bl_security saves each checkpoint before the next step; other flows keep LangGraph's default."""
+    mock_tools_registry.return_value = MagicMock()
+    _checkpointer(mock_gitlab_workflow)
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._registry_flow_id = MagicMock(return_value=registry_flow_id)
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+
+    await workflow._compile_and_run_graph("goal")
+
+    assert graph.captured_durability == expected_durability
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_dispatches_polymorphically(
@@ -2528,7 +2568,7 @@ async def test_compile_and_run_graph_hands_the_resolved_config_to_the_failure_ha
 
     class FailingGraph:
         async def astream(  # pylint: disable=unused-argument  # astream() signature
-            self, input, config, stream_mode
+            self, input, config, stream_mode, durability=None
         ):
             yield "updates", {"step1": {"key": "value"}}
             raise RuntimeError("graph failed")
