@@ -9,6 +9,7 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 )
 from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
+    CheckpointAccessDeniedError,
     InvalidRequestException,
     NotifiableException,
 )
@@ -48,6 +49,9 @@ TERMINAL_EXCEPTIONS: tuple[type[Exception], ...] = (
     # Out of credits/entitlements, or the quota check itself is unavailable.
     InsufficientCredits,
     UsageQuotaError,
+    # GitLab refused a checkpoint with 401/403: the session lost access, for
+    # example GitLab Duo was turned off, and every sibling's save fails too.
+    CheckpointAccessDeniedError,
 )
 
 

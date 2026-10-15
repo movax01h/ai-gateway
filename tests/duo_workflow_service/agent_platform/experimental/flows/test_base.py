@@ -957,6 +957,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         assert flow._registry_flow_id() == "bl_security"
         assert flow._is_metadata_only() is True
+        assert flow._checkpoint_durability() == "sync"
         for cls in (user_interface, audit_collector):
             assert cls.call_args.kwargs["metadata_only"] is True
         assert "metadata_only" not in gitlab_workflow.call_args.kwargs
@@ -993,6 +994,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         assert flow._registry_flow_id() is None
         assert flow._is_metadata_only() is False
+        assert flow._checkpoint_durability() is None
         for cls in (user_interface, audit_collector):
             assert cls.call_args.kwargs["metadata_only"] is False
 

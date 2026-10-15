@@ -55,6 +55,8 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.errors.typing import (
+    CheckpointAccessDeniedError,
+    CheckpointSaveError,
     InvalidRequestException,
     NotifiableException,
 )
@@ -530,6 +532,9 @@ def terminal_cases() -> dict[type[Exception], Exception]:
         SecurityException: SecurityException("prompt injection in a tool result"),
         InsufficientCredits: InsufficientCredits(),
         UsageQuotaError: UsageQuotaError("quota check unavailable"),
+        CheckpointAccessDeniedError: CheckpointAccessDeniedError(
+            "Failed to save checkpoint: {'message': '403 Forbidden'}"
+        ),
     }
 
 
@@ -1269,6 +1274,14 @@ class TestWhatStaysUncontained:
         )
 
         assert error_record(result, 1)["type"] == "RuntimeError"
+
+    def test_a_checkpoint_save_failure_without_access_loss_is_contained(self, identity):
+        result = run_fan_out(
+            failing(identity, {"b": CheckpointSaveError("500 Internal Server Error")}),
+            ["a", "b", "c"],
+        )
+
+        assert error_record(result, 1)["type"] == "CheckpointSaveError"
 
 
 class TestTheAllFailedGuard:

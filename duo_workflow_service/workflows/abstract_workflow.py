@@ -26,7 +26,7 @@ from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchai
 from langgraph.errors import (  # pylint: disable=no-langgraph-langchain-imports
     GraphRecursionError,
 )
-from langgraph.types import Command
+from langgraph.types import Command, Durability
 from langsmith import traceable, tracing_context
 from pydantic import BaseModel, ConfigDict
 
@@ -37,6 +37,7 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import (
     METADATA_ONLY_FLOWS,
     RECURSION_LIMIT,
+    SYNC_CHECKPOINT_FLOWS,
 )
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
@@ -384,6 +385,14 @@ class AbstractWorkflow(ABC):
         """Whether the session exposes only run metadata: no model or user text in the live stream or audit events."""
         return self._registry_flow_id() in METADATA_ONLY_FLOWS
 
+    def _checkpoint_durability(self) -> Optional[Durability]:
+        """When LangGraph saves each step's checkpoint; ``None`` keeps its default asynchronous saves.
+
+        ``"sync"`` waits for each save before the next step starts, so a checkpoint GitLab refuses stops the run at the
+        next step instead of when the graph exits. Subgraphs inherit the mode.
+        """
+        return "sync" if self._registry_flow_id() in SYNC_CHECKPOINT_FLOWS else None
+
     async def _tag_langsmith_hard_limit(self) -> None:
         """Attach a LangSmith tag and metadata to the current trace when the hard recursion limit is hit.
 
@@ -720,6 +729,7 @@ class AbstractWorkflow(ABC):
                     input=invocation.graph_input,
                     config=graph_config,
                     stream_mode=["values", "messages", "updates"],
+                    durability=self._checkpoint_durability(),
                 ):
                     if type == "values":
                         self._record_first_response_metric()

@@ -39,6 +39,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
+    CheckpointAccessDeniedError,
     CheckpointFetchError,
     CheckpointSaveError,
     InvalidRequestException,
@@ -5004,6 +5005,38 @@ async def test_aput_failed_post_log_level(
     assert len(failure_logs) == 1
     assert failure_logs[0]["log_level"] == expected_level
     assert failure_logs[0]["status_code"] == status_code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,access_denied",
+    [(401, True), (403, True), (404, False), (429, False), (500, False), (503, False)],
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_failed_post_access_denied_only_on_401_and_403(
+    _mock_duo_workflow_metrics,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    status_code,
+    access_denied,
+):
+    """Only a lost-access refusal raises CheckpointAccessDeniedError, which ends a fan-out; anything else may be
+    transient and stays a plain CheckpointSaveError."""
+    http_client.apost.return_value = GitLabHttpResponse(
+        status_code=status_code, body={"message": f"{status_code}"}
+    )
+
+    with pytest.raises(CheckpointSaveError) as raised:
+        await gitlab_workflow.aput(
+            {"configurable": {"checkpoint_id": None}},
+            checkpoint_data[0]["checkpoint"],
+            checkpoint_metadata,
+            ChannelVersions(),
+        )
+
+    assert isinstance(raised.value, CheckpointAccessDeniedError) is access_denied
 
 
 @pytest.mark.asyncio
