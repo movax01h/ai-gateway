@@ -202,14 +202,16 @@ class ScheduleNotification(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., condition: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
 
 class TrackLlmCallForSelfHosted(_message.Message):
-    __slots__ = ("workflowID", "featureQualifiedName", "featureAiCatalogItem")
+    __slots__ = ("workflowID", "featureQualifiedName", "featureAiCatalogItem", "sourceType")
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     FEATUREQUALIFIEDNAME_FIELD_NUMBER: _ClassVar[int]
     FEATUREAICATALOGITEM_FIELD_NUMBER: _ClassVar[int]
+    SOURCETYPE_FIELD_NUMBER: _ClassVar[int]
     workflowID: str
     featureQualifiedName: str
     featureAiCatalogItem: bool
-    def __init__(self, workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ...) -> None: ...
+    sourceType: str
+    def __init__(self, workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ..., sourceType: _Optional[str] = ...) -> None: ...
 
 class RunShellCommand(_message.Message):
     __slots__ = ("command", "timeout")
@@ -566,16 +568,18 @@ class ShellInformationContext(_message.Message):
     def __init__(self, shell_name: _Optional[str] = ..., shell_type: _Optional[str] = ..., shell_variant: _Optional[str] = ..., shell_environment: _Optional[str] = ..., ssh_session: bool = ..., cwd: _Optional[str] = ...) -> None: ...
 
 class TrackSelfHostedClientEvent(_message.Message):
-    __slots__ = ("requestID", "workflowID", "featureQualifiedName", "featureAiCatalogItem")
+    __slots__ = ("requestID", "workflowID", "featureQualifiedName", "featureAiCatalogItem", "sourceType")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     FEATUREQUALIFIEDNAME_FIELD_NUMBER: _ClassVar[int]
     FEATUREAICATALOGITEM_FIELD_NUMBER: _ClassVar[int]
+    SOURCETYPE_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     workflowID: str
     featureQualifiedName: str
     featureAiCatalogItem: bool
-    def __init__(self, requestID: _Optional[str] = ..., workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ...) -> None: ...
+    sourceType: str
+    def __init__(self, requestID: _Optional[str] = ..., workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ..., sourceType: _Optional[str] = ...) -> None: ...
 
 class TrackSelfHostedAction(_message.Message):
     __slots__ = ("requestID",)

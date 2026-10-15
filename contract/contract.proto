@@ -272,6 +272,8 @@ message TrackLlmCallForSelfHosted {
     string featureQualifiedName = 2;
     // featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
     bool featureAiCatalogItem = 3;
+    // sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown.
+    string sourceType = 4;
 }
 
 // RunShellCommand requests execution of a raw shell command string.
@@ -678,6 +680,8 @@ message TrackSelfHostedClientEvent {
     string featureQualifiedName = 3;
     // featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
     bool featureAiCatalogItem = 4;
+    // sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown.
+    string sourceType = 5;
 }
 
 // TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event.
