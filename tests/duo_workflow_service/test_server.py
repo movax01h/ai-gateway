@@ -101,6 +101,7 @@ from duo_workflow_service.server import (
 )
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     BadStatusEvent,
+    CreatedWorkflowHasCheckpoints,
     ForbiddenStatusEvent,
     UnsupportedStatusEvent,
 )
@@ -1299,6 +1300,22 @@ def _cyclic_error() -> BaseException:
             "Invalid workflow ID:",
         ),
         (
+            CreatedWorkflowHasCheckpoints(
+                {"threadTs": "some-ts", "compressedCheckpoint": "eJyVVFFv"}
+            ),
+            False,
+            None,
+            grpc.StatusCode.FAILED_PRECONDITION,
+            "Workflow with status 'created' should not have existing checkpoints",
+        ),
+        (
+            UnsupportedStatusEvent("some other unsupported status event"),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: UnsupportedStatusEvent:",
+        ),
+        (
             _make_notifiable_with_envelope_cause(
                 "Envelope 'agent_platform_standard_context' version '2.0.0' "
                 "does not satisfy the required constraint '^1.0.0'."
@@ -1436,6 +1453,8 @@ async def test_execute_workflow_status_codes(
     mock_context.set_code.assert_called_once_with(expected_status)
     actual_detail = mock_context.set_details.call_args[0][0]
     assert actual_detail.startswith(expected_detail_prefix)
+    # Checkpoint content can carry conversation content and must never reach the details.
+    assert "compressedCheckpoint" not in actual_detail
 
 
 @pytest.mark.asyncio
