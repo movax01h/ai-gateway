@@ -334,6 +334,23 @@ class UnitPrimitiveConfig(BaseModel):
             return weights  # type: ignore[return-value]
         return None
 
+    @property
+    def allowed_model_identifiers(self) -> frozenset[str]:
+        """Return every model identifier the feature may serve: its default, selectable, beta, dev and tag models."""
+        return frozenset(
+            chain(
+                self.default_model_identifiers,
+                self.selectable_models,
+                self.beta_models,
+                self.dev.selectable_models if self.dev else [],
+                (
+                    model_id
+                    for entry in self.models_for_tags.values()
+                    for model_id in entry.models
+                ),
+            )
+        )
+
 
 class ModelSelectionConfig:
     _instance: Optional["ModelSelectionConfig"] = None
@@ -881,19 +898,7 @@ class ModelSelectionConfig:
         config = self.get_resolved_unit_primitive_config_map().get(feature_setting_name)
         if config is None:
             raise ValueError(f"Invalid feature setting: {feature_setting_name}")
-        return frozenset(
-            chain(
-                config.default_model_identifiers,
-                config.selectable_models,
-                config.beta_models,
-                config.dev.selectable_models if config.dev else [],
-                (
-                    model_id
-                    for entry in config.models_for_tags.values()
-                    for model_id in entry.models
-                ),
-            )
-        )
+        return config.allowed_model_identifiers
 
     def resolve_tag_for_goal(
         self, feature_setting_name: str, goal: str

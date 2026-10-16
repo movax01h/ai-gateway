@@ -9,6 +9,7 @@ __all__ = [
     "FeatureSettingRequiredError",
     "ModelNotAllowedForFeatureError",
     "ModelSelectionError",
+    "ProviderNotServedError",
 ]
 
 
@@ -35,3 +36,13 @@ class FeatureSettingRequiredError(ModelSelectionError):
             f"feature_setting is required to request model '{gitlab_identifier}'"
         )
         self.gitlab_identifier = gitlab_identifier
+
+
+class ProviderNotServedError(ModelSelectionError):
+    """The request names a provider that a gateway without custom models does not serve."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"This gateway does not serve models from provider '{provider}'"
+        )
+        self.provider = provider

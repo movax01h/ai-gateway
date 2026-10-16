@@ -11,8 +11,8 @@ from structlog.testing import capture_logs
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models import ModelMetadata
 from ai_gateway.models.base import (
-    _TRUSTED_PROVIDERS,
     ANTHROPIC_FACILITATOR_KEY_HEADER,
+    SERVER_KEYED_PROVIDERS,
     KindModelProvider,
     _warn_facilitator_key_missing,
     anthropic_facilitator_headers,
@@ -262,7 +262,7 @@ class TestValidateCustomEndpoint:
             allowed_api_bases=allowed,
         )
 
-    @pytest.mark.parametrize("provider", sorted(_TRUSTED_PROVIDERS))
+    @pytest.mark.parametrize("provider", sorted(SERVER_KEYED_PROVIDERS))
     @pytest.mark.parametrize("api_key", [None, "custom-key"])
     def test_raises_for_non_allowlisted_api_base_with_trusted_provider(
         self, provider, api_key
@@ -278,7 +278,7 @@ class TestValidateCustomEndpoint:
                 custom_llm_provider=provider,
             )
 
-    @pytest.mark.parametrize("provider", sorted(_TRUSTED_PROVIDERS))
+    @pytest.mark.parametrize("provider", sorted(SERVER_KEYED_PROVIDERS))
     def test_allows_trusted_provider_key_without_api_base(self, provider):
         # Managed Mistral: server-injected provider key, no endpoint.
         validate_custom_endpoint(
@@ -297,7 +297,7 @@ class TestValidateCustomEndpoint:
                 custom_llm_provider="custom_openai",
             )
 
-    @pytest.mark.parametrize("provider", sorted(_TRUSTED_PROVIDERS))
+    @pytest.mark.parametrize("provider", sorted(SERVER_KEYED_PROVIDERS))
     @pytest.mark.parametrize("api_base", ["https://allowed.example.com/", None])
     def test_allows_trusted_provider_on_allowlisted_endpoint(self, provider, api_base):
         # Managed Fireworks: endpoint comes from operator config, which the container

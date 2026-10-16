@@ -25,6 +25,7 @@ config = Config()
 
 __all__ = [
     "ANTHROPIC_FACILITATOR_KEY_HEADER",
+    "SERVER_KEYED_PROVIDERS",
     "KindModelProvider",
     "ModelAPICallError",
     "ModelAPIError",
@@ -40,7 +41,9 @@ __all__ = [
 log = structlog.stdlib.get_logger("models")
 request_log = get_request_logger("models")
 
-_TRUSTED_PROVIDERS = frozenset({"fireworks_ai", "mistral"})
+# GitLab-managed providers whose metadata builders take the model identifier from the model
+# definition and get the provider key that the server injects.
+SERVER_KEYED_PROVIDERS = frozenset({"fireworks_ai", "mistral"})
 
 
 def validate_custom_endpoint(
@@ -56,7 +59,7 @@ def validate_custom_endpoint(
     env vars) are accepted. URLs are compared after stripping trailing slashes so that semantically equivalent bases are
     not rejected due to formatting differences.
 
-    A provider in _TRUSTED_PROVIDERS waives the api_key check only, because those models carry a server-injected
+    A provider in SERVER_KEYED_PROVIDERS waives the api_key check only, because those models carry a server-injected
     provider key. api_base is checked against allowed_api_bases for every provider, trusted or not.
     """
     if custom_models_enabled:
@@ -73,7 +76,7 @@ def validate_custom_endpoint(
     if (
         api_key is not None
         and not allowlisted
-        and custom_llm_provider not in _TRUSTED_PROVIDERS
+        and custom_llm_provider not in SERVER_KEYED_PROVIDERS
     ):
         raise ValueError(
             "specifying custom models endpoint is disabled: api_key is not allowed"

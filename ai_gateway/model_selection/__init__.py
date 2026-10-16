@@ -2,6 +2,7 @@ from .errors import (
     FeatureSettingRequiredError,
     ModelNotAllowedForFeatureError,
     ModelSelectionError,
+    ProviderNotServedError,
 )
 from .model_selection_config import (
     LLMDefinition,
@@ -22,6 +23,7 @@ __all__ = [
     "ModelSelectionError",
     "ModelTagEntry",
     "PromptParams",
+    "ProviderNotServedError",
     "RestrictedModelAccessError",
     "UnitPrimitiveConfig",
     "ensure_restricted_model_access",
