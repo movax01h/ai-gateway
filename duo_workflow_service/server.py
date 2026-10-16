@@ -118,6 +118,7 @@ from duo_workflow_service.server_helpers import (
 )
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     BadStatusEvent,
+    CreatedWorkflowHasCheckpoints,
     ForbiddenStatusEvent,
 )
 from duo_workflow_service.structured_logging import set_workflow_id, setup_logging
@@ -971,6 +972,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             ):
                 context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
                 context.set_details(str(workflow.last_error.__cause__))
+            elif workflow.last_error and isinstance(
+                workflow.last_error, CreatedWorkflowHasCheckpoints
+            ):
+                # The session's stored data is inconsistent (a `created` workflow with
+                # checkpoints), not a service fault. The checkpoint is left out of the
+                # details: it varies per request and can carry conversation content.
+                context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+                context.set_details(CreatedWorkflowHasCheckpoints.DETAILS)
             elif workflow.last_error and isinstance(
                 workflow.last_error, InvalidRequestException
             ):

@@ -11,7 +11,7 @@ from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import WorkflowAlreadyFinishedException
 from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
 from duo_workflow_service.status_updater.gitlab_status_updater import (
-    UnsupportedStatusEvent,
+    CreatedWorkflowHasCheckpoints,
 )
 from lib.internal_events.event_enum import EventPropertyEnum
 
@@ -63,7 +63,7 @@ async def rails_status_dispatch(
             - EventPropertyEnum: The associated event property for tracking
 
     Raises:
-        UnsupportedStatusEvent: If a `created` workflow already has checkpoints.
+        CreatedWorkflowHasCheckpoints: If a `created` workflow already has checkpoints.
         WorkflowAlreadyFinishedException: If the workflow already finished.
     """
     checkpoint_tuple = (
@@ -92,10 +92,7 @@ async def rails_status_dispatch(
 
     if status == WorkflowStatusEnum.CREATED:
         if checkpoint_tuple:
-            raise UnsupportedStatusEvent(
-                f"Workflow with status 'created' should not have existing checkpoints. "
-                f"Found checkpoint: {checkpoint_tuple}"
-            )
+            raise CreatedWorkflowHasCheckpoints(checkpoint_tuple)
         return WorkflowStatusEventEnum.START, EventPropertyEnum.WORKFLOW_ID
 
     if status == WorkflowStatusEnum.FINISHED:
