@@ -67,7 +67,7 @@ log = structlog.stdlib.get_logger("litellm_model_registry")
 # lands in a stable, pinned PyPI release, so any model_selection entry that
 # outpaces our LiteLLM pin needs to be registered here by hand. Doing so lets
 # the AI Gateway route requests without waiting on a LiteLLM dependency bump.
-# Capability flags and costs mirror the predecessor entry that already ships
+# Capability flags mirror the predecessor entry that already ships
 # natively (Opus 4.6 for Opus 4.8, Sonnet 4.6 for Sonnet 5), since each was
 # launched at parity. Remove the manual entry once LiteLLM ships a native one
 # and the pin is bumped past it.
@@ -77,10 +77,6 @@ _OPUS_4_8_BEDROCK_METADATA: Dict[str, Any] = {
     "max_input_tokens": 1_000_000,
     "max_output_tokens": 128_000,
     "max_tokens": 128_000,
-    "input_cost_per_token": 5e-06,
-    "output_cost_per_token": 2.5e-05,
-    "cache_creation_input_token_cost": 6.25e-06,
-    "cache_read_input_token_cost": 5e-07,
     "supports_function_calling": True,
     "supports_tool_choice": True,
     "supports_response_schema": True,
@@ -97,10 +93,6 @@ _SONNET_5_BEDROCK_METADATA: Dict[str, Any] = {
     "max_input_tokens": 1_000_000,
     "max_output_tokens": 64_000,
     "max_tokens": 64_000,
-    "input_cost_per_token": 3e-06,
-    "output_cost_per_token": 1.5e-05,
-    "cache_creation_input_token_cost": 3.75e-06,
-    "cache_read_input_token_cost": 3e-07,
     "supports_function_calling": True,
     "supports_tool_choice": True,
     "supports_response_schema": True,
@@ -117,10 +109,6 @@ _HAIKU_5_5_BEDROCK_METADATA: Dict[str, Any] = {
     "max_input_tokens": 1_000_000,
     "max_output_tokens": 128_000,
     "max_tokens": 128_000,
-    "input_cost_per_token": 1e-07,
-    "output_cost_per_token": 5e-07,
-    "cache_creation_input_token_cost": 1.25e-07,
-    "cache_read_input_token_cost": 1e-08,
     "supports_function_calling": True,
     "supports_tool_choice": True,
     "supports_response_schema": True,
