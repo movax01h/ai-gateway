@@ -17,12 +17,14 @@ from structlog.testing import capture_logs
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import (
+    _get_gitlab_identifier,
     _track_code_suggestions_event,
 )
 from ai_gateway.model_metadata import create_model_metadata
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
+from ai_gateway.models import KindModelProvider
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
@@ -1454,6 +1456,37 @@ class TestCodeCompletions:
             body["choices"][0]["text"] == "Post-processed completion response"
         ) == expect_post_processed
 
+    # Only Sonnet 4.5 is checked end to end: request validation rejects
+    # `claude-sonnet-4-20250514` for the anthropic provider before routing.
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.usefixtures("mock_post_processor")
+    def test_legacy_anthropic_model_name_routes_to_sonnet_5_5(
+        self,
+        mock_client: Mock,
+        mock_prompt_ainvoke: Mock,
+    ):
+        params = {
+            "prompt_version": 1,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": "anthropic",
+            "model_name": "claude-sonnet-4-5-20250929",
+        }
+
+        response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        assert mock_prompt_ainvoke.called, "Should use prompt registry execution"
+
+        body = response.json()
+        assert body["model"]["engine"] == "anthropic"
+        assert body["model"]["name"] == "claude_sonnet_5_5"
+
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         ("model_provider", "model_name", "expect_forwarded"),
@@ -2762,3 +2795,13 @@ class TestCompletionsIamRoleWithCustomModelsDisabled:
                 },
             },
         )
+
+
+@pytest.mark.parametrize(
+    "legacy_model_name",
+    ["claude-sonnet-4-20250514", "claude-sonnet-4-5-20250929"],
+)
+def test_legacy_anthropic_completion_names_map_to_sonnet_5_5(legacy_model_name):
+    identifier = _get_gitlab_identifier(KindModelProvider.ANTHROPIC, legacy_model_name)
+
+    assert identifier == "claude_sonnet_5_5"

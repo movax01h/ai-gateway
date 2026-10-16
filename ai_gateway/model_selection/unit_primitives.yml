@@ -38,6 +38,8 @@ configurable_unit_primitives:
         weight: 25
     selectable_models:
       - "claude_sonnet_4_5_20250929"
+      - "claude_sonnet_5_5"
+      - "claude_sonnet_5_5_vertex"
       - "codestral_2501_fireworks"
       - "codestral_2508_fireworks"
       - "codestral_2508_vertex"
