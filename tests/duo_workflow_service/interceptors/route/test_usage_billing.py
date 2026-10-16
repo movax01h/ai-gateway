@@ -1,4 +1,5 @@
 # pylint: disable=invalid-overridden-method,super-init-not-called,unidiomatic-typecheck
+from contextlib import suppress
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -14,7 +15,10 @@ from duo_workflow_service.interceptors.route.usage_billing import (
 )
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from lib.events import GLReportingEventContext
-from lib.events.contextvar import self_hosted_dap_billing_enabled
+from lib.events.contextvar import (
+    mark_llm_call_retry,
+    self_hosted_dap_billing_enabled,
+)
 from lib.internal_events.client import InternalEventsClient
 
 
@@ -113,6 +117,44 @@ class TestSelfHostedBillingPromptCallbackHandler:
         action = call_args[0][0]
 
         assert action.trackLlmCallForSelfHosted.featureAiCatalogItem is True
+
+    @pytest.mark.asyncio
+    async def test_on_before_llm_call_skips_retried_call(
+        self, workflow_id, gl_reporting_event_context, mock_outbox
+    ):
+        """Test that a retried LLM call does not send a tracking action."""
+        handler = SelfHostedBillingPromptCallbackHandler(
+            workflow_id, gl_reporting_event_context, mock_outbox
+        )
+
+        with mark_llm_call_retry(True):
+            await handler.on_before_llm_call()
+
+        mock_outbox.put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "retry_raises",
+        [
+            pytest.param(False, id="retry_succeeded"),
+            pytest.param(True, id="retry_failed"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_on_before_llm_call_bills_call_after_retry(
+        self, workflow_id, gl_reporting_event_context, mock_outbox, retry_raises
+    ):
+        """Test that the call after a retry sends a tracking action, also when the retry raised."""
+        handler = SelfHostedBillingPromptCallbackHandler(
+            workflow_id, gl_reporting_event_context, mock_outbox
+        )
+
+        with suppress(RuntimeError), mark_llm_call_retry(True):
+            if retry_raises:
+                raise RuntimeError("model call failed")
+
+        await handler.on_before_llm_call()
+
+        mock_outbox.put_action_and_wait_for_response.assert_called_once()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

@@ -53,6 +53,7 @@ from duo_workflow_service.errors.error_handler import (
 from duo_workflow_service.tracking.langsmith_tags import tag_current_run
 from lib.context import LLMFinishReason, extract_finish_reason
 from lib.events import GLReportingEventContext
+from lib.events.contextvar import mark_llm_call_retry
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
 
@@ -463,6 +464,50 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         """Return the approaching-soft-limit warning message."""
         return self._ITERATION_WARNING_MESSAGE.format(cycles_remaining=cycles_remaining)
 
+    async def _with_cycle_budget_message(
+        self, history: list, cycle_count: int
+    ) -> tuple[list, bool]:
+        """Append the wrap-up instruction or the iteration warning that the cycle count calls for.
+
+        Returns:
+            The history, and True when the wrap-up instruction is active.
+        """
+        budget = self._cycle_budget
+        wrap_up_active = (
+            budget.max_cycles is not None and cycle_count >= budget.max_cycles
+        )
+        if wrap_up_active:
+            log.warning(
+                "Agent reached max_cycles soft limit; injecting wrap-up instruction",
+                agent=self.name,
+                cycle_count=cycle_count,
+                max_cycles=budget.max_cycles,
+            )
+            await self._tag_langsmith_soft_limit(cycle_count)
+
+            if cycle_count == budget.max_cycles:
+                self._track_max_cycles_reached(cycle_count)
+            history = [*history, HumanMessage(content=self._wrap_up_message())]
+        elif (
+            budget.max_cycles is not None
+            and budget.iteration_warning_offset is not None
+            and cycle_count == budget.max_cycles - budget.iteration_warning_offset
+        ):
+            cycles_remaining = budget.max_cycles - cycle_count
+            log.warning(
+                "Agent approaching max_cycles soft limit; injecting warning",
+                agent=self.name,
+                cycle_count=cycle_count,
+                max_cycles=budget.max_cycles,
+                cycles_remaining=cycles_remaining,
+            )
+            history = [
+                *history,
+                HumanMessage(content=self._iteration_warning_message(cycles_remaining)),
+            ]
+
+        return history, wrap_up_active
+
     def _completion_has_non_final_tool_calls(self, completion: AIMessage) -> bool:
         """Return True if the completion contains tool calls other than the final response tool.
 
@@ -555,58 +600,33 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             state
         )
         budget = self._cycle_budget
-        wrap_up_active = (
-            budget.max_cycles is not None and cycle_count >= budget.max_cycles
+        history, wrap_up_active = await self._with_cycle_budget_message(
+            history, cycle_count
         )
-        if wrap_up_active:
-            log.warning(
-                "Agent reached max_cycles soft limit; injecting wrap-up instruction",
-                agent=self.name,
-                cycle_count=cycle_count,
-                max_cycles=budget.max_cycles,
-            )
-            await self._tag_langsmith_soft_limit(cycle_count)
-
-            if cycle_count == budget.max_cycles:
-                self._track_max_cycles_reached(cycle_count)
-            history = [*history, HumanMessage(content=self._wrap_up_message())]
-        elif (
-            budget.max_cycles is not None
-            and budget.iteration_warning_offset is not None
-            and cycle_count == budget.max_cycles - budget.iteration_warning_offset
-        ):
-            cycles_remaining = budget.max_cycles - cycle_count
-            log.warning(
-                "Agent approaching max_cycles soft limit; injecting warning",
-                agent=self.name,
-                cycle_count=cycle_count,
-                max_cycles=budget.max_cycles,
-                cycles_remaining=cycles_remaining,
-            )
-            history = [
-                *history,
-                HumanMessage(content=self._iteration_warning_message(cycles_remaining)),
-            ]
 
         wrap_up_retries: int = 0
         truncation_retries: int = 0
         image_limit_retries: int = 0
         answer_rejections: int = 0
+        # True when the previous call failed and this pass repeats it.
+        retrying_failed_call = False
 
         while True:
             try:
-                completion: AIMessage = cast(
-                    AIMessage,
-                    await self._prompt.ainvoke(
-                        input={
-                            **self._prompt_template_inputs,
-                            **variables,
-                            "history": history,
-                            **self._predefined_runtime_variables(),
-                        },
-                        config=self._invoke_config,
-                    ),
-                )
+                with mark_llm_call_retry(retrying_failed_call):
+                    completion: AIMessage = cast(
+                        AIMessage,
+                        await self._prompt.ainvoke(
+                            input={
+                                **self._prompt_template_inputs,
+                                **variables,
+                                "history": history,
+                                **self._predefined_runtime_variables(),
+                            },
+                            config=self._invoke_config,
+                        ),
+                    )
+                retrying_failed_call = False
                 finish_reason = extract_finish_reason(completion.response_metadata)
                 if finish_reason in LLMFinishReason.truncation_values():
                     truncation_retries = self._count_truncation(
@@ -731,6 +751,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 )
                 if recovered is not None:
                     history, image_limit_retries = recovered, image_limit_retries + 1
+                retrying_failed_call = True
 
     def _deliberates_in_text(self) -> bool:
         return (
