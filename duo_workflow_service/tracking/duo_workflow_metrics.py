@@ -285,6 +285,24 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             registry=registry,
         )
 
+        # No tool_name label: MCP tool names are client-supplied, so labelling by tool is
+        # unbounded and the internal event already carries the name. `flow_type` is just as
+        # client-supplied, but already labels 15 metrics here, so omitting it buys nothing.
+        #
+        # Legacy workflows (ToolsApprovalComponent) only emit blocked, through ToolsExecutor; they
+        # emit no approval requested/resolved events. For a rate, divide by
+        # duo_workflow_tool_call_seconds_count, which carries the same flow_type.
+        #
+        # Chat emits one resolved per user decision, not per call (documented in
+        # config/events/resolve_duo_workflow_tool_approval.yml), so resolved and requested
+        # are not 1:1 there. Alert on levels, not on their ratio.
+        self.tool_governance_counter = Counter(
+            "duo_workflow_tool_governance_total",
+            "Count of human-in-the-loop tool governance decisions",
+            ["flow_type", "event", "outcome"] + METADATA_LABELS,
+            registry=registry,
+        )
+
     def count_checkpoints(
         self,
         endpoint="unknown",
@@ -373,6 +391,27 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
         self.agent_platform_session_abort_counter.labels(
             flow_type=flow_type,
             session_type=session_type_context.get(),
+            **build_metadata_labels(),
+        ).inc()
+
+    def count_tool_governance_event(
+        self,
+        flow_type: str = "unknown",
+        event: str = "unknown",
+        outcome: str = "none",
+    ) -> None:
+        """Count one governance decision.
+
+        `event` must be an ``EventEnum`` value and `outcome` an ``EventPropertyEnum`` value or
+        ``"none"``. Both are bounded on purpose; see the counter definition for why.
+
+        `outcome` defaults to ``"none"`` rather than the ``"unknown"`` used elsewhere in this
+        class, so events that carry no outcome land on one label value, not two.
+        """
+        self.tool_governance_counter.labels(
+            flow_type=flow_type,
+            event=event,
+            outcome=outcome,
             **build_metadata_labels(),
         ).inc()
 

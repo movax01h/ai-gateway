@@ -4,6 +4,8 @@ import unittest
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+from prometheus_client import CollectorRegistry
+
 from ai_gateway.code_suggestions import LanguageServerVersion
 from duo_workflow_service.audit_events.collector import MAX_BUFFER_BYTES
 from duo_workflow_service.tracking.duo_workflow_metrics import (
@@ -46,6 +48,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "audit_events_batch_size",
             "audit_events_payload_bytes",
             "audit_events_auto_flush_skipped_counter",
+            "tool_governance_counter",
         ]:
             mock_histogram = MagicMock()
             setattr(self.metrics, metric_name, mock_histogram)
@@ -487,6 +490,53 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         observe_mock.assert_called_once()
         args, _ = observe_mock.call_args
         self.assertGreaterEqual(args[0], 0)
+
+    def test_count_tool_governance_event(self):
+        self._assert_counter_called(
+            "tool_governance_counter",
+            "count_tool_governance_event",
+            {
+                "flow_type": "chat",
+                "event": "block_denied_duo_workflow_tool",
+                "outcome": "none",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+                "gitlab_realm": "unknown",
+                "is_gitlab_team_member": "unknown",
+            },
+            flow_type="chat",
+            event="block_denied_duo_workflow_tool",
+            outcome="none",
+        )
+
+    def test_count_tool_governance_event_against_a_real_registry(self):
+        """Exercises prometheus_client itself, not a mock.
+
+        The counter is incremented inside a best-effort `try`, so a label mismatch would be
+        swallowed and the metric would simply never appear. Only a real registry catches that.
+        """
+        registry = CollectorRegistry()
+        metrics = DuoWorkflowMetrics(registry=registry)
+
+        metrics.count_tool_governance_event(
+            flow_type="chat", event="block_denied_duo_workflow_tool"
+        )
+
+        value = registry.get_sample_value(
+            "duo_workflow_tool_governance_total",
+            {
+                "flow_type": "chat",
+                "event": "block_denied_duo_workflow_tool",
+                "outcome": "none",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+                "gitlab_realm": "unknown",
+                "is_gitlab_team_member": "unknown",
+            },
+        )
+        self.assertEqual(value, 1.0)
 
     def test_count_audit_events_captured(self):
         self._assert_counter_called(
