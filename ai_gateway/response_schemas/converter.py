@@ -213,9 +213,9 @@ def extract_field_constraints(  # pylint: disable=too-many-branches
     # Pydantic ref: https://docs.pydantic.dev/latest/api/standard_library_types/#strings
     if field_type == "string":
         if "minLength" in field_schema:
-            constraints["min_length"] = field_schema["minLength"]
+            constraints["min_length"] = int(field_schema["minLength"])
         if "maxLength" in field_schema:
-            constraints["max_length"] = field_schema["maxLength"]
+            constraints["max_length"] = int(field_schema["maxLength"])
         if "pattern" in field_schema:
             constraints["pattern"] = field_schema["pattern"]
 
@@ -224,9 +224,9 @@ def extract_field_constraints(  # pylint: disable=too-many-branches
     # Pydantic ref: https://docs.pydantic.dev/latest/api/standard_library_types/#lists
     if field_type == "array":
         if "minItems" in field_schema:
-            constraints["min_length"] = field_schema["minItems"]
+            constraints["min_length"] = int(field_schema["minItems"])
         if "maxItems" in field_schema:
-            constraints["max_length"] = field_schema["maxItems"]
+            constraints["max_length"] = int(field_schema["maxItems"])
 
     # Examples
     # JSON Schema ref: https://json-schema.org/draft-07/json-schema-validation#rfc.section.10.4
