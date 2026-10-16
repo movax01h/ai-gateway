@@ -505,6 +505,74 @@ If you change models for a feature, update the corresponding page.
 
 There's an [open issue](https://gitlab.com/gitlab-org/gitlab/-/work_items/587907) to explore automation for these updates. Until then, manual updates are required to keep our customer documentation accurate.
 
+## Feature allowlist for GitLab-managed models
+
+GitLab Rails offers only the models that `GET /v1/models/definitions` lists for a feature. The gateway applies the
+same lists on the server, in `check_client_model_metadata` (`ai_gateway/feature_allowlist.py`). Request paths call
+it where client-supplied model metadata enters: the `model_metadata` field of an HTTP body, the
+`x-gitlab-agent-platform-model-metadata` gRPC header of the Duo Workflow Service, and routes that build metadata from
+their own payload, such as the legacy `model_provider` and `model_name` fields of `/v2/code/completions`.
+
+A feature's allowlist is the union of its `default_models`, `selectable_models`, `beta_models`, `dev.selectable_models`
+and `models_for_tags` entries (`UnitPrimitiveConfig.allowed_model_identifiers`).
+
+The check uses the allowlist of the feature that the route serves. A route that passes no feature uses the client's
+`feature_setting`, so the client can name the feature whose allowlist suits it. This fallback stays until the routes
+derive the feature themselves: from the prompt on HTTP, and from the flow on the Duo Workflow Service.
+
+A gateway without custom models serves GitLab-managed models only, so it accepts a fixed set of providers. Over HTTP
+it accepts `gitlab` and `amazon_q`, which GitLab Rails sends, and `anthropic`, `vertex-ai` and `fireworks_ai`, which
+the legacy code completions fields send. On the Duo Workflow Service it accepts `gitlab` and `amazon_q`, and the
+server-built `fireworks_ai` and `mistral` shapes that the resume replays. Any other provider value, such as a
+self-hosted provider (`openai`, `litellm`) or an unknown string, resolves a GitLab-managed model all the same and is
+refused rather than checked. Amazon Q carries its own role and is not checked. Metadata that the gateway builds itself
+is never checked. A gateway that serves custom models (`AIGW_CUSTOM_MODELS__ENABLED=true`) runs every model on the
+operator's own keys, so it skips the check altogether, whatever the mode.
+
+The check looks at:
+
+- A provider this gateway does not serve. In `fallback` and `enforce` mode the request is refused, because there is
+  nothing valid to fall back to. In `log` mode the remaining checks still run, so the log shows what the request
+  would meet once the provider is fixed.
+- A named model (`identifier` or `name`) that is not in the allowlist of the request's `feature_setting`. A route
+  that knows which feature it serves passes that feature, and it wins over the client's value.
+- A request for the default model of a feature other than the one the route serves. The route's default is served
+  instead in `fallback` and `enforce` mode. This is not refused, because some clients still send another feature's
+  name on a few paths.
+- A named GitLab-managed model with no `feature_setting`. On HTTP there is nothing to check it against. On the Duo
+  Workflow Service the model is kept and the request is logged as a note, because the resume replay of a checkpointed
+  model has this shape.
+- A named GitLab-managed model with a `feature_setting` that does not exist. Both surfaces handle it the way HTTP
+  handles a named model with no `feature_setting`.
+- `identifier` sent together with `name` for a GitLab-managed model. `name` resolves the model the allowlist checks,
+  but the raw `identifier` becomes the wire model: `{"name": "claude_sonnet_4_6_vertex", "identifier":
+  "vertex_ai/claude-opus-4-8"}` passes as Sonnet and runs Opus on the gateway's Vertex AI credentials. Only `fallback`
+  and `enforce` mode rebuild the model from its definition. In `off` and `log` mode the override stays until
+  GitLab-managed models are resolved by their GitLab identifier only. A client `endpoint` or `api_key` is not handled
+  here; `validate_custom_endpoint` rejects both on a gateway without custom models.
+- A `dev` model or a deprecated model (logged only).
+
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE` selects the behavior. Set the same value on AI Gateway and Duo
+Workflow Service:
+
+| Mode | Behavior |
+|------|-----------|
+| `off` | No check. |
+| `log` | Log mismatches, change nothing. This is the default. |
+| `fallback` | Serve the feature's default model instead of a model that is not allowed. Rebuild a GitLab-managed model from its definition when a raw `identifier` would rewrite it. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. |
+| `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. Rebuild a raw `identifier` override as `fallback` does. |
+
+Every mismatch is logged as `Model allowlist mismatch` with a `reason` (`provider_not_served`, `model_not_allowed`,
+`feature_mismatch`, `missing_feature_setting`, `unknown_feature`, `managed_identifier_override`), the `mode`, the
+`surface` (`http` or `dws`), the `feature_setting` the check used (the route's feature when the route passes one, else
+the client's), the `client_feature_setting` as the client sent it, the `requested_name` and `requested_identifier` as
+the client sent them, the `served_identifier` and the caller's context such as the request `path`. Endpoint and key
+values are never logged. One request can log more than one mismatch, so count by `reason` or by correlation ID
+rather than by event. Informational cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
+`deprecated_model`) are logged as `Model allowlist note`.
+
+To roll back a stricter mode, set `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE=log`.
+
 ## Developer models
 
 The `dev` configuration allows you to test experimental models with internal team members before rolling them out to everyone.

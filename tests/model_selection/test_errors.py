@@ -4,6 +4,7 @@ from ai_gateway.model_selection import (
     FeatureSettingRequiredError,
     ModelNotAllowedForFeatureError,
     ModelSelectionError,
+    ProviderNotServedError,
 )
 
 
@@ -18,6 +19,10 @@ from ai_gateway.model_selection import (
             FeatureSettingRequiredError("claude_fable_5"),
             "feature_setting is required to request model 'claude_fable_5'",
         ),
+        (
+            ProviderNotServedError("openai"),
+            "This gateway does not serve models from provider 'openai'",
+        ),
     ],
 )
 def test_error_message(error, message):
@@ -29,6 +34,7 @@ def test_error_message(error, message):
     [
         ModelNotAllowedForFeatureError("duo_chat", "claude_fable_5"),
         FeatureSettingRequiredError("claude_fable_5"),
+        ProviderNotServedError("openai"),
     ],
 )
 def test_is_a_model_selection_error_but_not_a_value_error(error):

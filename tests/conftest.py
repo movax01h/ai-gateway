@@ -32,7 +32,7 @@ from ai_gateway.api.middleware import (
 from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
 from ai_gateway.api.middleware.route import usage_quota
 from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
-from ai_gateway.config import Config, ConfigModelLimits
+from ai_gateway.config import Config, ConfigModelLimits, get_config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.model_selection.model_selection_config import (
@@ -643,6 +643,14 @@ def reset_context_vars():
     ModelSelectionConfig._instance = None
     structured_logging.ENABLE_REQUEST_LOGGING = False
     self_hosted_dap_billing_enabled.set(False)
+
+
+@pytest.fixture(name="feature_allowlist_mode")
+def feature_allowlist_mode_fixture(request, monkeypatch):
+    """Set the feature allowlist mode for the test; parametrize indirectly to pick it."""
+    mode = getattr(request, "param", "log")
+    monkeypatch.setattr(get_config().model_selection, "feature_allowlist_mode", mode)
+    return mode
 
 
 @pytest.fixture(autouse=True)
