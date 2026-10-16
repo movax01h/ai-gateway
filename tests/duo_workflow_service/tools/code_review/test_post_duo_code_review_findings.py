@@ -83,10 +83,9 @@ async def test_post_duo_code_review_findings_success(gitlab_client_mock, metadat
     assert body["project_id"] == 123
     assert body["merge_request_iid"] == 45
     assert body["workflow_id"] == "test-workflow-123"
-    # Critical publishes before minor, and the summary carries narrative plus computed counts.
+    # Critical publishes before minor, and the summary is the reviewer's narrative.
     assert [f["new_line"] for f in review["findings"]] == [2, 1]
-    assert review["summary"].startswith("I focused on the auth changes.")
-    assert "2 findings (1 critical, 1 minor) across 1 file:" in review["summary"]
+    assert review["summary"] == "I focused on the auth changes."
 
 
 @pytest.mark.asyncio
@@ -144,7 +143,7 @@ async def test_post_duo_code_review_findings_applies_the_confidence_gate(
     assert json.loads(response)["suppressed_below_threshold"] == 1
     _, review = posted_review(gitlab_client_mock)
     assert [f["new_line"] for f in review["findings"]] == [2]
-    assert "1 finding (1 critical) across 1 file:" in review["summary"]
+    assert review["summary"] == "1 finding (1 critical) across 1 file."
 
 
 @pytest.mark.asyncio

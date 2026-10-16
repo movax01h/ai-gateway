@@ -107,10 +107,7 @@ async def test_applies_the_gate_and_orders_by_severity(tool):
     assert result["suppressed_below_threshold"] == 1
     assert result["min_confidence"] == 5
     assert result["counts"] == {"critical": 1, "major": 1, "minor": 1}
-    assert result["summary"].startswith("I focused on the auth changes.")
-    assert (
-        "3 findings (1 critical, 1 major, 1 minor) across 1 file:" in result["summary"]
-    )
+    assert result["summary"] == "I focused on the auth changes."
 
 
 @pytest.mark.asyncio
