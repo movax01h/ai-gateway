@@ -1,11 +1,17 @@
 """Tests for the external LiteLLM model metadata registry."""
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
 import litellm
 import pytest
+from litellm.litellm_core_utils.fallback_generalizations import (
+    get_fallback_generalization_rules,
+    set_fallback_generalizations,
+)
+from litellm.litellm_core_utils.get_model_cost_map import get_model_cost_map
 from litellm.utils import supports_tool_choice
 
 from ai_gateway.model_selection.model_selection_config import (
@@ -13,6 +19,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
     CompletionLiteLLMDefinition,
     EmbeddingLiteLLMDefinition,
+    ModelSelectionConfig,
 )
 from ai_gateway.model_selection.models import (
     ChatAnthropicParams,
@@ -375,6 +382,81 @@ class TestIntegrationWithLiteLLM:
         key = "fireworks_ai/accounts/gitlab/deployments/test-aigw-2587"
         assert key in litellm.model_cost
         assert supports_tool_choice(key) is True
+
+
+class TestSelfHostedBundledCostMap:
+    """Every managed LiteLLM model must resolve against the cost map bundled with LiteLLM, as in self-hosted images."""
+
+    @pytest.fixture(name="bundled_model_cost")
+    def bundled_model_cost_fixture(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> Iterator[None]:
+        """Replace the live cost map with the one LiteLLM bundles.
+
+        The self-hosted images set ``LITELLM_LOCAL_MODEL_COST_MAP=True``, and LiteLLM reads it once, when it is imported.
+        By now it is already imported, so setting the variable alone changes nothing: load the map again with the
+        variable set and swap it in. The swap, the fallback rules that come with the map and LiteLLM's lookup caches are
+        restored when the test ends.
+        """
+        rules = get_fallback_generalization_rules()
+        monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+        monkeypatch.setattr(
+            litellm,
+            "model_cost",
+            get_model_cost_map(url=litellm.model_cost_map_url),
+        )
+        litellm.utils._invalidate_model_cost_lowercase_map()
+        yield
+        monkeypatch.undo()
+        set_fallback_generalizations(rules)
+        litellm.utils._invalidate_model_cost_lowercase_map()
+
+    def test_managed_litellm_models_resolve_with_tool_support(
+        self, bundled_model_cost: None
+    ) -> None:
+        """Each managed LiteLLM model in ``models.yml`` supports tool calls on the bundled map plus our
+        registrations."""
+        llm_definitions = ModelSelectionConfig(
+            default_models_override={}
+        ).get_llm_definitions()
+
+        register_builtin_models()
+        register_fireworks_models(llm_definitions)
+
+        failures = []
+        for identifier, definition in llm_definitions.items():
+            # Entries without a provider are self-hosted placeholders: the customer
+            # names the model, so there is nothing for the map to resolve.
+            if not isinstance(definition, ChatLiteLLMDefinition) or (
+                not definition.provider
+            ):
+                continue
+
+            params = definition.params
+            try:
+                info = litellm.get_model_info(
+                    model=params.model, custom_llm_provider=params.custom_llm_provider
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                failures.append(f"{identifier} ({params.model}): {exc}")
+                continue
+
+            missing = [
+                flag
+                for flag in ("supports_function_calling", "supports_tool_choice")
+                if not info.get(flag)
+            ]
+            if missing:
+                failures.append(
+                    f"{identifier} ({params.model}): {', '.join(missing)} not set"
+                )
+
+        assert not failures, (
+            "These models do not resolve with tool support on LiteLLM's bundled cost map, so "
+            "self-hosted images would fail their first tool call. Add the model to "
+            "BUILTIN_MODEL_METADATA in ai_gateway/models/v2/litellm_model_registry.py:\n"
+            + "\n".join(failures)
+        )
 
 
 class TestRegisterFireworksModels:
