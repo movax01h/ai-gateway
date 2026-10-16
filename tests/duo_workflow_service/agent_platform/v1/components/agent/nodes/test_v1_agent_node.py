@@ -50,6 +50,10 @@ from duo_workflow_service.entities.image_blocks import (
     is_image_content_block,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
+from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.interceptors.route.usage_billing import (
+    SelfHostedBillingPromptCallbackHandler,
+)
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
 
@@ -3386,3 +3390,169 @@ class TestAgentNodeImageLimitFallback:
             await self._run(agent_node, base_flow_state, component_name, history)
 
         assert mock_prompt.ainvoke.call_count == 1
+
+
+class TestAgentNodeSelfHostedBilling:
+    """Self-hosted billing charges an LLM call once, however many times the agent retries it."""
+
+    @pytest.fixture(name="billing_outbox")
+    def billing_outbox_fixture(self):
+        outbox = Mock(spec=Outbox)
+        outbox.put_action_and_wait_for_response = AsyncMock()
+        return outbox
+
+    @pytest.fixture(name="reply_with")
+    def reply_with_fixture(self, mock_prompt, billing_outbox):
+        """Make the prompt run the billing callback before each reply, as `Prompt.ainvoke` does."""
+        billing = SelfHostedBillingPromptCallbackHandler(
+            "test-workflow",
+            GLReportingEventContext.from_workflow_definition("software_development"),
+            billing_outbox,
+        )
+
+        def reply_with(*replies):
+            pending = iter(replies)
+
+            async def ainvoke(**_kwargs):
+                await billing.on_before_llm_call()
+                reply = next(pending)
+                if isinstance(reply, Exception):
+                    raise reply
+                return reply
+
+            mock_prompt.ainvoke = AsyncMock(side_effect=ainvoke)
+
+        return reply_with
+
+    @pytest.fixture(name="_no_retry_delay")
+    def _no_retry_delay_fixture(self):
+        with patch(
+            "duo_workflow_service.errors.error_handler.asyncio.sleep", new=AsyncMock()
+        ):
+            yield
+
+    @staticmethod
+    def _truncated(message: AIMessage) -> AIMessage:
+        truncated = copy.copy(message)
+        truncated.response_metadata = {"finish_reason": "length"}
+        truncated.tool_calls = []
+        return truncated
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                APIStatusError(
+                    "Rate limit exceeded", response=Mock(status_code=429), body=None
+                ),
+                id="anthropic_rate_limit",
+            ),
+            pytest.param(
+                litellm.RateLimitError(
+                    message="Rate limit exceeded",
+                    llm_provider="fireworks_ai",
+                    model="test-model",
+                ),
+                id="litellm_rate_limit",
+            ),
+            pytest.param(
+                litellm.InternalServerError(
+                    message="Internal server error",
+                    llm_provider="fireworks_ai",
+                    model="test-model",
+                ),
+                id="litellm_internal_server_error",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_bills_once_when_a_retry_succeeds(
+        self,
+        agent_node,
+        base_flow_state,
+        mock_prompt,
+        mock_ai_message,
+        billing_outbox,
+        reply_with,
+        error,
+        _no_retry_delay,
+    ):
+        reply_with(error, error, mock_ai_message)
+
+        await agent_node.run(base_flow_state)
+
+        assert mock_prompt.ainvoke.call_count == 3
+        billing_outbox.put_action_and_wait_for_response.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_bills_once_when_every_retry_fails(
+        self,
+        agent_node,
+        base_flow_state,
+        mock_prompt,
+        billing_outbox,
+        reply_with,
+        _no_retry_delay,
+    ):
+        rate_limit = APIStatusError(
+            "Rate limit exceeded", response=Mock(status_code=429), body=None
+        )
+        reply_with(*[rate_limit] * 4)
+
+        with pytest.raises(ModelError):
+            await agent_node.run(base_flow_state)
+
+        assert mock_prompt.ainvoke.call_count == 4
+        billing_outbox.put_action_and_wait_for_response.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_bills_once_when_the_request_is_retried_without_images(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        billing_outbox,
+        reply_with,
+    ):
+        base_flow_state["conversation_history"] = {
+            component_name: [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": "fix what the screenshot shows"},
+                        image_content_block(base64="aW1n", mime_type="image/png"),
+                    ]
+                )
+            ]
+        }
+        reply_with(_image_limit_error(), mock_ai_message)
+
+        await agent_node.run(base_flow_state)
+
+        assert mock_prompt.ainvoke.call_count == 2
+        billing_outbox.put_action_and_wait_for_response.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_bills_each_call_after_the_model_replies(
+        self,
+        agent_node,
+        base_flow_state,
+        mock_prompt,
+        mock_ai_message,
+        billing_outbox,
+        reply_with,
+        _no_retry_delay,
+    ):
+        rate_limit = APIStatusError(
+            "Rate limit exceeded", response=Mock(status_code=429), body=None
+        )
+        truncated = self._truncated(mock_ai_message)
+        reply_with(rate_limit, truncated, truncated, mock_ai_message)
+
+        await agent_node.run(base_flow_state)
+
+        # Call 1 is billed and fails. Call 2 repeats it, so it is free.
+        # Calls 3 and 4 follow a model reply, so each one is billed.
+        assert mock_prompt.ainvoke.call_count == 4
+        assert billing_outbox.put_action_and_wait_for_response.call_count == 3

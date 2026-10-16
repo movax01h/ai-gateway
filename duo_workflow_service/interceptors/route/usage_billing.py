@@ -1,13 +1,17 @@
 from typing import TYPE_CHECKING, Any, Callable, Literal, NamedTuple, Optional
 
+import structlog
+
 from ai_gateway.prompts import BasePromptCallbackHandler, BasePromptRegistry, Prompt
 from contract import contract_pb2
 from duo_workflow_service.executor.outbox import Outbox
 from lib.events import GLReportingEventContext
-from lib.events.contextvar import self_hosted_dap_billing_enabled
+from lib.events.contextvar import llm_call_is_retry, self_hosted_dap_billing_enabled
 
 if TYPE_CHECKING:
     from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
+
+log = structlog.stdlib.get_logger("usage_billing")
 
 
 class SelfHostedBillingPromptCallbackHandler(BasePromptCallbackHandler):
@@ -24,6 +28,15 @@ class SelfHostedBillingPromptCallbackHandler(BasePromptCallbackHandler):
         self.source_type = source_type
 
     async def on_before_llm_call(self):
+        # A retry repeats a call that failed and was already billed, so it is the same logical call.
+        if llm_call_is_retry.get():
+            log.info(
+                "Skipping self-hosted billing for a retried LLM call",
+                workflow_id=self.workflow_id,
+                feature_qualified_name=self.gl_reporting_event_context.feature_qualified_name,
+            )
+            return
+
         action = contract_pb2.Action(
             trackLlmCallForSelfHosted=contract_pb2.TrackLlmCallForSelfHosted(
                 workflowID=self.workflow_id,
