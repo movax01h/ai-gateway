@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.v1.catalog.errors import (
 )
 from duo_workflow_service.agent_platform.v1.catalog.sources.ai_catalog_agent import (
     AiCatalogAgentSource,
+    ai_catalog_agent_prompt,
 )
 from duo_workflow_service.agent_platform.v1.catalog.sources.base import CatalogSource
 from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
@@ -48,7 +49,7 @@ def default_prompts() -> list[InMemoryPromptConfig]:
         without declaring anything for them. Listed here rather than asked of each source, because only
         a source that builds components needs one.
     """
-    return [agent_template_prompt()]
+    return [agent_template_prompt(), ai_catalog_agent_prompt()]
 
 
 def _supported() -> list[str]:

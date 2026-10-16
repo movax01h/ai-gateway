@@ -10,41 +10,56 @@ from duo_workflow_service.agent_platform.utils.validation import (
     FlowConfigLimitExceededError,
     FlowValidationError,
     FlowValidator,
+    placeholder_items_for,
 )
+from duo_workflow_service.agent_platform.v1.catalog import CatalogItemRef
+
+AI_CATALOG_REFERENCE = {
+    "source": "ai-catalog",
+    "item_type": "agent",
+    "item_id": "42",
+    "version": "1.0.0",
+}
 
 
 def _build_yaml(
     inputs: list[dict] | None = None,
     template_vars: str = "Hello {{ goal }}",
+    include: list[dict] | None = None,
+    subagents: list[dict] | None = None,
 ) -> str:
     if inputs is None:
         inputs = [{"from": "context:goal", "as": "goal"}]
 
-    return yaml.dump(
-        {
-            "version": "v1",
-            "environment": "ambient",
-            "flow": {"entry_point": "comp"},
-            "components": [
-                {
-                    "name": "comp",
-                    "type": "AgentComponent",
-                    "prompt_id": "test_prompt",
-                    "toolset": [],
-                    "inputs": inputs,
-                }
-            ],
-            "routers": [{"from": "comp", "to": "end"}],
-            "prompts": [
-                {
-                    "prompt_id": "test_prompt",
-                    "name": "test_prompt",
-                    "unit_primitives": ["duo_agent_platform"],
-                    "prompt_template": {"system": template_vars},
-                }
-            ],
-        }
-    )
+    component: dict = {
+        "name": "comp",
+        "type": "AgentComponent",
+        "prompt_id": "test_prompt",
+        "toolset": [],
+        "inputs": inputs,
+    }
+    if subagents is not None:
+        component["subagents"] = subagents
+
+    config: dict = {
+        "version": "v1",
+        "environment": "ambient",
+        "flow": {"entry_point": "comp"},
+        "components": [component],
+        "routers": [{"from": "comp", "to": "end"}],
+        "prompts": [
+            {
+                "prompt_id": "test_prompt",
+                "name": "test_prompt",
+                "unit_primitives": ["duo_agent_platform"],
+                "prompt_template": {"system": template_vars},
+            }
+        ],
+    }
+    if include is not None:
+        config["include"] = include
+
+    return yaml.dump(config)
 
 
 def _build_prompt_registry() -> LocalPromptRegistry:
@@ -212,3 +227,74 @@ class TestPromptVariableValidation:
         )
         with pytest.raises(ValueError, match="extra input variables"):
             validator.validate(yml)
+
+
+class TestDryRunWithAiCatalogAgents:
+    """The dry run builds the supervisor and its placeholder subagents without a start request."""
+
+    def test_a_declared_and_claimed_agent_compiles(self, validator: FlowValidator):
+        yml = _build_yaml(
+            include=[AI_CATALOG_REFERENCE], subagents=[AI_CATALOG_REFERENCE]
+        )
+        validator.validate(yml)
+
+    def test_a_claim_the_flow_does_not_declare_fails_at_save(
+        self, validator: FlowValidator
+    ):
+        yml = _build_yaml(include=[], subagents=[AI_CATALOG_REFERENCE])
+        with pytest.raises(ValueError, match="does not declare them"):
+            validator.validate(yml)
+
+    def test_a_declared_entry_nobody_claims_compiles(self, validator: FlowValidator):
+        yml = _build_yaml(include=[AI_CATALOG_REFERENCE])
+        validator.validate(yml)
+
+
+class TestPlaceholderItems:
+    def test_one_placeholder_agent_per_declared_ai_catalog_entry(self):
+        include = [
+            CatalogItemRef.model_validate(
+                {
+                    "source": "ai-catalog",
+                    "item_type": "agent",
+                    "item_id": item_id,
+                    "version": "1.0.0",
+                }
+            )
+            for item_id in ("42", "43")
+        ]
+
+        items = placeholder_items_for(include)
+
+        assert [
+            (agent.item_id, agent.version) for agent in items.ai_catalog_agents
+        ] == [
+            ("42", "1.0.0"),
+            ("43", "1.0.0"),
+        ]
+        assert items.workspace_agents == []
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {"source": "workspace", "item_type": "agent_template", "item_id": "*"},
+            {"source": "ai-catalog", "item_type": "agent", "item_id": "42"},
+            {
+                "source": "ai-catalog",
+                "item_type": "agent",
+                "item_id": " ",
+                "version": "1.0.0",
+            },
+        ],
+        ids=["workspace_entry", "no_version", "blank_id"],
+    )
+    def test_other_entries_get_no_placeholder(self, entry):
+        assert (
+            placeholder_items_for(
+                [CatalogItemRef.model_validate(entry)]
+            ).ai_catalog_agents
+            == []
+        )
+
+    def test_no_include_gives_no_items(self):
+        assert placeholder_items_for(None).ai_catalog_agents == []
