@@ -6,11 +6,29 @@ outcome - never tool arguments, user/rejection text, patterns, or commands.
 
 from typing import Optional
 
+from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.errors import log_exception
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
 
 __all__ = ["track_tool_governance_event"]
+
+
+def _count_governance_decision(
+    event_name: EventEnum, flow_type: str, outcome: Optional[str]
+) -> None:
+    """Count the decision so a spike in blocks or prompts is visible without a user report.
+
+    Guarded separately from the event below so that neither the counter nor the internal event can suppress the other.
+    """
+    try:
+        duo_workflow_metrics.count_tool_governance_event(
+            flow_type=flow_type,
+            event=event_name.value,
+            outcome=outcome or "none",
+        )
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        log_exception(e, extra={"event_name": str(event_name)})
 
 
 def track_tool_governance_event(
@@ -37,6 +55,8 @@ def track_tool_governance_event(
         outcome: Approval outcome (``approval``/``rejection``/``modification``)
             for resolution events; ``None`` otherwise.
     """
+    _count_governance_decision(event_name, flow_type, outcome)
+
     try:
         extra: dict = {}
         if tool_name is not None:
