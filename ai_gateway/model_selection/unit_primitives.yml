@@ -617,7 +617,7 @@ configurable_unit_primitives:
   - feature_setting: "bl_security"
     unit_primitives: []
     default_models:
-      - "claude_sonnet_5_vertex"
+      - "claude_sonnet_5_5_vertex"
     selectable_models:
       - "claude_opus_5_5"
       - "claude_opus_5_5_vertex"
