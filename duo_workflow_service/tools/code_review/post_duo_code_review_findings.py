@@ -84,7 +84,7 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
             "silently rewritten into a working one."
         ),
     )
-    review_truncation: Optional[Dict[str, Any]] = Field(
+    review_truncation: Optional[Any] = Field(
         default=None,
         description=(
             "The `detect_review_context_truncation` result. When the context was "
@@ -93,12 +93,14 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
     )
 
 
-def truncation_notice(review_truncation: Optional[Dict[str, Any]]) -> Optional[str]:
+def truncation_notice(review_truncation: Optional[Any]) -> Optional[str]:
     """The line that opens the summary when the reviewer saw only part of the merge request.
 
     Written here rather than by the reviewer, so it appears on every truncated review whatever the reviewer concluded.
     """
-    if not review_truncation or not review_truncation.get("truncated"):
+    if not isinstance(review_truncation, dict) or not review_truncation.get(
+        "truncated"
+    ):
         return None
 
     lead = "This merge request was too large for a full review."
@@ -137,7 +139,7 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
         previous_findings: Optional[List[Dict[str, Any]]] = None,
         existing_discussions: Optional[Any] = None,
         min_confidence: int = 0,
-        review_truncation: Optional[Dict[str, Any]] = None,
+        review_truncation: Optional[Any] = None,
         **kwargs: Any,
     ) -> str:
         published, suppressed = select_findings(findings or [], min_confidence)

@@ -266,8 +266,8 @@ async def test_post_duo_code_review_findings_opens_a_truncated_summary_with_a_no
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "review_truncation",
-    [None, {"truncated": False, "percent_shown": None}],
-    ids=["unknown", "complete"],
+    [None, {"truncated": False, "percent_shown": None}, '{"truncated": true}'],
+    ids=["unknown", "complete", "not_a_dict"],
 )
 async def test_post_duo_code_review_findings_leaves_a_complete_summary_alone(
     gitlab_client_mock, metadata, review_truncation
