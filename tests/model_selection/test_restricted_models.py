@@ -327,6 +327,97 @@ def test_validate_allows_restricted_model_in_its_own_flow_feature(
 
 
 @pytest.mark.parametrize(
+    ("identifiers", "shared"),
+    [
+        (["fake_restricted_model"], False),
+        (["fake_restricted_model", "claude_sonnet_5_vertex"], True),
+    ],
+)
+def test_validate_restricted_default_model_must_be_the_only_default(
+    config: ModelSelectionConfig, identifiers: list[str], shared: bool
+):
+    unit_primitive_configs = list(config.get_unit_primitive_config())
+    bl_security = next(
+        c for c in unit_primitive_configs if c.feature_setting == "bl_security"
+    )
+    bl_security.default_models = [
+        DefaultModelEntry(identifier=i, weight=50) for i in identifiers
+    ]
+    bl_security.selectable_models.append("fake_restricted_model")
+
+    errors = config._validate_restricted_models(
+        unit_primitive_configs, config.get_llm_definitions()
+    )
+
+    assert errors == (
+        [
+            "Restricted model(s) ['fake_restricted_model'] cannot share "
+            "default_models with other models in 'bl_security'"
+        ]
+        if shared
+        else []
+    )
+
+
+@pytest.mark.parametrize(
+    ("models", "shared"),
+    [
+        (["fake_restricted_model"], False),
+        (["fake_restricted_model", "claude_sonnet_5_vertex"], True),
+    ],
+)
+def test_validate_restricted_tagged_model_must_be_the_only_model_for_its_tag(
+    config: ModelSelectionConfig, models: list[str], shared: bool
+):
+    unit_primitive_configs = list(config.get_unit_primitive_config())
+    bl_security = next(
+        c for c in unit_primitive_configs if c.feature_setting == "bl_security"
+    )
+    bl_security.models_for_tags["large"] = ModelTagEntry(models=models)
+
+    errors = config._validate_restricted_models(
+        unit_primitive_configs, config.get_llm_definitions()
+    )
+
+    assert errors == (
+        [
+            "Restricted model(s) ['fake_restricted_model'] cannot share tag "
+            "'large' with other models in 'bl_security'"
+        ]
+        if shared
+        else []
+    )
+
+
+def test_validate_restricted_variant_must_be_the_only_default_and_tagged_model(
+    config: ModelSelectionConfig, fake_restricted_model
+):
+    """A variant sharing the restricted upstream model is refused at runtime too."""
+    variant = fake_restricted_model.model_copy(deep=True)
+    variant.gitlab_identifier = "fake_restricted_model_vertex"
+    variant.params.model = "vertex_ai/claude-fake-restricted-1@20261001"
+    models = {**config.get_llm_definitions(), variant.gitlab_identifier: variant}
+    shared = ["fake_restricted_model_vertex", "claude_sonnet_5_vertex"]
+    unit_primitive_configs = list(config.get_unit_primitive_config())
+    bl_security = next(
+        c for c in unit_primitive_configs if c.feature_setting == "bl_security"
+    )
+    bl_security.default_models = [
+        DefaultModelEntry(identifier=i, weight=50) for i in shared
+    ]
+    bl_security.models_for_tags["large"] = ModelTagEntry(models=shared)
+
+    errors = config._validate_restricted_models(unit_primitive_configs, models)
+
+    assert errors == [
+        "Restricted model(s) ['fake_restricted_model_vertex'] cannot share "
+        "default_models with other models in 'bl_security'",
+        "Restricted model(s) ['fake_restricted_model_vertex'] cannot share tag "
+        "'large' with other models in 'bl_security'",
+    ]
+
+
+@pytest.mark.parametrize(
     "feature_settings", [[], ["bl_security", ""], ["bl_security", "bl_security"]]
 )
 def test_validate_rejects_empty_or_duplicate_restricted_feature_settings(

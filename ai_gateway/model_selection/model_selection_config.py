@@ -704,6 +704,23 @@ class ModelSelectionConfig:
             for i in sorted({i for i in identifiers if identifiers.count(i) > 1})
         )
         flows_by_identifier = self._restricted_flows_by_identifier()
+
+        def matching_restricted(ids: Iterable[str]) -> list[str]:
+            # Match like the runtime check, so variants of a restricted model count.
+            return sorted(
+                i
+                for i in ids
+                if self.restricted_flows_for(
+                    [i],
+                    [
+                        d.params.model
+                        if (d := models.get(i) or self._env_llm_definitions.get(i))
+                        else None
+                    ],
+                )
+                is not None
+            )
+
         for config in unit_primitive_configs:
             # A restricted model may be listed only by the features whose
             # feature_setting is one of its feature_settings.
@@ -728,6 +745,20 @@ class ModelSelectionConfig:
                     f"'{config.feature_setting}': remove it from {list_name}"
                     for model_id in sorted(restricted.intersection(ids))
                 )
+            # A shared default would deny callers without access only on some runs.
+            defaults = config.default_model_identifiers
+            if len(defaults) > 1 and (shared := matching_restricted(defaults)):
+                errors.append(
+                    f"Restricted model(s) {shared} cannot share "
+                    f"default_models with other models in '{config.feature_setting}'"
+                )
+            errors.extend(
+                f"Restricted model(s) {shared} cannot share tag '{tag}' "
+                f"with other models in '{config.feature_setting}'"
+                for tag, entry in config.models_for_tags.items()
+                if len(entry.models) > 1
+                and (shared := matching_restricted(entry.models))
+            )
         # A fallback is another model reached by the same request, so restrictions apply to it too.
         params_sources = (
             "models.yml, AIGW_MODEL_SELECTION__MODEL_PARAMS "
