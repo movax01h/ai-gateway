@@ -1,5 +1,6 @@
 # pylint: disable=direct-environment-variable-reference,unknown-option-value,too-many-instance-attributes,dangerous-default-value
 import asyncio
+import json
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -62,6 +63,7 @@ from duo_workflow_service.checkpointer.write_mode import (
     incremental_checkpoints_enabled,
 )
 from duo_workflow_service.components import ToolsRegistry
+from duo_workflow_service.components.tools_registry import ceiling_exempt_tool_names
 from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     ApprovalSource,
@@ -130,6 +132,25 @@ DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 
 
+def _claim_requests_ceiling(raw: Any) -> bool:
+    """Whether an unparsable claim still asks for the ceiling, so it can fail closed."""
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return False
+    # Any value other than absent or false fails closed, matching how leniently it parses.
+    return isinstance(data, dict) and data.get("ceiling") not in (None, False)
+
+
+def _request_origin_known() -> bool:
+    """Whether this service knows its own issuer, so a self-issued token can be recognised."""
+    try:
+        _ = CloudConnectorConfig().service_name
+    except NoServiceNameError:
+        return False
+    return True
+
+
 def _nothing_stamped_the_request(user: CloudConnectorUser) -> bool:
     """Whether the caller reached this service with no Workhorse in between.
 
@@ -156,6 +177,9 @@ class ToolAccessPolicies(BaseModel):
     allow: list[str] = []
     ask: list[str] = []
     deny: list[str] = []
+    # Set by Rails when the governance ceiling is enabled. It is inside the signed claim,
+    # so a client cannot drop it. Older GitLab omits it and the ceiling stays off.
+    ceiling: bool = False
 
 
 @dataclass(frozen=True)
@@ -269,6 +293,8 @@ class AbstractWorkflow(ABC):
         # own preapproved_tools so v1 flows honour governance without also adopting
         # client-declared pre-approvals they never accepted before.
         self._governance_allowed_tools: list[str] = []
+        # `None` means the ceiling is off; an empty set means it is on and permits nothing.
+        self._admin_allowed_preapprovals: Optional[set[str]] = None
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
         self._first_response_metric_recorded = False
@@ -432,6 +458,32 @@ class AbstractWorkflow(ABC):
             if tool.get("trusted", False) and is_orbit_tool(tool["llm_name"])
         ]
 
+    def _allow_client_injected_mcp_tools(self) -> bool:
+        allowed = bool(
+            self._workflow_config.get("allow_client_injected_mcp_tools", False)
+        )
+        # Without a Workhorse stamp every MCP tool counts as client-injected, so with the
+        # ceiling on none of them may skip it. An unknown origin is treated the same way.
+        if self._admin_allowed_preapprovals is not None and (
+            not _request_origin_known() or _nothing_stamped_the_request(self._user)
+        ):
+            return False
+        return allowed
+
+    def _cap_client_preapprovals(self, tools_registry: ToolsRegistry) -> ToolsRegistry:
+        """Chat reads this list by name, so with the ceiling on drop what it does not permit.
+
+        That includes a client tool that borrows an allowed name. Returns the registry unchanged.
+        """
+        if self._admin_allowed_preapprovals is not None and self._preapproved_tools:
+            permitted = tools_registry.pre_approvals_allowed_by_policy(
+                self._preapproved_tools
+            )
+            self._preapproved_tools = [
+                name for name in self._preapproved_tools if name in permitted
+            ]
+        return tools_registry
+
     def _merge_jwt_governance_claims(self) -> None:
         if self._user.claims and self._user.claims.extra:
             raw = self._user.claims.extra.get("tool_access_policies")
@@ -452,6 +504,8 @@ class AbstractWorkflow(ABC):
                         exc_info=True,
                     )
                     self._preapproved_tools = []
+                    if _claim_requests_ceiling(raw):
+                        self._admin_allowed_preapprovals = set()
                     return
                 can_ask_user = self._workflow_config.get(
                     "allow_agent_to_request_user", False
@@ -471,6 +525,16 @@ class AbstractWorkflow(ABC):
                     # named in both allow and ask still reaches the user.
                     self._preapproved_tools = list(set(policies.allow) - ask)
                     self._governance_allowed_tools = list(self._preapproved_tools)
+                # Uses the raw ask list: `_ask_tools` is emptied for sessions that cannot ask,
+                # and an ask rule must still keep a tool out of pre-approval there.
+                if policies.ceiling and (
+                    policies.allow or policies.deny or policies.ask
+                ):
+                    self._admin_allowed_preapprovals = (
+                        set(policies.allow) - set(policies.ask)
+                    ) | ceiling_exempt_tool_names(
+                        set(policies.ask) | set(policies.deny)
+                    )
                 if deny:
                     self._denied_tools = list(set(self._denied_tools) | deny)
 
@@ -608,20 +672,21 @@ class AbstractWorkflow(ABC):
             if self._namespace and self._support_namespace_level_workflow() is False:
                 raise NamespaceLevelWorkflowNotSupportedException()
 
-            tools_registry = await ToolsRegistry.configure(
-                outbox=self._outbox,
-                workflow_config=self._workflow_config,
-                gl_http_client=self._http_client,
-                project=self._project,
-                workflow_id=self._workflow_id,
-                mcp_tools=self._permitted_mcp_tools(),
-                language_server_version=self._language_server_version,
-                denied_tools=self._denied_tools,
-                ask_tools=self._ask_tools,
-                allow_client_injected_mcp_tools=self._workflow_config.get(
-                    "allow_client_injected_mcp_tools", False
-                ),
-                allowed_tools=self._governance_allowed_tools,
+            tools_registry = self._cap_client_preapprovals(
+                await ToolsRegistry.configure(
+                    outbox=self._outbox,
+                    workflow_config=self._workflow_config,
+                    gl_http_client=self._http_client,
+                    project=self._project,
+                    workflow_id=self._workflow_id,
+                    mcp_tools=self._permitted_mcp_tools(),
+                    language_server_version=self._language_server_version,
+                    denied_tools=self._denied_tools,
+                    ask_tools=self._ask_tools,
+                    allow_client_injected_mcp_tools=self._allow_client_injected_mcp_tools(),
+                    allowed_tools=self._governance_allowed_tools,
+                    admin_allowed_preapprovals=self._admin_allowed_preapprovals,
+                )
             )
 
             def on_gitlab_status_update(status: WorkflowStatusEventEnum):

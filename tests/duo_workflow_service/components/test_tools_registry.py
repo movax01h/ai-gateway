@@ -20,6 +20,7 @@ from duo_workflow_service.components.tools_registry import (
     Toolset,
     ToolsRegistry,
     _merge_feature_tools,
+    ceiling_exempt_tool_names,
     discover_feature_tools,
 )
 from duo_workflow_service.entities.state import ApprovalSource
@@ -3138,3 +3139,132 @@ def test_ceiling_keeps_pre_approved_capability_tools(tool_metadata):
 
     assert added
     assert added <= registry._preapproved_tool_names
+
+
+# The ceiling keeps start_flow and the read-only groups, minus anything ruled.
+
+# Snapshot: changing it means a tool moved in or out of a read-only group, so check that Rails
+# defaults it to allow before updating this list.
+_EXPECTED_CEILING_EXEMPT = [
+    "ascp_list_components",
+    "ascp_list_scans",
+    "build_review_merge_request_context",
+    "ci_linter",
+    "evaluate_vuln_fp_status",
+    "extract_lines_from_text",
+    "fetch_glql_schema",
+    "finalize_code_review_findings",
+    "find_files",
+    "get_commit",
+    "get_commit_comments",
+    "get_commit_diff",
+    "get_current_user",
+    "get_downstream_pipelines",
+    "get_epic",
+    "get_failing_bridge_jobs",
+    "get_glql_schema",
+    "get_issue",
+    "get_issue_note",
+    "get_job_logs",
+    "get_merge_request",
+    "get_pipeline_failing_jobs",
+    "get_project",
+    "get_repository_file",
+    "get_repository_files",
+    "get_security_finding_details",
+    "get_session_context",
+    "get_vulnerability_details",
+    "get_wiki_page",
+    "get_work_item",
+    "get_work_item_notes",
+    "get_work_item_statuses",
+    "gitlab__user_search",
+    "gitlab_api_get",
+    "gitlab_blob_search",
+    "gitlab_commit_search",
+    "gitlab_documentation_search",
+    "gitlab_graphql",
+    "gitlab_group_project_search",
+    "gitlab_issue_search",
+    "gitlab_merge_request_search",
+    "gitlab_milestone_search",
+    "gitlab_note_search",
+    "gitlab_wiki_blob_search",
+    "grep",
+    "list_all_merge_request_notes",
+    "list_commits",
+    "list_dir",
+    "list_epic_notes",
+    "list_epics",
+    "list_group_audit_events",
+    "list_instance_audit_events",
+    "list_issue_notes",
+    "list_issues",
+    "list_merge_request_diffs",
+    "list_mr_discussions",
+    "list_project_audit_events",
+    "list_repository_tree",
+    "list_security_findings",
+    "list_vulnerabilities",
+    "list_work_items",
+    "read_file",
+    "read_files",
+    "resolve_vulnerability_target_branch",
+    "run_glql_query",
+    "start_flow",
+]
+
+
+def test_ceiling_exempt_tool_names_snapshot():
+    assert sorted(ceiling_exempt_tool_names(set())) == _EXPECTED_CEILING_EXEMPT
+
+
+@pytest.mark.parametrize(
+    "ruled,keeps_read_only",
+    [
+        # A rule only on write tools leaves Rails' read-only verdict at allow.
+        ({"run_command", "edit_file"}, True),
+        # A rule on a read tool may have demoted the read-only group in Rails.
+        ({"grep"}, False),
+        # So may a rule on a name DWS does not know as a write tool (for example MCP).
+        ({"gitlab_search"}, False),
+    ],
+)
+def test_ceiling_exempt_tool_names_turns_read_only_off_when_a_read_rule_exists(
+    ruled, keeps_read_only
+):
+    exempt = ceiling_exempt_tool_names(ruled)
+
+    assert "start_flow" in exempt
+    assert ("read_file" in exempt) is keeps_read_only
+    assert not exempt & ruled
+
+
+@pytest.mark.parametrize("name", ["edit_file", "ascp_list_scans"])
+def test_ceiling_never_widens_pre_approval(tool_metadata, name):
+    """A name the ceiling permits is not pre-approved unless something else pre-approves it."""
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "read_only_gitlab"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        allowed_tools=[],
+        admin_allowed_preapprovals={name},
+    )
+
+    assert not registry.is_preapproved(name)
+
+
+def test_privilege_tool_names_skips_mcp_configs_and_unnamed_tools():
+    class _Unnamed(BaseTool):  # pylint: disable=too-few-public-methods
+        name: str
+        description: str = "no default name"
+
+        def _run(self, *args, **kwargs):  # pragma: no cover
+            return None
+
+    privileges = {
+        "read_only_gitlab": [{"llm_name": "mcp_tool"}, _Unnamed, tools.ReadFile]
+    }
+
+    with patch.object(tools_registry, "_AGENT_PRIVILEGES", privileges):
+        assert tools_registry._privilege_tool_names("read_only_gitlab") == {"read_file"}

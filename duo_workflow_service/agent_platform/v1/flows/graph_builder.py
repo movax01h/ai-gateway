@@ -8,7 +8,7 @@ from langgraph.graph import StateGraph
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
 from duo_workflow_service.agent_platform.utils.flow import (
-    strip_ask_listed_pre_approvals,
+    filter_pre_approvals_by_policy,
 )
 from duo_workflow_service.agent_platform.v1.catalog import (
     CatalogItems,
@@ -147,7 +147,7 @@ class FlowGraphBuilder:
         )
 
         if "pre_approved_tools" in comp_params:
-            comp_params["pre_approved_tools"] = strip_ask_listed_pre_approvals(
+            comp_params["pre_approved_tools"] = filter_pre_approvals_by_policy(
                 comp_params["pre_approved_tools"], self._tools_registry
             )
 

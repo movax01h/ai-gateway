@@ -148,6 +148,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             mock_tools_registry = Mock()
             mock_tools_registry.toolset.return_value = []
             mock_tools_registry.mcp_tool_names.return_value = []
+            mock_tools_registry.pre_approvals_allowed_by_policy.side_effect = set
             mock_tools_registry_class.configure = AsyncMock(
                 return_value=mock_tools_registry
             )
@@ -250,6 +251,25 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         self, flow_instance, mock_tools_registry
     ):
         mock_tools_registry.ask_listed_tool_names.return_value = {"run_command"}
+
+        params = flow_instance._prepare_component_params(
+            {
+                "name": "agent",
+                "type": "AgentComponent",
+                "pre_approved_tools": ["run_command", "notify_me_when"],
+            },
+            mock_tools_registry,
+        )
+
+        assert params["pre_approved_tools"] == ["notify_me_when"]
+
+    def test_prepare_component_params_caps_pre_approvals_by_the_ceiling(
+        self, flow_instance, mock_tools_registry
+    ):
+        mock_tools_registry.ask_listed_tool_names.return_value = set()
+        mock_tools_registry.pre_approvals_allowed_by_policy.side_effect = lambda names: (
+            {"notify_me_when"} & set(names)
+        )
 
         params = flow_instance._prepare_component_params(
             {
