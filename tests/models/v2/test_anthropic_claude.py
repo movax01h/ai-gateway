@@ -158,7 +158,11 @@ class TestChatAnthropic:
                 {"web_search_options": {}},
                 [
                     {"name": "get_issue", "input_schema": []},
-                    {"type": "web_search_20250305", "name": "web_search"},
+                    {
+                        "type": "web_search_20250305",
+                        "name": "web_search",
+                        "max_uses": 5,
+                    },
                     {
                         "type": "web_fetch_20250910",
                         "name": "web_fetch",

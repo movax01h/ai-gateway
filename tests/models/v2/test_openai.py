@@ -1,4 +1,5 @@
 import pytest
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import Runnable
 
 from ai_gateway.models.v2.openai import _WEB_SEARCH_INCLUDES, ChatOpenAI
@@ -74,3 +75,19 @@ def test_bind_tools_merges_include(field_include, bind_kwargs, expected_include)
     result = chat.bind_tools(tools=[], **bind_kwargs)
 
     assert result.kwargs.get("include") == expected_include
+
+
+@pytest.mark.parametrize(
+    ("bind_tools_params", "expected_max_tool_calls"),
+    [
+        pytest.param({"web_search_options": {}}, 5, id="web-search-is-capped"),
+        pytest.param({}, None, id="no-web-search-no-cap"),
+    ],
+)
+def test_bind_tools_caps_web_search_calls(bind_tools_params, expected_max_tool_calls):
+    chat = ChatOpenAI(model="gpt-5", api_key="test", use_responses_api=True)
+
+    result = chat.bind_tools(tools=[], **bind_tools_params)
+    payload = chat._get_request_payload([HumanMessage("hi")], **result.kwargs)
+
+    assert payload.get("max_tool_calls") == expected_max_tool_calls
