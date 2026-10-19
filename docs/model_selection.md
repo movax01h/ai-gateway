@@ -520,6 +520,11 @@ The check uses the allowlist of the feature that the route serves. A route that 
 `feature_setting`, so the client can name the feature whose allowlist suits it. This fallback stays until the routes
 derive the feature themselves: from the prompt on HTTP, and from the flow on the Duo Workflow Service.
 
+On HTTP, `ModelConfigMiddleware` runs the check on the `model_metadata` field of each request body. It passes no
+feature, so on this path the client's `feature_setting` selects the allowlist. In `enforce` mode the middleware answers
+HTTP 403 with `{"detail": "<reason>"}` before the route runs. The Duo Workflow Service header and the route payloads
+do not call the check yet.
+
 A gateway without custom models serves GitLab-managed models only, so it accepts a fixed set of providers. Over HTTP
 it accepts `gitlab` and `amazon_q`, which GitLab Rails sends, and `anthropic`, `vertex-ai` and `fireworks_ai`, which
 the legacy code completions fields send. On the Duo Workflow Service it accepts `gitlab` and `amazon_q`, and the

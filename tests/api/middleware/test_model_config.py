@@ -3,10 +3,15 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from gitlab_cloud_connector import CloudConnectorUser
 from starlette.middleware import Middleware
+from starlette.types import ASGIApp, Receive, Scope, Send
+from structlog.testing import capture_logs
 
 from ai_gateway.api.middleware.model_config import ModelConfigMiddleware
-from lib.context import current_model_metadata_context
+from ai_gateway.config import get_config
+from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
+from lib.context import StarletteUser, current_model_metadata_context
 
 
 @pytest.fixture(name="model_metadata_context")
@@ -323,3 +328,152 @@ async def test_parses_iam_role_into_context_var(middleware_test_client, custom_m
     )
 
     assert response.json() == {"iam_role": IAM_ROLE_ARN}
+
+
+FABLE = "claude_fable_5"
+CHAT = "duo_chat"
+NOT_ALLOWED_FOR_CHAT = {
+    "provider": "gitlab",
+    "identifier": FABLE,
+    "feature_setting": CHAT,
+}
+
+
+def _feature(feature_setting: str) -> UnitPrimitiveConfig:
+    return ModelSelectionConfig.instance().get_unit_primitive_config_map()[
+        feature_setting
+    ]
+
+
+class _AuthenticatedUser:
+    """Set the user the way the authentication middleware does."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        scope["user"] = StarletteUser(CloudConnectorUser(True, global_user_id="user-1"))
+        await self.app(scope, receive, send)
+
+
+@pytest.fixture(name="cloud_gateway")
+def cloud_gateway_fixture(monkeypatch):
+    """Run as GitLab's own gateway: a gateway that serves custom models skips the allowlist check."""
+    monkeypatch.setattr(get_config().custom_models, "enabled", False)
+
+
+@pytest.mark.usefixtures("cloud_gateway", "feature_allowlist_mode")
+class TestFeatureAllowlist:
+    @pytest.mark.parametrize(
+        "feature_allowlist_mode", ["log", "fallback", "enforce"], indirect=True
+    )
+    def test_serves_an_allowed_model(self, middleware_test_client):
+        allowed = _feature(CHAT).default_model_identifiers[0]
+
+        response = middleware_test_client.post(
+            "/test",
+            json={
+                "model_metadata": {
+                    "provider": "gitlab",
+                    "identifier": allowed,
+                    "feature_setting": CHAT,
+                }
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["name"] == allowed
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
+    def test_log_mode_serves_the_model_and_logs_the_mismatch(
+        self, middleware_test_client
+    ):
+        assert FABLE not in _feature(CHAT).allowed_model_identifiers
+
+        with capture_logs() as logs:
+            response = middleware_test_client.post(
+                "/test", json={"model_metadata": NOT_ALLOWED_FOR_CHAT}
+            )
+
+        assert response.json()["name"] == FABLE
+        assert [
+            (entry["reason"], entry["path"])
+            for entry in logs
+            if entry["event"] == "Model allowlist mismatch"
+        ] == [("model_not_allowed", "/test")]
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+    def test_fallback_mode_serves_the_feature_default(self, middleware_test_client):
+        response = middleware_test_client.post(
+            "/test", json={"model_metadata": NOT_ALLOWED_FOR_CHAT}
+        )
+
+        assert response.json()["name"] in _feature(CHAT).default_model_identifiers
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+    def test_fallback_mode_leaves_a_model_without_a_feature_on_the_prompt_default(
+        self, middleware_test_client
+    ):
+        response = middleware_test_client.post(
+            "/test", json={"model_metadata": {"provider": "gitlab", "name": FABLE}}
+        )
+
+        assert response.json() is None
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+    def test_a_fireworks_default_gets_the_user_session(self, model_metadata_context):
+        app = FastAPI(
+            middleware=[
+                Middleware(_AuthenticatedUser),
+                Middleware(ModelConfigMiddleware),
+            ]
+        )
+
+        @app.post("/test")
+        async def session_id(request: Request):
+            await request.body()
+            return {"session_id": model_metadata_context.get().session_id}
+
+        response = TestClient(app).post(
+            "/test",
+            json={
+                "model_metadata": {
+                    "provider": "gitlab",
+                    "identifier": FABLE,
+                    "feature_setting": "code_completions",
+                }
+            },
+        )
+
+        assert response.json() == {"session_id": "user-1"}
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+    @pytest.mark.parametrize(
+        ("model_metadata", "detail"),
+        [
+            pytest.param(
+                NOT_ALLOWED_FOR_CHAT,
+                "Model 'claude_fable_5' is not available for 'duo_chat'",
+                id="model-not-allowed",
+            ),
+            pytest.param(
+                {"provider": "openai", "name": FABLE},
+                "This gateway does not serve models from provider 'openai'",
+                id="provider-not-served",
+            ),
+            pytest.param(
+                {"provider": "gitlab", "name": FABLE},
+                "feature_setting is required to request model 'claude_fable_5'",
+                id="missing-feature-setting",
+            ),
+        ],
+    )
+    def test_enforce_mode_rejects_the_request(
+        self, middleware_test_client, model_metadata, detail
+    ):
+        response = middleware_test_client.post(
+            "/test", json={"model_metadata": model_metadata}
+        )
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": detail}
