@@ -34,7 +34,6 @@
 
 # Orbit-specific flows, prompts, and libs are co-owned by the Orbit team
 /duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
-/duo_workflow_service/agent_platform/v1/flows/configs/developer/*-orbit.yml @gitlab-org/orbit
 /lib/context/orbit.py @gitlab-org/orbit
 
 # Insights features under ai/features/ are co-owned by Platform Insights
@@ -81,7 +80,6 @@
 
 # Orbit-specific flow configs
 /duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent/ @gitlab-org/orbit
-/duo_workflow_service/agent_platform/v1/flows/configs/developer/*-orbit.yml @gitlab-org/orbit
 
 # Insights features under ai/features/
 /ai/features/insights/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/analytics-section/platform-insights/engineers
