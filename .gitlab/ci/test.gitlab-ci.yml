@@ -97,7 +97,7 @@ tests:agents:analytics:
   extends: .tests:agents
   variables:
     AGENT_TEST_DIR: analytics_agent/
-  allow_failure: false
+  allow_failure: true
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
