@@ -209,7 +209,6 @@ ai_gateway/prompts/definitions/common/include_urls
 ai_gateway/prompts/definitions/common/merge_request_guidelines
 ai_gateway/prompts/definitions/common/package_recommendations
 ai_gateway/prompts/definitions/common/performance_optimization
-ai_gateway/prompts/definitions/common/planning
 ai_gateway/prompts/definitions/common/project_activity_fetch_issues
 ai_gateway/prompts/definitions/common/project_activity_fetch_merge_requests
 ai_gateway/prompts/definitions/common/push_retry
@@ -236,15 +235,9 @@ ai_gateway/prompts/definitions/create_repository_branch/user
 ai_gateway/prompts/definitions/deep_code_review_reviewer/base
 ai_gateway/prompts/definitions/deep_code_review_reviewer/system
 ai_gateway/prompts/definitions/deep_code_review_reviewer/user
-ai_gateway/prompts/definitions/developer_add_plan_comment/base
-ai_gateway/prompts/definitions/developer_add_plan_comment/system
-ai_gateway/prompts/definitions/developer_add_plan_comment/user
 ai_gateway/prompts/definitions/developer_agent_prompt/base
 ai_gateway/prompts/definitions/developer_agent_prompt/system
 ai_gateway/prompts/definitions/developer_agent_prompt/user
-ai_gateway/prompts/definitions/developer_planner/base
-ai_gateway/prompts/definitions/developer_planner/system
-ai_gateway/prompts/definitions/developer_planner/user
 ai_gateway/prompts/definitions/ensure_clean_git_state/base
 ai_gateway/prompts/definitions/ensure_clean_git_state/system
 ai_gateway/prompts/definitions/ensure_clean_git_state/user

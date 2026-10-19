@@ -22,7 +22,7 @@ def resolve_version(available: Iterable[str], version_query: str) -> str:
 
     If the query is not a valid PEP 440 constraint, an exact string match
     against *available* is attempted so that non-PEP 440 names such as
-    ``2.0.0-orbit`` still resolve.
+    ``2.0.0-interactive`` still resolve.
 
     Args:
         available: Version strings to match against (e.g. from YAML filenames or dict keys).
@@ -39,7 +39,7 @@ def resolve_version(available: Iterable[str], version_query: str) -> str:
     try:
         constraint = parse_constraint(version_query)
     except ValueError:
-        # version_query is not a valid PEP 440 constraint (e.g. "2.0.0-orbit").
+        # version_query is not a valid PEP 440 constraint (e.g. "2.0.0-interactive").
         # Fall back to an exact string match so that arbitrarily-named config
         # files can still be selected.
         if version_query in available_list:
