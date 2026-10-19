@@ -1,8 +1,9 @@
 from fastapi import APIRouter, status
-from gitlab_cloud_connector import GitLabUnitPrimitive
+from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
+from ai_gateway.api.feature_category import feature_category
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.types import (
     DeprecationInfo,
@@ -67,6 +68,7 @@ class _GetModelResponse(BaseModel):
     status_code=status.HTTP_200_OK,
     description="List of available large language models powering GitLab Duo features",
 )
+@feature_category(GitLabFeatureCategory.AI_ABSTRACTION_LAYER)
 async def get_models():
     selection_config = ModelSelectionConfig.instance()
     llm_definitions = selection_config.get_resolved_llm_definitions()

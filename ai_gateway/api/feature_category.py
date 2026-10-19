@@ -11,6 +11,10 @@ _CATEGORY_CONTEXT_KEY = "meta.feature_category"
 _UNIT_PRIMITIVE_CONTEXT_KEY = "meta.unit_primitive"
 _UNKNOWN_FEATURE_CATEGORY = "unknown"
 
+# Attribute set on decorated endpoints so the declared categories can be inspected without a request.
+# `functools.wraps` copies it to any decorator applied on top.
+_FEATURE_CATEGORIES_ATTR = "_gitlab_feature_categories"
+
 
 def feature_category(name: GitLabFeatureCategory):
     """Track a feature category in a single purpose endpoint.
@@ -32,6 +36,7 @@ def feature_category(name: GitLabFeatureCategory):
             context[_CATEGORY_CONTEXT_KEY] = name
             return await func(*args, **kwargs)
 
+        setattr(wrapper, _FEATURE_CATEGORIES_ATTR, frozenset({name}))
         return wrapper
 
     return decorator
@@ -46,10 +51,10 @@ def feature_categories(mapping: dict[GitLabUnitPrimitive, GitLabFeatureCategory]
     Example:
 
     ```
-    @feature_category({
+    @feature_categories({
         GitLabUnitPrimitive.EXPLAIN_VULNERABILITY: GitLabFeatureCategory.VULNERABILITY_MANAGEMENT,
         GitLabUnitPrimitive.GENERATE_COMMIT_MESSAGE: GitLabFeatureCategory.CODE_REVIEW_WORKFLOW,
-    }
+    })
     ```
     """
     for category in mapping.values():
@@ -83,9 +88,20 @@ def feature_categories(mapping: dict[GitLabUnitPrimitive, GitLabFeatureCategory]
             context[_UNIT_PRIMITIVE_CONTEXT_KEY] = unit_primitive
             return await func(request, *args, **kwargs)
 
+        setattr(wrapper, _FEATURE_CATEGORIES_ATTR, frozenset(mapping.values()))
         return wrapper
 
     return decorator
+
+
+def get_feature_categories(
+    endpoint: typing.Callable,
+) -> frozenset[GitLabFeatureCategory]:
+    """Get the feature categories declared on an endpoint with `feature_category` or `feature_categories`.
+
+    Returns an empty set if the endpoint declares none.
+    """
+    return getattr(endpoint, _FEATURE_CATEGORIES_ATTR, frozenset())
 
 
 def current_feature_category() -> str:

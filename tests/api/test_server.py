@@ -8,12 +8,13 @@ import litellm
 import pytest
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.routing import RouteContext, iter_route_contexts
+from fastapi.routing import APIRoute, RouteContext, iter_route_contexts
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from structlog.testing import capture_logs
 
 from ai_gateway.api import create_fast_api_server, server
+from ai_gateway.api.feature_category import get_feature_categories
 from ai_gateway.api.server import (
     assume_role_exception_handler,
     custom_http_exception_handler,
@@ -61,6 +62,12 @@ _ROUTES_V3 = [
 _ROUTES_V4 = [
     ("/v4/code/suggestions", ["POST"]),
 ]
+
+# Infrastructure routes that don't belong to a product feature
+_ROUTES_WITHOUT_FEATURE_CATEGORY = {
+    "/monitoring/healthz",
+    "/monitoring/ready",
+}
 
 
 @pytest.fixture(scope="module")
@@ -167,6 +174,32 @@ def test_setup_router():
     assert any(route.path == "/v3/code/completions" for route in routes)
     assert any(route.path == "/v4/code/suggestions" for route in routes)
     assert any(route.path == "/monitoring/healthz" for route in routes)
+
+
+def test_every_route_has_feature_category():
+    app = FastAPI()
+    server.setup_router(app)
+
+    # Built-in docs routes (/docs, /openapi.json, ...) are plain Starlette routes, not APIRoute
+    api_routes = [
+        route
+        for route in _flatten_routes(app)
+        if isinstance(route.original_route, APIRoute)
+    ]
+
+    # Keep the exemption list free of stale entries
+    assert _ROUTES_WITHOUT_FEATURE_CATEGORY <= {route.path for route in api_routes}
+
+    missing = sorted(
+        route.path
+        for route in api_routes
+        if route.path not in _ROUTES_WITHOUT_FEATURE_CATEGORY
+        and not get_feature_categories(route.endpoint)
+    )
+
+    assert not missing, (
+        f"Add @feature_category or @feature_categories to these routes: {missing}"
+    )
 
 
 def test_setup_prometheus_fastapi_instrumentator():
