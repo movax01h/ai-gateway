@@ -23,7 +23,6 @@
 /ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
-/duo_workflow_service/agent_platform/v1/flows/configs/risk_classification/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/risk_classification_claims/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/ (see work item 2853)
@@ -75,7 +74,6 @@
 /ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
-/duo_workflow_service/agent_platform/v1/flows/configs/risk_classification/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/risk_classification_claims/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/
