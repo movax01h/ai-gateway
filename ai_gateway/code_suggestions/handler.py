@@ -2,7 +2,7 @@ from enum import StrEnum
 from time import time
 from typing import Any, AsyncIterator, List, Optional, Protocol, Union
 
-from dependency_injector.providers import Factory
+from dependency_injector.providers import Configuration, Factory
 from dependency_injector.wiring import Provide, inject
 from fastapi import HTTPException, Request, status
 from gitlab_cloud_connector import (
@@ -10,7 +10,7 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     WrongUnitPrimitives,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, SerializerFunctionWrapHandler, model_serializer
 from sse_starlette.sse import EventSourceResponse
 from starlette.responses import StreamingResponse
 from starlette_context import context as starlette_context
@@ -24,23 +24,34 @@ from ai_gateway.code_suggestions import (
     LanguageServerVersion,
 )
 from ai_gateway.code_suggestions.base import SAAS_PROMPT_MODEL_MAP
+from ai_gateway.code_suggestions.fallback import build_rate_limit_fallback
 from ai_gateway.code_suggestions.processing.post.completions import (
     create_post_processor_for_model_metadata,
 )
-from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import (
+    AmazonQModelMetadata,
     TypeModelMetadata,
     build_default_code_completions_metadata,
     completion_context_max_percent_for_model_metadata,
     create_model_metadata,
+    resolve_provider_aware_metadata,
 )
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models import KindModelProvider
-from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.models.base import TokensConsumptionMetadata
+from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.structured_logging import get_request_logger
-from ai_gateway.tracking import SnowplowEventContext
+from ai_gateway.tracking import SnowplowEvent, SnowplowEventContext
+from ai_gateway.tracking.errors import log_exception
+from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.context import StarletteUser, current_model_metadata_context
-from lib.feature_flags.context import current_feature_flag_context
+from lib.feature_flags.context import (
+    FeatureFlag,
+    current_feature_flag_context,
+    is_feature_enabled,
+)
+from lib.internal_events import InternalEventsClient
 from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
 
 __all__ = [
@@ -70,6 +81,16 @@ class ModelMetadata(BaseModel):
     engine: Optional[str] = None
     name: Optional[str] = None
     lang: Optional[str] = None
+    tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_missing_token_usage(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        data = handler(self)
+        if data.get("tokens_consumption_metadata") is None:
+            data.pop("tokens_consumption_metadata", None)
+        return data
 
 
 class ResponseMetadataBase(BaseModel):
@@ -106,12 +127,47 @@ class StreamHandler(Protocol):
         pass
 
 
+@inject
+def _watch_code_suggestion_event(
+    context: SnowplowEventContext,
+    snowplow_instrumentator: SnowplowInstrumentator = Provide[
+        ContainerApplication.snowplow.instrumentator
+    ],
+) -> None:
+    try:
+        snowplow_instrumentator.watch(SnowplowEvent(context=context))
+    except Exception as e:
+        log_exception(e)
+
+
+def _get_prompt_on_behalf(
+    prompt_registry: BasePromptRegistry, *args: Any, **kwargs: Any
+) -> Prompt:
+    try:
+        return prompt_registry.get_on_behalf(*args, **kwargs)
+    except WrongUnitPrimitives:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized to access code suggestions",
+        )
+
+
+def _amazon_q_role_arn(
+    payload: Any, model_metadata: TypeModelMetadata | None
+) -> str | None:
+    if payload.role_arn:
+        return payload.role_arn
+    if isinstance(model_metadata, AmazonQModelMetadata):
+        return model_metadata.role_arn
+    return None
+
+
 async def code_suggestions(
     request: Request,
     payload: Any,
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
-    config: Config,
+    config: Configuration,
     stream_handler: StreamHandler,
 ):
     language_server_version = LanguageServerVersion.from_string(
@@ -137,13 +193,15 @@ async def code_suggestions(
         language=component.payload.language_identifier,
         global_user_id=current_user.global_user_id,
         region=config.google_cloud_platform.location(),
+        is_context_cap_enabled=(
+            is_feature_enabled(FeatureFlag.CAP_CODE_COMPLETION_CONTEXT)
+            if component.type == CodeEditorComponents.COMPLETION
+            else None
+        ),
     )
 
     if component.type == CodeEditorComponents.COMPLETION:
-        if not current_user.can(
-            GitLabUnitPrimitive.COMPLETE_CODE,
-            disallowed_issuers=[CloudConnectorConfig().service_name],
-        ):
+        if not current_user.can(GitLabUnitPrimitive.COMPLETE_CODE):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Unauthorized to access code suggestions",
@@ -181,17 +239,21 @@ async def code_completion(
     stream_handler: StreamHandler,
     snowplow_event_context: SnowplowEventContext,
     completions_agent_factory: Factory[CodeCompletions] = Provide[
-        ContainerApplication.code_suggestions.completions.agent_factory.provider
+        "code_suggestions.completions.agent_factory.provider"
     ],
     completions_amazon_q_factory: Factory[CodeCompletions] = Provide[
-        ContainerApplication.code_suggestions.completions.amazon_q_factory.provider
+        "code_suggestions.completions.amazon_q_factory.provider"
+    ],
+    internal_event_client: InternalEventsClient = Provide[
+        ContainerApplication.internal_event.client
     ],
     code_context: Optional[List[Any]] = None,
-    model_metadata: TypeModelMetadata = None,
-    config: Config = None,
+    model_metadata: TypeModelMetadata | None = None,
+    *,
+    config: Configuration,
     using_cache: bool = True,
 ):
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
 
     if payload.model_provider == KindModelProvider.AMAZON_Q or (
         model_metadata and model_metadata.provider == KindModelProvider.AMAZON_Q
@@ -205,46 +267,80 @@ async def code_completion(
                 detail="Unauthorized to access code suggestions",
             )
 
+        internal_event_client.track_event(
+            f"request_{GitLabUnitPrimitive.AMAZON_Q_INTEGRATION}_complete_code",
+            category=__name__,
+        )
         engine = completions_amazon_q_factory(
             model__current_user=current_user,
-            model__role_arn=payload.role_arn or model_metadata.role_arn,
+            model__role_arn=_amazon_q_role_arn(payload, model_metadata),
         )
     else:
+        if (
+            model_metadata is not None
+            and model_metadata.provider == "gitlab"
+            and model_metadata.name
+            not in ModelSelectionConfig.instance().allowed_models_for_feature(
+                "code_completions"
+            )
+        ):
+            request_log.warning(
+                "Ignoring model_metadata that is not selectable for code completions",
+                model_name=model_metadata.name,
+            )
+            model_metadata = None
+
+        engine_kwargs: dict[str, Any] = {}
         if model_metadata is None:
-            if config is None:
-                raise ValueError(
-                    "config must be provided when model_metadata is not set"
-                )
             model_metadata = build_default_code_completions_metadata(
                 fireworks_api_base_url=config.fireworks_api_base_url(),
                 model_keys=config.model_keys(),
                 user=current_user,
                 using_cache=using_cache,
-                mock_model_responses=config.mock_model_responses,
+                mock_model_responses=config.mock_model_responses(),
+            )
+            engine_kwargs["fallback_factory"] = build_rate_limit_fallback(
+                model_metadata,
+                prompt_registry,
+                current_user,
+                fireworks_api_base_url=config.fireworks_api_base_url(),
+                model_keys=config.model_keys(),
+                using_cache=using_cache,
+                mock_model_responses=config.mock_model_responses(),
+                excl_post_process=config.feature_flags.excl_post_process(),
+                fireworks_score_thresholds=config.feature_flags.fireworks_score_threshold(),
+            )
+        elif model_metadata.provider == "gitlab":
+            model_metadata = resolve_provider_aware_metadata(
+                model_metadata.llm_definition,
+                provider_keys=config.model_keys(),
+                fireworks_api_base_url=config.fireworks_api_base_url(),
+                mock_model_responses=config.mock_model_responses(),
+                session_id=current_user.global_user_id,
+                using_cache=using_cache,
             )
 
-        try:
-            prompt = prompt_registry.get_on_behalf(
-                current_user,
-                "code_suggestions/completions",
-                model_metadata=model_metadata,
-                internal_event_category=__name__,
-            )
-        except WrongUnitPrimitives:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Unauthorized to access code suggestions",
-            )
+        prompt = _get_prompt_on_behalf(
+            prompt_registry,
+            current_user,
+            "code_suggestions/completions",
+            model_metadata=model_metadata,
+            internal_event_category=__name__,
+        )
 
         post_processor = create_post_processor_for_model_metadata(
             model_metadata,
             config.feature_flags.excl_post_process(),
             config.feature_flags.fireworks_score_threshold(),
         )
+        if model_metadata.is_custom_model:
+            engine_kwargs["model__llm_definition"] = model_metadata.llm_definition
+
         engine = completions_agent_factory(
             model__prompt=prompt,
             post_processor=post_processor,
             model_metadata=model_metadata,
+            **engine_kwargs,
         )
 
         context_max_percent = completion_context_max_percent_for_model_metadata(
@@ -252,6 +348,8 @@ async def code_completion(
         )
         if context_max_percent is not None:
             kwargs["context_max_percent"] = context_max_percent
+
+    _watch_code_suggestion_event(snowplow_event_context)
 
     suggestions = await engine.execute(
         prefix=payload.content_above_cursor,
@@ -265,26 +363,30 @@ async def code_completion(
         **kwargs,
     )
 
-    if not isinstance(suggestions, list):
-        suggestions = [suggestions]
+    results = suggestions if isinstance(suggestions, list) else [suggestions]
+    first = results[0]
 
-    if isinstance(suggestions[0], AsyncIterator):
+    if isinstance(first, AsyncIterator):
         stream_metadata = _get_stream_metadata(engine, snowplow_event_context)
-        return await stream_handler(suggestions[0], stream_metadata)
+        return await stream_handler(first, stream_metadata)
 
     model_meta = ModelMetadata(
-        engine=suggestions[0].model_metadata.engine,
-        name=suggestions[0].model_metadata.name,
-        lang=suggestions[0].lang,
+        engine=first.model_metadata.engine,
+        name=first.model_metadata.name,
+        lang=first.lang,
+        tokens_consumption_metadata=(
+            first.metadata.tokens_consumption_metadata if first.metadata else None
+        ),
     )
 
     return CompletionResponse(
-        choices=_completion_suggestion_choices(suggestions),
+        choices=_completion_suggestion_choices(results),
         model=model_meta,
         metadata=ResponseMetadataBase(
             timestamp=int(time()),
             model=model_meta,
-            enabled_feature_flags=current_feature_flag_context.get(),
+            enabled_feature_flags=list(current_feature_flag_context.get()),
+            region=snowplow_event_context.region,
         ),
     )
 
@@ -318,18 +420,21 @@ async def code_generation(
     stream_handler: StreamHandler,
     snowplow_event_context: SnowplowEventContext,
     agent_factory: Factory[CodeGenerations] = Provide[
-        ContainerApplication.code_suggestions.generations.agent_factory.provider
+        "code_suggestions.generations.agent_factory.provider"
     ],
     generations_amazon_q_factory: Factory[CodeGenerations] = Provide[
-        ContainerApplication.code_suggestions.generations.amazon_q_factory.provider
+        "code_suggestions.generations.amazon_q_factory.provider"
+    ],
+    internal_event_client: InternalEventsClient = Provide[
+        ContainerApplication.internal_event.client
     ],
     # pylint: disable=unused-argument
     code_context: Optional[List[Any]] = None,
-    model_metadata: Optional[TypeModelMetadata] = None,
-    config: Optional[Config] = None,
+    model_metadata: TypeModelMetadata | None = None,
+    config: Configuration | None = None,
 ):
-    model_provider = payload.model_provider or (
-        model_metadata and model_metadata.provider
+    model_provider: str | None = payload.model_provider or (
+        model_metadata.provider if model_metadata else None
     )
     if model_provider == KindModelProvider.AMAZON_Q:
         if not current_user.can(
@@ -341,9 +446,13 @@ async def code_generation(
                 detail="Unauthorized to access code suggestions",
             )
 
+        internal_event_client.track_event(
+            f"request_{GitLabUnitPrimitive.AMAZON_Q_INTEGRATION}_generate_code",
+            category=__name__,
+        )
         engine = generations_amazon_q_factory(
             model__current_user=current_user,
-            model__role_arn=payload.role_arn or model_metadata.role_arn,
+            model__role_arn=_amazon_q_role_arn(payload, model_metadata),
         )
     elif payload.prompt_id:
         # for backward compatibility, eventually prmpt_version should be a mandatory field
@@ -352,7 +461,8 @@ async def code_generation(
         # in case prompt_id is present, model_provider is not directly passed in from request
         model_provider = SAAS_PROMPT_MODEL_MAP[prompt_version]["model_provider"]
 
-        prompt = prompt_registry.get_on_behalf(
+        prompt = _get_prompt_on_behalf(
+            prompt_registry,
             user=current_user,
             prompt_id=payload.prompt_id,
             prompt_version=payload.prompt_version,
@@ -365,7 +475,7 @@ async def code_generation(
             "Executing code generation with prompt registry",
             prompt_name=prompt.name,
             prompt_model_class=prompt.model.__class__.__name__,
-            prompt_model_name=prompt.model_name,
+            prompt_model_name=prompt.reported_model_name,
         )
     else:
         # If model_provider is specified in payload but no prompt_id, use it to override model_metadata
@@ -374,7 +484,7 @@ async def code_generation(
                 model_metadata = create_model_metadata(
                     {"provider": "gitlab", "identifier": "claude_sonnet_4_5_20250929"},
                     mock_model_responses=(
-                        config.mock_model_responses if config else False
+                        config.mock_model_responses() if config else False
                     ),
                 )
             elif model_provider == KindModelProvider.VERTEX_AI:
@@ -384,11 +494,12 @@ async def code_generation(
                         "identifier": "claude_sonnet_4_5_20250929_vertex",
                     },
                     mock_model_responses=(
-                        config.mock_model_responses if config else False
+                        config.mock_model_responses() if config else False
                     ),
                 )
 
-        prompt = prompt_registry.get_on_behalf(
+        prompt = _get_prompt_on_behalf(
+            prompt_registry,
             user=current_user,
             prompt_id="code_suggestions/generations",
             model_metadata=model_metadata,
@@ -400,8 +511,10 @@ async def code_generation(
             "Executing code generation with prompt registry (legacy path)",
             prompt_name=prompt.name,
             prompt_model_class=prompt.model.__class__.__name__,
-            prompt_model_name=prompt.model_name,
+            prompt_model_name=prompt.reported_model_name,
         )
+
+    _watch_code_suggestion_event(snowplow_event_context)
 
     suggestion = await engine.execute(
         prefix=payload.content_above_cursor,
@@ -435,7 +548,8 @@ async def code_generation(
         metadata=ResponseMetadataBase(
             timestamp=int(time()),
             model=model_meta,
-            enabled_feature_flags=current_feature_flag_context.get(),
+            enabled_feature_flags=list(current_feature_flag_context.get()),
+            region=snowplow_event_context.region,
         ),
     )
 
@@ -450,6 +564,6 @@ def _get_stream_metadata(
             engine=engine.model.metadata.engine,
             name=engine.model.metadata.name,
         ),
-        enabled_feature_flags=current_feature_flag_context.get(),
+        enabled_feature_flags=list(current_feature_flag_context.get()),
         region=snowplow_event_context.region,
     )

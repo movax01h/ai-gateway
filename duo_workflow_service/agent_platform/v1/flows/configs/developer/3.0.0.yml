@@ -39,11 +39,23 @@ components:
       - "todo_write"
       - "run_command"
 
+    identical_tool_call_limit: 3
+
     ui_log_events:
       - "on_agent_reasoning"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
+
+    subagents:
+      - source: workspace
+        item_type: agent_template
+        item_id: "*"
+
+include:
+  - source: workspace
+    item_type: agent_template
+    item_id: "*"
 
 routers:
   - from: "developer_agent"

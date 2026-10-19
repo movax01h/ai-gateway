@@ -57,7 +57,13 @@ override_env() {
   awk -v k="$key" -v v="$value" 'BEGIN{FS=OFS="="} $1==k {$0=k"="v} 1' .env > .env.tmp && mv .env.tmp .env
 }
 
-gitlab_base_url="http://${CAPRONI_PRIMARY_HOSTNAME:-"gitlab.caproni.test"}"
+# These URLs are consumed by ai-gateway and duo-workflow-service, both of which
+# run under mirrord in edit mode: DNS and outgoing TCP resolve in the ai-gateway
+# pod's network, not the host's. In there the hostname must reach the cluster
+# ingress on its in-cluster port, which is 80 regardless of what host port the
+# k3d loadbalancer is published on. Keep them portless.
+gitlab_host="${CAPRONI_PRIMARY_HOSTNAME:-gitlab.caproni.test}"
+gitlab_base_url="http://${gitlab_host}"
 
 override_env AIGW_GITLAB_URL                    "$gitlab_base_url/"
 override_env AIGW_GITLAB_API_URL                "${gitlab_base_url}/api/v4/"
@@ -155,21 +161,38 @@ success "  ✓ Found pod: $TOOLBOX_POD"
 GITLAB_DIR="$(cd "$REPOS_DIR/gitlab" && pwd)"
 
 # ---------------------------------------------------------------------------
+# Run one of gitlab's caproni scripts with gitlab's own toolchain on PATH.
+#
+# Those scripts assume an activated mise shell: db_migrate.sh parses
+# config/database.yml with bare `ruby`. Caproni's hook environment has mise on
+# PATH but not activated, so `ruby` resolves to nothing. Resolving through the
+# monolith's .tool-versions also covers any other host-side tool those scripts
+# reach for later.
+# ---------------------------------------------------------------------------
+
+gitlab_script() {
+  (cd "$GITLAB_DIR" && mise trust --quiet && RAILS_ENV=development mise exec -- "./.gitlab/caproni/$1")
+}
+
+# ---------------------------------------------------------------------------
 # Ensure the GitLab repo's cluster-config sync has run first.
 #
 # caproni processes repository hooks in alphabetical order, so this
 # (ai-gateway) hook fires BEFORE gitlab's own edit_mode_start hooks. The
 # Rails steps below need config/database.yml etc., which gitlab's
-# .gitlab/caproni/setup.sh copies from the cluster. Run it now if the config
-# is missing (the script is idempotent — it re-runs harmlessly when gitlab's
-# own hook fires later in the same `caproni run`).
+# .gitlab/caproni/setup.sh copies from the cluster.
+#
+# Always run it, even when config/database.yml already exists: a copy left
+# over from a previous cluster carries that cluster's database credentials,
+# and every Rails step below would then fail password authentication. The
+# script is idempotent — it re-runs harmlessly when gitlab's own hook fires
+# later in the same `caproni run` — and this block is only reached when Duo
+# seeding is not skipped, so the extra sync is cheap by comparison.
 # ---------------------------------------------------------------------------
 
-if [[ ! -f "$GITLAB_DIR/config/database.yml" ]]; then
-  echo ""
-  echo "==> GitLab config not synced yet – running gitlab's .gitlab/caproni/setup.sh first..."
-  "$GITLAB_DIR/.gitlab/caproni/setup.sh"
-fi
+echo ""
+echo "==> Syncing GitLab config from the cluster (gitlab's .gitlab/caproni/setup.sh)..."
+gitlab_script setup.sh
 
 # The Rails steps below also need the local checkout's migrations applied:
 # the development database is cloned from the chart's stable release, while
@@ -179,7 +202,7 @@ fi
 
 echo ""
 echo "==> Ensuring database migrations are up to date..."
-"$GITLAB_DIR/.gitlab/caproni/db_migrate.sh"
+gitlab_script db_migrate.sh
 
 run_rake() {
   (cd "$GITLAB_DIR" && mise trust --quiet && RAILS_ENV=development AI_GATEWAY_URL="$AI_GATEWAY_URL" mise exec -- \

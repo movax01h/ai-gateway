@@ -2,6 +2,7 @@ accessor
 accessors
 ACLs
 Adafruit
+agentic
 Agentic
 Airbnb
 Airtable
@@ -42,6 +43,7 @@ Asana
 Asciidoctor
 asdf
 Assembla
+Astra
 Astro
 async
 Atlassian
@@ -105,6 +107,7 @@ Bootsnap
 bot
 bot's
 Bottlerocket
+Brevo
 browsable
 bugfix
 bugfixed
@@ -124,6 +127,7 @@ burstable
 CA
 cacheable
 Caddy
+cAdvisor
 callout
 callouts
 callstack
@@ -137,6 +141,7 @@ captcha
 CAPTCHAs
 Capybara
 Casdoor
+Ccache
 CDNs
 CE
 CentOS
@@ -174,12 +179,15 @@ CMKs
 CNAs
 CNs
 Cobertura
+CocoaPods
 Codeberg
 Codeception
 Codecov
+codemods
 codenames
 Codepen
 CodeSandbox
+Codestral
 Codey
 Cognito
 Coinbase
@@ -198,6 +206,7 @@ Conda
 config
 Configs
 Consul
+containerd
 Contentful
 Corosync
 corpuses
@@ -294,11 +303,12 @@ DevOps
 Dhall
 dialogs
 Diffblue
+DinD
 disambiguates
 discoverability
 dismissable
 Disqus
-Distroless
+distroless
 Divio
 DLE
 DNs
@@ -315,6 +325,7 @@ dogfoods
 DOMPurify
 dotenv
 dotfiles
+dotnet
 doublestar
 downvoted
 downvotes
@@ -331,6 +342,7 @@ EGit
 ElastiCache
 Elasticsearch
 Eleventy
+Embeddable
 enablement
 Encrypt
 enqueued
@@ -348,10 +360,12 @@ ETag
 ETags
 Etsy
 Excon
+ExCoveralls
 exfiltrate
 exfiltration
 ExifTool
 expirable
+Fabernovel
 Facebook
 failover
 failovers
@@ -364,6 +378,7 @@ fastlane
 Fastly
 Fastzip
 favicon
+favicons
 favorited
 Fediverse
 ffaker
@@ -398,6 +413,8 @@ fuzzer
 fuzzing
 Gantt
 Gbps
+GCC
+gcovr
 Gemfile
 Gemnasium
 Gemojione
@@ -417,7 +434,9 @@ gitlabsos
 Gitleaks
 Gitpod
 Gitter
+glab
 GLab
+GLM
 globals
 globbing
 globstar
@@ -425,18 +444,22 @@ globstars
 GLQL's
 Gmail
 Godep
+gofmt
 Golang
 Goldmark
+golint
 Gollum
 Google
 goroutine
 goroutines
 Gosec
+govet
 GPUs
 Gradle
 Grafana
 Grafonnet
 gravatar
+Grayson
 Grype
 GUIs
 Gzip
@@ -449,6 +472,7 @@ hardcoded
 hardcodes
 HashiCorp
 Haswell
+Heartbleed
 heatmap
 heatmaps
 Helm
@@ -466,6 +490,7 @@ hotfixed
 hotfixes
 hotfixing
 hotspots
+howto
 HTMLHint
 http
 https
@@ -475,9 +500,12 @@ iCalendar
 iCloud
 IDE's
 idempotence
+idempotency
 IDEs
 idmapper
 Iglu
+IID
+IIDs
 IIFEs
 Immer
 inclusivity
@@ -507,6 +535,7 @@ Javafuzz
 JavaScript
 Jenkins
 Jenkinsfile
+JFrog
 Jira
 Jitsu
 jq
@@ -534,12 +563,15 @@ keyless
 keyset
 keyspace
 keystore
+keystores
 keytab
 keytabs
 Kibana
 kibibyte
 kibibytes
+Kimi
 Kinesis
+Kiro
 Klar
 Knative
 KPIs
@@ -548,6 +580,7 @@ Kroki
 kubeconfig
 Kubecost
 kubectl
+Kubelet
 Kubernetes
 Kubesec
 Kucoin
@@ -563,6 +596,7 @@ ldapsearch
 Lefthook
 Leiningen
 Lemmy
+Libbehave
 libFuzzer
 Libgcrypt
 Libravatar
@@ -637,7 +671,9 @@ mitigations
 mitmproxy
 mixin
 mixins
+Mixtral
 MLflow
+MLOps
 Mmap
 mockup
 mockups
@@ -658,6 +694,7 @@ namespaced
 namespaces
 namespacing
 namespacings
+Nano
 Nanoc
 NAT
 navigations
@@ -677,6 +714,7 @@ NuGet
 nullability
 nullable
 Nurtch
+NVIDIA
 NVMe
 nyc
 OAuth
@@ -691,6 +729,7 @@ Okta
 Ollama
 OLM
 OmniAuth
+Ona
 onboarding
 OpenID
 OpenShift
@@ -721,6 +760,7 @@ passwordless
 Patroni
 PDFs
 performant
+pg_ash
 PgBouncer
 pgFormatter
 pgLoader
@@ -739,6 +779,8 @@ Pipfile
 Pipfiles
 Piwik
 plaintext
+pnpm
+Podfile
 podman
 Poedit
 polyfill
@@ -774,6 +816,7 @@ prepopulate
 prepopulated
 presentationals
 Prettifier
+Prioritizer
 Pritaly
 Priyanka
 profiler
@@ -787,11 +830,13 @@ proxyable
 proxying
 pseudocode
 pseudonymization
+pseudonymize
 pseudonymized
 pseudonymizer
 Pulumi
 Puma
 Pumble
+Pydantic
 Pylint
 PyPI
 pytest
@@ -799,6 +844,7 @@ Python
 Qualys
 queryable
 Quicktime
+Qwen
 Rackspace
 railties
 Raspbian
@@ -883,6 +929,7 @@ roadmaps
 rock
 rollout
 rollouts
+Roslynator
 routable
 RPCs
 RSpec
@@ -915,9 +962,11 @@ scatterplot
 scatterplots
 schedulable
 Schemastore
+scoverage
 scriptable
 scrollable
 SDKs
+seccomp
 segmentations
 SELinux
 Semgrep
@@ -935,6 +984,7 @@ SFCs
 sharded
 sharding
 SHAs
+Shellshock
 shfmt
 Shippo
 Shopify
@@ -1035,6 +1085,8 @@ supercookie
 supercookies
 supergroup
 supergroups
+superproject
+superproject's
 superset
 supersets
 supertype
@@ -1044,6 +1096,7 @@ swappiness
 swimlane
 swimlanes
 syncable
+syntaxes
 Sysbench
 Sysbox
 syscall
@@ -1052,11 +1105,13 @@ syslog
 systemd
 tablespace
 tablespaces
+Tailscale
 Tamland
 tanuki
 taskscaler
 tcpdump
 teardown
+Telesign
 templated
 Thanos
 thoughtbot
@@ -1069,6 +1124,7 @@ timeboxing
 timecop
 timelog
 timelogs
+Timestamper
 Tiptap
 todos
 tokenizer
@@ -1093,6 +1149,7 @@ Trendline
 triaged
 triages
 triaging
+triggerer
 Trivy
 Trixie
 Truststore
@@ -1144,6 +1201,8 @@ unescaped
 unfollow
 unfollowed
 unfollows
+unforgeable
+Unforgeable
 Unicorn
 unindexed
 unlink
@@ -1210,6 +1269,8 @@ untarred
 untrack
 untracked
 untrusted
+untyped
+unvalidated
 unverified
 unverifies
 unverify
@@ -1223,6 +1284,7 @@ upvotes
 urgencies
 URIs
 URL
+userland
 UUIDs
 Vagrantfile
 validator
@@ -1238,6 +1300,7 @@ virtualizing
 Vite
 VMs
 VPCs
+VRAM
 VSCodium
 Vue
 Vuex
@@ -1252,6 +1315,7 @@ webserver
 Webservice
 websocket
 websockets
+Wget
 whitepaper
 whitepapers
 wireframe
@@ -1261,6 +1325,8 @@ wireframing
 Wireshark
 Wordpress
 Workato
+workplan
+workplans
 workstream
 worktree
 worktrees
@@ -1269,6 +1335,7 @@ Xcode
 Xenial
 Xeon
 Xerus
+XGBoost
 XPath
 Yandex
 YouTrack
@@ -1280,6 +1347,7 @@ Zeitwerk
 Zendesk
 ZenTao
 Zoekt
+Zscaler
 zsh
 Zstandard
 Zuora

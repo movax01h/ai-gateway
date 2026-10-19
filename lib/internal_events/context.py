@@ -5,11 +5,30 @@ from typing import Any, Dict, List, Optional, Set
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
+    "RESERVED_AI_CONTEXT_EXTRA_KEYS",
     "EventContext",
     "InternalEventAdditionalProperties",
     "current_event_context",
+    "merge_event_context_extra",
     "tracked_internal_events",
 ]
+
+# Keys of EventContext.extra that feed identity fields on the ai_context
+# Snowplow context (workflow_id/workflow_type/agent_name from callers,
+# flow_name/item_version/item_schema_version from the DWS flow registry).
+# Client-supplied `x-gitlab-tracking-context` must never be allowed to set
+# these directly - see internal_events_interceptor.py and
+# ai_gateway/api/middleware/internal_event.py.
+RESERVED_AI_CONTEXT_EXTRA_KEYS = frozenset(
+    {
+        "workflow_id",
+        "workflow_type",
+        "agent_name",
+        "flow_name",
+        "item_version",
+        "item_schema_version",
+    }
+)
 
 
 class EventContext(BaseModel):
@@ -80,13 +99,37 @@ class InternalEventAdditionalProperties:
         self.extra = kwargs
 
 
+_DEFAULT_EVENT_CONTEXT = EventContext()
+
 current_event_context: ContextVar[EventContext] = ContextVar(
-    "current_event_context", default=EventContext()
+    "current_event_context", default=_DEFAULT_EVENT_CONTEXT
 )
 
 tracked_internal_events: ContextVar[Set[str]] = ContextVar(
     "tracked_internal_events", default=set()
 )
+
+
+def merge_event_context_extra(**fields: Any) -> None:
+    """Merge fields into the current request's event context ``extra``.
+
+    Every internal event emitted later in this request picks them up, because
+    ``InternalEventsClient.track_event`` merges ``EventContext.extra`` into the
+    per-event extras. Rebinding ``context.extra`` on the shared object (rather
+    than re-setting the ContextVar) is what makes the update visible to tasks
+    that captured the context before this call - both workflow task spawns
+    happen after the merge point anyway (``server.py`` ``workflow.run``,
+    ``server.py`` ``receive_events``). The ``_DEFAULT_EVENT_CONTEXT``
+    branch is a test-only safety net: its ``set()`` is invisible to already
+    running sibling tasks, which is fine because production always has the
+    interceptor-installed per-RPC context.
+    """
+    context = current_event_context.get()
+    if context is _DEFAULT_EVENT_CONTEXT:
+        context = EventContext()
+        current_event_context.set(context)
+    context.extra = {**(context.extra or {}), **fields}
+
 
 merge_request_url_context: ContextVar[Optional[str]] = ContextVar(
     "merge_request_url", default=None

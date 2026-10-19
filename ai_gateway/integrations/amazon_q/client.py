@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, Dict, List
 
 import boto3
 from botocore.exceptions import ClientError
@@ -17,10 +17,64 @@ from lib.context import StarletteUser, cloud_connector_token_context_var
 
 request_log = get_request_logger("amazon_q")
 
+# Upper bound on how much of the token authority's error text is logged. Its error responses are short sentences, so
+# this only guards against an unusually verbose one flooding the logs.
+GLGO_ERROR_LOG_LIMIT = 500
+
 __all__ = [
     "AmazonQClient",
     "AmazonQClientFactory",
 ]
+
+
+def _glgo_error_context(ex: BaseException) -> Dict[str, Any]:
+    """Extract the token authority's response details from a failed exchange.
+
+    The exception message only says that the request returned an error status. Without the status code and the reason,
+    a glgo-side failure surfaces as a bare "Cannot obtain OIDC token" and the actual cause is only recoverable by
+    cross-referencing glgo's own logs.
+
+    Only the "error" field of glgo's own JSON error envelope is logged, never the raw body. Anything else answering on
+    that route - a proxy, a WAF, an edge error page - is outside our trust boundary and could echo parts of the request
+    we send, which carries a bearer JWT and the Cloud Connector Token. For those responses we record just enough to
+    tell that something other than glgo replied.
+
+    Never raises: this runs on an error path, where failing would replace the controlled 500 with an unhandled
+    exception.
+    """
+    response = getattr(ex, "response", None)
+    if response is None:
+        return {}
+
+    try:
+        return {
+            "glgo_status_code": getattr(response, "status_code", None),
+            **_glgo_error_body_context(response),
+        }
+    except Exception:  # pylint: disable=broad-exception-caught  # diagnostics must not break the error path
+        return {"glgo_context_unavailable": True}
+
+
+def _glgo_error_body_context(response: Any) -> Dict[str, Any]:
+    """Summarise a response body without trusting its contents.
+
+    Returns the reported error when the body is glgo's error envelope, and a description of the payload otherwise.
+    """
+    try:
+        payload = response.json()
+    except Exception:  # pylint: disable=broad-exception-caught  # any malformed body lands here
+        payload = None
+
+    if isinstance(payload, dict) and isinstance(payload.get("error"), str):
+        return {"glgo_error": payload["error"][:GLGO_ERROR_LOG_LIMIT]}
+
+    headers = getattr(response, "headers", None) or {}
+
+    return {
+        "glgo_response_unrecognized": True,
+        "glgo_response_content_type": headers.get("Content-Type"),
+        "glgo_response_length": len(getattr(response, "content", b"") or b""),
+    }
 
 
 class AmazonQClientFactory:
@@ -64,7 +118,7 @@ class AmazonQClientFactory:
             request_log.info("Obtained Glgo token", source=__name__, user_id=user_id)
             return token
         except Exception as ex:
-            log_exception(ex)
+            log_exception(ex, extra=_glgo_error_context(ex))
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Cannot obtain OIDC token",

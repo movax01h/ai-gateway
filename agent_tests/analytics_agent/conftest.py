@@ -5,30 +5,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
 
-from agent_tests.conftest import make_prompt_adapter_class
-from duo_workflow_service.conversation.history_optimizer.pipeline import (
-    HistoryOptimizerPipeline,
-)
-from duo_workflow_service.conversation.history_optimizer.schema import (
-    OptimizationResult,
+from agent_tests.conftest import (
+    make_passthrough_optimizer_pipeline,
+    make_prompt_adapter_class,
 )
 from lib.context import gitlab_version
-
-
-def _make_passthrough_pipeline() -> HistoryOptimizerPipeline:
-    """Build a HistoryOptimizerPipeline mock that returns history unchanged."""
-    mock_pipeline = Mock(spec=HistoryOptimizerPipeline)
-
-    async def optimize(history):
-        return history, [OptimizationResult(messages=history, was_modified=False)]
-
-    mock_pipeline.optimize = AsyncMock(side_effect=optimize)
-    return mock_pipeline
 
 
 def pytest_collection_modifyitems(items):
@@ -89,8 +75,8 @@ def mock_gitlab_client():
 def mock_gitlab_version():
     """Set the GitLab version to 19.3.0, which clears both GLQL version floors.
 
-    GLQL itself needs 18.6 and the schema endpoint 19.3. Every reader imports
-    the same context var, so one set covers them all.
+    GLQL itself needs 18.6 and the schema endpoint 19.3. Every reader imports the same context var, so one set covers
+    them all.
     """
     token = gitlab_version.set("19.3.0")
     yield
@@ -100,7 +86,9 @@ def mock_gitlab_version():
 @pytest.fixture
 def glql_tool(mock_gitlab_client):
     """RunGLQLQuery tool with mocked GitLab client."""
-    from duo_workflow_service.tools.run_glql_query import RunGLQLQuery
+    from ai.features.insights.analytics_agent.components.run_glql_query import (
+        RunGLQLQuery,
+    )
 
     return RunGLQLQuery(metadata={"gitlab_client": mock_gitlab_client})
 
@@ -124,8 +112,13 @@ def glql_schema_tool(flow_version, mock_gitlab_client):
     full schema. The stub answers on path, so a tool added to the toolset later
     cannot silently receive the schema for its own GET.
     """
+    from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+
+    tool: DuoBaseTool
     if flow_version == "1.0.0":
-        from duo_workflow_service.tools.get_glql_schema import GetGlqlSchema
+        from ai.features.insights.analytics_agent.components.get_glql_schema import (
+            GetGlqlSchema,
+        )
 
         tool = GetGlqlSchema(metadata={})
     else:
@@ -175,12 +168,11 @@ def analytics_system_template(flow_version):
     """Load the analytics agent system template from YAML config file."""
     config_path = (
         Path(__file__).resolve().parents[2]
-        / "duo_workflow_service"
-        / "agent_platform"
-        / "v1"
-        / "flows"
-        / "configs"
+        / "ai"
+        / "features"
+        / "insights"
         / "analytics_agent"
+        / "config"
         / f"{flow_version}.yml"
     )
     with open(config_path) as f:
@@ -228,7 +220,7 @@ def analytics_agent(
         tools_registry=mock_tools_registry,
         system_template_override=None,
         toolset=Toolset(pre_approved=set(), all_tools=tools_dict),
-        optimizer_pipeline=_make_passthrough_pipeline(),
+        optimizer_pipeline=make_passthrough_optimizer_pipeline(),
     )
 
 
@@ -268,5 +260,5 @@ def analytics_agent_without_orbit(
         tools_registry=mock_tools_registry,
         system_template_override=None,
         toolset=Toolset(pre_approved=set(), all_tools=tools_dict),
-        optimizer_pipeline=_make_passthrough_pipeline(),
+        optimizer_pipeline=make_passthrough_optimizer_pipeline(),
     )

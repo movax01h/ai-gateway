@@ -30,14 +30,6 @@ To lint the entire projects, you can use the following command:
 make lint
 ```
 
-We are incrementally rolling out `mypy` static type checker to the project
-([issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/246)).
-To show outstanding `mypy` warnings, you can use the following command:
-
-```shell
-make check-mypy TODO=true
-```
-
 To fix linting errors, you can use the following command:
 
 ```shell
@@ -144,7 +136,7 @@ to add internal events and test internal event collection with Snowplow locally.
 
 ## Release
 
-See [release doc](docs/release.md).
+See [release doc](docs/delivery/release.md).
 
 ## Rate limiting
 

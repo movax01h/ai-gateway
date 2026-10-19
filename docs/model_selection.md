@@ -24,8 +24,9 @@ appropriate definitions is abstracted via the `create_model_metadata` method, ac
 
 - If `name` is provided, the model definition with the matching `gitlab_identifier` is fetched. This logic is used
 primarily by model metadata requesting a custom model.
-- If `feature_setting` is provided, the `default_model` from the matching entry from `configurable_unit_primitives`
-is fetched. This is the case applicable to users selecting "GitLab default model" in the UI
+- If `feature_setting` is provided, one of the `default_models` from the matching entry from
+`configurable_unit_primitives` is picked (see [Traffic splitting between default models](#traffic-splitting-between-default-models)).
+This is the case applicable to users selecting "GitLab default model" in the UI
 - If `identifier` is provided, the model definition with the matching `gitlab_identifier` is fetched. This is triggered
 when the user has selected a GitLab-provided model other than "GitLab default model" in the UI
 
@@ -62,7 +63,8 @@ configurable_unit_primitives:
   - feature_setting: "code_suggestions"
     unit_primitives:
       - "code_suggestions"
-    default_model: "codestral"
+    default_models:
+      - "codestral"
     selectable_models:
       - "codestral"
 ```
@@ -89,7 +91,8 @@ Assume `code_suggestions/completions` is given as the `prompt_id`, and `1.0.0` a
 If the model metadata from the request is `{"provider": "gitlab", "feature_setting": "code_suggestions"}`, the following
 steps will occur:
 
-- `unit_primitives.yml` will be searched for  `feature_setting: "code_suggestions"`, and its `default_model` retrieved
+- `unit_primitives.yml` will be searched for  `feature_setting: "code_suggestions"`, and one of its `default_models`
+  picked (with a single entry, `codestral` is always selected)
 - `models.yml` will be searched for `gitlab_identifier: codestral`, and its `family` and parameters retrieved
 - Each `value` from `family` will be checked in order for a corresponding prompt definition folder, so first the path
 `ai_gateway/prompts/definitions/code_suggestions/completions/codestral` is checked. Assuming it doesn't exist, next
@@ -148,6 +151,7 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 - `provider` (optional): The provider of the model, used for display in the UI (e.g "Vertex", "Anthropic")
 - `description`: **Required** for GitLab UI-selectable models. A brief description of the model (up to 90 characters) used for display in the UI e.g "Fast, cost-effective responses". When adding descriptions, tag `@tmccaslin` (Taylor McCaslin) for a vendor approval on the copy.
 - `cost_indicator`: **Required** for GitLab UI-selectable models. A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`, `$$$$`). See [Determining model cost indicators](#determining-model-cost-indicators).
+- `requires_paid_credits` (optional, defaults to `false`): Marks the model as available only to accounts that have purchased GitLab credits. Surfaced in the `/v1/models/definitions` response so clients can show a "Requires paid credits" indicator and block chat input.
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
 [How models and prompts are selected](#how-models-and-prompts-are-selected) for more details)
 - `params`: Dictionary with custom parameters to be passed to the model client
@@ -171,6 +175,33 @@ models:
     prompt_params:
       timeout: 60
       max_retries: 3
+```
+
+### Thinking configuration for Claude models
+
+Claude models support extended thinking via the `thinking` and `output_config` fields in `prompt_params`. These are
+model-specific parameters — valid values and whether `thinking` is required at all differ between Claude versions —
+so they are configured per model entry in `models.yml` rather than per agent.
+
+```yaml
+models:
+  - name: "Claude Sonnet 4.6"
+    gitlab_identifier: "claude_sonnet_4_6"
+    model_class_provider: "anthropic"
+    params:
+      model: "claude-sonnet-4-6"
+    prompt_params:
+      thinking:
+        type: adaptive
+      output_config:
+        effort: medium
+```
+
+Both fields default to `None` and are excluded from the request when not set, leaving existing models unaffected.
+To experiment without touching `models.yml`, use the `AIGW_MODEL_SELECTION__PROMPT_PARAMS` environment variable:
+
+```shell
+AIGW_MODEL_SELECTION__PROMPT_PARAMS='{"claude_sonnet_4_6": {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}}}'
 ```
 
 ### Context management in prompt_params
@@ -258,8 +289,11 @@ Unit primitive groups are defined in `ai_gateway/model_selection/unit_primitives
 - `feature_setting`: An identifier used to refer to the feature name
 - `unit_primitives`: the list of unit primitives that belong to this group, as defined in
   the [cloud_connector](https://gitlab.com/gitlab-org/cloud-connector/gitlab-cloud-connector/-/blob/main/src/python/gitlab_cloud_connector/gitlab_features.py#L19)
-- `default_model`: (required) the `gitlab_identifier` of the model used when no tag matches or no tag is specified.
-- `models_for_tags`: (optional) a map of tag strings to `gitlab_identifier` values, enabling per-task model routing (see [Model tag configuration](#model-tag-configuration)). `small` and `large` are conventional tags but any string is valid.
+- `default_models`: (required) the model(s) used when no tag matches or no tag is specified. Each entry is either a
+  plain `gitlab_identifier` string or an object with `identifier` and an optional `weight`. When several models are
+  listed, traffic is distributed across them (see
+  [Traffic splitting between default models](#traffic-splitting-between-default-models)).
+- `models_for_tags`: (optional) a map of tag strings to a `gitlab_identifier` value, or to an object with `models` and `keywords`, enabling per-task model routing (see [Model tag configuration](#model-tag-configuration)). `small` and `large` are conventional tags but any string is valid.
 - `selectable_models`: a list of `gitlab_identifier` for the models that the user can select from
 - `beta_models`: a list of models that are not fully supported but users can select from
 - `dev`: optional nested configuration for developer-only models with the following fields:
@@ -280,7 +314,8 @@ configurable_unit_primitives:
     unit_primitives:
       - "ask_build"
       - "ask_commit"
-    default_model: "claude_sonnet_4_5_20250929"
+    default_models:
+      - "claude_sonnet_4_5_20250929"
     selectable_models:
       - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_20250514"
@@ -290,26 +325,127 @@ configurable_unit_primitives:
         - "claude_haiku_4_5_20251001"
   ```
 
+## Traffic splitting between default models
+
+`default_models` accepts more than one entry, distributing traffic for the feature across the listed models. Each
+entry can carry an optional `weight` controlling what percentage of traffic is routed to it. This is typically used
+to split traffic between vendors for the same model (for example, Anthropic API and Vertex AI variants of the same
+Claude model) or to ramp up a new model gradually.
+
+```yaml
+configurable_unit_primitives:
+  - feature_setting: "duo_chat"
+    unit_primitives:
+      - "duo_chat"
+    default_models:
+      - identifier: "claude_sonnet_4_6_vertex"
+        weight: 70
+      - identifier: "claude_sonnet_4_6"
+        weight: 30
+```
+
+Rules:
+
+- Weights are relative — they are passed directly to `random.choices`, so they don't need to sum to 100. In the
+  example above, `claude_sonnet_4_6_vertex` serves roughly 70% of requests and `claude_sonnet_4_6` the remaining 30%.
+- Weights must be 0 or more, and at least one weight in a feature must be above 0. Both checks run at startup.
+- Weights are all-or-nothing within a feature: if any entry has a `weight`, **every** entry in that feature's
+  `default_models` must have one. A mix of weighted and unweighted entries fails validation at startup.
+- When no entry has a `weight`, traffic is distributed uniformly across all listed models (equivalent to giving every
+  entry the same weight).
+- Plain strings are still accepted and behave the same as an unweighted entry, so `- "claude_sonnet_4_6_vertex"` is
+  equivalent to `- identifier: "claude_sonnet_4_6_vertex"`.
+- The selection is made per request, so the observed split converges to the configured ratio only over a sufficiently
+  large volume of requests.
+
 ## Model tag configuration
 
-Features that route different tasks to different models (for example, a lightweight model for simple subtasks and a powerful model for complex ones) can declare this in `unit_primitives.yml` using `models_for_tags` alongside the required `default_model`.
+Features that route different tasks to different models (for example, a lightweight model for simple subtasks and a powerful model for complex ones) can declare this in `unit_primitives.yml` using `models_for_tags` alongside the required `default_models`.
+
+For how Duo Developer chooses the `small` or `large` tag per request, see the [model routing design document](model_routing/index.md).
 
 ### Configuring tags in `unit_primitives.yml`
 
-Use `models_for_tags` to map tag strings to `gitlab_identifier` values. `default_model` is always required and is used when no tag matches or no tag is specified. `small` and `large` are conventional tags that preserve the previous two-bucket semantics, but any string is valid. No changes to `models.yml` are required — model resolution is driven entirely by `models_for_tags` in `unit_primitives.yml`:
+Use `models_for_tags` to map tag strings to `gitlab_identifier` values. `default_models` is always required and is used when no tag matches or no tag is specified. `small` and `large` are conventional tags that preserve the previous two-bucket semantics, but any string is valid. No changes to `models.yml` are required — model resolution is driven entirely by `models_for_tags` in `unit_primitives.yml`:
 
 ```yaml
 configurable_unit_primitives:
   - feature_setting: "duo_agent_platform"
     unit_primitives:
       - "duo_agent_platform"
-    default_model: claude_sonnet_4_6_vertex
+    default_models:
+      - claude_sonnet_4_6_vertex
     models_for_tags:
       small: claude_haiku_4_5_20251001_vertex
       large: claude_sonnet_4_6_vertex
       claude: claude_sonnet_4_6_vertex
       reasoning: claude_opus_4_7_vertex
 ```
+
+A tag can also be written as an object. `models` accepts more than one entry and load-balances across provider variants of the same model, the way `default_models` does. `keywords` selects the tag from the request goal (see [Routing the default model by goal](#routing-the-default-model-by-goal)). Both spellings can appear in the same file:
+
+```yaml
+configurable_unit_primitives:
+  - feature_setting: "duo_developer"
+    unit_primitives: []
+    default_models:
+      - claude_sonnet_4_6_vertex
+    models_for_tags:
+      large:
+        models:
+          - claude_sonnet_4_6_vertex
+        keywords:
+          - refactor
+          - concurrency
+      small:
+        models:
+          - claude_haiku_4_5_20251001_vertex
+        keywords:
+          - typo
+          - docstring
+```
+
+Keyword rules are routing hints and never a security boundary: they are sensitive to wording and can be triggered deliberately. `/v1/models/definitions` reports one model per tag, so a tag listing several models shows its first.
+
+### Routing the default model by goal
+
+When the `duo_developer_model_routing` feature flag is enabled for a request, Duo Workflow Service routes the request once, when the workflow starts and before the flow is built, so every turn of the flow runs on the same model.
+It reads the task: the title and description of the triggering issue or merge request (from the `agent_platform_resource_context` additional context), otherwise the goal of the `StartWorkflowRequest`.
+The model behind the `classifier` tag, or the `small` tag when no `classifier` tag is configured, then classifies the task with the `classify_goal_tier` prompt, answering `small`, `large`, or `unsure` under a three-second timeout.
+A `small` or `large` answer makes that tag's model the request's `default`.
+`unsure`, a timeout, or an error keeps the configured `default_models`, and requests that name an explicit model `identifier` are never routed.
+
+Before the classifier runs, the task is scored against each tag's `keywords` with BM25, and the first matching tag (in the order tags are declared in `models_for_tags`) is passed to the classifier as a hint.
+A keyword matches when the task scores at least 75% of what the keyword scores against itself: a one-word keyword matches wherever it appears, but half of a phrase, such as `race` for `race condition`, does not.
+Matching ignores case, links, and @mentions, and allows plain plural and verb endings, so `typo` matches `typos` but not `typography`.
+
+The keyword lists come from the goal templates GitLab Rails renders for assignments, review requests, and mentions (`ee/app/models/ai/catalog/goal_templates/developer/`) — that template text is the whole goal for those requests and dictates the level of effort, so keep the lists free of words it contains. See the [model routing design document](model_routing/index.md).
+
+Components that declare their own `model_tags` are unaffected: they keep resolving through `ModelMetadataByTag.get`.
+
+#### Routing telemetry
+
+With the flag on, every workflow start where the classifier answers with a tag emits one structured log line and one `duo_workflow_model_routing_decision` internal event ([definition](../config/events/duo_workflow_model_routing_decision.yml)). The log line carries every field below by name. The event carries each value once, using Snowplow's built-in columns where they fit:
+
+| Log field               | Event field                                    | Meaning                                                                                                                                                                                  |
+| ----------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflow_id`           | `value` (numeric) and `ai_context.workflow_id` | The workflow ID from the start request.                                                                                                                                                  |
+| `tag`                   | `label`                                        | The tag the classifier picked.                                                                                                                                                           |
+| `outcome`               | `property`                                     | `routed` when the tag resolved to its own model; `fallback_default` when the tag has no resolvable model and the request kept the default. A fallback is also logged at `warning` level. |
+| `feature_setting`       | `extra.feature_setting`                        | The feature setting whose `models_for_tags` was matched.                                                                                                                                 |
+| `matched_keywords`      | `extra.matched_keywords`                       | The keyword hint: every keyword of the first matching tag found in the task, in policy order. Empty when no keyword matched. Can belong to another tag when the classifier overrode it.  |
+| `gitlab_identifier`     | `extra.gitlab_identifier`                      | The model the request is served by.                                                                                                                                                      |
+| `classifier_identifier` | `extra.classifier_identifier`                  | The classifier model that picked the tag: the `classifier` tag's model, or the `small` tag's when there is none.                                                                         |
+
+Nothing is emitted on the bypass paths (flag off, explicit `identifier`, an `unsure` answer, a timeout, or an error), because nothing was routed.
+
+`tag` and `matched_keywords` never contain text from the task. `matched_keywords` is copied from the `keywords` lists in `unit_primitives.yml`, and a classifier answer that isn't a tag declared in `models_for_tags` produces no event.
+
+Routing runs only when a workflow starts, so each workflow emits at most one routing event. A resumed workflow isn't routed again and emits nothing.
+
+`workflow_id` is the join key to billing: the routing event carries it as `ai_context.workflow_id`, and the billing event for the same workflow carries it as `metadata.workflow_id`, next to `llm_operations`.
+Each operation's `model_id` is the provider-reported model name, not a `gitlab_identifier`, so map `gitlab_identifier` to its `params.model` in `models.yml` before comparing them.
+Billing also covers resumed runs, which aren't routed again and can be served by a different model than the routing event names.
 
 ### How tag resolution works
 
@@ -321,7 +457,7 @@ The `ModelMetadataByTag` class wraps one or more `ModelMetadata` instances and e
 
 ### Expressing tag preference in components
 
-Components in `duo_workflow_service` declare their preferred model via the `model_tags` field on `BaseComponent`. It defaults to `None`, which resolves to the feature's `default_model`.
+Components in `duo_workflow_service` declare their preferred model via the `model_tags` field on `BaseComponent`. It defaults to `None`, which resolves to one of the feature's `default_models`.
 
 In flow YAML configs:
 
@@ -369,6 +505,74 @@ If you change models for a feature, update the corresponding page.
 
 There's an [open issue](https://gitlab.com/gitlab-org/gitlab/-/work_items/587907) to explore automation for these updates. Until then, manual updates are required to keep our customer documentation accurate.
 
+## Feature allowlist for GitLab-managed models
+
+GitLab Rails offers only the models that `GET /v1/models/definitions` lists for a feature. The gateway applies the
+same lists on the server, in `check_client_model_metadata` (`ai_gateway/feature_allowlist.py`). Request paths call
+it where client-supplied model metadata enters: the `model_metadata` field of an HTTP body, the
+`x-gitlab-agent-platform-model-metadata` gRPC header of the Duo Workflow Service, and routes that build metadata from
+their own payload, such as the legacy `model_provider` and `model_name` fields of `/v2/code/completions`.
+
+A feature's allowlist is the union of its `default_models`, `selectable_models`, `beta_models`, `dev.selectable_models`
+and `models_for_tags` entries (`UnitPrimitiveConfig.allowed_model_identifiers`).
+
+The check uses the allowlist of the feature that the route serves. A route that passes no feature uses the client's
+`feature_setting`, so the client can name the feature whose allowlist suits it. This fallback stays until the routes
+derive the feature themselves: from the prompt on HTTP, and from the flow on the Duo Workflow Service.
+
+A gateway without custom models serves GitLab-managed models only, so it accepts a fixed set of providers. Over HTTP
+it accepts `gitlab` and `amazon_q`, which GitLab Rails sends, and `anthropic`, `vertex-ai` and `fireworks_ai`, which
+the legacy code completions fields send. On the Duo Workflow Service it accepts `gitlab` and `amazon_q`, and the
+server-built `fireworks_ai` and `mistral` shapes that the resume replays. Any other provider value, such as a
+self-hosted provider (`openai`, `litellm`) or an unknown string, resolves a GitLab-managed model all the same and is
+refused rather than checked. Amazon Q carries its own role and is not checked. Metadata that the gateway builds itself
+is never checked. A gateway that serves custom models (`AIGW_CUSTOM_MODELS__ENABLED=true`) runs every model on the
+operator's own keys, so it skips the check altogether, whatever the mode.
+
+The check looks at:
+
+- A provider this gateway does not serve. In `fallback` and `enforce` mode the request is refused, because there is
+  nothing valid to fall back to. In `log` mode the remaining checks still run, so the log shows what the request
+  would meet once the provider is fixed.
+- A named model (`identifier` or `name`) that is not in the allowlist of the request's `feature_setting`. A route
+  that knows which feature it serves passes that feature, and it wins over the client's value.
+- A request for the default model of a feature other than the one the route serves. The route's default is served
+  instead in `fallback` and `enforce` mode. This is not refused, because some clients still send another feature's
+  name on a few paths.
+- A named GitLab-managed model with no `feature_setting`. On HTTP there is nothing to check it against. On the Duo
+  Workflow Service the model is kept and the request is logged as a note, because the resume replay of a checkpointed
+  model has this shape.
+- A named GitLab-managed model with a `feature_setting` that does not exist. Both surfaces handle it the way HTTP
+  handles a named model with no `feature_setting`.
+- `identifier` sent together with `name` for a GitLab-managed model. `name` resolves the model the allowlist checks,
+  but the raw `identifier` becomes the wire model: `{"name": "claude_sonnet_4_6_vertex", "identifier":
+  "vertex_ai/claude-opus-4-8"}` passes as Sonnet and runs Opus on the gateway's Vertex AI credentials. Only `fallback`
+  and `enforce` mode rebuild the model from its definition. In `off` and `log` mode the override stays until
+  GitLab-managed models are resolved by their GitLab identifier only. A client `endpoint` or `api_key` is not handled
+  here; `validate_custom_endpoint` rejects both on a gateway without custom models.
+- A `dev` model or a deprecated model (logged only).
+
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE` selects the behavior. Set the same value on AI Gateway and Duo
+Workflow Service:
+
+| Mode | Behavior |
+|------|-----------|
+| `off` | No check. |
+| `log` | Log mismatches, change nothing. This is the default. |
+| `fallback` | Serve the feature's default model instead of a model that is not allowed. Rebuild a GitLab-managed model from its definition when a raw `identifier` would rewrite it. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. |
+| `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. Rebuild a raw `identifier` override as `fallback` does. |
+
+Every mismatch is logged as `Model allowlist mismatch` with a `reason` (`provider_not_served`, `model_not_allowed`,
+`feature_mismatch`, `missing_feature_setting`, `unknown_feature`, `managed_identifier_override`), the `mode`, the
+`surface` (`http` or `dws`), the `feature_setting` the check used (the route's feature when the route passes one, else
+the client's), the `client_feature_setting` as the client sent it, the `requested_name` and `requested_identifier` as
+the client sent them, the `served_identifier` and the caller's context such as the request `path`. Endpoint and key
+values are never logged. One request can log more than one mismatch, so count by `reason` or by correlation ID
+rather than by event. Informational cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
+`deprecated_model`) are logged as `Model allowlist note`.
+
+To roll back a stricter mode, set `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE=log`.
+
 ## Developer models
 
 The `dev` configuration allows you to test experimental models with internal team members before rolling them out to everyone.
@@ -376,6 +580,26 @@ This is useful when you want to validate a new model internally without exposing
 
 The actual access control happens in the client (GitLab Rails), which checks whether the user is a GitLab team member.
 GitLab team members see both the regular and developer models, while everyone else only sees the regular ones.
+
+## Restricted models
+
+To allow a model only in specific features, add it to `ai_gateway/model_selection/model_restrictions.yml`
+instead of changing its entry in `models.yml`:
+
+```yaml
+# ai_gateway/model_selection/model_restrictions.yml
+restricted_models:
+  - identifier: "claude_example_model" # a gitlab_identifier from models.yml or an env-injected release
+    feature_settings: ["bl_security"]  # feature settings allowed to use it (for a flow, its flow config id)
+```
+
+A restricted model is refused everywhere else, including the proxy endpoints. Only features whose `feature_setting`
+is one of its `feature_settings` can list it in `unit_primitives.yml`. `validate-model-selection-config` rejects an
+unknown identifier, empty or duplicate `feature_settings`, and duplicate entries.
+
+At request time, the model is usable only when the flow config ID the request is authorized for (from a signed flow
+claim) is one of its `feature_settings`. A flow's feature setting is its flow config ID (for example,
+`bl_security`). This is a naming convention: if the names differ, validation rejects the entry (fail-safe).
 
 ## Model deprecations
 

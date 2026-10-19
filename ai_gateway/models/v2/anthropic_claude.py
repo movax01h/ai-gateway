@@ -12,13 +12,18 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import model_validator
 
-from ai_gateway.models.base import validate_custom_endpoint
+from ai_gateway.models.base import (
+    anthropic_facilitator_headers,
+    validate_custom_endpoint,
+)
 from ai_gateway.models.v2._model_compat import (
     remove_trailing_assistant_message,
     supports_assistant_prefill,
 )
 
 __all__ = ["ChatAnthropic"]
+
+_ANTHROPIC_API_URL = "https://api.anthropic.com"
 
 _WEB_SEARCH_TOOL: dict[str, Any] = {
     "type": "web_search_20250305",
@@ -78,6 +83,11 @@ class ChatAnthropic(_LChatAnthropic):
         # Add beta header if beta features are specified
         if self.betas:
             headers["anthropic-beta"] = ",".join(self.betas)
+
+        # An override points somewhere other than Anthropic, e.g. the Duo Workflow caching proxy.
+        api_url = self.anthropic_api_url or _ANTHROPIC_API_URL
+        if api_url.rstrip("/") == _ANTHROPIC_API_URL:
+            headers.update(anthropic_facilitator_headers())
 
         return headers or None
 

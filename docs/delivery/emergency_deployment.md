@@ -18,7 +18,7 @@ Use this runbook to push a fix to the GitLab-managed AIGW/DWS fleet faster than 
 
 ## When to use this
 
-Use `expedited` **only** when a production or security incident makes the canary rollout too slow. Examples: a breaking production bug, or a security patch that has to reach all traffic immediately. For everything else, including high-priority feature work, use the default `legacy` (canary) strategy.
+Use `expedited` only when a production or security incident makes the canary rollout too slow. Examples: a breaking production bug, or a security patch that has to reach all traffic immediately. For everything else, including high-priority feature work, use the default `legacy` (canary) strategy.
 
 ## Procedure
 

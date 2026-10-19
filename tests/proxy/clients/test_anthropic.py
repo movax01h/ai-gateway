@@ -4,10 +4,42 @@ from unittest.mock import patch
 import fastapi
 import pytest
 from fastapi import status
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from pydantic import SecretStr
 
 from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.models.base import ANTHROPIC_FACILITATOR_KEY_HEADER
 from ai_gateway.proxy.clients import AnthropicProxyModelFactory, ProxyClient
-from ai_gateway.proxy.clients.anthropic import _resolve_api_key
+from ai_gateway.proxy.clients.anthropic import (
+    _build_headers_to_upstream,
+    _resolve_api_key,
+)
+
+
+class TestFacilitatorKeyHeader:
+    """The facilitator key rides alongside the upstream API key on the proxy path.
+
+    Both cases assert on the header dict only; no request is issued.
+    """
+
+    def test_sent_when_configured(self):
+        with patch("ai_gateway.models.base.config") as mock_config:
+            mock_config.anthropic_facilitator_key = SecretStr("fake-facilitator-key")
+
+            headers = _build_headers_to_upstream("fake-upstream-key")
+
+        assert headers == {
+            "x-api-key": "fake-upstream-key",
+            ANTHROPIC_FACILITATOR_KEY_HEADER: "fake-facilitator-key",
+        }
+
+    def test_omitted_when_unset(self):
+        with patch("ai_gateway.models.base.config") as mock_config:
+            mock_config.anthropic_facilitator_key = None
+
+            assert _build_headers_to_upstream("fake-upstream-key") == {
+                "x-api-key": "fake-upstream-key"
+            }
 
 
 @pytest.fixture(name="anthropic_factory")
@@ -112,6 +144,26 @@ async def test_invalid_proxy_requests(
 
     assert excinfo.value.status_code == expected_status
     assert excinfo.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+async def test_rejects_model_outside_the_allowlist(
+    anthropic_factory, request_factory, request_params, request_headers
+):
+    request = request_factory(
+        request_url="http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages",
+        request_body=json.dumps(request_params).encode("utf-8"),
+        request_headers=request_headers,
+    )
+    request.user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={"gitlab_allowed_model_refs": ["claude_fable_5"]}),
+    )
+
+    with pytest.raises(fastapi.HTTPException) as excinfo:
+        await anthropic_factory.factory(request)
+
+    assert excinfo.value.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio

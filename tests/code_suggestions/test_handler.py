@@ -2,24 +2,22 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from dependency_injector import providers
+from gitlab_cloud_connector import WrongUnitPrimitives
+from starlette_context import request_cycle_context
 
 from ai_gateway.code_suggestions import handler as handler_module
 from ai_gateway.code_suggestions.handler import code_completion
+from ai_gateway.model_metadata import (
+    AmazonQModelMetadata,
+    FireworksModelMetadata,
+    create_model_metadata,
+)
+from ai_gateway.models.base import TokensConsumptionMetadata
 
 
-def _make_payload():
-    payload = MagicMock()
-    payload.model_provider = None
-    payload.role_arn = None
-    payload.content_above_cursor = "def f("
-    payload.content_below_cursor = ""
-    payload.file_name = "test.py"
-    payload.language_identifier = "python"
-    payload.stream = False
-    return payload
-
-
-def _make_suggestion():
+@pytest.fixture(name="suggestion")
+def suggestion_fixture():
     return SimpleNamespace(
         text="x = 1",
         score=0,
@@ -31,21 +29,80 @@ def _make_suggestion():
     )
 
 
+@pytest.fixture(name="payload")
+def payload_fixture():
+    payload = MagicMock()
+    payload.model_provider = None
+    payload.role_arn = None
+    payload.content_above_cursor = "def f("
+    payload.content_below_cursor = ""
+    payload.file_name = "test.py"
+    payload.language_identifier = "python"
+    payload.stream = False
+    return payload
+
+
+@pytest.fixture(name="generation_payload")
+def generation_payload_fixture(payload):
+    payload.prompt_id = None
+    payload.prompt_enhancer = None
+    return payload
+
+
+@pytest.fixture(name="engine")
+def engine_fixture(suggestion):
+    engine = MagicMock()
+    engine.execute = AsyncMock(return_value=suggestion)
+    return engine
+
+
+@pytest.fixture(name="agent_factory")
+def agent_factory_fixture(engine):
+    return MagicMock(return_value=engine)
+
+
+@pytest.fixture(name="prompt_registry")
+def prompt_registry_fixture():
+    return MagicMock()
+
+
+@pytest.fixture(name="snowplow_instrumentator")
+def snowplow_instrumentator_fixture(mock_ai_gateway_container):
+    instrumentator = MagicMock()
+    mock_ai_gateway_container.snowplow.instrumentator.override(
+        providers.Object(instrumentator)
+    )
+    yield instrumentator
+    mock_ai_gateway_container.snowplow.instrumentator.reset_override()
+
+
+@pytest.fixture(name="snowplow_event_context")
+def snowplow_event_context_fixture():
+    context = MagicMock()
+    context.region = "us-central1"
+    return context
+
+
+def assert_snowplow_event(instrumentator, expected_context):
+    instrumentator.watch.assert_called_once()
+    event = instrumentator.watch.call_args.args[0]
+    assert isinstance(event, handler_module.SnowplowEvent)
+    assert event.context is expected_context
+
+
 @pytest.mark.asyncio
-async def test_code_completion_applies_model_driven_behavior():
+async def test_code_completion_applies_model_driven_behavior(
+    payload, engine, agent_factory, prompt_registry
+):
     """A completion: wires the model's post-processor and the resolved model
     metadata to the engine, forwards the model's context cap to execute, and
     reports the resolved model under metadata.model (the shared response shape)."""
     model_metadata = MagicMock()
     model_metadata.provider = "fireworks_ai"
+    model_metadata.is_custom_model = False
 
     prompt = MagicMock()
-    prompt_registry = MagicMock()
     prompt_registry.get_on_behalf.return_value = prompt
-
-    engine = MagicMock()
-    engine.execute = AsyncMock(return_value=_make_suggestion())
-    agent_factory = MagicMock(return_value=engine)
 
     snowplow_event_context = MagicMock()
     snowplow_event_context.region = "us-central1"
@@ -65,7 +122,7 @@ async def test_code_completion_applies_model_driven_behavior():
         ),
     ):
         response = await code_completion(
-            payload=_make_payload(),
+            payload=payload,
             current_user=MagicMock(),
             prompt_registry=prompt_registry,
             stream_handler=AsyncMock(),
@@ -85,3 +142,484 @@ async def test_code_completion_applies_model_driven_behavior():
 
     assert response.metadata.model.engine == "fireworks_ai"
     assert response.metadata.model.name == "codestral_2508_fireworks"
+    assert response.model.tokens_consumption_metadata is None
+
+
+@pytest.mark.asyncio
+async def test_code_completion_reports_token_consumption(
+    payload, suggestion, agent_factory, prompt_registry, snowplow_event_context
+):
+    tokens = TokensConsumptionMetadata(
+        input_tokens=12, output_tokens=3, context_tokens_sent=5, context_tokens_used=4
+    )
+    suggestion.metadata = SimpleNamespace(tokens_consumption_metadata=tokens)
+    model_metadata = MagicMock()
+    model_metadata.provider = "fireworks_ai"
+    model_metadata.is_custom_model = False
+    prompt_registry.get_on_behalf.return_value = MagicMock()
+
+    with (
+        patch.object(
+            handler_module,
+            "create_post_processor_for_model_metadata",
+            return_value=object(),
+        ),
+        patch.object(
+            handler_module,
+            "completion_context_max_percent_for_model_metadata",
+            return_value=0.3,
+        ),
+    ):
+        response = await code_completion(
+            payload=payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=snowplow_event_context,
+            completions_agent_factory=agent_factory,
+            completions_amazon_q_factory=MagicMock(),
+            model_metadata=model_metadata,
+            config=MagicMock(),
+        )
+
+    assert response.model.tokens_consumption_metadata == tokens
+    assert response.metadata.model.tokens_consumption_metadata == tokens
+
+
+@pytest.mark.asyncio
+async def test_code_suggestions_dispatches_completion_without_event(
+    snowplow_instrumentator,
+):
+    component = MagicMock()
+    component.type = handler_module.CodeEditorComponents.COMPLETION
+    payload = MagicMock()
+    payload.prompt_components = [component]
+
+    request = MagicMock()
+    request.headers = {}
+    current_user = MagicMock()
+    current_user.can.return_value = True
+    snowplow_context = MagicMock()
+
+    with (
+        request_cycle_context({}),
+        patch.object(handler_module, "CloudConnectorConfig"),
+        patch.object(
+            handler_module,
+            "get_snowplow_code_suggestion_context",
+            return_value=snowplow_context,
+        ),
+        patch.object(
+            handler_module, "code_completion", new=AsyncMock()
+        ) as completion_mock,
+    ):
+        await handler_module.code_suggestions(
+            request=request,
+            payload=payload,
+            current_user=current_user,
+            prompt_registry=MagicMock(),
+            config=MagicMock(),
+            stream_handler=AsyncMock(),
+        )
+
+    snowplow_instrumentator.watch.assert_not_called()
+    completion_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_code_completion_watches_event_after_authorization(
+    payload, engine, prompt_registry, snowplow_instrumentator, snowplow_event_context
+):
+    model_metadata = MagicMock()
+    model_metadata.provider = "openai"
+
+    with (
+        patch.object(
+            handler_module,
+            "create_post_processor_for_model_metadata",
+            return_value=None,
+        ),
+        patch.object(
+            handler_module,
+            "completion_context_max_percent_for_model_metadata",
+            return_value=None,
+        ),
+    ):
+        await code_completion(
+            payload=payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=snowplow_event_context,
+            completions_agent_factory=MagicMock(return_value=engine),
+            completions_amazon_q_factory=MagicMock(),
+            model_metadata=model_metadata,
+            config=MagicMock(),
+        )
+
+    assert_snowplow_event(snowplow_instrumentator, snowplow_event_context)
+
+
+@pytest.mark.asyncio
+async def test_code_completion_skips_event_when_unauthorized(
+    payload, prompt_registry, snowplow_instrumentator
+):
+    model_metadata = MagicMock()
+    model_metadata.provider = "openai"
+    prompt_registry.get_on_behalf.side_effect = WrongUnitPrimitives
+
+    with pytest.raises(handler_module.HTTPException):
+        await code_completion(
+            payload=payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=MagicMock(),
+            completions_agent_factory=MagicMock(),
+            completions_amazon_q_factory=MagicMock(),
+            model_metadata=model_metadata,
+            config=MagicMock(),
+        )
+
+    snowplow_instrumentator.watch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_code_completion_swallows_snowplow_errors(
+    payload, engine, prompt_registry, snowplow_instrumentator, snowplow_event_context
+):
+    model_metadata = MagicMock()
+    model_metadata.provider = "openai"
+    snowplow_instrumentator.watch.side_effect = RuntimeError("snowplow down")
+
+    with (
+        patch.object(
+            handler_module,
+            "create_post_processor_for_model_metadata",
+            return_value=None,
+        ),
+        patch.object(
+            handler_module,
+            "completion_context_max_percent_for_model_metadata",
+            return_value=None,
+        ),
+        patch.object(handler_module, "log_exception") as log_mock,
+    ):
+        response = await code_completion(
+            payload=payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=snowplow_event_context,
+            completions_agent_factory=MagicMock(return_value=engine),
+            completions_amazon_q_factory=MagicMock(),
+            model_metadata=model_metadata,
+            config=MagicMock(),
+        )
+
+    log_mock.assert_called_once()
+    assert response.metadata.model.name == "codestral_2508_fireworks"
+
+
+@pytest.mark.asyncio
+async def test_code_generation_watches_event_after_authorization(
+    generation_payload,
+    agent_factory,
+    prompt_registry,
+    snowplow_instrumentator,
+    snowplow_event_context,
+):
+    await handler_module.code_generation(
+        payload=generation_payload,
+        current_user=MagicMock(),
+        prompt_registry=prompt_registry,
+        stream_handler=AsyncMock(),
+        snowplow_event_context=snowplow_event_context,
+        agent_factory=agent_factory,
+        generations_amazon_q_factory=MagicMock(),
+    )
+
+    assert_snowplow_event(snowplow_instrumentator, snowplow_event_context)
+
+
+@pytest.mark.asyncio
+async def test_code_generation_skips_event_when_unauthorized(
+    generation_payload, prompt_registry, snowplow_instrumentator
+):
+    prompt_registry.get_on_behalf.side_effect = WrongUnitPrimitives
+
+    with pytest.raises(handler_module.HTTPException):
+        await handler_module.code_generation(
+            payload=generation_payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=MagicMock(),
+            agent_factory=MagicMock(),
+            generations_amazon_q_factory=MagicMock(),
+        )
+
+    snowplow_instrumentator.watch.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prompt_id", "prompt_version", "event"),
+    [
+        (
+            "code_suggestions/generations",
+            "^1.0.0",
+            "Executing code generation with prompt registry",
+        ),
+        (None, None, "Executing code generation with prompt registry (legacy path)"),
+    ],
+)
+async def test_code_generation_logs_the_requested_model(
+    generation_payload,
+    agent_factory,
+    prompt_registry,
+    snowplow_instrumentator,  # pylint: disable=unused-argument
+    snowplow_event_context,
+    prompt_id,
+    prompt_version,
+    event,
+):
+    generation_payload.prompt_id = prompt_id
+    generation_payload.prompt_version = prompt_version
+    prompt_registry.get_on_behalf.return_value = MagicMock(
+        model_name="placeholder", reported_model_name="requested-model"
+    )
+
+    with patch.object(handler_module, "request_log") as request_log:
+        await handler_module.code_generation(
+            payload=generation_payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=snowplow_event_context,
+            agent_factory=agent_factory,
+            generations_amazon_q_factory=MagicMock(),
+            model_metadata=MagicMock(provider="openai"),
+        )
+
+    [entry] = [c for c in request_log.info.call_args_list if c.args == (event,)]
+    assert entry.kwargs["prompt_model_name"] == "requested-model"
+
+
+@pytest.mark.parametrize(
+    ("model_metadata_provider", "is_custom_model"), [("openai", True)]
+)
+@pytest.mark.asyncio
+async def test_code_completion_passes_llm_definition_for_self_hosted(
+    payload, agent_factory, prompt_registry, model_metadata, snowplow_event_context
+):
+    with (
+        patch.object(
+            handler_module,
+            "create_post_processor_for_model_metadata",
+            return_value=None,
+        ),
+        patch.object(
+            handler_module,
+            "completion_context_max_percent_for_model_metadata",
+            return_value=None,
+        ),
+    ):
+        await code_completion(
+            payload=payload,
+            current_user=MagicMock(),
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=snowplow_event_context,
+            completions_agent_factory=agent_factory,
+            completions_amazon_q_factory=MagicMock(),
+            model_metadata=model_metadata,
+            config=MagicMock(),
+        )
+
+    agent_factory.assert_called_once_with(
+        model__prompt=prompt_registry.get_on_behalf.return_value,
+        post_processor=None,
+        model_metadata=model_metadata,
+        model__llm_definition=model_metadata.llm_definition,
+    )
+
+
+async def _complete_with_pinned_model(
+    identifier, payload, agent_factory, prompt_registry
+):
+    kwargs = await _complete_with_metadata(
+        create_model_metadata({"provider": "gitlab", "identifier": identifier}),
+        payload,
+        agent_factory,
+        prompt_registry,
+    )
+
+    return kwargs["model_metadata"]
+
+
+async def _complete_with_metadata(
+    model_metadata, payload, agent_factory, prompt_registry
+):
+    current_user = MagicMock()
+    current_user.global_user_id = "user-1"
+
+    snowplow_event_context = MagicMock()
+    snowplow_event_context.region = "us-central1"
+
+    config = MagicMock()
+    config.model_keys.return_value = {"fireworks_provider_api_key": "fw-key"}
+    config.fireworks_api_base_url.return_value = "https://api.fireworks.ai/inference/v1"
+    config.mock_model_responses.return_value = False
+
+    with (
+        patch.object(
+            handler_module,
+            "create_post_processor_for_model_metadata",
+            return_value=None,
+        ),
+        patch.object(
+            handler_module,
+            "completion_context_max_percent_for_model_metadata",
+            return_value=None,
+        ),
+    ):
+        await code_completion(
+            payload=payload,
+            current_user=current_user,
+            prompt_registry=prompt_registry,
+            stream_handler=AsyncMock(),
+            snowplow_event_context=snowplow_event_context,
+            completions_agent_factory=agent_factory,
+            completions_amazon_q_factory=MagicMock(),
+            model_metadata=model_metadata,
+            config=config,
+            using_cache=True,
+        )
+
+    return agent_factory.call_args.kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_completion_injects_provider_key_for_pinned_fireworks_model(
+    payload, agent_factory, prompt_registry
+):
+    resolved = await _complete_with_pinned_model(
+        "codestral_2508_fireworks", payload, agent_factory, prompt_registry
+    )
+
+    assert isinstance(resolved, FireworksModelMetadata)
+    assert resolved.name == "codestral_2508_fireworks"
+    assert resolved.api_key == "fw-key"
+    assert resolved.session_id == "user-1"
+    assert resolved.using_cache is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_completion_keeps_gitlab_metadata_for_pinned_vertex_model(
+    payload, agent_factory, prompt_registry
+):
+    resolved = await _complete_with_pinned_model(
+        "codestral_2508_vertex", payload, agent_factory, prompt_registry
+    )
+
+    assert resolved.provider == "gitlab"
+    assert resolved.name == "codestral_2508_vertex"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_completion_uses_the_default_model_for_a_non_selectable_pin(
+    payload, agent_factory, prompt_registry
+):
+    resolved = await _complete_with_pinned_model(
+        "claude_opus_5", payload, agent_factory, prompt_registry
+    )
+
+    assert isinstance(resolved, FireworksModelMetadata)
+    assert resolved.name == "codestral_2508_fireworks"
+    assert resolved.api_key == "fw-key"
+
+
+@pytest.mark.parametrize(
+    ("payload_role_arn", "model_metadata", "expected_role_arn"),
+    [
+        ("arn:payload", None, "arn:payload"),
+        (
+            "arn:payload",
+            AmazonQModelMetadata.model_construct(
+                provider="amazon_q", name="amazon_q", role_arn="arn:metadata"
+            ),
+            "arn:payload",
+        ),
+        (
+            None,
+            AmazonQModelMetadata.model_construct(
+                provider="amazon_q", name="amazon_q", role_arn="arn:metadata"
+            ),
+            "arn:metadata",
+        ),
+        (None, MagicMock(provider="openai"), None),
+        (None, None, None),
+    ],
+)
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_completion_passes_role_arn_to_amazon_q_engine(
+    payload,
+    prompt_registry,
+    snowplow_event_context,
+    engine,
+    payload_role_arn,
+    model_metadata,
+    expected_role_arn,
+):
+    payload.model_provider = "amazon_q"
+    payload.role_arn = payload_role_arn
+    amazon_q_factory = MagicMock(return_value=engine)
+    current_user = MagicMock()
+
+    await code_completion(
+        payload=payload,
+        current_user=current_user,
+        prompt_registry=prompt_registry,
+        stream_handler=AsyncMock(),
+        snowplow_event_context=snowplow_event_context,
+        completions_agent_factory=MagicMock(),
+        completions_amazon_q_factory=amazon_q_factory,
+        internal_event_client=MagicMock(),
+        model_metadata=model_metadata,
+        config=MagicMock(),
+    )
+
+    amazon_q_factory.assert_called_once_with(
+        model__current_user=current_user, model__role_arn=expected_role_arn
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+@pytest.mark.parametrize("pinned", [False, True])
+async def test_code_completion_wires_the_rate_limit_fallback_for_the_default_only(
+    payload, agent_factory, prompt_registry, pinned
+):
+    model_metadata = (
+        create_model_metadata(
+            {"provider": "gitlab", "identifier": "codestral_2508_vertex"}
+        )
+        if pinned
+        else None
+    )
+    fallback_factory = MagicMock()
+
+    with patch.object(
+        handler_module, "build_rate_limit_fallback", return_value=fallback_factory
+    ) as mock_build:
+        kwargs = await _complete_with_metadata(
+            model_metadata, payload, agent_factory, prompt_registry
+        )
+
+    assert mock_build.call_count == (0 if pinned else 1)
+    assert kwargs.get("fallback_factory") is (None if pinned else fallback_factory)

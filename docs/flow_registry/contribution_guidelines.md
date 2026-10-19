@@ -119,9 +119,9 @@ When the GitLab monolith changes an envelope's fields:
 
 ### Backwards compatibility guarantees
 
-- Envelopes **without** a `version` field are treated as `"1.0.0"` by DWS. This covers all GitLab instances that
+- Envelopes without a `version` field are treated as `"1.0.0"` by DWS. This covers all GitLab instances that
   predate the versioning scheme.
-- Flows **without** a `version_constraint` use an implicit `^1.0.0` constraint, accepting any `1.x.x` envelope.
+- Flows without a `version_constraint` use an implicit `^1.0.0` constraint, accepting any `1.x.x` envelope.
 - A `^1.x.x` constraint accepts any `1.x.x` envelope and ignores `2.x.x` (breaking) envelopes.
 
 ### Error handling
@@ -225,7 +225,7 @@ Components are the fundamental building blocks of Flow Registry. They represent 
 
 #### Base Class
 
-All components MUST inherit from the `BaseComponent` class defined in [`duo_workflow_service/agent_platform/v1/components/base.py`](duo_workflow_service/agent_platform/v1/components/base.py). This base class defines the required interface and attributes that all components must implement.
+All components MUST inherit from the `BaseComponent` class defined in [`duo_workflow_service/agent_platform/v1/components/base.py`](../../duo_workflow_service/agent_platform/v1/components/base.py). This base class defines the required interface and attributes that all components must implement.
 
 #### Required Interface
 

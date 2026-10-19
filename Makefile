@@ -11,17 +11,14 @@ INTEGRATION_TESTS_DIR := ${ROOT_DIR}/integration_tests
 PYTEST_SLOWEST_TESTS_COUNT ?= 10
 
 LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
+	ai \
+	conftest.py \
 	${DUO_WORKFLOW_SERVICE_DIR} \
 	${LIB_DIR} \
 	${LINTS_DIR} \
 	${SCRIPTS_DIR} \
 	${TESTS_DIR} \
 	${INTEGRATION_TESTS_DIR}
-
-MYPY_LINT_TODO_DIR ?= --exclude "ai_gateway/models/litellm.py" \
-	--exclude "ai_gateway/api/v2/code/completions.py" \
-	--exclude "ai_gateway/code_suggestions/completions.py" \
-	--exclude "ai_gateway/code_suggestions/handler.py"
 
 EDITORCONFIG_LINT_WORKING_DIR ?=
 CODESPELL_LINT_WORKING_DIR ?=
@@ -216,13 +213,8 @@ check-pylint: install-lint-deps
 
 .PHONY: check-mypy
 check-mypy: install-lint-deps
-ifeq ($(TODO),true)
-	@echo "Running mypy check todo..."
-	@poetry run mypy ${LINT_WORKING_DIR}
-else
 	@echo "Running mypy check..."
-	@poetry run mypy ${LINT_WORKING_DIR} ${MYPY_LINT_TODO_DIR} --exclude "scripts/vendor/*"
-endif
+	@poetry run mypy ${LINT_WORKING_DIR} --exclude "scripts/vendor/*"
 
 .PHONY: check-codespell
 check-codespell: install-lint-deps
@@ -248,6 +240,12 @@ check-yamllint: install-lint-deps
 check-graphql:
 	@echo "Running GraphQL validation..."
 	@poetry run python scripts/validate_graphql.py
+
+# Git ref whose allowlist is the baseline; additions since it fail. Empty skips that check.
+LEGACY_ROOTS_BASE ?=
+.PHONY: check-legacy-roots
+check-legacy-roots:
+	@poetry run python scripts/check_legacy_roots.py $(if $(LEGACY_ROOTS_BASE),--base $(LEGACY_ROOTS_BASE))
 
 .PHONY: install-test-deps
 install-test-deps:
@@ -283,22 +281,25 @@ test-undercoverage: install-test-deps
 	@poetry run diff-cover .test-reports/coverage.xml --compare-branch=$(UNDERCOVERAGE_COMPARE_BRANCH) --diff-range-notation=$(UNDERCOVERAGE_DIFF_RANGE_NOTATION) --show-uncovered --fail-under=100
 
 .PHONY: test-integration
-# `integration_tests/` drives a deployed AI Gateway over HTTP. The Duo Workflow Service tests instead run a
-# gRPC server in-process, so they live under `tests/` where the shared fixtures are and are named explicitly
-# here — pytest's `testpaths` covers them too, meaning `make test` runs them as well.
+# `integration_tests/` drives a deployed AI Gateway over HTTP. The Duo Workflow Service tests in
+# `integration_tests/duo_workflow_service/` instead run a gRPC server in-process, reusing fixtures from
+# `tests/` via their conftest. `integration_tests/` is outside pytest's `testpaths`, so `make test` skips them.
 test-integration: install-test-deps
 	@echo "Running integration tests..."
-	@poetry run pytest integration_tests/ tests/duo_workflow_service/integration/ -n auto
+	@poetry run pytest integration_tests/ -n auto
 
 .PHONY: test-agents
+# --dist loadgroup keeps tests that score the same cached LLM response on one
+# worker; tests without an xdist group are distributed as they were before.
 test-agents: install-test-deps
 	@echo "Running agent tests..."
-	@poetry run pytest agent_tests/$(AGENT_TEST_DIR) -n 4 -v --tb=short --reruns 2 --reruns-delay 5 \
+	@poetry run pytest agent_tests/$(AGENT_TEST_DIR) -n 4 --dist loadgroup -v --tb=short --reruns 2 --reruns-delay 5 \
+		--junitxml=".test-reports/agent-tests.xml" \
 		$(if $(EXECUTION_MODEL),--execution-model=$(EXECUTION_MODEL)) \
 		$(if $(VALIDATION_MODEL),--validation-model=$(VALIDATION_MODEL))
 
 .PHONY: lint-doc
-lint-doc: vale markdownlint
+lint-doc: vale markdownlint lychee
 
 .PHONY: vale
 vale:
@@ -310,6 +311,11 @@ markdownlint:
 	@echo "Running markdownlint..."
 	@markdownlint-cli2 "clients/*/*.md" "docs/**/*.md" *.md
 
+.PHONY: lychee
+lychee:
+	@echo "Running lychee..."
+	@lychee --offline --include-fragments --root-dir . --exclude-path "node_modules" "**/*.md"
+
 .PHONY: ingest
 ingest:
 	@echo "Running data ingestion and refreshing for search APIs..."
@@ -318,13 +324,13 @@ ingest:
 .PHONY: duo-workflow-docs
 duo-workflow-docs:
 	@echo "Generating Duo Workflow Service graph documentation..."
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run python scripts/generate_graph_docs.py ${DOC_DIR}/duo_workflow_service_graphs.md
 
 .PHONY: duo-workflow-flow-schema
 duo-workflow-flow-schema:
 	@echo "Generating Duo Agent Platform flow config JSON Schema..."
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run python -m duo_workflow_service.schemas.v1.flow_config_schema
 
 .PHONY: check-duo-workflow-flow-schema
@@ -342,7 +348,7 @@ duo-workflow-service-reload:
 .PHONY: duo-workflow-service-dependencies
 duo-workflow-service-dependencies:
 	@echo "Generating Duo Workflow Service dependencies for CI configuration..."
-	@poetry install
+	@test "$$CI" = "true" -a -d .venv || poetry install
 	@poetry run python scripts/generate_dws_change_patterns.py
 
 .PHONY: duo-workflow-service-memray

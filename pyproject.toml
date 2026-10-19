@@ -24,9 +24,9 @@ fetch-foundational-agents = "duo_workflow_service.scripts.fetch_foundational_age
 verify-pricing-multipliers = "scripts.verify_pricing_multipliers:main"
 
 [tool.poetry.dependencies]
-fastapi = "^0.141.0"
+fastapi = "^0.142.0"
 dependency-injector = "^4.41.0"
-uvicorn = {version = "^0.52.0", extras = ["standard"]}
+uvicorn = {version = "^0.54.0", extras = ["standard"]}
 requests = "^2.32.3"
 numpy = "^2.2.3"
 python-dotenv = "^1.0.1"
@@ -39,7 +39,7 @@ python-jose = { extras = ["cryptography"], version = "^3.3.0" }
 starlette-context = "^0.5.0"
 google-cloud-profiler = "^4.1.0"
 py-grpc-prometheus = "^0.8.0"
-tiktoken = "^0.13.0"
+tiktoken = "^0.14.0"
 tree-sitter = "^0.21.0"
 transformers = "^5.0.0"
 snowplow-tracker = "^1.0.3"
@@ -53,7 +53,7 @@ tree-sitter-languages = "^1.10.2"
 jinja2 = "^3.1.3"
 pyyaml = "^6.0.2"
 google-cloud-discoveryengine = "^0.20.0"
-litellm = {version = ">=1.91.0,<1.92.0", extras = ["proxy"]}
+litellm = {version = ">=1.101.0,<1.102.0", extras = ["proxy"]}
 langgraph = "^1.0.2"
 langchain-anthropic = "^1.4.3"
 langchain-community = "^0.4.1"
@@ -91,11 +91,10 @@ aiohttp = "^3.13.5"
 botocore = "^1.43.10"
 jsonschema = "^4.23.0"
 langchain-core = "^1.4.0"
-langsmith = "^0.11.0"
+langsmith = "^0.14.0"
 openai = "^2.37.0"
 ormsgpack = "^1.12.1"
 packaging = "^24.1"
-pydantic-core = "^2.46.4"
 tenacity = "^9.0.0"
 
 [[tool.poetry.source]]
@@ -113,7 +112,7 @@ pytest-asyncio = "^1.0.0"
 pylint = "^4.0.5"
 astroid = "^4.0.4"
 pytest-watcher = "^0.6.0"
-pytest-randomly = "^4.0.0"
+pytest-randomly = "^5.0.0"
 pytest-xdist = "^3.6.1"
 pytest-rerunfailures = "^16.1"
 pyfakefs = "^6.0.0"
@@ -162,16 +161,18 @@ skip = """
 ./tmp,\
 ./vendor,\
 Gemfile.lock,\
+go.sum,\
 node_modules,\
 package-lock.json,\
 poetry.lock
 """
-ignore-words-list = "astroid"
+# "reacher" is a bl_security prompt term (the principal that can reach an entry point).
+ignore-words-list = "astroid,reacher"
 ignore-multiline-regex = "codespell:ignore-begin.*\n.*codespell:ignore-end"
 
 [tool.pytest.ini_options]
 addopts = "--disable-warnings --import-mode=importlib"
-testpaths = ["tests"]
+testpaths = ["tests", "ai/features/*/*/tests"]
 filterwarnings = [
   "error::UserWarning",
   # Remove after migrating to httpx2
@@ -180,11 +181,19 @@ filterwarnings = [
   # otherwise turned into an error above) for class-scoped fixtures defined as
   # instance methods. Remove after migrating those fixtures to @classmethod.
   "ignore::pytest.PytestRemovedIn10Warning",
+  # litellm's request/response TypedDicts mark members `ReadOnly`, which pydantic
+  # cannot enforce and warns about when it first builds a schema for them. The
+  # warning fires from inside litellm (including its LoggingWorker, where raising
+  # it silently drops our success callbacks), so we cannot act on it. Remove when
+  # pydantic stops warning or litellm drops the qualifier.
+  "ignore:Item .* is using the `ReadOnly` qualifier:UserWarning",
 ]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]
+core = "sysmon"
 source = [
+  "ai",
   "ai_gateway",
   "duo_workflow_service",
   "lib",
@@ -192,6 +201,8 @@ source = [
 ]
 omit = [
   "tests/*",
+  # Depth is intentional: co-located tests live exactly at <domain>/<feature>/tests/.
+  "ai/features/*/*/tests/*",
   "*.jinja",
 ]
 
@@ -287,6 +298,13 @@ disable_error_code = "method-assign"
 
 [[tool.mypy.overrides]]
 module = "tests.*"
+check_untyped_defs = false
+disable_error_code = "annotation-unchecked"
+
+# Co-located feature tests get the same relaxed treatment as tests/.
+# Depth is intentional: <domain>.<feature>.tests is the only co-located shape.
+[[tool.mypy.overrides]]
+module = "ai.features.*.*.tests.*"
 check_untyped_defs = false
 disable_error_code = "annotation-unchecked"
 

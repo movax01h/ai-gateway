@@ -2,7 +2,11 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Optional, override
 
+import requests
+from pydantic import SecretStr
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
+
+from lib.snowplow import set_bearer_token
 
 __all__ = [
     "Client",
@@ -23,6 +27,7 @@ class SnowplowClientConfiguration:
     app_id: str = "gitlab_ai_gateway"
     batch_size: int = 1
     thread_count: int = 1
+    api_key: Optional[SecretStr] = None
 
 
 @dataclass
@@ -58,6 +63,7 @@ class SnowplowEventContext:  # pylint: disable=too-many-instance-attributes
     context_tokens_sent: Optional[int] = None
     context_tokens_used: Optional[int] = None
     region: Optional[str] = None
+    is_context_cap_enabled: Optional[bool] = None
 
 
 @dataclass
@@ -76,6 +82,12 @@ class Client(ABC):
     def track(self, *args, **kwargs) -> None:
         pass
 
+    def shutdown(self) -> None:
+        """Release any resources held by the client.
+
+        The default is a no-op for clients that hold none.
+        """
+
 
 class SnowplowClient(Client):
     """The Snowplow client to send tracking event to external Snowplow collectors.
@@ -84,13 +96,16 @@ class SnowplowClient(Client):
         configuration: A SnowplowClientConfiguration using to initialize the Snowplow tracker.
     """
 
-    SCHEMA = "iglu:com.gitlab/code_suggestions_context/jsonschema/3-6-0"
+    SCHEMA = "iglu:com.gitlab/code_suggestions_context/jsonschema/3-10-0"
 
     def __init__(self, configuration: SnowplowClientConfiguration) -> None:
+        self._session = requests.Session()
+        set_bearer_token(self._session, configuration.api_key)
         emitter = AsyncEmitter(
             batch_size=configuration.batch_size,
             thread_count=configuration.thread_count,
             endpoint=configuration.endpoint,
+            session=self._session,
         )
 
         self.tracker = Tracker(
@@ -119,6 +134,12 @@ class SnowplowClient(Client):
         )
 
         self.tracker.track(structured_event)
+
+    @override
+    def shutdown(self) -> None:
+        """Flush pending events and close the HTTP session shared by the emitter."""
+        self.tracker.flush(is_async=True)
+        self._session.close()
 
 
 class SnowplowClientStub(Client):

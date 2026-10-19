@@ -40,7 +40,10 @@ The API version (v1, experimental) is already determined by the root path (`agen
 ### Syncing Flows from the AI Catalog
 
 The `fetch-foundational-agents` script (`duo_workflow_service/scripts/fetch_foundational_agents.py`) fetches a flow
-config from the GitLab AI Catalog and writes it to the correct versioned path in the flow registry.
+config from the GitLab AI Catalog and writes it as a feature under `ai/features/foundational_agents/`, so
+flow-config discovery registers it like any bundled feature. A fetched agent must not share its name with a
+bundled feature: discovery fails at boot on a duplicate flow ID. Fetched agents are gitignored; the Docker images
+run the script at build time.
 
 **Usage:**
 
@@ -65,9 +68,12 @@ poetry run fetch-foundational-agents \
 This writes:
 
 ```plaintext
-duo_workflow_service/agent_platform/v1/flows/configs/developer/1.0.0.yml
-duo_workflow_service/agent_platform/v1/flows/configs/code_review/1.0.0.yml
+ai/features/foundational_agents/developer/config/1.0.0.yml
+ai/features/foundational_agents/code_review/config/1.0.0.yml
 ```
+
+The `experimental` registry has no feature roots; the script writes those configs to
+`duo_workflow_service/agent_platform/experimental/flows/configs/<flow>/1.0.0.yml`.
 
 Use `--dry-run` to print the fetched YAML to stdout without writing any files.
 
@@ -115,7 +121,7 @@ grpcurl \
 ```
 
 > **Note:** `flowConfigSchemaVersion` (`"v1"` or `"experimental"`) maps to the root directory of the flow config
-> (`agent_platform/v1/flows/configs/` vs `agent_platform/experimental/flows/configs/`). It is **not** the same as
+> (`agent_platform/v1/flows/configs/` vs `agent_platform/experimental/flows/configs/`). It is not the same as
 > `flowVersion`, which selects the specific YAML file within the flow's subdirectory.
 
 #### Deprecated `workflowDefinition` string
@@ -472,7 +478,7 @@ surfaced in the UI chat log.
 > `content` is validated against the flow's `input_schema` with **`additionalProperties: true`** and every
 > non-`optional` field marked **required**. This means:
 >
-> - An envelope whose `content` carries a field the flow's `input_schema` does **not** declare is **accepted** — extra
+> - An envelope whose `content` carries a field the flow's `input_schema` does not declare is **accepted** — extra
 >   fields are silently ignored. This makes envelope schema changes that only add new fields backwards-compatible.
 > - An envelope missing a required (non-`optional`) field fails validation.
 >
@@ -510,7 +516,7 @@ The outputs are automatically available to subsequent components when they are r
 configuration or used in router conditions.
 Refer to the documentation of every component to check what outputs it produces.
 
-> **Note:** Tool responses have automatic truncation applied. See [Tool Development Guide](../adding_new_tool.md#2-️-tool-response-truncation) for details.
+> **Note:** Tool responses have automatic truncation applied. See [Tool Development Guide](../adding_new_tool.md#2-tool-response-truncation) for details.
 
 ## UI Logs
 
@@ -646,9 +652,18 @@ For a simpler alternative to the full GDK + Agent Platform setup, you can use th
 
 #### Running a Flow
 
-Use the `duo run` command with the `--flow-config` flag pointing to your flow YAML file:
+Use the `duo run` command with the `--flow-config` flag pointing to your flow YAML file. A flow
+that has moved to `ai/features/` and a flow that still lives in the legacy root use different
+paths:
 
 ```shell
+# a flow under ai/features/
+duo run \
+  --flow-config ai/features/<domain>/your_flow/config/1.0.0.yml \
+  --flow-config-schema-version v1 \
+  -g "Your goal description here"
+
+# a flow in the legacy root
 duo run \
   --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow/1.0.0.yml \
   --flow-config-schema-version v1 \
@@ -665,10 +680,12 @@ export DUO_WORKFLOW_ADDITIONAL_CONTEXT_CONTENT='[{"Category":"your_category","Co
 
 ```shell
 duo run \
-  --flow-config duo_workflow_service/agent_platform/v1/flows/configs/your_flow/1.0.0.yml \
+  --flow-config ai/features/<domain>/your_flow/config/1.0.0.yml \
   --flow-config-schema-version v1 \
   -g "Your goal description here"
 ```
+
+For a flow in the legacy root, pass its legacy path to `--flow-config`, as in the previous example.
 
 The `Category` must match a category defined in your flow's `flow.inputs` section, and the `Content` must be a JSON-serialized string matching the `input_schema`.
 
@@ -682,3 +699,7 @@ This method is particularly useful for:
 - Rapid prototyping of new flows
 
 For more advanced options, including a Docker wrapper for reproducible testing, see the [Duo CLI headless mode documentation](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/tree/main/packages/cli?ref_type=heads#headless-mode).
+
+## Design notes
+
+- [Chat engine: the conversational boundary for chat-partial flows](chat_engine.md)

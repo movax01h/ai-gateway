@@ -253,7 +253,7 @@ class BindToolsCache:
     def __init__(self, max_size: int = 128):
         self._max_size = max_size
         self._cache: OrderedDict[
-            tuple[str, str, Optional[str]], Runnable[Any, BaseMessage]
+            tuple[str, str, Optional[str], str], Runnable[Any, BaseMessage]
         ] = OrderedDict()
         self._lock = threading.RLock()
 
@@ -281,7 +281,15 @@ class BindToolsCache:
         """
         start_time = time.perf_counter()
         tool_signature = compute_tool_signature(tools)
-        cache_key = (model_id, tool_signature, tool_choice)
+        kwargs_signature = (
+            json.dumps(kwargs, sort_keys=True, default=str) if kwargs else ""
+        )
+        cache_key = (
+            model_id,
+            tool_signature,
+            tool_choice,
+            kwargs_signature,
+        )
 
         with self._lock:
             if cache_key in self._cache:

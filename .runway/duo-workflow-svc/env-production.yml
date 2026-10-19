@@ -4,6 +4,10 @@ DUO_WORKFLOW_GOOGLE_CLOUD_PROFILER__ENABLED: false
 LANGCHAIN_TRACING_V2: true
 LANGSMITH_PROJECT: "duo-workflow-production"
 SENTRY_ERROR_TRACKING_ENABLED: true
+# Short RPCs are cheap to trace. ExecuteWorkflow streams stay open for the whole
+# flow and hit Sentry's 1000-span cap, so only a slice of them is traced.
+SENTRY_TRACES_SAMPLE_RATE: "1.0"
+SENTRY_WORKFLOW_TRACES_SAMPLE_RATE: "0.05"
 DUO_WORKFLOW_CLOUD_CONNECTOR_SERVICE_NAME: "gitlab-duo-workflow-service"
 DUO_WORKFLOW_SERVICE_ENVIRONMENT: "production"
 AIGW_INTERNAL_EVENT__ENABLED: true

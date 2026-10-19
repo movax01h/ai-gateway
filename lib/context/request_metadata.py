@@ -20,6 +20,8 @@ gitlab_instance_id: ContextVar[Optional[str]] = ContextVar(
 )
 gitlab_realm: ContextVar[Optional[str]] = ContextVar("gitlab_realm", default=None)
 gitlab_version: ContextVar[Optional[str]] = ContextVar("gitlab_version", default=None)
+# Instance-local GitLab user ID of the requesting user (``x-gitlab-user-id``).
+gitlab_user_id: ContextVar[Optional[str]] = ContextVar("gitlab_user_id", default=None)
 language_server_version: ContextVar[Optional[LanguageServerVersion]] = ContextVar(
     "language_server_version", default=None
 )
@@ -107,6 +109,7 @@ class LLMFinishReason(str, Enum):
     TOOL_USE = "tool_use"
     CONTENT_FILTER = "content_filter"
     GUARDRAIL_INTERVENED = "guardrail_intervened"
+    REFUSAL = "refusal"
     MODEL_CONTEXT_WINDOW_EXCEEDED = "model_context_window_exceeded"
 
     @classmethod
@@ -130,6 +133,7 @@ class LLMFinishReason(str, Enum):
             cls.LENGTH,
             cls.CONTENT_FILTER,
             cls.GUARDRAIL_INTERVENED,
+            cls.REFUSAL,
             cls.MAX_TOKENS,
             cls.MODEL_CONTEXT_WINDOW_EXCEEDED,
         ]

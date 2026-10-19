@@ -1,6 +1,9 @@
 from collections.abc import Callable, Sequence
+from functools import lru_cache
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union, override
 
+import litellm
+import structlog
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.chat_models import _ChatModelBinding
@@ -8,25 +11,111 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from litellm import AnthropicConfig, OpenAIGPT5Config
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models.base import validate_custom_endpoint
+from ai_gateway.models.user_identity_header import inject_user_identity_header
 from ai_gateway.models.v2 import (
     litellm_empty_text_patch,  # noqa: F401  (applies the monkey-patch)
 )
 from ai_gateway.models.v2._model_compat import (
+    flatten_assistant_content,
+    hoist_tool_result_images,
+    normalize_image_blocks,
     remove_trailing_assistant_message,
+    strip_image_blocks_for_non_vision_model,
     supports_assistant_prefill,
 )
 from ai_gateway.models.v2.litellm_model_registry import (
     register_builtin_models,
     register_external_models,
     register_fireworks_models,
+    register_fireworks_vision_flags,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
-__all__ = ["ChatLiteLLM"]
+__all__ = ["ChatLiteLLM", "litellm_supports_native_web_search"]
+
+log = structlog.stdlib.get_logger("chat_litellm")
+
+# Only Vertex AI runs Anthropic's server-side tools (hosted web search). Bedrock does not.
+_WEB_SEARCH_CAPABLE_PROVIDERS = frozenset({"vertex_ai"})
+
+
+@lru_cache(maxsize=64)
+def _litellm_maps_web_search(
+    model: Optional[str], custom_llm_provider: Optional[str]
+) -> bool:
+    """Whether the installed LiteLLM maps `web_search_options` for this model."""
+    if not model:
+        return False
+
+    supported_params = litellm.get_supported_openai_params(
+        model=model, custom_llm_provider=custom_llm_provider
+    )
+
+    return "web_search_options" in (supported_params or [])
+
+
+def litellm_supports_native_web_search(
+    model: Optional[str], custom_llm_provider: Optional[str]
+) -> bool:
+    """Whether a litellm-routed model runs a provider-hosted web search."""
+    return (
+        custom_llm_provider in _WEB_SEARCH_CAPABLE_PROVIDERS
+        and _litellm_maps_web_search(model, custom_llm_provider)
+    )
+
+
+def _drop_unsupported_web_search(kwargs: Dict[str, Any]) -> None:
+    """Drop `web_search_options` unless the model can run a hosted web search."""
+    if kwargs.get("web_search_options") is None:
+        return
+
+    model = kwargs.get("model")
+    custom_llm_provider = kwargs.get("custom_llm_provider")
+
+    if custom_llm_provider not in _WEB_SEARCH_CAPABLE_PROVIDERS:
+        reason = "provider does not run a hosted web search"
+    elif not _litellm_maps_web_search(model, custom_llm_provider):
+        reason = "litellm does not map web_search_options for this model"
+    else:
+        return
+
+    del kwargs["web_search_options"]
+    log.warning(
+        "Dropping web_search_options: web search unsupported for this model",
+        model=model,
+        custom_llm_provider=custom_llm_provider,
+        reason=reason,
+    )
+
+
+_WEB_SEARCH_UNAVAILABLE_NOTE = (
+    "Web search is not available for the selected model on this provider. If the answer "
+    "needs current or external information, tell the user both that web search doesn't "
+    "work with this model and provider combination, and that they can select a different "
+    "model or provider to use it."
+)
+
+
+def _is_web_search_policy_error(error: litellm.BadRequestError) -> bool:
+    """Whether an org policy on Vertex disallows web search for this model."""
+    message = str(error)
+    return "allowedPartnerModelFeatures" in message and "web_search" in message
+
+
+def _without_web_search(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop web search and tell the model, so it doesn't claim to have searched."""
+    messages = [
+        *kwargs.get("messages", []),
+        {"role": "system", "content": _WEB_SEARCH_UNAVAILABLE_NOTE},
+    ]
+    return {
+        **{k: v for k, v in kwargs.items() if k != "web_search_options"},
+        "messages": messages,
+    }
 
 
 def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
@@ -48,8 +137,9 @@ def _force_gpt_5_max_completion_tokens(kwargs: Dict[str, Any]) -> None:
 
 
 def _remove_deprecated_temperature_parameters(kwargs: Dict[str, Any]) -> None:
-    """Claude Opus 4.7/4.8, Sonnet 5, Fable 5, and Mythos 5 deprecated the temperature parameter. Passing it causes a
-    Bad Request response, so we drop it to avoid that.
+    """Claude Opus 4.7/4.8, Sonnet 5, Fable 5, Mythos 5, and Haiku 5.5 deprecated the temperature parameter.
+
+    Passing it causes a Bad Request response, so we drop it to avoid that.
 
     https://gitlab.com/gitlab-org/gitlab/-/work_items/601614
     """
@@ -73,12 +163,17 @@ def _is_deprecated_temperature_model(model: str) -> bool:
             "opus_4_8",
             "opus-4.8",
             "opus_4.8",
+            "opus-5",
+            "opus_5",
             "sonnet-5",
             "sonnet_5",
             "fable-5",
             "fable_5",
             "mythos-5",
             "mythos_5",
+            "haiku-5-5",
+            "haiku_5_5",
+            "haiku-5.5",
         )
     )
 
@@ -166,6 +261,10 @@ register_builtin_models()
 # custom deployment identifiers (see work item #2587).
 register_fireworks_models(ModelSelectionConfig.instance().get_llm_definitions())
 
+# Make LiteLLM's client-side image check agree with the definitions' `supports_vision`
+# flags. Runs before the operator's external file, which stays the final override.
+register_fireworks_vision_flags(ModelSelectionConfig.instance().get_llm_definitions())
+
 # Register any additional model metadata supplied by operators via an external
 # JSON file (path set by AIGW_LITELLM__MODEL_METADATA_FILE). It allows operators
 # to enable parameters like `tool_choice` for models that are missing from
@@ -176,6 +275,21 @@ register_external_models()
 class ChatLiteLLM(_LChatLiteLLM):
     custom_models_enabled: bool = False
     allowed_api_bases: frozenset[str] = frozenset()
+    user_id_header: Optional[str] = None
+    reasoning_effort: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _apply_reasoning_effort(self) -> "ChatLiteLLM":
+        if self.reasoning_effort:
+            allowed = self.model_kwargs.get("allowed_openai_params", [])
+            self.model_kwargs = {
+                **self.model_kwargs,
+                "reasoning_effort": self.reasoning_effort,
+                # litellm rejects the param for openai-compatible providers
+                # unless it is explicitly allowed through.
+                "allowed_openai_params": sorted({*allowed, "reasoning_effort"}),
+            }
+        return self
 
     def validate_endpoint_kwargs(self, kwargs: dict[str, Any]) -> None:
         validate_custom_endpoint(
@@ -201,8 +315,6 @@ class ChatLiteLLM(_LChatLiteLLM):
         ] = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, AIMessage]:
-        kwargs.pop("web_search_options", None)  # Not yet supported for LiteLLM
-
         self.validate_endpoint_kwargs(kwargs)
         return super().bind_tools(tools, tool_choice=tool_choice, **kwargs)
 
@@ -212,6 +324,22 @@ class ChatLiteLLM(_LChatLiteLLM):
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         message_dicts, params = super()._create_message_dicts(messages, stop)
         model_name = self.model_name or self.model
+        # Models known not to see images get a text notice instead of a provider
+        # error; the remaining LangChain image blocks are then rewritten into
+        # OpenAI's `image_url` form, which the LiteLLM converter does not do.
+        message_dicts = strip_image_blocks_for_non_vision_model(
+            message_dicts, model_name, self.custom_llm_provider
+        )
+        message_dicts = normalize_image_blocks(message_dicts)
+        # After normalize, so there is one image shape to recognise, and before
+        # the prefill rewrite, since the hoist can append a user message.
+        message_dicts = hoist_tool_result_images(
+            message_dicts, self.custom_llm_provider, model_name
+        )
+        # Before the prefill rewrite, so a trailing assistant turn is already text.
+        message_dicts = flatten_assistant_content(
+            message_dicts, self.custom_llm_provider
+        )
         if not supports_assistant_prefill(model_name):
             payload = remove_trailing_assistant_message({"messages": message_dicts})
             message_dicts = payload["messages"]
@@ -224,10 +352,31 @@ class ChatLiteLLM(_LChatLiteLLM):
         **kwargs: Any,
     ) -> Any:
         # kwargs has the merged model, provider, and max_tokens by this point.
+        # Nothing here invokes the model synchronously, so none of these kwargs fixes
+        # are mirrored in the sync completion_with_retry.
         _force_gpt_5_max_completion_tokens(kwargs)
         _remove_deprecated_temperature_parameters(kwargs)
         _rewrite_trailing_assistant_prefill(kwargs)
-        return await super().acompletion_with_retry(run_manager=run_manager, **kwargs)
+        inject_user_identity_header(kwargs, self.user_id_header)
+        _drop_unsupported_web_search(kwargs)
+        try:
+            return await super().acompletion_with_retry(
+                run_manager=run_manager, **kwargs
+            )
+        except litellm.BadRequestError as error:
+            if kwargs.get(
+                "web_search_options"
+            ) is None or not _is_web_search_policy_error(error):
+                raise
+            log.warning(
+                "Retrying without web search: disallowed by provider policy",
+                model=kwargs.get("model"),
+                custom_llm_provider=kwargs.get("custom_llm_provider"),
+                error=str(error),
+            )
+            return await super().acompletion_with_retry(
+                run_manager=run_manager, **_without_web_search(kwargs)
+            )
 
     @property
     @override

@@ -1,0 +1,12 @@
+---
+description: Tracks requests to the summarize_comments unit primitive
+internal_events: true
+action: request_summarize_comments
+product_group: work_items
+product_categories:
+  - team_planning
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6798
+tiers:
+  - premium
+  - ultimate

@@ -16,6 +16,9 @@ from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.config.base import PromptConfig
 from duo_workflow_service.agents.base import BaseAgent
+from duo_workflow_service.checkpointer.write_mode import (
+    compaction_ui_chat_log_update,
+)
 from duo_workflow_service.conversation.history_optimizer.builder import (
     FlowContext,
     build_history_optimizer_pipeline,
@@ -151,6 +154,9 @@ class Agent(BaseAgent):
                             self.name: [*optimized_history, *appended],
                         }
                     )
+                    response["ui_chat_log"] = compaction_ui_chat_log_update(
+                        response.get("ui_chat_log", [])
+                    )
                 return response
             except APIStatusError as error:
                 log_exception(error, extra={"context": "Error processing agent"})
@@ -183,22 +189,27 @@ class Agent(BaseAgent):
                         }
                     )
 
+                error_ui_chat_logs = [
+                    UiChatLog(
+                        message_type=MessageTypeEnum.AGENT,
+                        message_sub_type=None,
+                        content=ui_content,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        status=ToolStatus.FAILURE,
+                        correlation_id=None,
+                        tool_info=None,
+                        additional_context=None,
+                        message_id=f"error-{uuid4()}",
+                    )
+                ]
                 return {
                     "conversation_history": error_history_update,
                     "status": WorkflowStatusEnum.ERROR,
-                    "ui_chat_log": [
-                        UiChatLog(
-                            message_type=MessageTypeEnum.AGENT,
-                            message_sub_type=None,
-                            content=ui_content,
-                            timestamp=datetime.now(timezone.utc).isoformat(),
-                            status=ToolStatus.FAILURE,
-                            correlation_id=None,
-                            tool_info=None,
-                            additional_context=None,
-                            message_id=f"error-{uuid4()}",
-                        )
-                    ],
+                    "ui_chat_log": (
+                        compaction_ui_chat_log_update(error_ui_chat_logs)
+                        if history_rewritten
+                        else error_ui_chat_logs
+                    ),
                 }
 
     def _prepare_input(self, state: DuoWorkflowStateType) -> dict:

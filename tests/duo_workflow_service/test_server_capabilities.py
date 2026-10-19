@@ -10,6 +10,7 @@ def test_get_dws_capabilities():
         "tool_call_approval",
         "tool_call_pattern_approval",
         "flow_semantic_versioning",
+        "inline_flow_config_binding",
     ]
 
 
@@ -18,6 +19,7 @@ def test_get_dws_capabilities_with_metadata():
         CapabilityInfo(name="tool_call_approval", metadata=""),
         CapabilityInfo(name="tool_call_pattern_approval", metadata=""),
         CapabilityInfo(name="flow_semantic_versioning", metadata=""),
+        CapabilityInfo(name="inline_flow_config_binding", metadata=""),
     ]
 
 

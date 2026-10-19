@@ -3,6 +3,7 @@ query GetProjectWorkItemNotes(
     $workItemIid: String!,
     $includeNoteResolvedAndResolvableFields: Boolean!,
     $includeDiscussionIdField: Boolean!,
+    $filter: NotesFilterType,
     $first: Int,
     $after: String
 ) {
@@ -11,7 +12,7 @@ query GetProjectWorkItemNotes(
             nodes {
                 widgets {
                     ... on WorkItemWidgetNotes {
-                        notes(first: $first, after: $after) {
+                        notes(first: $first, after: $after, filter: $filter) {
                             pageInfo {
                                 hasNextPage
                                 endCursor

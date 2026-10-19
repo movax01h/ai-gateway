@@ -96,7 +96,7 @@ def test_lite_llm_chat_uses_configured_request_timeout():
     container = ContainerModels()
     container.config.from_dict(
         {
-            "custom_models": {"enabled": False},
+            "custom_models": {"enabled": False, "user_id_header": None},
             "bedrock_guardrail_config": None,
             "fireworks_api_base_url": "",
             "duo_chat": {"model_request_timeout": 45.0},
@@ -124,7 +124,7 @@ def test_lite_llm_completion_resolves_vertex_location(
     container = ContainerModels()
     container.config.from_dict(
         {
-            "custom_models": {"enabled": False},
+            "custom_models": {"enabled": False, "user_id_header": None},
             "bedrock_guardrail_config": None,
             "fireworks_api_base_url": "",
             "vertex_text_model": {"location": runway_region},
@@ -139,6 +139,23 @@ def test_lite_llm_completion_resolves_vertex_location(
     )
 
     assert model.vertex_location == expected
+
+
+@pytest.mark.parametrize("vertexai_location", [None, "europe-west2"])
+def test_lite_llm_embedding_uses_vertexai_location(vertexai_location):
+    container = ContainerModels()
+    container.config.from_dict(
+        {
+            "custom_models": {"enabled": False, "user_id_header": None},
+            "vertexai_location": vertexai_location,
+            "mock_model_responses": False,
+            "use_agentic_mock": False,
+        }
+    )
+
+    model = container.lite_llm_embedding_fn(model="text-embedding-005")
+
+    assert model.vertex_location == vertexai_location
 
 
 @pytest.mark.asyncio

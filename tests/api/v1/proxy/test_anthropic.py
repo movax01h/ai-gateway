@@ -143,6 +143,7 @@ class TestProxyAnthropic:
                         "model_id": "claude-3-5-haiku-20241022",
                         "model_engine": "anthropic",
                         "model_provider": "anthropic",
+                        "model_vendor": "anthropic",
                         "prompt_tokens": 6,
                         "completion_tokens": 4,
                         "agent_name": None,

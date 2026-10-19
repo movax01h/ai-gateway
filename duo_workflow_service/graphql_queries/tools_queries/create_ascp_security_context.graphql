@@ -6,6 +6,7 @@ mutation createAscpSecurityContext($input: AscpSecurityContextCreateInput!) {
       authenticationModel
       authorizationModel
       dataSensitivity
+      securityBoundary @gl_introduced(version: "19.5.0")
       scan {
         id
       }

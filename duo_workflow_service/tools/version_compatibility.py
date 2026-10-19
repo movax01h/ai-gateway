@@ -21,6 +21,16 @@ AGENT_PLAN_WIDGET_VERSION = Version("19.0.0")
 GROUP_LEVEL_CUSTOM_INSTRUCTIONS_VERSION = Version("19.0.0")
 SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.2.0")
 GLQL_SCHEMA_ENDPOINT_VERSION = Version("19.3.0")
+AGENT_PLAN_READINESS_VERSION = Version("19.4.0")
+LABELS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
+SUGGESTED_REVIEWERS_ENDPOINT_VERSION = Version("19.4.0")
+CLIENT_MCP_TRUST_STRIPPED_VERSION = Version("19.5.0")
+CLIENT_MCP_TRUST_STRIPPED_BACKPORT_VERSIONS: dict[tuple[int, ...], Version] = {
+    (19, 3): Version("19.3.6"),
+    (19, 4): Version("19.4.3"),
+}
+VULNERABILITY_TRACKED_REF_VERSION = Version("19.5.0")
+ASCP_SECURITY_BOUNDARY_VERSION = Version("19.5.0")
 
 # Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
 # parse, such as a GDK's `19.3.0-pre-g1234abcd`.
@@ -52,6 +62,15 @@ def get_gitlab_version() -> Version:
         fallback_version=str(DEFAULT_FALLBACK_VERSION),
     )
     return DEFAULT_FALLBACK_VERSION
+
+
+def strips_client_mcp_trust() -> bool:
+    """Whether Workhorse clears the trusted flag on client-supplied MCP tools."""
+    version = get_gitlab_version()
+    floor = CLIENT_MCP_TRUST_STRIPPED_BACKPORT_VERSIONS.get(
+        version.release[:2], CLIENT_MCP_TRUST_STRIPPED_VERSION
+    )
+    return version >= floor
 
 
 def supports_hierarchy_widget() -> bool:
@@ -99,9 +118,56 @@ def supports_agent_plan_widget() -> bool:
     return get_gitlab_version() >= AGENT_PLAN_WIDGET_VERSION
 
 
+def supports_agent_plan_readiness() -> bool:
+    """Check if the agent plan widget input accepts readiness fields.
+
+    `readinessScore` and `readinessScoreFeedback` were added to the
+    agentPlan widget input (`AgentPlanInputType`) later than `content`,
+    which has existed since the widget type itself shipped in 19.0, so they
+    need their own floor rather than riding :func:`supports_agent_plan_widget`.
+
+    Both ride one 19.4 floor: `readinessScore` landed after the 19.3 cut
+    (first ships in 19.4) and `readinessScoreFeedback` landed alongside it
+    in the same milestone. Both are additionally gated at runtime by the
+    `workplan_score` feature flag on the GitLab side, which no version check
+    can cover: a 19.4+ instance with the flag disabled still rejects the
+    arguments.
+
+    Returns:
+        True if readiness fields are accepted (GitLab >= 19.4), False otherwise.
+    """
+    return get_gitlab_version() >= AGENT_PLAN_READINESS_VERSION
+
+
 def supports_licensed_feature_availability() -> bool:
     """Check if the GitLab instance exposes the licensedFeatureAvailability GraphQL field."""
     return get_gitlab_version() >= LICENSED_FEATURE_AVAILABILITY_VERSION
+
+
+def supports_vulnerability_tracked_ref() -> bool:
+    """Check if ``Vulnerability.trackedRef`` returns usable data.
+
+    The field (and its ``SecurityTrackedRef.refType``) was added as an experiment
+    in GitLab 18.10, but before 19.5 the AI workflow token lacks the permission to
+    read it, so it always resolves to ``null``. The threshold is therefore 19.5,
+    not the schema introduction milestone: below it the field is either rejected
+    (older schema) or uselessly ``null``, so it is omitted and callers fall back
+    to the project default branch. An instance that reports no version falls back
+    below the floor and is treated as unsupported.
+
+    Returns:
+        True if ``trackedRef`` is readable (GitLab >= 19.5), False otherwise.
+    """
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        VULNERABILITY_TRACKED_REF_VERSION
+    )
+
+
+def supports_ascp_security_boundary() -> bool:
+    """Check if ``AscpSecurityContextCreateInput`` accepts ``securityBoundary`` (GitLab >= 19.5)."""
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        ASCP_SECURITY_BOUNDARY_VERSION
+    )
 
 
 def supports_group_level_custom_instructions() -> bool:
@@ -139,6 +205,16 @@ def _padded_release(version: Version) -> tuple[int, ...]:
     return release + (0,) * (3 - len(release))
 
 
+def supports_labels_by_name() -> bool:
+    """Check if labels are readable with an ai_workflows-scoped token (GitLab 19.4)."""
+    if not gitlab_version.get():
+        return True
+
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        LABELS_AI_WORKFLOWS_SCOPE_VERSION
+    )
+
+
 def supports_glql_schema_endpoint() -> bool:
     """Check if the GitLab instance serves `GET /api/v4/glql/schema`.
 
@@ -150,4 +226,23 @@ def supports_glql_schema_endpoint() -> bool:
     # Padded, because a two-component header like "19.3" releases as (19, 3).
     return _padded_release(get_gitlab_version()) >= _padded_release(
         GLQL_SCHEMA_ENDPOINT_VERSION
+    )
+
+
+def supports_suggested_reviewers_endpoint() -> bool:
+    """Check if the GitLab instance serves the merge request suggested_reviewers endpoint.
+
+    An instance that reports no version is treated as supported, for the same reason
+    as supports_set_reviewers_mutation: the fallback version predates the endpoint,
+    so gating on it would disable the tool on instances that do serve it.
+
+    Returns:
+        True if the endpoint is available, False otherwise.
+    """
+    if not gitlab_version.get():
+        return True
+
+    # Compare .release so GitLab.com's 19.4.0-pre passes the 19.4.0 floor.
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        SUGGESTED_REVIEWERS_ENDPOINT_VERSION
     )

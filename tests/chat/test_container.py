@@ -11,12 +11,6 @@ from ai_gateway.chat.tools.gitlab import (
     GitlabDocumentation,
     SelfHostedGitlabDocumentation,
 )
-from ai_gateway.models.anthropic import (
-    AnthropicChatModel,
-    AnthropicModel,
-    KindAnthropicModel,
-)
-from ai_gateway.models.litellm import KindLiteLlmModel, LiteLlmChatModel
 
 
 @pytest.fixture(name="config_values")
@@ -35,19 +29,6 @@ def test_container(
 ):
     chat = cast(providers.Container, mock_ai_gateway_container.chat)
 
-    assert isinstance(
-        chat.anthropic_claude_factory("llm", name=KindAnthropicModel.CLAUDE_SONNET_4_5),
-        AnthropicModel,
-    )
-    assert isinstance(
-        chat.anthropic_claude_factory(
-            "chat", name=KindAnthropicModel.CLAUDE_SONNET_4_5
-        ),
-        AnthropicChatModel,
-    )
-    assert isinstance(
-        chat.litellm_factory(name=KindLiteLlmModel.MISTRAL), LiteLlmChatModel
-    )
     assert isinstance(
         chat.gl_agent_remote_executor_factory(agent=mock_agent), GLAgentRemoteExecutor
     )

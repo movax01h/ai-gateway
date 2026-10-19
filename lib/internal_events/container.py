@@ -1,6 +1,7 @@
 from dependency_injector import containers, providers
 
 from lib.internal_events.client import InternalEventsClient
+from lib.unified_events.service import UnifiedEventService
 
 __all__ = [
     "ContainerInternalEvent",
@@ -18,4 +19,11 @@ class ContainerInternalEvent(containers.DeclarativeContainer):
         endpoint=config.endpoint,
         app_id=config.app_id,
         namespace=config.namespace,
+        api_key=config.api_key,
+    )
+
+    unified_event_service = providers.Singleton(
+        UnifiedEventService,
+        sidecar_url=config.sidecar_url,
+        enabled=config.sidecar_enabled,
     )

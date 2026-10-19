@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "gitlab/dangerfiles/capability"
+
 PROJECT_NAME = helper.config.project_name
 
 MESSAGE = <<~MARKDOWN
@@ -19,6 +21,12 @@ for guidance on how you can benefit from the Reviewer Roulette, or use the
 [GitLab Review Workload Dashboard](https://gitlab-org.gitlab.io/gitlab-roulette/)
 to find other available reviewers.
 
+MARKDOWN
+
+WARNING_MESSAGE = <<MARKDOWN
+
+⚠ Failed to retrieve team member data, so the suggestions below may be incomplete:
+%{warnings}
 MARKDOWN
 
 NO_SUGGESTIONS = <<MARKDOWN
@@ -42,6 +50,11 @@ MARKDOWN
 
 OPTIONAL_REVIEW_TEMPLATE = '%{role} review is optional for %{category}'
 
+ROLE_READERS = {
+  reviewer: ->(spin) { spin.reviewer },
+  maintainer: ->(spin) { spin.maintainer }
+}.freeze
+
 def group_not_available_template(slack_channel, gitlab_group)
   <<~TEMPLATE.strip
     No engineer is available for automated assignment, please reach out to the `#{slack_channel}` Slack channel or mention `#{gitlab_group}` for assistance.
@@ -50,17 +63,56 @@ end
 
 NOT_AVAILABLE_TEMPLATES = {
   default: 'No %{role} available',
-  analytics_instrumentation: group_not_available_template('#g_analyze_analytics_instrumentation', '@gitlab-org/analytics-section/analytics-instrumentation/engineers'),
-  utilization: group_not_available_template('#g_utilization', '@gitlab-org/fulfillment/utilization')
+  analytics_instrumentation: group_not_available_template('#g_analyze_analytics_instrumentation', '@gitlab-org/analytics-section/analytics-instrumentation/engineers')
 }.freeze
 
 CATEGORY_LABELS = {
   ai_gateway: '~"group::ai core infra"',
   duo_workflow_service: '~"devops::agent foundations"',
-  analytics_instrumentation: '~"group::analytics instrumentation"',
-  utilization: '~"group::utilization"',
-
+  analytics_instrumentation: '~"group::analytics instrumentation"'
 }.freeze
+
+# Roles under `ai-gateway` are bare `reviewer`/`maintainer` since
+# www-gitlab-com!143966, so split the rows on the stage `team_tags` instead.
+TEAM_TAG_PREFIXES = {
+  ai_gateway: 'AI Platform:',
+  duo_workflow_service: 'Agent Foundations:'
+}.freeze
+
+class TeamScopedCapability < Gitlab::Dangerfiles::Capability::None
+  def has_capability?(teammate)
+    super && on_team?(teammate)
+  end
+
+  private
+
+  # Holding the role is the gate, so an untagged teammate stays eligible for
+  # every row. A teammate is only dropped when their team data puts them on
+  # some other team, which is what kept offering, say, a Runner maintainer as
+  # this group's reviewer.
+  def on_team?(teammate)
+    tags = Array(teammate.to_h['team_tags']).map(&:to_s)
+
+    tags.empty? || tags.any? { |tag| tag.start_with?(TEAM_TAG_PREFIXES.fetch(category)) }
+  end
+end
+
+# `Capability.for` is the public dispatch point. Overriding it keeps the whole
+# Spinner path (weightage, availability, per-branch seeding) intact, unlike
+# writing the private `@category_to_class` registry.
+#
+# Prepended rather than aliased so evaluating this file twice in one process
+# is safe: `super` always reaches the gem's `for`, and a repeat `prepend` of a
+# module already in the ancestor chain is a no-op.
+module TeamScopedCapabilityDispatch
+  def for(category, **arguments)
+    return TeamScopedCapability.new(category: category, **arguments) if TEAM_TAG_PREFIXES.key?(category)
+
+    super
+  end
+end
+
+Gitlab::Dangerfiles::Capability.singleton_class.prepend(TeamScopedCapabilityDispatch)
 
 DWS_CODE_REVIEW_GUIDELINES_MESSAGE = <<MARKDOWN
 
@@ -81,7 +133,7 @@ def note_for_spin_role(spin, role, category)
     if spin.optional_role == role
       OPTIONAL_REVIEW_TEMPLATE % { role: role.capitalize, category: CATEGORY_LABELS[spin.category] }
     else
-      spin.public_send(role)&.markdown_name(author: roulette.team_mr_author) # rubocop:disable GitlabSecurity/PublicSend
+      ROLE_READERS.fetch(role).call(spin)&.markdown_name(author: roulette.team_mr_author)
     end
 
   note || (template % { role: role })
@@ -94,16 +146,47 @@ def markdown_row_for_spin(category, spin)
   "| #{CATEGORY_LABELS[category]} | #{reviewer_note} | #{maintainer_note} |"
 end
 
+# A stale prefix does not empty a row, it quietly narrows it to the untagged
+# teammates, which reads the same as a healthy row. Silence is what let the
+# previous breakage run for weeks, so say it out loud.
+def warn_on_stale_team_tag(category)
+  members = Gitlab::Dangerfiles::Teammate.company_members
+  return if members.empty?
+
+  prefix = TEAM_TAG_PREFIXES.fetch(category)
+  tagged = members.any? do |teammate|
+    teammate.capabilities(PROJECT_NAME).any? &&
+      Array(teammate.to_h['team_tags']).any? { |tag| tag.to_s.start_with?(prefix) }
+  end
+
+  return if tagged
+
+  warn(
+    "No teammate with an `#{PROJECT_NAME}` role carries a team tag under " \
+    "`#{prefix}`, so the #{CATEGORY_LABELS[category]} row is drawing only " \
+    "from teammates who have no team tag at all. The stage was most likely " \
+    "renamed in the team data and `TEAM_TAG_PREFIXES` needs updating."
+  )
+end
+
 changes = helper.changes_by_category
 categories = roulette.prepare_categories(changes.keys - [:unknown])
 
 if changes.any?
+  categories.each do |category|
+    warn_on_stale_team_tag(category) if TEAM_TAG_PREFIXES.key?(category)
+  end
+
   random_roulette_spins = roulette.spin(nil, categories)
   rows = random_roulette_spins.map do |spin|
     markdown_row_for_spin(spin.category, spin)
   end
 
   markdown(MESSAGE)
+
+  if roulette.warnings.any?
+    markdown(WARNING_MESSAGE % { warnings: roulette.warnings.map { |warning| "* #{warning}" }.join("\n") })
+  end
 
   if rows.empty?
     markdown(NO_SUGGESTIONS)

@@ -15,8 +15,11 @@ class BaseAgentOutput(BaseModel):
         return cls(**msg.tool_calls[0]["args"])
 
     def to_string_output(self) -> str:
-        """Return a human-readable string representation for UI display."""
-        return self.model_dump_json(indent=2)
+        """Return a human-readable string representation for UI display.
+
+        The JSON is wrapped in a Markdown code fence so the UI renders it as a highlighted code block.
+        """
+        return f"```json\n{self.model_dump_json(indent=2)}\n```"
 
     def to_output(self) -> str | dict:
         """Return the canonical output value for writing to flow state."""

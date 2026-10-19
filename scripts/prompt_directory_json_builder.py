@@ -52,16 +52,21 @@ def process_feature_without_subfeatures(path):
 
 if __name__ == "__main__":
     BASE_PATH = "ai_gateway/prompts/definitions"
-    # Prompts moved to ai/features/<domain>/<feature>/prompts/ keep their flat
-    # feature id, so they join the same directory structure.
+    target_features_with_subfeatures = ["chat", "code_suggestions", "workflow"]
+    # Moved prompts join the same structure: a feature in a subfeatured domain,
+    # such as ai/features/chat/react/, under its domain; the others by name.
+    # An ai/shared/ name must not match a subfeatured domain: neither loop scans it.
     FEATURE_PROMPT_ROOTS = {
         prompts.parent.name: prompts
-        for prompts in Path("ai/features").glob("*/*/prompts")
+        for prompts in [
+            *Path("ai/features").glob("*/*/prompts"),
+            *Path("ai/shared").glob("*/prompts"),
+        ]
         if prompts.is_dir()
+        and prompts.parent.parent.name not in target_features_with_subfeatures
     }
     feature_models = {}
 
-    target_features_with_subfeatures = ["chat", "code_suggestions"]
     all_features = [
         file for file in os.listdir(BASE_PATH) if Path(BASE_PATH, file).is_dir()
     ] + list(FEATURE_PROMPT_ROOTS)
@@ -71,10 +76,17 @@ if __name__ == "__main__":
 
     for feature in target_features_with_subfeatures:
         feature_path = Path(BASE_PATH) / feature
-        if feature_path.is_dir():
-            result = process_feature_with_subfeatures(feature_path)
-            if result:
-                feature_models[feature] = result
+        result = (
+            process_feature_with_subfeatures(feature_path)
+            if feature_path.is_dir()
+            else {}
+        )
+        for prompts in Path("ai/features", feature).glob("*/prompts"):
+            moved = process_feature_without_subfeatures(prompts)
+            if moved:
+                result[prompts.parent.name] = moved
+        if result:
+            feature_models[feature] = result
 
     for feature in target_features_without_subfeatures:
         feature_path = FEATURE_PROMPT_ROOTS.get(feature, Path(BASE_PATH) / feature)

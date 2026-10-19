@@ -1,6 +1,7 @@
 from .get_vulnerability_details import (
     EvaluateVulnerabilityFalsePositiveStatus,
     GetVulnerabilityDetails,
+    ResolveVulnerabilityTargetBranch,
 )
 from .post_sast_fp_analysis_to_gitlab import PostSastFpAnalysisToGitlab
 from .post_secret_fp_analysis_to_gitlab import PostSecretFpAnalysisToGitlab
@@ -11,5 +12,6 @@ __all__ = [
     "GetVulnerabilityDetails",
     "PostSastFpAnalysisToGitlab",
     "PostSecretFpAnalysisToGitlab",
+    "ResolveVulnerabilityTargetBranch",
     "UpdateVulnerabilitySeverity",
 ]

@@ -41,6 +41,7 @@ from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
+from duo_workflow_service.agent_platform.v1.catalog import CatalogItems
 from duo_workflow_service.agent_platform.v1.flows.base import Flow
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.client_capabilities import MIN_CAPABILITIES_VERSION
@@ -206,6 +207,7 @@ class DryRunFlowValidator(Flow):
         config: FlowConfig,
         prompt_registry: BasePromptRegistry,
         internal_event_client: InternalEventsClient,
+        catalog_items: Optional[CatalogItems] = None,
     ) -> None:
         """Initialise with the minimum required dependencies.
 
@@ -216,6 +218,8 @@ class DryRunFlowValidator(Flow):
                 model loading occurs.
             internal_event_client: Events client (no events are emitted
                 during validation).
+            catalog_items: Catalog items to validate the config against.
+                Defaults to none, which validates the config as authored.
 
         Note:
             ``ResponseSchemaRegistry()`` is passed as the shared registry.
@@ -233,6 +237,7 @@ class DryRunFlowValidator(Flow):
             prompt_registry=prompt_registry,
             schema_registry=ResponseSchemaRegistry(),
             internal_event_client=internal_event_client,
+            catalog_items=catalog_items,
         )
         # Replace the flow-scoped prompt registry with a stub that delegates
         # get_required_variables() to the real registry while short-circuiting
@@ -246,6 +251,9 @@ class DryRunFlowValidator(Flow):
         # during dry-run compilation. Production flows leave this as False.
         for comp_config in self._config.components:
             comp_config["strict_validation"] = True
+
+        # Components synthesized per catalog item never reach the loop above, so
+        # binding copies the flag from the component coordinating them.
 
     def validate(self) -> None:
         """Run dry-run compilation to validate the flow configuration.

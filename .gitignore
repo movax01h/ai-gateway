@@ -326,3 +326,8 @@ tmp/
 .llm_cache.db
 
 /.claude
+
+# Catalog-fetched foundational agents (written by fetch-foundational-agents)
+ai/features/foundational_agents/*
+!ai/features/foundational_agents/.gitkeep
+!ai/features/foundational_agents/README.md

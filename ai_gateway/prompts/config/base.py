@@ -2,7 +2,11 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from ai_gateway.model_selection import PromptParams
-from ai_gateway.model_selection.models import BaseModelParams, OpenAIProviderParams
+from ai_gateway.model_selection.models import (
+    BaseModelParams,
+    LiteLLMProviderParams,
+    OpenAIProviderParams,
+)
 from lib.billing_events.service import LLMOperationType
 
 __all__ = [
@@ -30,6 +34,7 @@ class PromptProviderParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     openai: OpenAIProviderParams | None = None
+    litellm: LiteLLMProviderParams | None = None
 
     @model_validator(mode="after")
     def validate_blocks_not_empty(self) -> "PromptProviderParams":
@@ -63,6 +68,7 @@ class PromptConfig(BaseModel):
     prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
     operation_type: LLMOperationType = "standard"
+    tool_output_security: bool = True
 
 
 class InMemoryPromptConfig(BaseModel):
@@ -76,6 +82,7 @@ class InMemoryPromptConfig(BaseModel):
     prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
     operation_type: LLMOperationType = "standard"
+    tool_output_security: bool = True
 
     def to_prompt_data(self) -> dict:
         params = self.model_dump(exclude={"prompt_id", "unit_primitives"})

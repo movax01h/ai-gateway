@@ -8,6 +8,9 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain.messages import AIMessage
 
 from ai_gateway.container import ContainerApplication
+from duo_workflow_service.checkpointer.write_mode import (
+    incremental_checkpoints_enabled,
+)
 from duo_workflow_service.components.tools_registry import ToolMetadata, ToolsRegistry
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.entities.state import (
@@ -20,14 +23,13 @@ from duo_workflow_service.entities.state import (
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
-from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 from duo_workflow_service.tracking.monitoring_context import (
     MonitoringContext,
     current_monitoring_context,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
-from lib.context import gitlab_version
+from lib.context import client_capabilities, gitlab_version
 from lib.events import GLReportingEventContext
 
 
@@ -44,24 +46,6 @@ def plan_fixture(plan_steps: list[Task]) -> Plan:
 @pytest.fixture(name="mock_now")
 def mock_now_fixture() -> datetime:
     return datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
-
-
-@pytest.fixture(name="gl_http_client", scope="function")
-def gl_http_client_fixture():
-    return AsyncMock(spec=GitlabHttpClient)
-
-
-@pytest.fixture(name="project_mock", scope="function")
-def project_mock_fixture():
-    return Project(
-        id=1,
-        name="test-project",
-        description="Test project",
-        http_url_to_repo="http://example.com/repo.git",
-        web_url="http://example.com/repo",
-        languages=[],
-        exclusion_rules=None,
-    )
 
 
 @pytest.fixture(name="tool_metadata", scope="function")
@@ -134,6 +118,19 @@ def mock_gitlab_version_fixture(gl_version: str):
     gitlab_version.set(None)
 
 
+@pytest.fixture(name="incremental_checkpoints_only")
+def incremental_checkpoints_only_fixture():
+    """The run writes incremental-only checkpoints: the workflow flag is on and the instance advertises the
+    ``incremental_checkpoints_only`` server capability on a GitLab version that forwards capabilities."""
+    enabled_token = incremental_checkpoints_enabled.set(True)
+    capabilities_token = client_capabilities.set({"incremental_checkpoints_only"})
+    version_token = gitlab_version.set("19.4.0")
+    yield
+    incremental_checkpoints_enabled.reset(enabled_token)
+    client_capabilities.reset(capabilities_token)
+    gitlab_version.reset(version_token)
+
+
 @pytest.fixture(name="workflow_id")
 def workflow_id_fixture():
     return "1234"
@@ -198,6 +195,11 @@ def agent_privileges_names_fixture() -> list[str]:
     return []
 
 
+@pytest.fixture(name="pre_approved_agent_privileges_names")
+def pre_approved_agent_privileges_names_fixture() -> list[str]:
+    return []
+
+
 @pytest.fixture(name="mcp_enabled")
 def mcp_enabled_fixture() -> bool:
     return False
@@ -217,6 +219,7 @@ def first_checkpoint_fixture() -> dict[str, Any] | None:
 def workflow_config_fixture(
     workflow_id: str,
     agent_privileges_names: list[str],
+    pre_approved_agent_privileges_names: list[str],
     allow_agent_to_request_user: bool,
     mcp_enabled: bool,
     first_checkpoint: dict[str, Any],
@@ -225,7 +228,7 @@ def workflow_config_fixture(
         "workflow_id": workflow_id,
         "project_id": 1,
         "agent_privileges_names": agent_privileges_names,
-        "pre_approved_agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": pre_approved_agent_privileges_names,
         "allow_agent_to_request_user": allow_agent_to_request_user,
         "mcp_enabled": mcp_enabled,
         "first_checkpoint": first_checkpoint,

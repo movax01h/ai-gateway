@@ -10,7 +10,7 @@ from duo_workflow_service.components import ToolsApprovalComponent, ToolsRegistr
 from duo_workflow_service.components.executor.component import ExecutorComponent, Routes
 from duo_workflow_service.entities import Plan, WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.tools import DuoBaseTool
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.fixture(name="mock_build_agent")
@@ -199,7 +199,7 @@ class TestExecutorComponent:
         self,
         mock_build_agent: Mock,
         executor_component: ExecutorComponent,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
     ):
         """Test that Agent is created with correct parameters."""
         mock_graph = Mock(spec=StateGraph)

@@ -107,7 +107,7 @@ class ShellCommand(DuoBaseTool):
     name: str = "run_command"
     description: str = (
         "Execute a shell command in the current project directory. "
-        "Do not prefix command with 'cd' as the working directory is already set."
+        "Do not prefix commands with 'cd' when running in the current working directory."
     )
     args_schema: Type[BaseModel] = ShellCommandInput
     supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = RunCommand

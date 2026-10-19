@@ -1,0 +1,109 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "code_review_findings",
+    "description": "Use this tool to submit your review as structured findings. Report every candidate issue you can anchor to an exact diff line, each with a calibrated confidence score: publishing decisions happen downstream at a configured confidence threshold, never in your head. An empty findings array is a valid and expected result for a clean diff.",
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "description": "Every candidate issue you found, in the order you found them, including ones you consider minor or were unable to fully confirm — express doubt through the confidence score, never by omitting the finding. Anchor each one to an exact line of the diff: a finding you cannot anchor to a specific line, or that restates a design choice without identifying a concrete problem, does not belong here. Empty array when the diff is clean.",
+            "items": {
+                "type": "object",
+                "title": "CodeReviewFinding",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Full file path exactly as it appears in the diff."
+                    },
+                    "new_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Line number in the NEW version of the file, read from the `new_line` attribute of the `<line>` tag in the diff. Never guess, count, or interpolate: an approximate line number anchors the comment to the wrong code."
+                    },
+                    "old_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Line number in the OLD version, read from the `old_line` attribute of the `<line>` tag. Set this only for a deleted or unchanged context line."
+                    },
+                    "target_code": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Verbatim text content of the single `<line>` tag at `new_line`, copied exactly character for character. This is what anchors the published comment, so it must match the file content exactly. Always one line, even when `suggestion` replaces several."
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "The `new_line` of the LAST existing line your `suggestion` stands in for, read from that line's `<line>` tag. Equal to `new_line` when there is no suggestion or the suggestion replaces only that one line. Larger than `new_line` whenever the suggestion also replaces lines below it (a rewritten block, condition, or function body): only `new_line` through `end_line` are removed when it is applied, and every line below that span stays in the file. Every line in the span must appear in the same hunk of the diff as added or unchanged lines."
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["critical", "major", "minor"],
+                        "description": "critical: a correctness, safety, or security defect that should block merge. major: a likely-correctness, convention, or design problem that should be fixed. minor: a genuine but lower-stakes problem, such as a misleading name or comment, a missing test for changed behavior, an undocumented invariant, or a maintainability trap."
+                    },
+                    "category": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Short kebab-case slug for the issue TYPE, e.g. `sql-injection`, `layer-violation`, `missing-test`, `fail-open`. Rendered into the comment header and the summary breakdown, so prefer an established slug over inventing a near-synonym of one."
+                    },
+                    "message": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "The finding as one short markdown paragraph. Open with what breaks and when, then explain why. Use short sentences in plain words, and backticks only for code the reader would search for or copy. When something is still open, end with one direct question to the author. Leave out the severity and category: they render into the comment header automatically."
+                    },
+                    "suggestion": {
+                        "type": "string",
+                        "description": "Replacement for the lines from `new_line` through `end_line`, published as a suggestion the reader applies in one click. Applying it removes exactly those lines and inserts this code; lines below the span stay in the file. Code only, with the exact leading whitespace of the lines it replaces: no prose, explanatory comments, diff markers, or code fences. Set it whenever the fix is a rewrite of those lines in place. Leave it unset otherwise: moving the code elsewhere, changing lines outside the span, and anchoring to a deleted line cannot be applied as a suggestion."
+                    },
+                    "custom_instruction_ref": {
+                        "type": "string",
+                        "description": "Name of the custom review instruction that drove this finding, when one did. Leave unset for findings from standard review criteria. Do not write the attribution into the message; it renders automatically from this field."
+                    },
+                    "confidence": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10,
+                        "description": "How sure you are the issue is REAL, scored on the evidence you gathered — not on how important it feels (that is severity). 9-10: you verified the defect and can point to the evidence. 6-8: likely real, but something material is unverified. 3-5: a plausible concern you could not settle either way; state the open question in the message. 0-2: a hunch supported by little. Never inflate the score to protect a finding from the publishing threshold."
+                    }
+                },
+                "required": ["file", "new_line", "end_line", "target_code", "severity", "category", "message", "confidence"]
+            }
+        },
+        "summary": {
+            "type": "string",
+            "description": "Your review summary, in the first person, written after every finding has its score. Findings below the publishing threshold in your instructions are never shown to the author: leave them out completely, as if you had not reported them, and never call anything low-confidence. Open with your verdict on the change in one sentence, then name the kinds of issues you raised and roughly how much work they take to fix. If there were existing discussions, say in one sentence what was fixed since your last review and what still stands. When `findings` is empty or no finding reaches the threshold, instead give 3-5 short bullets (each starting with `- `), each naming one thing you checked and what you found. Name what you checked, not how you checked it. Leave out finding counts and per-severity tallies: they are computed and rendered separately."
+        },
+        "previous_findings": {
+            "type": "array",
+            "description": "On a re-review, one entry per existing discussion thread you reconciled: ADDRESSED, PARTIALLY ADDRESSED, NOT ADDRESSED, RESOLVED, or DISPUTED. Skip OBSOLETE and ADDRESSED INCORRECTLY threads; the last gets a new comment instead. Leave unset on a first review. The list is rendered, ordered and shown or withheld by the publishing step.",
+            "items": {
+                "type": "object",
+                "title": "PreviousFinding",
+                "properties": {
+                    "discussion_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "The thread's discussion_id, as given in existing_discussions."
+                    },
+                    "file": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "File the thread is anchored to, as given in existing_discussions."
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["fixed", "verified", "partially_fixed", "still_outstanding", "disputed"],
+                        "description": "fixed: ADDRESSED - the code changed and every point you raised is now fixed in that changed code. verified: RESOLVED and your check of the changed code confirmed the fix. fixed and verified both claim someone changed the code, so use neither unless you found that change in the diff. partially_fixed: PARTIALLY ADDRESSED. still_outstanding: NOT ADDRESSED, or RESOLVED with the code unchanged; resolving a thread is not a fix. disputed: DISPUTED - a human explained why the code is correct or that no change is needed; never use still_outstanding for it."
+                    },
+                    "note": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "One short, plain sentence on the finding and, when partially fixed, what still stands."
+                    }
+                },
+                "required": ["discussion_id", "file", "status", "note"]
+            }
+        }
+    },
+    "required": ["findings"]
+}

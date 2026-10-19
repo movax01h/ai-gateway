@@ -117,11 +117,15 @@ graph TD;
     __start__([<p>__start__</p>]):::first
     agent(agent)
     run_tools(run_tools)
+    forced_call_complete(forced_call_complete)
     __end__([<p>__end__</p>]):::last
-    __start__ --> agent;
+    __start__ -. &nbsp;continue&nbsp; .-> agent;
+    __start__ -. &nbsp;tool_use&nbsp; .-> run_tools;
     agent -. &nbsp;stop&nbsp; .-> __end__;
     agent -. &nbsp;tool_use&nbsp; .-> run_tools;
-    run_tools --> agent;
+    run_tools -. &nbsp;continue&nbsp; .-> agent;
+    run_tools -. &nbsp;stop&nbsp; .-> forced_call_complete;
+    forced_call_complete --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2
     classDef first fill-opacity:0
     classDef last fill:#bfb6fc
@@ -187,90 +191,6 @@ graph TD;
     classDef last fill:#bfb6fc
 ```
 
-## Graph: `developer 1.0.0 (experimental)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> git_setup;
-    git_setup(git_setup<br>#91;DeterministicStepComponent#93;);
-    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
-    developer_agent(developer_agent<br>#91;AgentComponent#93;);
-    git_setup --> git_unshallow;
-    git_unshallow --> developer_agent;
-    developer_agent --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
-## Graph: `fix_pipeline 1.0.0 (experimental)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> git_setup;
-    git_setup(git_setup<br>#91;DeterministicStepComponent#93;);
-    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
-    fix_pipeline_agent(fix_pipeline_agent<br>#91;AgentComponent#93;);
-    git_setup --> git_unshallow;
-    git_unshallow --> fix_pipeline_agent;
-    fix_pipeline_agent --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
-## Graph: `resolve_dependency_bump 1.0.0 (experimental)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> resolve_dep_bump_pipeline_fix;
-    resolve_dep_bump_pipeline_fix(resolve_dep_bump_pipeline_fix<br>#91;AgentComponent#93;);
-    resolve_dep_bump_pipeline_fix --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
-## Graph: `vulnerability_context_agent 1.0.0 (experimental)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> vulnerability_context_agent;
-    vulnerability_context_agent(vulnerability_context_agent<br>#91;AgentComponent#93;);
-    vulnerability_context_agent --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
 ## Graph: `agentic_chat 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -328,6 +248,72 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `bl_security 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> grounding;
+    grounding(grounding<br>#91;AgentComponent#93;);
+    tuner(tuner<br>#91;AgentComponent#93;);
+    discover_units(discover_units<br>#91;DeterministicStepComponent#93;);
+    map_reviews_prep(map_reviews_prep<br>#91;DeterministicStepComponent#93;);
+    map_reviews(map_reviews<br>#91;AgentComponent#93;);
+    map_reviews_collect(map_reviews_collect<br>#91;DeterministicStepComponent#93;);
+    sibling_scan_prep(sibling_scan_prep<br>#91;DeterministicStepComponent#93;);
+    sibling_scan(sibling_scan<br>#91;AgentComponent#93;);
+    sibling_scan_collect(sibling_scan_collect<br>#91;DeterministicStepComponent#93;);
+    adjudicate(adjudicate<br>#91;DeterministicStepComponent#93;);
+    triage_prep(triage_prep<br>#91;DeterministicStepComponent#93;);
+    triage(triage<br>#91;AgentComponent#93;);
+    triage_collect(triage_collect<br>#91;DeterministicStepComponent#93;);
+    adjudicate_post(adjudicate_post<br>#91;DeterministicStepComponent#93;);
+    write_report(write_report<br>#91;DeterministicStepComponent#93;);
+    grounding --> tuner;
+    tuner --> discover_units;
+    discover_units --> map_reviews_prep;
+    map_reviews_prep --> map_reviews;
+    map_reviews --> map_reviews_collect;
+    map_reviews_collect --> sibling_scan_prep;
+    sibling_scan_prep --> sibling_scan;
+    sibling_scan --> sibling_scan_collect;
+    sibling_scan_collect --> adjudicate;
+    adjudicate --> triage_prep;
+    triage_prep --> triage;
+    triage --> triage_collect;
+    triage_collect -.->|"success"| adjudicate_post;
+    adjudicate_post -.->|"success"| write_report;
+    write_report -.->|"success"| __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `business_context_security_guidelines 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> business_context_security_guidelines_agent;
+    business_context_security_guidelines_agent(business_context_security_guidelines_agent<br>#91;AgentComponent#93;);
+    business_context_security_guidelines_agent --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `code_review 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -347,8 +333,8 @@ graph TD;
     fetch_mr_metadata(fetch_mr_metadata<br>#91;DeterministicStepComponent#93;);
     analyze_prescan_results(analyze_prescan_results<br>#91;AgentComponent#93;);
     perform_code_review_and_publish(perform_code_review_and_publish<br>#91;OneOffComponent#93;);
-    build_review_context -.->|success| fetch_mr_diffs;
-    build_review_context -.->|default_route| abort;
+    build_review_context -.->|"success"| fetch_mr_diffs;
+    build_review_context -.->|"default_route"| abort;
     fetch_mr_diffs --> explore_relevant_directories;
     explore_relevant_directories --> prescan_codebase;
     prescan_codebase --> fetch_mr_metadata;
@@ -360,7 +346,7 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `code_review 2.0.0-dev (v1)` (Flow Registry)
+## Graph: `code_review 2.0.0 (v1)` (Flow Registry)
 
 ```mermaid
 ---
@@ -380,15 +366,91 @@ graph TD;
     analyze_prescan_results(analyze_prescan_results<br>#91;AgentComponent#93;);
     fetch_existing_discussions(fetch_existing_discussions<br>#91;DeterministicStepComponent#93;);
     perform_code_review_and_publish(perform_code_review_and_publish<br>#91;OneOffComponent#93;);
-    build_review_context -.->|success| fetch_mr_diffs;
-    build_review_context -.->|default_route| abort;
+    build_review_context -.->|"success"| fetch_mr_diffs;
+    build_review_context -.->|"default_route"| abort;
     fetch_mr_diffs --> explore_relevant_directories;
     explore_relevant_directories --> prescan_codebase;
     prescan_codebase --> fetch_mr_metadata;
     fetch_mr_metadata --> analyze_prescan_results;
-    analyze_prescan_results --> fetch_existing_discussions;
+    analyze_prescan_results -.->|"None"| perform_code_review_and_publish;
+    analyze_prescan_results -.->|"(empty)"| perform_code_review_and_publish;
+    analyze_prescan_results -.->|"default_route"| fetch_existing_discussions;
     fetch_existing_discussions --> perform_code_review_and_publish;
     perform_code_review_and_publish --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `code_review 3.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> build_review_context;
+    build_review_context(build_review_context<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_diffs(fetch_mr_diffs<br>#91;DeterministicStepComponent#93;);
+    explore_relevant_directories(explore_relevant_directories<br>#91;OneOffComponent#93;);
+    prescan_codebase(prescan_codebase<br>#91;OneOffComponent#93;);
+    fetch_mr_metadata(fetch_mr_metadata<br>#91;DeterministicStepComponent#93;);
+    analyze_prescan_results(analyze_prescan_results<br>#91;AgentComponent#93;);
+    fetch_existing_discussions(fetch_existing_discussions<br>#91;DeterministicStepComponent#93;);
+    perform_code_review_and_publish(perform_code_review_and_publish<br>#91;OneOffComponent#93;);
+    build_review_context -.->|"success"| fetch_mr_diffs;
+    build_review_context -.->|"default_route"| abort;
+    fetch_mr_diffs --> explore_relevant_directories;
+    explore_relevant_directories --> prescan_codebase;
+    prescan_codebase --> fetch_mr_metadata;
+    fetch_mr_metadata --> analyze_prescan_results;
+    analyze_prescan_results -.->|"None"| perform_code_review_and_publish;
+    analyze_prescan_results -.->|"(empty)"| perform_code_review_and_publish;
+    analyze_prescan_results -.->|"default_route"| fetch_existing_discussions;
+    fetch_existing_discussions --> perform_code_review_and_publish;
+    perform_code_review_and_publish --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `code_review 4.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> build_review_context;
+    build_review_context(build_review_context<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_diffs(fetch_mr_diffs<br>#91;DeterministicStepComponent#93;);
+    explore_relevant_directories(explore_relevant_directories<br>#91;OneOffComponent#93;);
+    prescan_codebase(prescan_codebase<br>#91;OneOffComponent#93;);
+    fetch_mr_metadata(fetch_mr_metadata<br>#91;DeterministicStepComponent#93;);
+    analyze_prescan_results(analyze_prescan_results<br>#91;AgentComponent#93;);
+    fetch_existing_discussions(fetch_existing_discussions<br>#91;DeterministicStepComponent#93;);
+    review(review<br>#91;AgentComponent#93;);
+    publish_review(publish_review<br>#91;DeterministicStepComponent#93;);
+    build_review_context -.->|"success"| fetch_mr_diffs;
+    build_review_context -.->|"default_route"| abort;
+    fetch_mr_diffs --> explore_relevant_directories;
+    explore_relevant_directories --> prescan_codebase;
+    prescan_codebase --> fetch_mr_metadata;
+    fetch_mr_metadata --> analyze_prescan_results;
+    analyze_prescan_results -.->|"None"| review;
+    analyze_prescan_results -.->|"(empty)"| review;
+    analyze_prescan_results -.->|"default_route"| fetch_existing_discussions;
+    fetch_existing_discussions --> review;
+    review --> publish_review;
+    publish_review --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
@@ -413,8 +475,8 @@ graph TD;
     git_push(git_push<br>#91;AgentComponent#93;);
     load_jenkins_file --> convert_to_gitlab_ci;
     convert_to_gitlab_ci --> create_repository_branch;
-    create_repository_branch -.->|success| git_commit;
-    create_repository_branch -.->|default_route| __end__;
+    create_repository_branch -.->|"success"| git_commit;
+    create_repository_branch -.->|"default_route"| __end__;
     git_commit --> git_push;
     git_push --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
@@ -441,10 +503,59 @@ graph TD;
     git_push(git_push<br>#91;AgentComponent#93;);
     load_jenkins_file --> convert_to_gitlab_ci;
     convert_to_gitlab_ci --> create_repository_branch;
-    create_repository_branch -.->|success| git_commit;
-    create_repository_branch -.->|default_route| __end__;
+    create_repository_branch -.->|"success"| git_commit;
+    create_repository_branch -.->|"default_route"| __end__;
     git_commit --> git_push;
     git_push --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `deep_code_review 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> fetch_mr_data;
+    fetch_mr_data(fetch_mr_data<br>#91;DeterministicStepComponent#93;);
+    fetch_existing_discussions(fetch_existing_discussions<br>#91;DeterministicStepComponent#93;);
+    review(review<br>#91;AgentComponent#93;);
+    publish_review(publish_review<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_data -.->|"None"| review;
+    fetch_mr_data -.->|"default_route"| fetch_existing_discussions;
+    fetch_existing_discussions --> review;
+    review --> publish_review;
+    publish_review --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `developer 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> git_setup;
+    git_setup(git_setup<br>#91;DeterministicStepComponent#93;);
+    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
+    developer_agent(developer_agent<br>#91;AgentComponent#93;);
+    git_setup --> git_unshallow;
+    git_unshallow --> developer_agent;
+    developer_agent --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
@@ -473,6 +584,27 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `developer 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> git_unshallow;
+    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
+    developer_agent(developer_agent<br>#91;AgentComponent#93;);
+    git_unshallow --> developer_agent;
+    developer_agent --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `developer 2.0.0-goal (v1)` (Flow Registry)
 
 ```mermaid
@@ -486,13 +618,15 @@ graph TD;
     __end__(__end__):::last;
     __start__ --> developer_agent;
     developer_agent(developer_agent<br>#91;AgentComponent#93;);
-    verifier(verifier<br>#91;AgentComponent#93;);
+    verifier(verifier<br>#91;AgentComponent#93;):::subagent;
     user_input(user_input<br>#91;HumanInputComponent#93;);
+    developer_agent <-.->|"subagent"| verifier;
     developer_agent --> user_input;
     user_input --> developer_agent;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
+    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;
 ```
 
 ## Graph: `developer 2.0.0-interactive (v1)` (Flow Registry)
@@ -537,27 +671,6 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
-## Graph: `developer 2.0.0 (v1)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> git_unshallow;
-    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
-    developer_agent(developer_agent<br>#91;AgentComponent#93;);
-    git_unshallow --> developer_agent;
-    developer_agent --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
 ## Graph: `developer 2.1.0-interactive (v1)` (Flow Registry)
 
 ```mermaid
@@ -571,13 +684,15 @@ graph TD;
     __end__(__end__):::last;
     __start__ --> developer_agent;
     developer_agent(developer_agent<br>#91;AgentComponent#93;);
-    review_agent(review_agent<br>#91;AgentComponent#93;);
+    review_agent(review_agent<br>#91;AgentComponent#93;):::subagent;
     user_input(user_input<br>#91;HumanInputComponent#93;);
+    developer_agent <-.->|"subagent"| review_agent;
     developer_agent --> user_input;
     user_input --> developer_agent;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
+    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;
 ```
 
 ## Graph: `developer 3.0.0 (v1)` (Flow Registry)
@@ -635,6 +750,29 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `fix_pipeline 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> git_setup;
+    git_setup(git_setup<br>#91;DeterministicStepComponent#93;);
+    git_unshallow(git_unshallow<br>#91;DeterministicStepComponent#93;);
+    fix_pipeline_agent(fix_pipeline_agent<br>#91;AgentComponent#93;);
+    git_setup --> git_unshallow;
+    git_unshallow --> fix_pipeline_agent;
+    fix_pipeline_agent --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `fix_pipeline 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -663,32 +801,32 @@ graph TD;
     git_push_branch(git_push_branch<br>#91;DeterministicStepComponent#93;);
     fix_pipeline_create_new_mr(fix_pipeline_create_new_mr<br>#91;OneOffComponent#93;);
     fix_pipeline_new_mr_comment(fix_pipeline_new_mr_comment<br>#91;AgentComponent#93;);
-    fetch_failing_bridge_jobs -.->|None| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|(empty)| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|default_route| fetch_mr_diffs;
+    fetch_failing_bridge_jobs -.->|"None"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"(empty)"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"default_route"| fetch_mr_diffs;
     fetch_mr_diffs --> fix_pipeline_context;
-    fix_pipeline_context -.->|add_comment| fix_pipeline_add_comment;
-    fix_pipeline_context -.->|create_plan| fix_pipeline_checkout_existing_branch;
-    fix_pipeline_context -.->|direct_code_suggestions| fix_pipeline_code_suggestions;
-    fix_pipeline_context -.->|no_action| __end__;
-    fix_pipeline_context -.->|default_route| __end__;
-    fix_pipeline_checkout_existing_branch -.->|success| fix_pipeline_execution;
-    fix_pipeline_checkout_existing_branch -.->|default_route| __end__;
+    fix_pipeline_context -.->|"add_comment"| fix_pipeline_add_comment;
+    fix_pipeline_context -.->|"create_plan"| fix_pipeline_checkout_existing_branch;
+    fix_pipeline_context -.->|"direct_code_suggestions"| fix_pipeline_code_suggestions;
+    fix_pipeline_context -.->|"no_action"| __end__;
+    fix_pipeline_context -.->|"default_route"| __end__;
+    fix_pipeline_checkout_existing_branch -.->|"success"| fix_pipeline_execution;
+    fix_pipeline_checkout_existing_branch -.->|"default_route"| __end__;
     fix_pipeline_add_comment --> __end__;
     fix_pipeline_execution --> fix_pipeline_check_diff;
     fix_pipeline_check_diff --> fix_pipeline_decide_fix;
-    fix_pipeline_decide_fix -.->|create_fix_on_existing_mr| fix_pipeline_code_suggestions;
-    fix_pipeline_decide_fix -.->|create_fix_on_new_mr| git_fetch_for_branch;
-    fix_pipeline_decide_fix -.->|no_action_needed| __end__;
-    fix_pipeline_decide_fix -.->|default_route| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"create_fix_on_existing_mr"| fix_pipeline_code_suggestions;
+    fix_pipeline_decide_fix -.->|"create_fix_on_new_mr"| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"no_action_needed"| __end__;
+    fix_pipeline_decide_fix -.->|"default_route"| git_fetch_for_branch;
     fix_pipeline_code_suggestions --> __end__;
     git_fetch_for_branch --> fix_pipeline_create_branch;
-    fix_pipeline_create_branch -.->|success| fix_pipeline_git_commit;
-    fix_pipeline_create_branch -.->|default_route| __end__;
+    fix_pipeline_create_branch -.->|"success"| fix_pipeline_git_commit;
+    fix_pipeline_create_branch -.->|"default_route"| __end__;
     fix_pipeline_git_commit --> git_fetch_unshallow;
     git_fetch_unshallow --> git_push_branch;
-    git_push_branch -.->|failed| __end__;
-    git_push_branch -.->|default_route| fix_pipeline_create_new_mr;
+    git_push_branch -.->|"failed"| __end__;
+    git_push_branch -.->|"default_route"| fix_pipeline_create_new_mr;
     fix_pipeline_create_new_mr --> fix_pipeline_new_mr_comment;
     fix_pipeline_new_mr_comment --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
@@ -724,32 +862,32 @@ graph TD;
     git_push_branch(git_push_branch<br>#91;DeterministicStepComponent#93;);
     fix_pipeline_create_new_mr(fix_pipeline_create_new_mr<br>#91;OneOffComponent#93;);
     fix_pipeline_new_mr_comment(fix_pipeline_new_mr_comment<br>#91;AgentComponent#93;);
-    fetch_failing_bridge_jobs -.->|None| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|(empty)| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|default_route| fetch_mr_diffs;
+    fetch_failing_bridge_jobs -.->|"None"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"(empty)"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"default_route"| fetch_mr_diffs;
     fetch_mr_diffs --> fix_pipeline_context;
-    fix_pipeline_context -.->|add_comment| fix_pipeline_add_comment;
-    fix_pipeline_context -.->|create_plan| fix_pipeline_checkout_existing_branch;
-    fix_pipeline_context -.->|direct_code_suggestions| fix_pipeline_code_suggestions;
-    fix_pipeline_context -.->|no_action| __end__;
-    fix_pipeline_context -.->|default_route| __end__;
-    fix_pipeline_checkout_existing_branch -.->|success| fix_pipeline_execution;
-    fix_pipeline_checkout_existing_branch -.->|default_route| __end__;
+    fix_pipeline_context -.->|"add_comment"| fix_pipeline_add_comment;
+    fix_pipeline_context -.->|"create_plan"| fix_pipeline_checkout_existing_branch;
+    fix_pipeline_context -.->|"direct_code_suggestions"| fix_pipeline_code_suggestions;
+    fix_pipeline_context -.->|"no_action"| __end__;
+    fix_pipeline_context -.->|"default_route"| __end__;
+    fix_pipeline_checkout_existing_branch -.->|"success"| fix_pipeline_execution;
+    fix_pipeline_checkout_existing_branch -.->|"default_route"| __end__;
     fix_pipeline_add_comment --> __end__;
     fix_pipeline_execution --> fix_pipeline_check_diff;
     fix_pipeline_check_diff --> fix_pipeline_decide_fix;
-    fix_pipeline_decide_fix -.->|create_fix_on_existing_mr| fix_pipeline_code_suggestions;
-    fix_pipeline_decide_fix -.->|create_fix_on_new_mr| git_fetch_for_branch;
-    fix_pipeline_decide_fix -.->|no_action_needed| __end__;
-    fix_pipeline_decide_fix -.->|default_route| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"create_fix_on_existing_mr"| fix_pipeline_code_suggestions;
+    fix_pipeline_decide_fix -.->|"create_fix_on_new_mr"| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"no_action_needed"| __end__;
+    fix_pipeline_decide_fix -.->|"default_route"| git_fetch_for_branch;
     fix_pipeline_code_suggestions --> __end__;
     git_fetch_for_branch --> fix_pipeline_create_branch;
-    fix_pipeline_create_branch -.->|success| fix_pipeline_git_commit;
-    fix_pipeline_create_branch -.->|default_route| __end__;
+    fix_pipeline_create_branch -.->|"success"| fix_pipeline_git_commit;
+    fix_pipeline_create_branch -.->|"default_route"| __end__;
     fix_pipeline_git_commit --> git_fetch_unshallow;
     git_fetch_unshallow --> git_push_branch;
-    git_push_branch -.->|failed| __end__;
-    git_push_branch -.->|default_route| fix_pipeline_create_new_mr;
+    git_push_branch -.->|"failed"| __end__;
+    git_push_branch -.->|"default_route"| fix_pipeline_create_new_mr;
     fix_pipeline_create_new_mr --> fix_pipeline_new_mr_comment;
     fix_pipeline_new_mr_comment --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
@@ -785,32 +923,32 @@ graph TD;
     git_push_branch(git_push_branch<br>#91;DeterministicStepComponent#93;);
     fix_pipeline_create_new_mr(fix_pipeline_create_new_mr<br>#91;OneOffComponent#93;);
     fix_pipeline_new_mr_comment(fix_pipeline_new_mr_comment<br>#91;AgentComponent#93;);
-    fetch_failing_bridge_jobs -.->|None| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|(empty)| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|default_route| fetch_mr_diffs;
+    fetch_failing_bridge_jobs -.->|"None"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"(empty)"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"default_route"| fetch_mr_diffs;
     fetch_mr_diffs --> fix_pipeline_context;
-    fix_pipeline_context -.->|add_comment| fix_pipeline_add_comment;
-    fix_pipeline_context -.->|create_plan| fix_pipeline_checkout_existing_branch;
-    fix_pipeline_context -.->|direct_code_suggestions| fix_pipeline_code_suggestions;
-    fix_pipeline_context -.->|no_action| __end__;
-    fix_pipeline_context -.->|default_route| __end__;
-    fix_pipeline_checkout_existing_branch -.->|success| fix_pipeline_execution;
-    fix_pipeline_checkout_existing_branch -.->|default_route| __end__;
+    fix_pipeline_context -.->|"add_comment"| fix_pipeline_add_comment;
+    fix_pipeline_context -.->|"create_plan"| fix_pipeline_checkout_existing_branch;
+    fix_pipeline_context -.->|"direct_code_suggestions"| fix_pipeline_code_suggestions;
+    fix_pipeline_context -.->|"no_action"| __end__;
+    fix_pipeline_context -.->|"default_route"| __end__;
+    fix_pipeline_checkout_existing_branch -.->|"success"| fix_pipeline_execution;
+    fix_pipeline_checkout_existing_branch -.->|"default_route"| __end__;
     fix_pipeline_add_comment --> __end__;
     fix_pipeline_execution --> fix_pipeline_check_diff;
     fix_pipeline_check_diff --> fix_pipeline_decide_fix;
-    fix_pipeline_decide_fix -.->|create_fix_on_existing_mr| fix_pipeline_code_suggestions;
-    fix_pipeline_decide_fix -.->|create_fix_on_new_mr| git_fetch_for_branch;
-    fix_pipeline_decide_fix -.->|no_action_needed| __end__;
-    fix_pipeline_decide_fix -.->|default_route| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"create_fix_on_existing_mr"| fix_pipeline_code_suggestions;
+    fix_pipeline_decide_fix -.->|"create_fix_on_new_mr"| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"no_action_needed"| __end__;
+    fix_pipeline_decide_fix -.->|"default_route"| git_fetch_for_branch;
     fix_pipeline_code_suggestions --> __end__;
     git_fetch_for_branch --> fix_pipeline_create_branch;
-    fix_pipeline_create_branch -.->|success| fix_pipeline_git_commit;
-    fix_pipeline_create_branch -.->|default_route| __end__;
+    fix_pipeline_create_branch -.->|"success"| fix_pipeline_git_commit;
+    fix_pipeline_create_branch -.->|"default_route"| __end__;
     fix_pipeline_git_commit --> git_fetch_unshallow;
     git_fetch_unshallow --> git_push_branch;
-    git_push_branch -.->|failed| __end__;
-    git_push_branch -.->|default_route| fix_pipeline_create_new_mr;
+    git_push_branch -.->|"failed"| __end__;
+    git_push_branch -.->|"default_route"| fix_pipeline_create_new_mr;
     fix_pipeline_create_new_mr --> fix_pipeline_new_mr_comment;
     fix_pipeline_new_mr_comment --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
@@ -848,32 +986,32 @@ graph TD;
     fix_pipeline_create_new_mr(fix_pipeline_create_new_mr<br>#91;OneOffComponent#93;);
     fix_pipeline_new_mr_comment(fix_pipeline_new_mr_comment<br>#91;AgentComponent#93;);
     fetch_failing_jobs --> fetch_failing_bridge_jobs;
-    fetch_failing_bridge_jobs -.->|None| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|(empty)| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|default_route| fetch_mr_diffs;
+    fetch_failing_bridge_jobs -.->|"None"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"(empty)"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"default_route"| fetch_mr_diffs;
     fetch_mr_diffs --> fix_pipeline_context;
-    fix_pipeline_context -.->|add_comment| fix_pipeline_add_comment;
-    fix_pipeline_context -.->|create_plan| fix_pipeline_checkout_existing_branch;
-    fix_pipeline_context -.->|direct_code_suggestions| fix_pipeline_code_suggestions;
-    fix_pipeline_context -.->|no_action| __end__;
-    fix_pipeline_context -.->|default_route| __end__;
-    fix_pipeline_checkout_existing_branch -.->|success| fix_pipeline_execution;
-    fix_pipeline_checkout_existing_branch -.->|default_route| __end__;
+    fix_pipeline_context -.->|"add_comment"| fix_pipeline_add_comment;
+    fix_pipeline_context -.->|"create_plan"| fix_pipeline_checkout_existing_branch;
+    fix_pipeline_context -.->|"direct_code_suggestions"| fix_pipeline_code_suggestions;
+    fix_pipeline_context -.->|"no_action"| __end__;
+    fix_pipeline_context -.->|"default_route"| __end__;
+    fix_pipeline_checkout_existing_branch -.->|"success"| fix_pipeline_execution;
+    fix_pipeline_checkout_existing_branch -.->|"default_route"| __end__;
     fix_pipeline_add_comment --> __end__;
     fix_pipeline_execution --> fix_pipeline_check_diff;
     fix_pipeline_check_diff --> fix_pipeline_decide_fix;
-    fix_pipeline_decide_fix -.->|create_fix_on_existing_mr| fix_pipeline_code_suggestions;
-    fix_pipeline_decide_fix -.->|create_fix_on_new_mr| git_fetch_for_branch;
-    fix_pipeline_decide_fix -.->|no_action_needed| __end__;
-    fix_pipeline_decide_fix -.->|default_route| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"create_fix_on_existing_mr"| fix_pipeline_code_suggestions;
+    fix_pipeline_decide_fix -.->|"create_fix_on_new_mr"| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"no_action_needed"| __end__;
+    fix_pipeline_decide_fix -.->|"default_route"| git_fetch_for_branch;
     fix_pipeline_code_suggestions --> __end__;
     git_fetch_for_branch --> fix_pipeline_create_branch;
-    fix_pipeline_create_branch -.->|success| fix_pipeline_git_commit;
-    fix_pipeline_create_branch -.->|default_route| __end__;
+    fix_pipeline_create_branch -.->|"success"| fix_pipeline_git_commit;
+    fix_pipeline_create_branch -.->|"default_route"| __end__;
     fix_pipeline_git_commit --> git_fetch_unshallow;
     git_fetch_unshallow --> git_push_branch;
-    git_push_branch -.->|failed| __end__;
-    git_push_branch -.->|default_route| fix_pipeline_create_new_mr;
+    git_push_branch -.->|"failed"| __end__;
+    git_push_branch -.->|"default_route"| fix_pipeline_create_new_mr;
     fix_pipeline_create_new_mr --> fix_pipeline_new_mr_comment;
     fix_pipeline_new_mr_comment --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
@@ -901,42 +1039,37 @@ graph TD;
     fix_pipeline_code_suggestions(fix_pipeline_code_suggestions<br>#91;AgentComponent#93;);
     fix_pipeline_add_comment(fix_pipeline_add_comment<br>#91;AgentComponent#93;);
     git_fetch_for_branch(git_fetch_for_branch<br>#91;DeterministicStepComponent#93;);
+    git_fetch_unshallow(git_fetch_unshallow<br>#91;DeterministicStepComponent#93;);
     fix_pipeline_create_branch(fix_pipeline_create_branch<br>#91;AgentComponent#93;);
     fix_pipeline_checkout_existing_branch(fix_pipeline_checkout_existing_branch<br>#91;AgentComponent#93;);
     fix_pipeline_check_diff(fix_pipeline_check_diff<br>#91;DeterministicStepComponent#93;);
     fix_pipeline_execution(fix_pipeline_execution<br>#91;AgentComponent#93;);
-    fix_pipeline_git_commit(fix_pipeline_git_commit<br>#91;AgentComponent#93;);
-    git_fetch_unshallow(git_fetch_unshallow<br>#91;DeterministicStepComponent#93;);
-    git_push_branch(git_push_branch<br>#91;DeterministicStepComponent#93;);
     fix_pipeline_create_new_mr(fix_pipeline_create_new_mr<br>#91;OneOffComponent#93;);
     fix_pipeline_new_mr_comment(fix_pipeline_new_mr_comment<br>#91;AgentComponent#93;);
     fetch_failing_jobs --> fetch_failing_bridge_jobs;
-    fetch_failing_bridge_jobs -.->|None| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|(empty)| fix_pipeline_context;
-    fetch_failing_bridge_jobs -.->|default_route| fetch_mr_diffs;
+    fetch_failing_bridge_jobs -.->|"None"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"(empty)"| fix_pipeline_context;
+    fetch_failing_bridge_jobs -.->|"default_route"| fetch_mr_diffs;
     fetch_mr_diffs --> fix_pipeline_context;
-    fix_pipeline_context -.->|add_comment| fix_pipeline_add_comment;
-    fix_pipeline_context -.->|create_plan| fix_pipeline_checkout_existing_branch;
-    fix_pipeline_context -.->|direct_code_suggestions| fix_pipeline_code_suggestions;
-    fix_pipeline_context -.->|no_action| __end__;
-    fix_pipeline_context -.->|default_route| __end__;
-    fix_pipeline_checkout_existing_branch -.->|success| fix_pipeline_execution;
-    fix_pipeline_checkout_existing_branch -.->|default_route| __end__;
+    fix_pipeline_context -.->|"add_comment"| fix_pipeline_add_comment;
+    fix_pipeline_context -.->|"create_plan"| fix_pipeline_checkout_existing_branch;
+    fix_pipeline_context -.->|"direct_code_suggestions"| fix_pipeline_code_suggestions;
+    fix_pipeline_context -.->|"no_action"| __end__;
+    fix_pipeline_context -.->|"default_route"| __end__;
+    fix_pipeline_checkout_existing_branch -.->|"success"| fix_pipeline_execution;
+    fix_pipeline_checkout_existing_branch -.->|"default_route"| __end__;
     fix_pipeline_add_comment --> __end__;
     fix_pipeline_execution --> fix_pipeline_check_diff;
     fix_pipeline_check_diff --> fix_pipeline_decide_fix;
-    fix_pipeline_decide_fix -.->|create_fix_on_existing_mr| fix_pipeline_code_suggestions;
-    fix_pipeline_decide_fix -.->|create_fix_on_new_mr| git_fetch_for_branch;
-    fix_pipeline_decide_fix -.->|no_action_needed| __end__;
-    fix_pipeline_decide_fix -.->|default_route| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"create_fix_on_existing_mr"| fix_pipeline_code_suggestions;
+    fix_pipeline_decide_fix -.->|"create_fix_on_new_mr"| git_fetch_for_branch;
+    fix_pipeline_decide_fix -.->|"no_action_needed"| __end__;
+    fix_pipeline_decide_fix -.->|"default_route"| git_fetch_for_branch;
     fix_pipeline_code_suggestions --> __end__;
-    git_fetch_for_branch --> fix_pipeline_create_branch;
-    fix_pipeline_create_branch -.->|success| fix_pipeline_git_commit;
-    fix_pipeline_create_branch -.->|default_route| __end__;
-    fix_pipeline_git_commit --> git_fetch_unshallow;
-    git_fetch_unshallow --> git_push_branch;
-    git_push_branch -.->|failed| __end__;
-    git_push_branch -.->|default_route| fix_pipeline_create_new_mr;
+    git_fetch_for_branch --> git_fetch_unshallow;
+    git_fetch_unshallow --> fix_pipeline_create_branch;
+    fix_pipeline_create_branch -.->|"success"| fix_pipeline_create_new_mr;
+    fix_pipeline_create_branch -.->|"default_route"| __end__;
     fix_pipeline_create_new_mr --> fix_pipeline_new_mr_comment;
     fix_pipeline_new_mr_comment --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
@@ -1048,12 +1181,25 @@ graph TD;
     fetch_notes(fetch_notes<br>#91;DeterministicStepComponent#93;);
     rubric(rubric<br>#91;AgentComponent#93;);
     coverage(coverage<br>#91;AgentComponent#93;);
-    fetch -.->|success| fetch_notes;
-    fetch -.->|default_route| abort;
-    fetch_notes -.->|success| rubric;
-    fetch_notes -.->|default_route| abort;
+    falsifier(falsifier<br>#91;AgentComponent#93;);
+    xexam_rubric(xexam_rubric<br>#91;AgentComponent#93;);
+    xexam_coverage(xexam_coverage<br>#91;AgentComponent#93;);
+    xexam_falsifier(xexam_falsifier<br>#91;AgentComponent#93;);
+    verdict(verdict<br>#91;AgentComponent#93;);
+    persist(persist<br>#91;DeterministicStepComponent#93;);
+    fetch -.->|"success"| fetch_notes;
+    fetch -.->|"default_route"| abort;
+    fetch_notes -.->|"success"| rubric;
+    fetch_notes -.->|"default_route"| abort;
     rubric --> coverage;
-    coverage --> __end__;
+    coverage --> falsifier;
+    falsifier --> xexam_rubric;
+    xexam_rubric --> xexam_coverage;
+    xexam_coverage --> xexam_falsifier;
+    xexam_falsifier --> verdict;
+    verdict --> persist;
+    persist -.->|"success"| __end__;
+    persist -.->|"default_route"| abort;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
@@ -1080,6 +1226,103 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `recommend_reviewers 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> post_recommendation;
+    post_recommendation(post_recommendation<br>#91;OneOffComponent#93;);
+    assign_reviewers(assign_reviewers<br>#91;OneOffComponent#93;);
+    post_recommendation --> assign_reviewers;
+    assign_reviewers --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `recommend_reviewers 3.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> suggest_reviewers;
+    suggest_reviewers(suggest_reviewers<br>#91;OneOffComponent#93;);
+    suggest_reviewers --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `recommend_reviewers 3.1.0-dev (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> suggest_reviewers;
+    suggest_reviewers(suggest_reviewers<br>#91;OneOffComponent#93;);
+    suggest_reviewers --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `resolve_dependency_bump 1.0.0 (experimental)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> resolve_dep_bump_pipeline_fix;
+    resolve_dep_bump_pipeline_fix(resolve_dep_bump_pipeline_fix<br>#91;AgentComponent#93;);
+    resolve_dep_bump_pipeline_fix --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `resolve_dependency_bump 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> resolve_dep_bump_pipeline_fix;
+    resolve_dep_bump_pipeline_fix(resolve_dep_bump_pipeline_fix<br>#91;AgentComponent#93;);
+    resolve_dep_bump_pipeline_fix --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
 ## Graph: `resolve_sast_vulnerability 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
@@ -1097,26 +1340,28 @@ graph TD;
     ensure_clean_git_state(ensure_clean_git_state<br>#91;AgentComponent#93;);
     create_repository_branch(create_repository_branch<br>#91;AgentComponent#93;);
     execute_fix(execute_fix<br>#91;AgentComponent#93;);
-    validate_fix_has_changes(validate_fix_has_changes<br>#91;AgentComponent#93;);
+    validate_fix_has_changes(validate_fix_has_changes<br>#91;DeterministicStepComponent#93;);
     commit_changes(commit_changes<br>#91;OneOffComponent#93;);
+    push_commits(push_commits<br>#91;AgentComponent#93;);
     push_and_create_mr(push_and_create_mr<br>#91;OneOffComponent#93;);
     link_vulnerability(link_vulnerability<br>#91;DeterministicStepComponent#93;);
     evaluate_merge_request(evaluate_merge_request<br>#91;AgentComponent#93;);
     gather_context --> evaluate_vuln_fp_status;
-    evaluate_vuln_fp_status -.->|skip_false_positive| __end__;
-    evaluate_vuln_fp_status -.->|proceed_with_fix| ensure_clean_git_state;
-    evaluate_vuln_fp_status -.->|default_route| ensure_clean_git_state;
+    evaluate_vuln_fp_status -.->|"skip_false_positive"| __end__;
+    evaluate_vuln_fp_status -.->|"proceed_with_fix"| ensure_clean_git_state;
+    evaluate_vuln_fp_status -.->|"default_route"| ensure_clean_git_state;
     ensure_clean_git_state --> create_repository_branch;
-    create_repository_branch -.->|success| execute_fix;
-    create_repository_branch -.->|default_route| __end__;
+    create_repository_branch -.->|"success"| execute_fix;
+    create_repository_branch -.->|"default_route"| __end__;
     execute_fix --> validate_fix_has_changes;
-    validate_fix_has_changes -.->|proceed| commit_changes;
-    validate_fix_has_changes -.->|no_changes| __end__;
-    validate_fix_has_changes -.->|default_route| __end__;
-    commit_changes -.->|success| push_and_create_mr;
-    commit_changes -.->|default_route| __end__;
-    push_and_create_mr -.->|success| evaluate_merge_request;
-    push_and_create_mr -.->|default_route| __end__;
+    validate_fix_has_changes -.->|"Exit code: 0\nproceed"| commit_changes;
+    validate_fix_has_changes -.->|"default_route"| __end__;
+    commit_changes -.->|"success"| push_commits;
+    commit_changes -.->|"default_route"| __end__;
+    push_commits -.->|"success"| push_and_create_mr;
+    push_commits -.->|"default_route"| __end__;
+    push_and_create_mr -.->|"success"| evaluate_merge_request;
+    push_and_create_mr -.->|"default_route"| __end__;
     evaluate_merge_request --> link_vulnerability;
     link_vulnerability --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
@@ -1141,28 +1386,154 @@ graph TD;
     ensure_clean_git_state(ensure_clean_git_state<br>#91;AgentComponent#93;);
     create_repository_branch(create_repository_branch<br>#91;AgentComponent#93;);
     execute_fix(execute_fix<br>#91;AgentComponent#93;);
-    validate_fix_has_changes(validate_fix_has_changes<br>#91;AgentComponent#93;);
+    validate_fix_has_changes(validate_fix_has_changes<br>#91;DeterministicStepComponent#93;);
     commit_changes(commit_changes<br>#91;OneOffComponent#93;);
+    push_commits(push_commits<br>#91;AgentComponent#93;);
     push_and_create_mr(push_and_create_mr<br>#91;OneOffComponent#93;);
     link_vulnerability(link_vulnerability<br>#91;DeterministicStepComponent#93;);
     evaluate_merge_request(evaluate_merge_request<br>#91;AgentComponent#93;);
     gather_context --> evaluate_vuln_fp_status;
-    evaluate_vuln_fp_status -.->|skip_false_positive| __end__;
-    evaluate_vuln_fp_status -.->|proceed_with_fix| ensure_clean_git_state;
-    evaluate_vuln_fp_status -.->|default_route| ensure_clean_git_state;
+    evaluate_vuln_fp_status -.->|"skip_false_positive"| __end__;
+    evaluate_vuln_fp_status -.->|"proceed_with_fix"| ensure_clean_git_state;
+    evaluate_vuln_fp_status -.->|"default_route"| ensure_clean_git_state;
     ensure_clean_git_state --> create_repository_branch;
-    create_repository_branch -.->|success| execute_fix;
-    create_repository_branch -.->|default_route| __end__;
+    create_repository_branch -.->|"success"| execute_fix;
+    create_repository_branch -.->|"default_route"| __end__;
     execute_fix --> validate_fix_has_changes;
-    validate_fix_has_changes -.->|proceed| commit_changes;
-    validate_fix_has_changes -.->|no_changes| __end__;
-    validate_fix_has_changes -.->|default_route| __end__;
-    commit_changes -.->|success| push_and_create_mr;
-    commit_changes -.->|default_route| __end__;
-    push_and_create_mr -.->|success| evaluate_merge_request;
-    push_and_create_mr -.->|default_route| __end__;
+    validate_fix_has_changes -.->|"Exit code: 0\nproceed"| commit_changes;
+    validate_fix_has_changes -.->|"default_route"| __end__;
+    commit_changes -.->|"success"| push_commits;
+    commit_changes -.->|"default_route"| __end__;
+    push_commits -.->|"success"| push_and_create_mr;
+    push_commits -.->|"default_route"| __end__;
+    push_and_create_mr -.->|"success"| evaluate_merge_request;
+    push_and_create_mr -.->|"default_route"| __end__;
     evaluate_merge_request --> link_vulnerability;
     link_vulnerability --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `resolve_sast_vulnerability 1.0.2 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> gather_context;
+    gather_context(gather_context<br>#91;DeterministicStepComponent#93;);
+    evaluate_vuln_fp_status(evaluate_vuln_fp_status<br>#91;DeterministicStepComponent#93;);
+    resolve_target_branch(resolve_target_branch<br>#91;DeterministicStepComponent#93;);
+    ensure_clean_git_state(ensure_clean_git_state<br>#91;AgentComponent#93;);
+    create_repository_branch(create_repository_branch<br>#91;AgentComponent#93;);
+    execute_fix(execute_fix<br>#91;AgentComponent#93;);
+    validate_fix_has_changes(validate_fix_has_changes<br>#91;DeterministicStepComponent#93;);
+    commit_changes(commit_changes<br>#91;OneOffComponent#93;);
+    push_commits(push_commits<br>#91;AgentComponent#93;);
+    push_and_create_mr(push_and_create_mr<br>#91;OneOffComponent#93;);
+    link_vulnerability(link_vulnerability<br>#91;DeterministicStepComponent#93;);
+    evaluate_merge_request(evaluate_merge_request<br>#91;AgentComponent#93;);
+    gather_context --> evaluate_vuln_fp_status;
+    evaluate_vuln_fp_status -.->|"skip_false_positive"| __end__;
+    evaluate_vuln_fp_status -.->|"proceed_with_fix"| resolve_target_branch;
+    evaluate_vuln_fp_status -.->|"default_route"| resolve_target_branch;
+    resolve_target_branch -.->|"success"| ensure_clean_git_state;
+    resolve_target_branch -.->|"default_route"| __end__;
+    ensure_clean_git_state --> create_repository_branch;
+    create_repository_branch -.->|"success"| execute_fix;
+    create_repository_branch -.->|"default_route"| __end__;
+    execute_fix --> validate_fix_has_changes;
+    validate_fix_has_changes -.->|"Exit code: 0\nproceed"| commit_changes;
+    validate_fix_has_changes -.->|"default_route"| __end__;
+    commit_changes -.->|"success"| push_commits;
+    commit_changes -.->|"default_route"| __end__;
+    push_commits -.->|"success"| push_and_create_mr;
+    push_commits -.->|"default_route"| __end__;
+    push_and_create_mr -.->|"success"| evaluate_merge_request;
+    push_and_create_mr -.->|"default_route"| __end__;
+    evaluate_merge_request --> link_vulnerability;
+    link_vulnerability --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `resolve_sast_vulnerability 1.0.3 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> gather_context;
+    gather_context(gather_context<br>#91;DeterministicStepComponent#93;);
+    evaluate_vuln_fp_status(evaluate_vuln_fp_status<br>#91;DeterministicStepComponent#93;);
+    resolve_target_branch(resolve_target_branch<br>#91;DeterministicStepComponent#93;);
+    ensure_clean_git_state(ensure_clean_git_state<br>#91;AgentComponent#93;);
+    create_repository_branch(create_repository_branch<br>#91;AgentComponent#93;);
+    exclude_pre_existing_files(exclude_pre_existing_files<br>#91;DeterministicStepComponent#93;);
+    execute_fix(execute_fix<br>#91;AgentComponent#93;);
+    validate_fix_has_changes(validate_fix_has_changes<br>#91;DeterministicStepComponent#93;);
+    commit_changes(commit_changes<br>#91;OneOffComponent#93;);
+    push_commits(push_commits<br>#91;AgentComponent#93;);
+    push_and_create_mr(push_and_create_mr<br>#91;OneOffComponent#93;);
+    link_vulnerability(link_vulnerability<br>#91;DeterministicStepComponent#93;);
+    evaluate_merge_request(evaluate_merge_request<br>#91;AgentComponent#93;);
+    gather_context --> evaluate_vuln_fp_status;
+    evaluate_vuln_fp_status -.->|"skip_false_positive"| __end__;
+    evaluate_vuln_fp_status -.->|"proceed_with_fix"| resolve_target_branch;
+    evaluate_vuln_fp_status -.->|"default_route"| resolve_target_branch;
+    resolve_target_branch -.->|"success"| ensure_clean_git_state;
+    resolve_target_branch -.->|"default_route"| __end__;
+    ensure_clean_git_state --> create_repository_branch;
+    create_repository_branch -.->|"success"| exclude_pre_existing_files;
+    create_repository_branch -.->|"default_route"| __end__;
+    exclude_pre_existing_files -.->|"Exit code: 0\nexcluded"| execute_fix;
+    exclude_pre_existing_files -.->|"default_route"| __end__;
+    execute_fix --> validate_fix_has_changes;
+    validate_fix_has_changes -.->|"Exit code: 0\nproceed"| commit_changes;
+    validate_fix_has_changes -.->|"default_route"| __end__;
+    commit_changes -.->|"success"| push_commits;
+    commit_changes -.->|"default_route"| __end__;
+    push_commits -.->|"success"| push_and_create_mr;
+    push_commits -.->|"default_route"| __end__;
+    push_and_create_mr -.->|"success"| evaluate_merge_request;
+    push_and_create_mr -.->|"default_route"| __end__;
+    evaluate_merge_request --> link_vulnerability;
+    link_vulnerability --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `risk_classification 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> fetch_mr_diffs;
+    fetch_mr_diffs(fetch_mr_diffs<br>#91;DeterministicStepComponent#93;);
+    classify_risk(classify_risk<br>#91;AgentComponent#93;);
+    submit_risk_classification(submit_risk_classification<br>#91;OneOffComponent#93;);
+    fetch_mr_diffs --> classify_risk;
+    classify_risk --> submit_risk_classification;
+    submit_risk_classification --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
@@ -1188,46 +1559,12 @@ graph TD;
     sast_fp_detection_agent(sast_fp_detection_agent<br>#91;AgentComponent#93;);
     sast_post_results_to_gitlab_component(sast_post_results_to_gitlab_component<br>#91;OneOffComponent#93;);
     sast_vulnerability_details_component --> validate_sast_vulnerability_component;
-    validate_sast_vulnerability_component -.->|valid| sast_vulnerability_source_file_component;
-    validate_sast_vulnerability_component -.->|invalid| __end__;
-    sast_vulnerability_source_file_component -.->|success| sast_vulnerability_lines_component;
-    sast_vulnerability_source_file_component -.->|default_route| __end__;
-    sast_vulnerability_lines_component -.->|success| sast_vulnerability_report_component;
-    sast_vulnerability_lines_component -.->|default_route| __end__;
-    sast_vulnerability_report_component --> sast_fp_detection_agent;
-    sast_fp_detection_agent --> sast_post_results_to_gitlab_component;
-    sast_post_results_to_gitlab_component --> __end__;
-    classDef default fill:#f2f0ff,line-height:1.2;
-    classDef first fill-opacity:0;
-    classDef last fill:#bfb6fc;
-```
-
-## Graph: `sast_fp_detection 1.1.0-dev (v1)` (Flow Registry)
-
-```mermaid
----
-config:
-    flowchart:
-        curve: linear
----
-graph TD;
-    __start__(__start__):::first;
-    __end__(__end__):::last;
-    __start__ --> sast_vulnerability_details_component;
-    sast_vulnerability_details_component(sast_vulnerability_details_component<br>#91;DeterministicStepComponent#93;);
-    validate_sast_vulnerability_component(validate_sast_vulnerability_component<br>#91;AgentComponent#93;);
-    sast_vulnerability_source_file_component(sast_vulnerability_source_file_component<br>#91;OneOffComponent#93;);
-    sast_vulnerability_lines_component(sast_vulnerability_lines_component<br>#91;OneOffComponent#93;);
-    sast_vulnerability_report_component(sast_vulnerability_report_component<br>#91;AgentComponent#93;);
-    sast_fp_detection_agent(sast_fp_detection_agent<br>#91;AgentComponent#93;);
-    sast_post_results_to_gitlab_component(sast_post_results_to_gitlab_component<br>#91;OneOffComponent#93;);
-    sast_vulnerability_details_component --> validate_sast_vulnerability_component;
-    validate_sast_vulnerability_component -.->|valid| sast_vulnerability_source_file_component;
-    validate_sast_vulnerability_component -.->|invalid| __end__;
-    sast_vulnerability_source_file_component -.->|success| sast_vulnerability_lines_component;
-    sast_vulnerability_source_file_component -.->|default_route| __end__;
-    sast_vulnerability_lines_component -.->|success| sast_vulnerability_report_component;
-    sast_vulnerability_lines_component -.->|default_route| __end__;
+    validate_sast_vulnerability_component -.->|"valid"| sast_vulnerability_source_file_component;
+    validate_sast_vulnerability_component -.->|"invalid"| __end__;
+    sast_vulnerability_source_file_component -.->|"success"| sast_vulnerability_lines_component;
+    sast_vulnerability_source_file_component -.->|"default_route"| __end__;
+    sast_vulnerability_lines_component -.->|"success"| sast_vulnerability_report_component;
+    sast_vulnerability_lines_component -.->|"default_route"| __end__;
     sast_vulnerability_report_component --> sast_fp_detection_agent;
     sast_fp_detection_agent --> sast_post_results_to_gitlab_component;
     sast_post_results_to_gitlab_component --> __end__;
@@ -1255,10 +1592,41 @@ graph TD;
     secret_fp_detection_agent(secret_fp_detection_agent<br>#91;AgentComponent#93;);
     secret_post_results_to_gitlab_component(secret_post_results_to_gitlab_component<br>#91;OneOffComponent#93;);
     secret_vulnerability_details_component --> secret_vulnerability_source_file_component;
-    secret_vulnerability_source_file_component -.->|success| secret_vulnerability_lines_component;
-    secret_vulnerability_source_file_component -.->|default_route| __end__;
-    secret_vulnerability_lines_component -.->|success| secret_vulnerability_report_component;
-    secret_vulnerability_lines_component -.->|default_route| __end__;
+    secret_vulnerability_source_file_component -.->|"success"| secret_vulnerability_lines_component;
+    secret_vulnerability_source_file_component -.->|"default_route"| __end__;
+    secret_vulnerability_lines_component -.->|"success"| secret_vulnerability_report_component;
+    secret_vulnerability_lines_component -.->|"default_route"| __end__;
+    secret_vulnerability_report_component --> secret_fp_detection_agent;
+    secret_fp_detection_agent --> secret_post_results_to_gitlab_component;
+    secret_post_results_to_gitlab_component --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `secrets_fp_detection 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> secret_vulnerability_details_component;
+    secret_vulnerability_details_component(secret_vulnerability_details_component<br>#91;DeterministicStepComponent#93;);
+    secret_vulnerability_source_file_component(secret_vulnerability_source_file_component<br>#91;OneOffComponent#93;);
+    secret_vulnerability_lines_component(secret_vulnerability_lines_component<br>#91;OneOffComponent#93;);
+    secret_vulnerability_report_component(secret_vulnerability_report_component<br>#91;AgentComponent#93;);
+    secret_fp_detection_agent(secret_fp_detection_agent<br>#91;AgentComponent#93;);
+    secret_post_results_to_gitlab_component(secret_post_results_to_gitlab_component<br>#91;OneOffComponent#93;);
+    secret_vulnerability_details_component --> secret_vulnerability_source_file_component;
+    secret_vulnerability_source_file_component -.->|"success"| secret_vulnerability_lines_component;
+    secret_vulnerability_source_file_component -.->|"default_route"| __end__;
+    secret_vulnerability_lines_component -.->|"success"| secret_vulnerability_report_component;
+    secret_vulnerability_lines_component -.->|"default_route"| __end__;
     secret_vulnerability_report_component --> secret_fp_detection_agent;
     secret_fp_detection_agent --> secret_post_results_to_gitlab_component;
     secret_post_results_to_gitlab_component --> __end__;
@@ -1288,8 +1656,8 @@ graph TD;
     validate_and_publish(validate_and_publish<br>#91;AgentComponent#93;);
     apply_completed_label(apply_completed_label<br>#91;DeterministicStepComponent#93;);
     respond_to_comment(respond_to_comment<br>#91;AgentComponent#93;);
-    check_existing_review -.->|mention| respond_to_comment;
-    check_existing_review -.->|default_route| apply_triggered_label;
+    check_existing_review -.->|"mention"| respond_to_comment;
+    check_existing_review -.->|"default_route"| apply_triggered_label;
     apply_triggered_label --> fetch_mr_data;
     fetch_mr_data --> build_review_context;
     build_review_context --> prescan_codebase;
@@ -1298,6 +1666,62 @@ graph TD;
     validate_and_publish --> apply_completed_label;
     apply_completed_label --> __end__;
     respond_to_comment --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `security_review 2.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> check_existing_review;
+    check_existing_review(check_existing_review<br>#91;DeterministicStepComponent#93;);
+    apply_triggered_label(apply_triggered_label<br>#91;DeterministicStepComponent#93;);
+    fetch_mr_data(fetch_mr_data<br>#91;DeterministicStepComponent#93;);
+    build_review_context(build_review_context<br>#91;AgentComponent#93;);
+    prescan_codebase(prescan_codebase<br>#91;AgentComponent#93;);
+    perform_security_review(perform_security_review<br>#91;AgentComponent#93;);
+    validate_and_publish(validate_and_publish<br>#91;AgentComponent#93;);
+    apply_completed_label(apply_completed_label<br>#91;DeterministicStepComponent#93;);
+    respond_to_comment(respond_to_comment<br>#91;AgentComponent#93;);
+    check_existing_review -.->|"mention"| respond_to_comment;
+    check_existing_review -.->|"default_route"| apply_triggered_label;
+    apply_triggered_label --> fetch_mr_data;
+    fetch_mr_data -.->|"success"| build_review_context;
+    fetch_mr_data -.->|"default_route"| abort;
+    build_review_context --> prescan_codebase;
+    prescan_codebase --> perform_security_review;
+    perform_security_review --> validate_and_publish;
+    validate_and_publish --> apply_completed_label;
+    apply_completed_label --> __end__;
+    respond_to_comment --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+```
+
+## Graph: `slack_assistant 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> slack_agent;
+    slack_agent(slack_agent<br>#91;AgentComponent#93;);
+    slack_agent --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
@@ -1321,9 +1745,9 @@ graph TD;
     executor(executor<br>#91;AgentComponent#93;);
     context_builder --> planner;
     planner --> plan_approval;
-    plan_approval -.->|approve| executor;
-    plan_approval -.->|modify| planner;
-    plan_approval -.->|default_route| __end__;
+    plan_approval -.->|"approve"| executor;
+    plan_approval -.->|"modify"| planner;
+    plan_approval -.->|"default_route"| __end__;
     executor --> __end__;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
@@ -1364,15 +1788,127 @@ graph TD;
     research_gate(research_gate<br>#91;HumanInputComponent#93;);
     planner(planner<br>#91;AgentComponent#93;);
     plan_gate(plan_gate<br>#91;HumanInputComponent#93;);
-    research -.->|ready| planner;
-    research -.->|needs_input| research_gate;
-    research -.->|default_route| research_gate;
+    context_gate(context_gate<br>#91;HumanInputComponent#93;);
+    research -.->|"ready"| planner;
+    research -.->|"needs_input"| research_gate;
+    research -.->|"needs_context"| context_gate;
+    research -.->|"default_route"| research_gate;
     research_gate --> research;
-    planner -.->|ask_question| plan_gate;
-    planner -.->|plan_ready| __end__;
-    planner -.->|default_route| plan_gate;
+    planner -.->|"ask_question"| plan_gate;
+    planner -.->|"needs_context"| context_gate;
+    planner -.->|"plan_ready"| __end__;
+    planner -.->|"default_route"| plan_gate;
     plan_gate --> planner;
+    context_gate --> research;
     classDef default fill:#f2f0ff,line-height:1.2;
     classDef first fill-opacity:0;
     classDef last fill:#bfb6fc;
+```
+
+## Graph: `workplan 1.1.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> research;
+    research(research<br>#91;AgentComponent#93;);
+    research_gate(research_gate<br>#91;HumanInputComponent#93;);
+    planner(planner<br>#91;AgentComponent#93;);
+    plan_gate(plan_gate<br>#91;HumanInputComponent#93;);
+    context_gate(context_gate<br>#91;HumanInputComponent#93;);
+    score_fetch(score_fetch<br>#91;DeterministicStepComponent#93;);
+    score_fetch_notes(score_fetch_notes<br>#91;DeterministicStepComponent#93;);
+    rubric(rubric<br>#91;AgentComponent#93;):::subagent;
+    coverage(coverage<br>#91;AgentComponent#93;):::subagent;
+    falsifier(falsifier<br>#91;AgentComponent#93;):::subagent;
+    xexam_rubric(xexam_rubric<br>#91;AgentComponent#93;):::subagent;
+    xexam_coverage(xexam_coverage<br>#91;AgentComponent#93;):::subagent;
+    xexam_falsifier(xexam_falsifier<br>#91;AgentComponent#93;):::subagent;
+    readiness_supervisor(readiness_supervisor<br>#91;AgentComponent#93;<br>max_delegations: 6);
+    readiness_supervisor <-.->|"subagent"| rubric;
+    readiness_supervisor <-.->|"subagent"| coverage;
+    readiness_supervisor <-.->|"subagent"| falsifier;
+    readiness_supervisor <-.->|"subagent"| xexam_rubric;
+    readiness_supervisor <-.->|"subagent"| xexam_coverage;
+    readiness_supervisor <-.->|"subagent"| xexam_falsifier;
+    research -.->|"ready"| planner;
+    research -.->|"needs_input"| research_gate;
+    research -.->|"needs_context"| context_gate;
+    research -.->|"default_route"| research_gate;
+    research_gate --> research;
+    planner -.->|"ask_question"| plan_gate;
+    planner -.->|"needs_context"| context_gate;
+    planner -.->|"plan_ready"| score_fetch;
+    planner -.->|"default_route"| plan_gate;
+    plan_gate --> planner;
+    context_gate --> research;
+    score_fetch -.->|"success"| score_fetch_notes;
+    score_fetch -.->|"default_route"| __end__;
+    score_fetch_notes -.->|"success"| readiness_supervisor;
+    score_fetch_notes -.->|"default_route"| __end__;
+    readiness_supervisor --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;
+```
+
+## Graph: `workplan 1.2.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> research;
+    research(research<br>#91;AgentComponent#93;);
+    research_gate(research_gate<br>#91;HumanInputComponent#93;);
+    planner(planner<br>#91;AgentComponent#93;);
+    plan_gate(plan_gate<br>#91;HumanInputComponent#93;);
+    context_gate(context_gate<br>#91;HumanInputComponent#93;);
+    score_fetch(score_fetch<br>#91;DeterministicStepComponent#93;);
+    score_fetch_notes(score_fetch_notes<br>#91;DeterministicStepComponent#93;);
+    rubric(rubric<br>#91;AgentComponent#93;):::subagent;
+    coverage(coverage<br>#91;AgentComponent#93;):::subagent;
+    falsifier(falsifier<br>#91;AgentComponent#93;):::subagent;
+    xexam_rubric(xexam_rubric<br>#91;AgentComponent#93;):::subagent;
+    xexam_coverage(xexam_coverage<br>#91;AgentComponent#93;):::subagent;
+    xexam_falsifier(xexam_falsifier<br>#91;AgentComponent#93;):::subagent;
+    readiness_supervisor(readiness_supervisor<br>#91;AgentComponent#93;<br>max_delegations: 6);
+    readiness_supervisor <-.->|"subagent"| rubric;
+    readiness_supervisor <-.->|"subagent"| coverage;
+    readiness_supervisor <-.->|"subagent"| falsifier;
+    readiness_supervisor <-.->|"subagent"| xexam_rubric;
+    readiness_supervisor <-.->|"subagent"| xexam_coverage;
+    readiness_supervisor <-.->|"subagent"| xexam_falsifier;
+    research -.->|"ready"| planner;
+    research -.->|"needs_input"| research_gate;
+    research -.->|"needs_context"| context_gate;
+    research -.->|"default_route"| research_gate;
+    research_gate --> research;
+    planner -.->|"ask_question"| plan_gate;
+    planner -.->|"needs_context"| context_gate;
+    planner -.->|"plan_ready"| score_fetch;
+    planner -.->|"default_route"| plan_gate;
+    plan_gate --> planner;
+    context_gate --> research;
+    score_fetch -.->|"success"| score_fetch_notes;
+    score_fetch -.->|"default_route"| __end__;
+    score_fetch_notes -.->|"success"| readiness_supervisor;
+    score_fetch_notes -.->|"default_route"| __end__;
+    readiness_supervisor --> __end__;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;
 ```

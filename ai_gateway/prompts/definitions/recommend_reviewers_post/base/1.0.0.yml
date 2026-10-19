@@ -7,3 +7,4 @@ prompt_template:
     {% include 'recommend_reviewers_post/user/1.0.0.jinja' %}
 params:
   timeout: 60
+  cache_control_injection_points: []

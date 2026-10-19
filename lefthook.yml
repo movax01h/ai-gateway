@@ -10,15 +10,10 @@ pre-commit:
     lint-python:
       glob: "*.py"
       run: |
-        MYPY_SAFE_FILES=$(poetry run python scripts/filter_mypy_excludes.py {staged_files})
-
         # Filter out auto-generated protobuf files that cannot be linted
         export STAGED_FILES="$(echo '{staged_files}' | tr ' ' '\n' | grep -v 'contract_pb2\.py' | tr '\n' ' ')"
 
-        # Run mypy separately with filtered files
-        if [[ -n "$MYPY_SAFE_FILES" ]]; then
-          make check-mypy LINT_WORKING_DIR="$MYPY_SAFE_FILES"
-        fi
+        make check-mypy LINT_WORKING_DIR="$STAGED_FILES"
 
         # Run all other parts of lint-code (everything except check-mypy)
         make check-ruff check-pylint check-codespell check-docformatter check-editorconfig \
@@ -30,6 +25,11 @@ pre-commit:
       run: |
         if echo '{staged_files}' | tr ' ' '\n' | grep -qE '^(duo_workflow_service/agent_platform/v1/flows/flow_config\.py|duo_workflow_service/schemas/.*|ai_gateway/prompts/config/base\.py|ai_gateway/response_schemas/config\.py)$'; then
           make check-duo-workflow-flow-schema
+        fi
+    check-legacy-roots:
+      run: |
+        if echo '{staged_files}' | tr ' ' '\n' | grep -qE '^(ai_gateway/prompts/definitions/|duo_workflow_service/agent_platform/v1/flows/configs/)|^scripts/(check_legacy_roots\.py|legacy_roots_allowlist\.txt)$'; then
+          make check-legacy-roots LEGACY_ROOTS_BASE=origin/main
         fi
     lint-graphql:
       glob: "*.graphql"

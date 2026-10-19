@@ -27,6 +27,9 @@ from duo_workflow_service.workflows.type_definitions import (
     AdditionalContext,
 )
 from lib.context import client_capabilities, gitlab_version
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
+)
 
 
 @pytest.fixture(name="outbox")
@@ -1852,7 +1855,9 @@ class TestStreamingToolCallUiChatLog:
         assert not checkpoint_notifier.ui_chat_log
 
 
-def _server_tool_use_chunk(msg_id="resp_1", tool_id="srvtu_1", name="web_search"):
+def _server_tool_use_chunk(
+    msg_id="resp_1", tool_id="srvtu_1", name="web_search", index=1
+):
     return AIMessageChunk(
         id=msg_id,
         content=[
@@ -1861,13 +1866,13 @@ def _server_tool_use_chunk(msg_id="resp_1", tool_id="srvtu_1", name="web_search"
                 "id": tool_id,
                 "name": name,
                 "input": {"query": "latest AI research"},
-                "index": 1,
+                "index": index,
             }
         ],
     )
 
 
-def _server_tool_result_chunk(msg_id="resp_1", tool_id="srvtu_1"):
+def _server_tool_result_chunk(msg_id="resp_1", tool_id="srvtu_1", index=2):
     return AIMessageChunk(
         id=msg_id,
         content=[
@@ -1875,7 +1880,7 @@ def _server_tool_result_chunk(msg_id="resp_1", tool_id="srvtu_1"):
                 "type": "web_search_tool_result",
                 "tool_use_id": tool_id,
                 "content": [{"type": "web_search_result", "url": "https://x"}],
-                "index": 2,
+                "index": index,
             }
         ],
     )
@@ -1894,6 +1899,7 @@ def test_server_tool_use_creates_pending_card(checkpoint_notifier):
     assert len(tool_entries) == 1
     entry = tool_entries[0]
     assert entry["status"] == ToolStatus.PENDING
+    assert "sources" not in entry["tool_info"]
     assert entry["message_sub_type"] == "web_search"
     assert entry["message_id"] == "srvtu_1"
     assert entry["tool_info"]["name"] == "web_search"
@@ -1909,9 +1915,11 @@ def test_server_tool_result_flips_pending_card_to_success(checkpoint_notifier):
     entry = tool_entries[0]
     assert entry["status"] == ToolStatus.SUCCESS
     assert entry["message_id"] == "srvtu_1"
-    assert entry["tool_info"]["tool_response"] == [
-        {"type": "web_search_result", "url": "https://x"}
-    ]
+    # Rendered as a string: the CLI and IDE validate tool_response as one and
+    # drop the whole chat log otherwise.
+    assert entry["tool_info"]["tool_response"] == "https://x"
+    assert entry["tool_info"]["sources"] == [{"title": "https://x", "url": "https://x"}]
+    assert_client_valid_tool_info(entry["tool_info"])
 
 
 def test_duplicate_server_tool_use_block_is_idempotent(checkpoint_notifier):
@@ -1983,22 +1991,55 @@ def test_text_around_server_tool_splits_into_separate_agent_entries(
 
 def test_multiple_server_tools_match_their_results(checkpoint_notifier):
     checkpoint_notifier._append_chunk_to_ui_chat_log(
-        _server_tool_use_chunk(tool_id="srvtu_1", name="web_search")
+        _server_tool_use_chunk(tool_id="srvtu_1", name="web_search", index=0)
     )
     checkpoint_notifier._append_chunk_to_ui_chat_log(
-        _server_tool_use_chunk(tool_id="srvtu_2", name="web_fetch")
+        _server_tool_result_chunk(tool_id="srvtu_1", index=1)
     )
     checkpoint_notifier._append_chunk_to_ui_chat_log(
-        _server_tool_result_chunk(tool_id="srvtu_2")
+        _server_tool_use_chunk(tool_id="srvtu_2", name="web_fetch", index=2)
     )
     checkpoint_notifier._append_chunk_to_ui_chat_log(
-        _server_tool_result_chunk(tool_id="srvtu_1")
+        _server_tool_result_chunk(tool_id="srvtu_2", index=3)
     )
 
     tool_entries = _tool_entries(checkpoint_notifier)
     assert len(tool_entries) == 2
     assert {e["message_id"] for e in tool_entries} == {"srvtu_1", "srvtu_2"}
     assert all(e["status"] == ToolStatus.SUCCESS for e in tool_entries)
+
+
+def test_server_tool_card_gains_args_as_input_streams(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        AIMessageChunk(
+            id="resp_1",
+            content=[
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_fetch",
+                    "input": {},
+                    "index": 0,
+                }
+            ],
+        )
+    )
+    for partial_json in ('{"url": "https:', '//x"}'):
+        checkpoint_notifier._append_chunk_to_ui_chat_log(
+            AIMessageChunk(
+                id="resp_1",
+                content=[
+                    {
+                        "type": "input_json_delta",
+                        "partial_json": partial_json,
+                        "index": 0,
+                    }
+                ],
+            )
+        )
+
+    [card] = _tool_entries(checkpoint_notifier)
+    assert card["tool_info"]["args"] == {"url": "https://x"}
 
 
 def test_client_tool_use_block_creates_no_server_card(checkpoint_notifier):
@@ -2020,18 +2061,64 @@ def test_client_tool_use_block_creates_no_server_card(checkpoint_notifier):
     assert _tool_entries(checkpoint_notifier) == []
 
 
-def test_server_tool_result_without_matching_use_logs_warning(checkpoint_notifier):
-    with patch("duo_workflow_service.checkpointer.notifier.log") as mock_log:
-        checkpoint_notifier._append_chunk_to_ui_chat_log(
-            _server_tool_result_chunk(tool_id="orphan")
-        )
+def test_server_tool_result_without_matching_use_creates_no_card(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        _server_tool_result_chunk(tool_id="orphan")
+    )
 
     assert _tool_entries(checkpoint_notifier) == []
-    mock_log.warning.assert_called_once_with(
-        "Received server tool result with no matching server_tool_use entry",
-        tool_use_id="orphan",
-        block_type="web_search_tool_result",
+
+
+def _openai_web_search_chunk(msg_id="resp_1", call_id="ws_1", query="q", index=0):
+    return AIMessageChunk(
+        id=msg_id,
+        content=[
+            {
+                "type": "web_search_call",
+                "id": call_id,
+                "status": "completed",
+                "action": {"type": "search", "query": query},
+                "index": index,
+            }
+        ],
     )
+
+
+def test_openai_web_search_card_gains_citations_as_text_streams(checkpoint_notifier):
+    checkpoint_notifier._append_chunk_to_ui_chat_log(_openai_web_search_chunk())
+
+    entry = _tool_entries(checkpoint_notifier)[0]
+    assert "tool_response" not in entry["tool_info"]
+
+    checkpoint_notifier._append_chunk_to_ui_chat_log(
+        AIMessageChunk(
+            id="resp_1",
+            content=[
+                {
+                    "type": "text",
+                    "text": "Answer.",
+                    "annotations": [
+                        {
+                            "type": "url_citation",
+                            "url": "https://a",
+                            "title": "A",
+                            "start_index": 0,
+                            "end_index": 1,
+                        }
+                    ],
+                    "index": 1,
+                }
+            ],
+        )
+    )
+
+    tool_entries = _tool_entries(checkpoint_notifier)
+    assert len(tool_entries) == 1
+    # Rendered as a string: the CLI and IDE validate tool_response as one and
+    # drop the whole chat log otherwise (same as the Anthropic path).
+    assert tool_entries[0]["tool_info"]["tool_response"] == "A: https://a"
+    assert_client_valid_tool_info(tool_entries[0]["tool_info"])
+    assert checkpoint_notifier.ui_chat_log[-1]["content"] == "Answer."
 
 
 def _values_state(status=WorkflowStatusEnum.INPUT_REQUIRED.value, interrupted=False):
@@ -2146,6 +2233,29 @@ async def test_any_enqueue_releases_the_deferred_checkpoint(
     await checkpoint_notifier.flush_deferred_checkpoint()
 
     assert outbox.put_action.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_checkpoint_queued_before_the_pause_does_not_announce_it(
+    checkpoint_notifier, outbox
+):
+    """Payloads are composed when the send loop drains them, which can be after the pause."""
+    await checkpoint_notifier.send_event(
+        "values", _values_state(WorkflowStatusEnum.EXECUTION), False, allow_defer=True
+    )
+    assert outbox.put_action.call_count == 1
+
+    await checkpoint_notifier.send_event(
+        "values", _values_state(), False, allow_defer=True
+    )
+
+    # The queued checkpoint predates the pause, so it must not carry it.
+    assert checkpoint_notifier.most_recent_new_checkpoint().status == "RUNNING"
+
+    await checkpoint_notifier.flush_deferred_checkpoint()
+
+    assert outbox.put_action.call_count == 2
+    assert checkpoint_notifier.most_recent_new_checkpoint().status == "INPUT_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -2327,3 +2437,57 @@ def test_checkpoint_ui_chat_log_bounding_incremental_client(
         assert wire_log[0]["message_id"] == _OMISSION_MARKER_ID
     else:
         assert not any(e["message_id"] == _OMISSION_MARKER_ID for e in wire_log)
+
+
+_METADATA_ONLY_SECRET = "SECRET-MODEL-TEXT"
+
+_METADATA_ONLY_KEPT_ENTRY_FIELDS = {
+    "message_id": "msg-1",
+    "message_type": "tool",
+    "message_sub_type": "read_file",
+    "status": "success",
+    "timestamp": "2026-10-06T00:00:00+00:00",
+    "correlation_id": "corr-1",
+    "component_name": "triage",
+}
+
+
+class TestLiveStream:
+    """A metadata-only flow streams checkpoints without model text."""
+
+    def test_checkpoint_carries_no_text(self):
+        notifier = UserInterface(
+            outbox=Mock(), goal=_METADATA_ONLY_SECRET, metadata_only=True
+        )
+        notifier.status = WorkflowStatusEnum.EXECUTION
+        notifier.ui_chat_log = [
+            {
+                **_METADATA_ONLY_KEPT_ENTRY_FIELDS,
+                "content": _METADATA_ONLY_SECRET,
+                "tool_info": {
+                    "name": "read_file",
+                    "args": {"file_path": _METADATA_ONLY_SECRET},
+                    "tool_response": _METADATA_ONLY_SECRET,
+                },
+                "additional_context": [{"content": _METADATA_ONLY_SECRET}],
+                "subsession_id": _METADATA_ONLY_SECRET,
+            }
+        ]
+        notifier.steps = [
+            {"id": "1", "description": _METADATA_ONLY_SECRET, "status": "In Progress"}
+        ]
+
+        checkpoint = notifier.most_recent_new_checkpoint()
+
+        assert checkpoint.goal == ""
+        assert loads(checkpoint.checkpoint)["channel_values"] == {
+            "ui_chat_log": [
+                {
+                    **_METADATA_ONLY_KEPT_ENTRY_FIELDS,
+                    "content": "",
+                    "additional_context": None,
+                    "tool_info": {"name": "read_file", "args": {}},
+                }
+            ],
+            "plan": {"steps": [{"id": "1", "status": "In Progress"}]},
+        }

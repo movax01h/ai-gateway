@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 from langchain_core.messages import AIMessage
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.v1.components.supervisor_v2.delegate_task import (
@@ -49,10 +50,13 @@ class TestBuildDelegateTaskModel:
                 prompt="Do something",
             )
 
-    def test_docstring_is_inherited_from_delegate_task(self, subagent_descriptors):
-        """create_model does NOT inherit __doc__ automatically -- verify it's passed explicitly."""
+    def test_tool_description_reaches_the_llm(self, subagent_descriptors):
+        """The description is what the provider is sent, so assert on the converted schema."""
         model = build_delegate_task_model(subagent_descriptors)
-        assert model.__doc__ == DelegateTask.__doc__
+        description = convert_to_openai_tool(model)["function"]["description"]
+
+        assert description == DelegateTask.tool_description
+        assert description != DelegateTask.__doc__
 
     def test_subagent_name_field_description_lists_all_agents(
         self, subagent_descriptors, developer_name, developer_description

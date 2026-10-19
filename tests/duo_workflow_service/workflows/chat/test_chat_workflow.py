@@ -1,5 +1,7 @@
 # pylint: disable=file-naming-for-tests,import-outside-toplevel,no-else-raise,no-value-for-parameter,too-many-lines,unexpected-keyword-arg
+import base64
 import json
+import re
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, patch
 from uuid import UUID
 
@@ -7,6 +9,7 @@ import pytest
 from dependency_injector import containers
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims, WrongUnitPrimitives
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Overwrite
 
@@ -17,9 +20,14 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.agent_platform.v1.catalog import (
+    CatalogItems,
+    WorkspaceAgent,
+)
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
 from duo_workflow_service.checkpointer.gitlab_workflow import WorkflowStatusEventEnum
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
@@ -30,10 +38,15 @@ from duo_workflow_service.entities import (
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
+    UiChatLog,
 )
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.tools.toolset import Toolset
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
+from duo_workflow_service.workflows.chat.commands import (
+    CHAT_COMMAND_CATEGORY,
+    forced_tool_call_message_id,
+)
 from duo_workflow_service.workflows.chat.workflow import (
     CHAT_FLOW_TOOLS,
     CHAT_GITLAB_MUTATION_TOOLS,
@@ -41,12 +54,20 @@ from duo_workflow_service.workflows.chat.workflow import (
     CHAT_READ_ONLY_TOOLS,
     CHAT_SESSION_CONTEXT_TOOLS,
     CHAT_UTILITY_TOOLS,
+    NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS,
     RUN_COMMAND_TOOLS,
     Routes,
     Workflow,
     _resolve_additional_context_vars,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.context.approval_sources import (
+    approval_sources,
+    get_approval_policy_ref,
+    get_approval_source,
+    init_approval_sources,
+    record_approval_source,
+)
 from lib.events import GLReportingEventContext
 from lib.feature_flags import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
@@ -458,6 +479,7 @@ async def test_workflow_run(
                 agent_name_override=None,  # Default workflow has no override
                 compaction=ANY,
                 web_search_enabled=False,
+                web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
             )
 
@@ -548,6 +570,7 @@ async def test_workflow_run_with_agent_name_override(
                 agent_name_override="348/0",  # Should pass the override
                 compaction=ANY,
                 web_search_enabled=False,
+                web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
             )
 
@@ -581,15 +604,6 @@ class TestUnauthorizedChatExecution:
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
-            + CHAT_SESSION_CONTEXT_TOOLS,
-        ),
-        (
-            ["agentic_foundational_flow_tool"],
-            {},
-            CHAT_READ_ONLY_TOOLS
-            + CHAT_MUTATION_TOOLS
-            + RUN_COMMAND_TOOLS
-            + CHAT_GITLAB_MUTATION_TOOLS
             + CHAT_FLOW_TOOLS
             + CHAT_SESSION_CONTEXT_TOOLS,
         ),
@@ -600,13 +614,13 @@ class TestUnauthorizedChatExecution:
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS
+            + CHAT_FLOW_TOOLS
             + CHAT_UTILITY_TOOLS
             + CHAT_SESSION_CONTEXT_TOOLS,
         ),
     ],
     ids=[
-        "without_flow_tools_feature_flag",
-        "with_flow_tools_feature_flag",
+        "without_clarification_question_tool_feature_flag",
         "with_clarification_question_tool_feature_flag",
     ],
 )
@@ -640,55 +654,28 @@ def test_tools_registry_interaction(
 
 
 @pytest.mark.parametrize(
-    ("config_overrides", "expect_start_flow"),
+    "config_overrides",
     [
-        ({}, True),
-        (
-            {
-                "features": {
-                    "foundational_flows": {"enabled": True, "enabled_flows": None}
+        {},
+        {"features": {"foundational_flows": {"enabled": True, "enabled_flows": None}}},
+        {"features": {"foundational_flows": {"enabled": False, "enabled_flows": None}}},
+        {
+            "features": {
+                "foundational_flows": {
+                    "enabled": True,
+                    "enabled_flows": ["code_review/v1"],
                 }
-            },
-            True,
-        ),
-        (
-            {
-                "features": {
-                    "foundational_flows": {"enabled": False, "enabled_flows": None}
+            }
+        },
+        {"features": {"foundational_flows": {"enabled": True, "enabled_flows": []}}},
+        {
+            "features": {
+                "foundational_flows": {
+                    "enabled": True,
+                    "enabled_flows": ["unsupported/v1"],
                 }
-            },
-            False,
-        ),
-        (
-            {
-                "features": {
-                    "foundational_flows": {
-                        "enabled": True,
-                        "enabled_flows": ["code_review/v1"],
-                    }
-                }
-            },
-            True,
-        ),
-        (
-            {
-                "features": {
-                    "foundational_flows": {"enabled": True, "enabled_flows": []}
-                }
-            },
-            False,
-        ),
-        (
-            {
-                "features": {
-                    "foundational_flows": {
-                        "enabled": True,
-                        "enabled_flows": ["unsupported/v1"],
-                    }
-                }
-            },
-            False,
-        ),
+            }
+        },
     ],
     ids=[
         "defaults_to_available",
@@ -699,28 +686,32 @@ def test_tools_registry_interaction(
         "only_unsupported_flows_enabled",
     ],
 )
-def test_start_flow_tool_gated_by_enablement(
-    config_overrides, expect_start_flow, workflow_with_project
+def test_start_flow_tool_offered_whatever_the_foundational_flow_config(
+    config_overrides, workflow_with_project
 ):
-    """start_flow is only offered when foundational flows can run for the project."""
-    current_feature_flag_context.set({"agentic_foundational_flow_tool"})
+    """Custom AI Catalog flows are enabled per project, not by these settings.
 
+    The tool's own schema narrows to the enabled members, so offering it here costs nothing when no foundational flow is
+    available.
+    """
     workflow = workflow_with_project
     workflow._workflow_config = {**workflow._workflow_config, **config_overrides}
 
-    tools = workflow._get_tools()
-
-    assert ("start_flow" in tools) is expect_start_flow
+    assert "start_flow" in workflow._get_tools()
 
 
 @pytest.mark.parametrize(
     "generic_gitlab_tools_enabled", [True, False], ids=["generic_tools", "simple_tools"]
 )
 @pytest.mark.parametrize("web_search_enabled", [True, False])
+@pytest.mark.parametrize("web_search_allowed_for_group", [True, False])
 def test_web_search_requested_when_opted_in(
-    generic_gitlab_tools_enabled, web_search_enabled, workflow_with_project
+    generic_gitlab_tools_enabled,
+    web_search_enabled,
+    web_search_allowed_for_group,
+    workflow_with_project,
 ):
-    """web_search follows the per-conversation opt-in, under either read-only tool set.
+    """web_search follows the per-conversation opt-in and the group grant, under either read-only tool set.
 
     Requesting it is necessary but not sufficient: ToolsRegistry enables it only for models without
     native web search, and `toolset` silently drops names that are not enabled. So omitting it when
@@ -733,11 +724,261 @@ def test_web_search_requested_when_opted_in(
     workflow_with_project._workflow_config = {
         **workflow_with_project._workflow_config,
         "web_search_enabled": web_search_enabled,
+        "web_search_allowed_for_group": web_search_allowed_for_group,
     }
 
     tools = workflow_with_project._get_tools()
 
-    assert ("web_search" in tools) is web_search_enabled
+    assert ("web_search" in tools) is (
+        web_search_enabled and web_search_allowed_for_group
+    )
+
+
+def _gitlab_checkpoint_with_history(
+    conversation_history: dict, requested_ids: list | None = None
+) -> dict:
+    """Build a GitLabCheckpoint dict in the real production shape.
+
+    Mirrors what the GraphQL API caches in ``WorkflowConfig["latest_checkpoint"]``:
+    the checkpoint payload is compressed/encoded (19.0+ ``compressedCheckpoint``),
+    not a plain ``channel_values`` dict reachable by attribute. Using the real
+    serializer means the test exercises the actual decode path in
+    ``_record_approved_tool_sources`` and would catch a dict-vs-attribute or
+    decode regression.
+
+    ``requested_ids`` populates the persisted ``tool_call_approval_requested``
+    channel so the mixed-batch scoping can be exercised; omit it to mimic an
+    older checkpoint that predates the field.
+    """
+    channel_values: dict = {"conversation_history": conversation_history}
+    if requested_ids is not None:
+        channel_values["tool_call_approval_requested"] = requested_ids
+    inner = {"channel_values": channel_values}
+    return {"compressedCheckpoint": compress_checkpoint(inner)}  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_defaults_to_user_explicit(
+    workflow_with_approval,
+):
+    """On approval resume, the pending tool calls are attributed user_explicit (no client-sent source) so their
+    ToolInvokedEvent stays attributed."""
+    workflow = workflow_with_approval
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+
+    pending = AIMessage(
+        content="",
+        tool_calls=[
+            {"id": "c1", "name": "run_command", "args": {"command": "ls"}},
+            {"id": "c2", "name": "read_file", "args": {"path": "/a"}},
+        ],
+    )
+    checkpoint_tuple = _gitlab_checkpoint_with_history({"test_prompt": [pending]})
+
+    init_approval_sources()
+    try:
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+        assert get_approval_source("c1") == "user_explicit"
+        assert get_approval_source("c2") == "user_explicit"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_uses_client_source(workflow_with_project):
+    """A client-sent approval source (e.g. auto_mode) overrides the default."""
+    workflow = workflow_with_project
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+    workflow._approval = contract_pb2.Approval(
+        approval=contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_AUTO_MODE,
+            policy_ref=contract_pb2.Approval.PolicyRef(origin="policy"),
+        )
+    )
+
+    pending = AIMessage(
+        content="",
+        tool_calls=[{"id": "c1", "name": "run_command", "args": {"command": "ls"}}],
+    )
+    checkpoint_tuple = _gitlab_checkpoint_with_history({"test_prompt": [pending]})
+
+    init_approval_sources()
+    try:
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+        assert get_approval_source("c1") == "auto_mode"
+        assert get_approval_policy_ref("c1") == {"origin": "policy"}
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_scopes_to_requested_calls(
+    workflow_with_project,
+):
+    """In a mixed batch, only the calls that required a fresh decision get the client's approval source.
+
+    A pre-approved / session-reused call in the same AIMessage must keep its source, not be relabeled, *given* its
+    prior attribution is still present in the registry when this runs. In production it usually isn't (see
+    test_record_approved_tool_sources_loses_preapproved_attribution_across_real_resume): this test only exercises
+    the scoping mechanism's intent, using the same registry instance to stand in for the pre-interrupt one.
+    """
+    workflow = workflow_with_project
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+    workflow._approval = contract_pb2.Approval(
+        approval=contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_USER_EXPLICIT,
+        )
+    )
+
+    pending = AIMessage(
+        content="",
+        tool_calls=[
+            {"id": "c1", "name": "run_command", "args": {"command": "ls"}},
+            {"id": "c2", "name": "read_file", "args": {"path": "/a"}},
+        ],
+    )
+    # Only c2 required a fresh decision; c1 was pre-approved.
+    checkpoint_tuple = _gitlab_checkpoint_with_history(
+        {"test_prompt": [pending]}, requested_ids=["c2"]
+    )
+
+    init_approval_sources()
+    try:
+        # Simulate the agent's prior attribution of the pre-approved skip.
+        record_approval_source("c1", "preapproved_config")
+
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+
+        assert get_approval_source("c1") == "preapproved_config"
+        assert get_approval_source("c2") == "user_explicit"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_loses_preapproved_attribution_across_real_resume(
+    workflow_with_project,
+):
+    """KNOWN GAP (https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938), not
+    fixed here: a pre-approved / session-reused call's attribution does not actually survive to resume, because the
+    approval_sources registry is a per-invocation ContextVar (reset in GitLabWorkflow.__aenter__) and an approval
+    decision always arrives as a new invocation.
+
+    This reproduces that reset (unlike the sibling test above, which keeps using the same registry instance throughout)
+    and documents that the pre-approved call comes back unattributed.
+    """
+    workflow = workflow_with_project
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+    workflow._approval = contract_pb2.Approval(
+        approval=contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_USER_EXPLICIT,
+        )
+    )
+
+    pending = AIMessage(
+        content="",
+        tool_calls=[
+            {"id": "c1", "name": "run_command", "args": {"command": "ls"}},
+            {"id": "c2", "name": "read_file", "args": {"path": "/a"}},
+        ],
+    )
+    # Only c2 required a fresh decision; c1 was pre-approved.
+    checkpoint_tuple = _gitlab_checkpoint_with_history(
+        {"test_prompt": [pending]}, requested_ids=["c2"]
+    )
+
+    # Pre-interrupt invocation: the agent attributes c1's skip, then the
+    # workflow pauses.
+    init_approval_sources()
+    record_approval_source("c1", "preapproved_config")
+    approval_sources.set(None)
+
+    # Post-interrupt invocation: a new workflow object, a fresh registry.
+    init_approval_sources()
+    try:
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+
+        assert get_approval_source("c1") is None
+        assert get_approval_source("c2") == "user_explicit"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_noops_without_checkpoint_or_approval(
+    workflow_with_approval, workflow_with_project
+):
+    """The attribution is a no-op (records nothing) when there is no checkpoint to read the pending calls from, or no
+    approval to attribute them to."""
+    workflow_with_approval._agent = Mock()
+    workflow_with_approval._agent.name = "test_prompt"
+
+    init_approval_sources()
+    try:
+        # No checkpoint tuple: nothing to read.
+        workflow_with_approval._record_approved_tool_sources(None)
+        # A non-mapping checkpoint (not the expected GitLabCheckpoint dict) is
+        # also a safe no-op rather than an error.
+        workflow_with_approval._record_approved_tool_sources("not-a-dict")
+        # No approval on the workflow: nothing to attribute (returns before any
+        # checkpoint decode).
+        workflow_with_project._approval = None
+        workflow_with_project._record_approved_tool_sources({"checkpoint": "{}"})
+        assert get_approval_source("c1") is None
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_noops_when_last_message_not_ai(
+    workflow_with_approval,
+):
+    """When the last checkpointed message is not an AIMessage (so it holds no pending tool calls), attribution records
+    nothing."""
+    workflow = workflow_with_approval
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+
+    checkpoint_tuple = _gitlab_checkpoint_with_history(
+        {"test_prompt": [HumanMessage(content="not an AI message")]}
+    )
+
+    init_approval_sources()
+    try:
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+        assert get_approval_source("c1") is None
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_record_approved_tool_sources_swallows_corrupt_payload(
+    workflow_with_approval,
+):
+    """A corrupt compressedCheckpoint (zlib.error on decompress) must not escape:
+
+    attribution is best-effort and cannot disturb the already-decided approval flow, so the broad guard swallows it and
+    records nothing.
+    """
+    workflow = workflow_with_approval
+    workflow._agent = Mock()
+    workflow._agent.name = "test_prompt"
+
+    # Not valid zlib-compressed data, so uncompress_checkpoint -> zlib.decompress
+    # raises zlib.error, which is neither KeyError/ValueError/TypeError.
+    checkpoint_tuple = {"compressedCheckpoint": "not-valid-zlib-data"}
+
+    init_approval_sources()
+    try:
+        # Must not raise despite the zlib.error inside decode.
+        workflow._record_approved_tool_sources(checkpoint_tuple)
+        assert get_approval_source("c1") is None
+    finally:
+        approval_sources.set(None)
 
 
 @pytest.mark.asyncio
@@ -968,7 +1209,7 @@ async def test_get_graph_input_resume_with_rejected_approval(
 
 
 @pytest.mark.asyncio
-@patch("duo_workflow_service.workflows.chat.workflow.log_exception")
+@patch("duo_workflow_service.workflows.chat.workflow.log_workflow_failure")
 async def test_handle_workflow_failure(mock_log_exception, workflow_with_project):
     error = Exception("Test error")
     compiled_graph = MagicMock()
@@ -1162,6 +1403,10 @@ async def test_agent_run_with_tool_approval_required(workflow_with_project):
     ]
 
     workflow_with_project._agent.tools_registry.approval_required.return_value = True
+    # _get_approvals resolves via the toolset now; None => a fresh decision needed.
+    workflow_with_project._agent.toolset.resolve_approval_source = AsyncMock(
+        return_value=None
+    )
 
     # Mock the model to NOT be an agentic mock model so approval is required
     mock_model = Mock()
@@ -1442,79 +1687,117 @@ class TestMcpServerToolsFiltering:
         yield
         current_mcp_server_tools_context.reset(token)
 
-    @pytest.mark.asyncio
-    async def test_get_tools_without_mcp_search_enabled(self, workflow_with_project):
-        """Test that search tools are included when MCP search is not enabled."""
-        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
+    @pytest.fixture(name="set_mcp_enabled")
+    def set_mcp_enabled_fixture(self, workflow_with_project):
+        def _set(mcp_enabled: bool) -> None:
+            workflow_with_project._workflow_config = {
+                **workflow_with_project._workflow_config,
+                "mcp_enabled": mcp_enabled,
+            }
 
-        # No MCP tools enabled
-        set_enabled_mcp_server_tools(set())
+        return _set
+
+    @pytest.mark.parametrize(
+        "generic_gitlab_tools_enabled",
+        [True, False],
+        ids=["generic_tools", "simple_tools"],
+    )
+    @pytest.mark.parametrize(
+        "mcp_enabled,enabled_mcp_server_tools,native_search_kept",
+        [
+            (True, set(), True),
+            (True, {"some_other_tool"}, True),
+            (True, {"search"}, False),
+            (True, {"search", "some_other_tool"}, False),
+            # Rails advertises MCP search whenever mcp_client is on, but the
+            # namespace does not allow MCP tools, so they never reach the agent.
+            (False, {"search"}, True),
+            (False, {"search", "some_other_tool"}, True),
+            (False, set(), True),
+        ],
+        ids=[
+            "mcp_enabled_no_mcp_tools",
+            "mcp_enabled_other_mcp_tools",
+            "mcp_enabled_search",
+            "mcp_enabled_search_and_others",
+            "mcp_disabled_search",
+            "mcp_disabled_search_and_others",
+            "mcp_disabled_no_mcp_tools",
+        ],
+    )
+    def test_get_tools_native_search_tools(
+        self,
+        workflow_with_project,
+        set_mcp_enabled,
+        generic_gitlab_tools_enabled,
+        mcp_enabled,
+        enabled_mcp_server_tools,
+        native_search_kept,
+    ):
+        """Native search tools are dropped only when MCP search can reach the agent."""
+        current_feature_flag_context.set(
+            {"use_generic_gitlab_api_tools"} if generic_gitlab_tools_enabled else set()
+        )
+        set_mcp_enabled(mcp_enabled)
+        set_enabled_mcp_server_tools(enabled_mcp_server_tools)
 
         tools = workflow_with_project._get_tools()
 
-        # All search tools should be present
-        assert "gitlab_issue_search" in tools
-        assert "gitlab_blob_search" in tools
-        assert "gitlab_merge_request_search" in tools
+        for tool in [
+            "gitlab_issue_search",
+            "gitlab_blob_search",
+            "gitlab_merge_request_search",
+        ]:
+            assert (tool in tools) is native_search_kept
+
+        # Not covered by the MCP server, so always offered.
         assert "gitlab_documentation_search" in tools
-
-    @pytest.mark.asyncio
-    async def test_get_tools_with_mcp_search_enabled(self, workflow_with_project):
-        """Test that search tools are filtered when MCP search is enabled."""
-        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
-
-        # Enable search MCP tool
-        set_enabled_mcp_server_tools({"search"})
-
-        tools = workflow_with_project._get_tools()
-
-        # Search tools should be filtered out
-        assert "gitlab_issue_search" not in tools
-        assert "gitlab_blob_search" not in tools
-        assert "gitlab_merge_request_search" not in tools
-
-        # Documentation search should still be present (not covered by MCP)
-        assert "gitlab_documentation_search" in tools
-
-        # Other tools should still be present
         assert "list_merge_request_diffs" in tools
         assert "read_file" in tools
 
-    @pytest.mark.asyncio
-    async def test_get_tools_with_other_mcp_tools(self, workflow_with_project):
-        """Test that other MCP tools don't affect search tools."""
-        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
-
-        # Enable some other MCP tool (not search)
-        set_enabled_mcp_server_tools({"some_other_tool", "another_tool"})
-
-        tools = workflow_with_project._get_tools()
-
-        # All search tools should still be present
-        assert "gitlab_issue_search" in tools
-        assert "gitlab_blob_search" in tools
-        assert "gitlab_merge_request_search" in tools
-        assert "gitlab_documentation_search" in tools
-
-    @pytest.mark.asyncio
-    async def test_get_tools_with_mcp_search_and_other_tools(
-        self, workflow_with_project
+    @pytest.mark.parametrize("mcp_enabled", [True, False])
+    def test_get_tools_applies_every_replacement(
+        self, workflow_with_project, set_mcp_enabled, mcp_enabled
     ):
-        """Test filtering when multiple MCP tools are enabled including search."""
-        from lib.mcp_server_tools.context import set_enabled_mcp_server_tools
+        """Each enabled MCP server tool removes the native tools mapped to it, and only those."""
+        replacements = {
+            "search": ("gitlab_issue_search",),
+            "save_merge_request": ("create_merge_request", "update_merge_request"),
+            "get_project": ("get_project",),
+        }
+        set_mcp_enabled(mcp_enabled)
+        set_enabled_mcp_server_tools({"search", "save_merge_request"})
 
-        # Enable multiple MCP tools including search
-        set_enabled_mcp_server_tools({"search", "some_other_tool", "another_tool"})
+        with patch.dict(
+            "duo_workflow_service.workflows.chat.workflow.NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS",
+            replacements,
+            clear=True,
+        ):
+            tools = workflow_with_project._get_tools()
 
-        tools = workflow_with_project._get_tools()
+        for tool in [
+            "gitlab_issue_search",
+            "create_merge_request",
+            "update_merge_request",
+        ]:
+            assert (tool in tools) is not mcp_enabled
 
-        # Search tools should be filtered out
-        assert "gitlab_issue_search" not in tools
-        assert "gitlab_blob_search" not in tools
-        assert "gitlab_merge_request_search" not in tools
+        # Mapped, but its MCP tool is not enabled for the session.
+        assert "get_project" in tools
+        # Enabled MCP tool, but not mapped to this native tool.
+        assert "gitlab_blob_search" in tools
 
-        # Documentation search should still be present
-        assert "gitlab_documentation_search" in tools
+    def test_replacements_only_name_offered_native_tools(
+        self, workflow_with_project, set_mcp_enabled
+    ):
+        """Guards against typos: every mapped native tool is one chat would otherwise offer."""
+        set_mcp_enabled(False)
+        current_feature_flag_context.set(set())
+
+        offered = set(workflow_with_project._get_tools())
+
+        for native_tools in NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS.values():
+            assert set(native_tools) <= offered
 
     @pytest.mark.asyncio
     async def test_get_session_context_requested_regardless_of_flags(
@@ -1611,6 +1894,10 @@ async def test_agent_returns_content_and_tool_calls_with_approval_required(
     ]
 
     workflow_with_project._agent.tools_registry.approval_required.return_value = True
+    # _get_approvals resolves via the toolset now; None => a fresh decision needed.
+    workflow_with_project._agent.toolset.resolve_approval_source = AsyncMock(
+        return_value=None
+    )
 
     mock_model = Mock()
     mock_model._is_auto_approved_by_agentic_mock_model = False
@@ -1898,6 +2185,42 @@ class TestWorkflowSystemTemplatePreRender:
         assert workflow.system_template_override == "orbit on goal={{ goal }}"
 
 
+class TestWorkflowAcceptsCatalogItems:
+    """The server offers ``catalog_items`` to every ``v1`` request.
+
+    A chat-partial config is ``v1`` by schema version but is built by this class, not the
+    v1 Flow, and ``AbstractWorkflow.__init__`` takes no ``**kwargs`` to absorb the
+    argument. Every chat-partial flow therefore failed to construct.
+    """
+
+    @pytest.mark.parametrize(
+        "catalog_items",
+        [
+            CatalogItems(),
+            CatalogItems(
+                workspace_agents=[
+                    WorkspaceAgent(
+                        name="workspace/agents/tester",
+                        description="Runs tests.",
+                        toolset=["run_command"],
+                        prompt="Be terse.",
+                    )
+                ]
+            ),
+        ],
+        ids=["empty", "populated"],
+    )
+    def test_catalog_items_do_not_break_construction(self, flow_type, catalog_items):
+        workflow = Workflow(
+            workflow_id="test-id",
+            workflow_metadata={},
+            workflow_type=flow_type,
+            catalog_items=catalog_items,
+        )
+
+        assert workflow._workflow_id == "test-id"
+
+
 class TestResumeCheckpointTs:
     """Chat is the only workflow type allowed to resume at a client-requested checkpoint."""
 
@@ -2084,14 +2407,19 @@ class TestWebSearchTogglePropagation:
     """The toggle is re-read on every turn, so a mid-conversation change takes effect."""
 
     @pytest.mark.parametrize("toggle", [True, False])
+    @pytest.mark.parametrize("web_search_allowed_for_group", [True, False])
     def test_compile_passes_current_workflow_config_toggle_to_create_agent(
         self,
         workflow_with_project,
         mock_tools_registry,
         toggle,
+        web_search_allowed_for_group,
     ):
         workflow = workflow_with_project
-        workflow._workflow_config = {"web_search_enabled": toggle}
+        workflow._workflow_config = {
+            "web_search_enabled": toggle,
+            "web_search_allowed_for_group": web_search_allowed_for_group,
+        }
 
         with (
             patch("duo_workflow_service.workflows.chat.workflow.StateGraph"),
@@ -2103,3 +2431,1248 @@ class TestWebSearchTogglePropagation:
             workflow._compile("Test goal", mock_tools_registry, MagicMock())
 
         assert mock_create_agent.call_args.kwargs["web_search_enabled"] is toggle
+        assert (
+            mock_create_agent.call_args.kwargs["web_search_allowed_for_group"]
+            is web_search_allowed_for_group
+        )
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\npixels"
+PNG_B64 = base64.b64encode(PNG_BYTES).decode()
+# `_verify_declared_type` checks the payload against its declared type, so a webp
+# envelope needs real webp bytes rather than reused PNG ones.
+WEBP_B64 = base64.b64encode(b"RIFF" + b"\x00" * 4 + b"WEBPpixels").decode()
+
+
+def attachment_envelope(**overrides) -> AdditionalContext:
+    payload = {
+        "mime_type": "image/png",
+        "data": PNG_B64,
+        "filename": "screenshot.png",
+    }
+    payload.update(overrides)
+    return AdditionalContext(category="attachments", content=json.dumps(payload))
+
+
+FILE_CONTEXT = AdditionalContext(
+    category="file",
+    id="test-file-id",
+    content="test content",
+    metadata={"path": "/test/file.py"},
+)
+
+# What the Duo CLI puts on every request, whether or not the user typed anything.
+EXECUTOR_CONTEXT = [
+    AdditionalContext(
+        category="user_rule",
+        id="agent-skills-instructions",
+        content="No agent skills were discovered.",
+    ),
+    AdditionalContext(
+        category="os_information",
+        id="os_information",
+        content="<os><platform>darwin</platform></os>",
+    ),
+    AdditionalContext(
+        category="agent_user_environment",
+        id="agent_user_environment_shell_info",
+        content='{"shell_name":"zsh"}',
+    ),
+]
+
+
+def image_blocks(message) -> list:
+    return [
+        block
+        for block in message.content
+        if isinstance(block, dict) and block.get("type") == "image"
+    ]
+
+
+class TestChatAttachments:
+    """User-uploaded images riding the `attachments` additional-context category.
+
+    The two entry points are the opening turn (`get_workflow_state`) and every
+    later turn (the plain-message branch of `get_graph_input`).
+    """
+
+    @pytest.fixture(name="workflow_with_attachment")
+    def workflow_with_attachment_fixture(self, workflow_with_project):
+        workflow_with_project._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(),
+        ]
+        return workflow_with_project
+
+    def _first_turn(self, workflow):
+        state = workflow.get_workflow_state("what is in this screenshot?")
+        return state["conversation_history"]["test_prompt"][0], state["ui_chat_log"][0]
+
+    async def _later_turn(self, workflow, goal="what is in this screenshot?"):
+        result = await workflow.get_graph_input(
+            goal, WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
+        )
+        return result
+
+    # --- delivery -------------------------------------------------------
+
+    def test_first_turn_sends_the_image_alongside_the_text(
+        self, workflow_with_attachment
+    ):
+        message, _ = self._first_turn(workflow_with_attachment)
+
+        assert message.content[0] == {
+            "type": "text",
+            "text": "what is in this screenshot?",
+        }
+        (image,) = image_blocks(message)
+        assert image["base64"] == PNG_B64
+        assert image["mime_type"] == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_later_turn_sends_the_image_alongside_the_text(
+        self, workflow_with_attachment
+    ):
+        result = await self._later_turn(workflow_with_attachment)
+
+        message = result.update["conversation_history"]["test_prompt"][0]
+        assert message.content[0]["text"] == "what is in this screenshot?"
+        assert image_blocks(message)[0]["base64"] == PNG_B64
+
+    def test_every_attachment_becomes_its_own_block(self, workflow_with_project):
+        workflow_with_project._additional_context = [
+            attachment_envelope(filename="a.png"),
+            attachment_envelope(
+                filename="b.webp", mime_type="image/webp", data=WEBP_B64
+            ),
+        ]
+
+        message, _ = self._first_turn(workflow_with_project)
+
+        assert [block["mime_type"] for block in image_blocks(message)] == [
+            "image/png",
+            "image/webp",
+        ]
+
+    # --- keeping base64 out of the text/UI paths ------------------------
+
+    def test_attachments_are_kept_out_of_the_prompt_context(
+        self, workflow_with_attachment
+    ):
+        """The additional-context partial renders `content` verbatim, so a base64 payload left in the list would reach
+        the model as prose."""
+        message, _ = self._first_turn(workflow_with_attachment)
+
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
+
+    def test_the_ui_chat_log_names_the_attachment_without_its_payload(
+        self, workflow_with_attachment
+    ):
+        """The UI log is echoed back on every checkpoint and rebuilds the transcript on reload, so it carries a payload-
+        free reference rather than nothing at all."""
+        _, ui_log = self._first_turn(workflow_with_attachment)
+
+        file_ctx, reference = ui_log["additional_context"]
+        assert file_ctx == FILE_CONTEXT
+        assert reference.category == "attachments"
+        assert reference.metadata["title"] == "screenshot.png"
+        assert reference.content == ""
+
+    def test_no_attachment_payload_ever_reaches_the_ui_chat_log(
+        self, workflow_with_attachment
+    ):
+        """The invariant behind the reference envelope: naming the file must not become
+        a back door for the base64 into the checkpoint."""
+        _, ui_log = self._first_turn(workflow_with_attachment)
+
+        assert PNG_B64 not in json.dumps(ui_log, default=str)
+
+    @pytest.mark.asyncio
+    async def test_a_later_turn_names_the_attachment_but_keeps_it_out_of_the_prompt(
+        self, workflow_with_attachment
+    ):
+        result = await self._later_turn(workflow_with_attachment)
+
+        message = result.update["conversation_history"]["test_prompt"][0]
+        # The prompt path must stay exactly as it was: these references are
+        # client-facing only, and would otherwise be rendered into the prompt.
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
+
+        ui_context = result.update["ui_chat_log"][-1]["additional_context"]
+        assert [item.category for item in ui_context] == ["file", "attachments"]
+
+    def test_an_attachments_only_turn_reports_only_the_reference(
+        self, workflow_with_project
+    ):
+        """Emptying the list must look like the turn never carried context at all on the prompt path, while the client
+        still sees what was attached."""
+        workflow_with_project._additional_context = [attachment_envelope()]
+
+        message, ui_log = self._first_turn(workflow_with_project)
+
+        assert message.additional_kwargs["additional_context"] is None
+        assert [item.category for item in ui_log["additional_context"]] == [
+            "attachments"
+        ]
+
+    # --- turns that carry only attachments ------------------------------
+
+    @pytest.mark.asyncio
+    async def test_a_later_turn_with_no_text_still_reaches_the_model(
+        self, workflow_with_project
+    ):
+        """`if goal:` used to drop the turn; an image alone is still a question."""
+        workflow_with_project._additional_context = [attachment_envelope()]
+
+        result = await self._later_turn(workflow_with_project, goal="")
+
+        message = result.update["conversation_history"]["test_prompt"][0]
+        assert image_blocks(message)[0]["base64"] == PNG_B64
+        assert result.update["ui_chat_log"][-1]["message_type"] == MessageTypeEnum.USER
+
+    @pytest.mark.asyncio
+    async def test_a_later_turn_with_neither_text_nor_attachments_is_still_dropped(
+        self, workflow_with_project
+    ):
+        workflow_with_project._additional_context = None
+
+        result = await self._later_turn(workflow_with_project, goal="")
+
+        assert "conversation_history" not in result.update
+        assert "ui_chat_log" not in result.update
+
+    # --- no attachments: byte-identical to before ------------------------
+
+    def test_text_only_turns_keep_plain_string_content(self, workflow_with_project):
+        message, ui_log = self._first_turn(workflow_with_project)
+
+        assert message.content == "what is in this screenshot?"
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
+        assert ui_log["additional_context"] == [FILE_CONTEXT]
+
+    def test_a_turn_with_no_context_at_all_is_unchanged(self, workflow_with_project):
+        workflow_with_project._additional_context = None
+
+        message, ui_log = self._first_turn(workflow_with_project)
+
+        assert message.content == "what is in this screenshot?"
+        assert message.additional_kwargs["additional_context"] is None
+        assert ui_log["additional_context"] is None
+
+    # --- validation ------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "envelope,expected",
+        [
+            (
+                attachment_envelope(mime_type="application/pdf"),
+                "unsupported media type 'application/pdf'",
+            ),
+            (attachment_envelope(data="not base64!!"), "is not valid base64 data"),
+            (
+                AdditionalContext(category="attachments", content="not json"),
+                "invalid JSON content",
+            ),
+        ],
+    )
+    def test_a_bad_attachment_is_reported_with_a_visible_reason(
+        self, workflow_with_project, envelope, expected
+    ):
+        """A generic failure would leave the user with no idea what to change."""
+        workflow_with_project._additional_context = [envelope]
+
+        state = workflow_with_project.get_workflow_state("look at this")
+
+        notice = state["ui_chat_log"][-1]
+        assert notice["status"] == ToolStatus.FAILURE
+        assert re.search(expected, notice["content"])
+
+    def test_a_bad_attachment_does_not_fail_the_session(self, workflow_with_project):
+        """Raising here would reach `_handle_compile_and_run_exception`, which sets `ERROR` -> `FAILED` -> a `drop`
+        event, so Rails would move the whole conversation to failed and the thread could not be continued.
+
+        Losing a conversation over an oversized PNG is far too harsh.
+        """
+        workflow_with_project._additional_context = [
+            attachment_envelope(mime_type="application/pdf")
+        ]
+
+        state = workflow_with_project.get_workflow_state("look at this")
+
+        assert state["status"] != WorkflowStatusEnum.ERROR
+        # The turn still goes to the model, so the user gets an answer rather than a
+        # dead session.
+        assert state["conversation_history"]["test_prompt"]
+
+    def test_the_model_is_told_the_files_are_missing(self, workflow_with_project):
+        """Dropping the files silently would leave the model answering "what is in this screenshot?" as though nothing
+        had been sent, and it would guess."""
+        workflow_with_project._additional_context = [
+            attachment_envelope(mime_type="application/pdf")
+        ]
+
+        state = workflow_with_project.get_workflow_state("what is in this screenshot?")
+
+        message = state["conversation_history"]["test_prompt"][0]
+        text = " ".join(
+            block["text"] for block in message.content if block["type"] == "text"
+        )
+        assert "could not be included" in text
+        assert "unsupported media type" in text
+        assert not image_blocks(message)
+
+    @pytest.mark.asyncio
+    async def test_a_bad_attachment_on_a_later_turn_is_also_non_fatal(
+        self, workflow_with_project
+    ):
+        workflow_with_project._additional_context = [
+            attachment_envelope(mime_type="application/pdf")
+        ]
+
+        result = await self._later_turn(workflow_with_project)
+
+        assert result.update["status"] != WorkflowStatusEnum.ERROR
+        assert "could not be attached" in result.update["ui_chat_log"][-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_an_attachments_only_turn_that_fails_still_answers_the_user(
+        self, workflow_with_project
+    ):
+        """With no goal and no valid files there would otherwise be nothing to send, and the user would see their
+        message vanish."""
+        workflow_with_project._additional_context = [
+            attachment_envelope(data="not base64!!")
+        ]
+
+        result = await self._later_turn(workflow_with_project, goal="")
+
+        assert result.update["conversation_history"]["test_prompt"]
+        assert "could not be attached" in result.update["ui_chat_log"][-1]["content"]
+
+    @pytest.mark.parametrize("later_turn", [False, True])
+    @pytest.mark.asyncio
+    async def test_a_wholly_rejected_turn_leaves_no_empty_user_bubble(
+        self, workflow_with_project, later_turn
+    ):
+        """The references name the attachments that survived, and on a rejection none did.
+
+        With no text either, a user entry has nothing to render and the client draws an empty bubble -- the gap review
+        found on the success path, arriving by another route. The notice that follows says what failed, so it carries
+        the turn alone.
+        """
+        workflow_with_project._additional_context = [
+            attachment_envelope(data="not base64!!")
+        ]
+
+        if later_turn:
+            logs = (await self._later_turn(workflow_with_project, goal="")).update[
+                "ui_chat_log"
+            ]
+        else:
+            logs = workflow_with_project.get_workflow_state("")["ui_chat_log"]
+
+        assert [entry["message_type"] for entry in logs] == [MessageTypeEnum.AGENT]
+        assert "could not be attached" in logs[0]["content"]
+
+    @pytest.mark.parametrize("later_turn", [False, True])
+    @pytest.mark.asyncio
+    async def test_a_rejected_turn_that_has_text_keeps_its_user_entry(
+        self, workflow_with_project, later_turn
+    ):
+        """Only a turn with nothing to show is suppressed; the message itself is still the user's."""
+        workflow_with_project._additional_context = [
+            attachment_envelope(data="not base64!!")
+        ]
+
+        if later_turn:
+            logs = (
+                await self._later_turn(workflow_with_project, goal="look at this")
+            ).update["ui_chat_log"]
+        else:
+            logs = workflow_with_project.get_workflow_state("look at this")[
+                "ui_chat_log"
+            ]
+
+        assert logs[0]["message_type"] == MessageTypeEnum.USER
+        assert logs[0]["content"] == "look at this"
+        assert "could not be attached" in logs[-1]["content"]
+
+    @pytest.mark.parametrize("later_turn", [False, True])
+    @pytest.mark.asyncio
+    async def test_ambient_context_does_not_resurrect_the_user_entry(
+        self, workflow_with_project, later_turn
+    ):
+        """Ambient context rides along on every turn and is not something the user sent.
+
+        The CLI attaches `os_information`, `agent_user_environment` and `user_rule` to each request, and the web client
+        attaches the current page. Counting any of it as "worth showing" means the entry is never suppressed in real
+        traffic, which is exactly how the first version of this fix passed its tests and still produced a blank bubble
+        against the CLI.
+        """
+        workflow_with_project._additional_context = [
+            *EXECUTOR_CONTEXT,
+            attachment_envelope(data="not base64!!"),
+        ]
+
+        if later_turn:
+            logs = (await self._later_turn(workflow_with_project, goal="")).update[
+                "ui_chat_log"
+            ]
+        else:
+            logs = workflow_with_project.get_workflow_state("")["ui_chat_log"]
+
+        assert [entry["message_type"] for entry in logs] == [MessageTypeEnum.AGENT]
+
+    def test_ambient_context_still_reaches_a_turn_that_is_shown(
+        self, workflow_with_project
+    ):
+        """Suppression is about the empty entry, not about dropping context from a turn that has one."""
+        workflow_with_project._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(data="not base64!!"),
+        ]
+
+        logs = workflow_with_project.get_workflow_state("look at this")["ui_chat_log"]
+
+        assert logs[0]["message_type"] == MessageTypeEnum.USER
+        assert logs[0]["additional_context"] == [FILE_CONTEXT]
+
+    def test_an_empty_turn_without_attachments_is_untouched(
+        self, workflow_with_project
+    ):
+        """The suppression is scoped to rejections; an empty turn that never carried a file is a separate question."""
+        workflow_with_project._additional_context = None
+
+        logs = workflow_with_project.get_workflow_state("")["ui_chat_log"]
+
+        assert [entry["message_type"] for entry in logs] == [MessageTypeEnum.USER]
+
+    def test_a_rejected_payload_never_reaches_the_prompt_or_the_ui(
+        self, workflow_with_project
+    ):
+        """Not parsing the envelope must not mean leaving it in the context list."""
+        workflow_with_project._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(mime_type="application/pdf"),
+        ]
+
+        state = workflow_with_project.get_workflow_state("look at this")
+
+        assert PNG_B64 not in json.dumps(state["ui_chat_log"], default=str)
+        message = state["conversation_history"]["test_prompt"][0]
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
+
+    # --- approval decisions carry no user message ------------------------
+
+    @pytest.mark.asyncio
+    async def test_attachments_sent_with_an_approval_are_dropped_loudly(
+        self, workflow_with_approval
+    ):
+        """The approval branch builds no HumanMessage, so there is nothing to attach to.
+
+        Warn rather than fail silently.
+        """
+        workflow_with_approval._additional_context = [attachment_envelope()]
+
+        with patch(
+            "duo_workflow_service.workflows.chat.workflow.logger"
+        ) as mock_logger:
+            result = await self._later_turn(workflow_with_approval, goal="")
+
+        assert result.goto == "run_tools"
+        assert "conversation_history" not in result.update
+        mock_logger.warning.assert_called_once_with(
+            "Discarding attachments sent alongside a tool approval decision",
+            workflow_id="1234",
+            count=1,
+        )
+
+        # Loudly means to the user, not just to the logs.
+        (notice,) = result.update["ui_chat_log"]
+        assert notice["status"] == ToolStatus.FAILURE
+        assert "could not be sent" in notice["content"]
+
+    @pytest.mark.asyncio
+    async def test_the_approved_tool_still_runs_when_an_attachment_is_malformed(
+        self, workflow_with_approval
+    ):
+        """Validating a payload we are about to discard would fail an approval the user already gave."""
+        workflow_with_approval._additional_context = [
+            attachment_envelope(mime_type="application/pdf")
+        ]
+
+        result = await self._later_turn(workflow_with_approval, goal="")
+
+        assert result.goto == "run_tools"
+        assert "could not be sent" in result.update["ui_chat_log"][-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_envelope_never_reaches_the_prompt_on_a_decision_turn(
+        self, workflow_with_approval
+    ):
+        """Skipping the parse must not mean skipping the removal: an envelope left in the
+        list would render its base64 into the prompt."""
+        workflow_with_approval._approval = MagicMock()
+        workflow_with_approval._approval.WhichOneof.return_value = "rejection"
+        workflow_with_approval._approval.rejection.message = "no"
+        workflow_with_approval._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(data="not base64!!"),
+        ]
+
+        result = await self._later_turn(workflow_with_approval, goal="")
+
+        assert PNG_B64 not in json.dumps(result.update, default=str)
+        user_entry = result.update["ui_chat_log"][0]
+        assert user_entry["additional_context"] == [FILE_CONTEXT]
+
+    @pytest.mark.asyncio
+    async def test_a_dropped_attachment_is_not_named_in_the_ui_chat_log(
+        self, workflow_with_approval
+    ):
+        """A rejection builds a user message, so it produces a UI log entry -- but the attachments were still discarded.
+
+        Naming a file the model never saw would tell the user it was delivered.
+        """
+        workflow_with_approval._approval = MagicMock()
+        workflow_with_approval._approval.WhichOneof.return_value = "rejection"
+        workflow_with_approval._approval.rejection.message = "no, use this instead"
+        workflow_with_approval._additional_context = [attachment_envelope()]
+
+        result = await self._later_turn(workflow_with_approval, goal="")
+
+        # The user message is first; the discard notice follows it.
+        ui_context = result.update["ui_chat_log"][0]["additional_context"]
+        assert not [
+            item for item in (ui_context or []) if item.category == "attachments"
+        ]
+        assert "could not be sent" in result.update["ui_chat_log"][-1]["content"]
+
+
+FLOW_COMMAND_CONTEXT = AdditionalContext(
+    category=CHAT_COMMAND_CATEGORY,
+    content=json.dumps(
+        {
+            "command": "flow",
+            "ai_catalog_item_consumer_id": 42,
+            "goal": "check the auth module",
+        }
+    ),
+    metadata={},
+)
+
+USER_FILE_CONTEXT = AdditionalContext(
+    category="file", id="f", content="test content", metadata={}
+)
+
+
+@pytest.fixture(name="workflow_with_flow_command")
+def workflow_with_flow_command_fixture(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container: containers.Container,
+    mock_chat_agent: ChatAgent,
+    user: CloudConnectorUser,
+    mock_tools_registry: Mock,
+    workflow_id: str,
+    flow_type: GLReportingEventContext,
+):
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_metadata={},
+        workflow_type=flow_type,
+        user=user,
+        additional_context=[FLOW_COMMAND_CONTEXT, USER_FILE_CONTEXT],
+    )
+    workflow._project = None
+    workflow._namespace = None
+    workflow._http_client = MagicMock()
+    mock_chat_agent.tools_registry = mock_tools_registry
+    workflow._agent = mock_chat_agent
+    return workflow
+
+
+EXPECTED_FLOW_TOOL_ARGS = {
+    "flow": {
+        "name": "catalog_flow",
+        "ai_catalog_item_consumer_id": 42,
+        "goal": "check the auth module",
+    }
+}
+
+
+def assert_forces_the_flow_tool(messages):
+    """The turn is a user message answered by a fixed, client-chosen tool call."""
+    human, ai = messages
+
+    assert isinstance(human, HumanMessage)
+    # Ordering matters: reversed, ChatAgent cancels the call as abandoned.
+    assert isinstance(ai, AIMessage)
+
+    (tool_call,) = ai.tool_calls
+    assert tool_call["name"] == "start_flow"
+    assert tool_call["args"] == EXPECTED_FLOW_TOOL_ARGS
+    assert tool_call["id"]
+
+
+@pytest.mark.asyncio
+async def test_flow_command_forces_a_tool_call_on_a_new_thread(
+    workflow_with_flow_command,
+):
+    result = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module", WorkflowStatusEventEnum.START, None
+    )
+
+    assert_forces_the_flow_tool(result["conversation_history"]["test_prompt"])
+
+
+@pytest.mark.asyncio
+async def test_flow_command_forces_a_tool_call_on_a_later_turn(
+    workflow_with_flow_command,
+):
+    result = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module",
+        WorkflowStatusEventEnum.RESUME,
+        EXISTING_CHECKPOINT,
+    )
+
+    assert result.goto == "run_tools"
+    assert_forces_the_flow_tool(result.update["conversation_history"]["test_prompt"])
+
+
+@pytest.mark.asyncio
+async def test_flow_command_with_no_message_text_still_forces_the_tool_on_a_later_turn(
+    workflow_with_flow_command,
+):
+    """A bare ``/flow:<name>`` has nothing to say beyond the tool call it forces."""
+    result = await workflow_with_flow_command.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
+    )
+
+    assert result.goto == "run_tools"
+    assert_forces_the_flow_tool(result.update["conversation_history"]["test_prompt"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_event",
+    [WorkflowStatusEventEnum.START, WorkflowStatusEventEnum.RESUME],
+    ids=["new_thread", "later_turn"],
+)
+async def test_flow_command_envelope_is_kept_out_of_the_prompt_and_transcript(
+    status_event, workflow_with_flow_command
+):
+    """The envelope is machine addressing, not something the user supplied."""
+    later_turn = status_event == WorkflowStatusEventEnum.RESUME
+    result = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module",
+        status_event,
+        EXISTING_CHECKPOINT if later_turn else None,
+    )
+    update = result.update if later_turn else result
+
+    human = update["conversation_history"]["test_prompt"][0]
+    assert human.additional_kwargs["additional_context"] == [USER_FILE_CONTEXT]
+    assert update["ui_chat_log"][-1]["additional_context"] == [USER_FILE_CONTEXT]
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_flow_command_envelope_is_still_kept_out_of_the_transcript(
+    mock_duo_workflow_service_container,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_chat_agent,
+    user,
+    mock_tools_registry,
+    workflow_id,
+    flow_type,
+):
+    """Rails cannot serialise the category, so a persisted envelope breaks reading the session back.
+
+    A malformed one is the case that most needs removing, because there is no forced tool call to signal that a command
+    was involved at all.
+    """
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_metadata={},
+        workflow_type=flow_type,
+        user=user,
+        additional_context=[
+            AdditionalContext(
+                category=CHAT_COMMAND_CATEGORY, content="not json at all", metadata={}
+            ),
+            USER_FILE_CONTEXT,
+        ],
+    )
+    workflow._project = None
+    workflow._namespace = None
+    workflow._http_client = MagicMock()
+    mock_chat_agent.tools_registry = mock_tools_registry
+    workflow._agent = mock_chat_agent
+
+    assert workflow._forced_tool_call is None
+
+    result = await workflow.get_graph_input(
+        "/flow:security-scan go", WorkflowStatusEventEnum.START, None
+    )
+
+    assert result["ui_chat_log"][-1]["additional_context"] == [USER_FILE_CONTEXT]
+    assert result["conversation_history"]["test_prompt"][0].additional_kwargs[
+        "additional_context"
+    ] == [USER_FILE_CONTEXT]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "additional_context",
+    [None, [], [FLOW_COMMAND_CONTEXT]],
+    ids=["null", "empty", "envelope-only"],
+)
+async def test_absent_additional_context_stays_absent(
+    mock_duo_workflow_service_container,  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_chat_agent,
+    user,
+    mock_tools_registry,
+    workflow_id,
+    flow_type,
+    additional_context,
+):
+    """Stripping the envelope must not turn absence into an empty list.
+
+    ``with_attachment_references`` distinguishes ``None`` from ``[]``, and ``_turn_context`` normalises an emptied list
+    back to ``None``, so reporting ``[]`` here would change what every workflow puts in its transcript and chat log —
+    not just one carrying a flow command.
+    """
+    workflow = Workflow(
+        workflow_id=workflow_id,
+        workflow_metadata={},
+        workflow_type=flow_type,
+        user=user,
+        additional_context=additional_context,
+    )
+    workflow._project = None
+    workflow._namespace = None
+    workflow._http_client = MagicMock()
+    mock_chat_agent.tools_registry = mock_tools_registry
+    workflow._agent = mock_chat_agent
+
+    assert workflow._additional_context is None
+
+    result = await workflow.get_graph_input(
+        "/flow:security-scan go", WorkflowStatusEventEnum.START, None
+    )
+
+    assert result["ui_chat_log"][-1]["additional_context"] is None
+    assert (
+        result["conversation_history"]["test_prompt"][0].additional_kwargs[
+            "additional_context"
+        ]
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_turn_still_goes_to_the_agent(workflow_with_project):
+    result = await workflow_with_project.get_graph_input(
+        "what does this do?", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
+    )
+
+    assert result.goto == "agent"
+    (message,) = result.update["conversation_history"]["test_prompt"]
+    assert isinstance(message, HumanMessage)
+
+
+@pytest.mark.parametrize(
+    ("history", "expected"),
+    [
+        ([HumanMessage(content="hi")], Routes.CONTINUE),
+        ([AIMessage(content="hello")], Routes.CONTINUE),
+        ([], Routes.CONTINUE),
+        (
+            [
+                HumanMessage(content="hi"),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "start_flow",
+                            "args": {},
+                            "id": "c1",
+                            "type": "tool_call",
+                        }
+                    ],
+                ),
+            ],
+            Routes.TOOL_USE,
+        ),
+    ],
+    ids=["user_turn", "agent_reply", "no_history", "forced_tool_call"],
+)
+def test_entry_route(history, expected, workflow_with_project):
+    state = ChatWorkflowState(conversation_history={"test_prompt": history})
+
+    assert workflow_with_project._entry_route(state) == expected
+
+
+def forced_turn(tool_name="start_flow"):
+    """A user message answered by a tool call the client chose."""
+    return [
+        HumanMessage(content="/flow:sushi-flow"),
+        AIMessage(
+            content="",
+            id=forced_tool_call_message_id(),
+            tool_calls=[
+                {"name": tool_name, "args": {}, "id": "c1", "type": "tool_call"}
+            ],
+        ),
+        ToolMessage(content="{}", tool_call_id="c1", name=tool_name),
+    ]
+
+
+def model_authored_turn(tool_name="gitlab_list_duo_agents_and_flows"):
+    """The same shape, for a tool call the model chose itself."""
+    return [
+        HumanMessage(content="which flows can I run?"),
+        AIMessage(
+            content="Let me look.",
+            id="lc_run--01a0d910",
+            tool_calls=[
+                {"name": tool_name, "args": {}, "id": "c2", "type": "tool_call"}
+            ],
+        ),
+        ToolMessage(content="{}", tool_call_id="c2", name=tool_name),
+    ]
+
+
+def tool_card(tool_call_id, status=ToolStatus.SUCCESS, tool_name="start_flow"):
+    """The chat log entry ToolsExecutor writes for a call that ran.
+
+    `message_id` is the tool call's id, as `_create_tool_ui_chat_log` sets it, since that is what the router matches
+    on. A call that never ran gets no entry at all, which is modelled by leaving it out rather than by passing a
+    status.
+    """
+    return UiChatLog(
+        message_type=MessageTypeEnum.TOOL,
+        message_sub_type=tool_name,
+        content="Started flow sushi-flow",
+        timestamp="2026-09-29T18:30:34Z",
+        status=status,
+        correlation_id=None,
+        tool_info=None,
+        additional_context=None,
+        message_id=tool_call_id,
+    )
+
+
+@pytest.mark.parametrize(
+    ("history", "cards", "expected"),
+    [
+        (forced_turn(), [tool_card("c1")], Routes.STOP),
+        (model_authored_turn(), [tool_card("c2")], Routes.CONTINUE),
+        ([], [], Routes.CONTINUE),
+        (
+            forced_turn() + model_authored_turn(),
+            [tool_card("c1"), tool_card("c2")],
+            Routes.CONTINUE,
+        ),
+        (
+            model_authored_turn() + forced_turn(),
+            [tool_card("c2"), tool_card("c1")],
+            Routes.STOP,
+        ),
+    ],
+    ids=[
+        "forced_call",
+        "model_authored_call",
+        "no_history",
+        "forced_call_in_an_earlier_turn",
+        "forced_call_after_an_ordinary_turn",
+    ],
+)
+def test_post_tools_route(history, cards, expected, workflow_with_project):
+    """Forced-ness is a property of the turn, not of the session.
+
+    A session whose first turn was a command must still reach the model on every turn after it -- hence the
+    earlier-turn case, which is the whole reason this reads the history rather than the workflow's
+    ``_forced_tool_call``.
+
+    The chat log accumulates across a thread, so the last two cases carry both turns' cards. The router has to pick
+    out the one belonging to the call it is routing on, which is why it matches ids rather than reading the newest
+    entry.
+    """
+    state = ChatWorkflowState(
+        conversation_history={"test_prompt": history}, ui_chat_log=cards
+    )
+
+    assert workflow_with_project._post_tools_route(state) == expected
+
+
+@pytest.mark.parametrize(
+    "cards",
+    [
+        [],
+        [tool_card("c1", status=ToolStatus.FAILURE)],
+        [tool_card("c1", status=ToolStatus.TIMED_OUT)],
+        [tool_card("c9")],
+    ],
+    ids=[
+        "the_tool_never_ran",
+        "the_call_failed",
+        "the_call_timed_out",
+        "a_card_for_a_different_call",
+    ],
+)
+def test_a_forced_call_that_did_not_succeed_still_reaches_the_agent(
+    cards, workflow_with_project
+):
+    """Only a command that did the thing ends the turn. Anything less, the model gets to speak.
+
+    A failure ends up here because ending the turn on one leaves the user holding an error they cannot act on -- for a
+    timeout, a card reading "Tool call failed: ToolException" -- with retyping the command their only move. Handed
+    back, the model can say what went wrong and offer to run the tool itself, which is an approval prompt away from
+    working.
+
+    A tool that never ran arrives by the same route, by writing no card at all: ToolsExecutor answers an unknown tool
+    with "Tool ... not found" and `continue`s before building a chat log entry. Reachable in production when a
+    governance deny rule strips the tool.
+    """
+    state = ChatWorkflowState(
+        conversation_history={"test_prompt": forced_turn()}, ui_chat_log=cards
+    )
+
+    assert workflow_with_project._post_tools_route(state) == Routes.CONTINUE
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (WorkflowStatusEnum.NOT_STARTED, {"status": WorkflowStatusEnum.INPUT_REQUIRED}),
+        (WorkflowStatusEnum.EXECUTION, {"status": WorkflowStatusEnum.INPUT_REQUIRED}),
+        (WorkflowStatusEnum.ERROR, {}),
+    ],
+    ids=["fresh_thread", "resumed_turn", "already_failed"],
+)
+def test_forced_call_complete_settles_the_status(
+    status, expected, workflow_with_project
+):
+    """Skipping the agent means writing the status it would have written.
+
+    Without it the checkpoint lands on CREATED or RUNNING, neither of which maps to a Rails status event, and the
+    session sits `running` until the stuck-workflow reaper fails it. Both statuses a turn can start from are covered,
+    since those are the only two that reach here today.
+
+    ERROR is the case that cannot happen yet: nothing on the path writes it. Covered so that if something starts to,
+    a failed command is not reported to Rails as a turn waiting on the user.
+    """
+    state = ChatWorkflowState(conversation_history={"test_prompt": []}, status=status)
+
+    assert workflow_with_project._forced_call_complete(state) == expected
+
+
+def compile_graph_recording_visited_nodes(
+    workflow,
+    mock_tools_executor,
+    mock_create_agent,
+    agent_replies=(),
+    tool_names=("start_flow", "gitlab_list_duo_agents_and_flows"),
+    card_status=ToolStatus.SUCCESS,
+):
+    """Compile the real graph with both nodes replaced by recorders.
+
+    _compile builds its own agent, so the recorder has to be installed at create_agent rather than on the fixture's
+    agent.
+
+    The tools recorder answers each call with a ToolMessage and a chat log card, as the real node does, so the routing
+    that follows it is exercised on a realistic state rather than on one the router cannot read. `tools_run` names
+    every tool executed, across every turn on the thread.
+
+    `tool_names` is the toolset: a call for anything outside it gets the not-found answer and, as in ToolsExecutor, no
+    card. `card_status` sets the status on the cards for calls that did run, so a test can make the tool fail.
+
+    `agent_replies` scripts what the model says, for tests that care; it falls back to a reply with no tool calls,
+    which ends the turn.
+    """
+    visited = []
+    tools_run = []
+    scripted = iter(agent_replies)
+
+    async def run_agent(state):
+        visited.append("agent")
+        reply = next(scripted, AIMessage(content="done"))
+        return {"conversation_history": {"test_prompt": [reply]}}
+
+    async def run_tools(state):
+        visited.append("run_tools")
+        last_message = state["conversation_history"]["test_prompt"][-1]
+        results = []
+        cards = []
+        for tool_call in getattr(last_message, "tool_calls", []):
+            tools_run.append(tool_call["name"])
+
+            if tool_call["name"] not in tool_names:
+                # The not-found branch answers and moves on before building a card.
+                results.append(
+                    ToolMessage(
+                        content=f"Tool {tool_call['name']} not found",
+                        tool_call_id=tool_call["id"],
+                        name=tool_call["name"],
+                    )
+                )
+                continue
+
+            results.append(
+                ToolMessage(
+                    content=json.dumps({"status": "started", "workflow_id": 8688507}),
+                    tool_call_id=tool_call["id"],
+                    name=tool_call["name"],
+                )
+            )
+            cards.append(
+                tool_card(
+                    tool_call["id"],
+                    status=card_status,
+                    tool_name=tool_call["name"],
+                )
+            )
+        return {
+            "conversation_history": {"test_prompt": results},
+            "ui_chat_log": cards,
+            "status": WorkflowStatusEnum.EXECUTION,
+        }
+
+    agent = MagicMock()
+    agent.name = "test_prompt"
+    agent.run = run_agent
+    mock_create_agent.return_value = agent
+    mock_tools_executor.return_value.run = run_tools
+
+    toolset = MagicMock(bindable=[])
+
+    tools_registry = MagicMock()
+    tools_registry.toolset.return_value = toolset
+
+    return (
+        workflow._compile("goal", tools_registry, MemorySaver()),
+        visited,
+        tools_run,
+    )
+
+
+async def drain(graph, graph_input, thread_id):
+    async for _ in graph.astream(
+        graph_input,
+        config={"configurable": {"thread_id": thread_id}, "recursion_limit": 5},
+    ):
+        pass
+    return await graph.aget_state({"configurable": {"thread_id": thread_id}})
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_a_flow_command_runs_the_tool_and_ends_the_turn(
+    mock_tools_executor, mock_create_agent, workflow_with_flow_command
+):
+    """A new thread cannot be entered with a Command, so entry routes on state.
+
+    LangGraph only treats a Command as input when a prior checkpoint exists, so the forced call is seeded into the
+    conversation and the entry router picks it up instead.
+
+    The turn then ends at the tool. Handing control to the model would spend a turn re-deriving what the tool has
+    already done -- in production, a `gitlab_list_duo_agents_and_flows` lookup for an id the forced call already
+    carried -- and would narrate the result as though the model had chosen it.
+    """
+    graph, visited, tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_flow_command, mock_tools_executor, mock_create_agent
+    )
+    graph_input = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module", WorkflowStatusEventEnum.START, None
+    )
+
+    state = await drain(graph, graph_input, "t1")
+
+    assert visited == ["run_tools"]
+    assert tools_run == ["start_flow"]
+    # The status the agent would have written, written without it.
+    assert state.values["status"] == WorkflowStatusEnum.INPUT_REQUIRED
+    assert state.next == ()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_a_flow_command_cannot_start_a_second_flow(
+    mock_tools_executor, mock_create_agent, workflow_with_flow_command
+):
+    """One command, one flow session.
+
+    Before this the model ran on after the forced call and, having just looked the flow up, was one judgement call away
+    from starting it again -- two sessions, double the CI minutes, and duplicate comments on real issues and merge
+    requests. The scripted model here makes exactly that call, so the guarantee has to be structural: it holds because
+    the model is never asked, not because it chose well.
+    """
+    graph, _visited, tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_flow_command,
+        mock_tools_executor,
+        mock_create_agent,
+        agent_replies=[
+            AIMessage(
+                content="Let me start that flow.",
+                id="lc_run--01a0d910",
+                tool_calls=[
+                    {
+                        "name": "start_flow",
+                        "args": EXPECTED_FLOW_TOOL_ARGS,
+                        "id": "c9",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ],
+    )
+    graph_input = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module", WorkflowStatusEventEnum.START, None
+    )
+
+    await drain(graph, graph_input, "t3")
+
+    assert tools_run.count("start_flow") == 1
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_a_flow_command_for_an_unavailable_tool_still_gets_an_answer(
+    mock_tools_executor, mock_create_agent, workflow_with_flow_command
+):
+    """Shape taken from a real session: workflow 79, goal `/flow:test-flow hello you`.
+
+    Its checkpoint runs HumanMessage -> forced AIMessage -> ToolMessage("Tool start_flow not found") -> the model
+    explaining. `start_flow` was absent from the toolset, and the not-found branch of ToolsExecutor writes no chat log
+    entry, so the model's turn was the only thing the user saw. Ending the turn at the tool would have shown them
+    nothing whatsoever.
+    """
+    graph, visited, _tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_flow_command,
+        mock_tools_executor,
+        mock_create_agent,
+        tool_names=("read_file",),
+    )
+    graph_input = await workflow_with_flow_command.get_graph_input(
+        "/flow:test-flow hello you", WorkflowStatusEventEnum.START, None
+    )
+
+    state = await drain(graph, graph_input, "t6")
+
+    assert visited == ["run_tools", "agent"]
+    assert state.next == ()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_a_flow_command_whose_tool_failed_still_gets_an_answer(
+    mock_tools_executor, mock_create_agent, workflow_with_flow_command
+):
+    """A failed command is a dead end if the turn ends on it.
+
+    Found in review: a `start_flow` that timed out left the card reading "Tool call failed: ToolException" and the
+    session over, with retyping the command the only way on. Before this routing existed the model took the failure
+    and offered to start the flow itself, which the user could approve. That path is kept: only a call that did the
+    thing ends the turn.
+    """
+    graph, visited, _tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_flow_command,
+        mock_tools_executor,
+        mock_create_agent,
+        card_status=ToolStatus.FAILURE,
+    )
+    graph_input = await workflow_with_flow_command.get_graph_input(
+        "/flow:security-scan check the auth module", WorkflowStatusEventEnum.START, None
+    )
+
+    state = await drain(graph, graph_input, "t7")
+
+    assert visited == ["run_tools", "agent"]
+    assert state.next == ()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_the_turn_after_a_flow_command_still_reaches_the_agent(
+    mock_tools_executor, mock_create_agent, workflow_with_flow_command
+):
+    """Suppression lasts one turn.
+
+    The forced call is parsed once per session, so anything keyed off that would mute the model for the rest of the
+    conversation -- the user's next question would go unanswered.
+    """
+    graph, visited, _tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_flow_command, mock_tools_executor, mock_create_agent
+    )
+    await drain(
+        graph,
+        await workflow_with_flow_command.get_graph_input(
+            "/flow:sushi-flow", WorkflowStatusEventEnum.START, None
+        ),
+        "t4",
+    )
+    visited.clear()
+
+    # The follow-up carries no command envelope, as a plain message does not.
+    workflow_with_flow_command._forced_tool_call = None
+    follow_up = await workflow_with_flow_command.get_graph_input(
+        "what did that do?", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
+    )
+
+    await drain(graph, follow_up, "t4")
+
+    assert visited == ["agent"]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_compiled_graph_enters_at_the_agent_for_an_ordinary_turn(
+    mock_tools_executor, mock_create_agent, workflow_with_project
+):
+    graph, visited, _tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_project, mock_tools_executor, mock_create_agent
+    )
+    graph_input = await workflow_with_project.get_graph_input(
+        "what does this do?", WorkflowStatusEventEnum.START, None
+    )
+
+    await drain(graph, graph_input, "t2")
+
+    assert visited == ["agent"]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.ToolsExecutor")
+async def test_a_tool_the_model_chose_still_returns_to_it(
+    mock_tools_executor, mock_create_agent, workflow_with_project
+):
+    """The ordinary loop is untouched: only a client-forced call ends the turn at the tool."""
+    graph, visited, _tools_run = compile_graph_recording_visited_nodes(
+        workflow_with_project, mock_tools_executor, mock_create_agent
+    )
+
+    state = await drain(
+        graph,
+        ChatWorkflowState(
+            plan={"steps": []},
+            status=WorkflowStatusEnum.EXECUTION,
+            conversation_history={"test_prompt": model_authored_turn()[:2]},
+            ui_chat_log=[],
+            last_human_input=None,
+            goal="which flows can I run?",
+            project=None,
+            namespace=None,
+            approval=None,
+            preapproved_tools=[],
+            denied_tools=[],
+        ),
+        "t5",
+    )
+
+    assert visited == ["run_tools", "agent"]
+    assert state.next == ()

@@ -1,18 +1,27 @@
 import base64
-import fnmatch
 import html
 import json
 import re
-from typing import Annotated, Any, Dict, Iterable, Iterator, List, Optional, Type
+from typing import Annotated, Any, Dict, Iterable, List, Optional, Type
 from urllib.parse import quote, unquote
 
 import structlog
-import yaml
 from langchain_core.tools import InjectedToolArg, ToolException
 from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
+from duo_workflow_service.tools.code_review.custom_instructions import (
+    INSTRUCTIONS_FILE_PATH,
+    filter_matching_instructions,
+    format_instructions,
+    parse_instructions,
+)
+from duo_workflow_service.tools.code_review.diff_format import (
+    format_file_diffs,
+    format_renamed_files,
+    walk_diff_lines,
+)
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
 from duo_workflow_service.tools.tool_output_manager import TruncationConfig
@@ -84,6 +93,24 @@ class BuildReviewMergeRequestContextInput(ProjectResourceInput):
             'are marked since_last_review="true". Ignored in lightweight mode.'
         ),
     )
+    include_instruction_format_hint: Annotated[bool, InjectedToolArg] = Field(
+        default=True,
+        description=(
+            "If True, the custom-instructions section tells the model to prefix "
+            "comments with an 'According to custom instructions...' attribution. "
+            "Set False for flows that render the attribution themselves from "
+            "structured findings, so the model is not instructed to write it too."
+        ),
+    )
+    include_changed_files_list: Annotated[bool, InjectedToolArg] = Field(
+        default=False,
+        description=(
+            "If True, add a <changed_files> list of every changed file path "
+            "immediately before <git_diffs>, as an explicit coverage checklist "
+            "the reviewer works through as it reads the diffs. No effect in "
+            "lightweight mode, whose output is the list."
+        ),
+    )
 
 
 class BuildReviewMergeRequestContext(DuoBaseTool):
@@ -126,13 +153,24 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         lightweight = kwargs.get("lightweight", False)
         include_diff_links = kwargs.get("include_diff_links", False)
         baseline_sha = kwargs.get("baseline_sha")
+        include_instruction_format_hint = kwargs.get(
+            "include_instruction_format_hint", True
+        )
+        include_changed_files_list = kwargs.get("include_changed_files_list", False)
         context = await self._build_context(
             validation_result, only_diffs, lightweight, baseline_sha
         )
 
         if lightweight:
-            return self._format_lightweight_output(context)
-        return self._format_output(context, include_diff_links=include_diff_links)
+            return self._format_lightweight_output(
+                context, include_instruction_format_hint=include_instruction_format_hint
+            )
+        return self._format_output(
+            context,
+            include_diff_links=include_diff_links,
+            include_instruction_format_hint=include_instruction_format_hint,
+            include_changed_files_list=include_changed_files_list,
+        )
 
     async def _build_context(
         self,
@@ -231,12 +269,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
     ) -> tuple[Optional[str], set]:
         """Work out which lines arrived since the previous review.
 
-        Returns the scope state and the ``(new_path, new_line)`` pairs added since
-        ``baseline_sha``. Only ``delta`` carries pairs; every other state returns an
+        Returns the scope state and the `(new_path, new_line)` pairs added since
+        `baseline_sha`. Only `delta` carries pairs; every other state returns an
         empty set and means the whole diff still needs a full-priority review.
 
-        Both diffs are taken against the current head, so ``new_line`` means the same
-        thing in each. ``old_line`` does not, because the bases differ.
+        Both diffs are taken against the current head, so `new_line` means the same
+        thing in each. `old_line` does not, because the bases differ.
         """
         if not baseline_sha:
             return None, set()
@@ -317,7 +355,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
     def _has_collapsed_diff(diffs: List[Dict[str, Any]]) -> bool:
         """Report whether any file came back without its patch.
 
-        GitLab returns an empty ``diff`` when a patch exceeds the size limit. A pure
+        GitLab returns an empty `diff` when a patch exceeds the size limit. A pure
         rename and a deletion are patchless by design and have no added line to lose.
         A new file is all added lines, so a patchless one is a dropped patch.
 
@@ -339,9 +377,9 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         Failure is ordinary here: a force push orphans the baseline and 404s, a
         private fork 403s. Neither deserves an error-level log, so this avoids
-        ``_process_http_response``, which logs every non-2xx as an error.
+        `_process_http_response`, which logs every non-2xx as an error.
 
-        ``straight=true`` compares the two commits directly. The merge base default
+        `straight=true` compares the two commits directly. The merge base default
         would, after a rebase, fall back to the original fork point and return the
         whole merge request, marking every line as new.
         """
@@ -372,12 +410,12 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             return None
 
     def _added_line_keys(self, pairs: Iterable[tuple]) -> set:
-        """Collect ``(path, new_line)`` for every added line in ``(path, raw_diff)`` pairs."""
+        """Collect `(path, new_line)` for every added line in `(path, raw_diff)` pairs."""
         return {
             (path, line_new)
             for path, raw_diff in pairs
             if path and raw_diff
-            for kind, _, line_new, _ in self._walk_diff_lines(raw_diff)
+            for kind, _, line_new, _ in walk_diff_lines(raw_diff)
             if kind == "added"
         }
 
@@ -508,8 +546,8 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             project_id, branch
         )
 
-        all_instructions = self._parse_custom_instructions(instructions_content)
-        return self._filter_matching_instructions(all_instructions, diff_file_paths)
+        all_instructions = parse_instructions(instructions_content)
+        return filter_matching_instructions(all_instructions, diff_file_paths)
 
     async def _fetch_all_custom_instructions(
         self, project_id: int, merge_request_iid: int
@@ -543,80 +581,19 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         """Fetch custom instructions file from repository."""
         try:
             return await self._fetch_file_content(
-                project_id, branch, ".gitlab/duo/mr-review-instructions.yaml"
+                project_id, branch, INSTRUCTIONS_FILE_PATH
             )
         except Exception:
             return None
 
-    def _parse_custom_instructions(
-        self, content: Optional[str]
-    ) -> List[Dict[str, Any]]:
-        """Parse YAML custom instructions content."""
-        if not content:
-            return []
-
-        try:
-            data = yaml.safe_load(content)
-            if not isinstance(data, dict) or "instructions" not in data:
-                return []
-
-            return [
-                self._parse_instruction_item(item)
-                for item in data["instructions"]
-                if isinstance(item, dict) and self._is_valid_instruction(item)
-            ]
-        except Exception:
-            return []
-
-    def _is_valid_instruction(self, item: Dict[str, Any]) -> bool:
-        """Check if instruction item has all required fields."""
-        return bool(
-            item.get("name") and item.get("instructions") and item.get("fileFilters")
-        )
-
-    def _parse_instruction_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse a single instruction item into standardized format."""
-        file_filters = item.get("fileFilters", [])
-
-        return {
-            "name": item.get("name"),
-            "instructions": item.get("instructions"),
-            "include_patterns": [f for f in file_filters if not f.startswith("!")],
-            "exclude_patterns": [f[1:] for f in file_filters if f.startswith("!")],
-        }
-
-    def _filter_matching_instructions(
-        self, all_instructions: List[Dict], diff_file_paths: List[str]
-    ) -> List[Dict]:
-        """Filter instructions to only include those matching at least one diff file."""
-        if not all_instructions:
-            return []
-
-        return [
-            instruction
-            for instruction in all_instructions
-            if any(self._matches_pattern(path, instruction) for path in diff_file_paths)
-        ]
-
-    def _matches_pattern(self, path: str, instruction: Dict) -> bool:
-        """Check if a file path matches the instruction's include/exclude patterns."""
-        includes = instruction.get("include_patterns", [])
-        excludes = instruction.get("exclude_patterns", [])
-
-        # With include patterns: match only files matching includes (minus exclusions)
-        # Without include patterns: match all files (minus exclusions)
-        matches_include = not includes or any(
-            fnmatch.fnmatch(path, pattern) for pattern in includes
-        )
-        matches_exclude = any(fnmatch.fnmatch(path, pattern) for pattern in excludes)
-
-        return matches_include and not matches_exclude
-
-    def _format_lightweight_output(self, context: dict) -> str:
+    def _format_lightweight_output(
+        self, context: dict, include_instruction_format_hint: bool = True
+    ) -> str:
         """Format lightweight output with only file paths and custom instructions."""
         file_paths = "\n".join(f"- {path}" for path in context["file_paths"])
-        custom_instructions_section = self._format_custom_instructions(
-            context.get("custom_instructions", [])
+        custom_instructions_section = format_instructions(
+            context.get("custom_instructions", []),
+            include_format_hint=include_instruction_format_hint,
         )
 
         output = f"<changed_files>\n{file_paths}\n</changed_files>"
@@ -626,21 +603,28 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 
         return output
 
-    def _format_output(self, context: dict, include_diff_links: bool = False) -> str:
+    def _format_output(
+        self,
+        context: dict,
+        include_diff_links: bool = False,
+        include_instruction_format_hint: bool = True,
+        include_changed_files_list: bool = False,
+    ) -> str:
         """Format output with escaped user content."""
 
         # Escape user-controlled fields to prevent HTML/XML injection
         title = html.escape(context["mr_data"].get("title") or "")
         description = html.escape(context["mr_data"].get("description") or "")
 
-        custom_instructions_section = self._format_custom_instructions(
-            context.get("custom_instructions", [])
+        custom_instructions_section = format_instructions(
+            context.get("custom_instructions", []),
+            include_format_hint=include_instruction_format_hint,
         )
 
-        file_diffs_section = self._format_diffs(
+        file_diffs_section = format_file_diffs(
             context["diffs_and_paths"], context.get("changed_lines")
         )
-        renamed_files_section = self._format_renamed_files(context["renamed_files"])
+        renamed_files_section = format_renamed_files(context["renamed_files"])
         diff_section = "\n\n".join(
             list(filter(None, [file_diffs_section, renamed_files_section]))
         )
@@ -654,6 +638,19 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         )
 
         review_scope_section = self._format_review_scope(context.get("review_scope"))
+
+        # Pure renames have no diff, so diffs_and_paths misses them; dict.fromkeys keeps
+        # the order and dedupes a rename that also changed content.
+        changed_paths = dict.fromkeys(
+            [*context["diffs_and_paths"], *context["renamed_files"]]
+        )
+        changed_files_section = (
+            "<changed_files>\n"
+            + "\n".join(f"- {path}" for path in changed_paths)
+            + "\n</changed_files>"
+            if include_changed_files_list
+            else ""
+        )
 
         return f"""Here are the merge request details for you to review:
 
@@ -671,6 +668,8 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
 {diff_links_section}
 
 {custom_instructions_section}
+
+{changed_files_section}
 
 <git_diffs>
 {diff_section}
@@ -695,171 +694,6 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         )
 
         return f'<review_scope state="{review_scope}">\n{guidance}\n</review_scope>'
-
-    def _format_custom_instructions(
-        self, custom_instructions: List[Dict[str, Any]]
-    ) -> str:
-        """Format custom instructions section."""
-        if not custom_instructions:
-            return ""
-
-        instruction_items = []
-        for instruction in custom_instructions:
-            include_patterns = ", ".join(instruction["include_patterns"]) or "all files"
-            exclude_patterns = ", ".join(instruction["exclude_patterns"]) or "none"
-
-            instruction_items.append(
-                f'For files matching "{include_patterns}" '
-                f"(excluding: {exclude_patterns}) - {instruction['name']}:\n"
-                f"{instruction['instructions'].strip()}\n"
-            )
-
-        instructions_text = "\n".join(instruction_items)
-
-        return f"""<custom_instructions>
-Apply these additional review instructions to matching files:
-
-{instructions_text}
-IMPORTANT: Only apply each custom instruction to files that match its specified pattern. If a file doesn't match any custom instruction pattern, only apply the standard review criteria.
-
-When commenting based on custom instructions, format as:
-"According to custom instructions in '[instruction_name]' ([brief paraphrase of relevant instruction]): [your specific comment about the code]"
-
-Example: "According to custom instructions in 'Security Best Practices' (validate all API input): This endpoint should validate input parameters to prevent SQL injection."
-
-This formatting is only required for custom instruction comments. Regular review comments based on standard review criteria should NOT include this prefix.
-</custom_instructions>"""
-
-    def _format_diffs(
-        self, diffs_and_paths: Dict[str, str], changed_lines: Optional[set] = None
-    ) -> str:
-        """Format diffs section with structured line format."""
-
-        formatted_diffs = []
-        for file_path, diff_content in diffs_and_paths.items():
-            formatted_lines = self._parse_and_format_diff(
-                diff_content, file_path, changed_lines
-            )
-            formatted_diffs.append(
-                f'<file_diff filename="{file_path}">\n{formatted_lines}\n</file_diff>'
-            )
-
-        return "\n\n".join(formatted_diffs)
-
-    def _format_renamed_files(self, renamed_files: Dict[str, str]) -> str:
-        """Format diffs section with structured line format."""
-        if not renamed_files:
-            return ""
-
-        formatted_renamed_files = ["<renamed_files>"]
-        for new_path, old_path in renamed_files.items():
-            formatted_renamed_files.append(
-                f'<file old_path="{old_path}" new_path="{new_path}"></file>'
-            )
-        formatted_renamed_files += ["</renamed_files>"]
-
-        return "\n".join(formatted_renamed_files)
-
-    @staticmethod
-    def _walk_diff_lines(raw_diff: str) -> Iterator[tuple[str, int, int, str]]:
-        """Walk a unified diff, yielding ``(kind, old_line, new_line, text)`` per line.
-
-        ``kind`` is one of ``chunk_header``, ``nonewline``, ``added``, ``deleted`` or
-        ``context``. The line numbers belong to the yielded line, not the running
-        counters. File metadata lines are skipped.
-
-        Metadata is only skipped before the first hunk header. Inside a hunk a ``+++``
-        is an added line whose own text starts with ``++``, and a ``---`` is a deleted
-        line starting ``--``. Skipping those would drop the line and leave every later
-        counter in the hunk one short, which misplaces the rendered line number and
-        stops the incremental-diff collector matching the same line across two diffs.
-        """
-        line_old = 1
-        line_new = 1
-        in_hunk = False
-
-        for line in raw_diff.split("\n"):
-            if not line:
-                continue
-
-            if line.startswith("@@"):
-                # Parse chunk header
-                match = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
-                if match:
-                    line_old = int(match.group(1))
-                    line_new = int(match.group(2))
-                    in_hunk = True
-                    yield "chunk_header", line_old, line_new, line
-                continue
-
-            # A new file section closes the hunk that came before it, so its own
-            # ``---``/``+++`` headers are metadata again.
-            if line.startswith("diff --git"):
-                in_hunk = False
-                continue
-
-            if not in_hunk and (line.startswith("+++") or line.startswith("---")):
-                continue
-
-            # Handle "No newline at end of file"
-            if line.startswith("\\"):
-                yield "nonewline", line_old, line_new, line
-                continue
-
-            # Determine line type and extract text without prefix
-            if line.startswith("+"):
-                yield "added", line_old, line_new, line[1:]
-                line_new += 1
-            elif line.startswith("-"):
-                yield "deleted", line_old, line_new, line[1:]
-                line_old += 1
-            elif line.startswith(" "):
-                yield "context", line_old, line_new, line[1:]
-                line_old += 1
-                line_new += 1
-            else:
-                # Unexpected line format, treat as context
-                yield "context", line_old, line_new, line
-                line_old += 1
-                line_new += 1
-
-    def _parse_and_format_diff(
-        self,
-        raw_diff: str,
-        file_path: Optional[str] = None,
-        changed_lines: Optional[set] = None,
-    ) -> str:
-        """Parse raw diff and format each line with type and line numbers.
-
-        Added lines listed in ``changed_lines`` are marked with
-        ``since_last_review="true"``.
-        """
-        if not raw_diff.strip() or "Binary files" in raw_diff:
-            return ""
-
-        lines = []
-
-        for kind, line_old, line_new, text in self._walk_diff_lines(raw_diff):
-            if kind == "chunk_header":
-                lines.append(f"<chunk_header>{text}</chunk_header>")
-                continue
-
-            # An added line has no old number and a deleted line has no new one.
-            # A context or nonewline line carries both.
-            old = "" if kind == "added" else line_old
-            new = "" if kind == "deleted" else line_new
-            marked = (
-                kind == "added"
-                and changed_lines
-                and (file_path, line_new) in changed_lines
-            )
-            marker = ' since_last_review="true"' if marked else ""
-
-            lines.append(
-                f'<line type="{kind}" old_line="{old}" new_line="{new}"{marker}>{text}</line>'
-            )
-
-        return "\n".join(lines)
 
     def _format_original_files(self, files_content: Dict[str, str]) -> str:
         """Format original files section."""
@@ -887,12 +721,12 @@ This formatting is only required for custom instruction comments. Regular review
         """Build a diff_links block mapping each changed file to a blob permalink.
 
         Links are pinned to the immutable commit that was reviewed
-        (``diff_refs.head_sha``), so they keep pointing at the reviewed version
+        (`diff_refs.head_sha`), so they keep pointing at the reviewed version
         even after new commits are pushed to the merge request:
 
             {project_web_url}/-/blob/{head_sha}/{file_path}
 
-        Downstream prompts append ``#L{line}`` to anchor a specific line. Using a
+        Downstream prompts append `#L{line}` to anchor a specific line. Using a
         blob permalink built from data already returned by the API avoids
         replicating the monolith's internal diff-anchor hashing, which would
         couple this tool to monolith implementation details.

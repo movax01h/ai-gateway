@@ -4,16 +4,21 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
 import pytest
+from google.protobuf import struct_pb2
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import StateGraph
 from langgraph.types import Command
+from pydantic import Field
 
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     EndComponent,
+)
+from duo_workflow_service.agent_platform.experimental.components.for_each import (
+    ForEachComponent,
 )
 from duo_workflow_service.agent_platform.experimental.flows.base import (
     Flow,
@@ -36,9 +41,15 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.flow_request import RegistryFlowRequest
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
+from duo_workflow_service.workflows.registry import (
+    _load_flow_from_inline_config,
+    resolve_flow,
+)
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 
 
 @pytest.mark.usefixtures("mock_duo_workflow_service_container")
@@ -391,6 +402,62 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                     or input.resume.get("message") is None  # type: ignore[union-attr]
                 )
 
+            if expected_event_type == FlowEventType.APPROVE:
+                # A human approve with no client-sent source defaults to
+                # user_explicit so the executed calls stay attributed.
+                assert input.resume["approval_source"] == "user_explicit"  # type: ignore[index]
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tools_registry")
+    async def test_resume_command_carries_client_approval_source_and_policy_ref(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """An APPROVE that carries a client-sent source and policy_ref forwards both on the resume FlowEvent, so the
+        approved calls' audit events are attributed with the client's provenance rather than the user_explicit
+        default."""
+        approval = contract_pb2.Approval(
+            approval=contract_pb2.Approval.Approved(
+                approval_source=contract_pb2.Approval.APPROVAL_SOURCE_AUTO_MODE,
+                policy_ref=contract_pb2.Approval.PolicyRef(
+                    origin="gitlab_default",
+                    file=".gitlab/duo/pretooluse.rego",
+                ),
+            )
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-client-source",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+                approval=approval,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run("test goal")
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.resume["event_type"] == FlowEventType.APPROVE  # type: ignore[index]
+            assert input.resume["approval_source"] == "auto_mode"  # type: ignore[index]
+            assert input.resume["policy_ref"] == {  # type: ignore[index]
+                "origin": "gitlab_default",
+                "file": ".gitlab/duo/pretooluse.rego",
+            }
+
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_checkpointer", "mock_tools_registry")
     async def test_graph_input_with_additional_context(
@@ -460,7 +527,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             self.mock_components(["AgentComponent", "AnotherComponent"]),
             patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
             patch(
-                "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
             ) as mock_log_exception,
         ):
             # Create flow instance
@@ -687,7 +754,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             self.mock_components(["AgentComponent"]),
             patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
             patch(
-                "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
             ) as mock_log_exception,
         ):
             flow = Flow(
@@ -843,6 +910,93 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         mock_tools_registry.toolset.assert_called_once_with(
             ["read_file", mcp_tool_name], tool_options={}
         )
+
+    @contextmanager
+    def _run_patches(self):
+        prefix = "duo_workflow_service.workflows.abstract_workflow"
+        checkpointer = Mock(initial_status_event=WorkflowStatusEventEnum.START)
+        checkpointer.aget_tuple = AsyncMock(return_value=None)
+        with (
+            patch(
+                "duo_workflow_service.agent_platform.experimental.flows.base.load_component_class",
+                return_value=MagicMock(return_value=self.mock_component("c")),
+            ),
+            patch("duo_workflow_service.agent_platform.experimental.flows.base.Router"),
+            patch(f"{prefix}.GitLabWorkflow") as gitlab_workflow,
+            patch(
+                f"{prefix}.UserInterface",
+                return_value=MagicMock(spec=UserInterface, ui_chat_log=[]),
+            ) as user_interface,
+            patch(f"{prefix}.AuditEventCollector") as audit_collector,
+        ):
+            gitlab_workflow.return_value.__aenter__.return_value = checkpointer
+            audit_collector.return_value.start = AsyncMock()
+            audit_collector.return_value.close = AsyncMock()
+            yield gitlab_workflow, user_interface, audit_collector
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_state_graph", "mock_tools_registry")
+    async def test_bl_security_from_the_registry_runs_metadata_only(
+        self, mock_flow_metadata, user, flow_type
+    ):
+        """bl_security resolved as the service resolves it is metadata-only; checkpoints stay complete."""
+        resolved = resolve_flow(
+            RegistryFlowRequest(
+                config_id="bl_security", schema_version="experimental", version="1.0.0"
+            )
+        )
+        with self._run_patches() as (gitlab_workflow, user_interface, audit_collector):
+            flow = resolved.factory(
+                workflow_id="wf-bl",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                audit_event_enabled=True,
+            )
+            await flow.run("scan")
+
+        assert flow._registry_flow_id() == "bl_security"
+        assert flow._is_metadata_only() is True
+        assert flow._checkpoint_durability() == "sync"
+        for cls in (user_interface, audit_collector):
+            assert cls.call_args.kwargs["metadata_only"] is True
+        assert "metadata_only" not in gitlab_workflow.call_args.kwargs
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_state_graph", "mock_tools_registry")
+    async def test_an_inline_copy_of_bl_security_is_not_metadata_only(
+        self, mock_flow_metadata, user, flow_type
+    ):
+        """An inline config cannot claim a registry id, even when it names itself bl_security."""
+        struct = struct_pb2.Struct()
+        struct.update(
+            {
+                "version": "experimental",
+                "environment": "ambient",
+                "name": "bl_security",
+                "config_id": "bl_security",
+                "_config_id": "bl_security",
+                "flow": {"entry_point": "c"},
+                "components": [{"name": "c", "type": "AgentComponent"}],
+                "routers": [{"from": "c", "to": "end"}],
+            }
+        )
+        factory = _load_flow_from_inline_config(struct, "experimental")
+        with self._run_patches() as (_, user_interface, audit_collector):
+            flow = factory(
+                workflow_id="wf-inline",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                audit_event_enabled=True,
+            )
+            await flow.run("scan")
+
+        assert flow._registry_flow_id() is None
+        assert flow._is_metadata_only() is False
+        assert flow._checkpoint_durability() is None
+        for cls in (user_interface, audit_collector):
+            assert cls.call_args.kwargs["metadata_only"] is False
 
     def test_process_additional_context_empty_list(self, flow_instance):
         """Test _process_additional_context with empty list."""
@@ -1146,7 +1300,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         config = {"configurable": {"thread_id": "test-workflow-123"}}
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ):
             await flow_instance._handle_workflow_failure(
                 RuntimeError("boom"), graph, config
@@ -1172,7 +1326,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         graph = AsyncMock()
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ):
             await flow_instance._handle_workflow_failure(
                 RuntimeError("secret internal detail"), graph, {}
@@ -1187,7 +1341,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     async def test_handle_workflow_failure_no_compiled_graph(self, flow_instance):
         """When compiled_graph is None, only log_exception runs."""
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ):
             await flow_instance._handle_workflow_failure(
                 RuntimeError("early failure"), None, {}
@@ -1206,7 +1360,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         flow_instance.log = MagicMock()
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ):
             await flow_instance._handle_workflow_failure(
                 RuntimeError("boom"), graph, {}
@@ -1234,7 +1388,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ) as mock_log_exception:
             await flow_instance._handle_workflow_failure(error, graph, {})
 
@@ -1265,7 +1419,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         error = NotifiableAgentException("Safe message only")
 
         with patch(
-            "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
         ) as mock_log_exception:
             await flow_instance._handle_workflow_failure(error, graph, {})
 
@@ -1288,7 +1442,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         with (
             patch(
-                "duo_workflow_service.agent_platform.experimental.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.experimental.flows.base.log_workflow_failure"
             ),
             pytest.raises(TraceableException) as exc_info,
         ):
@@ -1306,3 +1460,116 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             == "The workflow reached its maximum step limit and could not complete. "
             "Please try again with a more focused goal, or break the task into smaller steps."
         )
+
+    class _SupervisorLike(EndComponent):
+        """A component that consumed subagents while it was being built."""
+
+        subagent_components: dict = Field(default_factory=dict)
+
+    @pytest.fixture(name="dap_for_each_flag")
+    def dap_for_each_flag_fixture(self):
+        """Enable ``dap_for_each`` for one test, then restore the previous context.
+
+        Additive, so a context an outer fixture already populated survives.
+        """
+        token = current_feature_flag_context.set(
+            current_feature_flag_context.get() | {FeatureFlag.DAP_FOR_EACH.value}
+        )
+        yield
+        current_feature_flag_context.reset(token)
+
+    @pytest.fixture(name="fannable")
+    def fannable_fixture(self, user, flow_type):
+        return EndComponent(
+            name="review_one", flow_id="flow-1", flow_type=flow_type, user=user
+        )
+
+    @staticmethod
+    def instantiate(flow_instance, component, comp_params):
+        """Build one component through ``Flow`` and return the dict it landed in."""
+        components: dict[str, BaseComponent] = {}
+        comp_class = MagicMock(return_value=component)
+        with patch(
+            "duo_workflow_service.agent_platform.experimental.flows.base.load_component_class",
+            return_value=comp_class,
+        ):
+            flow_instance._instantiate_component(
+                {"name": "review_one", "type": "SomeComponent"},
+                {"name": "review_one", **comp_params},
+                components,
+            )
+        return components, comp_class
+
+    FOR_EACH = {"items": "context:discover.files", "as": "context:item"}
+
+    @pytest.mark.usefixtures("dap_for_each_flag")
+    def test_for_each_is_not_passed_to_the_component_it_wraps(
+        self, flow_instance, fannable
+    ):
+        _, comp_class = self.instantiate(
+            flow_instance, fannable, {"for_each": self.FOR_EACH}
+        )
+
+        assert "for_each" not in comp_class.call_args.kwargs
+
+    @pytest.mark.usefixtures("dap_for_each_flag")
+    def test_a_component_declaring_for_each_is_replaced_by_the_wrapper(
+        self, flow_instance, fannable
+    ):
+        components, _ = self.instantiate(
+            flow_instance, fannable, {"for_each": self.FOR_EACH}
+        )
+
+        wrapper = components["review_one"]
+        assert isinstance(wrapper, ForEachComponent)
+        assert wrapper.component is fannable
+        assert wrapper.for_each.items == "context:discover.files"
+
+    def test_for_each_is_ignored_while_the_feature_flag_is_off(
+        self, flow_instance, fannable
+    ):
+        with patch.object(flow_instance, "log") as log:
+            components, _ = self.instantiate(
+                flow_instance, fannable, {"for_each": self.FOR_EACH}
+            )
+
+        assert components["review_one"] is fannable
+        assert log.warning.call_args.kwargs == {
+            "component": "review_one",
+            "feature_flag": "dap_for_each",
+        }
+
+    @pytest.mark.usefixtures("dap_for_each_flag")
+    def test_a_component_without_for_each_is_left_alone(self, flow_instance, fannable):
+        components, _ = self.instantiate(flow_instance, fannable, {})
+
+        assert components["review_one"] is fannable
+
+    @pytest.mark.usefixtures("dap_for_each_flag")
+    def test_wrapping_still_lets_flow_claim_the_subagents_the_component_consumed(
+        self, flow_instance, user, flow_type
+    ):
+        """The wrapper hides ``subagent_components``, so it is read first."""
+        supervisor = self._SupervisorLike(
+            name="review_one",
+            flow_id="flow-1",
+            flow_type=flow_type,
+            user=user,
+            subagent_components={"developer": MagicMock(spec=BaseComponent)},
+        )
+        components: dict[str, BaseComponent] = {
+            "developer": MagicMock(spec=BaseComponent)
+        }
+        comp_class = MagicMock(return_value=supervisor)
+        with patch(
+            "duo_workflow_service.agent_platform.experimental.flows.base.load_component_class",
+            return_value=comp_class,
+        ):
+            flow_instance._instantiate_component(
+                {"name": "review_one", "type": "SomeComponent"},
+                {"name": "review_one", "for_each": self.FOR_EACH},
+                components,
+            )
+
+        assert "developer" not in components
+        assert isinstance(components["review_one"], ForEachComponent)

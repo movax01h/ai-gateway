@@ -285,6 +285,33 @@ class TestVertexAIDumpResults:
         assert dumped[0]["source_title"] == "Page 1"
         assert dumped[1]["source_title"] == "Page 2"
 
+    def test_dump_results_handles_missing_title(
+        self, mock_search_service_client, vertex_ai_search_factory
+    ):
+        """Test that results indexed without a title don't fail."""
+        vertex_search = vertex_ai_search_factory(client=mock_search_service_client)
+
+        results = [
+            SearchResult(
+                id="1",
+                content="Content without a title",
+                metadata={
+                    "md5sum": "page1",
+                    "source_url": "https://docs.gitlab.com/ee/page1",
+                },
+            ),
+        ]
+
+        dumped = vertex_search.dump_results(results)
+
+        assert dumped == [
+            {
+                "relevant_snippets": ["Content without a title"],
+                "source_url": "https://docs.gitlab.com/ee/page1",
+                "source_title": None,
+            }
+        ]
+
     def test_dump_results_empty_list(
         self, mock_search_service_client, vertex_ai_search_factory
     ):

@@ -3,8 +3,10 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 import structlog
 from gitlab_cloud_connector import CloudConnectorUser
+from pydantic import SecretStr
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
 
 from lib.billing_events.context import BillingEventContext
@@ -14,6 +16,7 @@ from lib.internal_events.context import (
     InternalEventAdditionalProperties,
     current_event_context,
 )
+from lib.snowplow import set_bearer_token
 from lib.usage_quota.client import should_skip_usage_quota_for_user
 
 __all__ = ["BillingEvent", "BillingEventsClient"]
@@ -40,6 +43,7 @@ class BillingEventsClient:
         batch_size: int,
         thread_count: int,
         internal_event_client: InternalEventsClient,
+        api_key: Optional[SecretStr] = None,
     ) -> None:
         self._logger = structlog.stdlib.get_logger("billing_events_client")
         self.enabled = enabled
@@ -53,16 +57,20 @@ class BillingEventsClient:
             namespace=namespace,
             batch_size=batch_size,
             thread_count=thread_count,
+            api_key_configured=bool(api_key),
         )
 
         if enabled:
             self._logger.info("Creating AsyncEmitter and Tracker for billing events")
+            self._session = requests.Session()
+            set_bearer_token(self._session, api_key)
             self._emitter = AsyncEmitter(
                 batch_size=batch_size,
                 thread_count=thread_count,
                 endpoint=endpoint,
                 on_success=self._on_success,
                 on_failure=self._on_failure,
+                session=self._session,
             )
 
             self.snowplow_tracker = Tracker(
@@ -102,6 +110,8 @@ class BillingEventsClient:
                 queue_size + buffer_size if queue_size >= 0 and buffer_size >= 0 else -1
             ),
         )
+        self.snowplow_tracker.flush(is_async=True)
+        self._session.close()
 
     def _on_success(self, sent_events: List[Dict[str, Any]]) -> None:
         self._logger.info(
@@ -147,7 +157,7 @@ class BillingEventsClient:
         unit_of_measure: str = "tokens",
         quantity: float = 1.0,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    ) -> bool:
         """Send billing event to Data Insights Platform.
 
         Args:
@@ -159,16 +169,21 @@ class BillingEventsClient:
                 'request'). Defaults to 'tokens'.
             quantity: Quantity of usage for this record. Must be greater than 0. Defaults to 1.0.
             metadata: Optional dictionary containing additional key-value pairs for the billing event context.
+
+        Returns:
+            True if the event was handed to the Snowplow tracker, False if it was skipped (billing events disabled or
+            invalid quantity) or the Snowplow call failed. A failure in the follow-up internal analytics event does not
+            change the result, because the billing event has already been sent by then.
         """
         if not self.enabled:
             self._logger.info("Billing events disabled")
-            return
+            return False
 
         self._logger.info("Tracking billing event", event_type=event.value)
 
         if quantity <= 0:
             self._logger.warning("Invalid quantity", quantity=quantity)
-            return
+            return False
 
         internal_context: EventContext = current_event_context.get()
 
@@ -240,7 +255,16 @@ class BillingEventsClient:
                 "Successfully called snowplow_tracker.track()",
                 event_id=event_id,
             )
+        except Exception as e:
+            self._logger.error(
+                "Failed to send billing event",
+                error=str(e),
+            )
+            return False
 
+        # The billing event has been sent at this point. The internal analytics event is best-effort and must not
+        # affect the result, otherwise a caller retrying on False could bill twice.
+        try:
             additional_properties = InternalEventAdditionalProperties(
                 label=event_id,
                 property=event.value,
@@ -257,6 +281,9 @@ class BillingEventsClient:
             )
         except Exception as e:
             self._logger.error(
-                "Failed to send billing event",
+                "Failed to send internal event for billing event",
+                event_id=event_id,
                 error=str(e),
             )
+
+        return True

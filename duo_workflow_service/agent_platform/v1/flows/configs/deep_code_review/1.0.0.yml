@@ -1,0 +1,176 @@
+# Deep Duo Code Review: one investigative reviewer agent followed by a
+# deterministic publish step. No finding passes through a model after the
+# reviewer writes it; the confidence gate is the only (counted) drop.
+# Epic: https://gitlab.com/groups/gitlab-org/-/work_items/21524
+
+version: "v1"
+
+environment: ambient
+
+components:
+  # Step 1: Fetch title, description, custom instructions and diffs in one call.
+  - name: "fetch_mr_data"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      # The reviewer reads files on demand; preloaded contents were ~68% of the
+      # payload, re-billed every cycle, with no recall gain.
+      - from: "true"
+        as: "only_diffs"
+        literal: true
+      # The publish step renders the custom-instruction attribution itself.
+      - from: "false"
+        as: "include_instruction_format_hint"
+        literal: true
+      # The reviewer's coverage checklist.
+      - from: "true"
+        as: "include_changed_files_list"
+        literal: true
+      # Marks the lines added since the previous review.
+      - from: "context:inputs.code_review_context.last_reviewed_head_sha"
+        as: "baseline_sha"
+        optional: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 2: The inline threads this bot started on earlier reviews, with any human
+  # replies. Skipped by the router on a first review.
+  - name: "fetch_existing_discussions"
+    type: DeterministicStepComponent
+    tool_name: "list_mr_discussions"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "context:inputs.code_review_context.duo_code_review_bot_name"
+        as: "only_from_author"
+        optional: true
+      - from: "true"
+        as: "only_resolvable"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 3: The reviewer, with read-only repository tools.
+  - name: "review"
+    type: AgentComponent
+    prompt_id: "deep_code_review_reviewer"
+    prompt_version: "^1.0.0"
+    response_schema_id: "code_review_findings"
+    response_schema_version: "^1.0.0"
+    max_cycles: 25
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "mr_data"
+      - from: "context:fetch_existing_discussions.tool_responses"
+        as: "existing_discussions"
+        optional: true
+      - from: "context:inputs.code_review_context.duo_code_review_bot_name"
+        as: "duo_code_review_bot_name"
+        optional: true
+      - from: "context:inputs.code_review_context.last_reviewed_head_sha"
+        as: "last_reviewed_head_sha"
+        optional: true
+      # The publish step reuses this anchor, so the summary rule and the gate share one threshold.
+      - from: &min_confidence "4"
+        as: "min_confidence"
+        literal: true
+    toolset:
+      # The workload checks the repository out at this merge request's head, so
+      # these read local disk instead of a round trip per file.
+      - "grep"
+      - "read_file"
+      - "read_files"
+      - "find_files"
+      - "list_dir"
+      # The checkout holds one revision, so other refs and history stay on the API.
+      - "get_repository_file"
+      - "list_commits"
+      - "get_commit_diff"
+      # Cross-repo reach: the checkout is this project only, and this covers what isn't.
+      - "gitlab_api_get"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  # Step 4: Publish in pure code from the reviewer's schema-validated answer.
+  # `findings` is required so a missing answer fails the flow instead of posting
+  # a clean review. min_confidence 4 comes from the benchmark sweep (gitlab#618672).
+  - name: "publish_review"
+    type: DeterministicStepComponent
+    tool_name: "post_duo_code_review_findings"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "context:review.final_answer.findings"
+        as: "findings"
+      - from: "context:review.final_answer.summary"
+        as: "summary"
+        optional: true
+      - from: "context:review.final_answer.previous_findings"
+        as: "previous_findings"
+        optional: true
+      - from: "context:fetch_existing_discussions.tool_responses"
+        as: "existing_discussions"
+        optional: true
+      - from: *min_confidence
+        as: "min_confidence"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "fetch_mr_data"
+    condition:
+      # Absent exactly when the bot has never published a comment on this merge
+      # request, so there are no threads to fetch.
+      input:
+        from: "context:inputs.code_review_context.last_reviewed_head_sha"
+        optional: true
+      routes:
+        "None": "review"
+        "default_route": "fetch_existing_discussions"
+  - from: "fetch_existing_discussions"
+    to: "review"
+  - from: "review"
+    to: "publish_review"
+  - from: "publish_review"
+    to: "end"
+
+flow:
+  entry_point: "fetch_mr_data"
+  inputs:
+    # Sent by the additional_context_resolver on the code_review/v1 catalog entry.
+    - category: code_review_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        duo_code_review_bot_name:
+          type: string
+          description: Username of the bot that authors Duo Code Review comments
+          optional: true
+        last_reviewed_head_sha:
+          type: string
+          description: Head commit SHA of the merge request at the previous review
+          optional: true
+    # Built by Rails from the merge request the session is linked to.
+    - category: agent_platform_resource_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        merge_request_id:
+          type: string
+          description: IID of the merge request under review.

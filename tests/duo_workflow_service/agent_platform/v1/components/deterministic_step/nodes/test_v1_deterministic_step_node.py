@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools import BaseTool
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
@@ -16,7 +16,8 @@ from duo_workflow_service.agent_platform.v1.components.deterministic_step.ui_log
     UILogEventsDeterministicStep,
 )
 from duo_workflow_service.agent_platform.v1.state import FlowStateKeys, IOKey
-from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.events import GLReportingEventContext
+from lib.internal_events.event_enum import EventEnum
 
 
 @pytest.fixture(name="mock_prompt_security")
@@ -109,7 +110,7 @@ def flow_id_fixture():
 @pytest.fixture(name="flow_type")
 def flow_type_fixture():
     """Fixture for flow type."""
-    return CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    return GLReportingEventContext.from_workflow_definition("software_development")
 
 
 @pytest.fixture(name="inputs")
@@ -173,6 +174,42 @@ def deterministic_step_node_fixture(
 
 class TestDeterministicStepNode:
     """Test suite for DeterministicStepNode class focusing on the run method."""
+
+    @pytest.mark.asyncio
+    async def test_an_image_result_is_stored_as_text_not_blocks(
+        self,
+        deterministic_step_node,
+        workflow_state,
+        mock_tool,
+        mock_get_vars_from_state,
+        mock_tool_monitoring,
+        mock_prompt_security,
+    ):
+        """A block list carrying an image is rendered to a string before it is stored in flow state."""
+        payload = "QUFBQQ==" * 512
+        mock_tool.ainvoke.return_value = [
+            {
+                "type": "text",
+                "text": "Read image file: ./shot.png (image/png, 3 KB). The image follows.",
+            },
+            {"type": "image", "base64": payload, "mime_type": "image/png"},
+        ]
+        mock_prompt_security.side_effect = lambda **kwargs: kwargs["response"]
+
+        result = await deterministic_step_node.run(workflow_state)
+
+        # The scan sees the rendered text, so no image reaches HiddenLayer.
+        scanned = mock_prompt_security.call_args.kwargs["response"]
+        assert isinstance(scanned, str)
+        assert payload not in scanned
+
+        stored = result[FlowStateKeys.CONTEXT]["responses"]
+        assert stored == (
+            "Read image file: ./shot.png (image/png, 3 KB). The image follows.\n"
+            "[image/png omitted from history]"
+        )
+        assert payload not in str(result)
+        assert result[FlowStateKeys.CONTEXT]["status"] == "success"
 
     @pytest.mark.asyncio
     async def test_run_success(

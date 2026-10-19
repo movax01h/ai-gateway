@@ -64,7 +64,6 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Iterator, NamedTuple, Optional, override
 
 import structlog
-from jinja2 import Environment
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
@@ -78,6 +77,8 @@ from langchain_core.outputs import (
     ChatResult,
     LLMResult,
 )
+
+from ai_gateway.prompts.base import PromptSandboxedEnvironment
 
 log = structlog.stdlib.get_logger("agentic_mock")
 
@@ -238,7 +239,7 @@ class ResponseHandler:
             return template_vars
 
         try:
-            env = Environment()
+            env = PromptSandboxedEnvironment()
             template = env.from_string(self.content)
 
             # Render the template as a module to capture all variables set via {% set %}
@@ -260,8 +261,8 @@ class ResponseHandler:
 
         return template_vars
 
-    def _create_jinja_environment(self) -> Environment:
-        return Environment(
+    def _create_jinja_environment(self) -> PromptSandboxedEnvironment:
+        return PromptSandboxedEnvironment(
             autoescape=False,  # Don't escape content since we're dealing with JSON/code
             trim_blocks=True,
             lstrip_blocks=True,

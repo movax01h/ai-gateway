@@ -8,8 +8,10 @@ from langchain_core.tools import ToolException
 from contract import contract_pb2
 from duo_workflow_service.executor.action import (
     _execute_action,
+    _execute_action_accepting_image,
     _execute_action_and_get_action_response,
 )
+from duo_workflow_service.executor.image_result import ImageActionResult
 from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
 from duo_workflow_service.workflows.type_definitions import (
     MAX_MESSAGE_SIZE,
@@ -89,6 +91,61 @@ async def test_execute_action_success_plaintext_response(metadata):
             and "HTTP response when plain text response expected" in call[0][0]
         ]
         assert len(http_log_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_action_accepting_image_returns_typed_result(metadata):
+    action = contract_pb2.Action()
+    action.runReadFile.filepath = "./screenshot.png"
+    client_event = contract_pb2.ClientEvent()
+    client_event.actionResponse.requestID = "test-request-img"
+    client_event.actionResponse.imageResponse.mime_type = "image/png"
+    client_event.actionResponse.imageResponse.data = b"\x89PNG\r\n\x1a\n" + b"pixels"
+
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
+
+    result = await _execute_action_accepting_image(metadata, action)
+
+    assert result == ImageActionResult(
+        mime_type="image/png", data=b"\x89PNG\r\n\x1a\n" + b"pixels"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_action_accepting_image_still_returns_plaintext(metadata):
+    action = contract_pb2.Action()
+    client_event = contract_pb2.ClientEvent()
+    client_event.actionResponse.plainTextResponse.response = "plain content"
+
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
+
+    result = await _execute_action_accepting_image(metadata, action)
+
+    assert result == "plain content"
+
+
+@pytest.mark.asyncio
+async def test_execute_action_rejects_image_for_non_image_tools(metadata):
+    """An imageResponse to an action whose tool cannot accept images is a protocol error, not a silent string."""
+    action = contract_pb2.Action()
+    action.runCommand.program = "ls"
+    client_event = contract_pb2.ClientEvent()
+    client_event.actionResponse.requestID = "test-request-img-reject"
+    client_event.actionResponse.imageResponse.mime_type = "image/png"
+    client_event.actionResponse.imageResponse.data = b"\x89PNG\r\n\x1a\n"
+
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
+
+    with pytest.raises(
+        ToolException, match="Executor doesn't return expected response fields"
+    ):
+        await _execute_action(metadata, action)
 
 
 @pytest.mark.asyncio

@@ -110,9 +110,6 @@ class KindVertexTextModel(StrEnum):
     CODESTRAL_2501 = "codestral-2501"
     CODESTRAL_2508 = "codestral-2508"
 
-    # Gemini
-    GEMINI_2_5_FLASH = "gemini-2.5-flash"
-
     # This method handles the provider prefix transformation for
     # Vertex AI models
     # It's necessary because we're using LiteLLM abstraction
@@ -244,7 +241,7 @@ class PalmCodeGenBaseModel(TextGenModelBase):
     async def generate(
         self,
         prefix: str,
-        suffix: str,
+        suffix: str | None,
         stream: bool = False,
         temperature: float = 0.2,
         max_output_tokens: int = 32,
@@ -280,7 +277,7 @@ class PalmCodeBisonModel(PalmCodeGenBaseModel):
     async def generate(
         self,
         prefix: str,
-        suffix: str,
+        suffix: str | None,
         stream: bool = False,
         temperature: float = 0.2,
         max_output_tokens: int = 2048,

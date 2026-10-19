@@ -17,6 +17,8 @@ from langchain_core.messages import BaseMessage
 from langchain_core.messages.ai import AIMessage, UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+from litellm.types.utils import PromptTokensDetailsWrapper, Usage
+from pydantic import TypeAdapter
 from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 from transformers import PreTrainedTokenizerFast
@@ -30,12 +32,13 @@ from ai_gateway.api.middleware import (
 from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
 from ai_gateway.api.middleware.route import usage_quota
 from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
-from ai_gateway.config import Config, ConfigModelLimits
+from ai_gateway.config import Config, ConfigModelLimits, get_config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
     LLMDefinition,
+    ModelRestriction,
     ModelSelectionConfig,
     PromptParams,
 )
@@ -51,6 +54,7 @@ from lib.context import (
     StarletteUser,
     current_model_metadata_context,
     current_model_metadata_with_size_context,
+    gitlab_user_id,
     llm_operations,
     token_usage,
 )
@@ -258,10 +262,20 @@ def mock_litellm_acompletion_fixture():
 @pytest.fixture(name="mock_litellm_aembedding_response")
 def mock_litellm_aembedding_response_fixture():
     return AsyncMock(
+        model="test-embedding-model-from-response",
         data=[
             {"embedding": [0.1, 0.2, 0.3], "index": 0},
             {"embedding": [0.4, 0.5, 0.6], "index": 1},
         ],
+        # Embeddings providers report prompt tokens only, completion tokens are always 0
+        usage=Usage(
+            prompt_tokens=12,
+            completion_tokens=0,
+            total_tokens=12,
+            prompt_tokens_details=PromptTokensDetailsWrapper(
+                cached_tokens=4, text_tokens=8
+            ),
+        ),
     )
 
 
@@ -299,6 +313,11 @@ def usage_metadata_fixture():
     return None
 
 
+@pytest.fixture(name="model_max_tokens")
+def model_max_tokens_fixture():
+    return None
+
+
 @pytest.fixture(name="model_disable_streaming")
 def model_disable_streaming_fixture():
     return False
@@ -309,6 +328,7 @@ class FakeModel(FakeListChatModel):
     model_name: str
     model_error: Optional[Exception] = None
     usage_metadata: Optional[UsageMetadata] = None
+    max_tokens: Optional[int] = None
 
     @property
     def _llm_type(self) -> str:
@@ -365,6 +385,7 @@ def model_fixture(
     model_error: Exception,
     usage_metadata: Optional[UsageMetadata],
     model_disable_streaming: Union[bool, Literal["tool_calling"]],
+    model_max_tokens: Optional[int],
 ):
     # our default Assistant prompt template already contains "Thought: "
     if isinstance(model_response, str):
@@ -379,6 +400,7 @@ def model_fixture(
         model_error=model_error,
         usage_metadata=usage_metadata,
         disable_streaming=model_disable_streaming,
+        max_tokens=model_max_tokens,
     )
 
 
@@ -422,6 +444,11 @@ def prompt_name_fixture():
     return "test_prompt"
 
 
+@pytest.fixture(name="tool_output_security")
+def tool_output_security_fixture(request):
+    return getattr(request, "param", True)
+
+
 @pytest.fixture(name="prompt_config")
 def prompt_config_fixture(
     prompt_name: str,
@@ -429,6 +456,7 @@ def prompt_config_fixture(
     unit_primitive: GitLabUnitPrimitive,
     prompt_template: dict[str, str | list[str]],
     prompt_params: PromptParams,
+    tool_output_security: bool,
 ):
     return PromptConfig(
         name=prompt_name,
@@ -436,6 +464,7 @@ def prompt_config_fixture(
         unit_primitive=unit_primitive,
         prompt_template=prompt_template,
         params=prompt_params,
+        tool_output_security=tool_output_security,
     )
 
 
@@ -450,13 +479,26 @@ def llm_definition_fixture():
     )
 
 
+@pytest.fixture(name="model_metadata_provider")
+def model_metadata_provider_fixture():
+    return "gitlab"
+
+
+@pytest.fixture(name="is_custom_model")
+def is_custom_model_fixture():
+    return False
+
+
 @pytest.fixture(name="model_metadata")
-def model_metadata_fixture(llm_definition: LLMDefinition):
+def model_metadata_fixture(
+    llm_definition: LLMDefinition, model_metadata_provider: str, is_custom_model: bool
+):
     return ModelMetadata(
-        provider="gitlab",
+        provider=model_metadata_provider,
         name="mistral",
         llm_definition=llm_definition,
         friendly_name="Mistral",
+        is_custom_model=is_custom_model,
     )
 
 
@@ -576,7 +618,19 @@ def additional_context_fixture() -> list[AdditionalContext] | None:
 
 @pytest.fixture(autouse=True)
 def disable_cached_logger():
-    structlog.configure(cache_logger_on_first_use=False)
+    # structlog's default console renderer prints every logged exception as a rich
+    # traceback with locals. A failing flow logs LangGraph state and protobuf
+    # payloads as locals, which takes over 15s per exception under coverage on a
+    # loaded CI worker and pushes the integration tests past their budget.
+    structlog.configure(
+        cache_logger_on_first_use=False,
+        processors=[
+            *structlog.get_config()["processors"][:-1],
+            structlog.dev.ConsoleRenderer(
+                exception_formatter=structlog.dev.plain_traceback
+            ),
+        ],
+    )
 
 
 def reset_context_vars():
@@ -589,6 +643,35 @@ def reset_context_vars():
     ModelSelectionConfig._instance = None
     structured_logging.ENABLE_REQUEST_LOGGING = False
     self_hosted_dap_billing_enabled.set(False)
+
+
+@pytest.fixture(name="feature_allowlist_mode")
+def feature_allowlist_mode_fixture(request, monkeypatch):
+    """Set the feature allowlist mode for the test; parametrize indirectly to pick it."""
+    mode = getattr(request, "param", "log")
+    monkeypatch.setattr(get_config().model_selection, "feature_allowlist_mode", mode)
+    return mode
+
+
+@pytest.fixture(autouse=True)
+def pin_default_model_to_first_entry():
+    def first_entry(population, weights=None, *, cum_weights=None, k=1):
+        return [population[0]] * k
+
+    with patch(
+        "ai_gateway.model_selection.model_selection_config.random.choices",
+        side_effect=first_entry,
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def disable_anthropic_default_credentials():
+    # `AsyncAnthropic()` runs the SDK's default credential chain when no static credential is
+    # given, reading `ANTHROPIC_PROFILE` and `~/.config/anthropic/configs/*.json`. A developer's
+    # own profile then leaks into tests and can fail them (e.g. a non-https `base_url`).
+    with patch("anthropic._client.default_credentials", return_value=None):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -796,3 +879,57 @@ def mock_track_billing_event_fixture():
         "lib.billing_events.client.BillingEventsClient.track_billing_event"
     ) as mock:
         yield mock
+
+
+@pytest.fixture(name="gitlab_user_id_in_context")
+def gitlab_user_id_in_context_fixture():
+    """Set the instance-local user ID for the current request, as RequestMetadataMiddleware does."""
+    user_id = "42"
+    token = gitlab_user_id.set(user_id)
+    yield user_id
+    gitlab_user_id.reset(token)
+
+
+@pytest.fixture(name="no_gitlab_user_id_in_context")
+def no_gitlab_user_id_in_context_fixture():
+    """Clear the instance-local user ID for the current request (e.g. non-user traffic)."""
+    token = gitlab_user_id.set(None)
+    yield
+    gitlab_user_id.reset(token)
+
+
+FAKE_RESTRICTED_MODEL = {
+    "name": "Fake Restricted Model",
+    "gitlab_identifier": "fake_restricted_model",
+    "model_class_provider": "anthropic",
+    "max_context_tokens": 200000,
+    "proxy_provider": "anthropic",
+    "params": {"model": "claude-fake-restricted-1"},
+}
+
+
+@pytest.fixture(name="model_restrictions")
+def model_restrictions_fixture():
+    """Serve these restrictions instead of model_restrictions.yml; tests may append."""
+    restrictions = [
+        ModelRestriction(
+            identifier="fake_restricted_model", feature_settings=["bl_security"]
+        )
+    ]
+    with patch.object(
+        ModelSelectionConfig, "get_model_restrictions", return_value=restrictions
+    ):
+        yield restrictions
+
+
+@pytest.fixture(name="fake_restricted_model")
+def fake_restricted_model_fixture(model_restrictions):  # pylint: disable=unused-argument
+    """Register a model restricted to the bl_security flow alongside models.yml."""
+    definition = TypeAdapter(LLMDefinition).validate_python(FAKE_RESTRICTED_MODEL)
+    original = ModelSelectionConfig.get_llm_definitions
+
+    def get_llm_definitions(self):
+        return {**original(self), definition.gitlab_identifier: definition}
+
+    with patch.object(ModelSelectionConfig, "get_llm_definitions", get_llm_definitions):
+        yield definition

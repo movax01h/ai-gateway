@@ -7,7 +7,7 @@ Downstream code works only with these types — it never re-examines raw proto f
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Optional, Union
+from typing import Optional, Union, override
 
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
@@ -18,10 +18,18 @@ from duo_workflow_service.agent_platform.utils.flow import (
     VALID_SCHEMA_VERSIONS,
     parse_deprecated_workflow_definition,
 )
+from duo_workflow_service.agent_platform.v1.catalog import (
+    CatalogItems,
+    CatalogItemsError,
+)
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     DEFAULT_FLOW_VERSION,
 )
 from lib.language_server import LanguageServerVersion
+
+# Only the v1 flow config declares an `include` section, and only the v1 Flow accepts
+# the items argument.
+_CATALOG_SCHEMA_VERSION = "v1"
 
 _LEGACY_WORKFLOW_NAMES = frozenset(
     {
@@ -43,6 +51,14 @@ class BaseFlowRequest(BaseModel):
         Downstream consumers (GLReportingEventContext, billing, monitoring, logging) still expect this format.  A
         follow-up should migrate those consumers to accept FlowRequest directly, at which point this method is deleted.
         """
+
+    def supports_catalog_items(self) -> bool:
+        """Whether catalog items sent with this request could bind to anything.
+
+        Returns:
+            ``False`` by default; only the request types whose flows accept items override it.
+        """
+        return False
 
 
 class RegistryFlowRequest(BaseFlowRequest):
@@ -82,6 +98,10 @@ class RegistryFlowRequest(BaseFlowRequest):
 
     def to_legacy_identifier(self) -> str:
         return f"{self.config_id}/{self.schema_version}"
+
+    @override
+    def supports_catalog_items(self) -> bool:
+        return self.schema_version == _CATALOG_SCHEMA_VERSION
 
 
 class InlineFlowRequest(BaseFlowRequest):
@@ -180,6 +200,51 @@ def normalize_flow_request(
 
     # ── Path D: empty request → default ──
     return LegacyWorkflowRequest(workflow_definition="software_development")
+
+
+def normalize_catalog_items(
+    start_req: contract_pb2.StartWorkflowRequest,
+    flow_request: FlowRequest,
+) -> CatalogItems:
+    """Translate the ``catalog_items`` envelope into validated items.
+
+    Args:
+        start_req: The request as received.
+        flow_request: The already-normalized flow identity, which decides whether items can bind.
+
+    Returns:
+        The items the request carried, or none when it carried no envelope, the common case.
+
+    Raises:
+        CatalogItemsError: If this request cannot carry items, or if the ones it carries are not
+            valid.
+    """
+    if not start_req.HasField("catalog_items"):
+        return CatalogItems()
+
+    # Rejected rather than dropped, so a client never sees a flow that quietly declines
+    # to delegate.
+    if not flow_request.supports_catalog_items():
+        raise CatalogItemsError(
+            f"Catalog items are only supported for '{_CATALOG_SCHEMA_VERSION}' flows "
+            "shipped as foundational flows."
+        )
+
+    version = start_req.catalog_items.WhichOneof("items")
+    if version is None:
+        # A client built against a newer schema. It intended to send items, so failing is
+        # more honest than running without them.
+        raise CatalogItemsError(
+            "The catalog_items envelope carries no schema version this server recognises."
+        )
+
+    # Proto field names are kept, so the payload keys match the item models.
+    return CatalogItems.from_payload(
+        MessageToDict(
+            getattr(start_req.catalog_items, version),
+            preserving_proto_field_name=True,
+        )
+    )
 
 
 def workflow_definition_key_from_proto(

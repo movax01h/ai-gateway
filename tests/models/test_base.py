@@ -5,12 +5,17 @@ import httpx
 import pytest
 from anthropic import AsyncAnthropic
 from httpx import AsyncClient, Limits
+from pydantic import SecretStr
 from structlog.testing import capture_logs
 
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models import ModelMetadata
 from ai_gateway.models.base import (
-    _TRUSTED_PROVIDERS,
+    ANTHROPIC_FACILITATOR_KEY_HEADER,
+    SERVER_KEYED_PROVIDERS,
+    KindModelProvider,
+    _warn_facilitator_key_missing,
+    anthropic_facilitator_headers,
     init_anthropic_client,
     log_request,
     validate_custom_endpoint,
@@ -35,6 +40,56 @@ async def test_init_anthropic_client():
         assert limits_arg.max_connections == 1000
         assert limits_arg.max_keepalive_connections == 100
         assert limits_arg.keepalive_expiry == 30
+
+
+@pytest.mark.parametrize(
+    ("configured_key", "expected"),
+    [
+        (
+            SecretStr("fake-facilitator-key"),
+            {ANTHROPIC_FACILITATOR_KEY_HEADER: "fake-facilitator-key"},
+        ),
+        (None, {}),
+        (SecretStr(""), {}),
+    ],
+)
+def test_anthropic_facilitator_headers(configured_key, expected):
+    """The secret is unwrapped for the header, and an unset or blank key sends nothing."""
+    with patch("ai_gateway.models.base.config") as mock_config:
+        mock_config.anthropic_facilitator_key = configured_key
+
+        assert anthropic_facilitator_headers() == expected
+
+
+def test_init_anthropic_client_does_not_carry_facilitator_header():
+    """`with_options` merges rather than replaces headers, so this must stay off the singleton."""
+    with patch("ai_gateway.models.base.config") as mock_config:
+        mock_config.anthropic_facilitator_key = SecretStr("fake-facilitator-key")
+
+        client = init_anthropic_client()
+
+    assert ANTHROPIC_FACILITATOR_KEY_HEADER not in client.default_headers
+
+    derived = client.with_options(default_headers={"anthropic-version": "2023-06-01"})
+    assert ANTHROPIC_FACILITATOR_KEY_HEADER not in derived.default_headers
+
+
+def test_missing_facilitator_key_warns_once_per_process():
+    """A half-configured deployment is visible in the logs, without a line per request."""
+    _warn_facilitator_key_missing.cache_clear()
+
+    with patch("ai_gateway.models.base.config") as mock_config:
+        mock_config.anthropic_facilitator_key = None
+
+        with capture_logs() as cap_logs:
+            assert anthropic_facilitator_headers() == {}
+            assert anthropic_facilitator_headers() == {}
+
+    _warn_facilitator_key_missing.cache_clear()
+
+    warnings = [entry for entry in cap_logs if entry["log_level"] == "warning"]
+    assert len(warnings) == 1
+    assert "ANTHROPIC_FACILITATOR_KEY" in warnings[0]["event"]
 
 
 # httpx attaches the effective per-request timeout as an extension; this is the
@@ -207,7 +262,7 @@ class TestValidateCustomEndpoint:
             allowed_api_bases=allowed,
         )
 
-    @pytest.mark.parametrize("provider", sorted(_TRUSTED_PROVIDERS))
+    @pytest.mark.parametrize("provider", sorted(SERVER_KEYED_PROVIDERS))
     @pytest.mark.parametrize("api_key", [None, "custom-key"])
     def test_raises_for_non_allowlisted_api_base_with_trusted_provider(
         self, provider, api_key
@@ -223,7 +278,7 @@ class TestValidateCustomEndpoint:
                 custom_llm_provider=provider,
             )
 
-    @pytest.mark.parametrize("provider", sorted(_TRUSTED_PROVIDERS))
+    @pytest.mark.parametrize("provider", sorted(SERVER_KEYED_PROVIDERS))
     def test_allows_trusted_provider_key_without_api_base(self, provider):
         # Managed Mistral: server-injected provider key, no endpoint.
         validate_custom_endpoint(
@@ -242,7 +297,7 @@ class TestValidateCustomEndpoint:
                 custom_llm_provider="custom_openai",
             )
 
-    @pytest.mark.parametrize("provider", sorted(_TRUSTED_PROVIDERS))
+    @pytest.mark.parametrize("provider", sorted(SERVER_KEYED_PROVIDERS))
     @pytest.mark.parametrize("api_base", ["https://allowed.example.com/", None])
     def test_allows_trusted_provider_on_allowlisted_endpoint(self, provider, api_base):
         # Managed Fireworks: endpoint comes from operator config, which the container
@@ -358,3 +413,12 @@ class TestModelMetadataToParamsBedrockGuardrail:
             "guardrailIdentifier": "abc123",
             "trace": "disabled",
         }
+
+
+def test_kind_model_provider_custom_partition():
+    custom = {p for p in KindModelProvider if p.is_custom_provider}
+
+    assert custom == {
+        KindModelProvider.LITELLM,
+        KindModelProvider.MISTRALAI,
+    }

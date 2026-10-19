@@ -24,7 +24,7 @@ class ClarificationOption(BaseModel):
 
 
 class ClarificationQuestionInput(BaseModel):
-    """Input schema for ``ClarificationQuestionTool``: a question with 2-3 options."""
+    """Input schema for `ClarificationQuestionTool`: a question with 2-3 options."""
 
     question: str = Field(
         description="A single concise sentence stating exactly what needs to be decided."

@@ -36,7 +36,7 @@ class TestVerboseAiLogsEndToEnd:
         monkeypatch.setenv("AIGW_LOGGING__ENABLE_LITELLM_LOGGING", "false")
 
         # Setup logging (which reads the env vars we just mocked)
-        setup_logging()
+        setup_logging(cache_logger_on_first_use=False)
 
         # Ensure we're using the real enabled_instance_verbose_ai_logs function
         aigw_logging.enabled_instance_verbose_ai_logs = enabled_instance_verbose_ai_logs

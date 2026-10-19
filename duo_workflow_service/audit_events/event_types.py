@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,6 +31,7 @@ class AuditEventType(str, Enum):
     AI_TOOL_EXECUTION_FAILED = auto()
     AI_TOOL_EXECUTION_RETRIED = auto()
     AI_LLM_REQUEST_FAILED = auto()
+    AI_WEB_SEARCH_INVOKED = auto()
 
 
 class AuditEvent(BaseModel):
@@ -42,11 +43,18 @@ class AuditEvent(BaseModel):
     workflow_id: str
     sequence: Optional[int] = None
 
+    # Free text the collector may excerpt so the event fits its size cap. Its
+    # `{field}_truncated` and `{field}_bytes` siblings are sent only when set.
+    excerpt_field: ClassVar[Optional[str]] = None
+
     def to_cloudevent(self) -> dict[str, Any]:
-        data = self.model_dump(
-            mode="json",
-            exclude={"id", "event_type", "timestamp", "sequence"},
-        )
+        exclude = {"id", "event_type", "timestamp", "sequence"}
+        field = self.excerpt_field
+        if field and not getattr(self, f"{field}_truncated"):
+            exclude |= {f"{field}_truncated", f"{field}_bytes"}
+        data = self.model_dump(mode="json", exclude=exclude)
+        if data.get("policy_ref") is None:
+            data.pop("policy_ref", None)
         return {
             "specversion": CLOUDEVENT_SPEC_VERSION,
             "id": self.id,
@@ -82,15 +90,21 @@ class UserInputReceivedEvent(AuditEvent):
 
 class LlmInputSentEvent(AuditEvent):
     event_type: AuditEventType = AuditEventType.AI_LLM_INPUT_SENT
+    excerpt_field: ClassVar[Optional[str]] = "prompt_content"
     model_name: str
     prompt_content: str
+    prompt_content_truncated: bool = False
+    prompt_content_bytes: Optional[int] = None
     tools_bound: Optional[list[str]] = None
 
 
 class LlmResponseReceivedEvent(AuditEvent):
     event_type: AuditEventType = AuditEventType.AI_LLM_RESPONSE_RECEIVED
+    excerpt_field: ClassVar[Optional[str]] = "response_content"
     model_name: str
     response_content: str
+    response_content_truncated: bool = False
+    response_content_bytes: Optional[int] = None
     prompt_token_count: Optional[int] = None
     completion_token_count: Optional[int] = None
     finish_reason: Optional[str] = None
@@ -108,13 +122,24 @@ class ToolInvokedEvent(AuditEvent):
     event_type: AuditEventType = AuditEventType.AI_TOOL_INVOKED
     tool_name: str
     tool_args: Optional[dict[str, Any]] = None
+    # Source that authorized this tool call (an ApprovalSource string value).
+    # Rails merges the CloudEvent `data` verbatim into
+    # AuditEvents::AiAuditEvent#details, so this snake_case name is what shows up
+    # in the persisted audit trail.
+    approval_source: Optional[str] = None
+    # Provenance of the policy that drove an auto/policy approval, when the
+    # client supplied it (see policy_ref provenance, ai-assist!6444).
+    policy_ref: Optional[dict[str, str]] = None
 
 
 class ToolResponseReceivedEvent(AuditEvent):
     event_type: AuditEventType = AuditEventType.AI_TOOL_RESPONSE_RECEIVED
+    excerpt_field: ClassVar[Optional[str]] = "response_content"
     tool_name: str
     response_content: str
-    response_length: int
+    response_length: int  # characters in the full response
+    response_content_truncated: bool = False
+    response_content_bytes: Optional[int] = None  # UTF-8 bytes in the full response
 
 
 class ToolExecutionFailedEvent(AuditEvent):
@@ -138,3 +163,13 @@ class LlmRequestFailedEvent(AuditEvent):
     error_type: str
     error_message: str
     latency_ms: Optional[float] = None
+
+
+class WebSearchInvokedEvent(AuditEvent):
+    """Separate from `ToolInvokedEvent`: compliance filters match on the event name."""
+
+    event_type: AuditEventType = AuditEventType.AI_WEB_SEARCH_INVOKED
+    model_name: str
+    provider: str
+    search_source: str
+    """`native` when the model searched itself, `agentcore` when our tool did."""

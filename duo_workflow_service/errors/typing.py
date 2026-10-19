@@ -67,6 +67,14 @@ class CheckpointSaveError(Exception):
     """
 
 
+class CheckpointAccessDeniedError(CheckpointSaveError):
+    """Raised when GitLab refuses a checkpoint POST with 401 or 403.
+
+    The session lost access, for example because GitLab Duo was turned off for its namespace, so no later checkpoint can
+    save either.
+    """
+
+
 class EnvelopeVersionMismatchException(Exception):
     """Raised when an additional context envelope version does not satisfy the flow's constraint.
 

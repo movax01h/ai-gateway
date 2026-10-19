@@ -48,10 +48,6 @@ def build_delegate_task_model(
     dynamic_model = create_model(
         "DynamicDelegateTask",
         __base__=DelegateTask,
-        # pydantic's create_model does NOT inherit __doc__ from __base__ — pass
-        # it explicitly, since this docstring is what becomes the tool's
-        # description shown to the LLM (see DelegateTask's docstring).
-        __doc__=DelegateTask.__doc__,
         subagent_name=(
             subagent_enum,
             Field(
@@ -69,29 +65,42 @@ def build_delegate_task_model(
 
 
 class DelegateTask(BaseModel):
-    """Delegate a task to a specialist subagent.
+    """Base class for the delegate_task tool.
 
-    **Rules — violating these will produce an error:**
+    The model actually used at runtime is built by ``build_delegate_task_model()`` with a
+    SubagentEnum generated from the subagents list.
 
-    1. Calling this tool multiple times in the same turn is expected and
-        encouraged whenever you have several independent tasks to delegate:
-        each call spawns its own subsession and they all run concurrently. Do
-        NOT delegate one task, wait, then delegate the next — batch every
-        independent delegation into the same turn instead.
-    2. However, in a turn where you call this tool, it must be the ONLY tool
-        you call — never mix delegate_task with any other tool (e.g.
-        run_command, read_file) in the same message. If you also need to run
-        other tools, do that in a separate turn, before or after delegating.
-    3. A subagent keeps nothing between delegations. Every call starts one
-        from scratch, so give it the full context it needs; you cannot send a
-        follow-up to a subagent you delegated to earlier. If a result comes
-        back incomplete, delegate again and restate everything the subagent
-        needs in the new prompt.
+    What the LLM is sent is ``tool_description``, not this docstring: the description is
+    declared explicitly so that it is written for the model and this docstring stays
+    free to address the reader of this file.
     """
 
-    model_config = ConfigDict(title="delegate_task", frozen=True)
-
     tool_title: ClassVar[str] = "delegate_task"
+
+    tool_description: ClassVar[str] = """Delegate a task to a specialist subagent.
+
+**Rules — violating these will produce an error:**
+
+1. Calling this tool multiple times in the same turn is expected and
+    encouraged whenever you have several independent tasks to delegate:
+    each call spawns its own subsession and they all run concurrently. Do
+    NOT delegate one task, wait, then delegate the next — batch every
+    independent delegation into the same turn instead.
+2. However, in a turn where you call this tool, it must be the ONLY tool
+    you call — never mix delegate_task with any other tool (e.g.
+    run_command, read_file) in the same message. If you also need to run
+    other tools, do that in a separate turn, before or after delegating.
+3. A subagent keeps nothing between delegations. Every call starts one
+    from scratch, so give it the full context it needs; you cannot send a
+    follow-up to a subagent you delegated to earlier. If a result comes
+    back incomplete, delegate again and restate everything the subagent
+    needs in the new prompt."""
+
+    model_config = ConfigDict(
+        title=tool_title,
+        frozen=True,
+        json_schema_extra={"description": tool_description},
+    )
 
     subagent_name: str = Field(description="The specialist agent to delegate to.")
     description: str = Field(

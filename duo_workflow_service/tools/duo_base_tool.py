@@ -36,6 +36,23 @@ DESCRIPTION_CHARACTER_LIMIT = 1_048_576
 STABLE_VERSION_THRESHOLD = Version("1.0.0")
 
 
+def log_failed_request(
+    logger: structlog.stdlib.BoundLogger,
+    event: str,
+    status_code: Any,
+    **kwargs: Any,
+) -> None:
+    """Log a failed GitLab API request made by a tool.
+
+    A 4xx response usually means the model asked for something that does not exist or is not accessible, for example
+    a file path it guessed. The tool raises a ``ToolException`` that is returned to the model, so this is logged as a
+    warning. Any other status points at GitLab or at our request and is logged as an error.
+    """
+    is_client_error = isinstance(status_code, int) and 400 <= status_code < 500
+    log_method = logger.warning if is_client_error else logger.error
+    log_method(event, status_code=status_code, **kwargs)
+
+
 class ProjectURLValidationResult(NamedTuple):
     project_id: Optional[str]
     errors: List[str]
@@ -359,13 +376,13 @@ class DuoBaseTool(BaseTool):
     ) -> list[Any]:
         """Fetch all pages from a paginated GitLab REST endpoint.
 
-        Iterates through pages using the ``X-Next-Page`` response header until
-        no further pages are available or ``max_pages`` is reached.  The safety
-        cap on ``max_pages`` guards against infinite loops caused by a
+        Iterates through pages using the `X-Next-Page` response header until
+        no further pages are available or `max_pages` is reached.  The safety
+        cap on `max_pages` guards against infinite loops caused by a
         misbehaving server that keeps returning a next-page header.
 
         Args:
-            endpoint: The API path to GET (e.g. ``/api/v4/projects/1/issues/2/notes``).
+            endpoint: The API path to GET (e.g. `/api/v4/projects/1/issues/2/notes`).
             per_page: Number of items to request per page (default 100, GitLab max).
             max_pages: Maximum number of pages to fetch before stopping (default 100).
             extra_params: Additional query parameters merged into every request.
@@ -505,9 +522,10 @@ class DuoBaseTool(BaseTool):
 
         if not response.is_success():
             if logger:
-                logger.error(
+                log_failed_request(
+                    logger,
                     f"{identifier} request failed",
-                    status_code=response.status_code,
+                    response.status_code,
                     response_body=str(response.body)[:300],
                 )
 

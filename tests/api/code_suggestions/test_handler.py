@@ -12,9 +12,14 @@ from pydantic import AnyUrl
 
 from ai_gateway.api.v3 import api_router as v3_api_router
 from ai_gateway.api.v4 import api_router as v4_api_router
+from ai_gateway.code_suggestions.base import (
+    CodeSuggestionsMetadata,
+    CodeSuggestionsOutput,
+)
 from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
+from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import Prompt
 from ai_gateway.tracking import SnowplowEventContext
 from lib.feature_flags.context import current_feature_flag_context
@@ -67,6 +72,58 @@ def config_values_fixture(assets_dir):
 
 
 class TestEditorContentCompletion:
+    @pytest.mark.parametrize("mock_suggestions_output_text", ["def search"])
+    def test_token_consumption_in_response(
+        self,
+        mock_client: TestClient,
+        mock_suggestions_output: CodeSuggestionsOutput,
+        route: str,
+    ):
+        tokens = TokensConsumptionMetadata(
+            input_tokens=12,
+            output_tokens=3,
+            context_tokens_sent=5,
+            context_tokens_used=4,
+        )
+        output = mock_suggestions_output._replace(
+            metadata=CodeSuggestionsMetadata(tokens_consumption_metadata=tokens)
+        )
+        data = {
+            "prompt_components": [
+                {
+                    "type": "code_editor_completion",
+                    "payload": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "# Create a fast binary search\n",
+                        "content_below_cursor": "\n",
+                        "language_identifier": "python",
+                    },
+                }
+            ],
+        }
+
+        with patch(
+            "ai_gateway.code_suggestions.CodeCompletions.execute", return_value=output
+        ):
+            response = mock_client.post(
+                route,
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                    "X-Gitlab-Global-User-Id": "test-user-id",
+                },
+                json=data,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["model"]["tokens_consumption_metadata"] == tokens.model_dump()
+        assert body["metadata"]["model"]["tokens_consumption_metadata"] == (
+            tokens.model_dump()
+        )
+
     @pytest.mark.parametrize(
         ("mock_suggestions_output_text", "expected_response"),
         [
@@ -157,6 +214,8 @@ class TestEditorContentCompletion:
 
         assert body["metadata"]["timestamp"] > 0
 
+        assert body["metadata"]["region"] == "us-central1"
+
         assert set(body["metadata"]["enabled_feature_flags"]) == set(
             expected_response["metadata"]["enabled_feature_flags"]
         )
@@ -167,6 +226,7 @@ class TestEditorContentCompletion:
             language="python",
             gitlab_realm="self-managed",
             is_direct_connection=False,
+            is_context_cap_enabled=False,
             gitlab_instance_id="1234",
             gitlab_global_user_id="test-user-id",
             gitlab_host_name="",
@@ -378,6 +438,8 @@ class TestEditorContentGeneration:
         assert body["metadata"]["model"] == expected_response["metadata"]["model"]
 
         assert body["metadata"]["timestamp"] > 0
+
+        assert body["metadata"]["region"] == "us-central1"
 
         assert set(body["metadata"]["enabled_feature_flags"]) == set(
             expected_response["metadata"]["enabled_feature_flags"]
@@ -598,6 +660,7 @@ class TestEditorContentGeneration:
                         ),
                     ),
                     friendly_name="Mistral",
+                    is_custom_model=True,
                 ),
                 None,
             ),
@@ -1046,7 +1109,7 @@ class TestIncomingRequest:
         assert response.status_code == expected_code
 
 
-class TestUnauthorizedIssuer:
+class TestSelfSignedIssuer:
     @pytest.fixture(name="auth_user")
     def auth_user_fixture(self):
         return CloudConnectorUser(
@@ -1059,29 +1122,157 @@ class TestUnauthorizedIssuer:
             ),
         )
 
-    def test_failed_authorization_scope(self, mock_client, route: str):
+    @pytest.fixture(name="headers")
+    def headers_fixture(self):
+        return {
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-Gitlab-Global-User-Id": "1234",
+            "X-GitLab-Realm": "self-managed",
+        }
+
+    @pytest.fixture(name="payload")
+    def payload_fixture(self):
+        return {
+            "file_name": "test.py",
+            "content_above_cursor": "def hello_world():",
+            "content_below_cursor": "",
+            "language_identifier": "python",
+        }
+
+    def test_completion_is_authorized(
+        self, mock_client, mock_completions: Mock, route: str, headers, payload
+    ):
         response = mock_client.post(
             route,
-            headers={
-                "Authorization": "Bearer 12345",
-                "X-Gitlab-Authentication-Type": "oidc",
-                "X-Gitlab-Global-User-Id": "1234",
-                "X-GitLab-Realm": "self-managed",
-            },
+            headers=headers,
             json={
                 "prompt_components": [
-                    {
-                        "type": "code_editor_completion",
-                        "payload": {
-                            "file_name": "test",
-                            "content_above_cursor": "def hello_world():",
-                            "content_below_cursor": "",
-                            "model_provider": "vertex-ai",
-                        },
-                    }
+                    {"type": "code_editor_completion", "payload": payload}
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        mock_completions.assert_called_once()
+        snowplow_event_context = mock_completions.call_args.kwargs[
+            "snowplow_event_context"
+        ]
+        assert snowplow_event_context.is_direct_connection is True
+
+    def test_completion_accepts_a_selectable_pinned_model(
+        self, mock_client, mock_completions: Mock, route: str, headers, payload
+    ):
+        response = mock_client.post(
+            route,
+            headers=headers,
+            json={
+                "prompt_components": [
+                    {"type": "code_editor_completion", "payload": payload}
+                ],
+                "model_metadata": {
+                    "provider": "gitlab",
+                    "identifier": "codestral_2508_vertex",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        mock_completions.assert_called_once()
+
+    def test_completion_serves_the_default_model_for_a_non_selectable_pin(
+        self, mock_client, mock_completions: Mock, route: str, headers, payload
+    ):
+        response = mock_client.post(
+            route,
+            headers=headers,
+            json={
+                "prompt_components": [
+                    {"type": "code_editor_completion", "payload": payload}
+                ],
+                "model_metadata": {"provider": "gitlab", "identifier": "claude_opus_5"},
+            },
+        )
+
+        assert response.status_code == 200
+        mock_completions.assert_called_once()
+
+    def test_generation_is_rejected(
+        self, mock_client, mock_generations: Mock, route: str, headers, payload
+    ):
+        response = mock_client.post(
+            route,
+            headers=headers,
+            json={
+                "prompt_components": [
+                    {"type": "code_editor_generation", "payload": payload}
                 ]
             },
         )
 
         assert response.status_code == 403
         assert response.json() == {"detail": "Unauthorized to access code suggestions"}
+        mock_generations.assert_not_called()
+
+
+class TestAmazonQInternalEvents:
+    @pytest.fixture(name="payload")
+    def payload_fixture(self):
+        return {
+            "file_name": "main.py",
+            "content_above_cursor": "# Create a fast binary search\n",
+            "content_below_cursor": "\n",
+            "language_identifier": "python",
+            "model_provider": "amazon_q",
+            "role_arn": "test:role",
+        }
+
+    @pytest.fixture(name="headers")
+    def headers_fixture(self):
+        return {
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-GitLab-Instance-Id": "1234",
+            "X-GitLab-Realm": "self-managed",
+            "X-Gitlab-Global-User-Id": "test-user-id",
+        }
+
+    @pytest.mark.usefixtures("mock_completions")
+    def test_completion_tracks_internal_event(
+        self, mock_client, mock_track_internal_event: Mock, route: str, headers, payload
+    ):
+        response = mock_client.post(
+            route,
+            headers=headers,
+            json={
+                "prompt_components": [
+                    {"type": "code_editor_completion", "payload": payload}
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        mock_track_internal_event.assert_called_once_with(
+            "request_amazon_q_integration_complete_code",
+            category="ai_gateway.code_suggestions.handler",
+        )
+
+    @pytest.mark.usefixtures("mock_generations")
+    def test_generation_tracks_internal_event(
+        self, mock_client, mock_track_internal_event: Mock, route: str, headers, payload
+    ):
+        response = mock_client.post(
+            route,
+            headers=headers,
+            json={
+                "prompt_components": [
+                    {"type": "code_editor_generation", "payload": payload}
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        mock_track_internal_event.assert_called_once_with(
+            "request_amazon_q_integration_generate_code",
+            category="ai_gateway.code_suggestions.handler",
+        )

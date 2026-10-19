@@ -51,6 +51,76 @@ internal_event_client.track_event(
 )
 ```
 
+### AI context
+
+When tracking AI-related events, you can provide AI-specific metadata using the `ai_context` parameter. This is the **preferred approach** for new code as it provides type safety and clarity.
+
+#### Using explicit AIContext (recommended)
+
+Pass an `AIContext` object to explicitly set workflow, agent, and token metadata:
+
+```python
+from lib.internal_events import AIContext, InternalEventsClient
+
+internal_event_client.track_event(
+    event_name="workflow_route_decision",
+    ai_context=AIContext(
+        workflow_id="wf-123",
+        flow_type="fix_pipeline",
+        agent_name="supervisor",
+    ),
+    category="Router",
+)
+```
+
+For events with token usage:
+
+```python
+ai_context = AIContext(
+    workflow_id="wf-456",
+    flow_type="code_review",
+    input_tokens=1500,
+    output_tokens=800,
+    total_tokens=2300,
+    cache_read=200,
+    cache_creation=100,
+)
+
+internal_event_client.track_event(
+    event_name="token_usage_completion",
+    ai_context=ai_context,
+)
+```
+
+#### Implicit extraction (legacy)
+
+For backwards compatibility, `track_event` still extracts AI context from `additional_properties.extra` and `**kwargs` when `ai_context` is not provided:
+
+```python
+# Legacy approach - still works but not recommended for new code
+additional_properties = InternalEventAdditionalProperties(
+    label="completion_event",
+    workflow_id="wf-789",
+    flow_type="chat",
+    agent_name="assistant",
+)
+
+internal_event_client.track_event(
+    event_name="request_completion",
+    additional_properties=additional_properties,
+    input_tokens=500,
+    output_tokens=300,
+)
+```
+
+#### Precedence rules
+
+When both explicit `ai_context` and implicit values are present, the explicit `ai_context` takes precedence for all its fields:
+
+- `workflow_id`, `flow_type`, `agent_name` from `AIContext` override values in `additional_properties.extra`
+- Token fields (`input_tokens`, `output_tokens`, `total_tokens`, `cache_read`, `cache_creation`, `ephemeral_5m_input_tokens`, `ephemeral_1h_input_tokens`) from `AIContext` override values from `**kwargs`
+- `session_id` is always derived from `additional_properties.value`, regardless of `ai_context`
+
 Various arguments can be set aside from the event name.
 See [this section](https://docs.gitlab.com/ee/development/internal_analytics/internal_event_instrumentation/quick_start.html#trigger-events) for more information.
 

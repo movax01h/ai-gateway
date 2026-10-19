@@ -23,8 +23,8 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
 )
 from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
 from duo_workflow_service.tools.toolset import Toolset
+from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag
-from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="mock_tools_registry")
@@ -63,7 +63,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override="test_system_template",
             tracker=tracker,
         )
@@ -83,7 +83,7 @@ class TestCreateAgent:
             internal_event_extra={
                 "agent_name": "chat",
                 "workflow_id": "workflow_123",
-                "workflow_type": CategoryEnum.WORKFLOW_CHAT,
+                "workflow_type": "chat",
             },
         )
 
@@ -110,7 +110,9 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.AI_CATALOG_AGENT,
+            workflow_type=GLReportingEventContext.from_workflow_definition(
+                "ai_catalog_agent"
+            ),
             system_template_override=None,
             agent_name_override="348/0",
         )
@@ -129,7 +131,7 @@ class TestCreateAgent:
             internal_event_extra={
                 "agent_name": "348/0",
                 "workflow_id": "workflow_123",
-                "workflow_type": CategoryEnum.AI_CATALOG_AGENT,
+                "workflow_type": "ai_catalog_agent",
             },
         )
 
@@ -155,7 +157,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             agent_name_override=None,
         )
@@ -167,10 +169,11 @@ class TestCreateAgent:
         assert call_kwargs["bind_tools_params"] == {}
 
     @pytest.mark.parametrize(
-        "feature_enabled,client_capable,web_search_enabled,expected_params,"
-        "expected_state,test_description",
+        "feature_enabled,client_capable,web_search_enabled,web_search_allowed_for_group,"
+        "expected_params,expected_state,test_description",
         [
             (
+                True,
                 True,
                 True,
                 True,
@@ -182,12 +185,14 @@ class TestCreateAgent:
                 True,
                 True,
                 False,
+                True,
                 {},
                 WebSearchState(supported=True, active=False),
                 "feature and capability enabled but workflow toggle off",
             ),
             (
                 False,
+                True,
                 True,
                 True,
                 {},
@@ -198,6 +203,7 @@ class TestCreateAgent:
                 True,
                 False,
                 True,
+                True,
                 {},
                 WebSearchState(supported=False, active=False),
                 "client not capable",
@@ -206,9 +212,19 @@ class TestCreateAgent:
                 False,
                 False,
                 False,
+                True,
                 {},
                 WebSearchState(supported=False, active=False),
                 "all conditions disabled",
+            ),
+            (
+                True,
+                True,
+                True,
+                False,
+                {},
+                WebSearchState(supported=False, active=False),
+                "group forbids web search",
             ),
         ],
     )
@@ -230,13 +246,19 @@ class TestCreateAgent:
         feature_enabled,
         client_capable,
         web_search_enabled,
+        web_search_allowed_for_group,
         expected_params,
         expected_state,
         test_description,
     ):
         """Test that web_search_options requires feature flag, client capability, and workflow toggle."""
-        mock_is_feature_enabled.return_value = feature_enabled
-        mock_is_client_capable.return_value = client_capable
+        # Gate on the argument too, so asking for the wrong flag or capability fails here.
+        mock_is_feature_enabled.side_effect = lambda flag: (
+            feature_enabled and flag is FeatureFlag.DAP_WEB_SEARCH
+        )
+        mock_is_client_capable.side_effect = lambda capability: (
+            client_capable and capability == "web_search"
+        )
 
         agent = create_agent(
             user=user,
@@ -245,9 +267,10 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             web_search_enabled=web_search_enabled,
+            web_search_allowed_for_group=web_search_allowed_for_group,
         )
 
         assert isinstance(agent, ChatAgent)
@@ -260,14 +283,6 @@ class TestCreateAgent:
         assert agent.web_search == expected_state, (
             f"Failed for scenario: {test_description}"
         )
-
-        assert mock_is_feature_enabled.call_count == 1
-        mock_is_feature_enabled.assert_any_call(FeatureFlag.DAP_WEB_SEARCH)
-
-        if feature_enabled:
-            mock_is_client_capable.assert_called_once_with("web_search")
-        else:
-            mock_is_client_capable.assert_not_called()
 
     @pytest.mark.parametrize(
         "native_available,expected_params",
@@ -307,9 +322,10 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             web_search_enabled=True,
+            web_search_allowed_for_group=True,
         )
 
         call_kwargs = mock_local_prompt_registry.get_on_behalf.call_args.kwargs
@@ -339,7 +355,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             compaction=cfg,
         )
@@ -382,7 +398,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             compaction=custom_config,
         )
@@ -416,7 +432,7 @@ class TestCreateAgent:
             tools=mock_toolset,
             prompt_registry=mock_local_prompt_registry,
             workflow_id="workflow_123",
-            workflow_type=CategoryEnum.WORKFLOW_CHAT,
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
             system_template_override=None,
             compaction=None,
         )

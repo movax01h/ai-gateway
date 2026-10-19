@@ -21,6 +21,7 @@ from typing import Any, Optional, Union
 
 import structlog
 
+from duo_workflow_service.entities.image_blocks import without_image_blocks
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.security.prompt_scanner import (
     DefaultScanner,
@@ -368,11 +369,19 @@ def apply_security_scanning(
     if trust_level == ToolTrustLevel.TRUSTED_INTERNAL:
         return sanitized_response
 
+    # Scan a copy without image blocks. A text scanner cannot find an injection
+    # in base64, so the payload only adds megabytes per request, and a failed
+    # scan fails open, leaving the text next to the image unscanned too.
+    # Image-borne injection is not covered by this scan. Whole blocks go because
+    # in LOG_ONLY each leftover string value is its own call. The caller still
+    # gets the original response, images included.
+    scannable_response = without_image_blocks(sanitized_response)
+
     if protection_level == PromptInjectionProtectionLevel.LOG_ONLY:
-        _schedule_fire_and_forget_scan(sanitized_response)
+        _schedule_fire_and_forget_scan(scannable_response)
 
     elif protection_level == PromptInjectionProtectionLevel.INTERRUPT:
-        text_to_scan = _extract_text_for_scanning(sanitized_response)
+        text_to_scan = _extract_text_for_scanning(scannable_response)
         if text_to_scan:
             _run_blocking_scan(text_to_scan, tool_name)
 

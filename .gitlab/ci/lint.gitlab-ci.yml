@@ -77,6 +77,22 @@ lint:duo_workflow_flow_schema:
   script:
     - make check-duo-workflow-flow-schema
 
+lint:legacy_roots:
+  stage: test
+  extends: .poetry
+  needs:
+    - install
+  rules:
+    - changes:
+        - "ai_gateway/prompts/definitions/**/*"
+        - "duo_workflow_service/agent_platform/v1/flows/configs/**/*"
+        - "scripts/check_legacy_roots.py"
+        - "scripts/legacy_roots_allowlist.txt"
+  script:
+    - BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+    - if [ -n "$BASE" ]; then git fetch origin "$BASE" --depth=1; fi
+    - make check-legacy-roots LEGACY_ROOTS_BASE="$BASE"
+
 lint:doc:
   stage: test
   image: ${DOCS_LINT_IMAGE}
@@ -105,3 +121,34 @@ lint:commit:
     - if: '$CI_MERGE_REQUEST_DIFF_BASE_SHA && $CI_MERGE_REQUEST_DRAFT == "true"'
       allow_failure: true
     - if: "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+
+lint:prompt_diff_comment:
+  # Posts (or updates) an MR comment with a unified diff between each newly
+  # added prompt version and its predecessor on the target branch, since the
+  # MR diff only shows the new file. Informational only: never blocks the MR.
+  extends: .poetry
+  stage: test
+  needs:
+    - install
+  allow_failure: true
+  variables:
+    # The project-level GITLAB_TOKEN is protected (unavailable in MR pipelines);
+    # reuse the Danger bot token, which already posts MR comments.
+    GITLAB_TOKEN: $DANGER_GITLAB_API_TOKEN
+  rules:
+    # Forks and security forks have no Danger token; skip instead of failing.
+    - if: "$DANGER_GITLAB_API_TOKEN == null"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      # Keep in step with VERSIONED_ROOTS in scripts/prompt_diff_comment.py.
+      changes:
+        - "ai_gateway/prompts/definitions/**/*.jinja"
+        - "ai_gateway/prompts/definitions/**/*.yml"
+        - "ai/features/**/*.jinja"
+        - "ai/features/**/*.yml"
+        - "ai/shared/**/*.jinja"
+        - "ai/shared/**/*.yml"
+        - "duo_workflow_service/agent_platform/v1/flows/configs/**/*.yml"
+        - "duo_workflow_service/agent_platform/experimental/flows/configs/**/*.yml"
+  script:
+    - poetry run python scripts/prompt_diff_comment.py

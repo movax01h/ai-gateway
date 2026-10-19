@@ -21,7 +21,7 @@ class ClientEvent(_message.Message):
     def __init__(self, startRequest: _Optional[_Union[StartWorkflowRequest, _Mapping]] = ..., actionResponse: _Optional[_Union[ActionResponse, _Mapping]] = ..., heartbeat: _Optional[_Union[HeartbeatRequest, _Mapping]] = ..., stopWorkflow: _Optional[_Union[StopWorkflowRequest, _Mapping]] = ...) -> None: ...
 
 class StartWorkflowRequest(_message.Message):
-    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion", "streaming", "resume_checkpoint_ts")
+    __slots__ = ("clientVersion", "workflowID", "workflowDefinition", "goal", "workflowMetadata", "clientCapabilities", "mcpTools", "additional_context", "approval", "flowConfig", "flowConfigSchemaVersion", "preapproved_tools", "flowConfigId", "flowVersion", "streaming", "resume_checkpoint_ts", "catalog_items")
     CLIENTVERSION_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
@@ -38,6 +38,7 @@ class StartWorkflowRequest(_message.Message):
     FLOWVERSION_FIELD_NUMBER: _ClassVar[int]
     STREAMING_FIELD_NUMBER: _ClassVar[int]
     RESUME_CHECKPOINT_TS_FIELD_NUMBER: _ClassVar[int]
+    CATALOG_ITEMS_FIELD_NUMBER: _ClassVar[int]
     clientVersion: str
     workflowID: str
     workflowDefinition: str
@@ -54,19 +55,46 @@ class StartWorkflowRequest(_message.Message):
     flowVersion: str
     streaming: bool
     resume_checkpoint_ts: str
-    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ..., streaming: bool = ..., resume_checkpoint_ts: _Optional[str] = ...) -> None: ...
+    catalog_items: CatalogItems
+    def __init__(self, clientVersion: _Optional[str] = ..., workflowID: _Optional[str] = ..., workflowDefinition: _Optional[str] = ..., goal: _Optional[str] = ..., workflowMetadata: _Optional[str] = ..., clientCapabilities: _Optional[_Iterable[str]] = ..., mcpTools: _Optional[_Iterable[_Union[McpTool, _Mapping]]] = ..., additional_context: _Optional[_Iterable[_Union[AdditionalContext, _Mapping]]] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., flowConfig: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., flowConfigSchemaVersion: _Optional[str] = ..., preapproved_tools: _Optional[_Iterable[str]] = ..., flowConfigId: _Optional[str] = ..., flowVersion: _Optional[str] = ..., streaming: bool = ..., resume_checkpoint_ts: _Optional[str] = ..., catalog_items: _Optional[_Union[CatalogItems, _Mapping]] = ...) -> None: ...
+
+class CatalogItems(_message.Message):
+    __slots__ = ("catalog_items_v1",)
+    CATALOG_ITEMS_V1_FIELD_NUMBER: _ClassVar[int]
+    catalog_items_v1: CatalogItemsV1
+    def __init__(self, catalog_items_v1: _Optional[_Union[CatalogItemsV1, _Mapping]] = ...) -> None: ...
+
+class CatalogItemsV1(_message.Message):
+    __slots__ = ("workspace_agents",)
+    WORKSPACE_AGENTS_FIELD_NUMBER: _ClassVar[int]
+    workspace_agents: _containers.RepeatedCompositeFieldContainer[WorkspaceAgent]
+    def __init__(self, workspace_agents: _Optional[_Iterable[_Union[WorkspaceAgent, _Mapping]]] = ...) -> None: ...
+
+class WorkspaceAgent(_message.Message):
+    __slots__ = ("name", "description", "toolset", "prompt")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    TOOLSET_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    description: str
+    toolset: _containers.RepeatedScalarFieldContainer[str]
+    prompt: str
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., toolset: _Optional[_Iterable[str]] = ..., prompt: _Optional[str] = ...) -> None: ...
 
 class ActionResponse(_message.Message):
-    __slots__ = ("requestID", "plainTextResponse", "httpResponse", "scheduleNotificationResponse")
+    __slots__ = ("requestID", "plainTextResponse", "httpResponse", "scheduleNotificationResponse", "imageResponse")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     PLAINTEXTRESPONSE_FIELD_NUMBER: _ClassVar[int]
     HTTPRESPONSE_FIELD_NUMBER: _ClassVar[int]
     SCHEDULENOTIFICATIONRESPONSE_FIELD_NUMBER: _ClassVar[int]
+    IMAGERESPONSE_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     plainTextResponse: PlainTextResponse
     httpResponse: HttpResponse
     scheduleNotificationResponse: ScheduleNotificationResponse
-    def __init__(self, requestID: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ..., scheduleNotificationResponse: _Optional[_Union[ScheduleNotificationResponse, _Mapping]] = ...) -> None: ...
+    imageResponse: ImageResponse
+    def __init__(self, requestID: _Optional[str] = ..., plainTextResponse: _Optional[_Union[PlainTextResponse, _Mapping]] = ..., httpResponse: _Optional[_Union[HttpResponse, _Mapping]] = ..., scheduleNotificationResponse: _Optional[_Union[ScheduleNotificationResponse, _Mapping]] = ..., imageResponse: _Optional[_Union[ImageResponse, _Mapping]] = ...) -> None: ...
 
 class HeartbeatRequest(_message.Message):
     __slots__ = ("timestamp",)
@@ -117,6 +145,14 @@ class ScheduleNotificationResponse(_message.Message):
     fires_at: str
     def __init__(self, accepted: bool = ..., reason: _Optional[str] = ..., fires_at: _Optional[str] = ...) -> None: ...
 
+class ImageResponse(_message.Message):
+    __slots__ = ("mime_type", "data")
+    MIME_TYPE_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    mime_type: str
+    data: bytes
+    def __init__(self, mime_type: _Optional[str] = ..., data: _Optional[bytes] = ...) -> None: ...
+
 class Action(_message.Message):
     __slots__ = ("requestID", "runCommand", "runHTTPRequest", "runReadFile", "runWriteFile", "runGitCommand", "runEditFile", "newCheckpoint", "listDirectory", "grep", "findFiles", "runMCPTool", "mkdir", "runReadFiles", "runShellCommand", "trackLlmCallForSelfHosted", "scheduleNotification")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
@@ -166,14 +202,16 @@ class ScheduleNotification(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., condition: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
 
 class TrackLlmCallForSelfHosted(_message.Message):
-    __slots__ = ("workflowID", "featureQualifiedName", "featureAiCatalogItem")
+    __slots__ = ("workflowID", "featureQualifiedName", "featureAiCatalogItem", "sourceType")
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     FEATUREQUALIFIEDNAME_FIELD_NUMBER: _ClassVar[int]
     FEATUREAICATALOGITEM_FIELD_NUMBER: _ClassVar[int]
+    SOURCETYPE_FIELD_NUMBER: _ClassVar[int]
     workflowID: str
     featureQualifiedName: str
     featureAiCatalogItem: bool
-    def __init__(self, workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ...) -> None: ...
+    sourceType: str
+    def __init__(self, workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ..., sourceType: _Optional[str] = ...) -> None: ...
 
 class RunShellCommand(_message.Message):
     __slots__ = ("command", "timeout")
@@ -250,10 +288,20 @@ class RunGitCommand(_message.Message):
     def __init__(self, command: _Optional[str] = ..., arguments: _Optional[str] = ..., repository_url: _Optional[str] = ...) -> None: ...
 
 class GenerateTokenRequest(_message.Message):
-    __slots__ = ("workflowDefinition",)
+    __slots__ = ("workflowDefinition", "flow_config_id", "flow_config", "workflowID", "flow_version", "flow_config_schema_version")
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
+    FLOW_CONFIG_ID_FIELD_NUMBER: _ClassVar[int]
+    FLOW_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
+    FLOW_VERSION_FIELD_NUMBER: _ClassVar[int]
+    FLOW_CONFIG_SCHEMA_VERSION_FIELD_NUMBER: _ClassVar[int]
     workflowDefinition: str
-    def __init__(self, workflowDefinition: _Optional[str] = ...) -> None: ...
+    flow_config_id: str
+    flow_config: _struct_pb2.Struct
+    workflowID: str
+    flow_version: str
+    flow_config_schema_version: str
+    def __init__(self, workflowDefinition: _Optional[str] = ..., flow_config_id: _Optional[str] = ..., flow_config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., workflowID: _Optional[str] = ..., flow_version: _Optional[str] = ..., flow_config_schema_version: _Optional[str] = ...) -> None: ...
 
 class GenerateTokenResponse(_message.Message):
     __slots__ = ("token", "expiresAt", "server_capabilities")
@@ -395,20 +443,22 @@ class ToolAnnotations(_message.Message):
     def __init__(self, title: _Optional[str] = ..., read_only_hint: bool = ..., destructive_hint: bool = ..., idempotent_hint: bool = ..., open_world_hint: bool = ...) -> None: ...
 
 class McpTool(_message.Message):
-    __slots__ = ("name", "description", "inputSchema", "icons", "annotations", "trusted")
+    __slots__ = ("name", "description", "inputSchema", "icons", "annotations", "trusted", "client_injected")
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     INPUTSCHEMA_FIELD_NUMBER: _ClassVar[int]
     ICONS_FIELD_NUMBER: _ClassVar[int]
     ANNOTATIONS_FIELD_NUMBER: _ClassVar[int]
     TRUSTED_FIELD_NUMBER: _ClassVar[int]
+    CLIENT_INJECTED_FIELD_NUMBER: _ClassVar[int]
     name: str
     description: str
     inputSchema: str
     icons: Icons
     annotations: ToolAnnotations
     trusted: bool
-    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., inputSchema: _Optional[str] = ..., icons: _Optional[_Union[Icons, _Mapping]] = ..., annotations: _Optional[_Union[ToolAnnotations, _Mapping]] = ..., trusted: bool = ...) -> None: ...
+    client_injected: bool
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., inputSchema: _Optional[str] = ..., icons: _Optional[_Union[Icons, _Mapping]] = ..., annotations: _Optional[_Union[ToolAnnotations, _Mapping]] = ..., trusted: bool = ..., client_injected: bool = ...) -> None: ...
 
 class Icons(_message.Message):
     __slots__ = ("items",)
@@ -445,11 +495,13 @@ class Approval(_message.Message):
         APPROVAL_SOURCE_PRETOOLUSE_HOOK: _ClassVar[Approval.ApprovalSource]
         APPROVAL_SOURCE_AUTO_MODE: _ClassVar[Approval.ApprovalSource]
         APPROVAL_SOURCE_PREAPPROVED_CONFIG: _ClassVar[Approval.ApprovalSource]
+        APPROVAL_SOURCE_SESSION_APPROVAL: _ClassVar[Approval.ApprovalSource]
     APPROVAL_SOURCE_UNSPECIFIED: Approval.ApprovalSource
     APPROVAL_SOURCE_USER_EXPLICIT: Approval.ApprovalSource
     APPROVAL_SOURCE_PRETOOLUSE_HOOK: Approval.ApprovalSource
     APPROVAL_SOURCE_AUTO_MODE: Approval.ApprovalSource
     APPROVAL_SOURCE_PREAPPROVED_CONFIG: Approval.ApprovalSource
+    APPROVAL_SOURCE_SESSION_APPROVAL: Approval.ApprovalSource
     class PolicyRef(_message.Message):
         __slots__ = ("origin", "file", "hash", "version")
         ORIGIN_FIELD_NUMBER: _ClassVar[int]
@@ -516,16 +568,18 @@ class ShellInformationContext(_message.Message):
     def __init__(self, shell_name: _Optional[str] = ..., shell_type: _Optional[str] = ..., shell_variant: _Optional[str] = ..., shell_environment: _Optional[str] = ..., ssh_session: bool = ..., cwd: _Optional[str] = ...) -> None: ...
 
 class TrackSelfHostedClientEvent(_message.Message):
-    __slots__ = ("requestID", "workflowID", "featureQualifiedName", "featureAiCatalogItem")
+    __slots__ = ("requestID", "workflowID", "featureQualifiedName", "featureAiCatalogItem", "sourceType")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     FEATUREQUALIFIEDNAME_FIELD_NUMBER: _ClassVar[int]
     FEATUREAICATALOGITEM_FIELD_NUMBER: _ClassVar[int]
+    SOURCETYPE_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     workflowID: str
     featureQualifiedName: str
     featureAiCatalogItem: bool
-    def __init__(self, requestID: _Optional[str] = ..., workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ...) -> None: ...
+    sourceType: str
+    def __init__(self, requestID: _Optional[str] = ..., workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ..., sourceType: _Optional[str] = ...) -> None: ...
 
 class TrackSelfHostedAction(_message.Message):
     __slots__ = ("requestID",)

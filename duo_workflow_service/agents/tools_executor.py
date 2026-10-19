@@ -19,19 +19,18 @@ from duo_workflow_service.agents.project_utils import resolve_project_name_for_t
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     TIER_ACCESS_DENIED_SUB_TYPE,
-    TOOL_RESPONSE_MAX_DISPLAY_MSG,
     DuoWorkflowStateType,
     MessageTypeEnum,
     Plan,
     ToolInfo,
     ToolStatus,
     UiChatLog,
+    render_for_display,
 )
 from duo_workflow_service.errors.typing import TierAccessDeniedException
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
-from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 from duo_workflow_service.tools import RunCommand, Toolset, format_tool_display_message
 from duo_workflow_service.tools.planner import PlannerTool
 from duo_workflow_service.tracking.errors import log_exception
@@ -191,7 +190,31 @@ class ToolsExecutor:
                 if chat_logs and "tool_info" in chat_logs[0]:
                     chat_log = chat_logs[0]
                     cleaned_response = self._clean_run_command_response(response)
-                    chat_log["tool_info"]["tool_response"] = cleaned_response
+                    # Overwriting the card built above means rendering the
+                    # command output for display again. Without this it reached
+                    # the client raw: unscanned by the UI-only entropy
+                    # detectors, and uncapped.
+                    #
+                    # The status travels too. The web frontend switches on
+                    # tool_response.status, and a failed command whose card
+                    # said "success" would be announced as completed. A tool
+                    # message carries its own; a plain string, the error path,
+                    # takes it from the entry.
+                    status = getattr(cleaned_response, "status", None)
+                    if status not in ("success", "error"):
+                        status = (
+                            "success"
+                            if chat_log.get("status") == ToolStatus.SUCCESS
+                            else "error"
+                        )
+                    chat_log["tool_info"]["tool_response"] = ToolMessage(
+                        content=render_for_display(
+                            cleaned_response, tool_name=tool_name
+                        ),
+                        name=tool_name,
+                        tool_call_id=tool_call.get("id") or "",
+                        status=status,
+                    )
                     chat_log["message_sub_type"] = "command_output"
                     ui_chat_logs.extend([chat_log])
             else:
@@ -627,17 +650,22 @@ class ToolsExecutor:
         if project_name:
             tool_args = {**tool_args, "project_name": project_name}
 
-        tool_response = redact_secrets_for_ui(tool_response, tool_name=tool_name)
-
         tool_info: Optional[ToolInfo] = None
         if tool_name not in _ACTION_HANDLERS:
             if tool_response is not None:
+                # The ToolMessage wrapper stays because the agentic-chat client
+                # reads tool_response.content and .status off this card.
                 tool_info = ToolInfo(
                     name=tool_name,
                     args=tool_args,
                     tool_response=ToolMessage(
-                        content=tool_response.content[:TOOL_RESPONSE_MAX_DISPLAY_MSG],
-                        name=tool_response.name,
+                        content=render_for_display(
+                            tool_response.content, tool_name=tool_name
+                        ),
+                        # The client validates this as a string. langchain sets
+                        # it only when it wraps a raw return value, so a tool
+                        # that returns its own ToolMessage leaves it None.
+                        name=tool_response.name or tool_name,
                         tool_call_id=tool_response.tool_call_id,
                     ),
                 )

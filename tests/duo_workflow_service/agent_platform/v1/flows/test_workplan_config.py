@@ -6,10 +6,20 @@ options) rather than on ``FlowConfig`` machinery — generic ``FlowConfig``
 behavior is covered in ``test_flow_config.py``.
 """
 
+import json
+from pathlib import Path
+
 import pytest
 
+from ai_gateway import response_schemas
+from ai_gateway.prompts.base import jinja2_formatter
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.tools.work_item import CreateWorkItemNoteInput
+from lib.version import resolve_version
+
+# The flow's two AgentComponents. Shared by the classes below so a rename or a
+# third stage can't leave one list behind.
+AGENT_COMPONENT_NAMES = ["research", "planner"]
 
 
 class TestWorkplanToolOptions:
@@ -24,7 +34,6 @@ class TestWorkplanToolOptions:
     """
 
     EXPECTED_OPTIONS = {"internal": False}
-    AGENT_COMPONENT_NAMES = ["research", "planner"]
 
     @staticmethod
     def _create_work_item_note_options(config: FlowConfig, component_name: str) -> dict:
@@ -79,6 +88,7 @@ class TestWorkplanRouterWiring:
         assert router["condition"]["routes"] == {
             "ready": "planner",
             "needs_input": "research_gate",
+            "needs_context": "context_gate",
             "default_route": "research_gate",
         }
 
@@ -89,6 +99,7 @@ class TestWorkplanRouterWiring:
         assert router["condition"]["input"] == "context:planner.final_answer.decision"
         assert router["condition"]["routes"] == {
             "ask_question": "plan_gate",
+            "needs_context": "context_gate",
             "plan_ready": "end",
             "default_route": "plan_gate",
         }
@@ -103,7 +114,176 @@ class TestWorkplanRouterWiring:
 
         assert router["to"] == target
 
+    # The resume after a context request carries the original goal, so it has
+    # to land in research's conversation, not the planner's.
+    def test_context_gate_resumes_into_research(self):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        router = self._router_for(config, "context_gate")
+        gate = _component(config, "context_gate")
+
+        assert router["to"] == "research"
+        assert gate["sends_response_to"] == "research"
+
     def test_entry_point_is_research(self):
         config = FlowConfig.from_yaml_config("workplan", "1.0.0")
 
         assert config.flow.entry_point == "research"
+
+
+class TestWorkplanGatesAreAnsweredExternally:
+    """Replies come from the work item, so the session page must not render approval buttons for any gate."""
+
+    @pytest.mark.parametrize("version", ["1.0.0", "1.1.0", "1.2.0"])
+    @pytest.mark.parametrize(
+        "gate_name", ["research_gate", "plan_gate", "context_gate"]
+    )
+    def test_gate_interaction_type_is_external(self, version, gate_name):
+        config = FlowConfig.from_yaml_config("workplan", version)
+
+        assert _component(config, gate_name)["interaction_type"] == "external"
+
+
+class TestWorkplanQuestionToolingIsAvailable:
+    """Guard the tools both stages' prompts depend on to ask a question well.
+
+    The prompts require two things of every question comment: that it isn't a
+    duplicate of one already on the work item (checked by reading the notes,
+    since a run can resume days later or restart with no memory), and that it
+    @mentions someone who can answer it (looked up at runtime, not templated).
+    Both are prompt-only behaviors - dropping either tool from a toolset
+    wouldn't fail schema validation, it would just turn the instruction into a
+    hallucinated no-op, so the coupling is pinned here.
+    """
+
+    REQUIRED_TOOLS = {"get_work_item_notes", "get_current_user"}
+
+    @pytest.mark.parametrize("component_name", AGENT_COMPONENT_NAMES)
+    def test_component_can_read_notes_and_identify_the_current_user(
+        self, component_name
+    ):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        component = next(
+            c for c in config.components if c.get("name") == component_name
+        )
+
+        # Entries are either plain strings or single-key {tool: options} maps,
+        # matching FlowGraphBuilder._parse_toolset.
+        declared = {
+            next(iter(entry)) if isinstance(entry, dict) else entry
+            for entry in component["toolset"]
+        }
+
+        assert self.REQUIRED_TOOLS <= declared
+
+
+SCHEMA_DEFINITIONS = Path(response_schemas.__file__).parent / "definitions"
+
+
+def _component(config: FlowConfig, component_name: str) -> dict:
+    return next(c for c in config.components if c.get("name") == component_name)
+
+
+def _declared_decisions(component: dict) -> list[str]:
+    """Read the ``decision`` enum straight out of the component's schema."""
+    schema_dir = SCHEMA_DEFINITIONS / component["response_schema_id"] / "base"
+    version = resolve_version(
+        [f.stem for f in schema_dir.glob("*.json")],
+        component["response_schema_version"],
+    )
+    schema = json.loads((schema_dir / f"{version}.json").read_text())
+
+    return schema["properties"]["decision"]["enum"]
+
+
+def _rendered_system_prompt(config: FlowConfig, component: dict) -> str:
+    # The stage literal the flow actually passes, not the component name -
+    # a config declaring the wrong one renders the other stage's branch.
+    stage = next(
+        inp["from"]
+        for inp in component["inputs"]
+        if inp.get("as") == "stage" and inp.get("literal")
+    )
+    assert config.prompts is not None
+    prompt = next(p for p in config.prompts if p.prompt_id == component["prompt_id"])
+    system = prompt.prompt_template["system"]
+    assert isinstance(system, str)
+
+    return jinja2_formatter(
+        system,
+        stage=stage,
+        goal="",
+        research_findings="",
+    )
+
+
+class TestDuplicateQuestionStopDecision:
+    """Guard the stage-conditional decision literal in the duplicate-question stop.
+
+    ``asking_a_question`` is one partial rendered twice, and the keyword it
+    tells the agent to stop with differs per stage. Nothing else fails if the
+    two branches are swapped or a keyword is renamed: the agent would emit a
+    value its response schema doesn't accept, the router would fall through to
+    ``default_route``, and the flow would keep working - just always gated on a
+    human. So both halves are pinned here, against the schema rather than a
+    hardcoded string.
+    """
+
+    EXPECTED_DECISION = {"research": "needs_input", "planner": "ask_question"}
+
+    @pytest.mark.parametrize("component_name", AGENT_COMPONENT_NAMES)
+    def test_stop_names_this_stage_decision_and_the_schema_accepts_it(
+        self, component_name
+    ):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        component = _component(config, component_name)
+        expected = self.EXPECTED_DECISION[component_name]
+
+        rendered = _rendered_system_prompt(config, component)
+
+        assert f"`decision: {expected}`" in rendered
+        assert expected in _declared_decisions(component)
+
+        # And the other stage's keyword must not leak in: both branches of the
+        # conditional rendering would look fine in isolation.
+        (other,) = set(self.EXPECTED_DECISION.values()) - {expected}
+        assert other not in rendered
+
+
+class TestContextRequestStopDecision:
+    """Guard the decision each stage stops with after requesting more context.
+
+    GitLab tells a context request apart from a question by the gate the run
+    paused at, and only ``context_gate`` resumes with the original goal. Both
+    stages reach it with ``needs_context``; a wrong keyword would pause at the
+    question gate instead, and the resume would carry replies, not the goal.
+    """
+
+    @pytest.mark.parametrize("component_name", AGENT_COMPONENT_NAMES)
+    def test_request_stops_with_needs_context_and_routes_to_context_gate(
+        self, component_name
+    ):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        component = _component(config, component_name)
+        rendered = _rendered_system_prompt(config, component)
+        router = next(r for r in config.routers if r["from"] == component_name)
+
+        assert "## Requesting more context" in rendered
+        assert "`decision: needs_context`" in rendered
+        assert "needs_context" in _declared_decisions(component)
+        assert router["condition"]["routes"]["needs_context"] == "context_gate"
+
+    # Research hands back to the planner without appending a message, so the
+    # prompt is the only thing telling it that a context request was acted on.
+    def test_planner_is_told_research_ran_again_after_a_context_request(self):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        rendered = _rendered_system_prompt(config, _component(config, "planner"))
+
+        assert "research\nhas since run again on an updated description" in rendered
+
+    # The planner's request lands back in research's own conversation, right
+    # after its earlier `ready`, so only the prompt tells it not to repeat it.
+    def test_research_is_told_to_rerun_after_a_planner_context_request(self):
+        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        rendered = _rendered_system_prompt(config, _component(config, "research"))
+
+        assert "the planner found\nthe description too thin" in rendered

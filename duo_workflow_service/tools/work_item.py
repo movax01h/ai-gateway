@@ -86,6 +86,7 @@ WORK_ITEM_IDENTIFICATION_DESCRIPTION = """To identify a work item you must provi
 """
 
 DateString = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")]
+LabelName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class HealthStatus(str, Enum):
@@ -397,6 +398,16 @@ class GetWorkItem(WorkItemBaseTool):
 
 
 class GetWorkItemNotesInput(WorkItemResourceInput):
+    notes_filter: Literal["ALL_NOTES", "ONLY_COMMENTS", "ONLY_ACTIVITY"] = Field(
+        default="ALL_NOTES",
+        description=(
+            "Filter the notes returned. ALL_NOTES (default) returns all notes, "
+            "including system notes. ONLY_COMMENTS returns only user comments "
+            "and excludes system notes (e.g. assignee changes, title changes, "
+            "cross-references). ONLY_ACTIVITY returns only system notes and "
+            "excludes user comments."
+        ),
+    )
     sort: Optional[str] = Field(
         default=None,
         description="Return work item notes sorted in asc or desc order. Default is desc.",
@@ -441,6 +452,7 @@ class GetWorkItemNotes(WorkItemBaseTool):
         group_id = kwargs.pop("group_id", None)
         project_id = kwargs.pop("project_id", None)
         work_item_iid = kwargs.pop("work_item_iid", None)
+        notes_filter = kwargs.pop("notes_filter", "ALL_NOTES")
         page_size = kwargs.pop("page_size", 20)
         pagination_cursor = kwargs.pop("pagination_cursor", None)
 
@@ -453,6 +465,7 @@ class GetWorkItemNotes(WorkItemBaseTool):
         query_variables = {
             "fullPath": resolved.parent.full_path,
             "workItemIid": str(resolved.work_item_iid),
+            "filter": notes_filter,
             "first": page_size,
             "after": pagination_cursor,
             **get_query_variables_for_version(
@@ -509,11 +522,14 @@ class CreateWorkItemInput(ParentResourceInput):
     assignee_ids: Optional[List[int]] = Field(
         default=None, description="IDs of users to assign"
     )
+    labels: Optional[List[LabelName]] = Field(
+        default=None,
+        description="""Exact label names to set on the work item, e.g. ['bug', 'group::ai framework'].""",
+    )
     label_ids: Optional[List[str]] = Field(
         default=None,
-        description="""Label global IDs or numeric IDs to add to the work item..
-        Do not use label names like 'bug' - you must use numeric IDs (e.g., 123)
-        To find label IDs: First fetch the project labels, then pass the numeric IDs from the response.""",
+        description="""Label global IDs or numeric IDs to set on the work item.
+        Only use this if you already have the IDs; otherwise use 'labels'.""",
     )
     confidential: Optional[bool] = Field(
         default=None, description="Set to true to create a confidential work item."
@@ -629,15 +645,23 @@ class UpdateWorkItemInput(WorkItemResourceInput):
         default=None,
         description="The state of the work item. Use 'opened' or 'closed'.",
     )
+    add_labels: Optional[List[LabelName]] = Field(
+        default=None,
+        description="""Exact label names to add to the work item, e.g. ['bug', 'group::ai framework'].""",
+    )
+    remove_labels: Optional[List[LabelName]] = Field(
+        default=None,
+        description="Exact label names to remove from the work item.",
+    )
     add_label_ids: Optional[List[str]] = Field(
         default=None,
         description="""Label global IDs or numeric IDs to add to the work item.
-        Do not use label names like 'bug' - you must use numeric IDs (e.g., 123)""",
+        Only use this if you already have the IDs; otherwise use 'add_labels'.""",
     )
     remove_label_ids: Optional[List[str]] = Field(
         default=None,
-        description="""Label global IDs or numeric IDs to add to the work item.
-        Do not use label names like 'bug' - you must use numeric IDs (e.g., 123).""",
+        description="""Label global IDs or numeric IDs to remove from the work item.
+        Only use this if you already have the IDs; otherwise use 'remove_labels'.""",
     )
     hierarchy_widget: Optional[Dict[Literal["parent_id"], str]] = Field(
         default=None,
@@ -667,6 +691,22 @@ class UpdateWorkItemInput(WorkItemResourceInput):
         description="""A plan on how the work should be implemented.
         Expects markdown with ## Why, ## What, and ## How sections""",
     )
+    readiness_score: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="""Readiness score (0-100) for the work item's agent plan.
+        Independent of 'agent_plan': passing only a score leaves the existing plan
+        content untouched, which is how a scoring flow reports on a plan it did not
+        author.""",
+    )
+    readiness_score_feedback: Optional[str] = Field(
+        default=None,
+        description="""Readiness score feedback for the work item's agent plan.
+        Markdown authored by the verdict LLM. Independent of 'agent_plan' and
+        'readiness_score': passing only feedback leaves the existing plan content
+        and score untouched.""",
+    )
 
 
 class UpdateWorkItem(WorkItemBaseTool):
@@ -676,7 +716,8 @@ class UpdateWorkItem(WorkItemBaseTool):
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
 
     Supports updating title, description, assignees, labels, state, status, health
-    status, weight, dates, hierarchy, to-do items and agent plan.
+    status, weight, dates, hierarchy, to-do items, the agent plan and the agent
+    plan's readiness score and feedback.
 
     Note: 'state' (opened / closed) is different from 'status_id' (the status
     category widget, e.g. New / In Progress / Done). To set a status, first call
@@ -692,6 +733,8 @@ class UpdateWorkItem(WorkItemBaseTool):
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", title="Updated title")
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="add")
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="mark_as_done", todo_id="gid://gitlab/Todo/123")
+    - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score=72)
+    - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score_feedback="1. **blocking**: Name the migration file\n2. **non-blocking**: Add a regression test\n3. **non-blocking**: Expand rollback notes")
     - update_work_item(project_id='namespace/project', work_item_iid=42, agent_plan="## Why\nFoo can't bar.\n## What\nMake Foo bar.\n## How\nAdd `Foo#bar` calling `Baz.qux`.")
     """
     args_schema: Type[BaseModel] = UpdateWorkItemInput

@@ -66,6 +66,7 @@ See [Further reading](#further-reading) for links to each deployment type's docu
 
 - `AIGW_BILLING_EVENT__ENABLED` — enable or disable billing event emission
 - `AIGW_BILLING_EVENT__ENDPOINT` — Snowplow collector endpoint URL
+- `AIGW_BILLING_EVENT__API_KEY` — optional API key, sent as a bearer token to the collector when set
 - `AIGW_BILLING_EVENT__BATCH_SIZE` — events per batch (set to `1` for local testing)
 - `AIGW_BILLING_EVENT__THREAD_COUNT` — number of async emitter worker threads
 
@@ -80,5 +81,5 @@ See [Application Settings](../application_settings.md) for the full configuratio
 
 - [Technical Overview](technical_overview.md): `BillingEventsClient` and `BillingEventService` API reference, `BillingEvent` enum, event types table, local testing setup, and best practices.
 - [Self-Hosted DAP Usage Billing](self-hosted-dap.md): Architecture for billing in self-hosted Duo deployments.
-- [Usage Quota](../usage_quota.md): Per-consumer credit checks before billable operations execute, `UsageQuotaEvent` enum, and decorator usage for HTTP and gRPC.
+- [Usage Quota](usage_quota.md): Per-consumer credit checks before billable operations execute, `UsageQuotaEvent` enum, and decorator usage for HTTP and gRPC.
 - [Internal Events](../internal_events.md): `InternalEventsClient` used for `usage_billing_event` correlation tracking.

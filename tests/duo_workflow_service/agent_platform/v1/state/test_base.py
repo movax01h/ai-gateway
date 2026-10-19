@@ -5,6 +5,9 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    MissingAdditionalContextError,
+)
 from duo_workflow_service.agent_platform.v1.state import (
     BaseIOKey,
     FlowState,
@@ -856,11 +859,91 @@ class TestIOKey:
         io_key = IOKey(target="context", subkeys=["test_key"], optional=optional)
 
         if should_raise_error:
-            with pytest.raises(KeyError):
+            with pytest.raises(
+                KeyError, match="Missing required input 'context:test_key'"
+            ):
                 io_key.value_from_state(state)
         else:
             result = io_key.value_from_state(state)
             assert result == expected_value
+
+    @pytest.mark.parametrize(
+        "key,context,expected_error,expected_category",
+        [
+            pytest.param(
+                "context:inputs.issue_context.iid",
+                {"inputs": {}},
+                MissingAdditionalContextError,
+                "issue_context",
+                id="missing_category_is_missing_additional_context",
+            ),
+            pytest.param(
+                "context:inputs.issue_context.iid",
+                {"inputs": {"issue_context": {}}},
+                KeyError,
+                None,
+                id="missing_field_in_supplied_category",
+            ),
+            pytest.param(
+                "context:inputs",
+                {},
+                KeyError,
+                None,
+                id="missing_inputs",
+            ),
+            pytest.param(
+                "context:issue_iid",
+                {"inputs": {}},
+                KeyError,
+                None,
+                id="missing_top_level_context_key",
+            ),
+            pytest.param(
+                "context:read_verdict.final_answer",
+                {"read_verdict": {}},
+                KeyError,
+                None,
+                id="missing_component_output",
+            ),
+        ],
+    )
+    def test_iokey_missing_additional_context_category(
+        self, key, context, expected_error, expected_category
+    ):
+        state: FlowState = {
+            "agent_context_limits": {},
+            "status": WorkflowStatusEnum.NOT_STARTED,
+            "conversation_history": {},
+            "ui_chat_log": [],
+            "context": context,
+        }
+
+        with pytest.raises(KeyError, match="Missing required input") as exc_info:
+            IOKey.parse_key(key).value_from_state(state)
+
+        assert type(exc_info.value) is expected_error
+        assert getattr(exc_info.value, "category", None) == expected_category
+
+
+class TestIOKeyContains:
+    @pytest.mark.parametrize(
+        ("outer", "inner", "expected"),
+        [
+            ("context:a", "context:a", True),
+            ("context:a", "context:a.b", True),
+            ("context:a.b", "context:a", False),
+            ("context:a", "context:ab", False),
+            ("context:a", "status", False),
+        ],
+    )
+    def test_a_key_contains_the_paths_under_it(self, outer, inner, expected):
+        assert (IOKey.parse_key(inner) in IOKey.parse_key(outer)) is expected
+
+    def test_a_bare_key_contains_every_key_of_its_target(self):
+        assert IOKey(target="context", subkeys=["a", "b"]) in IOKey(target="context")
+
+    def test_only_keys_can_be_contained(self):
+        assert "context:a" not in IOKey.parse_key("context:a")
 
 
 class TestIOKeyModelValidations:

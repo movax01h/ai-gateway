@@ -28,7 +28,7 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
     OptimizationResult,
 )
-from duo_workflow_service.entities import WorkflowEventType
+from duo_workflow_service.entities import WorkflowEvent, WorkflowEventType
 from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
     MessageTypeEnum,
@@ -37,8 +37,8 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from lib.events import GLReportingEventContext
 from lib.guardrails import GUARDRAIL_INTERVENED_WARNING
-from lib.internal_events.event_enum import CategoryEnum
 from lib.prompts.utilities import render_security_block
 from tests.conftest import FakeModel
 
@@ -76,7 +76,7 @@ def _noop_pipeline() -> HistoryOptimizerPipeline:
 def agent_fixture(
     prompt: Prompt,
     gl_http_client: GitlabHttpClient,
-    workflow_type: CategoryEnum,
+    workflow_type: GLReportingEventContext,
     check_events: bool,
 ) -> Agent:
     return Agent(
@@ -445,7 +445,9 @@ def test_create_agent_with_prompt_registry(
         internal_event_category="test_category",
         tools=tools,
         workflow_id="workflow_123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         check_events=True,
         http_client=gl_http_client,
     )
@@ -458,7 +460,7 @@ def test_create_agent_with_prompt_registry(
         internal_event_extra={
             "agent_name": "test_agent",
             "workflow_id": "workflow_123",
-            "workflow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            "workflow_type": "software_development",
         },
     )
 
@@ -483,7 +485,9 @@ def test_build_agent_with_compaction_config_uses_compaction_optimizer(
         prompt_version="^1.0.0",
         tools=tools,
         workflow_id="workflow_123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         http_client=gl_http_client,
         compaction=compaction_config,
     )
@@ -508,7 +512,9 @@ def test_build_agent_without_compaction_config_uses_legacy_trim(
         prompt_version="^1.0.0",
         tools=tools,
         workflow_id="workflow_123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         http_client=gl_http_client,
     )
 
@@ -525,7 +531,7 @@ class TestAgentOptimizerPipeline:
         self,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
@@ -563,12 +569,142 @@ class TestAgentOptimizerPipeline:
         assert workflow_state["conversation_history"][prompt_name] == original_messages
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_get_event", "incremental_checkpoints_only")
+    async def test_agent_run_rewrite_trims_ui_chat_log_when_blobs_hold_history(
+        self,
+        prompt: Prompt,
+        gl_http_client: GitlabHttpClient,
+        workflow_type: GLReportingEventContext,
+        workflow_state: DuoWorkflowStateType,
+        prompt_name: str,
+    ):
+        """Under incremental-only writes a history rewrite also replaces ``ui_chat_log`` with this step's entries
+        (gitlab-org/gitlab#628017)."""
+        optimized_messages: list[BaseMessage] = [HumanMessage(content="optimized")]
+        mock_pipeline = Mock(spec=HistoryOptimizerPipeline)
+        mock_pipeline.optimize = AsyncMock(
+            return_value=(
+                optimized_messages,
+                [OptimizationResult(messages=optimized_messages, was_modified=True)],
+            )
+        )
+        workflow_state["conversation_history"][prompt_name] = [
+            HumanMessage(content="test message")
+        ]
+        workflow_state["last_human_input"] = WorkflowEvent(
+            id="event-1",
+            event_type=WorkflowEventType.MESSAGE,
+            message="hello",
+            correlation_id=None,
+        )
+
+        agent = Agent(
+            name=prompt_name,
+            prompt=prompt,
+            workflow_id="test-workflow-123",
+            workflow_type=workflow_type,
+            http_client=gl_http_client,
+            check_events=True,
+            optimizer_pipeline=mock_pipeline,
+        )  # type: ignore[call-arg]
+
+        with patch.object(
+            agent.__class__.__bases__[0], "ainvoke", new_callable=AsyncMock
+        ) as mock_ainvoke:
+            mock_ainvoke.return_value = AIMessage(content="reply")
+            result = await agent.run(workflow_state)
+
+        update = result["ui_chat_log"]
+        assert isinstance(update, Overwrite)
+        assert len(update.value) == 1
+        assert update.value[0]["message_type"] == MessageTypeEnum.AGENT
+        assert update.value[0]["content"] == "reply"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures(
+        "mock_get_event", "mock_ainvoke", "incremental_checkpoints_only"
+    )
+    async def test_agent_run_rewrite_without_ui_entries_empties_ui_chat_log(
+        self,
+        prompt: Prompt,
+        gl_http_client: GitlabHttpClient,
+        workflow_type: GLReportingEventContext,
+        workflow_state: DuoWorkflowStateType,
+        prompt_name: str,
+    ):
+        """A planner/executor step has no UI entry of its own, so the trimmed channel is empty."""
+        optimized_messages: list[BaseMessage] = [HumanMessage(content="optimized")]
+        mock_pipeline = Mock(spec=HistoryOptimizerPipeline)
+        mock_pipeline.optimize = AsyncMock(
+            return_value=(
+                optimized_messages,
+                [OptimizationResult(messages=optimized_messages, was_modified=True)],
+            )
+        )
+        workflow_state["conversation_history"][prompt_name] = [
+            HumanMessage(content="test message")
+        ]
+        workflow_state["last_human_input"] = None
+
+        agent = Agent(
+            name=prompt_name,
+            prompt=prompt,
+            workflow_id="test-workflow-123",
+            workflow_type=workflow_type,
+            http_client=gl_http_client,
+            check_events=True,
+            optimizer_pipeline=mock_pipeline,
+        )  # type: ignore[call-arg]
+
+        result = await agent.run(workflow_state)
+
+        update = result["ui_chat_log"]
+        assert isinstance(update, Overwrite)
+        assert update.value == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_get_event", "mock_ainvoke")
+    async def test_agent_run_rewrite_appends_ui_chat_log_without_incremental_only(
+        self,
+        prompt: Prompt,
+        gl_http_client: GitlabHttpClient,
+        workflow_type: GLReportingEventContext,
+        workflow_state: DuoWorkflowStateType,
+        prompt_name: str,
+    ):
+        optimized_messages: list[BaseMessage] = [HumanMessage(content="optimized")]
+        mock_pipeline = Mock(spec=HistoryOptimizerPipeline)
+        mock_pipeline.optimize = AsyncMock(
+            return_value=(
+                optimized_messages,
+                [OptimizationResult(messages=optimized_messages, was_modified=True)],
+            )
+        )
+        workflow_state["conversation_history"][prompt_name] = [
+            HumanMessage(content="test message")
+        ]
+
+        agent = Agent(
+            name=prompt_name,
+            prompt=prompt,
+            workflow_id="test-workflow-123",
+            workflow_type=workflow_type,
+            http_client=gl_http_client,
+            check_events=True,
+            optimizer_pipeline=mock_pipeline,
+        )  # type: ignore[call-arg]
+
+        result = await agent.run(workflow_state)
+
+        assert not isinstance(result.get("ui_chat_log"), Overwrite)
+
+    @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_get_event")
     async def test_agent_run_rewrite_persists_on_api_error(
         self,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
@@ -622,7 +758,7 @@ class TestAgentOptimizerPipeline:
         self,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):

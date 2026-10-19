@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import structlog
+from pydantic import SecretStr
 from snowplow_tracker import SelfDescribingJson, StructuredEvent, Tracker
 
 from lib.internal_events.ai_context import AIContext
@@ -14,7 +15,7 @@ from lib.internal_events.context import (
     pipeline_source_context,
     tracked_internal_events,
 )
-from lib.snowplow import LoggingAsyncEmitter
+from lib.snowplow import LoggingAsyncEmitter, set_bearer_token
 
 __all__ = ["InternalEventsClient"]
 
@@ -23,9 +24,13 @@ class InternalEventsClient:
     """Client to handle internal events using SnowplowClient."""
 
     STANDARD_CONTEXT_SCHEMA = "iglu:com.gitlab/gitlab_standard/jsonschema/1-1-8"
-    AI_CONTEXT_SCHEMA = "iglu:com.gitlab/ai_context/jsonschema/1-0-1"
+    AI_CONTEXT_SCHEMA = "iglu:com.gitlab/ai_context/jsonschema/1-0-2"
     REQUEST_TIMEOUT = (5.0, 10.0)
     MAX_VALUE_LENGTH = 1000
+    # iglu ai_context 1-0-2 constraints on the flow-registry identity fields.
+    ITEM_VERSION_MAX_LENGTH = 32
+    FLOW_NAME_MAX_LENGTH = 64
+    VALID_ITEM_SCHEMA_VERSIONS = frozenset({"experimental", "v1"})
 
     def __init__(
         self,
@@ -35,12 +40,14 @@ class InternalEventsClient:
         namespace: str,
         batch_size: int,
         thread_count: int,
+        api_key: Optional[SecretStr] = None,
     ) -> None:
         self._logger = structlog.stdlib.get_logger("internal_events_client")
         self.enabled = enabled
 
         if enabled:
             self._session = requests.Session()
+            set_bearer_token(self._session, api_key)
             self._emitter = LoggingAsyncEmitter(
                 logger=self._logger,
                 batch_size=batch_size,
@@ -81,7 +88,7 @@ class InternalEventsClient:
             emitter_queue_size=queue_size,
             emitter_buffer_size=buffer_size,
         )
-        self.snowplow_tracker.flush()
+        self.snowplow_tracker.flush(is_async=True)
         queue_size, buffer_size = self._get_emitter_stats()
         self._session.close()
         self._logger.info(
@@ -131,6 +138,7 @@ class InternalEventsClient:
         event_name: str,
         additional_properties: Optional[InternalEventAdditionalProperties] = None,
         category: Optional[str] = "default_category",
+        ai_context: Optional[AIContext] = None,
         **kwargs,
     ) -> None:
         """Send internal event to Snowplow.
@@ -140,7 +148,15 @@ class InternalEventsClient:
                 <action>_<target_of_action>_<where/when>. Reference:
                 https://docs.gitlab.com/ee/development/internal_analytics/internal_event_instrumentation/quick_start.html#defining-event-and-metrics
             additional_properties: Additional properties for the event.
-            category:  the location where the event happened ideally classname which invoked the event.
+            category: the location where the event happened ideally classname which invoked the event.
+            ai_context: Optional explicit AIContext to attach to the event. When provided, its
+                ``workflow_id``, ``flow_type``, and ``agent_name`` fields take precedence over
+                values extracted from ``extra``/``kwargs``. Token fields (``input_tokens``,
+                ``output_tokens``, ``total_tokens``, ``cache_read``, ``cache_creation``,
+                ``ephemeral_5m_input_tokens``, ``ephemeral_1h_input_tokens``) on the explicit
+                context also take precedence. Passing this parameter is the preferred path for
+                new callers; the implicit extraction from ``extra``/``kwargs`` is retained for
+                backwards compatibility.
         """
         if not self.enabled:
             self._logger.debug("Internal events disabled")
@@ -170,6 +186,46 @@ class InternalEventsClient:
 
         session_id = additional_properties.value
         event_property = self.truncate_string(additional_properties.property)
+        resolved_session_id = str(session_id) if session_id is not None else None
+
+        if ai_context is not None:
+            resolved_ai_context = AIContext(
+                session_id=resolved_session_id,
+                workflow_id=ai_context.workflow_id,
+                flow_type=ai_context.flow_type,
+                agent_name=ai_context.agent_name,
+                input_tokens=ai_context.input_tokens,
+                output_tokens=ai_context.output_tokens,
+                total_tokens=ai_context.total_tokens,
+                ephemeral_5m_input_tokens=ai_context.ephemeral_5m_input_tokens,
+                ephemeral_1h_input_tokens=ai_context.ephemeral_1h_input_tokens,
+                cache_read=ai_context.cache_read,
+                cache_creation=ai_context.cache_creation,
+            )
+        else:
+            item_schema_version = extra.get("item_schema_version")
+            if item_schema_version not in self.VALID_ITEM_SCHEMA_VERSIONS:
+                item_schema_version = None
+            resolved_ai_context = AIContext(
+                session_id=resolved_session_id,
+                workflow_id=extra.get("workflow_id"),
+                flow_type=extra.get("workflow_type"),
+                agent_name=extra.get("agent_name"),
+                flow_name=self.truncate_string(
+                    extra.get("flow_name"), max_length=self.FLOW_NAME_MAX_LENGTH
+                ),
+                item_version=self.truncate_string(
+                    extra.get("item_version"), max_length=self.ITEM_VERSION_MAX_LENGTH
+                ),
+                item_schema_version=item_schema_version,
+                input_tokens=new_context.get("input_tokens"),
+                output_tokens=new_context.get("output_tokens"),
+                total_tokens=new_context.get("total_tokens"),
+                ephemeral_5m_input_tokens=extra.get("ephemeral_5m_input_tokens"),
+                ephemeral_1h_input_tokens=extra.get("ephemeral_1h_input_tokens"),
+                cache_read=extra.get("cache_read"),
+                cache_creation=extra.get("cache_creation"),
+            )
 
         self._logger.info(
             "Building AIContext",
@@ -177,39 +233,29 @@ class InternalEventsClient:
             label=additional_properties.label,
             property=event_property,
             session_id=session_id,
-            workflow_id=extra.get("workflow_id"),
-            flow_type=extra.get("workflow_type"),
-            agent_name=extra.get("agent_name"),
-            input_tokens=new_context.get("input_tokens"),
-            input_tokens_type=type(new_context.get("input_tokens")).__name__,
-            output_tokens=new_context.get("output_tokens"),
-            output_tokens_type=type(new_context.get("output_tokens")).__name__,
-            total_tokens=new_context.get("total_tokens"),
-            total_tokens_type=type(new_context.get("total_tokens")).__name__,
-            ephemeral_5m_input_tokens=extra.get("ephemeral_5m_input_tokens"),
-            ephemeral_1h_input_tokens=extra.get("ephemeral_1h_input_tokens"),
-            cache_read=extra.get("cache_read"),
-            cache_creation=extra.get("cache_creation"),
-        )
-
-        ai_context = AIContext(
-            session_id=str(session_id) if session_id is not None else None,
-            workflow_id=extra.get("workflow_id"),
-            flow_type=extra.get("workflow_type"),
-            agent_name=extra.get("agent_name"),
-            input_tokens=new_context.get("input_tokens"),
-            output_tokens=new_context.get("output_tokens"),
-            total_tokens=new_context.get("total_tokens"),
-            ephemeral_5m_input_tokens=extra.get("ephemeral_5m_input_tokens"),
-            ephemeral_1h_input_tokens=extra.get("ephemeral_1h_input_tokens"),
-            cache_read=extra.get("cache_read"),
-            cache_creation=extra.get("cache_creation"),
+            workflow_id=resolved_ai_context.workflow_id,
+            flow_type=resolved_ai_context.flow_type,
+            agent_name=resolved_ai_context.agent_name,
+            flow_name=resolved_ai_context.flow_name,
+            item_version=resolved_ai_context.item_version,
+            item_schema_version=resolved_ai_context.item_schema_version,
+            input_tokens=resolved_ai_context.input_tokens,
+            input_tokens_type=type(resolved_ai_context.input_tokens).__name__,
+            output_tokens=resolved_ai_context.output_tokens,
+            output_tokens_type=type(resolved_ai_context.output_tokens).__name__,
+            total_tokens=resolved_ai_context.total_tokens,
+            total_tokens_type=type(resolved_ai_context.total_tokens).__name__,
+            ephemeral_5m_input_tokens=resolved_ai_context.ephemeral_5m_input_tokens,
+            ephemeral_1h_input_tokens=resolved_ai_context.ephemeral_1h_input_tokens,
+            cache_read=resolved_ai_context.cache_read,
+            cache_creation=resolved_ai_context.cache_creation,
+            explicit_ai_context_provided=ai_context is not None,
         )
 
         structured_event = StructuredEvent(
             context=[
                 SelfDescribingJson(self.STANDARD_CONTEXT_SCHEMA, new_context),
-                SelfDescribingJson(self.AI_CONTEXT_SCHEMA, asdict(ai_context)),
+                SelfDescribingJson(self.AI_CONTEXT_SCHEMA, asdict(resolved_ai_context)),
             ],
             category=category,  # type: ignore[arg-type]
             action=event_name,
@@ -235,16 +281,24 @@ class InternalEventsClient:
         )
         tracked_internal_events.get().add(event_name)
 
-    def truncate_string(self, value: str | None) -> str | None:
-        """Truncate a string to MAX_VALUE_LENGTH, appending '...' if trimmed.
+    def truncate_string(
+        self, value: str | None, max_length: int = MAX_VALUE_LENGTH
+    ) -> str | None:
+        """Truncate a string to max_length, appending '...' if trimmed.
 
         Args:
-            value: The string to truncate, or None.
+            value: The string to truncate, or None. A non-string value (for
+                example a client-supplied JSON extra of the wrong type) is
+                treated as absent and normalises to None.
+            max_length: The maximum length to allow; defaults to
+                MAX_VALUE_LENGTH.
         Returns:
             The original string if it is within the length limit or None/empty,
-            otherwise the string truncated to MAX_VALUE_LENGTH characters (including
-            the trailing '...').
+            otherwise the string truncated to max_length characters (including
+            the trailing '...'). None when value is not a string.
         """
-        if value and len(value) > self.MAX_VALUE_LENGTH:
-            return value[: self.MAX_VALUE_LENGTH - 3] + "..."
+        if not isinstance(value, str):
+            return None
+        if len(value) > max_length:
+            return value[: max_length - 3] + "..."
         return value

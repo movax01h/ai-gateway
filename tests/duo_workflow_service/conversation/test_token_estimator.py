@@ -5,6 +5,7 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
+from duo_workflow_service.entities.image_blocks import IMAGE_BLOCK_TOKEN_ESTIMATE
 
 PATCH_COUNT_APPROX = (
     "duo_workflow_service.conversation.token_estimator.count_tokens_approximately"
@@ -37,7 +38,9 @@ class TestCountTokensArbitrary:
         result = count_tokens(messages, is_complete_history=False)
 
         assert result == 100
-        mock_count_approx.assert_called_once_with(messages=[])
+        mock_count_approx.assert_called_once_with(
+            messages=[], tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_without_usage_metadata(self, mock_count_approx):
@@ -48,7 +51,9 @@ class TestCountTokensArbitrary:
         result = count_tokens(messages, is_complete_history=False)
 
         assert result == 50
-        mock_count_approx.assert_called_once_with(messages=messages)
+        mock_count_approx.assert_called_once_with(
+            messages=messages, tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_mixed(self, mock_count_approx):
@@ -72,7 +77,9 @@ class TestCountTokensArbitrary:
         result = count_tokens(messages, is_complete_history=False)
 
         assert result == 125
-        mock_count_approx.assert_called_once_with(messages=[human1, human2])
+        mock_count_approx.assert_called_once_with(
+            messages=[human1, human2], tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_empty(self, mock_count_approx):
@@ -82,7 +89,9 @@ class TestCountTokensArbitrary:
         result = count_tokens([], is_complete_history=False)
 
         assert result == 0
-        mock_count_approx.assert_called_once_with(messages=[])
+        mock_count_approx.assert_called_once_with(
+            messages=[], tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_with_tool_messages(self, mock_count_approx):
@@ -99,7 +108,9 @@ class TestCountTokensArbitrary:
         result = count_tokens(messages, is_complete_history=False)
 
         assert result == 30
-        mock_count_approx.assert_called_once_with(messages=[human, ai, tool])
+        mock_count_approx.assert_called_once_with(
+            messages=[human, ai, tool], tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_ai_with_zero_output_tokens(self, mock_count_approx):
@@ -118,7 +129,9 @@ class TestCountTokensArbitrary:
         result = count_tokens(messages, is_complete_history=False)
 
         assert result == 20
-        mock_count_approx.assert_called_once_with(messages=[ai])
+        mock_count_approx.assert_called_once_with(
+            messages=[ai], tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
 
 class TestCountTokensHistory:
@@ -153,7 +166,9 @@ class TestCountTokensHistory:
         result = count_tokens(messages, is_complete_history=True)
 
         assert result == 515
-        mock_count_approx.assert_called_once_with(messages=[trailing])
+        mock_count_approx.assert_called_once_with(
+            messages=[trailing], tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_ai_at_end(self, mock_count_approx):
@@ -186,7 +201,9 @@ class TestCountTokensHistory:
         result = count_tokens(messages, is_complete_history=True)
 
         assert result == 40
-        mock_count_approx.assert_called_once_with(messages=messages)
+        mock_count_approx.assert_called_once_with(
+            messages=messages, tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_ai_without_metadata(self, mock_count_approx):
@@ -200,7 +217,9 @@ class TestCountTokensHistory:
         result = count_tokens(messages, is_complete_history=True)
 
         assert result == 35
-        mock_count_approx.assert_called_once_with(messages=messages)
+        mock_count_approx.assert_called_once_with(
+            messages=messages, tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_multiple_ai_messages(self, mock_count_approx):
@@ -232,7 +251,9 @@ class TestCountTokensHistory:
         result = count_tokens(messages, is_complete_history=True)
 
         assert result == 310
-        mock_count_approx.assert_called_once_with(messages=[trailing])
+        mock_count_approx.assert_called_once_with(
+            messages=[trailing], tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_ai_with_zero_total_tokens(self, mock_count_approx):
@@ -253,7 +274,9 @@ class TestCountTokensHistory:
         result = count_tokens(messages, is_complete_history=True)
 
         assert result == 45
-        mock_count_approx.assert_called_once_with(messages=messages)
+        mock_count_approx.assert_called_once_with(
+            messages=messages, tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE
+        )
 
     @patch(PATCH_COUNT_APPROX)
     def test_multiple_trailing_messages(self, mock_count_approx):
@@ -281,5 +304,43 @@ class TestCountTokensHistory:
 
         assert result == 260
         mock_count_approx.assert_called_once_with(
-            messages=[trailing1, trailing2, trailing3]
+            messages=[trailing1, trailing2, trailing3],
+            tokens_per_image=IMAGE_BLOCK_TOKEN_ESTIMATE,
         )
+
+
+class TestImageBudgeting:
+    """An attachment must be priced at its ceiling on the path that actually budgets.
+
+    These call the real ``count_tokens_approximately`` rather than a mock: the bug this
+    guards against was the estimator silently keeping langchain's 85-token default, which
+    a signature assertion alone would not have caught.
+    """
+
+    @staticmethod
+    def _image_message():
+        return HumanMessage(
+            content=[
+                {"type": "text", "text": "what is in this screenshot?"},
+                {
+                    "type": "image",
+                    "base64": "QUJD" * 4096,
+                    "mime_type": "image/png",
+                },
+            ]
+        )
+
+    def test_an_image_is_charged_the_ceiling_not_langchains_default(self):
+        text_only = HumanMessage(content="what is in this screenshot?")
+
+        with_image = count_tokens([self._image_message()], is_complete_history=False)
+        without_image = count_tokens([text_only], is_complete_history=False)
+
+        # 85 is langchain's default; anything near it means the constant is not applied.
+        assert with_image - without_image == IMAGE_BLOCK_TOKEN_ESTIMATE
+
+    def test_the_base64_payload_is_never_measured_as_prose(self):
+        """A 16 KiB payload counted as text would be ~4000 tokens on its own."""
+        result = count_tokens([self._image_message()], is_complete_history=False)
+
+        assert result < 2 * IMAGE_BLOCK_TOKEN_ESTIMATE

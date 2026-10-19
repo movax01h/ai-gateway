@@ -64,14 +64,16 @@ if [ ! -d "$DEFINITIONS_ROOT" ]; then
   exit 1
 fi
 
-# Find all potential prompt files matching the prompt name. A moved feature
-# keeps its flat id under ai/features/<domain>/<feature>/prompts/.
+# Find all potential prompt files matching the prompt name. A moved prompt
+# lives under ai/features/<domain>/<feature>/prompts/ or ai/shared/<name>/prompts/.
 echo "Searching for prompt definitions matching '$PROMPT_NAME'..."
 FEATURES_ROOT="$BASE_DIR/ai/features"
+SHARED_ROOT="$BASE_DIR/ai/shared"
 FOUND_FILES=$(
   {
     find "$DEFINITIONS_ROOT" -type f -path "*/$PROMPT_NAME/*" -name "*.yml"
     [ -d "$FEATURES_ROOT" ] && find "$FEATURES_ROOT" -type f -path "*/$PROMPT_NAME/prompts/*" -name "*.yml"
+    [ -d "$SHARED_ROOT" ] && find "$SHARED_ROOT" -type f -path "*/$PROMPT_NAME/prompts/*" -name "*.yml"
   } | sort
 )
 

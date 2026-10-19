@@ -17,16 +17,20 @@ from structlog.testing import capture_logs
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import (
+    _get_gitlab_identifier,
     _track_code_suggestions_event,
 )
+from ai_gateway.model_metadata import create_model_metadata
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
+from ai_gateway.models import KindModelProvider
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.tracking.container import ContainerTracking
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
 from lib.billing_events import BillingEvent, ExecutionEnvironment
-from lib.feature_flags.context import current_feature_flag_context
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -1040,6 +1044,7 @@ class TestCodeCompletions:
                 language=expected_language,
                 gitlab_realm=request_headers.get("X-Gitlab-Realm", ""),
                 is_direct_connection=True,
+                is_context_cap_enabled=False,
                 suggestion_source="network",
                 region="us-central1",
                 gitlab_instance_id=request_headers.get("X-Gitlab-Instance-Id", ""),
@@ -1093,6 +1098,68 @@ class TestCodeCompletions:
         args = snowplow_instrumentator_mock.watch.call_args[0]
         assert len(args) == 1
         assert args[0] == expected_event
+
+    @pytest.mark.parametrize(
+        "auth_user",
+        [
+            CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(
+                    scopes=["complete_code"],
+                    subject="1234",
+                    gitlab_realm="self-managed",
+                    issuer="gitlab-ai-gateway",
+                ),
+            )
+        ],
+    )
+    @pytest.mark.usefixtures("mock_completions", "auth_user")
+    def test_snowplow_tracking_is_context_cap_enabled(
+        self,
+        mock_client: TestClient,
+        mock_ai_gateway_container: containers.Container,
+    ):
+        snowplow_instrumentator_mock = Mock(spec=SnowplowInstrumentator)
+        snowplow_container_mock = Mock(spec=ContainerTracking)
+        snowplow_container_mock.instrumentator = Mock(
+            return_value=snowplow_instrumentator_mock
+        )
+
+        with (
+            patch.object(
+                mock_ai_gateway_container, "snowplow", snowplow_container_mock
+            ),
+            patch(
+                "ai_gateway.api.v2.code.completions.is_feature_enabled",
+                return_value=True,
+            ) as mock_is_feature_enabled,
+        ):
+            mock_client.post(
+                "/completions",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-Gitlab-Global-User-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 1,
+                    "project_path": "gitlab-org/gitlab",
+                    "project_id": 278964,
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "# Create a fast binary search\n",
+                        "content_below_cursor": "\n",
+                    },
+                },
+            )
+
+        mock_is_feature_enabled.assert_called_with(
+            FeatureFlag.CAP_CODE_COMPLETION_CONTEXT
+        )
+        (event,), _ = snowplow_instrumentator_mock.watch.call_args
+        assert event.context.is_context_cap_enabled is True
 
     @pytest.mark.parametrize(
         ("auth_user", "extra_headers", "expected_status_code"),
@@ -1161,7 +1228,7 @@ class TestCodeCompletions:
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
         "model_details",
-        [{"model_provider": "vertex-ai", "model_name": "codestral-2508"}, {}],
+        [{"model_provider": "vertex-ai", "model_name": "codestral-2508"}],
     )
     def test_vertex_codestral(
         self,
@@ -1200,6 +1267,94 @@ class TestCodeCompletions:
         assert "codestral" in result["model"]["name"]
 
         assert result["choices"][0]["text"] == "Post-processed completion response"
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        "model_details",
+        [
+            {},
+            {"model_provider": "gitlab"},
+            {"model_provider": "fireworks_ai", "model_name": "codestral-2508"},
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("default_identifier", "expected_engine"),
+        [
+            ("codestral_2508_vertex", "vertex-ai"),
+            ("codestral_2508_fireworks", "fireworks_ai"),
+        ],
+    )
+    def test_gitlab_default_uses_default_models(
+        self,
+        mock_client: Mock,
+        mock_prompt_ainvoke: Mock,
+        mock_post_processor: Mock,
+        model_details: Dict[str, str],
+        default_identifier: str,
+        expected_engine: str,
+    ):
+        params = {
+            "prompt_version": 2,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+        }
+        params.update(model_details)
+        default_model = ModelSelectionConfig.instance().get_model(default_identifier)
+
+        with patch(
+            "ai_gateway.model_selection.ModelSelectionConfig.get_model_for_feature",
+            return_value=default_model,
+        ) as mock_get_model_for_feature:
+            response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        mock_get_model_for_feature.assert_called_with("code_completions")
+        assert mock_prompt_ainvoke.called
+        assert response.json()["model"]["engine"] == expected_engine
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        ("model_details", "expected_fallback_calls"),
+        [
+            ({"model_provider": "fireworks_ai", "model_name": "codestral-2508"}, 1),
+            ({}, 1),
+            ({"model_provider": "gitlab", "model_name": "codestral_2508_fireworks"}, 0),
+        ],
+    )
+    def test_rate_limit_fallback_is_wired_for_the_gitlab_default_only(
+        self,
+        mock_client: Mock,
+        mock_prompt_ainvoke: Mock,
+        mock_post_processor: Mock,
+        model_details: Dict[str, str],
+        expected_fallback_calls: int,
+    ):
+        params = {
+            "prompt_version": 2,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+        }
+        params.update(model_details)
+
+        with patch(
+            "ai_gateway.api.v2.code.completions.build_rate_limit_fallback",
+            return_value=None,
+        ) as mock_build:
+            response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        assert mock_prompt_ainvoke.called
+        assert mock_build.call_count == expected_fallback_calls
 
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
@@ -1298,9 +1453,143 @@ class TestCodeCompletions:
         assert body["model"]["engine"] == expected_model_engine
         assert body["model"]["name"] == expected_model_name
         assert (
-            body["choices"][0]["text"] == expect_post_processed
-            and "Post-processed completion response"
-        ) or "whatever"
+            body["choices"][0]["text"] == "Post-processed completion response"
+        ) == expect_post_processed
+
+    # Only Sonnet 4.5 is checked end to end: request validation rejects
+    # `claude-sonnet-4-20250514` for the anthropic provider before routing.
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.usefixtures("mock_post_processor")
+    def test_legacy_anthropic_model_name_routes_to_sonnet_5_5(
+        self,
+        mock_client: Mock,
+        mock_prompt_ainvoke: Mock,
+    ):
+        params = {
+            "prompt_version": 1,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": "anthropic",
+            "model_name": "claude-sonnet-4-5-20250929",
+        }
+
+        response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        assert mock_prompt_ainvoke.called, "Should use prompt registry execution"
+
+        body = response.json()
+        assert body["model"]["engine"] == "anthropic"
+        assert body["model"]["name"] == "claude_sonnet_5_5"
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        ("model_provider", "model_name", "expect_forwarded"),
+        [
+            ("vertex-ai", "codestral-2508", False),
+            ("gitlab", "codestral_2508_vertex", False),
+            ("litellm", "codestral", True),
+        ],
+    )
+    @pytest.mark.usefixtures("mock_prompt_ainvoke")
+    def test_client_model_fields_forwarded_only_for_custom_models(
+        self,
+        mock_client: Mock,
+        model_provider: str,
+        model_name: str,
+        expect_forwarded: bool,
+    ):
+        params = {
+            "prompt_version": 2,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": model_provider,
+            "model_name": model_name,
+            "model_endpoint": "http://localhost:4000/",
+            "model_api_key": "api-key",
+            "model_identifier": "bedrock/anthropic.claude-3-5-sonnet",
+        }
+
+        with patch(
+            "ai_gateway.api.v2.code.completions.create_model_metadata",
+            wraps=create_model_metadata,
+        ) as mock_create_model_metadata:
+            response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        data = mock_create_model_metadata.call_args.args[0]
+        forwarded = {
+            key: data.get(key) for key in ("identifier", "endpoint", "api_key")
+        }
+        if expect_forwarded:
+            assert forwarded == {
+                "identifier": "bedrock/anthropic.claude-3-5-sonnet",
+                "endpoint": "http://localhost:4000/",
+                "api_key": "api-key",
+            }
+        else:
+            assert forwarded == {"identifier": None, "endpoint": None, "api_key": None}
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
+        ("model_provider", "model_name", "expect_forwarded"),
+        [
+            ("vertex-ai", "codestral-2508", False),
+            ("gitlab", "codestral_2508_vertex", False),
+            ("litellm", "codestral", True),
+        ],
+    )
+    @pytest.mark.usefixtures("mock_prompt_ainvoke")
+    def test_model_iam_role_forwarded_only_for_custom_models(
+        self,
+        mock_client: Mock,
+        model_provider: str,
+        model_name: str,
+        expect_forwarded: bool,
+    ):
+        iam_role = "arn:aws:iam::123456789012:role/my-bedrock-role"
+        params = {
+            "prompt_version": 2,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": model_provider,
+            "model_name": model_name,
+            "model_endpoint": "http://localhost:4000/",
+            "model_identifier": "bedrock/anthropic.claude-3-5-sonnet",
+            "model_iam_role": iam_role,
+        }
+
+        with (
+            patch("ai_gateway.model_metadata.get_config") as mock_get_config,
+            patch(
+                "ai_gateway.model_metadata.get_assumed_role_credentials"
+            ) as mock_assume_role,
+            patch(
+                "ai_gateway.api.v2.code.completions.create_model_metadata",
+                wraps=create_model_metadata,
+            ) as mock_create_model_metadata,
+        ):
+            mock_get_config.return_value.custom_models.enabled = True
+            response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        data = mock_create_model_metadata.call_args.args[0]
+        assert data.get("iam_role") == (iam_role if expect_forwarded else None)
+        if expect_forwarded:
+            mock_assume_role.assert_called_with(iam_role, external_id="1234")
+        else:
+            mock_assume_role.assert_not_called()
 
     @pytest.mark.parametrize("mock_model_responses", [False])
     @pytest.mark.parametrize(
@@ -1356,43 +1645,24 @@ class TestCodeCompletions:
             assert "prompt_cache_max_len" not in call_kwargs
 
     @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize("gcp_location", ["asia-mock-location"])
     @pytest.mark.parametrize(
-        (
-            "gcp_location",
-            "model_details",
-            "expected_model",
-            "expected_content",
-        ),
+        ("model_details", "expected_engine"),
         [
-            # Codestral FIM models use the new fim_fireworks prompt which passes only prefix
-            # as user message. The FIM formatting is done internally by CompletionLiteLLM.
             (
-                "asia-mock-location",
                 {"model_provider": "vertex-ai", "model_name": "codestral-2508"},
-                "codestral-2508",
-                "foo",
+                "vertex-ai",
             ),
-            # Qwen models still use the chat-based prompt with system message
-            (
-                "asia-mock-location",
-                {},
-                "qwen2p5-coder-7b",
-                "<|fim_prefix|>foo<|fim_suffix|>\n<|fim_middle|>",
-            ),
+            ({}, "fireworks_ai"),
         ],
     )
-    @pytest.mark.usefixtures(
-        "mock_litellm_acompletion", "mock_litellm_atext_completion"
-    )
-    def test_code_completion_in_asia(
+    def test_code_completion_in_asia_is_not_forced_to_fireworks(
         self,
         mock_client: Mock,
-        model_details: Dict[str, str],
-        # pylint: disable-next=unused-argument
-        expected_model: str,  # parametrize-injected; not referenced in test body
-        # pylint: disable-next=unused-argument
-        expected_content: str,  # parametrize-injected; not referenced in test body
         mock_prompt_ainvoke: Mock,
+        mock_post_processor: Mock,
+        model_details: Dict[str, str],
+        expected_engine: str,
     ):
         params = {
             "prompt_version": 1,
@@ -1404,19 +1674,13 @@ class TestCodeCompletions:
                 "content_below_cursor": "\n",
             },
         }
-
         params.update(model_details)
 
-        self._send_code_completions_request(mock_client, params)
+        response = self._send_code_completions_request(mock_client, params)
 
-        expected_input = {
-            "prefix": "foo",
-            "suffix": "\n",
-            "file_name": "main.py",
-            "language": "python",
-        }
-
-        mock_prompt_ainvoke.assert_called_once_with(expected_input)
+        assert response.status_code == 200
+        assert response.json()["model"]["engine"] == expected_engine
+        mock_prompt_ainvoke.assert_called_once()
 
     @pytest.mark.parametrize("mock_model_responses", [False])
     def test_codestral_uses_text_completion_api(
@@ -1851,6 +2115,12 @@ class TestGitLabModelProvider:
                 "Anthropic",
                 {"temperature": 0.0, "max_tokens": 4096},
             ),
+            ("claude_sonnet_5_5", "Anthropic", {"max_tokens": 4096}),
+            (
+                "claude_sonnet_5_5_vertex",
+                "Gemini Enterprise Agent Platform",
+                {"max_tokens": 4096},
+            ),
         ],
     )
     def test_gitlab_identifier_preserved_for_different_models(
@@ -2206,6 +2476,7 @@ class TestCodeGenerations:
                 "model_id": "mistral",
                 "model_engine": "anthropic",
                 "model_provider": "litellm",
+                "model_vendor": "fireworks_ai",
                 "token_count": 10,
                 "prompt_tokens": 6,
                 "completion_tokens": 4,
@@ -2233,6 +2504,7 @@ class TestCodeGenerations:
                         "content_below_cursor": "\n",
                     },
                     "model_provider": "litellm",
+                    "model_vendor": "fireworks_ai",
                     "model_name": "mistral",
                 },
             )
@@ -2470,3 +2742,66 @@ class TestCustomModelsSSRF:
                     },
                 },
             )
+
+
+class TestCompletionsIamRoleWithCustomModelsDisabled:
+    @pytest.fixture(name="config_values")
+    def config_values_fixture(self, assets_dir):
+        return {
+            "custom_models": {
+                "enabled": False,
+            },
+            "self_signed_jwt": {
+                "signing_key": open(assets_dir / "keys" / "signing_key.pem").read(),
+            },
+        }
+
+    @pytest.fixture(name="scopes")
+    def scopes_fixture(self):
+        return ["complete_code"]
+
+    @pytest.mark.parametrize("model_provider", ["litellm", "codestral"])
+    def test_model_iam_role_rejected(self, mock_client: TestClient, model_provider):
+        with patch("ai_gateway.model_metadata.get_config") as mock_get_config:
+            mock_get_config.return_value.custom_models.enabled = False
+            response = self._post(mock_client, model_provider)
+
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+        assert response.json() == {
+            "detail": "iam_role is only supported when custom models are enabled"
+        }
+
+    @staticmethod
+    def _post(mock_client: TestClient, model_provider: str):
+        return mock_client.post(
+            "/code/completions",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+                "X-GitLab-Global-User-Id": "1234",
+            },
+            json={
+                "model_provider": model_provider,
+                "model_name": "codestral",
+                "model_identifier": "bedrock/anthropic.claude-3-5-sonnet",
+                "model_iam_role": "arn:aws:iam::123456789012:role/r",
+                "prompt_version": 2,
+                "current_file": {
+                    "file_name": "t.py",
+                    "content_above_cursor": "x",
+                    "content_below_cursor": "",
+                },
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    "legacy_model_name",
+    ["claude-sonnet-4-20250514", "claude-sonnet-4-5-20250929"],
+)
+def test_legacy_anthropic_completion_names_map_to_sonnet_5_5(legacy_model_name):
+    identifier = _get_gitlab_identifier(KindModelProvider.ANTHROPIC, legacy_model_name)
+
+    assert identifier == "claude_sonnet_5_5"

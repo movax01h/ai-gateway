@@ -196,7 +196,10 @@ class TestCancelledTurnContext:
         assert result == []
 
     def test_prefix_violation_degrades_gracefully(self):
-        """When the prefix assumption is violated, the delta is empty and a warning is logged."""
+        """When the prefix assumption is violated, the delta is empty and logged at info level.
+
+        A mid-turn compaction trims the tip's ui_chat_log, so the mismatch is expected there (gitlab-org/gitlab#628017).
+        """
         boundary_log = [_entry(MessageTypeEnum.USER, "original")]
         tip_log = [_entry(MessageTypeEnum.USER, "different")]  # prefix mismatch
 
@@ -208,10 +211,11 @@ class TestCancelledTurnContext:
             )
 
         assert result == []
-        warnings = [
+        prefix_logs = [
             log for log in cap_logs if "prefix assumption" in log.get("event", "")
         ]
-        assert warnings, "Expected a prefix-violation warning"
+        assert prefix_logs, "Expected a prefix-violation log line"
+        assert prefix_logs[0]["log_level"] == "info"
 
     def test_boundary_longer_than_tip_degrades_gracefully(self):
         """When boundary is longer than tip (impossible in normal operation), the delta is empty."""

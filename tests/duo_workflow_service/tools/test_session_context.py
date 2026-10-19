@@ -1,12 +1,17 @@
 import json
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import ToolException
 
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
 from duo_workflow_service.gitlab.gitlab_workflow_params import WorkflowConfigFetchError
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
+from duo_workflow_service.json_encoder.encoder import dumps_checkpoint
 from duo_workflow_service.tools.session_context import (
+    CHECKPOINT_CHANNELS,
     MAX_TOOL_RESPONSE_CHARS,
     MAX_UI_CHAT_LOG_ENTRIES,
     GetSessionContext,
@@ -37,6 +42,10 @@ def _make_checkpoint(channel_values: dict) -> dict:
     }
 
 
+def _is_checkpoints_path(path: str) -> bool:
+    return "/checkpoints?" in path
+
+
 def _make_response(body) -> GitLabHttpResponse:
     return GitLabHttpResponse(status_code=200, body=body)
 
@@ -59,7 +68,7 @@ def _route_aget(checkpoints=None, *, checkpoints_response=None, record=None):
         record = _make_workflow_record()
 
     async def _aget(path, parse_json=True, **_kwargs):
-        if path.endswith("/checkpoints?per_page=1"):
+        if _is_checkpoints_path(path):
             if checkpoints_response is not None:
                 return checkpoints_response
             return _make_response(checkpoints)
@@ -84,11 +93,73 @@ class TestGetSessionContextApiCall:
         called_paths = [
             call.kwargs.get("path") for call in gitlab_client.aget.call_args_list
         ]
-        assert (
-            "/api/v4/ai/duo_workflows/workflows/42/checkpoints?per_page=1"
-            in called_paths
-        )
         assert "/api/v4/ai/duo_workflows/workflows/42" in called_paths
+        checkpoints_path = next(p for p in called_paths if _is_checkpoints_path(p))
+        url = urlparse(checkpoints_path)
+        assert url.path == "/api/v4/ai/duo_workflows/workflows/42/checkpoints"
+        assert parse_qs(url.query) == {
+            "per_page": ["1"],
+            "channels[]": list(CHECKPOINT_CHANNELS),
+            "accept_compressed": ["true"],
+        }
+
+    @pytest.mark.asyncio
+    async def test_decompresses_compressed_checkpoint(self, tool, gitlab_client):
+        compressed = compress_checkpoint(
+            {
+                "channel_values": {
+                    "goal": "Fix the login bug",
+                    "ui_chat_log": [
+                        {"message_type": "agent", "content": "Done", "timestamp": "t"}
+                    ],
+                }
+            }
+        )
+        gitlab_client.aget.side_effect = _route_aget(
+            [{"compressed_checkpoint": compressed, "metadata": {}}]
+        )
+
+        result = json.loads(await tool._arun(session_id=42))
+
+        assert result["goal"] == "Fix the login bug"
+        assert result["last_message"] == "Done"
+
+    @pytest.mark.asyncio
+    async def test_compressed_and_uncompressed_checkpoints_give_same_output(
+        self, tool, gitlab_client
+    ):
+        # The legacy executor stores tool_response as a ToolMessage.
+        state = {
+            "channel_values": {
+                "ui_chat_log": [
+                    {
+                        "message_type": "tool",
+                        "content": "read_file result",
+                        "timestamp": "t",
+                        "tool_info": {
+                            "name": "read_file",
+                            "args": {"path": "auth.py"},
+                            "tool_response": ToolMessage(
+                                content="def login(): pass", tool_call_id="1"
+                            ),
+                        },
+                    }
+                ]
+            }
+        }
+        bodies = [
+            [{"checkpoint": json.loads(dumps_checkpoint(state)), "metadata": {}}],
+            [{"compressed_checkpoint": compress_checkpoint(state), "metadata": {}}],
+        ]
+
+        outputs = []
+        for body in bodies:
+            gitlab_client.aget.side_effect = _route_aget(body)
+            outputs.append(json.loads(await tool._arun(session_id=1)))
+
+        assert outputs[0] == outputs[1]
+        tool_response = outputs[1]["recent_activity"][0]["tool_info"]["tool_response"]
+        assert tool_response["content"] == "def login(): pass"
 
     @pytest.mark.asyncio
     async def test_empty_checkpoint_list_raises(self, tool, gitlab_client):
@@ -113,7 +184,7 @@ class TestGetSessionContextApiCall:
     @pytest.mark.asyncio
     async def test_client_exception_propagates(self, tool, gitlab_client):
         async def _aget(path, parse_json=True, **_kwargs):
-            if path.endswith("/checkpoints?per_page=1"):
+            if _is_checkpoints_path(path):
                 raise Exception("Connection error")
             return _make_response(_make_workflow_record())
 
@@ -557,7 +628,7 @@ class TestGetSessionContextWorkflowRecord:
         # a partial, record-field-less response: the checkpoints endpoint
         # must never be reached.
         async def _aget(path, parse_json=True, **_kwargs):
-            if path.endswith("/checkpoints?per_page=1"):
+            if _is_checkpoints_path(path):
                 return _make_response([_make_checkpoint({})])
             return GitLabHttpResponse(
                 status_code=403, body={"message": "403 Forbidden"}
@@ -571,14 +642,12 @@ class TestGetSessionContextWorkflowRecord:
         called_paths = [
             call.kwargs.get("path") for call in gitlab_client.aget.call_args_list
         ]
-        assert not any(
-            path.endswith("/checkpoints?per_page=1") for path in called_paths
-        )
+        assert not any(_is_checkpoints_path(path) for path in called_paths)
 
     @pytest.mark.asyncio
     async def test_propagates_when_record_fetch_raises(self, tool, gitlab_client):
         async def _aget(path, parse_json=True, **_kwargs):
-            if path.endswith("/checkpoints?per_page=1"):
+            if _is_checkpoints_path(path):
                 return _make_response([_make_checkpoint({})])
             raise Exception("Connection error")
 
@@ -596,7 +665,7 @@ class TestGetSessionContextWorkflowRecord:
         # normalizing to an empty record and letting the checkpoints fetch
         # proceed regardless.
         async def _aget(path, parse_json=True, **_kwargs):
-            if path.endswith("/checkpoints?per_page=1"):
+            if _is_checkpoints_path(path):
                 return _make_response([_make_checkpoint({})])
             return _make_response([])
 
@@ -608,6 +677,4 @@ class TestGetSessionContextWorkflowRecord:
         called_paths = [
             call.kwargs.get("path") for call in gitlab_client.aget.call_args_list
         ]
-        assert not any(
-            path.endswith("/checkpoints?per_page=1") for path in called_paths
-        )
+        assert not any(_is_checkpoints_path(path) for path in called_paths)

@@ -9,7 +9,6 @@ from ai_gateway.model_selection.types import (
     DevConfig,
     FeatureDeprecatedModel,
 )
-from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 router = APIRouter()
 
@@ -38,12 +37,15 @@ class _GetModelResponseModel(BaseModel):
     deprecation: DeprecationInfo | None = None
     description: str | None = None
     cost_indicator: str | None = None
+    requires_paid_credits: bool = False
 
 
 class _GetModelResponseUnitPrimitive(BaseModel):
     feature_setting: str
     default_model: str  # deprecated, maintained for backward compatibility
     default_models: list[str]
+    # Display only; inference never reads this. The field is `dict[str, str]`,
+    # so a tag with several models reports its first.
     models_for_tags: dict[str, str]
     models_for_size_preference: dict[
         str, str
@@ -73,15 +75,14 @@ async def get_models():
     # Maps pseudo-model identifier to _GetModelResponseModel.
     pseudo_models: dict[str, _GetModelResponseModel] = {}
 
-    multi_default_models_enabled = is_feature_enabled(
-        FeatureFlag.AI_GATEWAY_MULTI_DEFAULT_MODELS
-    )
-
     for primitive in selection_config.get_resolved_unit_primitive_config_map().values():
         values = primitive.model_dump()
+        # default_models is now a list of DefaultModelEntry dicts; extract identifiers
+        # for the API response which expects a flat list of strings.
+        values["default_models"] = primitive.default_model_identifiers
         default_models = values["default_models"]
 
-        if len(default_models) > 1 and multi_default_models_enabled:
+        if len(default_models) > 1:
             # When there are multiple default models (load balancing across providers),
             # create a pseudo-model using the first model's name without a provider suffix.
             # This pseudo-model is used as the displayed default in the UI.
@@ -100,6 +101,11 @@ async def get_models():
                 cost_indicator=(
                     first_definition.cost_indicator if first_definition else None
                 ),
+                requires_paid_credits=(
+                    first_definition.requires_paid_credits
+                    if first_definition
+                    else False
+                ),
             )
             values["default_model"] = pseudo_identifier
             # Surface the pseudo-model in the dropdown as the prominent default row;
@@ -111,6 +117,9 @@ async def get_models():
         else:
             values["default_model"] = default_models[0]
 
+        values["models_for_tags"] = {
+            tag: entry["models"][0] for tag, entry in values["models_for_tags"].items()
+        }
         # Expose models_for_size_preference as a deprecated alias for models_for_tags
         # so existing consumers are not broken by the rename.
         values["models_for_size_preference"] = values["models_for_tags"]
@@ -130,6 +139,7 @@ async def get_models():
             deprecation=definition.deprecation,
             description=definition.description,
             cost_indicator=definition.cost_indicator,
+            requires_paid_credits=definition.requires_paid_credits,
         )
         for definition in llm_definitions.values()
     ]

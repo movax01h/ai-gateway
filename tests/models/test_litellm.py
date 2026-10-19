@@ -7,7 +7,7 @@ from litellm.exceptions import APIConnectionError, InternalServerError
 
 from ai_gateway.config import ConfigBedrockGuardrail, get_config
 from ai_gateway.models import KindLiteLlmModel, LiteLlmChatModel
-from ai_gateway.models.base import KindModelProvider
+from ai_gateway.models.base import KindModelProvider, ModelMetadata
 from ai_gateway.models.base_chat import Message, Role
 from ai_gateway.models.base_text import TextGenModelChunk, TextGenModelOutput
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
@@ -15,6 +15,8 @@ from ai_gateway.models.litellm import (
     LiteLlmAPIConnectionError,
     LiteLlmInternalServerError,
     LiteLlmTextGenModel,
+    ModelCompletionType,
+    _init_litellm_model_metadata,
 )
 from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.tracking import SnowplowEventContext
@@ -254,6 +256,15 @@ class TestLiteLlmChatModel:
         # A model without an entry in MODEL_SPECIFICATIONS exposes an empty
         # specifications mapping.
         assert lite_llm_chat_model.specifications == {}
+
+    def test_specifications_returns_empty_when_provider_is_none(self):
+        model = LiteLlmChatModel(
+            model_name=KindLiteLlmModel.MISTRAL,
+            provider=None,
+            metadata=ModelMetadata(name="mistral", engine="litellm"),
+        )
+
+        assert model.specifications == {}
 
     def test_request_timeout_uses_global_config(self, lite_llm_chat_model):
         # A global AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT applies to every chat
@@ -503,6 +514,57 @@ class TestLiteLlmTextGenModel:
     def test_max_model_len(self, model_name: str, expected_limit: int):
         model = LiteLlmTextGenModel.from_model_name(name=model_name)
         assert model.input_token_limit == expected_limit
+
+    def test_specifications_returns_empty_when_provider_is_none(self):
+        model = LiteLlmTextGenModel(
+            using_cache=True,
+            model_name=KindLiteLlmModel.CODEGEMMA,
+            provider=None,
+            metadata=ModelMetadata(name="codegemma", engine="litellm"),
+        )
+
+        assert model.specifications == {}
+
+    def test_from_model_name_raises_when_provider_is_none(self):
+        with pytest.raises(ValueError, match="Provider is required"):
+            LiteLlmTextGenModel.from_model_name(name="codegemma", provider=None)
+
+    @pytest.mark.parametrize(
+        ("provider", "name", "match"),
+        [
+            (
+                KindModelProvider.MISTRALAI,
+                "codestral",
+                "provider_keys is required for MistralAI provider",
+            ),
+            (
+                KindModelProvider.FIREWORKS,
+                "codestral-2501",
+                "provider_keys is required for Fireworks provider",
+            ),
+        ],
+    )
+    def test_from_model_name_raises_when_provider_keys_missing(
+        self, provider, name, match
+    ):
+        with pytest.raises(ValueError, match=match):
+            LiteLlmTextGenModel.from_model_name(name=name, provider=provider)
+
+    @pytest.mark.asyncio
+    async def test_generate_raises_when_fim_format_missing(
+        self, lite_llm_text_model, mock_litellm_acompletion
+    ):
+        with (
+            patch(
+                "ai_gateway.models.litellm.LiteLlmTextGenModel.specifications",
+                new_callable=PropertyMock,
+                return_value={"completion_type": ModelCompletionType.FIM},
+            ),
+            pytest.raises(
+                ValueError, match="fim_format is missing from specifications"
+            ),
+        ):
+            await lite_llm_text_model.generate(prefix="def hello():")
 
     def test_request_timeout_uses_global_config(self, lite_llm_text_model):
         # A global AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT applies to every text-gen
@@ -1253,6 +1315,11 @@ class TestLiteLlmTextGenModel:
             watcher.finish.assert_called_once()
 
 
+def test_init_litellm_model_metadata_raises_when_provider_is_none():
+    with pytest.raises(ValueError, match="Provider is required"):
+        _init_litellm_model_metadata(metadata=None, provider=None)
+
+
 class TestBedrockGuardrailConfig:
     @pytest.fixture(name="guardrail_config")
     def guardrail_config_fixture(self):
@@ -1379,3 +1446,65 @@ class TestBedrockGuardrailConfig:
 
             call_kwargs = mock_acompletion.call_args[1]
             assert "guardrailConfig" not in call_kwargs
+
+
+class TestUserIdentityHeader:
+    @pytest.fixture(name="chat_model")
+    def chat_model_fixture(self):
+        return LiteLlmChatModel.from_model_name(
+            name="mistral",
+            endpoint="http://127.0.0.1:1111/v1",
+            api_key="specified-api-key",
+            identifier="provider/some-cool-model",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+    @pytest.fixture(name="text_model")
+    def text_model_fixture(self):
+        return LiteLlmTextGenModel.from_model_name(
+            name="codegemma",
+            endpoint="http://127.0.0.1:4000",
+            api_key="specified-api-key",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+    @pytest.mark.asyncio
+    async def test_chat_model_forwards_user_id(
+        self, chat_model, mock_litellm_acompletion, gitlab_user_id_in_context
+    ):
+        await chat_model.generate([Message(content="hi", role=Role.USER)])
+
+        call_kwargs = mock_litellm_acompletion.call_args[1]
+        assert call_kwargs["extra_headers"] == {
+            "x-gitlab-user-id": gitlab_user_id_in_context
+        }
+
+    @pytest.mark.asyncio
+    async def test_text_model_forwards_user_id(
+        self, text_model, mock_litellm_acompletion, gitlab_user_id_in_context
+    ):
+        await text_model.generate(prefix="def hello():", suffix="")
+
+        call_kwargs = mock_litellm_acompletion.call_args[1]
+        assert call_kwargs["extra_headers"] == {
+            "x-gitlab-user-id": gitlab_user_id_in_context
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("gitlab_user_id_in_context")
+    async def test_text_model_omits_header_when_not_configured(
+        self, mock_litellm_acompletion
+    ):
+        text_model = LiteLlmTextGenModel.from_model_name(
+            name="codegemma",
+            endpoint="http://127.0.0.1:4000",
+            api_key="specified-api-key",
+            custom_models_enabled=True,
+        )
+
+        await text_model.generate(prefix="def hello():", suffix="")
+
+        call_kwargs = mock_litellm_acompletion.call_args[1]
+        assert "extra_headers" not in call_kwargs

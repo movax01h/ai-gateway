@@ -4,7 +4,7 @@ This document describes the billing architecture for **Duo Self-Hosted DAP** dep
 on **cloud (online) licensing**. It covers how per-LLM-call usage is tracked, authorized, and
 reported to CustomersDot without the LLM traffic ever leaving the customer's infrastructure.
 
-For the standard Cloud AI Gateway billing flow (SaaS and self-managed), see the [Technical Overview](billable_usage_technical_overview.md).
+For the standard Cloud AI Gateway billing flow (SaaS and self-managed), see the [Technical Overview](technical_overview.md).
 
 ## Background
 
@@ -67,8 +67,9 @@ rejected immediately and no LLM calls can proceed.
 ### 2. Self-hosted DWS signals each LLM call — emit billing event per LLM call
 
 Before each LLM call, the self-hosted DWS sends a lightweight billing signal to Workhorse
-over the existing workflow stream. The signal carries the workflow ID and the feature being
-invoked. Workhorse forwards it to Cloud DWS, which records a billing event. Because the LLM
+over the existing workflow stream. The signal carries the workflow ID, the feature being
+invoked, and the workflow's source type (the entry point that started the session, when GitLab
+provides one). Workhorse forwards it to Cloud DWS, which records a billing event. Because the LLM
 runs on customer infrastructure, Cloud DWS uses standardized placeholder values instead of
 real token counts.
 
@@ -84,6 +85,26 @@ self-hosted DWS.
 - If Cloud DWS returned failure (quota exceeded, invalid license, and so on), the LLM call
   is aborted.
 
+### Retried LLM calls
+
+The agent step in a flow repeats an LLM call when the call fails because of:
+
+- A rate limit or server error from the model provider (HTTP 429, 500, or 529).
+- A provider limit on images. The agent step removes the images and sends the call again.
+
+The repeated call is the same logical call, so the self-hosted DWS does not send another
+billing signal for it. The customer pays for the logical call once. If every retry fails,
+the customer still pays for that one call.
+
+A call that follows a model reply is a new call and is billed as usual. For example, the
+call that recovers from a truncated reply is billed.
+
+Network retries inside a single model call happen after its billing signal, so they were
+never billed again.
+
+This rule applies to self-hosted billing only. Cloud AI Gateway billing does not use the
+self-hosted billing callback.
+
 ## Key components
 
 ### Context variable: `self_hosted_dap_billing_enabled`
@@ -94,6 +115,15 @@ A `ContextVar[bool]` that signals whether self-hosted billing is active for the 
 request. It defaults to `False` and is set per-request by the `MetadataContextInterceptor`
 in the self-hosted DWS when `AIGW_CUSTOM_MODELS__ENABLED=true` and the
 `x-gitlab-self-hosted-dap-billing-enabled` header is present and truthy.
+
+### Context variable: `llm_call_is_retry`
+
+**Location**: Self-Hosted DWS — `lib/events/contextvar.py`
+
+A `ContextVar[bool]` that is `True` while a caller repeats an LLM call that failed. The agent
+step sets it with `mark_llm_call_retry` around the repeated call. The billing callback reads
+it and does not send a billing signal for the repeated call. See
+[Retried LLM calls](#retried-llm-calls).
 
 ### Prompt registry wrapper: `PromptRegistrySelfHostedBillingSupport`
 
@@ -107,17 +137,21 @@ returned prompt's `internal_callbacks` list.
 
 The callback's `on_before_llm_call` hook fires before each LLM invocation and sends the
 `TrackLlmCallForSelfHosted` action to Workhorse via the workflow outbox, then waits for
-Workhorse to return an `ActionResponse`.
+Workhorse to return an `ActionResponse`. It skips the action when `llm_call_is_retry` is set.
 
 ```python
 # duo_workflow_service/interceptors/route/usage_billing.py
 class SelfHostedBillingPromptCallbackHandler(BasePromptCallbackHandler):
     async def on_before_llm_call(self):
+        if llm_call_is_retry.get():
+            return
+
         action = contract_pb2.Action(
             trackLlmCallForSelfHosted=contract_pb2.TrackLlmCallForSelfHosted(
                 workflowID=self.workflow_id,
                 featureQualifiedName=self.gl_reporting_event_context.feature_qualified_name,
                 featureAiCatalogItem=self.gl_reporting_event_context.feature_ai_catalog_item or False,
+                sourceType=(self.source_type and self.source_type()) or "",
             )
         )
         await self.outbox.put_action_and_wait_for_response(action)
@@ -148,6 +182,11 @@ with `unit_of_measure="request"` and a quantity of `1` per LLM call.
 since the actual model runs on customer infrastructure and its token counts are not available
 to Cloud DWS. The placeholder operations are passed explicitly to
 `BillingEventService.track_billing` via the `llm_ops` parameter at the call site.
+
+When the event carries a source type, Cloud DWS adds it to the billing event as
+`metadata.source`. Cloud DWS drops values that are not lowercase letters, digits, and
+underscores, or that are longer than 64 characters, because the value comes from components
+that run on customer infrastructure.
 
 ## Usage quota check
 

@@ -10,6 +10,7 @@ import pytest
 from anthropic import APIStatusError
 from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.types import Overwrite
 
 from ai_gateway.prompts import Prompt
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
@@ -18,6 +19,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
     AgentNode,
     AgentStuckError,
     CycleBudget,
+    _AnswerCheck,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -30,6 +32,12 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.audit_events.collector import AuditEventCollector
+from duo_workflow_service.audit_events.context import audit_collector_context
+from duo_workflow_service.audit_events.event_types import AuditEventType
+from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
+    COMPACTION_CONTINUE_MESSAGE,
+)
 from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
@@ -37,9 +45,17 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionResult,
 )
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
+from duo_workflow_service.entities.image_blocks import (
+    image_content_block,
+    is_image_content_block,
+)
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
+from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.interceptors.route.usage_billing import (
+    SelfHostedBillingPromptCallbackHandler,
+)
+from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum
 
 
 @pytest.fixture(name="mock_prompt")
@@ -76,7 +92,9 @@ def agent_node_fixture(
     """Fixture for AgentNode instance (default, no response schema)."""
     return AgentNode(
         flow_id=flow_id,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
@@ -101,7 +119,9 @@ def agent_node_with_schema_fixture(
     """Fixture for AgentNode instance with AgentFinalOutput response schema."""
     return AgentNode(
         flow_id=flow_id,
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        flow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         name="test_agent_node",
         prompt=mock_prompt,
         inputs=inputs,
@@ -222,7 +242,9 @@ class TestAgentNode:
         template can branch on them."""
         node = AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -401,7 +423,9 @@ class TestAgentNode:
 
             agent_node = AgentNode(
                 flow_id=flow_id,
-                flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
                 name="test_agent_node",
                 prompt=mock_prompt,
                 inputs=inputs,
@@ -465,7 +489,9 @@ class TestAgentNode:
 
             agent_node = AgentNode(
                 flow_id=flow_id,
-                flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+                flow_type=GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
                 name="test_agent_node",
                 prompt=mock_prompt,
                 inputs=inputs,
@@ -664,7 +690,9 @@ class TestAgentNodeContextLimits:
         """AgentNode constructed with an explicit per-agent max_context_tokens."""
         return AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -837,6 +865,65 @@ class TestAgentNodeHistoryOptimization:
             assert len(compaction_logs) == 0
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    @pytest.mark.parametrize("was_modified", [True, False])
+    async def test_run_trims_ui_chat_log_only_when_history_was_rewritten(
+        self,
+        was_modified,
+        agent_node,
+        base_flow_state,
+        optimizer_pipeline,
+        compaction_ui_log,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Under incremental-only writes a rewrite replaces ``ui_chat_log`` with this step's entries; an untouched
+        history keeps appending (gitlab-org/gitlab#628017)."""
+        result_obj = CompactionResult(messages=[], was_modified=was_modified)
+        result_obj.ui_chat_logs = [compaction_ui_log] if was_modified else []
+
+        async def optimize(history):
+            return history, [result_obj]
+
+        optimizer_pipeline.optimize = AsyncMock(side_effect=optimize)
+
+        result = await agent_node.run(base_flow_state)
+
+        update = result.get(FlowStateKeys.UI_CHAT_LOG, [])
+        if was_modified:
+            assert isinstance(update, Overwrite)
+            assert update.value[-1]["message_id"] == "compaction-test-id"
+        else:
+            assert not isinstance(update, Overwrite)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_run_keeps_appending_when_trim_is_disabled(
+        self,
+        agent_node,
+        base_flow_state,
+        optimizer_pipeline,
+        compaction_ui_log,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Subagent graphs opt out: their final ui_chat_log is appended to the parent's by the dispatch node."""
+        agent_node._trim_ui_chat_log = False
+        result_obj = CompactionResult(messages=[], was_modified=True)
+        result_obj.ui_chat_logs = [compaction_ui_log]
+
+        async def optimize(history):
+            return history, [result_obj]
+
+        optimizer_pipeline.optimize = AsyncMock(side_effect=optimize)
+
+        result = await agent_node.run(base_flow_state)
+
+        update = result[FlowStateKeys.UI_CHAT_LOG]
+        assert not isinstance(update, Overwrite)
+        assert update[-1]["message_id"] == "compaction-test-id"
+
+    @pytest.mark.asyncio
     async def test_run_optimizer_logs_appended_after_base_ui_logs(
         self,
         flow_id,
@@ -868,7 +955,9 @@ class TestAgentNodeHistoryOptimization:
 
         node = AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -907,6 +996,85 @@ class TestAgentNodeHistoryOptimization:
                 assert i < compaction_idx, (
                     f"Non-compaction entry at index {i} appears after compaction card at {compaction_idx}"
                 )
+
+
+class TestAgentNodeWebSearchAudit:
+    """Flows bind web search too, and those searches fire no tool callback."""
+
+    @staticmethod
+    def _collector():
+        return AuditEventCollector(
+            client=Mock(), workflow_id="42", flush_interval_seconds=1_000
+        )
+
+    @pytest.fixture(name="search_block")
+    def search_block_fixture(self):
+        return {
+            "type": "server_tool_use",
+            "id": "srvtu_1",
+            "name": "web_search",
+            "input": {"query": "urllib3 CVE"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_run_audits_the_search(
+        self,
+        search_block,
+        mock_ai_message,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        _mock_predefined_runtime_variables,
+    ):
+        completion = copy.copy(mock_ai_message)
+        completion.content = [search_block]
+        completion.response_metadata = {"model_name": "claude-haiku-4-5"}
+        completion.tool_calls = []
+        mock_prompt.ainvoke = AsyncMock(return_value=completion)
+        collector = self._collector()
+
+        token = audit_collector_context.set(collector)
+        try:
+            await agent_node.run(base_flow_state)
+        finally:
+            audit_collector_context.reset(token)
+
+        events = collector._buffer  # pylint: disable=protected-access
+        assert len(events) == 1
+        assert events[0].event_type == AuditEventType.AI_WEB_SEARCH_INVOKED
+        assert events[0].model_name == "claude-haiku-4-5"
+
+    @pytest.mark.asyncio
+    async def test_truncation_retry_audits_the_search_once(
+        self,
+        search_block,
+        mock_ai_message,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """A retried turn re-runs the model, but only the final completion is audited."""
+        truncated = copy.copy(mock_ai_message)
+        truncated.content = [search_block]
+        truncated.response_metadata = {"finish_reason": "length"}
+        truncated.tool_calls = []
+
+        final = copy.copy(mock_ai_message)
+        final.content = [search_block]
+        final.response_metadata = {}
+        final.tool_calls = []
+        mock_prompt.ainvoke = AsyncMock(side_effect=[truncated, final])
+        collector = self._collector()
+
+        token = audit_collector_context.set(collector)
+        try:
+            await agent_node.run(base_flow_state)
+        finally:
+            audit_collector_context.reset(token)
+
+        assert mock_prompt.ainvoke.call_count == 2
+        assert len(collector._buffer) == 1  # pylint: disable=protected-access
 
 
 class TestAgentNodeTruncation:
@@ -1064,6 +1232,261 @@ class TestAgentNodeTruncation:
         assert result_history[-1] == normal_message
 
 
+def _invalid_final_answer(call_id: str = "bad") -> AIMessage:
+    """A final-answer tool call missing the required ``final_response`` field."""
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "final_response_tool", "id": call_id, "args": {"wrong": "x"}}
+        ],
+    )
+    message.response_metadata = {}
+    return message
+
+
+def _valid_final_answer() -> AIMessage:
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "final_response_tool",
+                "id": "good",
+                "args": {"final_response": "Done"},
+            }
+        ],
+    )
+    message.response_metadata = {}
+    return message
+
+
+def _combined_final_answer() -> AIMessage:
+    """A valid final answer sent together with another tool call, which is rejected."""
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "final_response_tool",
+                "id": "final",
+                "args": {"final_response": "Done"},
+            },
+            {"name": "read_file", "id": "other", "args": {}},
+        ],
+    )
+    message.response_metadata = {}
+    return message
+
+
+class TestAgentNodeAnswerRejections:
+    """Rejected final answers are retried inside run(), so they need their own cap."""
+
+    def test_allows_two_corrections(self):
+        # Issue #2945: two corrections, the third rejection stops the agent.
+        assert AgentNode._MAX_ANSWER_REJECTIONS == 3
+
+    @pytest.mark.asyncio
+    async def test_valid_answer_after_max_minus_one_rejections_completes(
+        self, mock_prompt, agent_node_with_schema, base_flow_state, component_name
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        valid = _valid_final_answer()
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit - 1)] + [valid]
+        )
+
+        result = await agent_node_with_schema.run(base_flow_state)
+
+        assert mock_prompt.ainvoke.call_count == limit
+        assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name][-1] == valid
+
+    @pytest.mark.asyncio
+    async def test_raises_agent_stuck_error_after_max_rejections(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        # Enough invalid answers to keep looping well past the cap, then a valid one:
+        # without the cap this completes and the pytest.raises below fails, not hangs.
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+
+        with pytest.raises(AgentStuckError) as exc_info:
+            await agent_node_with_schema.run(base_flow_state)
+
+        message = str(exc_info.value)
+        assert agent_node_with_schema.name in message
+        assert f"rejected {limit} times" in message
+        assert "final_response_tool raised validation error" in message
+        assert mock_prompt.ainvoke.call_count == limit
+
+    @pytest.mark.asyncio
+    async def test_error_message_truncates_long_validation_error(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+        long_error = "x" * 5000
+
+        with patch.object(
+            agent_node_with_schema,
+            "_final_answer_validate",
+            side_effect=lambda completion: (
+                _AnswerCheck([])
+                if completion.tool_calls[0]["id"] == "good"
+                else _AnswerCheck(
+                    [completion, ToolMessage(content="bad", tool_call_id="bad")],
+                    long_error,
+                )
+            ),
+        ):
+            with pytest.raises(AgentStuckError) as exc_info:
+                await agent_node_with_schema.run(base_flow_state)
+
+        preview = AgentNode._REJECTION_ERROR_PREVIEW_CHARS
+        assert "x" * preview in str(exc_info.value)
+        assert "x" * (preview + 1) not in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_logs_and_error_do_not_contain_model_output(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        secret = "PLANTED-SENTINEL-VALUE-7f3a91"
+        leaky = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "final_response_tool",
+                    "id": "bad",
+                    "args": {"final_response": {"token": secret}},
+                }
+            ],
+        )
+        leaky.response_metadata = {}
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[leaky for _ in range(limit + 5)] + [_valid_final_answer()]
+        )
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.log"
+        ) as mock_log:
+            with pytest.raises(AgentStuckError) as exc_info:
+                await agent_node_with_schema.run(base_flow_state)
+
+        assert secret not in str(exc_info.value)
+        assert "final_response: string_type" in str(exc_info.value)
+        rejection_logs = [
+            c
+            for c in mock_log.warning.call_args_list
+            if c.args and c.args[0].startswith("Final answer rejected")
+        ]
+        assert len(rejection_logs) == limit
+        assert all(secret not in str(c) for c in rejection_logs)
+        assert rejection_logs[-1].kwargs == {
+            "agent": agent_node_with_schema.name,
+            "answer_rejections": limit,
+            "max_answer_rejections": limit,
+            "error": "final_response_tool raised validation error: final_response: string_type",
+        }
+        # The model itself still gets the full error, input included.
+        retry_history = mock_prompt.ainvoke.call_args_list[1][1]["input"]["history"]
+        assert secret in retry_history[-1].content
+
+    @pytest.mark.asyncio
+    async def test_final_rejection_log_says_agent_is_stopped(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.log"
+        ) as mock_log:
+            with pytest.raises(AgentStuckError):
+                await agent_node_with_schema.run(base_flow_state)
+
+        messages = [
+            c.args[0]
+            for c in mock_log.warning.call_args_list
+            if c.args and c.args[0].startswith("Final answer rejected")
+        ]
+        assert len(messages) == limit
+        assert all("retrying" in m for m in messages[:-1])
+        assert "retrying" not in messages[-1]
+        assert "stopping the agent" in messages[-1]
+
+    @pytest.mark.asyncio
+    async def test_rejection_counter_resets_between_runs(
+        self, mock_prompt, agent_node_with_schema, base_flow_state, component_name
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        for _ in range(2):
+            valid = _valid_final_answer()
+            mock_prompt.ainvoke = AsyncMock(
+                side_effect=[_invalid_final_answer() for _ in range(limit - 1)]
+                + [valid]
+            )
+            result = await agent_node_with_schema.run(base_flow_state)
+            assert (
+                result[FlowStateKeys.CONVERSATION_HISTORY][component_name][-1] == valid
+            )
+
+    @pytest.mark.asyncio
+    async def test_answer_combined_with_other_tool_calls_counts_as_rejection(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_combined_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+
+        with pytest.raises(AgentStuckError) as exc_info:
+            await agent_node_with_schema.run(base_flow_state)
+
+        assert "mustn't be combined with other tool calls" in str(exc_info.value)
+        assert mock_prompt.ainvoke.call_count == limit
+
+    @pytest.mark.asyncio
+    async def test_rejections_during_wrap_up_are_capped(
+        self, mock_prompt, make_agent_node, state_at_limit
+    ):
+        limit = AgentNode._MAX_ANSWER_REJECTIONS
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer() for _ in range(limit + 5)]
+            + [_valid_final_answer()]
+        )
+        # max_wrap_up_retries is 2 in the factory: rejections must not consume it.
+        node = make_agent_node(response_schema=AgentFinalOutput)
+
+        with pytest.raises(AgentStuckError) as exc_info:
+            await node.run(state_at_limit)
+
+        assert f"rejected {limit} times" in str(exc_info.value)
+        assert mock_prompt.ainvoke.call_count == limit
+
+    @pytest.mark.asyncio
+    async def test_valid_answer_after_rejections_during_wrap_up_completes(
+        self, mock_prompt, make_agent_node, state_at_limit, component_name
+    ):
+        valid = _valid_final_answer()
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_invalid_final_answer(), _invalid_final_answer(), valid]
+        )
+        node = make_agent_node(response_schema=AgentFinalOutput)
+
+        result = await node.run(state_at_limit)
+
+        assert mock_prompt.ainvoke.call_count == 3
+        assert result[FlowStateKeys.CONVERSATION_HISTORY][component_name][-1] == valid
+
+
 class TestAgentNodeReasoning:
     """Test suite for AgentNode reasoning log emission."""
 
@@ -1089,7 +1512,9 @@ class TestAgentNodeReasoning:
         """Fixture for AgentNode with ui_history enabled."""
         return AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -1365,7 +1790,9 @@ class TestAgentNodeReasoning:
         )
         node = AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -1430,6 +1857,57 @@ class TestAgentNodeReasoning:
             if log["message_type"] == MessageTypeEnum.AGENT
         ]
         assert len(reasoning_logs) == 0
+
+    @pytest.mark.asyncio
+    async def test_reasoning_emitted_for_text_only_message_under_auto_tool_choice(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+        optimizer_pipeline,
+        ui_history_with_reasoning,
+        base_flow_state,
+        _mock_get_vars_from_state,
+    ):
+        """In schema mode the final answer is the schema tool call, so a text-only turn is deliberation.
+
+        Unlike ``test_no_reasoning_for_text_only_message``, there is no FinalResponseNode entry to duplicate.
+        """
+        schema = Mock()
+        schema.tool_title = "structured_response"
+        node = AgentNode(
+            flow_id=flow_id,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
+            name="test_agent_node",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            internal_event_client=mock_internal_event_client,
+            invoke_config={},
+            optimizer_pipeline=optimizer_pipeline,
+            ui_history=ui_history_with_reasoning,
+            response_schema=schema,
+            response_schema_tool_choice="auto",
+        )
+        mock_prompt.ainvoke = AsyncMock(
+            return_value=AIMessage(content="Let me consolidate what I found so far.")
+        )
+
+        result = await node.run(base_flow_state)
+
+        reasoning_logs = [
+            log
+            for log in result[FlowStateKeys.UI_CHAT_LOG]
+            if log["message_type"] == MessageTypeEnum.AGENT
+        ]
+        assert len(reasoning_logs) == 1
+        assert reasoning_logs[0]["content"] == "Let me consolidate what I found so far."
 
     def test_non_str_non_list_content_returns_empty(self):
         """Content that is neither str nor list returns an empty string."""
@@ -1514,7 +1992,9 @@ class TestAgentNodeInvokeConfig:
         config = {"tags": ["some tag"]}
         node = AgentNode(
             flow_id=flow_id,
-            flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
             name="test_agent_node",
             prompt=mock_prompt,
             inputs=inputs,
@@ -1579,7 +2059,7 @@ def make_agent_node_fixture(
         }
         kwargs = {
             "flow_id": flow_id,
-            "flow_type": CategoryEnum.DEVELOPER,
+            "flow_type": GLReportingEventContext.from_workflow_definition("developer"),
             "name": "test_agent_node",
             "prompt": mock_prompt,
             "inputs": inputs,
@@ -1783,7 +2263,7 @@ class TestAgentNodeMaxCycles:
                 max_cycles=3,
                 cycle_count=3,
             ),
-            category=CategoryEnum.DEVELOPER.value,
+            category="developer",
         )
 
         state["context"][component_name]["cycle_count"] = 3
@@ -1949,6 +2429,14 @@ class TestAgentNodeIterationWarning:
             assert "cycles_remaining" in str(call_kwargs)
 
 
+def _text_only_completion() -> AIMessage:
+    """A completion with prose and no tool calls, as an "auto"-mode agent produces while deliberating."""
+    message = AIMessage(content="Let me consolidate what I found so far.")
+    message.response_metadata = {}
+    message.tool_calls = []
+    return message
+
+
 class TestAgentNodeWrapUpRetries:
     """Test suite for AgentNode wrap-up retry behavior after max_cycles is reached."""
 
@@ -2031,6 +2519,65 @@ class TestAgentNodeWrapUpRetries:
             assert "2" in str(exc_info.value)  # max_wrap_up_retries
             # Should have been called exactly max_wrap_up_retries times
             assert mock_prompt.ainvoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_auto_tool_choice_text_only_completions_exhaust_wrap_up_retries(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        prompt_variables,
+        _mock_predefined_runtime_variables,
+    ):
+        """An "auto"-mode agent that keeps deliberating in text instead of answering must still be bounded."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            schema = Mock()
+            schema.tool_title = "structured_response"
+            mock_prompt.ainvoke = AsyncMock(
+                side_effect=[_text_only_completion() for _ in range(3)]
+            )
+
+            node = make_agent_node(
+                response_schema=schema, response_schema_tool_choice="auto"
+            )
+
+            with pytest.raises(
+                AgentStuckError, match="ignored the wrap-up instruction"
+            ):
+                await node.run(state_at_limit)
+
+            assert mock_prompt.ainvoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_any_tool_choice_text_only_completion_returns_without_retrying(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        component_name,
+        prompt_variables,
+        _mock_predefined_runtime_variables,
+    ):
+        """Default "any" mode keeps its previous behaviour: the turn is returned so the router can raise, rather than
+        being retried into a generic AgentStuckError."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            schema = Mock()
+            schema.tool_title = "structured_response"
+            completion = _text_only_completion()
+            mock_prompt.ainvoke = AsyncMock(side_effect=[completion])
+
+            result = await make_agent_node(response_schema=schema).run(state_at_limit)
+
+            assert mock_prompt.ainvoke.call_count == 1
+            assert result["conversation_history"][component_name][-1] == completion
 
     @pytest.mark.asyncio
     async def test_no_wrap_up_retry_when_agent_complies_immediately(
@@ -2141,3 +2688,871 @@ class TestAgentNodeWrapUpRetries:
             assert mock_prompt.ainvoke.call_count == 1
             # cycle_count should be 1 (first run)
             assert result["context"][component_name]["cycle_count"] == 1
+
+
+def _tool_call_completion() -> AIMessage:
+    """A completion calling a regular (non-final) tool."""
+    message = AIMessage(
+        content="",
+        tool_calls=[{"id": "tc1", "name": "read_file", "args": {}}],
+    )
+    message.response_metadata = {}
+    return message
+
+
+_NUDGE = (
+    "Continue. When you are done, call the `structured_response` tool with your "
+    "final answer."
+)
+
+
+def _nudge() -> HumanMessage:
+    return HumanMessage(content=_NUDGE)
+
+
+class TestAgentNodeTextOnlyTurns:
+    """Consecutive text-only turns in schema mode under "auto" are nudged, and bounded independently of max_cycles."""
+
+    @pytest.fixture(name="schema")
+    def schema_fixture(self):
+        schema = Mock()
+        schema.tool_title = "structured_response"
+        return schema
+
+    @pytest.fixture(name="auto_node")
+    def auto_node_fixture(self, make_agent_node, schema):
+        return make_agent_node(
+            max_cycles=None, response_schema=schema, response_schema_tool_choice="auto"
+        )
+
+    @staticmethod
+    def _state(base_flow_state, component_name, history):
+        state = copy.deepcopy(base_flow_state)
+        state["conversation_history"] = {component_name: history}
+        return state
+
+    @staticmethod
+    def _request_history(mock_prompt, call_index=-1):
+        return mock_prompt.ainvoke.call_args_list[call_index][1]["input"]["history"]
+
+    @pytest.mark.asyncio
+    async def test_text_only_reply_to_the_wrap_up_instruction_raises(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        mock_prompt,
+        auto_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """After three text-only turns the request carries the wrap-up instruction; a fourth text reply raises."""
+        mock_prompt.ainvoke = AsyncMock(return_value=_text_only_completion())
+        state = self._state(
+            base_flow_state,
+            component_name,
+            [
+                HumanMessage(content="go"),
+                _text_only_completion(),
+                _nudge(),
+                _text_only_completion(),
+                _nudge(),
+                _text_only_completion(),
+            ],
+        )
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.log"
+        ) as mock_log:
+            with pytest.raises(
+                AgentStuckError,
+                match="'test_agent_node' is stuck: it replied in text without calling a tool "
+                "4 times in a row, the last after the wrap-up instruction",
+            ):
+                await auto_node.run(state)
+
+        mock_log.warning.assert_called_once_with(
+            "Agent replied in text without calling a tool",
+            agent="test_agent_node",
+            text_only_turns=4,
+            max_text_only_turns=3,
+        )
+        assert mock_prompt.ainvoke.call_count == 1
+        assert self._request_history(mock_prompt)[-1] == HumanMessage(
+            content=auto_node._wrap_up_message()  # pylint: disable=protected-access
+        )
+
+    @pytest.mark.asyncio
+    async def test_text_only_turn_is_followed_by_a_persisted_nudge(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        mock_prompt,
+        auto_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """The request after a text-only turn no longer ends on an assistant message, and the nudge is kept."""
+        earlier = _text_only_completion()
+        completion = _text_only_completion()
+        mock_prompt.ainvoke = AsyncMock(return_value=completion)
+        go = HumanMessage(content="go")
+
+        result = await auto_node.run(
+            self._state(base_flow_state, component_name, [go, earlier])
+        )
+
+        assert self._request_history(mock_prompt) == [go, earlier, _nudge()]
+        assert result["conversation_history"][component_name] == [
+            go,
+            earlier,
+            _nudge(),
+            completion,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_compaction_continue_message_does_not_reset_the_count(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        mock_prompt,
+        auto_node,
+        optimizer_pipeline,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Compaction's continue message after a text-only tail does not reset the count."""
+        compaction_continue = HumanMessage(content=COMPACTION_CONTINUE_MESSAGE)
+
+        async def compact_once(history):
+            if optimizer_pipeline.optimize.await_count == 1:
+                return [*history, compaction_continue], []
+            return history, []
+
+        optimizer_pipeline.optimize = AsyncMock(side_effect=compact_once)
+        mock_prompt.ainvoke = AsyncMock(side_effect=lambda **_: _text_only_completion())
+        state = self._state(
+            base_flow_state,
+            component_name,
+            [
+                HumanMessage(content="go"),
+                _text_only_completion(),
+                _nudge(),
+                _text_only_completion(),
+            ],
+        )
+
+        result = await auto_node.run(state)
+        assert self._request_history(mock_prompt)[-2:] == [
+            compaction_continue,
+            _nudge(),
+        ]
+
+        with pytest.raises(AgentStuckError, match="4 times in a row"):
+            await auto_node.run(
+                self._state(
+                    base_flow_state,
+                    component_name,
+                    result["conversation_history"][component_name],
+                )
+            )
+        assert self._request_history(mock_prompt)[-1] == HumanMessage(
+            content=auto_node._wrap_up_message()  # pylint: disable=protected-access
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", [[], ""], ids=["empty_list", "empty_string"])
+    async def test_empty_replies_forever_stop_after_four_calls(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        content,
+        mock_prompt,
+        auto_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Feeding each run's history into the next, as the router's loop-back does, an empty reply that the trimmer
+        drops still changes the next request and still counts."""
+
+        def empty_reply(**_kwargs):
+            message = AIMessage(content=content)
+            message.response_metadata = {}
+            return message
+
+        mock_prompt.ainvoke = AsyncMock(side_effect=empty_reply)
+        state = self._state(
+            base_flow_state, component_name, [HumanMessage(content="go")]
+        )
+
+        with pytest.raises(AgentStuckError, match="4 times in a row"):
+            for _ in range(10):
+                result = await auto_node.run(state)
+                state = self._state(
+                    base_flow_state,
+                    component_name,
+                    result["conversation_history"][component_name],
+                )
+
+        assert mock_prompt.ainvoke.call_count == 4
+        # Each request carries one more nudge (the last: the wrap-up), so none repeats the one before.
+        request_lengths = [len(self._request_history(mock_prompt, i)) for i in range(4)]
+        assert request_lengths == sorted(set(request_lengths))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("history", "nudged"),
+        [
+            ([HumanMessage(content="go"), _text_only_completion()], True),
+            (
+                [
+                    HumanMessage(content="go"),
+                    _text_only_completion(),
+                    _nudge(),
+                    _text_only_completion(),
+                    _tool_call_completion(),
+                    ToolMessage(content="file contents", tool_call_id="tc1"),
+                ],
+                False,
+            ),
+            (
+                [
+                    HumanMessage(content="go"),
+                    _text_only_completion(),
+                    _nudge(),
+                    _text_only_completion(),
+                    _tool_call_completion(),
+                    ToolMessage(content="file contents", tool_call_id="tc1"),
+                    _text_only_completion(),
+                ],
+                True,
+            ),
+            (
+                [
+                    HumanMessage(content="go"),
+                    _text_only_completion(),
+                    _nudge(),
+                    _text_only_completion(),
+                ],
+                True,
+            ),
+        ],
+        ids=[
+            "below_limit",
+            "reset_by_tool_call",
+            "reset_then_one_text_turn",
+            "third_turn_does_not_raise",
+        ],
+    )
+    async def test_text_only_turn_below_the_limit_is_returned(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        history,
+        nudged,
+        mock_prompt,
+        auto_node,
+        base_flow_state,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """A tool call resets the count, and a text turn below the limit loops back as before."""
+        completion = _text_only_completion()
+        mock_prompt.ainvoke = AsyncMock(return_value=completion)
+
+        result = await auto_node.run(
+            self._state(base_flow_state, component_name, history)
+        )
+
+        assert result["conversation_history"][component_name][-1] == completion
+        assert (self._request_history(mock_prompt)[-1] == _nudge()) is nudged
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool_choice", "with_schema"),
+        [("auto", False), ("any", True)],
+        ids=["no_schema", "any_tool_choice"],
+    )
+    async def test_other_modes_are_unaffected(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        tool_choice,
+        with_schema,
+        mock_prompt,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        schema,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Without a schema a text reply is the final answer; under "any" the router handles it.
+
+        Neither gets a nudge or a cap.
+        """
+        node_kwargs = {"response_schema_tool_choice": tool_choice}
+        if with_schema:
+            node_kwargs["response_schema"] = schema
+        completion = _text_only_completion()
+        mock_prompt.ainvoke = AsyncMock(return_value=completion)
+        history = [HumanMessage(content="go")] + [
+            _text_only_completion() for _ in range(3)
+        ]
+
+        result = await make_agent_node(max_cycles=None, **node_kwargs).run(
+            self._state(base_flow_state, component_name, history)
+        )
+
+        assert self._request_history(mock_prompt) == history
+        assert result["conversation_history"][component_name][-1] == completion
+
+
+_MANY_IMAGES_MESSAGE = (
+    "messages.1.content.5.image.source.base64.data: At least one of the image "
+    "dimensions exceed max allowed size for many-image requests: 2000 pixels"
+)
+_UNCLASSIFIED_MESSAGE = (
+    "Error code: 400 - {'error': {'message': 'The image data you provided does not "
+    "represent a valid image. Please check your input and try again.', 'type': "
+    "'invalid_request_error', 'param': 'input', 'code': 'invalid_value'}}"
+)
+_INVENTED_MESSAGE = (
+    "Error code: 400 - the request was declined for a reason worded tomorrow"
+)
+_ONE_IMAGE_MESSAGE = (
+    "messages.1.content.3.image.source.base64.data: At least one of the image "
+    "dimensions exceed max allowed size: 8000 pixels"
+)
+
+
+def _image_limit_error(
+    message: str = _MANY_IMAGES_MESSAGE, status_code: int = 400
+) -> APIStatusError:
+    return APIStatusError(message, response=Mock(status_code=status_code), body=None)
+
+
+def _image_tool_message(call_id: str) -> ToolMessage:
+    return ToolMessage(
+        content=[
+            {"type": "text", "text": f"Read image file: {call_id}.png"},
+            image_content_block(base64="aW1n", mime_type="image/png"),
+        ],
+        tool_call_id=call_id,
+    )
+
+
+def _live_images(messages) -> int:
+    return sum(
+        1
+        for message in messages
+        if isinstance(message.content, list)
+        for block in message.content
+        if is_image_content_block(block)
+    )
+
+
+class TestAgentNodeImageLimitFallback:
+    @pytest.fixture(name="two_rounds")
+    def two_rounds_fixture(self):
+        return [
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "fix what the screenshot shows"},
+                    image_content_block(base64="aW1n", mime_type="image/png"),
+                ]
+            ),
+            AIMessage(
+                content="", tool_calls=[{"id": "a", "name": "read_file", "args": {}}]
+            ),
+            _image_tool_message("a"),
+            AIMessage(
+                content="", tool_calls=[{"id": "b", "name": "read_file", "args": {}}]
+            ),
+            _image_tool_message("b"),
+        ]
+
+    @staticmethod
+    def _run(agent_node, base_flow_state, component_name, history):
+        base_flow_state["conversation_history"] = {component_name: history}
+        return agent_node.run(base_flow_state)
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(_image_limit_error(), id="many_image_400"),
+            pytest.param(
+                _image_limit_error("request too large", status_code=413), id="413"
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_seen_images_leave_the_saved_history_and_the_request_is_retried(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        error,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(side_effect=[error, mock_ai_message])
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 2
+        retried = mock_prompt.ainvoke.call_args.kwargs["input"]["history"]
+        assert retried == saved[:-1]
+        assert _live_images(saved) == 1
+        assert is_image_content_block(saved[4].content[1])
+        assert saved[0].content[1] == {
+            "type": "text",
+            "text": "[image/png omitted from history]",
+        }
+        assert saved[2].content[1]["type"] == "text"
+        assert saved[-2] == HumanMessage(content=AgentNode._IMAGE_LIMIT_SEEN_MESSAGE)
+        assert saved[-1] == mock_ai_message
+
+    @pytest.mark.asyncio
+    async def test_a_second_rejection_removes_the_current_round_too(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(), _image_limit_error(), mock_ai_message]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 3
+        assert _live_images(saved) == 0
+        assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
+            AgentNode._IMAGE_LIMIT_SEEN_MESSAGE,
+            AgentNode._IMAGE_LIMIT_LATEST_MESSAGE,
+        ]
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            pytest.param(_UNCLASSIFIED_MESSAGE, id="known_wording"),
+            pytest.param(_INVENTED_MESSAGE, id="wording_never_seen"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_an_unclassified_rejection_removes_the_current_round_first(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        message,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Recovery never depends on the provider's wording: the newest images are the only unproven content."""
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(message), mock_ai_message]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 2
+        assert _live_images(saved) == 2
+        assert saved[4].content[1]["type"] == "text"
+        assert saved[-2] == HumanMessage(
+            content=AgentNode._IMAGE_REJECTED_LATEST_MESSAGE
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_unclassified_rejection_then_takes_the_seen_images(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[
+                _image_limit_error(_INVENTED_MESSAGE),
+                _image_limit_error(_INVENTED_MESSAGE),
+                mock_ai_message,
+            ]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 3
+        assert _live_images(saved) == 0
+        assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
+            AgentNode._IMAGE_REJECTED_LATEST_MESSAGE,
+            AgentNode._IMAGE_REJECTED_SEEN_MESSAGE,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_rejection_unrelated_to_the_images_surfaces_after_the_loop(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """The structural retry costs at most two extra requests while images are live, then the error surfaces."""
+        unrelated = APIStatusError(
+            "tools.0.name: invalid", response=Mock(status_code=400), body=None
+        )
+        mock_prompt.ainvoke = AsyncMock(side_effect=unrelated)
+
+        with pytest.raises(ModelError) as raised:
+            await self._run(agent_node, base_flow_state, component_name, two_rounds)
+
+        assert raised.value.status_code == 400
+        assert "tools.0.name" in raised.value.message
+        assert mock_prompt.ainvoke.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_one_oversized_image_removes_the_current_round_first(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_ONE_IMAGE_MESSAGE), mock_ai_message]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 2
+        assert _live_images(saved) == 2
+        assert is_image_content_block(saved[0].content[1])
+        assert is_image_content_block(saved[2].content[1])
+        assert saved[4].content[1]["type"] == "text"
+        assert saved[-2] == HumanMessage(
+            content=AgentNode._IMAGE_TOO_LARGE_MESSAGE.format(
+                limit=" (one side is over 8000 px)"
+            )
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_kind_may_change_between_attempts(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Removing the seen images drops the request under the many-image threshold, so the per-image rule names the
+        new one next."""
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[
+                _image_limit_error(),
+                _image_limit_error(_ONE_IMAGE_MESSAGE),
+                mock_ai_message,
+            ]
+        )
+
+        result = await self._run(
+            agent_node, base_flow_state, component_name, two_rounds
+        )
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 3
+        assert _live_images(saved) == 0
+        assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
+            AgentNode._IMAGE_LIMIT_SEEN_MESSAGE,
+            AgentNode._IMAGE_TOO_LARGE_MESSAGE.format(
+                limit=" (one side is over 8000 px)"
+            ),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_an_unseen_image_is_removed_on_the_first_pass_when_nothing_was_seen(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        history = [
+            HumanMessage(
+                content=[image_content_block(base64="aW1n", mime_type="image/png")]
+            )
+        ]
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(), mock_ai_message]
+        )
+
+        result = await self._run(agent_node, base_flow_state, component_name, history)
+
+        saved = result["conversation_history"][component_name]
+        assert mock_prompt.ainvoke.call_count == 2
+        assert _live_images(saved) == 0
+        assert saved[1] == HumanMessage(content=AgentNode._IMAGE_LIMIT_LATEST_MESSAGE)
+
+    @pytest.mark.asyncio
+    async def test_a_third_rejection_raises(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        two_rounds,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(side_effect=[_image_limit_error()] * 3)
+
+        with pytest.raises(ModelError) as raised:
+            await self._run(agent_node, base_flow_state, component_name, two_rounds)
+
+        assert raised.value.status_code == 400
+        assert mock_prompt.ainvoke.call_count == 3
+
+    @pytest.mark.parametrize(
+        ("error", "history"),
+        [
+            pytest.param(
+                APIStatusError(
+                    "invalid x-api-key", response=Mock(status_code=401), body=None
+                ),
+                [HumanMessage(content=[image_content_block("aW1n", "image/png")])],
+                id="a_status_outside_400_and_413_with_images",
+            ),
+            pytest.param(
+                _image_limit_error(),
+                [HumanMessage(content="no images at all")],
+                id="image_limit_without_images",
+            ),
+            pytest.param(
+                _image_limit_error(_INVENTED_MESSAGE),
+                [HumanMessage(content="no images at all")],
+                id="unclassified_400_without_images",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_other_errors_and_imageless_histories_raise_as_before(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        error,
+        history,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        mock_prompt.ainvoke = AsyncMock(side_effect=error)
+
+        with pytest.raises(ModelError):
+            await self._run(agent_node, base_flow_state, component_name, history)
+
+        assert mock_prompt.ainvoke.call_count == 1
+
+
+class TestAgentNodeSelfHostedBilling:
+    """Self-hosted billing charges an LLM call once, however many times the agent retries it."""
+
+    @pytest.fixture(name="billing_outbox")
+    def billing_outbox_fixture(self):
+        outbox = Mock(spec=Outbox)
+        outbox.put_action_and_wait_for_response = AsyncMock()
+        return outbox
+
+    @pytest.fixture(name="reply_with")
+    def reply_with_fixture(self, mock_prompt, billing_outbox):
+        """Make the prompt run the billing callback before each reply, as `Prompt.ainvoke` does."""
+        billing = SelfHostedBillingPromptCallbackHandler(
+            "test-workflow",
+            GLReportingEventContext.from_workflow_definition("software_development"),
+            billing_outbox,
+        )
+
+        def reply_with(*replies):
+            pending = iter(replies)
+
+            async def ainvoke(**_kwargs):
+                await billing.on_before_llm_call()
+                reply = next(pending)
+                if isinstance(reply, Exception):
+                    raise reply
+                return reply
+
+            mock_prompt.ainvoke = AsyncMock(side_effect=ainvoke)
+
+        return reply_with
+
+    @pytest.fixture(name="_no_retry_delay")
+    def _no_retry_delay_fixture(self):
+        with patch(
+            "duo_workflow_service.errors.error_handler.asyncio.sleep", new=AsyncMock()
+        ):
+            yield
+
+    @staticmethod
+    def _truncated(message: AIMessage) -> AIMessage:
+        truncated = copy.copy(message)
+        truncated.response_metadata = {"finish_reason": "length"}
+        truncated.tool_calls = []
+        return truncated
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                APIStatusError(
+                    "Rate limit exceeded", response=Mock(status_code=429), body=None
+                ),
+                id="anthropic_rate_limit",
+            ),
+            pytest.param(
+                litellm.RateLimitError(
+                    message="Rate limit exceeded",
+                    llm_provider="fireworks_ai",
+                    model="test-model",
+                ),
+                id="litellm_rate_limit",
+            ),
+            pytest.param(
+                litellm.InternalServerError(
+                    message="Internal server error",
+                    llm_provider="fireworks_ai",
+                    model="test-model",
+                ),
+                id="litellm_internal_server_error",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_bills_once_when_a_retry_succeeds(
+        self,
+        agent_node,
+        base_flow_state,
+        mock_prompt,
+        mock_ai_message,
+        billing_outbox,
+        reply_with,
+        error,
+        _no_retry_delay,
+    ):
+        reply_with(error, error, mock_ai_message)
+
+        await agent_node.run(base_flow_state)
+
+        assert mock_prompt.ainvoke.call_count == 3
+        billing_outbox.put_action_and_wait_for_response.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_bills_once_when_every_retry_fails(
+        self,
+        agent_node,
+        base_flow_state,
+        mock_prompt,
+        billing_outbox,
+        reply_with,
+        _no_retry_delay,
+    ):
+        rate_limit = APIStatusError(
+            "Rate limit exceeded", response=Mock(status_code=429), body=None
+        )
+        reply_with(*[rate_limit] * 4)
+
+        with pytest.raises(ModelError):
+            await agent_node.run(base_flow_state)
+
+        assert mock_prompt.ainvoke.call_count == 4
+        billing_outbox.put_action_and_wait_for_response.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_bills_once_when_the_request_is_retried_without_images(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        billing_outbox,
+        reply_with,
+    ):
+        base_flow_state["conversation_history"] = {
+            component_name: [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": "fix what the screenshot shows"},
+                        image_content_block(base64="aW1n", mime_type="image/png"),
+                    ]
+                )
+            ]
+        }
+        reply_with(_image_limit_error(), mock_ai_message)
+
+        await agent_node.run(base_flow_state)
+
+        assert mock_prompt.ainvoke.call_count == 2
+        billing_outbox.put_action_and_wait_for_response.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_bills_each_call_after_the_model_replies(
+        self,
+        agent_node,
+        base_flow_state,
+        mock_prompt,
+        mock_ai_message,
+        billing_outbox,
+        reply_with,
+        _no_retry_delay,
+    ):
+        rate_limit = APIStatusError(
+            "Rate limit exceeded", response=Mock(status_code=429), body=None
+        )
+        truncated = self._truncated(mock_ai_message)
+        reply_with(rate_limit, truncated, truncated, mock_ai_message)
+
+        await agent_node.run(base_flow_state)
+
+        # Call 1 is billed and fails. Call 2 repeats it, so it is free.
+        # Calls 3 and 4 follow a model reply, so each one is billed.
+        assert mock_prompt.ainvoke.call_count == 4
+        assert billing_outbox.put_action_and_wait_for_response.call_count == 3

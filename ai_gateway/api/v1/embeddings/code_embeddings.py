@@ -17,6 +17,7 @@ from ai_gateway.models.v2.embedding_litellm import (
     EmbeddingAuthenticationError,
     EmbeddingBadRequestError,
     EmbeddingRateLimitError,
+    EmbeddingTimeoutError,
 )
 from ai_gateway.prompts.base import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
@@ -84,6 +85,11 @@ async def _generate_code_embeddings(
             prompt_id=CODE_EMBEDDINGS_PROMPT_ID,
             model_metadata=model_metadata,
             internal_event_category=__name__,
+            # An embeddings model may bill by characters, not per token,
+            # so input_tokens alone cannot be used to cost embedding requests.
+            internal_event_extra={
+                "input_characters": _count_input_characters(payload.contents)
+            },
         )
     except ValueError as e:
         raise HTTPException(
@@ -113,6 +119,11 @@ async def _generate_code_embeddings(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
         )
+    except EmbeddingTimeoutError as e:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=str(e),
+        )
 
     # Explicitly type `predictions` as a list of dicts since we know
     #   it contains a list of dicts from the embedding response
@@ -123,8 +134,8 @@ async def _generate_code_embeddings(
     return EmbeddingsResponse(
         model=EmbeddingsResponse.Model(
             engine=prompt.model_provider,
-            name=prompt.model_name,
-            identifier=payload.model_metadata.identifier,
+            name=prompt.reported_model_name,
+            identifier=model_metadata.resolved_identifier,
         ),
         predictions=[
             EmbeddingsResponse.Prediction(
@@ -134,6 +145,10 @@ async def _generate_code_embeddings(
             for p in predictions
         ],
     )
+
+
+def _count_input_characters(contents: list[str]) -> int:
+    return sum(len("".join(content.split())) for content in contents)
 
 
 def _validate_and_get_model_metadata(

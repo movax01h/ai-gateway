@@ -4,11 +4,14 @@ from unittest.mock import Mock, patch
 
 import pytest
 from langchain_core.tools import BaseTool, ToolException
-from pydantic_core import ValidationError
+from prometheus_client import CollectorRegistry
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
+from duo_workflow_service.tracking.duo_workflow_metrics import DuoWorkflowMetrics
+from lib.events import GLReportingEventContext
 from lib.internal_events.event_enum import EventEnum
 
 
@@ -270,3 +273,42 @@ class TestTrackMergeRequestCreated:
         )
 
         tracker.client.track_event.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "event_name,outcome,expected_outcome",
+    [
+        (EventEnum.WORKFLOW_TOOL_BLOCKED, None, "none"),
+        (EventEnum.WORKFLOW_TOOL_APPROVAL_REQUESTED, None, "none"),
+        (EventEnum.WORKFLOW_TOOL_APPROVAL_RESOLVED, "approval", "approval"),
+    ],
+)
+def test_governance_event_reaches_a_real_counter(event_name, outcome, expected_outcome):
+    """Wiring check: a governance event from the tracker moves the real Prometheus counter."""
+    registry = CollectorRegistry()
+    metrics = DuoWorkflowMetrics(registry=registry)
+    tracker = ToolEventTracker(
+        flow_id="123",
+        flow_type=GLReportingEventContext.from_workflow_definition("chat"),
+        internal_event_client=Mock(),
+    )
+
+    with patch(
+        "duo_workflow_service.tracking.tool_governance.duo_workflow_metrics", metrics
+    ):
+        tracker.track_tool_governance_event(
+            event_name, tool_name="run_command", outcome=outcome
+        )
+
+    samples = [
+        sample
+        for family in registry.collect()
+        if family.name == "duo_workflow_tool_governance"
+        for sample in family.samples
+        if sample.name == "duo_workflow_tool_governance_total"
+    ]
+    assert len(samples) == 1
+    assert samples[0].value == 1
+    assert samples[0].labels["event"] == event_name.value
+    assert samples[0].labels["outcome"] == expected_outcome
+    assert samples[0].labels["flow_type"] == "chat"

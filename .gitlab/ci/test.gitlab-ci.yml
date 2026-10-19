@@ -6,8 +6,10 @@ tests:unit:
   stage: test
   tags:
     - saas-linux-large-amd64
-  needs:
-    - install
+  # `install` produces no artifacts, only the dependency cache. On a warm cache
+  # `make test-coverage-ci` skips the install; on a cold cache (e.g. a
+  # poetry.lock change) it installs for itself, so don't wait on the build stage.
+  needs: []
   script:
     - make test-coverage-ci
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
@@ -81,6 +83,15 @@ tests:integration:
       fi
     - make test-agents
   when: manual
+  artifacts:
+    when: always
+    expire_in: 1 weeks
+    paths:
+      # Pass-rate summaries, generated flow YAML, and agent transcripts.
+      - .test-reports/agent_tests/
+    reports:
+      junit:
+        - .test-reports/agent-tests.xml
 
 tests:agents:analytics:
   extends: .tests:agents
@@ -90,7 +101,10 @@ tests:agents:analytics:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
-        - duo_workflow_service/agent_platform/v1/flows/configs/analytics_agent/**/*
+        # Config and tools define agent behavior (tool names/schemas steer the
+        # model); tests/ stays out — it runs in tests:unit on every MR.
+        - ai/features/insights/analytics_agent/config/**/*
+        - ai/features/insights/analytics_agent/components/**/*
         - agent_tests/analytics_agent/**/*
         - agent_tests/*.py
       when: on_success
@@ -99,6 +113,23 @@ tests:agents:analytics:
     matrix:
       - EXECUTION_MODEL: "claude-sonnet-4-6"
       - EXECUTION_MODEL: "claude-opus-4-7"
+
+# Benchmark baseline for the Flow Creation foundational agent. Runs a single
+# execution model: the baseline is defined against one model so that scores stay
+# comparable across runs, and every case costs a multi-turn conversation.
+# See agent_tests/flow_creator/README.md.
+tests:agents:flow-creator:
+  extends: .tests:agents
+  variables:
+    AGENT_TEST_DIR: flow_creator/
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - duo_workflow_service/agent_platform/v1/flows/configs/flow_creator/**/*
+        - agent_tests/flow_creator/**/*
+      when: on_success
+    - when: manual
 
 .test-base: &test-base
   stage: test
@@ -193,13 +224,16 @@ feature-tests:
     DEBIAN_VERSION: "bookworm"
     RUBY_VERSION: "3.3"
     GO_VERSION: "1.24.6"  # datasource=golang-version depName=golang/go
-    PYTHON_VERSION: "3.12.13"
+    PYTHON_VERSION: "3.12.15"
     POETRY_VERSION: "2.3.1"
 
+# The check-proto-* jobs regenerate from contract/ and need no build artifact,
+# so they start immediately rather than waiting on the build stage.
 check-proto-go:
   extends: [.proto-variables]
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}golang:${GO_VERSION}-${DEBIAN_VERSION}
   stage: test
+  needs: []
   script:
     - apt update
     - apt install unzip  # Needed by Makefile to download and install protoc
@@ -215,6 +249,7 @@ check-proto-python:
   extends: [.proto-variables]
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}python:${PYTHON_VERSION}-${DEBIAN_VERSION}
   stage: test
+  needs: []
   script:
     - pip install poetry==${POETRY_VERSION}
     - make gen-proto-python
@@ -230,6 +265,7 @@ check-proto-ruby:
   extends: [.proto-variables]
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}ruby:${RUBY_VERSION}-${DEBIAN_VERSION}
   stage: test
+  needs: []
   script:
     - make gen-proto-ruby
     - '(git diff --exit-code || (echo "ERROR: There are changes after running make gen-proto-ruby. Run it locally and commit the changes." && exit 1))'
@@ -243,6 +279,7 @@ check-proto-node:
   extends: [.proto-variables]
   image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}node:18-${DEBIAN_VERSION}
   stage: test
+  needs: []
   script:
     - make gen-proto-node
     - '(git diff --exit-code || (echo "ERROR: There are changes after running make gen-proto-node. Run it locally and commit the changes." && exit 1))'
@@ -269,5 +306,6 @@ check-duo-workflow-docs:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         - duo_workflow_service/**/*
+        - ai/features/*/*/config/**/*
         - scripts/generate_graph_docs.py
         - docs/duo_workflow_service_graphs.md

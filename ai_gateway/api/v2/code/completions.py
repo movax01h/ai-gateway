@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from time import time
-from typing import Annotated, Any, AsyncIterator, Dict, Optional, Tuple
+from typing import Annotated, Any, AsyncIterator, Optional, Tuple
 
-from dependency_injector.providers import Factory
+from dependency_injector.providers import Configuration, Factory
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
@@ -46,13 +46,18 @@ from ai_gateway.code_suggestions import (
     CodeSuggestionsChunk,
 )
 from ai_gateway.code_suggestions.base import CodeSuggestionsOutput
+from ai_gateway.code_suggestions.fallback import build_rate_limit_fallback
 from ai_gateway.code_suggestions.processing.ops import lang_from_filename
 from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessor,
     PostProcessorOperation,
+    create_custom_model_post_processor,
 )
-from ai_gateway.config import Config
-from ai_gateway.model_metadata import create_model_metadata
+from ai_gateway.model_metadata import (
+    IamRoleNotAllowedError,
+    TypeModelMetadata,
+    create_model_metadata,
+)
 from ai_gateway.models import KindLiteLlmModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import BasePromptRegistry
@@ -62,7 +67,11 @@ from ai_gateway.tracking.errors import log_exception
 from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from lib.context import StarletteUser, get_current_user
 from lib.events import FeatureQualifiedNameStatic
-from lib.feature_flags.context import current_feature_flag_context
+from lib.feature_flags.context import (
+    FeatureFlag,
+    current_feature_flag_context,
+    is_feature_enabled,
+)
 from lib.internal_events import InternalEventsClient
 from lib.prompts.caching import X_GITLAB_MODEL_PROMPT_CACHE_ENABLED
 from lib.usage_quota import UsageQuotaEvent
@@ -78,7 +87,7 @@ class CompletionConfig:
 
     handler_class: Optional[type] = None
     requires_prompt_registry: bool = False
-    extra_kwargs: Optional[Dict[str, Any]] = None
+    extra_kwargs: Optional[dict[str, Any]] = None
     unit_primitive: Optional[GitLabUnitPrimitive] = None
 
     def __post_init__(self):
@@ -99,8 +108,8 @@ LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER = {
     "vertex-ai/codestral-2508": "codestral_2508_vertex",  # Set from the model provider handler for default case
     "fireworks_ai/codestral-2501": "codestral_2501_fireworks",
     "fireworks_ai/codestral-2508": "codestral_2508_fireworks",
-    "anthropic/claude-sonnet-4-20250514": "claude_sonnet_4_5_20250929",
-    "anthropic/claude-sonnet-4-5-20250929": "claude_sonnet_4_5_20250929",
+    "anthropic/claude-sonnet-4-20250514": "claude_sonnet_5_5",
+    "anthropic/claude-sonnet-4-5-20250929": "claude_sonnet_5_5",
 }
 
 
@@ -121,7 +130,7 @@ async def completions(
     payload: CompletionsRequestWithVersion,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
-    config: Annotated[Config, Depends(get_config)],
+    config: Annotated[Configuration, Depends(get_config)],
     completions_amazon_q_factory: Annotated[
         Factory[CodeCompletions],
         Depends(get_code_suggestions_completions_amazon_q_factory_provider),
@@ -148,7 +157,6 @@ async def completions(
         completions_agent_factory,
         completions_amazon_q_factory,
         internal_event_client,
-        region,
         config.model_keys(),
         config,
     )
@@ -165,6 +173,9 @@ async def completions(
             language=language_name,
             global_user_id=current_user.global_user_id,
             region=region,
+            is_context_cap_enabled=is_feature_enabled(
+                FeatureFlag.CAP_CODE_COMPLETION_CONTEXT
+            ),
         )
         snowplow_instrumentator.watch(SnowplowEvent(context=snowplow_event_context))
     except Exception as e:
@@ -202,7 +213,7 @@ async def completions(
             region=region,
         ),
         metadata=SuggestionsResponse.MetadataBase(
-            enabled_feature_flags=current_feature_flag_context.get(),
+            enabled_feature_flags=list(current_feature_flag_context.get()),
         ),
         choices=choices,
     )
@@ -220,7 +231,7 @@ async def generations(
     payload: GenerationsRequestWithVersion,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
-    config: Annotated[Config, Depends(get_config)],
+    config: Annotated[Configuration, Depends(get_config)],
     generations_vertex_factory: Annotated[
         Factory[CodeGenerations],
         Depends(get_code_suggestions_generations_vertex_provider),
@@ -301,7 +312,7 @@ async def generations(
         file_name=payload.current_file.file_name,
         editor_lang=payload.current_file.language_identifier,
         model_provider=payload.model_provider,
-        stream=payload.stream,
+        stream=payload.stream or False,
         user=current_user.cloud_connector_user,
     )
 
@@ -325,7 +336,7 @@ async def generations(
             region=config.google_cloud_platform.location(),
         ),
         metadata=SuggestionsResponse.MetadataBase(
-            enabled_feature_flags=current_feature_flag_context.get(),
+            enabled_feature_flags=list(current_feature_flag_context.get()),
         ),
         choices=_generation_suggestion_choices(suggestion.text),
     )
@@ -346,8 +357,10 @@ def _resolve_prompt_code_generations(
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
     generations_agent_factory: Factory[CodeGenerations],
-    config: Config,
+    config: Configuration,
 ) -> CodeGenerations:
+    assert payload.prompt_id is not None
+
     has_model_info = (
         payload.model_name is not None and payload.model_provider is not None
     )
@@ -361,7 +374,7 @@ def _resolve_prompt_code_generations(
                 "provider": "custom_openai",
                 "identifier": payload.model_identifier,
             },
-            mock_model_responses=config.mock_model_responses,
+            mock_model_responses=config.mock_model_responses(),
         )
         prompt = prompt_registry.get_on_behalf(
             current_user,
@@ -389,7 +402,7 @@ def _build_code_generations(
     generations_litellm_factory: Factory[CodeGenerations],
     generations_agent_factory: Factory[CodeGenerations],
     internal_event_client: InternalEventsClient,
-    config: Config,
+    config: Configuration,
 ) -> CodeGenerations:
     if payload.prompt_id:
         return _resolve_prompt_code_generations(
@@ -428,36 +441,47 @@ def _resolve_agent_code_completions(
     completions_agent_factory: Factory[CodeCompletions],
     model_keys: dict,
     using_cache: bool,
-    config: Config,
+    config: Configuration,
     gitlab_identifier: Optional[str] = None,
+    with_fallback: bool = False,
 ) -> CodeCompletions:
     # Use the GitLab identifier if provided (from model_provider: "gitlab")
     # Otherwise, try to map legacy provider/model_name to GitLab identifier
-    if gitlab_identifier:
-        name = gitlab_identifier
-    else:
-        name = _get_gitlab_identifier(payload.model_provider, payload.model_name)
-
-    model_metadata = create_model_metadata(
-        {
-            "name": name,
-            "endpoint": payload.model_endpoint,
-            "api_key": payload.model_api_key,
-            "identifier": payload.model_identifier,
-            "provider": payload.model_provider or "text-completion-openai",
-            "provider_keys": model_keys,
-            "fireworks_api_base_url": config.fireworks_api_base_url(),
-            "using_cache": using_cache,
-            "session_id": current_user.global_user_id,
-        },
-        mock_model_responses=config.mock_model_responses,
+    name = gitlab_identifier or _get_gitlab_identifier(
+        payload.model_provider, payload.model_name
     )
+
+    model_metadata_data: dict[str, Any] = {
+        "name": name,
+        "provider": payload.model_provider or "text-completion-openai",
+        "provider_keys": model_keys,
+        "fireworks_api_base_url": config.fireworks_api_base_url(),
+        "using_cache": using_cache,
+        "session_id": current_user.global_user_id,
+    }
+    if payload.model_provider is not None and payload.model_provider.is_custom_provider:
+        model_metadata_data.update(
+            endpoint=payload.model_endpoint,
+            api_key=payload.model_api_key,
+            identifier=payload.model_identifier,
+            iam_role=payload.model_iam_role,
+        )
+
+    try:
+        model_metadata = create_model_metadata(
+            model_metadata_data,
+            mock_model_responses=config.mock_model_responses(),
+        )
+    except IamRoleNotAllowedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
 
     # Create post processor based on model provider and name
     post_processor = _create_post_processor_for_model(
-        payload.model_provider,
         payload.model_name,
         config,
+        model_metadata,
     )
 
     try:
@@ -473,15 +497,32 @@ def _resolve_agent_code_completions(
             detail="Unauthorized to access code completions",
         )
 
+    fallback_factory = None
+    if with_fallback:
+        fallback_factory = build_rate_limit_fallback(
+            model_metadata,
+            prompt_registry,
+            current_user,
+            fireworks_api_base_url=config.fireworks_api_base_url(),
+            model_keys=model_keys,
+            using_cache=using_cache,
+            mock_model_responses=config.mock_model_responses(),
+            excl_post_process=config.feature_flags.excl_post_process(),
+            fireworks_score_thresholds=config.feature_flags.fireworks_score_threshold(),
+        )
+
     return completions_agent_factory(
         model__prompt=prompt,
         model__llm_definition=model_metadata.llm_definition,
         post_processor=post_processor,
         model_metadata=model_metadata,
+        fallback_factory=fallback_factory,
     )
 
 
-def _get_gitlab_identifier(model_provider: str, model_name: str) -> str:
+def _get_gitlab_identifier(
+    model_provider: Optional[KindModelProvider], model_name: Optional[str]
+) -> Optional[str]:
     legacy_identifier = f"{model_provider}/{model_name}"
 
     return LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER.get(
@@ -490,32 +531,28 @@ def _get_gitlab_identifier(model_provider: str, model_name: str) -> str:
 
 
 def _create_post_processor_for_model(
-    model_provider: str,
-    model_name: str,
-    config: Config,
+    model_name: Optional[str],
+    config: Configuration,
+    model_metadata: TypeModelMetadata,
 ) -> Optional[Factory]:
     """Create the appropriate post processor factory based on model provider and name."""
 
     # Vertex Codestral: apply STRIP_ASTERISKS
-    vertex_codestral_models = [
-        KindLiteLlmModel.CODESTRAL_2501,
-        KindLiteLlmModel.CODESTRAL_2508,
-    ]
     if (
-        model_provider == KindModelProvider.VERTEX_AI
-        and model_name in vertex_codestral_models
+        model_metadata.provider == KindModelProvider.VERTEX_AI
+        and "codestral" in model_metadata.llm_definition.family
     ):
         return Factory(
             PostProcessor,
             extras=[PostProcessorOperation.STRIP_ASTERISKS],
-            exclude=config.feature_flags.excl_post_process,
+            exclude=config.feature_flags.excl_post_process(),
         )
 
     # Fireworks: apply FILTER_SCORE and FIX_TRUNCATION
-    if model_provider == KindModelProvider.FIREWORKS:
+    if model_metadata.provider == KindModelProvider.FIREWORKS:
         return Factory(
             PostProcessor,
-            exclude=config.feature_flags.excl_post_process,
+            exclude=config.feature_flags.excl_post_process(),
             extras=[
                 PostProcessorOperation.FILTER_SCORE,
                 PostProcessorOperation.FIX_TRUNCATION,
@@ -525,22 +562,26 @@ def _create_post_processor_for_model(
             ),
         )
 
+    if model_metadata.is_custom_model:
+        return create_custom_model_post_processor(
+            config.feature_flags.excl_post_process()
+        )
+
     return None
 
 
 def _get_provider_config(
-    provider: KindModelProvider,
-    region: str,
+    provider: Optional[KindModelProvider],
     payload: CompletionsRequestWithVersion,
 ) -> CompletionConfig:
     """Get the appropriate completion configuration for the given provider."""
 
-    def _should_include_context(provider: KindModelProvider) -> bool:
+    def _should_include_context(provider: Optional[KindModelProvider]) -> bool:
         """Determine if this provider should include context."""
 
         return provider not in [KindModelProvider.ANTHROPIC, KindModelProvider.AMAZON_Q]
 
-    def _get_context_kwargs(provider: KindModelProvider) -> Dict[str, Any]:
+    def _get_context_kwargs(provider: Optional[KindModelProvider]) -> dict[str, Any]:
         """Get context kwargs if needed for this provider."""
 
         if _should_include_context(provider) and payload.context:
@@ -567,7 +608,7 @@ def _get_provider_config(
             extra_kwargs=_get_context_kwargs(provider),
         )
 
-    if provider == KindModelProvider.FIREWORKS or not _allow_vertex_codestral(region):
+    if provider == KindModelProvider.FIREWORKS:
         return CompletionConfig(
             handler_class=FireworksHandler,
             requires_prompt_registry=True,
@@ -589,9 +630,8 @@ def _build_code_completions(
     completions_agent_factory: Factory[CodeCompletions],
     completions_amazon_q_factory: Factory[CodeCompletions],
     internal_event_client: InternalEventsClient,
-    region: str,
     model_keys: dict,
-    config: Config,
+    config: Configuration,
 ) -> tuple[CodeCompletions, dict]:
     unit_primitive = GitLabUnitPrimitive.COMPLETE_CODE
     tracking_event = f"request_{unit_primitive}"
@@ -603,6 +643,11 @@ def _build_code_completions(
     )
 
     gitlab_identifier: Optional[str] = None
+    is_gitlab_default = _is_gitlab_default(payload)
+    if is_gitlab_default:
+        payload.model_provider = KindModelProvider.GITLAB
+        payload.model_name = None
+
     if payload.model_provider == KindModelProvider.GITLAB:
         model_metadata = create_model_metadata(
             {
@@ -611,37 +656,32 @@ def _build_code_completions(
                 "feature_setting": "code_completions",
                 "provider_keys": model_keys,
             },
-            mock_model_responses=config.mock_model_responses,
+            mock_model_responses=config.mock_model_responses(),
         )
 
         actual_provider = KindModelProvider.from_definition_provider(
             model_metadata.llm_definition.provider
         )
-        # Store the GitLab identifier for later use
-        gitlab_identifier = payload.model_name
+        gitlab_identifier = model_metadata.llm_definition.gitlab_identifier
         # Update payload with legacy model_provider/name for completions code
         payload.model_provider = actual_provider
         provider_model_name = (
             model_metadata.llm_definition.params.model or payload.model_name
         )
-        kwargs = {}
 
+        # Result dict is discarded; only the payload mutations these handlers make matter here.
         if actual_provider == KindModelProvider.ANTHROPIC:
-            AnthropicHandler(payload, request, kwargs).update_completion_params()
+            AnthropicHandler(payload, request, {}).update_completion_params()
         elif actual_provider == KindModelProvider.FIREWORKS:
             payload.model_name = provider_model_name
-            FireworksHandler(payload, request, kwargs).update_completion_params()
+            FireworksHandler(payload, request, {}).update_completion_params()
         elif actual_provider == KindModelProvider.VERTEX_AI:
             payload.model_name = provider_model_name
-            VertexHandler(payload, request, kwargs).update_completion_params()
+            VertexHandler(payload, request, {}).update_completion_params()
 
-    provider_config = _get_provider_config(
-        payload.model_provider,
-        region,
-        payload,
-    )
+    provider_config = _get_provider_config(payload.model_provider, payload)
 
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
 
     if provider_config.handler_class:
         provider_config.handler_class(
@@ -658,6 +698,7 @@ def _build_code_completions(
             using_cache=using_cache,
             config=config,
             gitlab_identifier=gitlab_identifier,
+            with_fallback=is_gitlab_default,
         )
 
         _track_code_suggestions_event(tracking_event, internal_event_client)
@@ -669,7 +710,7 @@ def _build_code_completions(
         model__role_arn=payload.role_arn,
     )
 
-    kwargs.update(provider_config.extra_kwargs)
+    kwargs.update(provider_config.extra_kwargs or {})
 
     unit_primitive = provider_config.unit_primitive or GitLabUnitPrimitive.COMPLETE_CODE
     tracking_event = f"request_{unit_primitive}"
@@ -724,8 +765,19 @@ def _generation_suggestion_choices(text: str) -> list:
     return [SuggestionsResponse.Choice(text=text)] if text else []
 
 
-def _allow_vertex_codestral(region: str):
-    return not region.startswith("asia-")
+def _is_gitlab_default(payload: CompletionsRequestWithVersion) -> bool:
+    """Whether the request asks for the GitLab default model rather than an explicit one.
+
+    Rails sends the legacy Fireworks pair for every user on "GitLab default", so that pair, a request with no model and
+    a `gitlab` request without an identifier all mean "let default_models decide". Other legacy pairs stay explicit.
+    """
+    if payload.model_provider in (None, KindModelProvider.GITLAB):
+        return payload.model_name is None
+
+    return (
+        payload.model_provider == KindModelProvider.FIREWORKS
+        and payload.model_name == KindLiteLlmModel.CODESTRAL_2508
+    )
 
 
 async def _handle_stream(
@@ -744,8 +796,8 @@ async def _execute_code_completion(
     payload: CompletionsRequestWithVersion,
     code_completions: CodeCompletions,
     current_user: StarletteUser,
-    **kwargs: dict,
-) -> any:
+    **kwargs: Any,
+) -> Any:
     output = await code_completions.execute(
         prefix=payload.current_file.content_above_cursor,
         suffix=payload.current_file.content_below_cursor,

@@ -34,13 +34,21 @@ GET_NOTE_QUERY = load_graphql_query(str(TOOLS_QUERIES_DIR / "get_note.graphql"))
 GET_WORK_ITEM_STATUSES_QUERY = load_graphql_query(
     str(TOOLS_QUERIES_DIR / "get_work_item_statuses.graphql")
 )
+GET_GROUP_LABELS_QUERY = load_graphql_query(
+    str(TOOLS_QUERIES_DIR / "get_group_labels.graphql")
+)
+GET_PROJECT_LABELS_QUERY = load_graphql_query(
+    str(TOOLS_QUERIES_DIR / "get_project_labels.graphql")
+)
 
 __all__ = [
     "CREATE_NOTE_MUTATION",
     "CREATE_WORK_ITEM_MUTATION",
+    "GET_GROUP_LABELS_QUERY",
     "GET_GROUP_WORK_ITEM_NOTES_QUERY",
     "GET_GROUP_WORK_ITEM_QUERY",
     "GET_NOTE_QUERY",
+    "GET_PROJECT_LABELS_QUERY",
     "GET_PROJECT_WORK_ITEM_NOTES_QUERY",
     "GET_PROJECT_WORK_ITEM_QUERY",
     "GET_WORK_ITEM_STATUSES_QUERY",

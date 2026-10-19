@@ -6,6 +6,12 @@ set -euo pipefail
 
 # Per-stack GitLab host from caproni.local.yaml; `|| true` keeps the fallback usable if the file is missing.
 host="${CAPRONI_PRIMARY_HOSTNAME:-gitlab.caproni.test}"
+
+# This script runs inside the reloader's mirrord session (LD_PRELOAD layer, same
+# as duo-workflow-service itself), so DNS and outgoing TCP resolve in the
+# ai-gateway pod's network, not the host's. In there the hostname must reach the
+# cluster ingress on its in-cluster port, which is 80 regardless of what host
+# port the k3d loadbalancer is published on. Do not append a host-side port.
 url="http://${host}/oauth/discovery/keys"
 
 for _ in $(seq 1 30); do

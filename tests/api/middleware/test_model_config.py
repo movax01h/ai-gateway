@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -24,10 +26,24 @@ def middleware_test_client_fixture(model_metadata_context):
         await request.body()
         model_metadata = model_metadata_context.get()
         return (
-            model_metadata.model_dump(exclude={"llm_definition", "friendly_name"})
+            model_metadata.model_dump(
+                exclude={
+                    "llm_definition",
+                    "friendly_name",
+                    "iam_role",
+                }
+            )
             if model_metadata
             else None
         )
+
+    @app.post("/iam-role")
+    async def iam_role(request: Request):
+        await request.body()
+        model_metadata = model_metadata_context.get()
+        return {
+            "iam_role": model_metadata.iam_role if model_metadata else None,
+        }
 
     return TestClient(app)
 
@@ -254,3 +270,56 @@ async def test_multiple_model_metadata_fields_in_large_body(middleware_test_clie
 
     # Should use the first model_metadata found
     assert response.json() == model_params_1
+
+
+BEDROCK_ENDPOINT = "https://bedrock-runtime.us-east-1.amazonaws.com/"
+IAM_ROLE_ARN = "arn:aws:iam::123456789012:role/my-role"
+
+
+@pytest.fixture(name="custom_models")
+def custom_models_fixture():
+    with patch("ai_gateway.model_metadata.get_config") as get_config:
+        get_config.return_value.custom_models.enabled = True
+        yield get_config.return_value.custom_models
+
+
+@pytest.mark.asyncio
+async def test_rejects_iam_role_when_custom_models_disabled(
+    middleware_test_client, custom_models
+):
+    custom_models.enabled = False
+
+    response = middleware_test_client.post(
+        "/iam-role",
+        json={
+            "model_metadata": {
+                "name": "gpt",
+                "provider": "bedrock",
+                "endpoint": BEDROCK_ENDPOINT,
+                "identifier": "bedrock/test_model_identifier",
+                "iam_role": IAM_ROLE_ARN,
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "iam_role is only supported when custom models are enabled"
+    }
+
+
+@pytest.mark.asyncio
+async def test_parses_iam_role_into_context_var(middleware_test_client, custom_models):
+    model_params = {
+        "name": "gpt",
+        "provider": "bedrock",
+        "endpoint": BEDROCK_ENDPOINT,
+        "identifier": "bedrock/test_model_identifier",
+        "iam_role": IAM_ROLE_ARN,
+    }
+
+    response = middleware_test_client.post(
+        "/iam-role", json={"model_metadata": model_params}
+    )
+
+    assert response.json() == {"iam_role": IAM_ROLE_ARN}

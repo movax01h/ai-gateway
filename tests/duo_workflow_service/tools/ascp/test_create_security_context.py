@@ -9,6 +9,9 @@ from duo_workflow_service.tools.ascp.create_security_context import (
     CreateAscpSecurityContext,
     CreateAscpSecurityContextInput,
 )
+from duo_workflow_service.tools.ascp.queries import (
+    CREATE_ASCP_SECURITY_CONTEXT_MUTATION,
+)
 
 
 @pytest.fixture(name="gitlab_client_mock")
@@ -35,6 +38,7 @@ def created_security_context_data_fixture_func():
         "authenticationModel": None,
         "authorizationModel": None,
         "dataSensitivity": None,
+        "securityBoundary": [],
         "scan": {"id": "gid://gitlab/Ascp::Scan/1"},
         "securityGuidelines": {
             "nodes": [
@@ -235,6 +239,8 @@ async def test_ascp_create_security_context_default_severity(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_gitlab_version")
+@pytest.mark.parametrize("gl_version", ["19.5.0-pre"])
 async def test_ascp_create_security_context_with_optional_fields(
     gitlab_client_mock,
     metadata,
@@ -245,6 +251,7 @@ async def test_ascp_create_security_context_with_optional_fields(
         "authenticationModel": "true",
         "authorizationModel": "elevated",
         "dataSensitivity": "false",
+        "securityBoundary": ["NETWORK_ACCESS", "USER_INPUT"],
     }
     gitlab_client_mock.graphql = AsyncMock(
         return_value={
@@ -265,17 +272,61 @@ async def test_ascp_create_security_context_with_optional_fields(
         authentication_model="true",
         authorization_model="elevated",
         data_sensitivity="false",
+        security_boundary=["NETWORK_ACCESS", "USER_INPUT"],
     )
 
     response_json = json.loads(response)
     assert response_json["security_context"]["authenticationModel"] == "true"
     assert response_json["security_context"]["authorizationModel"] == "elevated"
     assert response_json["security_context"]["dataSensitivity"] == "false"
+    assert response_json["security_context"]["securityBoundary"] == [
+        "NETWORK_ACCESS",
+        "USER_INPUT",
+    ]
 
     call_args = gitlab_client_mock.graphql.call_args[0]
     assert call_args[1]["input"]["authenticationModel"] == "true"
     assert call_args[1]["input"]["authorizationModel"] == "elevated"
     assert call_args[1]["input"]["dataSensitivity"] == "false"
+    assert call_args[1]["input"]["securityBoundary"] == ["NETWORK_ACCESS", "USER_INPUT"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_gitlab_version")
+@pytest.mark.parametrize("gl_version", ["19.4.0"])
+async def test_ascp_create_security_context_omits_security_boundary_before_19_5(
+    gitlab_client_mock,
+    metadata,
+    created_security_context_data_fixture,
+):
+    gitlab_client_mock.graphql = AsyncMock(
+        return_value={
+            "ascpSecurityContextCreate": {
+                "securityContext": created_security_context_data_fixture,
+                "errors": [],
+            },
+        },
+    )
+
+    tool = CreateAscpSecurityContext(metadata=metadata)
+
+    await tool._arun(
+        project_path="namespace/project",
+        component_id="gid://gitlab/Ascp::Component/1",
+        scan_id="gid://gitlab/Ascp::Scan/1",
+        guidelines=[{"name": "No direct DB access", "operation": "READ"}],
+        security_boundary=["NETWORK_ACCESS"],
+    )
+
+    call_args = gitlab_client_mock.graphql.call_args[0]
+    assert "securityBoundary" not in call_args[1]["input"]
+
+
+def test_ascp_create_security_context_mutation_tags_security_boundary_as_introduced_in_19_5():
+    assert (
+        'securityBoundary @gl_introduced(version: "19.5.0")'
+        in CREATE_ASCP_SECURITY_CONTEXT_MUTATION
+    )
 
 
 @pytest.mark.asyncio
@@ -458,6 +509,8 @@ async def test_ascp_create_security_context_missing_id(
         ("authorization_model", "admin"),
         ("data_sensitivity", "HIGH"),
         ("data_sensitivity", False),
+        ("security_boundary", ["PUBLIC"]),
+        ("security_boundary", "NETWORK_ACCESS"),
     ],
 )
 def test_ascp_create_security_context_rejects_invalid_structured_values(field, value):
@@ -484,6 +537,19 @@ def test_ascp_create_security_context_rejects_invalid_structured_values(field, v
         ("authentication_model", None),
         ("authorization_model", None),
         ("data_sensitivity", None),
+        ("security_boundary", ["NETWORK_ACCESS"]),
+        (
+            "security_boundary",
+            [
+                "NETWORK_ACCESS",
+                "USER_INPUT",
+                "PARTNER_BOUNDARY",
+                "TRUSTED_SERVICE",
+                "INTERNAL_ONLY",
+                "ISOLATED",
+            ],
+        ),
+        ("security_boundary", None),
     ],
 )
 def test_ascp_create_security_context_accepts_valid_structured_values(field, value):

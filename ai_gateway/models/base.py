@@ -1,3 +1,4 @@
+import functools
 import json
 from abc import ABC, abstractmethod
 from enum import StrEnum
@@ -23,6 +24,8 @@ from ai_gateway.structured_logging import can_log_request_data, get_request_logg
 config = Config()
 
 __all__ = [
+    "ANTHROPIC_FACILITATOR_KEY_HEADER",
+    "SERVER_KEYED_PROVIDERS",
     "KindModelProvider",
     "ModelAPICallError",
     "ModelAPIError",
@@ -38,7 +41,9 @@ __all__ = [
 log = structlog.stdlib.get_logger("models")
 request_log = get_request_logger("models")
 
-_TRUSTED_PROVIDERS = frozenset({"fireworks_ai", "mistral"})
+# GitLab-managed providers whose metadata builders take the model identifier from the model
+# definition and get the provider key that the server injects.
+SERVER_KEYED_PROVIDERS = frozenset({"fireworks_ai", "mistral"})
 
 
 def validate_custom_endpoint(
@@ -54,7 +59,7 @@ def validate_custom_endpoint(
     env vars) are accepted. URLs are compared after stripping trailing slashes so that semantically equivalent bases are
     not rejected due to formatting differences.
 
-    A provider in _TRUSTED_PROVIDERS waives the api_key check only, because those models carry a server-injected
+    A provider in SERVER_KEYED_PROVIDERS waives the api_key check only, because those models carry a server-injected
     provider key. api_base is checked against allowed_api_bases for every provider, trusted or not.
     """
     if custom_models_enabled:
@@ -71,7 +76,7 @@ def validate_custom_endpoint(
     if (
         api_key is not None
         and not allowlisted
-        and custom_llm_provider not in _TRUSTED_PROVIDERS
+        and custom_llm_provider not in SERVER_KEYED_PROVIDERS
     ):
         raise ValueError(
             "specifying custom models endpoint is disabled: api_key is not allowed"
@@ -87,8 +92,13 @@ class KindModelProvider(StrEnum):
     AMAZON_Q = "amazon_q"
     GITLAB = "gitlab"
 
+    @property
+    def is_custom_provider(self) -> bool:
+        """Only custom-model (GitLab Duo Self-Hosted) traffic sends "litellm" or "codestral"."""
+        return self in (KindModelProvider.LITELLM, KindModelProvider.MISTRALAI)
+
     @classmethod
-    def from_definition_provider(cls, provider: str) -> "KindModelProvider":
+    def from_definition_provider(cls, provider: Optional[str]) -> "KindModelProvider":
         if provider == "Anthropic":
             return KindModelProvider.ANTHROPIC
         if provider == "Gemini Enterprise Agent Platform":
@@ -193,11 +203,11 @@ class ModelBase(ABC):
             params["custom_llm_provider"] = "custom_openai"
             params["model"] = self.metadata.identifier
 
-        guardrail_params = bedrock_guardrail_params(
-            params.get("custom_llm_provider"), bedrock_guardrail_config
+        params.update(
+            bedrock_guardrail_params(
+                params.get("custom_llm_provider"), bedrock_guardrail_config
+            )
         )
-        if guardrail_params:
-            params["guardrailConfig"] = guardrail_params["guardrailConfig"]
 
         return params
 
@@ -243,6 +253,33 @@ async def log_request(request: httpx.Request):
             request_timeout=_request_timeout_extension(request),
             request_content_json={},
         )
+
+
+ANTHROPIC_FACILITATOR_KEY_HEADER = "anthropic-facilitator-key"
+
+
+@functools.cache
+def _warn_facilitator_key_missing() -> None:
+    # Once per process, so a half-configured deployment is visible without a line per request.
+    log.warning(
+        "ANTHROPIC_FACILITATOR_KEY is not configured; Anthropic API requests "
+        "are sent without the facilitator header"
+    )
+
+
+def anthropic_facilitator_headers() -> dict[str, str]:
+    """Return the facilitator header, or an empty dict when no key is configured.
+
+    Apply this only where the destination is guaranteed to be the Anthropic API. Do not add it to
+    Bedrock, Vertex or custom-endpoint requests, and do not bake it into the shared
+    `init_anthropic_client` singleton, since `with_options()` merges rather than replaces headers.
+    """
+    key = config.anthropic_facilitator_key
+    if not key:
+        _warn_facilitator_key_missing()
+        return {}
+
+    return {ANTHROPIC_FACILITATOR_KEY_HEADER: key.get_secret_value()}
 
 
 def init_anthropic_client() -> AsyncAnthropic:

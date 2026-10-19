@@ -89,13 +89,19 @@ class SubsessionRun(TypedDict):
     Attributes:
         subsession_id: The subsession this call ran, needed to
             report the ID back to the supervisor and to label the UI entry.
-        status: ``ERROR`` if the dispatch itself failed (see ``error``),
-            otherwise ``COMPLETED`` — the subagent's graph ran to its own
-            terminal node. Whether it actually *answered* is
-            ``final_answer``'s business.
+        status: ``COMPLETED`` when the subagent's graph reported reaching its
+            own terminal node (``EndComponent``), otherwise ``ERROR`` — either
+            because the dispatch raised, or because the graph returned without
+            terminating. Whether it actually *answered* is ``final_answer``'s
+            business.
         error: The failure message when ``status`` is ``ERROR``, else ``None``.
         final_answer: The subagent's answer, or ``None`` when it produced none
-            (or the dispatch failed).
+            (or the dispatch raised, which returns no state at all). Kept when
+            ``status`` is ``ERROR`` too: a run that answered and then failed to
+            terminate has one, and the record should say so rather than
+            re-derive it. Only the record keeps it, though:
+            ``DelegationCollectNode`` reports ``error`` for an ``ERROR`` run and
+            never reads the answer.
     """
 
     subsession_id: int

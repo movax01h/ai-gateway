@@ -5,6 +5,7 @@ model:
     temperature: 0.32
     max_tokens: 64
 unit_primitive: complete_code
+tool_output_security: false
 prompt_template:
   system: |
     {% include 'code_suggestions/completions/codestral_system/1.0.0.jinja' %}
@@ -13,8 +14,7 @@ prompt_template:
 params:
   timeout: 60
   stop:
-    - "[INST]"
-    - "[/INST]"
     - "[PREFIX]"
     - "[MIDDLE]"
     - "[SUFFIX]"
+    - "[INST]"

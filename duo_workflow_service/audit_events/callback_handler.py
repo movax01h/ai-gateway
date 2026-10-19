@@ -16,6 +16,7 @@ from duo_workflow_service.audit_events.event_types import (
     ToolInvokedEvent,
     ToolResponseReceivedEvent,
 )
+from lib.context import get_approval_policy_ref, get_approval_source
 
 logger = structlog.stdlib.get_logger("audit_callback_handler")
 
@@ -128,11 +129,16 @@ class AuditEventCallbackHandler(AsyncCallbackHandler):  # pylint: disable=too-ma
     ) -> None:
         tool_name = serialized.get("name", "unknown")
         self._tool_names[str(run_id)] = tool_name
+        tool_call_id = kwargs.get("tool_call_id")
+        approval_source = get_approval_source(tool_call_id)
+        policy_ref = get_approval_policy_ref(tool_call_id)
         self._collector.capture(
             ToolInvokedEvent(
                 workflow_id=self._workflow_id,
                 tool_name=tool_name,
                 tool_args=kwargs.get("inputs"),
+                approval_source=approval_source,
+                policy_ref=policy_ref,
             )
         )
 

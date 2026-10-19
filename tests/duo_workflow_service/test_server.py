@@ -5,7 +5,7 @@ import os
 import signal
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterable, List, Optional, cast
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import grpc
 import litellm
@@ -26,11 +26,16 @@ from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from grpc_health.v1 import health, health_pb2
 from jose import jwt
+from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+from litellm.exceptions import (
+    ContextWindowExceededError as LiteLLMContextWindowExceededError,
+)
 from packaging.version import Version
 from pydantic import BaseModel, model_validator
 from pydantic import ValidationError as PydanticValidationError
+from structlog.testing import capture_logs
 
 from ai_gateway.config import (
     Config,
@@ -39,17 +44,24 @@ from ai_gateway.config import (
     ConfigTLS,
 )
 from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.model_metadata import ModelMetadata, ModelMetadataByTag
+from ai_gateway.model_selection import RestrictedModelAccessError
+from ai_gateway.model_selection.models import BaseModelParams, ModelClassProvider
+from ai_gateway.prompts import BasePromptRegistry, Prompt
+from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import (
+    MissingAdditionalContextError,
     NotifiableAgentException,
 )
+from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.errors.typing import (
+    CheckpointSaveError,
     EnvelopeVersionMismatchException,
     InvalidRequestException,
     InvalidWorkflowIdException,
@@ -60,44 +72,65 @@ from duo_workflow_service.executor.outbox import (
     OutgoingMessageTooLargeError,
 )
 from duo_workflow_service.flow_request import InlineFlowRequest, RegistryFlowRequest
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.metadata_context_interceptor import (
     MetadataContextInterceptor,
 )
+from duo_workflow_service.interceptors.model_metadata_interceptor import (
+    ModelMetadataInterceptor,
+)
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.server import (
     CONTAINER_APPLICATION_PACKAGES,
+    DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S,
+    DEFAULT_SHUTDOWN_KILL_DEADLINE_S,
+    WORKFLOW_TASK_NAME_PREFIX,
     DuoWorkflowService,
     _extract_error_message,
+    _flow_config_digest,
+    _restricted_access_flow,
     clean_start_request,
+    drain_workflow_tasks,
     next_client_event,
     run,
     serve,
+    setup_container,
     setup_signal_handlers,
     validate_llm_access,
 )
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     BadStatusEvent,
+    CreatedWorkflowHasCheckpoints,
     ForbiddenStatusEvent,
     UnsupportedStatusEvent,
 )
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.session_context import GetSessionContext
-from duo_workflow_service.tracking import MonitoringContext
+from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.workflows.registry import ResolvedFlow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    DWS_SERVER_SHUTDOWN_STOP_REASON,
     OUTGOING_MESSAGE_TOO_LARGE,
     AdditionalContext,
 )
 from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.context import client_capabilities
+from lib.context.model import (
+    current_model_metadata_context,
+    current_model_metadata_with_size_context,
+    get_model_metadata,
+    restricted_access_ctx,
+)
 from lib.events import GLReportingEventContext
 from lib.events.contextvar import X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED
-from lib.internal_events.context import InternalEventAdditionalProperties
+from lib.internal_events.context import (
+    InternalEventAdditionalProperties,
+    current_event_context,
+)
 from lib.internal_events.event_enum import (
-    CategoryEnum,
     EventEnum,
     EventLabelEnum,
     EventPropertyEnum,
@@ -155,6 +188,13 @@ YQIDAQAB
 def setup_event_loop():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+
+@pytest.fixture(name="mock_litellm_module_level_aclient")
+def mock_litellm_module_level_aclient_fixture():
+    """Serve() closes this shared client on shutdown; keep the real one open for later tests."""
+    with patch.object(litellm, "module_level_aclient", AsyncMock()) as mock_aclient:
+        yield mock_aclient
 
 
 @pytest.fixture(name="mock_duo_workflow_service_container", scope="module")
@@ -304,6 +344,18 @@ def use_real_model_path_fixture(mock_duo_workflow_service_container):
     mock_duo_workflow_service_container.pkg_models_v2.container._mock_selector.reset_override()
 
 
+def test_setup_container_wires_and_validates():
+    with (
+        patch("duo_workflow_service.server.ContainerApplication") as mock_container,
+        patch("duo_workflow_service.server.wire_and_validate") as mock_wire,
+    ):
+        setup_container(MagicMock())
+
+    mock_wire.assert_called_once_with(
+        mock_container.return_value, packages=CONTAINER_APPLICATION_PACKAGES
+    )
+
+
 @pytest.mark.parametrize(
     "custom_models_enabled,should_validate_llm",
     [
@@ -314,6 +366,8 @@ def use_real_model_path_fixture(mock_duo_workflow_service_container):
 def test_run(custom_models_enabled, vertex_project, should_validate_llm):
     with (
         patch("duo_workflow_service.server.setup_container"),
+        # Keep the module-global flow-config root registry out of run() tests.
+        patch("duo_workflow_service.server.discover_feature_flow_configs"),
         patch("duo_workflow_service.server.setup_profiling") as mock_setup_profiling,
         patch(
             "duo_workflow_service.server.setup_error_tracking"
@@ -361,6 +415,8 @@ class TestRunMockUsageQuotaServer:
     def mock_run_dependencies_fixture(self):
         with (
             patch("duo_workflow_service.server.setup_container"),
+            # Keep the module-global flow-config root registry out of run() tests.
+            patch("duo_workflow_service.server.discover_feature_flow_configs"),
             patch("duo_workflow_service.server.setup_profiling"),
             patch("duo_workflow_service.server.setup_error_tracking"),
             patch("duo_workflow_service.server.setup_monitoring"),
@@ -773,6 +829,7 @@ async def test_list_capabilities(mock_context, servicer):
         {"name": "tool_call_approval", "metadata": ""},
         {"name": "tool_call_pattern_approval", "metadata": ""},
         {"name": "flow_semantic_versioning", "metadata": ""},
+        {"name": "inline_flow_config_binding", "metadata": ""},
     ]
 
 
@@ -874,9 +931,10 @@ async def test_execute_workflow_emits_billing_event(
             "llm_operations": [
                 {
                     "token_count": 15,
-                    "model_id": "claude-sonnet-4-6",
+                    "model_id": "claude-sonnet-5-5",
                     "model_engine": "litellm",
                     "model_provider": "litellm",
+                    "model_vendor": "vertex_ai",
                     "prompt_tokens": 10,
                     "completion_tokens": 5,
                     "agent_name": "test_agent",
@@ -901,7 +959,12 @@ async def test_execute_workflow_when_no_events_ends(
     mock_context,
     servicer,
 ):
-    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_resolve_flow.return_value = ResolvedFlow(
+        factory=mock_abstract_workflow_class,
+        flow_id="developer",
+        schema_version="v1",
+        flow_version="2.0.0-interactive",
+    )
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
     mock_workflow.run = AsyncMock()
@@ -918,6 +981,14 @@ async def test_execute_workflow_when_no_events_ends(
     assert isinstance(result, AsyncIterable)
     with pytest.raises(StopAsyncIteration):
         await anext(result)
+
+    # The resolved flow identity must be mirrored onto the event context so
+    # every internal event tracked for this session (after the resolve
+    # point) carries it, under the ai_context 1-0-2 field names.
+    extra = current_event_context.get().extra
+    assert extra["flow_name"] == "developer"
+    assert extra["item_version"] == "2.0.0-interactive"
+    assert extra["item_schema_version"] == "v1"
 
 
 @pytest.mark.asyncio
@@ -1129,6 +1200,22 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
     return exc
 
 
+def _chained(error: BaseException, cause: BaseException) -> BaseException:
+    error.__cause__ = cause
+    return error
+
+
+def _with_context(error: BaseException, context: BaseException) -> BaseException:
+    error.__context__ = context
+    return error
+
+
+def _cyclic_error() -> BaseException:
+    first, second = RuntimeError("first"), RuntimeError("second")
+    first.__cause__, second.__cause__ = second, first
+    return first
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "workflow_error,successful_execution,stop_reason,expected_status,expected_detail_prefix",
@@ -1151,7 +1238,21 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
         (
             AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
             False,
+            DWS_SERVER_SHUTDOWN_STOP_REASON,
+            grpc.StatusCode.UNAVAILABLE,
+            "workflow execution interrupted:",
+        ),
+        (
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+            False,
             "WORKHORSE_WEBSOCKET_PING_FAILED",
+            grpc.StatusCode.OK,
+            "workflow execution stopped",
+        ),
+        (
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+            False,
+            "WORKHORSE_WEBSOCKET_PONG_TIMEOUT",
             grpc.StatusCode.OK,
             "workflow execution stopped",
         ),
@@ -1199,6 +1300,22 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             "Invalid workflow ID:",
         ),
         (
+            CreatedWorkflowHasCheckpoints(
+                {"threadTs": "some-ts", "compressedCheckpoint": "eJyVVFFv"}
+            ),
+            False,
+            None,
+            grpc.StatusCode.FAILED_PRECONDITION,
+            "Workflow with status 'created' should not have existing checkpoints",
+        ),
+        (
+            UnsupportedStatusEvent("some other unsupported status event"),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: UnsupportedStatusEvent:",
+        ),
+        (
             _make_notifiable_with_envelope_cause(
                 "Envelope 'agent_platform_standard_context' version '2.0.0' "
                 "does not satisfy the required constraint '^1.0.0'."
@@ -1219,6 +1336,28 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             "RESPONSE event must include a non-empty message.",
         ),
         (
+            MissingAdditionalContextError(
+                "Missing required input 'context:inputs.issue_context.iid': "
+                "'issue_context' not found in state.",
+                category="issue_context",
+            ),
+            False,
+            None,
+            grpc.StatusCode.INVALID_ARGUMENT,
+            "Missing required input 'context:inputs.issue_context.iid': "
+            "'issue_context' not found in state.",
+        ),
+        (
+            KeyError(
+                "Missing required input 'context:issue_iid': "
+                "'issue_iid' not found in state."
+            ),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: KeyError:",
+        ),
+        (
             WorkflowAlreadyFinishedException(
                 "Session has already finished and cannot be resumed."
             ),
@@ -1226,6 +1365,46 @@ def _make_notifiable_with_envelope_cause(detail: str) -> NotifiableAgentExceptio
             None,
             grpc.StatusCode.OK,
             "workflow already finished",
+        ),
+        (
+            RestrictedModelAccessError(),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            "Model not available for this flow",
+        ),
+        (
+            _chained(RuntimeError("prompt build failed"), RestrictedModelAccessError()),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            "Model not available for this flow",
+        ),
+        (
+            _chained(
+                RuntimeError("outer"),
+                _chained(ValueError("inner"), RestrictedModelAccessError()),
+            ),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            "Model not available for this flow",
+        ),
+        (
+            _with_context(
+                RuntimeError("unrelated error in except"), RestrictedModelAccessError()
+            ),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: RuntimeError",
+        ),
+        (
+            _cyclic_error(),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: RuntimeError",
         ),
     ],
 )
@@ -1274,36 +1453,34 @@ async def test_execute_workflow_status_codes(
     mock_context.set_code.assert_called_once_with(expected_status)
     actual_detail = mock_context.set_details.call_args[0][0]
     assert actual_detail.startswith(expected_detail_prefix)
+    # Checkpoint content can carry conversation content and must never reach the details.
+    assert "compressedCheckpoint" not in actual_detail
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "cancel_error_message,expected_status,expected_detail_prefix,expected_log_count",
+    "cancel_error_message,expected_status,expected_detail_prefix",
     [
         (
             AIO_CANCEL_STOP_WORKFLOW_REQUEST,
             grpc.StatusCode.OK,
             "workflow execution stopped",
-            1,  # Only called from abort_workflow
         ),
         (
             AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
             grpc.StatusCode.OK,
             "workflow execution stopped",
-            1,  # Only called from abort_workflow
         ),
         (
             # Tuple-style error from LangGraph cleanup
             (AIO_CANCEL_STOP_WORKFLOW_REQUEST, "<Task cancelled>"),
             grpc.StatusCode.OK,
             "workflow execution stopped",
-            1,  # Only called from abort_workflow
         ),
         (
             "Some other cancellation",
             grpc.StatusCode.CANCELLED,
             "RPC cancelled by client",
-            2,  # Called from main handler AND abort_workflow
         ),
     ],
 )
@@ -1317,7 +1494,6 @@ async def test_execute_workflow_cancellation_handling(
     cancel_error_message,
     expected_status,
     expected_detail_prefix,
-    expected_log_count,
     start_request_iterator,
     mock_context,
     servicer,
@@ -1327,7 +1503,7 @@ async def test_execute_workflow_cancellation_handling(
     This test verifies that:
     1. Simple string error messages are handled correctly
     2. Tuple-style error messages (from LangGraph cleanup) are handled correctly
-    3. Unexpected cancellations are logged appropriately
+    3. Cancellations are expected and are not reported as errors
     """
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = False
@@ -1353,15 +1529,59 @@ async def test_execute_workflow_cancellation_handling(
     actual_detail = mock_context.set_details.call_args[0][0]
     assert actual_detail.startswith(expected_detail_prefix)
 
-    # Verify logging behavior
-    assert mock_log_exception.call_count == expected_log_count
+    # Neither the RPC cancellation nor the workflow task honouring it is an error
+    mock_log_exception.assert_not_called()
 
-    # For the main handler call (when expected_log_count == 2), verify the first call
-    if expected_log_count == 2:
-        # First call should be from the main exception handler
-        first_call_exception = mock_log_exception.call_args_list[0][0][0]
-        assert isinstance(first_call_exception, asyncio.CancelledError)
-        assert str(first_call_exception) == cancel_error_message
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch("duo_workflow_service.server.log_exception")
+async def test_execute_workflow_reports_task_ignoring_cancellation(
+    mock_log_exception,
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """A workflow task that outlives TASK_CANCELLATION_TIMEOUT is still reported as an error."""
+    cancellation_timeout = 0.01
+
+    async def run_ignoring_cancellation(_goal):
+        # Keep running for well past the timeout (e.g. stuck cleanup), then honour the cancellation.
+        deadline = asyncio.get_running_loop().time() + cancellation_timeout * 20
+        while asyncio.get_running_loop().time() < deadline:
+            try:
+                await asyncio.sleep(cancellation_timeout)
+            except asyncio.CancelledError:
+                pass
+        raise asyncio.CancelledError()
+
+    async def fail_after_workflow_starts():
+        await asyncio.sleep(0)
+        raise RuntimeError("send failed")
+
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = False
+    mock_workflow.run = run_ignoring_cancellation
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_gitlab_status = "running"
+    mock_workflow.get_from_outbox = fail_after_workflow_starts
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    with patch.object(servicer, "TASK_CANCELLATION_TIMEOUT", cancellation_timeout):
+        result = servicer.ExecuteWorkflow(
+            start_request_iterator,
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
+
+        with pytest.raises(StopAsyncIteration):
+            await anext(result)
+
+    logged = [c.args[0] for c in mock_log_exception.call_args_list]
+    assert [type(e) for e in logged] == [RuntimeError, TimeoutError]
 
 
 @pytest.mark.asyncio
@@ -1487,8 +1707,362 @@ async def test_generate_token(
             "tool_call_approval",
             "tool_call_pattern_approval",
             "flow_semantic_versioning",
+            "inline_flow_config_binding",
         ],
     )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_carries_instance_uuid_from_subject(
+    mock_token_authority,
+    mock_context,
+):
+    # Self-hosted instances sign their own tokens: the UUID is in ``sub`` and there is no
+    # ``gitlab_instance_uid``.
+    claims = UserClaims(
+        scopes=["duo_agent_platform"],
+        issuer="https://gitlab.example.com",
+        subject="instance-uuid",
+        gitlab_realm="self-managed",
+    )
+    current_user.set(CloudConnectorUser(authenticated=True, claims=claims))
+    servicer = DuoWorkflowService()
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["gitlab_instance_uid"] == "instance-uuid"
+
+
+def test_flow_config_digest_is_independent_of_map_insertion_order():
+    first = struct_pb2.Struct()
+    first.update({"name": "catalog-flow", "config": {"enabled": True, "count": 2}})
+    second = struct_pb2.Struct()
+    second.update({"config": {"count": 2, "enabled": True}, "name": "catalog-flow"})
+
+    assert _flow_config_digest(first) == _flow_config_digest(second)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra", [{"flow_config_digest": "untrusted-incoming-digest"}]
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_binds_authoritative_inline_flow_config(
+    mock_token_authority,
+    mock_context,
+    servicer,
+    simple_flow_config,
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    flow_config = struct_pb2.Struct()
+    flow_config.update(simple_flow_config)
+
+    await servicer.GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config=flow_config), mock_context
+    )
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["flow_config_digest"] == _flow_config_digest(flow_config)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra", [None, {"flow_config_digest": "untrusted-incoming-digest"}]
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_without_inline_flow_config_has_no_digest_binding(
+    mock_token_authority,
+    mock_context,
+    servicer,
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert "flow_config_digest" not in extra_claims
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,claim,value",
+    [
+        ("flow_config_id", "flow_config_id", "developer"),
+        ("flow_version", "flow_version", "^3.0.0"),
+        ("flow_config_schema_version", "flow_config_schema_version", "experimental"),
+        ("workflowID", "workflow_id", "42"),
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_binds_request_claim(
+    mock_token_authority,
+    mock_context,
+    servicer,
+    field,
+    claim,
+    value,
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+
+    await servicer.GenerateToken(
+        contract_pb2.GenerateTokenRequest(**{field: value}), mock_context
+    )
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims[claim] == value
+
+
+WORKFLOW_BINDING_ABORT = (
+    grpc.StatusCode.PERMISSION_DENIED,
+    "Workflow token is not authorized for the requested workflow",
+)
+
+
+async def _execute_workflow_with_id(servicer, mock_context, workflow_id):
+    """Drive ExecuteWorkflow far enough to pass (or trip) the binding guard.
+
+    Downstream failures are irrelevant here; the assertions below look only at
+    whether the guard aborted. `abort` is replaced with an AsyncMock because the
+    handler awaits it and the shared fixture supplies a plain MagicMock.
+    """
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    start_request = contract_pb2.StartWorkflowRequest(
+        workflowDefinition="software_development"
+    )
+    start_request.workflowID = workflow_id
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    try:
+        await anext(result)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
+def _binding_guard_aborted(mock_context) -> bool:
+    return any(
+        c.args == WORKFLOW_BINDING_ABORT for c in mock_context.abort.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,workflow_id",
+    [
+        ({"workflow_id": "42"}, "99"),
+        ({"workflow_id": "not-a-number"}, "42"),
+        ({"workflow_id": ""}, "42"),
+        ({"workflow_id": ""}, "0"),
+        ({"workflow_id": "0"}, "#0"),
+        ({"workflow_id": "42"}, "99?gid://gitlab/Ai::DuoWorkflows::Workflow/42"),
+        ({"workflow_id": "42"}, "99#gid://x/42"),
+        ({"workflow_id": "42"}, "gid://gitlab/Project/42"),
+        ({"workflow_id": "42"}, " 42 "),
+        ({"workflow_id": "42"}, "\u0664\u0662"),
+        ({"workflow_id": "42"}, "042"),
+        ({"workflow_id": "42"}, "4" * 5000),
+        ({"workflow_id": True}, "1"),
+        ({"workflow_id": 0}, "0"),
+        ({"workflow_id": -5}, "5"),
+        ({"workflow_id": None}, "42"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_mismatched_workflow_binding(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    workflow_id,
+):
+    await _execute_workflow_with_id(servicer, mock_context, workflow_id)
+
+    assert _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@patch("duo_workflow_service.server.log")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_logs_mismatched_workflow_binding(
+    _mock_resolve_flow,
+    mock_log,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "9" * 100)
+
+    assert _binding_guard_aborted(mock_context)
+    mock_log.warning.assert_any_call(
+        "Workflow token bound to a different workflow",
+        bound_workflow_id="42",
+        requested_workflow_id="9" * 64,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,workflow_id",
+    [
+        ({"workflow_id": "42"}, "42"),
+        ({"workflow_id": "42"}, "gid://gitlab/Ai::DuoWorkflows::Workflow/42"),
+        ({"workflow_id": "42"}, "#42"),
+        ({"workflow_id": 42}, "42"),
+        ({}, "42"),
+        (None, "42"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_allows_matching_workflow_token(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    workflow_id,
+):
+    await _execute_workflow_with_id(servicer, mock_context, workflow_id)
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [{"binds_workflow": True}])
+@patch("duo_workflow_service.server.log")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_logs_unbound_token_from_a_binding_instance(
+    mock_resolve_flow,
+    mock_log,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "9" * 100)
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+    mock_log.info.assert_any_call(
+        "Workflow token without a workflow binding",
+        token_issuer=ANY,
+        requested_workflow_id="9" * 64,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {},
+        {"binds_workflow": "true"},
+        {"binds_workflow": False},
+        {"binds_workflow": True, "workflow_id": "42"},
+    ],
+)
+@patch("duo_workflow_service.server.log")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_does_not_log_unbound_token_otherwise(
+    mock_resolve_flow,
+    mock_log,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "42")
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+    logged = [call.args[0] for call in mock_log.info.call_args_list if call.args]
+    assert "Workflow token without a workflow binding" not in logged
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_with_empty_id_never_reaches_the_binding_guard(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    """An empty workflowID is short-circuited by the usage-quota decorator.
+
+    It returns before ExecuteWorkflow's body runs, so no claim guard sees it and nothing is aborted. Asserted here so
+    the binding guard is not later widened to duplicate a check that already stops the request upstream.
+    """
+    await _execute_workflow_with_id(servicer, mock_context, "")
+
+    assert not _binding_guard_aborted(mock_context)
+    assert mock_context.abort.await_args_list == []
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_is_debug", [True])
+@pytest.mark.parametrize("claims_extra", [{"workflow_id": "42"}])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_exempts_debug_user_from_workflow_binding(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    await _execute_workflow_with_id(servicer, mock_context, "99")
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claim,claims_extra",
+    [
+        ("flow_config_id", None),
+        ("flow_config_id", {"flow_config_id": "developer"}),
+        ("flow_version", None),
+        ("flow_version", {"flow_version": "^3.0.0"}),
+        ("flow_config_schema_version", None),
+        ("flow_config_schema_version", {"flow_config_schema_version": "v1"}),
+        ("workflow_id", None),
+        ("workflow_id", {"workflow_id": "42"}),
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_without_field_has_no_binding(
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claim,
+    claims_extra,
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert claim not in extra_claims
 
 
 @pytest.mark.asyncio
@@ -1596,6 +2170,34 @@ async def test_generate_token_propagates_gitlab_root_namespace_id(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [{"binds_workflow": True}, {}],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_propagates_binds_workflow(
+    _mock_generate_token_response,
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claims_extra,
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims.get("binds_workflow") == claims_extra.get("binds_workflow")
+
+
+@pytest.mark.asyncio
 @patch.dict(
     os.environ,
     {
@@ -1655,6 +2257,57 @@ async def test_generate_token_propagates_gitlab_root_namespace_id_end_to_end(
         algorithms=CompositeProvider.SUPPORTED_ALGORITHMS,
     )
     assert outgoing_claims["gitlab_root_namespace_id"] == "123"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,claim,value",
+    [
+        ("flow_config_id", "flow_config_id", "developer"),
+        ("flow_version", "flow_version", "^3.0.0"),
+        ("flow_config_schema_version", "flow_config_schema_version", "experimental"),
+        ("workflowID", "workflow_id", "42"),
+    ],
+)
+@patch.dict(
+    os.environ,
+    {
+        "CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service",
+        "DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY": TEST_PRIVATE_KEY,
+    },
+)
+async def test_generate_token_binds_request_claim_end_to_end(
+    mock_context, field, claim, value
+):
+    incoming_user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(scopes=["duo_agent_platform"], gitlab_instance_uid="uid-1"),
+    )
+    incoming_token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
+        "user-1",
+        "saas",
+        incoming_user,
+        "1234",
+        ["duo_agent_platform"],
+        extra_claims={"iss": "gitlab-rails"},
+    )
+    provider = CompositeProvider(
+        [LocalAuthProvider(structlog, TEST_PRIVATE_KEY, TEST_PUBLIC_KEY)], structlog
+    )
+    current_user.set(provider.authenticate(incoming_token))
+    mock_context.invocation_metadata.return_value = [
+        ("x-gitlab-global-user-id", "user-1"),
+        ("x-gitlab-realm", "saas"),
+        ("x-gitlab-instance-id", "1234"),
+    ]
+
+    response = await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(**{field: value}), mock_context
+    )
+    decoded_user = provider.authenticate(response.token)
+
+    assert decoded_user.authenticated
+    assert decoded_user.claims.extra[claim] == value
 
 
 @pytest.mark.asyncio
@@ -1720,6 +2373,7 @@ async def test_generate_token_with_legacy_duo_workflow_execute_workflow_up(
             "tool_call_approval",
             "tool_call_pattern_approval",
             "flow_semantic_versioning",
+            "inline_flow_config_binding",
         ],
     )
 
@@ -1748,6 +2402,7 @@ async def test_generate_token_returns_server_capabilities(
         "tool_call_approval",
         "tool_call_pattern_approval",
         "flow_semantic_versioning",
+        "inline_flow_config_binding",
     ]
 
 
@@ -1831,7 +2486,10 @@ async def test_generate_token_unauthorized_for_any_flow(
     return_value=True,
 )
 async def test_grpc_server(
-    mock_cloud_connector_ready, mock_setup_signal_handlers, reflection_enabled
+    mock_cloud_connector_ready,
+    mock_setup_signal_handlers,
+    reflection_enabled,
+    mock_litellm_module_level_aclient,
 ):
     """Test that the gRPC server starts correctly and sets up signal handlers."""
     mock_server = AsyncMock()
@@ -1877,6 +2535,43 @@ async def test_grpc_server(
         mock_enable_reflection.assert_not_called()
     mock_setup_signal_handlers.assert_called_once()
     mock_cloud_connector_ready.assert_called_once()
+    mock_litellm_module_level_aclient.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.setup_signal_handlers")
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+async def test_grpc_server_litellm_client_close_failure_does_not_propagate(
+    mock_cloud_connector_ready,
+    mock_setup_signal_handlers,
+    mock_litellm_module_level_aclient,
+):
+    """Test that a failure closing the litellm client is swallowed during shutdown."""
+    mock_litellm_module_level_aclient.close.side_effect = RuntimeError("boom")
+
+    mock_server = AsyncMock()
+    mock_server.add_insecure_port.return_value = None
+    mock_server.start.return_value = None
+    mock_server.wait_for_termination.return_value = None
+
+    with (
+        patch(
+            "duo_workflow_service.server.grpc.aio.server",
+            return_value=mock_server,
+        ),
+        patch("duo_workflow_service.server.MonitoringInterceptor"),
+        patch("duo_workflow_service.server.connection_pool") as mock_connection_pool,
+    ):
+        mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
+        mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
+
+        mock_config = create_mock_default_config()
+        await serve(mock_config, 50052)
+
+    mock_litellm_module_level_aclient.close.assert_awaited_once()
 
 
 @patch(
@@ -1884,6 +2579,7 @@ async def test_grpc_server(
     return_value=True,
 )
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_litellm_module_level_aclient")
 async def test_grpc_server_sets_health_status_serving(mock_cloud_connector_ready):
     """Test that serve() sets both health statuses to SERVING on startup."""
     mock_server = AsyncMock()
@@ -1995,6 +2691,226 @@ async def test_signal_handler_sets_not_serving_on_shutdown(signal_type):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "grace_period_env,drain_timeout_env,kill_deadline_env,expect_warning",
+    [
+        ("5", "3", None, False),
+        ("5", "5", None, True),
+        (None, "12", None, True),
+        ("5", "5", "30", False),
+    ],
+)
+async def test_signal_handler_warns_when_shutdown_budget_reaches_kill_deadline(
+    grace_period_env, drain_timeout_env, kill_deadline_env, expect_warning
+):
+    env = {"DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S": drain_timeout_env}
+    if grace_period_env is not None:
+        env["DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S"] = grace_period_env
+    if kill_deadline_env is not None:
+        env["DUO_WORKFLOW_SHUTDOWN_KILL_DEADLINE_S"] = kill_deadline_env
+
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch("duo_workflow_service.server.log") as mock_log,
+    ):
+        setup_signal_handlers(AsyncMock(), asyncio.get_running_loop(), AsyncMock())
+
+    budget_warnings = [
+        call
+        for call in mock_log.warning.call_args_list
+        if "SIGKILL deadline" in call.args[0]
+    ]
+    assert len(budget_warnings) == (1 if expect_warning else 0)
+    if expect_warning:
+        assert budget_warnings[0].kwargs["drain_timeout_s"] == float(drain_timeout_env)
+
+
+@pytest.mark.asyncio
+async def test_signal_handler_falls_back_to_default_drain_timeout_when_env_is_invalid():
+    drain_calls = []
+
+    async def fake_drain(timeout):
+        drain_calls.append(timeout)
+
+    with (
+        patch.dict(
+            os.environ, {"DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S": "soon"}, clear=True
+        ),
+        patch("duo_workflow_service.server.log") as mock_log,
+        patch(
+            "duo_workflow_service.server.drain_workflow_tasks", side_effect=fake_drain
+        ),
+    ):
+        setup_signal_handlers(AsyncMock(), asyncio.get_running_loop(), AsyncMock())
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(0.1)
+
+    assert drain_calls == [DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S]
+    invalid_warnings = [
+        call
+        for call in mock_log.warning.call_args_list
+        if "Invalid DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S" in call.args[0]
+    ]
+    assert len(invalid_warnings) == 1
+    assert invalid_warnings[0].kwargs["value"] == "soon"
+
+
+@pytest.mark.asyncio
+async def test_signal_handler_falls_back_to_default_kill_deadline_when_env_is_invalid():
+    env = {
+        "DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S": "5",
+        "DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S": "5",
+        "DUO_WORKFLOW_SHUTDOWN_KILL_DEADLINE_S": "later",
+    }
+
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch("duo_workflow_service.server.log") as mock_log,
+    ):
+        setup_signal_handlers(AsyncMock(), asyncio.get_running_loop(), AsyncMock())
+
+    warnings = [call.args[0] for call in mock_log.warning.call_args_list]
+    assert "Invalid DUO_WORKFLOW_SHUTDOWN_KILL_DEADLINE_S, using default" in warnings
+    budget_warning = next(
+        call
+        for call in mock_log.warning.call_args_list
+        if "SIGKILL deadline" in call.args[0]
+    )
+    assert budget_warning.kwargs["kill_deadline_s"] == DEFAULT_SHUTDOWN_KILL_DEADLINE_S
+
+
+@pytest.mark.asyncio
+async def test_signal_handler_drains_workflows_before_server_stop():
+    calls = []
+    mock_server = AsyncMock()
+    mock_server.stop = AsyncMock(side_effect=lambda **_: calls.append("stop"))
+
+    async def fake_drain(timeout):
+        calls.append(("drain", timeout))
+
+    loop = asyncio.get_running_loop()
+
+    with (
+        patch.dict(
+            os.environ, {"DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S": "2.5"}, clear=True
+        ),
+        patch(
+            "duo_workflow_service.server.drain_workflow_tasks", side_effect=fake_drain
+        ),
+    ):
+        setup_signal_handlers(mock_server, loop, AsyncMock())
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(0.1)
+
+    assert calls == [("drain", 2.5), "stop"]
+
+
+@pytest.mark.asyncio
+async def test_drain_workflow_tasks_cancels_workflow_tasks_with_infra_stop():
+    cancel_messages = []
+
+    async def workflow_run():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as e:
+            cancel_messages.append(str(e))
+
+    monitoring_context = MonitoringContext(workflow_id="wf-1")
+    token = current_monitoring_context.set(monitoring_context)
+    try:
+        workflow_task = asyncio.create_task(
+            workflow_run(), name=f"{WORKFLOW_TASK_NAME_PREFIX}wf-1"
+        )
+    finally:
+        current_monitoring_context.reset(token)
+    unrelated_task = asyncio.create_task(asyncio.Event().wait(), name="unrelated")
+    await asyncio.sleep(0)
+
+    with patch("duo_workflow_service.server.log") as mock_log:
+        await drain_workflow_tasks(timeout=1.0)
+
+    assert workflow_task.done()
+    assert cancel_messages == [AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST]
+    assert monitoring_context.workflow_stop_reason == DWS_SERVER_SHUTDOWN_STOP_REASON
+    assert not unrelated_task.done()
+    mock_log.warning.assert_not_called()
+
+    unrelated_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_drain_workflow_tasks_logs_tasks_still_running_after_timeout():
+    release = asyncio.Event()
+
+    async def stubborn_run():
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                pass
+
+    task = asyncio.create_task(
+        stubborn_run(), name=f"{WORKFLOW_TASK_NAME_PREFIX}wf-stuck"
+    )
+    await asyncio.sleep(0)
+
+    with patch("duo_workflow_service.server.log") as mock_log:
+        await drain_workflow_tasks(timeout=0.05)
+
+    mock_log.warning.assert_called_once()
+    assert mock_log.warning.call_args.kwargs["workflow_tasks"] == [
+        f"{WORKFLOW_TASK_NAME_PREFIX}wf-stuck"
+    ]
+
+    release.set()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_drain_workflow_tasks_without_workflows_is_noop():
+    with patch("duo_workflow_service.server.log") as mock_log:
+        await drain_workflow_tasks(timeout=1.0)
+
+    mock_log.info.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_names_task_after_workflow_id(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.successful_execution = MagicMock(return_value=True)
+    mock_workflow.last_error = None
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    with patch(
+        "duo_workflow_service.server.asyncio.create_task", wraps=asyncio.create_task
+    ) as mock_create_task:
+        result = servicer.ExecuteWorkflow(
+            start_request_iterator,
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
+        with pytest.raises(StopAsyncIteration):
+            await anext(result)
+
+    task_names = [call.kwargs.get("name") for call in mock_create_task.call_args_list]
+    assert f"{WORKFLOW_TASK_NAME_PREFIX}123" in task_names
+
+
 class TestServeTLS:
     """Tests for TLS/gRPCS support in duo_workflow_service.server.serve()."""
 
@@ -2016,6 +2932,7 @@ class TestServeTLS:
         "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
         return_value=True,
     )
+    @pytest.mark.usefixtures("mock_litellm_module_level_aclient")
     async def test_serve_insecure_when_tls_disabled(
         self, mock_cloud_connector_ready, _
     ):
@@ -2057,6 +2974,7 @@ class TestServeTLS:
         "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
         return_value=True,
     )
+    @pytest.mark.usefixtures("mock_litellm_module_level_aclient")
     async def test_serve_secure_when_tls_enabled(
         self, mock_cloud_connector_ready, mock_setup_signal_handlers, tmp_path
     ):
@@ -2116,6 +3034,7 @@ class TestServeTLS:
         "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
         return_value=True,
     )
+    @pytest.mark.usefixtures("mock_litellm_module_level_aclient")
     async def test_serve_tls_enabled_reads_cert_and_key_files(
         self, mock_cloud_connector_ready, mock_setup_signal_handlers, tmp_path
     ):
@@ -2221,6 +3140,92 @@ async def test_execute_workflow_missing_workflow_metadata(
     mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
     mock_context.set_details.assert_called_once_with(
         "workflow execution failure: ValueError: validation error"
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_context_window_exceeded_error_is_collapsed(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    # The extracted message is collapsed to a stable "Context window exceeded"
+    # detail instead of the provider-specific payload.
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_error = LiteLLMContextWindowExceededError(
+        message=(
+            "litellm.ContextWindowExceededError: litellm.BadRequestError: "
+            'BedrockException: Context Window Error - {"message":"The model '
+            'returned the following errors: Input is too long for requested model."}'
+        ),
+        model="claude-sonnet-4-6",
+        llm_provider="bedrock",
+    )
+    mock_workflow.successful_execution = MagicMock(return_value=False)
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
+    mock_context.set_details.assert_called_once_with(
+        "workflow execution failure: ContextWindowExceededError: "
+        "Context window exceeded"
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_checkpoint_save_error_details_are_collapsed(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    # The Rails error body embedded in a CheckpointSaveError varies per request, so
+    # the gRPC details must collapse to the exception type plus a stable message.
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_error = CheckpointSaveError(
+        "Failed to save checkpoint: {'message': '400 Bad request - "
+        "PG::UntranslatableCharacter: ERROR: unsupported Unicode escape sequence'}"
+    )
+    mock_workflow.successful_execution = MagicMock(return_value=False)
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
+    mock_context.set_details.assert_called_once_with(
+        "workflow execution failure: CheckpointSaveError: Failed to save checkpoint"
     )
 
 
@@ -2351,6 +3356,121 @@ async def test_execute_workflow_forwards_resume_checkpoint_ts(
 
     _args, kwargs = mock_abstract_workflow_class.call_args
     assert kwargs["resume_checkpoint_ts"] == expected_resume_checkpoint_ts
+
+
+def _catalog_start_request(
+    *agents: contract_pb2.WorkspaceAgent,
+) -> contract_pb2.StartWorkflowRequest:
+    """A registry start request carrying a catalog_items envelope."""
+    return contract_pb2.StartWorkflowRequest(
+        workflowID="123",
+        flowConfigId="developer",
+        flowConfigSchemaVersion="v1",
+        flowVersion="2.0.0",
+        catalog_items=contract_pb2.CatalogItems(
+            catalog_items_v1=contract_pb2.CatalogItemsV1(workspace_agents=list(agents))
+        ),
+    )
+
+
+async def _execute_workflow(
+    servicer: DuoWorkflowService,
+    mock_context: grpc.ServicerContext,
+    start_request: contract_pb2.StartWorkflowRequest,
+) -> None:
+    """Drive ExecuteWorkflow to completion with a single start request."""
+
+    async def request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises((StopAsyncIteration, grpc.RpcError)):
+        await anext(result)
+
+
+@pytest.fixture(name="mock_flow_factory")
+def mock_flow_factory_fixture():
+    """A resolved flow whose factory records its call and whose workflow finishes at once."""
+    with (
+        patch("duo_workflow_service.server.AbstractWorkflow") as workflow_class,
+        patch("duo_workflow_service.server.resolve_flow") as resolve_flow,
+    ):
+        workflow = workflow_class.return_value
+        workflow.is_done = True
+        workflow.last_error = None
+        workflow.run = AsyncMock()
+        workflow.cleanup = AsyncMock()
+        workflow.get_from_outbox = AsyncMock(
+            return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+        )
+        resolve_flow.return_value = ResolvedFlow(factory=workflow_class)
+
+        yield workflow_class
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start_request,expected_agent_names",
+    [
+        (
+            _catalog_start_request(
+                contract_pb2.WorkspaceAgent(
+                    name="tester", description="Runs tests.", prompt="Be terse."
+                )
+            ),
+            ["workspace/agents/tester"],
+        ),
+        (_catalog_start_request(), []),
+        (contract_pb2.StartWorkflowRequest(workflowID="123"), None),
+    ],
+    ids=["items_reach_the_flow", "empty_envelope_still_passed", "no_envelope_omitted"],
+)
+async def test_execute_workflow_forwards_catalog_items(
+    mock_flow_factory,
+    mock_context,
+    servicer,
+    start_request,
+    expected_agent_names,
+):
+    """Whether the argument is passed follows the request shape, not the payload.
+
+    ``None`` means the argument must be absent: the workflow classes behind unsupported request shapes do not accept
+    it. An empty envelope is still passed, so that a future item kind leaving ``workspace_agents`` empty is not
+    dropped.
+    """
+    await _execute_workflow(servicer, mock_context, start_request)
+
+    kwargs = mock_flow_factory.call_args.kwargs
+    if expected_agent_names is None:
+        assert "catalog_items" not in kwargs
+    else:
+        assert [
+            agent.name for agent in kwargs["catalog_items"].workspace_agents
+        ] == expected_agent_names
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_invalid_catalog_items(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    """A bad payload aborts before resolution, so no workflow is ever created."""
+    await _execute_workflow(
+        servicer,
+        mock_context,
+        _catalog_start_request(contract_pb2.WorkspaceAgent(name="tester")),
+    )
+
+    mock_resolve_flow.assert_not_called()
+    mock_context.abort.assert_called_once()
+    assert mock_context.abort.call_args[0][0] == grpc.StatusCode.INVALID_ARGUMENT
+    assert "Invalid catalog items" in mock_context.abort.call_args[0][1]
 
 
 @pytest.mark.parametrize(
@@ -2599,6 +3719,7 @@ async def test_track_self_hosted_execute_workflow_billing_event(
                     "model_id": "self-hosted-model",
                     "model_engine": "litellm",
                     "model_provider": "litellm",
+                    "model_vendor": None,
                     "prompt_tokens": 1,
                     "completion_tokens": 1,
                     "agent_name": None,
@@ -2611,6 +3732,102 @@ async def test_track_self_hosted_execute_workflow_billing_event(
             "orbit_called": False,
         },
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_type", "expected_source"),
+    [
+        ("merge_request_code_conflict", "merge_request_code_conflict"),
+        ("", None),
+        ("Not A Source!", None),
+        ("a" * 65, None),
+        ("merge_request_code_conflict\n", None),
+    ],
+    ids=["valid", "empty", "invalid_characters", "too_long", "trailing_newline"],
+)
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_billing_event_source(
+    _mock_container,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+    source_type,
+    expected_source,
+):
+    auth_user.can = MagicMock(return_value=True)
+
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
+        yield contract_pb2.TrackSelfHostedClientEvent(
+            requestID="test-req-id",
+            workflowID="#1337",
+            featureQualifiedName="test_feature",
+            sourceType=source_type,
+        )
+
+    result = servicer.TrackSelfHostedExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        billing_service=billing_event_service,
+    )
+
+    _ = [action async for action in result]
+
+    metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+    assert metadata.get("source") == expected_source
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tracked", "expected_success_logs"),
+    [(True, 1), (False, 0)],
+)
+@patch("duo_workflow_service.server.ContainerApplication")
+async def test_track_self_hosted_execute_workflow_logs_success_only_when_tracked(
+    _mock_container,
+    billing_event_service,
+    billing_event_client,
+    auth_user,
+    mock_context,
+    servicer,
+    tracked,
+    expected_success_logs,
+):
+    """The success log is only emitted when the billing event was actually tracked, e.g. not when billing events are
+    disabled."""
+    auth_user.can = MagicMock(return_value=True)
+    billing_event_client.track_billing_event.return_value = tracked
+
+    async def mock_request_iterator() -> AsyncIterable[
+        contract_pb2.TrackSelfHostedClientEvent
+    ]:
+        yield contract_pb2.TrackSelfHostedClientEvent(
+            requestID="test-req-id",
+            workflowID="#1337",
+            featureQualifiedName="test_feature",
+            featureAiCatalogItem=True,
+        )
+
+    with capture_logs() as cap_logs:
+        result = servicer.TrackSelfHostedExecuteWorkflow(
+            mock_request_iterator(),
+            mock_context,
+            billing_service=billing_event_service,
+        )
+        actions = [action async for action in result]
+
+    assert [a.requestID for a in actions] == ["test-req-id"]
+    billing_event_client.track_billing_event.assert_called_once()
+    success_logs = [
+        log
+        for log in cap_logs
+        if log["event"] == "Successfully sent billing event for self-hosted LLM auth"
+    ]
+    assert len(success_logs) == expected_success_logs
 
 
 @pytest.mark.asyncio
@@ -2889,6 +4106,19 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
         return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
     )
     mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    authorized_flow_config = struct_pb2.Struct()
+    authorized_flow_config.update(simple_flow_config)
+    current_user.set(
+        CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                scopes=["duo_agent_platform"],
+                extra={
+                    "flow_config_digest": _flow_config_digest(authorized_flow_config)
+                },
+            ),
+        )
+    )
 
     async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
         yield contract_pb2.ClientEvent(
@@ -2920,6 +4150,187 @@ async def test_execute_workflow_with_flow_config_schema_version_parameterized(
             workflow_definition="test",
         )
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {"flow_config_digest": "wrong-digest"},
+        {"flow_config_digest": ""},
+        {"flow_config_digest": 123},
+        {"flow_config_digest": None},
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_unauthorized_inline_flow_config(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    simple_flow_config,
+):
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                workflowDefinition="catalog-flow",
+                flowConfig=simple_flow_config,
+                flowConfigSchemaVersion="v1",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the supplied flow config",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start_request",
+    [
+        pytest.param(
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+            id="registry-flow",
+        ),
+        pytest.param(
+            contract_pb2.StartWorkflowRequest(workflowDefinition="developer/v1"),
+            id="legacy-definition",
+        ),
+        pytest.param(contract_pb2.StartWorkflowRequest(), id="default-workflow"),
+    ],
+)
+@pytest.mark.parametrize("claims_extra", [{"flow_config_digest": "bound-catalog-flow"}])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_non_inline_flow_with_bound_token(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    start_request,
+):
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the supplied flow config",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [None, {}])
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_accepts_unbound_inline_flow_config_from_old_rails(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    simple_flow_config,
+):
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                workflowDefinition="catalog-flow",
+                flowConfig=simple_flow_config,
+                flowConfigSchemaVersion="v1",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.abort.assert_not_called()
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_allows_debug_user_to_change_inline_flow_config(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    simple_flow_config,
+):
+    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                workflowDefinition="catalog-flow",
+                flowConfig=simple_flow_config,
+                flowConfigSchemaVersion="v1",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_context.abort.assert_not_called()
+    mock_resolve_flow.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -2962,7 +4373,7 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
 
     # Verify the Prometheus metric was tracked
     mock_duo_workflow_metrics.count_agent_platform_receive_start_counter.assert_called_once_with(
-        flow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+        flow_type="software_development"
     )
 
     # Verify the internal event was tracked
@@ -2973,7 +4384,7 @@ async def test_execute_workflow_tracks_receive_start_request_internal_event(
             property=EventPropertyEnum.WORKFLOW_ID.value,
             value=123,
         ),
-        category=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+        category="software_development",
     )
 
 
@@ -3054,17 +4465,30 @@ async def test_send_events_sends_skips_checkpoint_if_already_sent(servicer):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scopes", [["duo_agent_platform", "duo_chat"]])
 @pytest.mark.parametrize(
-    "workflow_definition, expected_mapped_definition",
+    "workflow_definition, expected_mapped_definition, claims_extra",
     [
-        ("duo_planner/experimental", "duo_planner/v1"),
-        ("security_analyst_agent/experimental", "security_analyst_agent/v1"),
-        ("duo_planner/v1", "duo_planner/v1"),
-        ("security_analyst_agent/v1", "security_analyst_agent/v1"),
-        ("chat", "chat"),
-        ("software_development", "software_development"),
+        (
+            "duo_planner/experimental",
+            "duo_planner/v1",
+            {"flow_config_id": "duo_planner"},
+        ),
+        (
+            "security_analyst_agent/experimental",
+            "security_analyst_agent/v1",
+            {"flow_config_id": "security_analyst_agent"},
+        ),
+        ("duo_planner/v1", "duo_planner/v1", {"flow_config_id": "duo_planner"}),
+        (
+            "security_analyst_agent/v1",
+            "security_analyst_agent/v1",
+            {"flow_config_id": "security_analyst_agent"},
+        ),
+        ("chat", "chat", None),
+        ("software_development", "software_development", None),
         (
             "",
             "software_development",
+            None,
         ),  # empty defaults to software_development via normalization
     ],
 )
@@ -3076,6 +4500,7 @@ async def test_workflow_definition_mapping(
     mock_resolve_flow,
     mock_abstract_workflow_class,
     expected_mapped_definition,
+    claims_extra,
     start_request_iterator,
     mock_context,
     servicer,
@@ -3115,6 +4540,16 @@ async def test_workflow_definition_mapping(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        pytest.param(None, id="old-rails-token-without-claims"),
+        pytest.param({}, id="old-rails-token-without-flow-binding"),
+        pytest.param(
+            {"flow_config_id": "developer"}, id="new-rails-token-with-binding"
+        ),
+    ],
+)
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_with_flow_config_id_happy_path(
@@ -3122,8 +4557,9 @@ async def test_execute_workflow_with_flow_config_id_happy_path(
     mock_abstract_workflow_class,
     mock_context,
     servicer,
+    claims_extra,
 ):
-    """Server resolves flowConfigId + flowConfigSchemaVersion + flowVersion correctly."""
+    """Registry flows work with old unbound and new bound Rails tokens."""
     mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
     mock_workflow = mock_abstract_workflow_class.return_value
     mock_workflow.is_done = True
@@ -3156,6 +4592,562 @@ async def test_execute_workflow_with_flow_config_id_happy_path(
     mock_resolve_flow.assert_called_once_with(
         RegistryFlowRequest(config_id="developer", schema_version="v1", version="1.0.0")
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,start_request",
+    [
+        (
+            {"flow_config_id": "secrets_fp_detection"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+        ),
+        (
+            {"flow_config_id": ""},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+        ),
+        (
+            {"flow_config_id": 123},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+        ),
+        (
+            {"flow_config_id": None},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+        ),
+        (
+            {"flow_config_id": "secrets_fp_detection"},
+            contract_pb2.StartWorkflowRequest(workflowDefinition="developer/v1"),
+        ),
+        (
+            {"flow_config_id": "developer"},
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="software_development"
+            ),
+        ),
+        (
+            {"flow_config_id": "developer"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfig=struct_pb2.Struct(
+                    fields={"version": struct_pb2.Value(string_value="v1")}
+                ),
+                flowConfigSchemaVersion="v1",
+            ),
+        ),
+        (
+            {"flow_config_id": "developer"},
+            contract_pb2.StartWorkflowRequest(),
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_unauthorized_foundational_flow(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    start_request,
+):
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the requested flow",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_is_debug", [True])
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_debug_user_bypasses_flow_binding(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    user_is_debug,
+):
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,flow_version",
+    [
+        pytest.param(
+            {"flow_config_id": "developer"}, "^3.0.0", id="no-version-binding"
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": "^3.0.0"},
+            "^3.0.0",
+            id="version-range-binding",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": "1.1.0"},
+            "1.1.0",
+            id="exact-version-binding",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_with_flow_version_happy_path(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    claims_extra,
+    flow_version,
+):
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion=flow_version,
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_flow.assert_called_once_with(
+        RegistryFlowRequest(
+            config_id="developer", schema_version="v1", version=flow_version
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,start_request",
+    [
+        pytest.param(
+            {"flow_config_id": "workplan", "flow_version": "1.0.0"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="workplan",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.1.0",
+            ),
+            id="flag-gated-version-swap",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": "^3.0.0"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^2.0.0",
+            ),
+            id="major-version-swap",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": "^3.0.0"},
+            contract_pb2.StartWorkflowRequest(workflowDefinition="developer/v1"),
+            id="legacy-definition-downgrade",
+        ),
+        pytest.param(
+            {"flow_version": "^3.0.0"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfig=struct_pb2.Struct(
+                    fields={"version": struct_pb2.Value(string_value="v1")}
+                ),
+                flowConfigSchemaVersion="v1",
+            ),
+            id="inline-flow-config",
+        ),
+        pytest.param(
+            {"flow_version": "^3.0.0"},
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="software_development"
+            ),
+            id="legacy-workflow",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": ""},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="empty-claim",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": 3},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="3",
+            ),
+            id="non-string-claim",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_version": None},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="null-claim",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_unauthorized_flow_version(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    start_request,
+):
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the requested flow version",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_is_debug", [True])
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {
+            "flow_config_id": "developer",
+            "flow_version": "^3.0.0",
+            "flow_config_schema_version": "experimental",
+        }
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_debug_user_bypasses_flow_version_binding(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    user_is_debug,
+    claims_extra,
+):
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,start_request,expected",
+    [
+        pytest.param(
+            {
+                "flow_config_id": "fix_pipeline",
+                "flow_version": "1.0.0",
+                "flow_config_schema_version": "experimental",
+            },
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="fix_pipeline",
+                flowConfigSchemaVersion="experimental",
+                flowVersion="1.0.0",
+            ),
+            RegistryFlowRequest(
+                config_id="fix_pipeline", schema_version="experimental", version="1.0.0"
+            ),
+            id="experimental-binding",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": "v1"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            RegistryFlowRequest(
+                config_id="developer", schema_version="v1", version="^3.0.0"
+            ),
+            id="v1-binding",
+        ),
+        pytest.param(
+            {
+                "flow_config_id": "duo_planner",
+                "flow_config_schema_version": "experimental",
+            },
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="duo_planner/experimental"
+            ),
+            RegistryFlowRequest(
+                config_id="duo_planner", schema_version="experimental", version="1.0.0"
+            ),
+            id="legacy-definition-before-billing-mapping",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_with_flow_config_schema_version_binding(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    mock_context,
+    servicer,
+    claims_extra,
+    start_request,
+    expected,
+):
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+    mock_resolve_flow.assert_called_once_with(expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,start_request",
+    [
+        pytest.param(
+            {
+                "flow_config_id": "fix_pipeline",
+                "flow_version": "1.0.0",
+                "flow_config_schema_version": "experimental",
+            },
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="fix_pipeline",
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+            ),
+            id="experimental-to-v1-swap",
+        ),
+        pytest.param(
+            {
+                "flow_config_id": "resolve_dependency_bump",
+                "flow_version": "1.0.0",
+                "flow_config_schema_version": "v1",
+            },
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="resolve_dependency_bump",
+                flowConfigSchemaVersion="experimental",
+                flowVersion="1.0.0",
+            ),
+            id="v1-to-experimental-swap",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": "v1"},
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="developer/experimental"
+            ),
+            id="legacy-definition-swap",
+        ),
+        pytest.param(
+            {"flow_config_schema_version": "v1"},
+            contract_pb2.StartWorkflowRequest(
+                flowConfig=struct_pb2.Struct(
+                    fields={"version": struct_pb2.Value(string_value="v1")}
+                ),
+                flowConfigSchemaVersion="v1",
+            ),
+            id="inline-flow-config",
+        ),
+        pytest.param(
+            {"flow_config_schema_version": "v1"},
+            contract_pb2.StartWorkflowRequest(
+                workflowDefinition="software_development"
+            ),
+            id="legacy-workflow",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": ""},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="empty-claim",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": 1},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="non-string-claim",
+        ),
+        pytest.param(
+            {"flow_config_id": "developer", "flow_config_schema_version": None},
+            contract_pb2.StartWorkflowRequest(
+                flowConfigId="developer",
+                flowConfigSchemaVersion="v1",
+                flowVersion="^3.0.0",
+            ),
+            id="null-claim",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_unauthorized_flow_config_schema_version(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    start_request,
+):
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    start_request.workflowID = "123"
+    start_request.goal = "test goal"
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(startRequest=start_request)
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await anext(result)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the requested flow schema version",
+    )
+    mock_resolve_flow.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -3355,6 +5347,8 @@ def _make_flow_config_struct(
     inputs: Optional[List] = None,
     routers: Optional[List] = None,
     prompts: Optional[List] = None,
+    subagents: Optional[List] = None,
+    include: Optional[List] = None,
 ) -> struct_pb2.Struct:
     """Build a minimal valid flow config as a protobuf Struct."""
     if toolset is None:
@@ -3389,10 +5383,69 @@ def _make_flow_config_struct(
         "routers": routers,
         "prompts": prompts,
     }
+    if subagents is not None:
+        config_dict["components"][0]["subagents"] = subagents
+    if include is not None:
+        config_dict["include"] = include
 
     struct = struct_pb2.Struct()
     struct.update(config_dict)
     return struct
+
+
+_AI_CATALOG_AGENT_REF: dict[str, Any] = {
+    "source": "ai-catalog",
+    "item_type": "agent",
+    "item_id": "42",
+    "version": "1.0.0",
+}
+_AI_CATALOG_UNVERSIONED: dict[str, Any] = {
+    key: value for key, value in _AI_CATALOG_AGENT_REF.items() if key != "version"
+}
+_AI_CATALOG_UNIDENTIFIED: dict[str, Any] = {**_AI_CATALOG_AGENT_REF, "item_id": ""}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+@pytest.mark.parametrize(
+    "entry,include,expected_error",
+    [
+        (_AI_CATALOG_AGENT_REF, _AI_CATALOG_AGENT_REF, None),
+        (_AI_CATALOG_UNVERSIONED, _AI_CATALOG_UNVERSIONED, "must declare a version"),
+        (
+            _AI_CATALOG_UNIDENTIFIED,
+            _AI_CATALOG_UNIDENTIFIED,
+            "must name an agent",
+        ),
+        (
+            _AI_CATALOG_AGENT_REF,
+            {**_AI_CATALOG_AGENT_REF, "version": "2.0.0"},
+            "'include' section does not declare them",
+        ),
+    ],
+    ids=["declared_and_claimed", "no_version", "no_item_id", "claim_not_declared"],
+)
+async def test_validate_flow_config_with_an_ai_catalog_agent_reference(
+    entry, include, expected_error
+):
+    """Runs the real validator, so an `ai-catalog` entry is checked end to end rather than against a mock."""
+    service = DuoWorkflowService()
+
+    request = contract_pb2.ValidateFlowConfigRequest(
+        flow_config=_make_flow_config_struct(
+            subagents=[dict(entry)], include=[dict(include)]
+        ),
+    )
+    response = await service.ValidateFlowConfig(
+        request, MagicMock(spec=grpc.ServicerContext)
+    )
+
+    if expected_error is None:
+        assert list(response.errors) == []
+        assert response.valid is True
+    else:
+        assert response.valid is False
+        assert any(expected_error in err for err in response.errors)
 
 
 @pytest.mark.asyncio
@@ -3639,6 +5692,31 @@ async def test_flow_versioning_identity_not_stamped_when_resolution_fails(
             "BedrockException",
             id="bedrock_validation_error_collapses_to_stable_label",
         ),
+        pytest.param(
+            (
+                "litellm.BadRequestError: Fireworks_aiException - "
+                '{"error":{"object":"error","type":"invalid_request_error",'
+                '"code":"invalid_request_error","message":"2 request validation '
+                "errors: Input should be a valid string, field: "
+                "'messages[2].content.str', value: [{'text': 'Hi', 'type': 'text', "
+                "'index': 0}]; Extra inputs are not permitted, field: "
+                "'messages[2].content.list[ChatMessageContent][0].index', "
+                'value: 0"}}'
+            ),
+            "Fireworks_aiException - validation error",
+            id="fireworks_validation_errors_collapse_to_stable_label",
+        ),
+        pytest.param(
+            (
+                "litellm.BadRequestError: Fireworks_aiException - "
+                '{"error":{"object":"error","type":"invalid_request_error",'
+                '"code":"invalid_request_error","message":"1 request validation '
+                "error: Input should be a valid string, field: "
+                "'messages[1].content.str', value: []\"}}"
+            ),
+            "Fireworks_aiException - validation error",
+            id="fireworks_single_validation_error_collapses_to_stable_label",
+        ),
     ],
 )
 def test_extract_error_message_litellm_bad_request(message, expected):
@@ -3652,6 +5730,30 @@ def test_extract_error_message_litellm_bad_request(message, expected):
         assert isinstance(result, str) and result
     else:
         assert result == expected
+
+
+def test_extract_error_message_context_window_exceeded_error_is_collapsed():
+    # The provider wrappers and JSON payload vary per provider/model, so the
+    # details are collapsed to a stable "Context window exceeded" message.
+    error = LiteLLMContextWindowExceededError(
+        message=(
+            "litellm.ContextWindowExceededError: litellm.BadRequestError: "
+            'BedrockException: Context Window Error - {"message":"The model '
+            'returned the following errors: Input is too long for requested model."}'
+        ),
+        model="claude-sonnet-4-6",
+        llm_provider="bedrock",
+    )
+    assert _extract_error_message(error) == "Context window exceeded"
+
+    # ContextWindowExceededError is a subclass of BadRequestError; a plain
+    # BadRequestError must still go through the BadRequestError branch.
+    bad_request_error = LiteLLMBadRequestError(
+        message="some bad request",
+        model="claude-sonnet-4-6",
+        llm_provider="vertex_ai",
+    )
+    assert _extract_error_message(bad_request_error) == "some bad request"
 
 
 @pytest.mark.parametrize(
@@ -3789,6 +5891,16 @@ def test_extract_error_message_bad_status_event_is_collapsed(status_event, error
     )
 
 
+def test_extract_error_message_checkpoint_save_error_is_collapsed():
+    # The Rails error body (PG error, SQL fragment, offending JSON) varies per request,
+    # so it is collapsed to a stable, generic message.
+    error = CheckpointSaveError(
+        "Failed to save checkpoint: {'message': '400 Bad request - "
+        "PG::UntranslatableCharacter: ERROR: unsupported Unicode escape sequence'}"
+    )
+    assert _extract_error_message(error) == "Failed to save checkpoint"
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -3859,6 +5971,35 @@ def test_extract_error_message_additional_context_schema_error_is_collapsed():
 
 
 @pytest.mark.parametrize(
+    "target,subkeys,key",
+    [
+        pytest.param("context", "issue_iid", "issue_iid", id="context_input"),
+        pytest.param(
+            "context",
+            "inputs.prep_probe_alpha.field_one",
+            "prep_probe_alpha",
+            id="nested_context_input",
+        ),
+        pytest.param(
+            "conversation_history", "after_gate", "after_gate", id="history_input"
+        ),
+    ],
+)
+def test_extract_error_message_missing_required_input_is_collapsed(
+    target, subkeys, key
+):
+    # The input path and missing key vary per flow and fragment error grouping, so
+    # only a stable message should be surfaced.
+    error = KeyError(
+        f"Missing required input '{target}:{subkeys}': '{key}' not found in state. "
+        "If this is populated from a flow's additional_context, confirm "
+        "the caller supplied that category, or mark this input "
+        "'optional: true' if it may legitimately be absent."
+    )
+    assert _extract_error_message(error) == "Missing required input not found in state"
+
+
+@pytest.mark.parametrize(
     "message,expected",
     [
         pytest.param(
@@ -3887,6 +6028,35 @@ def test_extract_error_message_graphql_errors_collapse(message, expected):
     # GraphQL failures embed a per-request payload (variable names, locations, codes)
     # that fragments SLO grouping; only the stable "GraphQL errors" label (with any
     # leading prefix preserved) should be surfaced.
+    assert _extract_error_message(Exception(message)) == expected
+
+
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        pytest.param(
+            "An error occurred while processing your request. You can retry your "
+            "request, or contact us through our help center at help.openai.com if the "
+            "error persists. Please include the request ID "
+            "req_some_id in your message.",
+            "An error occurred while processing your request.",
+            id="plain_openai_api_error",
+        ),
+        pytest.param(
+            "litellm.APIError: OpenAIException - An error occurred while processing "
+            "your request. You can retry your request, or contact us through our help "
+            "center at help.openai.com if the error persists. Please include the "
+            "request ID req_some_id in your message.",
+            "litellm.APIError: OpenAIException - An error occurred while processing "
+            "your request.",
+            id="prefixed_openai_api_error",
+        ),
+    ],
+)
+def test_extract_error_message_openai_api_error_collapse(message, expected):
+    # OpenAI APIError messages append retry guidance and a per-request ID that
+    # fragments SLO grouping; only the stable leading sentence (with any leading
+    # prefix preserved) should be surfaced.
     assert _extract_error_message(Exception(message)) == expected
 
 
@@ -3999,6 +6169,14 @@ def test_extract_error_message_api_connection_error_token_normalization_still_ap
         (
             "WORKHORSE_WEBSOCKET_PING_FAILED",
             AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+        ),
+        (
+            "WORKHORSE_WEBSOCKET_PONG_TIMEOUT",
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+        ),
+        (
+            "WORKHORSE_WEBSOCKET_CLOSE_1000",
+            AIO_CANCEL_STOP_WORKFLOW_REQUEST,
         ),
         (
             "user_requested",
@@ -4175,3 +6353,808 @@ async def test_execute_workflow_base_exception_logging(
         # the RuntimeError itself must not be logged)
         for c in mock_log_exception.call_args_list:
             assert not isinstance(c[0][0], RuntimeError)
+
+
+GITLAB_COM_INSTANCE_UID = "gitlab-com-instance-uid"
+RESTRICTED_MODEL_ENV = {
+    "CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service",
+    "DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL": "https://gitlab.com",
+    "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS": GITLAB_COM_INSTANCE_UID,
+}
+
+
+def _instance_user(
+    issuer: str = "https://gitlab.com",
+    realm: str = "saas",
+    subject: str = GITLAB_COM_INSTANCE_UID,
+    extra: dict | None = None,
+) -> CloudConnectorUser:
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=["duo_agent_platform"],
+            issuer=issuer,
+            gitlab_realm=realm,
+            subject=subject,
+            extra=extra or {},
+        ),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_generate_token_binds_restricted_flow_for_gitlab_com(
+    mock_token_authority, mock_context
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_instance_user())
+
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"), mock_context
+    )
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["flow_config_id"] == "bl_security"
+    assert extra_claims["restricted_flow_verified"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_generate_token_does_not_verify_unrestricted_flow_with_saas_header(
+    mock_token_authority, mock_context
+):
+    """A header-chosen SaaS realm on an unrestricted flow never yields the verified claim."""
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_instance_user(subject="other-uid"))
+    mock_context.invocation_metadata.return_value = [("x-gitlab-realm", "saas")]
+
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="developer"), mock_context
+    )
+
+    assert mock_token_authority.return_value.encode.call_args.args[1] == "saas"
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert "restricted_flow_verified" not in extra_claims
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@pytest.mark.parametrize(
+    ("caller", "env"),
+    [
+        pytest.param(
+            _instance_user(issuer="https://customers.gitlab.com"),
+            {},
+            id="customers-dot-issuer",
+        ),
+        pytest.param(
+            _instance_user(issuer="https://self-managed.example.com"),
+            {},
+            id="other-issuer",
+        ),
+        pytest.param(_instance_user(realm="self-managed"), {}, id="self-managed"),
+        pytest.param(_instance_user(realm=""), {}, id="missing-realm-claim"),
+        pytest.param(_instance_user(subject="other-uid"), {}, id="other-instance"),
+        pytest.param(
+            _instance_user(),
+            {"DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS": ""},
+            id="empty-allowlist",
+        ),
+        pytest.param(
+            CloudConnectorUser(authenticated=True, is_debug=True), {}, id="debug"
+        ),
+        pytest.param(
+            CloudConnectorUser(
+                authenticated=True, is_debug=True, claims=_instance_user().claims
+            ),
+            {},
+            id="debug-with-gitlab-com-claims",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+async def test_generate_token_refuses_restricted_flow_for_other_callers(
+    mock_token_authority, mock_context, caller, env
+):
+    """Self-managed, Dedicated and every other caller get an error, never an unbound token."""
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(caller)
+
+    with patch.dict(os.environ, {**RESTRICTED_MODEL_ENV, **env}):
+        with pytest.raises(grpc.RpcError):
+            await DuoWorkflowService().GenerateToken(
+                contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"),
+                mock_context,
+            )
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Flow 'bl_security' is only available on GitLab.com",
+    )
+    mock_token_authority.return_value.encode.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@pytest.mark.parametrize(
+    "caller",
+    [
+        pytest.param(_instance_user(), id="gitlab-com"),
+        pytest.param(
+            _instance_user(issuer="https://customers.gitlab.com"),
+            id="customers-dot-issuer",
+        ),
+        pytest.param(_instance_user(realm="self-managed"), id="self-managed"),
+        pytest.param(_instance_user(subject="other-uid"), id="other-instance"),
+        pytest.param(CloudConnectorUser(authenticated=True, is_debug=True), id="debug"),
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_generate_token_keeps_binding_unrestricted_flows_for_any_caller(
+    mock_token_authority, mock_context, caller
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(caller)
+
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="developer"), mock_context
+    )
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["flow_config_id"] == "developer"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_generate_token_refuses_restricted_flow_for_token_bound_to_other_flow(
+    mock_token_authority, mock_context
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_instance_user(extra={"flow_config_id": "developer"}))
+
+    with pytest.raises(grpc.RpcError):
+        await DuoWorkflowService().GenerateToken(
+            contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"),
+            mock_context,
+        )
+
+    mock_context.abort.assert_called_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Caller token is not authorized for flow 'bl_security'",
+    )
+    mock_token_authority.return_value.encode.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_generate_token_binds_restricted_flow_for_token_bound_to_same_flow(
+    mock_token_authority, mock_context
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_instance_user(extra={"flow_config_id": "bl_security"}))
+
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"), mock_context
+    )
+
+    mock_context.abort.assert_not_called()
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["flow_config_id"] == "bl_security"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@pytest.mark.parametrize(
+    ("flow_config_id", "header_realm", "expected_realm"),
+    [
+        pytest.param("bl_security", "self-managed", "saas", id="restricted-flow"),
+        pytest.param("developer", "self-managed", "self-managed", id="other-flow"),
+        pytest.param("", "self-managed", "self-managed", id="no-flow"),
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_generate_token_takes_realm_from_claim_only_for_restricted_flows(
+    mock_token_authority, mock_context, flow_config_id, header_realm, expected_realm
+):
+    """Restricted flows bind the verified SaaS realm claim; other flows keep the header realm."""
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_instance_user())
+    mock_context.invocation_metadata.return_value = [("x-gitlab-realm", header_realm)]
+
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id=flow_config_id), mock_context
+    )
+
+    assert mock_token_authority.return_value.encode.call_args.args[1] == (
+        expected_realm
+    )
+
+
+@pytest.fixture(name="restricted_model_metadata")
+def restricted_model_metadata_fixture(fake_restricted_model):
+    metadata = ModelMetadata(
+        provider="gitlab",
+        name=fake_restricted_model.gitlab_identifier,
+        llm_definition=fake_restricted_model,
+    )
+    by_tag_token = current_model_metadata_with_size_context.set(
+        ModelMetadataByTag(default=metadata)
+    )
+    default_token = current_model_metadata_context.set(metadata)
+    yield metadata
+    current_model_metadata_context.reset(default_token)
+    current_model_metadata_with_size_context.reset(by_tag_token)
+
+
+# Signed claims whose flow_config_id is absent or not a usable flow id.
+MALFORMED_FLOW_CLAIMS = [
+    ("flow-claim-missing", {"workflow_id": "123"}),
+    ("flow-claim-empty", {"flow_config_id": ""}),
+    ("flow-claim-not-a-string", {"flow_config_id": ["bl_security"]}),
+]
+
+
+def _workflow_token_user(
+    flow_config_id: str | None = "bl_security",
+    realm: str = "saas",
+    is_debug: bool = False,
+    issuer: str = "gitlab-duo-workflow-service",
+    extra: dict | None = None,
+    subject: str = "",
+    restricted_flow_verified: bool = True,
+) -> CloudConnectorUser:
+    if extra is None:
+        extra = {"flow_config_id": flow_config_id} if flow_config_id else {}
+        if flow_config_id and restricted_flow_verified:
+            extra["restricted_flow_verified"] = True
+    return CloudConnectorUser(
+        authenticated=True,
+        is_debug=is_debug,
+        claims=UserClaims(
+            scopes=["duo_agent_platform"],
+            issuer=issuer,
+            gitlab_realm=realm,
+            subject=subject,
+            extra=extra,
+        ),
+    )
+
+
+async def _execute_registry_flow(
+    flow_config_id: str,
+    mock_context,
+    mock_resolve_flow,
+    mock_workflow_class,
+    on_build=None,
+    **start_request_fields,
+) -> list:
+    """Run ExecuteWorkflow for a registry flow and return the restricted access seen by the workflow."""
+    seen: list = []
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    mock_workflow = MagicMock()
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+
+    def build_workflow(**_kwargs):
+        seen.append(restricted_access_ctx.get())
+        if on_build:
+            on_build()
+        return mock_workflow
+
+    mock_workflow_class.side_effect = build_workflow
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_workflow_class)
+
+    async def request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                flowConfigId=flow_config_id,
+                flowConfigSchemaVersion="v1",
+                flowVersion="1.0.0",
+                goal="test goal",
+                **start_request_fields,
+            )
+        )
+
+    result = DuoWorkflowService().ExecuteWorkflow(
+        request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+    return seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_allows_restricted_model_for_authorized_flow(
+    mock_resolve_flow, mock_workflow_class, mock_context
+):
+    current_user.set(_workflow_token_user())
+
+    seen = await _execute_registry_flow(
+        "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+    )
+
+    mock_context.abort.assert_not_called()
+    assert seen == ["bl_security"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata")
+@pytest.mark.parametrize(
+    ("user", "flow_config_id"),
+    [
+        pytest.param(
+            _workflow_token_user(flow_config_id=None), "bl_security", id="no-claim"
+        ),
+        pytest.param(
+            _workflow_token_user(flow_config_id="developer"),
+            "developer",
+            id="other-flow",
+        ),
+        pytest.param(
+            _workflow_token_user(realm="self-managed"),
+            "bl_security",
+            id="self-managed",
+        ),
+        pytest.param(
+            _workflow_token_user(realm=""), "bl_security", id="missing-realm-claim"
+        ),
+        pytest.param(
+            _workflow_token_user(is_debug=True), "bl_security", id="debug-user"
+        ),
+        pytest.param(
+            CloudConnectorUser(authenticated=True, is_debug=True),
+            "bl_security",
+            id="debug-user-without-claims",
+        ),
+        pytest.param(
+            _workflow_token_user(issuer="https://gitlab.com"),
+            "bl_security",
+            id="not-issued-by-dws",
+        ),
+        pytest.param(
+            _workflow_token_user(flow_config_id=None, subject=GITLAB_COM_INSTANCE_UID),
+            "bl_security",
+            id="dws-token-with-gitlab-com-subject-no-claim",
+        ),
+        pytest.param(
+            _workflow_token_user(restricted_flow_verified=False),
+            "bl_security",
+            id="dws-token-without-verified-claim",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_denies_restricted_model(
+    mock_resolve_flow, mock_context, user, flow_config_id
+):
+    current_user.set(user)
+
+    with pytest.raises(grpc.RpcError):
+        await _execute_registry_flow(
+            flow_config_id, mock_context, mock_resolve_flow, MagicMock()
+        )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_denies_replayed_restricted_model_header(
+    mock_resolve_flow, mock_context
+):
+    """A stickiness replay header naming a restricted model is gated like any other request."""
+    current_user.set(_workflow_token_user(flow_config_id="developer"))
+    details = MagicMock()
+    details.invocation_metadata = [
+        (
+            ModelMetadataInterceptor.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA,
+            json.dumps({"provider": "anthropic", "name": "fake_restricted_model"}),
+        )
+    ]
+    await ModelMetadataInterceptor().intercept_service(AsyncMock(), details)
+    assert (
+        current_model_metadata_context.get().llm_definition.gitlab_identifier
+        == "fake_restricted_model"
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await _execute_registry_flow(
+            "developer", mock_context, mock_resolve_flow, MagicMock()
+        )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_denies_checkpoint_resume_on_restricted_model(
+    mock_resolve_flow, mock_context, fake_restricted_model
+):
+    """Resuming from a checkpoint saved on a restricted model is gated like a new run.
+
+    The model metadata is the exact JSON the checkpointer persists, replayed through the real interceptor.
+    """
+    http_client = AsyncMock()
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    checkpointer = GitLabWorkflow(
+        http_client,
+        "123",
+        MagicMock(),
+        {"incremental_checkpoints_enabled": False},
+        internal_event_client=MagicMock(),
+        billing_event_service=MagicMock(),
+    )
+    token = current_model_metadata_context.set(
+        ModelMetadata(
+            provider="gitlab",
+            name=fake_restricted_model.gitlab_identifier,
+            llm_definition=fake_restricted_model,
+        )
+    )
+    try:
+        await checkpointer.aput(
+            {"configurable": {}}, empty_checkpoint(), CheckpointMetadata(), {}
+        )
+    finally:
+        current_model_metadata_context.reset(token)
+    saved = json.loads(http_client.apost.call_args.kwargs["body"])
+
+    current_user.set(_workflow_token_user(flow_config_id=None))
+    details = MagicMock()
+    details.invocation_metadata = [
+        (
+            ModelMetadataInterceptor.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA,
+            saved["model_metadata_json"],
+        )
+    ]
+    await ModelMetadataInterceptor().intercept_service(AsyncMock(), details)
+    assert (
+        current_model_metadata_context.get().llm_definition.gitlab_identifier
+        == fake_restricted_model.gitlab_identifier
+    )
+
+    with pytest.raises(grpc.RpcError):
+        await _execute_registry_flow(
+            "bl_security",
+            mock_context,
+            mock_resolve_flow,
+            MagicMock(),
+            resume_checkpoint_ts="checkpoint-1",
+        )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_other_flow_runs_without_restricted_access(
+    mock_resolve_flow, mock_workflow_class, mock_context
+):
+    """Requests on ordinary models run unchanged; the claim names a flow no restricted model allows."""
+    current_user.set(_workflow_token_user(flow_config_id="developer"))
+
+    seen = await _execute_registry_flow(
+        "developer", mock_context, mock_resolve_flow, mock_workflow_class
+    )
+
+    mock_context.abort.assert_not_called()
+    assert seen == ["developer"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata")
+@pytest.mark.parametrize(
+    ("incoming_issuer", "incoming_realm", "allowed"),
+    [
+        ("https://gitlab.com", "saas", True),
+        ("https://gitlab.com", "self-managed", False),
+        ("https://customers.gitlab.com", "saas", False),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(
+    os.environ,
+    {
+        **RESTRICTED_MODEL_ENV,
+        "DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY": TEST_PRIVATE_KEY,
+    },
+)
+async def test_restricted_model_end_to_end_through_minted_token(
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_context,
+    incoming_issuer,
+    incoming_realm,
+    allowed,
+):
+    """GenerateToken mints the token ExecuteWorkflow authorizes, via real JWT encode/decode."""
+    provider = CompositeProvider(
+        [LocalAuthProvider(structlog, TEST_PRIVATE_KEY, TEST_PUBLIC_KEY)], structlog
+    )
+    incoming_token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
+        GITLAB_COM_INSTANCE_UID,
+        incoming_realm,
+        CloudConnectorUser(authenticated=True, claims=UserClaims()),
+        "1234",
+        ["duo_agent_platform"],
+        extra_claims={"iss": incoming_issuer},
+    )
+    current_user.set(provider.authenticate(incoming_token))
+    mock_context.invocation_metadata.return_value = [
+        ("x-gitlab-global-user-id", "user-1"),
+        ("x-gitlab-realm", "saas"),
+    ]
+
+    request = contract_pb2.GenerateTokenRequest(flow_config_id="bl_security")
+    if not allowed:
+        with pytest.raises(grpc.RpcError):
+            await DuoWorkflowService().GenerateToken(request, mock_context)
+        mock_context.abort.assert_called_once_with(
+            grpc.StatusCode.PERMISSION_DENIED,
+            "Flow 'bl_security' is only available on GitLab.com",
+        )
+        return
+
+    response = await DuoWorkflowService().GenerateToken(request, mock_context)
+    current_user.set(provider.authenticate(response.token))
+    mock_context.invocation_metadata.return_value = []
+
+    seen = await _execute_registry_flow(
+        "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+    )
+    assert seen == ["bl_security"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata")
+@pytest.mark.parametrize(
+    "extra",
+    [extra for _, extra in MALFORMED_FLOW_CLAIMS],
+    ids=[i for i, _ in MALFORMED_FLOW_CLAIMS],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_denies_restricted_model_on_malformed_flow_claim(
+    mock_resolve_flow, mock_context, extra
+):
+    """A missing, empty or non-string flow claim never reaches a restricted model.
+
+    The missing claim is denied by the restricted model check; an empty or non-string claim is already refused by the
+    flow binding check.
+    """
+    current_user.set(_workflow_token_user(extra=extra))
+
+    with pytest.raises(grpc.RpcError):
+        await _execute_registry_flow(
+            "bl_security", mock_context, mock_resolve_flow, MagicMock()
+        )
+
+    mock_context.abort.assert_awaited_once()
+    assert mock_context.abort.await_args.args[0] == grpc.StatusCode.PERMISSION_DENIED
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [extra for _, extra in MALFORMED_FLOW_CLAIMS],
+    ids=[i for i, _ in MALFORMED_FLOW_CLAIMS],
+)
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+def test_restricted_access_flow_ignores_malformed_flow_claim(extra):
+    assert _restricted_access_flow(_workflow_token_user(extra=extra)) is None
+
+
+@pytest.mark.parametrize(
+    "verified", [None, False, "true"], ids=["missing", "false", "not-a-bool"]
+)
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+def test_restricted_access_flow_requires_verified_claim_on_dws_token(verified):
+    """A DWS-minted SaaS-realm flow token without restricted_flow_verified is True grants nothing."""
+    extra = {"flow_config_id": "bl_security"}
+    if verified is not None:
+        extra["restricted_flow_verified"] = verified
+    assert _restricted_access_flow(_workflow_token_user(extra=extra)) is None
+
+
+BL_SECURITY_CLAIM = {"flow_config_id": "bl_security"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_allows_restricted_model_for_instance_token_flow_claim(
+    mock_resolve_flow, mock_workflow_class, mock_context
+):
+    """GitLab.com's instance token carrying a flow claim (Workhorse path) is authorized."""
+    current_user.set(_instance_user(extra=BL_SECURITY_CLAIM))
+
+    seen = await _execute_registry_flow(
+        "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+    )
+
+    mock_context.abort.assert_not_called()
+    assert seen == ["bl_security"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata")
+@pytest.mark.parametrize(
+    "user",
+    [
+        pytest.param(
+            _instance_user(subject="other-instance-uid", extra=BL_SECURITY_CLAIM),
+            id="subject-not-allowlisted",
+        ),
+        pytest.param(
+            _instance_user(realm="self-managed", extra=BL_SECURITY_CLAIM),
+            id="self-managed",
+        ),
+        pytest.param(
+            _instance_user(issuer="https://other.example.com", extra=BL_SECURITY_CLAIM),
+            id="other-issuer",
+        ),
+        pytest.param(_instance_user(), id="no-flow-claim"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_denies_restricted_model_for_instance_token(
+    mock_resolve_flow, mock_context, user
+):
+    current_user.set(user)
+
+    with pytest.raises(grpc.RpcError):
+        await _execute_registry_flow(
+            "bl_security", mock_context, mock_resolve_flow, MagicMock()
+        )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_denies_other_flow_for_instance_token_flow_claim(
+    mock_resolve_flow, mock_context
+):
+    """The instance token's flow claim binds the requested flow, as for minted tokens."""
+    current_user.set(_instance_user(extra=BL_SECURITY_CLAIM))
+
+    with pytest.raises(grpc.RpcError):
+        await _execute_registry_flow(
+            "developer", mock_context, mock_resolve_flow, MagicMock()
+        )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Workflow token is not authorized for the requested flow",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [extra for _, extra in MALFORMED_FLOW_CLAIMS],
+    ids=[i for i, _ in MALFORMED_FLOW_CLAIMS],
+)
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+def test_restricted_access_flow_ignores_malformed_instance_token_flow_claim(extra):
+    assert _restricted_access_flow(_instance_user(extra=extra)) is None
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_restricted_tag_model_is_denied_at_prompt_build(
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_context,
+    fake_restricted_model,
+    llm_definition,
+    model_factory,
+):
+    """A restricted model reachable only through a tag passes the up-front check but no prompt can use it."""
+    current_user.set(_workflow_token_user(flow_config_id="developer"))
+    default = ModelMetadata(
+        provider="gitlab", name="default_model", llm_definition=llm_definition
+    )
+    restricted = ModelMetadata(
+        provider="gitlab",
+        name=fake_restricted_model.gitlab_identifier,
+        llm_definition=fake_restricted_model,
+    )
+    by_tag_token = current_model_metadata_with_size_context.set(
+        ModelMetadataByTag(default=default, by_tag={"large": restricted})
+    )
+    default_token = current_model_metadata_context.set(default)
+    built: dict = {}
+
+    def build_prompt(tags):
+        config = PromptConfig(
+            name="test_prompt",
+            model=ModelConfig(params=BaseModelParams(model=None)),
+            unit_primitive=GitLabUnitPrimitive.DUO_AGENT_PLATFORM,
+            prompt_template={"system": "Hi", "user": "{{content}}"},
+        )
+        return Prompt(
+            ModelClassProvider.LITE_LLM,
+            model_factory,
+            config,
+            get_model_metadata(tags),
+        )
+
+    def build_prompts():
+        for tag in (None, "large"):
+            try:
+                built[tag] = build_prompt(tag)
+            except RestrictedModelAccessError as e:
+                built[tag] = e
+
+    try:
+        seen = await _execute_registry_flow(
+            "developer",
+            mock_context,
+            mock_resolve_flow,
+            mock_workflow_class,
+            on_build=build_prompts,
+        )
+    finally:
+        current_model_metadata_context.reset(default_token)
+        current_model_metadata_with_size_context.reset(by_tag_token)
+
+    assert seen == ["developer"]
+    mock_context.abort.assert_not_called()
+    assert isinstance(built[None], Prompt)
+    assert isinstance(built["large"], RestrictedModelAccessError)

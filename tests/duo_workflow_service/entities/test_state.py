@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional
 
+import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from contract import contract_pb2
@@ -13,19 +14,15 @@ from duo_workflow_service.entities.state import (
     _ui_chat_log_reducer,
     build_tool_info,
     policy_ref_to_log_dict,
+    render_for_display,
+)
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
 )
 
 
 class TestApprovalSourceFromProto:
-    """Documents the mapping between the proto enum and the StrEnum.
-
-    Client-reportable sources map 1:1 with the proto enum. Server-only sources are Python-only (never cross the wire)
-    and are exempted below; promoting one to the proto is a deliberate, separately-reviewable change.
-    """
-
-    # Members produced only server-side; intentionally absent from the proto
-    # enum because they are never client-reported. See ApprovalSource docs.
-    SERVER_ONLY_MEMBERS = {ApprovalSource.SESSION_APPROVAL}
+    """Documents the mapping between the proto enum and the StrEnum."""
 
     def test_every_proto_value_maps_to_a_loggable_string(self):
         for name, value in contract_pb2.Approval.ApprovalSource.items():
@@ -43,22 +40,67 @@ class TestApprovalSourceFromProto:
                 "share the enclosing message's namespace, so keep them prefixed."
             )
 
-    def test_every_client_reportable_member_has_a_proto_counterpart(self):
+    def test_every_member_has_a_proto_counterpart(self):
         proto_names = {
             name.removeprefix("APPROVAL_SOURCE_")
             for name in contract_pb2.Approval.ApprovalSource.keys()
         }
         for member in ApprovalSource:
-            if member in self.SERVER_ONLY_MEMBERS:
-                assert member.name not in proto_names, (
-                    f"{member.name} is documented as server-only but now exists "
-                    "in the proto; promote it deliberately and drop the exemption."
-                )
-                continue
-            assert member.name in proto_names
+            assert member.name in proto_names, (
+                f"{member.name} has no APPROVAL_SOURCE_{member.name} counterpart in the proto enum; "
+                "add it to contract.proto and regenerate the stubs."
+            )
 
     def test_unknown_value_does_not_raise(self):
         assert ApprovalSource.from_proto(99) == "unknown(99)"
+
+
+class TestApprovalSourceFromApproval:
+    """Documents ApprovalSource.from_approval."""
+
+    def test_uses_client_reported_source_when_present(self):
+        approved = contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_AUTO_MODE
+        )
+        assert ApprovalSource.from_approval(approved) == ApprovalSource.AUTO_MODE.value
+
+    def test_defaults_to_user_explicit_when_source_unset(self):
+        # An Approved message with no approval_source field (never sent) defaults
+        # to user_explicit (a human clicked approve without an explicit source).
+        assert (
+            ApprovalSource.from_approval(contract_pb2.Approval.Approved())
+            == ApprovalSource.USER_EXPLICIT.value
+        )
+
+    def test_none_defaults_to_user_explicit(self):
+        assert ApprovalSource.from_approval(None) == ApprovalSource.USER_EXPLICIT.value
+
+    def test_explicit_unspecified_is_distinct_from_never_sent(self):
+        # Proto3 optional presence: explicitly stamping APPROVAL_SOURCE_UNSPECIFIED
+        # (value 0) sets the field, so from_approval resolves it to "unspecified"
+        # rather than the user_explicit default returned for the never-sent case.
+        approved = contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_UNSPECIFIED
+        )
+        assert ApprovalSource.from_approval(approved) == "unspecified"
+
+    def test_clamps_client_sent_session_approval_to_user_explicit(self):
+        """SESSION_APPROVAL is server-produced only; a client claiming it is untrusted."""
+        approved = contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_SESSION_APPROVAL
+        )
+        assert (
+            ApprovalSource.from_approval(approved) == ApprovalSource.USER_EXPLICIT.value
+        )
+
+    def test_from_proto_itself_still_reports_session_approval_unclamped(self):
+        """from_proto stays a pure wire mapper; the clamp lives only in from_approval."""
+        assert (
+            ApprovalSource.from_proto(
+                contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_SESSION_APPROVAL
+            )
+            == ApprovalSource.SESSION_APPROVAL.value
+        )
 
 
 class TestPolicyRefToLogDict:
@@ -381,12 +423,14 @@ def test_build_tool_info_without_response():
 
     assert result == ToolInfo(name="my_tool", args={"arg1": "val1"})
     assert "tool_response" not in result
+    assert_client_valid_tool_info(result)
 
 
 def test_build_tool_info_with_short_response():
     result = build_tool_info("my_tool", {"arg1": "val1"}, tool_response="short output")
 
     assert result["tool_response"] == "short output"
+    assert_client_valid_tool_info(result)
 
 
 def test_build_tool_info_truncates_long_string_response():
@@ -394,12 +438,143 @@ def test_build_tool_info_truncates_long_string_response():
 
     result = build_tool_info("my_tool", {}, tool_response=long_response)
 
-    assert len(result["tool_response"]) == TOOL_RESPONSE_MAX_DISPLAY_MSG
+    assert result["tool_response"].startswith("x" * TOOL_RESPONSE_MAX_DISPLAY_MSG)
+    assert result["tool_response"].endswith(
+        f"[... display truncated: {TOOL_RESPONSE_MAX_DISPLAY_MSG:,} of "
+        f"{TOOL_RESPONSE_MAX_DISPLAY_MSG + 100:,} characters shown ...]"
+    )
+    assert_client_valid_tool_info(result)
 
 
-def test_build_tool_info_does_not_truncate_non_string_response():
-    non_string_response = {"key": "value", "data": [1, 2, 3]}
+class TestRenderForDisplay:
+    """Render, redact, cap, in that order.
 
-    result = build_tool_info("my_tool", {}, tool_response=non_string_response)
+    Every card builder calls this once, so this is where the order and the cap are pinned.
+    """
 
-    assert result["tool_response"] == non_string_response
+    def test_short_text_is_not_capped(self):
+        text = "x" * TOOL_RESPONSE_MAX_DISPLAY_MSG
+
+        assert render_for_display(text, tool_name="t") == text
+
+    def test_long_text_keeps_the_head_and_says_so(self):
+        text = "a" * TOOL_RESPONSE_MAX_DISPLAY_MSG + "b" * 500
+
+        result = render_for_display(text, tool_name="t")
+
+        assert result.startswith("a" * TOOL_RESPONSE_MAX_DISPLAY_MSG)
+        assert "b" not in result.split("\n[... display truncated")[0]
+        assert result.endswith(
+            f"[... display truncated: {TOOL_RESPONSE_MAX_DISPLAY_MSG:,} of "
+            f"{TOOL_RESPONSE_MAX_DISPLAY_MSG + 500:,} characters shown ...]"
+        )
+
+    def test_a_block_list_comes_out_as_one_redacted_capped_string(self):
+        token = "glpat-AAAAABBBBCCCCDDDDEEEE"
+        blocks = [
+            {"type": "text", "text": f"token {token}"},
+            {"type": "image", "base64": "A" * 4096, "mime_type": "image/png"},
+            {"type": "text", "text": "y" * TOOL_RESPONSE_MAX_DISPLAY_MSG},
+        ]
+
+        result = render_for_display(blocks, tool_name="read_file")
+
+        assert result.startswith(
+            "token [REDACTED]\n[image/png omitted from history]\nyyyy"
+        )
+        assert token not in result
+        assert "A" * 64 not in result
+        assert result.endswith("characters shown ...]")
+
+    def test_the_cap_measures_the_redacted_text(self):
+        """Redaction runs before the cap, so the marker counts what the client sees, not what the tool returned."""
+        token = "glpat-AAAAABBBBCCCCDDDDEEEE"
+        text = f"{token} " + "x" * TOOL_RESPONSE_MAX_DISPLAY_MSG
+
+        result = render_for_display(text, tool_name="read_file")
+
+        redacted_len = len("[REDACTED] ") + TOOL_RESPONSE_MAX_DISPLAY_MSG
+        assert result.startswith("[REDACTED] xxxx")
+        assert result.endswith(
+            f"[... display truncated: {TOOL_RESPONSE_MAX_DISPLAY_MSG:,} of "
+            f"{redacted_len:,} characters shown ...]"
+        )
+
+
+def test_contract_mirror_rejects_a_non_array_suggested_patterns():
+    """The mirror must not be looser than the client, or it gives false safety.
+
+    `all(isinstance(p, str) for p in value)` passes for a dict (its keys are strings) and for a bare string (its
+    characters are), where the client's schema requires an array of strings.
+    """
+    info = ToolInfo(name="t", args={}, suggested_patterns={"git *": 1})
+
+    with pytest.raises(AssertionError, match="must be an array"):
+        assert_client_valid_tool_info(info)
+
+
+class TestBuildToolInfoStructuredContent:
+    """Every structured tool_response is rendered as one string.
+
+    The CLI and the IDE validate `tool_response` as a string (or a message whose `content` is one) and discard the
+    whole checkpoint's chat log on the first entry that is neither. That is true whether or not an image is involved,
+    so the collapse is not gated on one.
+    """
+
+    def test_image_content_becomes_string_without_payload(self):
+        payload = "B" * 8192
+        tool_response = [
+            {"type": "text", "text": "Read image file: ./shot.png (image/png, 6 KB)."},
+            {"type": "image", "base64": payload, "mime_type": "image/png"},
+        ]
+
+        info = build_tool_info("read_file", {"file_path": "./shot.png"}, tool_response)
+
+        assert info["tool_response"] == (
+            "Read image file: ./shot.png (image/png, 6 KB).\n"
+            "[image/png omitted from history]"
+        )
+        assert payload not in info["tool_response"]
+        assert_client_valid_tool_info(info)
+
+    def test_text_only_list_becomes_string(self):
+        # No image, ~30 bytes, and it still drops the chat log on the client
+        # if it arrives as a list.
+        info = build_tool_info("read_file", {}, [{"type": "text", "text": "x"}])
+
+        assert info["tool_response"] == "x"
+        assert_client_valid_tool_info(info)
+
+    def test_dict_response_becomes_string(self):
+        # Previously pinned as passing through untouched; a dict is not in the
+        # client's union either.
+        info = build_tool_info("my_tool", {}, {"key": "value", "data": [1, 2, 3]})
+
+        assert isinstance(info["tool_response"], str)
+        assert_client_valid_tool_info(info)
+
+    def test_flattened_list_is_still_capped(self):
+        # The cap used to be string-only, so list content was never capped.
+        blocks = [{"type": "text", "text": "y" * TOOL_RESPONSE_MAX_DISPLAY_MSG}] * 2
+
+        info = build_tool_info("my_tool", {}, blocks)
+
+        assert info["tool_response"].startswith("y" * TOOL_RESPONSE_MAX_DISPLAY_MSG)
+        assert "[... display truncated:" in info["tool_response"]
+        assert_client_valid_tool_info(info)
+
+    def test_flattened_list_is_still_redacted(self):
+        token = "glpat-AAAAABBBBCCCCDDDDEEEE"
+
+        info = build_tool_info(
+            "my_tool", {}, [{"type": "text", "text": f"token {token}"}]
+        )
+
+        assert token not in info["tool_response"]
+        assert "[REDACTED]" in info["tool_response"]
+
+    def test_string_responses_unchanged(self):
+        info = build_tool_info("read_file", {}, "ordinary text output")
+
+        assert info["tool_response"] == "ordinary text output"
+        assert_client_valid_tool_info(info)

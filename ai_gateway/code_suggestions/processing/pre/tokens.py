@@ -15,7 +15,11 @@ class TokenizerTokenStrategy(TokenStrategyBase):
 
     @override
     def truncate_content(
-        self, text: str, max_length: int, truncation_side: str = "left"
+        self,
+        text: str,
+        max_length: int,
+        truncation_side: str = "left",
+        line_boundary: bool = False,
     ) -> CodeContent:
         self.tokenizer.truncation_side = truncation_side
 
@@ -30,11 +34,16 @@ class TokenizerTokenStrategy(TokenStrategyBase):
         # Decoding a single sequence returns a `str`; `decode` is typed as
         # `str | list[str]` to also cover batch decoding.
         decoded = cast(str, self.tokenizer.decode(tokens["input_ids"]))
+        length_tokens = len(tokens["input_ids"])
 
-        return CodeContent(
-            text=decoded,
-            length_tokens=len(tokens["input_ids"]),
-        )
+        if line_boundary and length_tokens == max_length:
+            if truncation_side == "left":
+                decoded = decoded.partition("\n")[2] or decoded
+            else:
+                decoded = decoded.rpartition("\n")[0] or decoded
+            length_tokens = self.estimate_length(decoded)[0]
+
+        return CodeContent(text=decoded, length_tokens=length_tokens)
 
     @override
     def estimate_length(self, text: str | list[str]) -> list[int]:

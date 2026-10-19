@@ -15,8 +15,10 @@ from structlog.testing import capture_logs
 
 from ai_gateway.api import create_fast_api_server, server
 from ai_gateway.api.server import (
+    assume_role_exception_handler,
     custom_http_exception_handler,
     model_api_exception_handler,
+    restricted_model_access_exception_handler,
     setup_custom_exception_handlers,
     setup_gcp_service_account,
     validation_exception_handler,
@@ -28,9 +30,11 @@ from ai_gateway.config import (
     ConfigInternalEvent,
 )
 from ai_gateway.container import ContainerApplication
+from ai_gateway.model_selection import RestrictedModelAccessError
 from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.structured_logging import setup_logging
+from lib.aws_assume_role import AssumeRoleError
 
 
 def _flatten_routes(app: FastAPI) -> list[RouteContext]:
@@ -40,7 +44,6 @@ def _flatten_routes(app: FastAPI) -> list[RouteContext]:
 
 
 _ROUTES_V1 = [
-    ("/v1/chat/{chat_invokable}", ["POST"]),  # legacy path
     ("/v1/embeddings/code_embeddings", ["POST"]),
 ]
 
@@ -93,7 +96,6 @@ def fastapi_server_app_fixture(auth_enabled) -> FastAPI:
     fast_api_container = ContainerApplication()
     fast_api_container.wire(
         modules=[
-            "ai_gateway.api.v1.chat.agent",
             "ai_gateway.api.v1.search.docs",
             "ai_gateway.api.v2.code.completions",
             "ai_gateway.api.v3.code.completions",
@@ -160,7 +162,6 @@ def test_setup_router():
     server.setup_router(app)
 
     routes = _flatten_routes(app)
-    assert any(route.path == "/v1/chat/{chat_invokable}" for route in routes)
     assert any(route.path == "/v2/code/completions" for route in routes)
     assert any(route.path == "/v1/models/definitions" for route in routes)
     assert any(route.path == "/v3/code/completions" for route in routes)
@@ -398,7 +399,11 @@ def test_setup_custom_exception_handlers(app, monkeypatch):
     assert mock_add_exception_handler.mock_calls == [
         mock.call(StarletteHTTPException, custom_http_exception_handler),
         mock.call(ModelAPIError, model_api_exception_handler),
+        mock.call(AssumeRoleError, assume_role_exception_handler),
         mock.call(RequestValidationError, validation_exception_handler),
+        mock.call(
+            RestrictedModelAccessError, restricted_model_access_exception_handler
+        ),
     ]
 
 
@@ -422,6 +427,19 @@ def test_custom_http_exception_handler(app):
     assert response.json() == {"detail": "Test Exception"}
 
 
+def test_restricted_model_access_exception_handler(app):
+    @app.get("/test")
+    def test_route():
+        raise RestrictedModelAccessError()
+
+    setup_custom_exception_handlers(app)
+
+    response = TestClient(app).get("/test")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Model not available for this flow"}
+
+
 def test_model_exception_handler(app):
     @app.get("/test")
     def test_route():
@@ -434,6 +452,26 @@ def test_model_exception_handler(app):
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Inference failed"}
+
+
+def test_assume_role_exception_handler(app):
+    @app.get("/test")
+    def test_route():
+        raise AssumeRoleError(
+            "Failed to assume IAM role arn:aws:iam::123456789012:role/r: AccessDenied",
+            role_arn="arn:aws:iam::123456789012:role/r",
+            error_code="AccessDenied",
+        )
+
+    setup_custom_exception_handlers(app)
+
+    response = TestClient(app).get("/test")
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Failed to assume the requested IAM role: AccessDenied"
+    }
+    assert "123456789012" not in response.text
 
 
 def test_model_exception_handler_with_429_error(app):
@@ -555,3 +593,89 @@ def test_validation_exception_handler_with_log_request_data(
     mock_context.__setitem__.assert_called_once()
     error_message = mock_context.__setitem__.call_args[0][1]
     assert "required_field" in error_message
+
+
+@pytest.mark.asyncio
+async def test_lifespan_wires_and_validates():
+    # Pin that AIGW boots through wire_and_validate with the explicit module
+    # list; a revert to bare wire() would silently drop the unresolved-marker
+    # escalation.
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = False
+    app = MagicMock()
+    app.extra = {"extra": {"config": config}}
+
+    with (
+        patch("ai_gateway.api.server.ContainerApplication") as mock_container,
+        patch("ai_gateway.api.server.wire_and_validate") as mock_wire,
+        patch("ai_gateway.api.server.discover_feature_prompts"),
+        patch("ai_gateway.api.server.setup_litellm"),
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        async with server.lifespan(app):
+            pass
+
+    mock_wire.assert_called_once_with(
+        mock_container.return_value, modules=server.CONTAINER_APPLICATION_MODULES
+    )
+
+
+@pytest.mark.asyncio
+async def test_lifespan_snowplow_shutdown():
+    """Verify that snowplow.client().shutdown() is called during lifespan teardown."""
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = False
+    app = MagicMock()
+    app.extra = {"extra": {"config": config}}
+
+    with (
+        patch("ai_gateway.api.server.ContainerApplication") as mock_container,
+        patch("ai_gateway.api.server.wire_and_validate"),
+        patch("ai_gateway.api.server.discover_feature_prompts"),
+        patch("ai_gateway.api.server.setup_litellm"),
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        async with server.lifespan(app):
+            pass
+
+    mock_container.return_value.snowplow.client.return_value.shutdown.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_snowplow_shutdown_exception():
+    """Verify that an exception from snowplow.client().shutdown() is logged and swallowed."""
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = False
+    app = MagicMock()
+    app.extra = {"extra": {"config": config}}
+
+    with (
+        patch("ai_gateway.api.server.ContainerApplication") as mock_container,
+        patch("ai_gateway.api.server.wire_and_validate"),
+        patch("ai_gateway.api.server.discover_feature_prompts"),
+        patch("ai_gateway.api.server.setup_litellm"),
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        mock_container.return_value.snowplow.client.return_value.shutdown.side_effect = RuntimeError(
+            "snowplow unavailable"
+        )
+
+        with capture_logs() as cap_logs:
+            # Should not raise despite the shutdown() exception
+            async with server.lifespan(app):
+                pass
+
+    warning_logs = [
+        log
+        for log in cap_logs
+        if log.get("log_level") == "warning"
+        and log.get("event") == "Failed to shutdown Snowplow client"
+    ]
+    assert len(warning_logs) == 1
+    assert warning_logs[0]["error"] == "snowplow unavailable"

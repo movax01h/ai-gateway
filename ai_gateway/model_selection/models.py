@@ -96,7 +96,16 @@ class BaseModelParams(BaseModel):
     extra_headers: Mapping[str, str] | None = None
 
 
-class ChatLiteLLMParams(BaseModelParams):
+class LiteLLMProviderParams(BaseModel):
+    """LiteLLM-only params, declared once so the models.yml layer (ChatLiteLLMParams) and the prompt layer
+    (PromptProviderParams.litellm) cannot drift apart."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reasoning_effort: str | None = None
+
+
+class ChatLiteLLMParams(BaseModelParams, LiteLLMProviderParams):
     custom_llm_provider: str | None = None
     """Easily switch to huggingface, replicate, together ai, sagemaker, etc.
     Example - https://litellm.vercel.app/docs/providers/vllm#batch-completion"""

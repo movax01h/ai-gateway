@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import (
     Any,
     AsyncIterator,
@@ -10,6 +11,7 @@ from typing import (
     List,
     MutableMapping,
     NamedTuple,
+    NoReturn,
     Optional,
     cast,
     override,
@@ -26,8 +28,23 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     WrongUnitPrimitives,
 )
-from jinja2 import BaseLoader, ChoiceLoader, Environment, PackageLoader, meta
+from jinja2 import (
+    BaseLoader,
+    ChoiceLoader,
+    Environment,
+    PackageLoader,
+    meta,
+    nodes,
+    pass_environment,
+)
+from jinja2.compiler import CodeGenerator
+from jinja2.compiler import Frame as JinjaFrame
 from jinja2.exceptions import SecurityError, TemplateNotFound
+from jinja2.filters import FILTERS as _JINJA_DEFAULT_FILTERS
+from jinja2.filters import do_indent as _jinja_do_indent
+from jinja2.filters import do_last as _jinja_do_last
+from jinja2.filters import do_mark_safe as _jinja_do_mark_safe
+from jinja2.filters import do_wordwrap as _jinja_do_wordwrap
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.callbacks.usage import UsageMetadataCallbackHandler
@@ -41,8 +58,12 @@ from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
 from langchain_core.runnables.config import merge_configs
 from langchain_core.tools import BaseTool
 from langsmith import tracing_context
+from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import ServiceUnavailableError as LiteLLMServiceUnavailableError
+from openai import APIConnectionError as OpenAIAPIConnectionError
+from openai import APIError as OpenAIAPIError
+from openai import InternalServerError as OpenAIInternalServerError
 from tenacity import (
     RetryCallState,
     retry,
@@ -57,7 +78,12 @@ from ai_gateway.model_metadata import (
     TypeModelMetadata,
     resolve_provider_aware_metadata,
 )
-from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    PromptParams,
+    ensure_restricted_model_access,
+)
+from ai_gateway.model_selection.model_selection_config import fallback_models
 from ai_gateway.model_selection.models import (
     BaseModelParams,
     ModelClassProvider,
@@ -118,6 +144,8 @@ _RETRYABLE_NETWORK_ERRORS = (
     AnthropicAPIConnectionError,
     AnthropicInternalServerError,
     AnthropicOverloadedError,
+    OpenAIAPIConnectionError,
+    OpenAIInternalServerError,
     LiteLLMInternalServerError,
     LiteLLMServiceUnavailableError,
 )
@@ -133,10 +161,50 @@ _RETRYABLE_ANTHROPIC_STATUS_CODES = {500, 529}
 # match on status_code.  Instead we inspect the body's error type string.
 _RETRYABLE_ANTHROPIC_STREAM_ERROR_TYPES = {"api_error", "overloaded_error"}
 
+# OpenAI's equivalent: the stream opens with HTTP 200 and the error arrives as an
+# `error` event, which the SDK raises as the bare APIError with the event payload as
+# `body`. Only server-side failures are worth another attempt -- a content-policy or
+# invalid-request rejection fails identically however many times it is sent.
+# Deliberately limited to the two types observed in production. Rate limiting is left
+# out: we don't retry HTTP 429 either, or honour Retry-After, so retrying would add
+# load to an already-throttled provider.
+_RETRYABLE_OPENAI_STREAM_ERROR_TYPES = {"server_error", "overloaded_error"}
+
+
+def _is_retryable_openai_stream_error(exc: OpenAIAPIError) -> bool:
+    # OpenAI reports stream failures as an `error` event after the HTTP response
+    # has already returned 200, and the SDK raises the bare `APIError` for those
+    # (its streaming decoder is the only place that does). There is no status code
+    # to match on, and every subclass carries one, so an exact type check at the
+    # call site identifies the mid-stream case without swallowing classified errors.
+    #
+    # The class alone says nothing about whether the failure is transient. In one
+    # production day these arrived as a generic server error (109), a content-policy
+    # rejection (33) and an overload notice (2), so classify on the body's error
+    # type the way the Anthropic branch in `_is_retryable` does: a policy rejection
+    # should fail fast rather than burn the full backoff.
+    body = exc.body
+    if isinstance(body, dict) and isinstance(body.get("type"), str):
+        return body["type"] in _RETRYABLE_OPENAI_STREAM_ERROR_TYPES
+    # An unclassified body means the stream broke without saying why, which is the
+    # shape of the generic server error above. Retrying is the better bet, and the
+    # bounded attempt count caps the cost when it isn't.
+    return True
+
 
 def _is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, LiteLLMAPIConnectionError):
+        # litellm.exceptions.APIConnectionError subclasses openai.APIConnectionError
+        # (litellm's whole exception hierarchy mirrors openai's for compatibility),
+        # so without this guard the OpenAIAPIConnectionError entry below would also
+        # match litellm's own connection error, which litellm's client already
+        # retries internally (max_retries=3). Retrying it again here would
+        # multiply attempts (4 outer x 4 inner) instead of adding a bounded retry.
+        return False
     if isinstance(exc, _RETRYABLE_NETWORK_ERRORS):
         return True
+    if type(exc) is OpenAIAPIError:  # pylint: disable=unidiomatic-typecheck
+        return _is_retryable_openai_stream_error(exc)
     if isinstance(exc, AnthropicAPIStatusError):
         if exc.status_code in _RETRYABLE_ANTHROPIC_STATUS_CODES:
             return True
@@ -280,9 +348,52 @@ async def _ainvoke_with_retry(
     return await invoke()
 
 
-# cspell:ignore binops, binop, Sandboxed
+# cspell:ignore binops, binop, Sandboxed, NSRef, nsref
+class _NamespaceCheckedCodeGenerator(CodeGenerator):
+    """Close a gap in Jinja2's ``{% set ns.attr %}`` handling.
+
+    ``CodeGenerator.visit_Assign`` (the plain form, ``{% set ns.attr = value %}``)
+    checks ``ns`` is a ``Namespace`` before allowing the write.
+    ``visit_AssignBlock`` (the block form, ``{% set ns.attr %}...{% endset %}``)
+    never emits that check, so it can write an arbitrary key/attribute onto
+    *any* object exposed to the template, not just ``namespace()`` objects.
+    No sandbox hook sees this either way -- the assignment compiles straight
+    into the rendered template's exec'd code.
+    """
+
+    def visit_AssignBlock(self, node: nodes.AssignBlock, frame: JinjaFrame) -> None:
+        # `node.target` isn't always a bare NSRef -- it can be a tuple
+        # containing one, e.g. `{% set junk, ns.attr %}`. Collect all NSRefs
+        # in it (deduped), same idea as `visit_Assign`'s `find_all`, but
+        # rooted at `target` rather than the whole node: `node.body` can
+        # contain nested block-sets, and checking their targets too would
+        # crash on a name the outer frame never learned about. `find_all`
+        # only checks descendants, not the node itself, so a bare `NSRef`
+        # target needs a separate check.
+        target = node.target
+        candidate_refs = ([target] if isinstance(target, nodes.NSRef) else []) + list(
+            target.find_all(nodes.NSRef)
+        )
+        seen_refs: set[str] = set()
+        for nsref in candidate_refs:
+            if nsref.name in seen_refs:
+                continue
+            seen_refs.add(nsref.name)
+            ref = frame.symbols.ref(nsref.name)
+            self.writeline(f"if not isinstance({ref}, Namespace):")
+            self.indent()
+            self.writeline(
+                "raise TemplateRuntimeError"
+                '("cannot assign attribute on non-namespace object")'
+            )
+            self.outdent()
+        super().visit_AssignBlock(node, frame)
+
+
 class PromptSandboxedEnvironment(ImmutableSandboxedEnvironment):
     """Sandboxed environment that forbids method access on bound objects."""
+
+    code_generator_class = _NamespaceCheckedCodeGenerator
 
     intercepted_binops = frozenset(["*", "**"])
 
@@ -377,21 +488,174 @@ def parse_json(value: Any) -> Any:
         raise SecurityError("Invalid json value") from e
 
 
-class FeatureRootLoader(BaseLoader):
-    """Resolve a self-namespaced include to a moved feature's ``prompts/`` dir.
+def _make_blocked_filter(name: str) -> Callable[..., NoReturn]:
+    """Build a filter that unconditionally blocks a built-in Jinja2 filter.
 
-    Template name ``<feature_id>/<rest>`` maps to ``<registered_root>/<rest>``,
-    so include strings need no rewrite when a feature moves to Layout B.
+    Used for filters that call a named method directly on their argument
+    without checking its type (e.g. ``reverse``'s ``reversed()``,
+    ``escape``'s ``s.__html__()``, ``dictsort``'s ``value.items()``).
+    Filter calls skip every sandbox check, so a template can pass any live
+    object it holds and have that method invoked, including one resolved
+    through an object's own ``__getattr__`` fallback (e.g. Pydantic's
+    ``model_extra``). None of these have a legitimate use here, so each is
+    blocked outright rather than sanitised.
+
+    Raises:
+        SecurityError: Always, when the returned filter is called.
+    """
+
+    def blocked_filter(*_args: Any, **_kwargs: Any) -> NoReturn:
+        log.warning(f"Blocked use of {name} filter in prompt template")
+        raise SecurityError(f"The '{name}' filter is not allowed in prompt templates")
+
+    blocked_filter.__name__ = f"blocked_{name}_filter"
+    return blocked_filter
+
+
+def guarded_indent_filter(value: Any, *args: Any, **kwargs: Any) -> Any:
+    """Block the built-in ``indent`` filter on non-string values.
+
+    ``do_indent`` runs ``s += newline`` before calling ``s.splitlines()``.
+    On a mutable non-string such as a list, that ``+=`` mutates the
+    caller's live object in place before ``.splitlines()`` raises. Strings
+    are immutable, so this is only a risk for non-strings, which
+    ``do_indent`` doesn't support anyway.
+
+    Raises:
+        SecurityError: If ``value`` is not a string.
+    """
+    if not isinstance(value, str):
+        log.warning("Blocked use of 'indent' filter on a non-string value")
+        raise SecurityError(
+            "The 'indent' filter is not allowed on non-string values in prompt templates"
+        )
+    return _jinja_do_indent(value, *args, **kwargs)
+
+
+def guarded_safe_filter(value: Any) -> Any:
+    """Block the built-in ``safe`` filter on non-string values.
+
+    ``do_mark_safe`` calls ``Markup(value)``, whose ``__new__`` calls
+    ``value.__html__()`` if present -- the same gadget as the
+    already-blocked ``escape``/``e``/``forceescape``/``striptags``, and
+    invocable the same way via an object's ``__getattr__`` fallback (e.g.
+    Pydantic's ``model_extra``).
+
+    Raises:
+        SecurityError: If ``value`` is not a string.
+    """
+    if not isinstance(value, str):
+        log.warning("Blocked use of 'safe' filter on a non-string value")
+        raise SecurityError(
+            "The 'safe' filter is not allowed on non-string values in prompt templates"
+        )
+    return _jinja_do_mark_safe(value)
+
+
+@pass_environment
+def guarded_last_filter(environment: Environment, seq: Any) -> Any:
+    """Block the built-in ``last`` filter on mapping values.
+
+    ``last`` also calls ``reversed()``, same as the blocked ``reverse``
+    filter, so it's just as risky on a mapping. Unlike ``reverse``, ``last``
+    has a legitimate use on lists and strings (e.g. ``goal | split(...) |
+    last``), so only mapping input is blocked.
+
+    Raises:
+        SecurityError: If ``seq`` is a mapping.
+    """
+    if isinstance(seq, MutableMapping):
+        log.warning("Blocked use of 'last' filter on a mapping in prompt template")
+        raise SecurityError(
+            "The 'last' filter is not allowed on mapping values in prompt templates"
+        )
+    return _jinja_do_last(environment, seq)
+
+
+@pass_environment
+def guarded_wordwrap_filter(
+    environment: Environment,
+    s: Any,
+    width: int = 79,
+    break_long_words: bool = True,
+    wrapstring: Any = None,
+    break_on_hyphens: bool = True,
+) -> Any:
+    """Block non-string ``s``, and coerce ``wordwrap``'s separator to a string.
+
+    ``do_wordwrap`` calls ``s.splitlines()`` on the text being wrapped, and
+    ``wrapstring.join(...)`` on the separator -- both call a named method
+    on the raw value instead of coercing it first (unlike the built-in
+    ``join`` filter, which does ``str(d).join(...)``). Either can invoke
+    an attacker-controlled method via an object's ``__getattr__`` fallback
+    (e.g. Pydantic's ``model_extra``). ``s`` has no legitimate non-string
+    use, so it's rejected; ``wrapstring`` does (a custom separator), so
+    it's coerced via ``str()`` instead, which resolves ``__str__`` on the
+    type directly and so can't be hijacked the same way.
+
+    Raises:
+        SecurityError: If ``s`` is not a string.
+    """
+    if not isinstance(s, str):
+        log.warning("Blocked use of 'wordwrap' filter on a non-string value")
+        raise SecurityError(
+            "The 'wordwrap' filter is not allowed on non-string values in prompt templates"
+        )
+    if wrapstring is not None and not isinstance(wrapstring, str):
+        log.warning("Coerced a non-string 'wordwrap' separator in prompt template")
+        wrapstring = str(wrapstring)
+    return _jinja_do_wordwrap(
+        environment, s, width, break_long_words, wrapstring, break_on_hyphens
+    )
+
+
+# Patch Jinja2's own filter table, not just this module's `jinja_env` instance
+# below, so that every Environment built anywhere in this process - including
+# duo_workflow_service's own separate `PromptSandboxedEnvironment(...)`
+# instances - copies these blocks too. `Environment.__init__` does
+# `self.filters = DEFAULT_FILTERS.copy()`, and `DEFAULT_FILTERS` is this exact
+# dict object, so patching it here, before any Environment is constructed,
+# applies process-wide. `jinja_env` below inherits it automatically.
+for _blocked_name in (
+    "reverse",
+    "escape",
+    "e",
+    "forceescape",
+    "striptags",
+    "dictsort",
+    "xmlattr",
+    "urlize",
+):
+    _JINJA_DEFAULT_FILTERS[_blocked_name] = _make_blocked_filter(_blocked_name)
+
+_JINJA_DEFAULT_FILTERS["last"] = guarded_last_filter
+_JINJA_DEFAULT_FILTERS["indent"] = guarded_indent_filter
+_JINJA_DEFAULT_FILTERS["safe"] = guarded_safe_filter
+_JINJA_DEFAULT_FILTERS["wordwrap"] = guarded_wordwrap_filter
+
+
+class FeatureRootLoader(BaseLoader):
+    """Resolve a self-namespaced include to a registered ``prompts/`` dir.
+
+    Template name ``<prompt_id>/<rest>`` maps to ``<registered_root>/<rest>``,
+    so include strings need no rewrite when a prompt moves. A two-part id such
+    as ``chat/react`` is tried before a one-part id.
     """
 
     def get_source(
         self, environment: Environment, template: str
     ) -> tuple[str, str, Callable[[], bool] | None]:
-        feature_id, _, rest = template.partition("/")
-        root = feature_prompt_root(feature_id)
-        if root is None or not rest:
-            raise TemplateNotFound(template)
+        parts = template.split("/")
+        for depth in (2, 1):
+            root = feature_prompt_root("/".join(parts[:depth]))
+            if root is not None and len(parts) > depth:
+                return self._read(root, "/".join(parts[depth:]), template)
+        raise TemplateNotFound(template)
 
+    @staticmethod
+    def _read(
+        root: Path, rest: str, template: str
+    ) -> tuple[str, str, Callable[[], bool] | None]:
         path = (root / rest).resolve()
         if not path.is_relative_to(root.resolve()) or not path.is_file():
             raise TemplateNotFound(template)
@@ -482,9 +746,13 @@ class BasePromptCallbackHandler:
         """
 
 
+ANTHROPIC_ONLY_MODEL_KWARGS = ("context_management", "thinking", "output_config")
+
+
 class Prompt(RunnableBinding[Any, BaseMessage]):
     name: str
     model_provider: str
+    model_vendor: Optional[str] = None
     model: Model
     unit_primitive: GitLabUnitPrimitive
     operation_type: LLMOperationType = "standard"
@@ -493,6 +761,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     limits: Optional[ModelLimits] = None
     internal_event_extra: dict[str, Any] = {}
     internal_callbacks: list[BasePromptCallbackHandler] = []
+    requested_model: Optional[str] = None
 
     def __init__(
         self,
@@ -514,10 +783,26 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             config.params, model_metadata, config.prompt_template, model_provider
         )
 
-        if "context_management" in model_kwargs and not self._is_anthropic_provider(
-            model_provider, config.model.params
-        ):
-            model_kwargs.pop("context_management")
+        llm_definition = model_metadata.llm_definition if model_metadata else None
+        # Default-deny for restricted models, on every name the model can be reached
+        # by: the resolved definition, a custom-provider identifier, a raw model string, or a fallback.
+        ensure_restricted_model_access(
+            identifiers=[
+                llm_definition.gitlab_identifier if llm_definition else None,
+                getattr(model_metadata, "name", None),
+            ],
+            models=[
+                model_kwargs.get("model"),
+                model_kwargs.get("model_id"),
+                config.model.params.model,
+                llm_definition.params.model if llm_definition else None,
+                *fallback_models(llm_definition.params if llm_definition else None),
+            ],
+        )
+
+        if not self._is_anthropic_provider(model_provider, config.model.params):
+            for key in ANTHROPIC_ONLY_MODEL_KWARGS:
+                model_kwargs.pop(key, None)
 
         model = self._build_model(
             model_factory,
@@ -564,7 +849,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             prompt_template_factory(model_provider, config)
             if prompt_template_factory
             else bind_model_variables(
-                self._build_prompt_template(config), model_provider, model_metadata
+                self._build_prompt_template(config, tools),
+                model_provider,
+                model_metadata,
             )
         )
         prompt = self._chain_cache_control_injection_points_converter(
@@ -603,14 +890,29 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             ),
         )
 
+        # Only LiteLLM clients name the vendor (e.g. fireworks_ai); other clients
+        # (anthropic, openai, ...) are their own vendor.
+        custom_llm_provider = getattr(base_model, "custom_llm_provider", None)
+        model_vendor = (
+            custom_llm_provider
+            if isinstance(custom_llm_provider, str) and custom_llm_provider
+            else model_provider
+        )
+
         super().__init__(
             name=config.name,
             model_provider=model_provider,
+            model_vendor=model_vendor,
             model=model,
             unit_primitive=config.unit_primitive,
             operation_type=config.operation_type,
             bound=chain,
             prompt_tpl=prompt_tpl,
+            requested_model=(
+                model_kwargs.get("model")
+                if model_metadata and model_metadata.is_custom_model
+                else None
+            ),
             **kwargs,
         )  # type: ignore[call-arg]
 
@@ -758,6 +1060,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     additional_allowed=operator_allowed_headers,
                 )
 
+        ensure_restricted_model_access(
+            models=[model_factory_args.get("model"), model_factory_args.get("model_id")]
+        )
+
         return model_factory(**model_factory_args)
 
     @property
@@ -765,12 +1071,18 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         return self.model._identifying_params["model"]
 
     @property
+    def reported_model_name(self) -> str:
+        """Name to report in logs and metrics: the requested model for custom models, else the instance model."""
+        return self.requested_model or self.model_name
+
+    @property
     def instrumentator(self) -> ModelRequestInstrumentator:
         return ModelRequestInstrumentator(
             model_engine=self.model._llm_type,
-            model_name=self.model_name,
+            model_name=self.reported_model_name,
             limits=self.limits,
             model_provider=self.model_provider,
+            model_vendor=self.model_vendor or "",
         )
 
     def set_limits(self, model_limits: ConfigModelLimits):
@@ -923,8 +1235,13 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             )
 
     @classmethod
-    def _build_prompt_template(cls, config: PromptConfig) -> ChatPromptTemplate:
-        messages = prompt_template_to_messages(config.prompt_template)
+    def _build_prompt_template(
+        cls, config: PromptConfig, tools: Optional[List[BaseTool]] = None
+    ) -> ChatPromptTemplate:
+        messages = prompt_template_to_messages(
+            config.prompt_template,
+            tool_output_security=config.tool_output_security or bool(tools),
+        )
 
         return ChatPromptTemplate.from_messages(messages, template_format="jinja2")
 
@@ -995,6 +1312,7 @@ class BasePromptRegistry(ABC):
         tools: Optional[List[BaseTool]] = None,
         is_graph_node: bool = False,
         unit_primitive: Optional[GitLabUnitPrimitive] = None,
+        track_event: bool = True,
         **kwargs: Any,
     ) -> Prompt:
         if not model_metadata:
@@ -1022,9 +1340,10 @@ class BasePromptRegistry(ABC):
             raise WrongUnitPrimitives
 
         # Only record internal events once we know the user has access to the Unit Primitive
-        self.internal_event_client.track_event(
-            f"request_{authorized_unit_primitive}", category=internal_event_category
-        )
+        if track_event:
+            self.internal_event_client.track_event(
+                f"request_{authorized_unit_primitive}", category=internal_event_category
+            )
 
         return prompt
 
@@ -1105,7 +1424,7 @@ class BasePromptRegistry(ABC):
         models_visited = set()
 
         for unit_primitive_config in model_selection_config.get_unit_primitive_config():
-            for model in unit_primitive_config.default_models:
+            for model in unit_primitive_config.default_model_identifiers:
                 if model in models_visited:
                     continue
 

@@ -17,7 +17,7 @@ spec:
     - europe-west9
   deployment:
     strategy: "expedited"
-  request_timeout: 90
+  request_timeout: 240
   observability:
     scrape_targets:
       - "localhost:8082"
@@ -30,7 +30,9 @@ spec:
     failure_threshold: 24
   liveness_probe:
     path: "/monitoring/healthz"
-    timeout_seconds: 5
+    timeout_seconds: 10
+    period_seconds: 15
+    failure_threshold: 10
   scalability:
     min_instances: 1
     max_instances: 100
@@ -48,3 +50,30 @@ spec:
   vpc_access:
     enabled: true
     egress: ALL_TRAFFIC
+  sidecars:
+    - name: events-sidecar
+      image: registry.gitlab.com/gitlab-org/analytics-section/analytics-instrumentation/events-sidecar:0.1.0
+      env:
+        - name: LISTEN_ADDR
+          value: ":8130"
+        - name: GITLAB_EVENTS_COLLECTOR
+          value: "https://events-stg.gitlab.net"
+        - name: GITLAB_EVENTS_APP_ID
+          value: "gitlab_ai_gateway"
+        - name: GITLAB_BILLING_EVENTS_APP_ID
+          value: "gitlab_ai_gateway-billing"
+      startup_probe:
+        port: 8130
+        path: /-/readiness
+        initial_delay_seconds: 5
+        period_seconds: 10
+        failure_threshold: 3
+      liveness_probe:
+        port: 8130
+        path: /-/liveness
+        period_seconds: 15
+        failure_threshold: 3
+      resources:
+        limits:
+          cpu: "200m"
+          memory: "128Mi"

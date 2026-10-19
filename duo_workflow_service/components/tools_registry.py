@@ -1,5 +1,8 @@
 import copy
+import importlib.util
 import json
+import keyword
+from pathlib import Path
 from typing import (
     Any,
     Iterable,
@@ -40,6 +43,7 @@ from duo_workflow_service.tools.set_form_permissions import SetFormPermissions
 from duo_workflow_service.tools.update_form_fields import UpdateFormFields
 from duo_workflow_service.tools.update_form_permissions import UpdateFormPermissions
 from duo_workflow_service.tools.web_search import web_search_boto_session
+from lib.feature_roots import default_features_dir
 from lib.language_server import LanguageServerVersion
 
 log = structlog.stdlib.get_logger("tools_registry")
@@ -88,6 +92,7 @@ _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
     tools.ShellCommand,
     tools.AdvanceBlobSearch,
     tools.ReadFileChunked,
+    tools.GrepLiteral,
     tools.NotifyMeWhen,
     tools.AgentCoreWebSearch,
 ]
@@ -99,11 +104,15 @@ _CAPABILITY_DEPENDENT_TOOLS: list[Type[BaseTool]] = [
 # someone puts it here on purpose. Superseding tools are absent because they inherit the approval
 # state of the tool they replace.
 #
-# Only read-only tools with no side effects belong here.
+# Only tools with no effect outside this session belong here: a read, or a message the
+# agent sends its future self.
 _PREAPPROVED_CAPABILITY_TOOLS: list[Type[BaseTool]] = [
     # Reads public web pages and returns text. Nothing is written, and the agent is told to treat
     # results as untrusted, so prompting on each search would only add friction.
     tools.AgentCoreWebSearch,
+    # A message from the agent to its future self. Touches no file, process, network or
+    # GitLab resource, so prompting on it is friction without protection. See #2906.
+    tools.NotifyMeWhen,
 ]
 
 _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
@@ -113,6 +122,7 @@ _READ_ONLY_FILE_TOOLS: list[Type[BaseTool]] = [
     tools.FindFiles,
     tools.Grep,
     tools.ExtractLinesFromText,
+    tools.FinalizeCodeReviewFindings,
 ]
 
 _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
@@ -161,10 +171,9 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
     tools.GetCurrentUser,
     tools.GetVulnerabilityDetails,
     tools.EvaluateVulnerabilityFalsePositiveStatus,
+    tools.ResolveVulnerabilityTargetBranch,
     tools.ExtractLinesFromText,
-    tools.GetGlqlSchema,
     tools.FetchGlqlSchema,
-    tools.RunGLQLQuery,
     tools.BuildReviewMergeRequestContext,
     tools.GetSecurityFindingDetails,
     tools.ListSecurityFindings,
@@ -184,11 +193,16 @@ ToolsOrConfigs = Union[Sequence[Type[BaseTool]], Sequence[McpToolConfig]]
 _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
     "read_only_files": _READ_ONLY_FILE_TOOLS,
     "read_write_files": [
+        tools.BlPrioritizeAndCap,
         *_READ_ONLY_FILE_TOOLS,
+        tools.BlCollectAndFlatten,
         tools.WriteFile,
         tools.EditFile,
+        tools.BlDedupFindings,
+        tools.BlWriteSastReport,
         tools.Mkdir,
         tools.RunTests,
+        tools.BlDiscoverAndCluster,
     ],
     "use_git": [
         tools.git.Command,
@@ -203,6 +217,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.CreateMergeRequestDiffNote,
         tools.UpdateMergeRequest,
         tools.AddMergeRequestReviewers,
+        tools.PostSuggestedReviewers,
         tools.CreateEpic,
         tools.UpdateEpic,
         tools.CreateCommit,
@@ -222,6 +237,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.PostSastFpAnalysisToGitlab,
         tools.PostSecretFpAnalysisToGitlab,
         tools.PostDuoCodeReview,
+        tools.PostDuoCodeReviewFindings,
         tools.SubmitMergeRequestRiskClassification,
         SubmitMrReview,
         ReplyToDiscussion,
@@ -242,6 +258,213 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
 }
 
 
+def discover_feature_tools(
+    features_dir: Optional[Path] = None,
+) -> dict[str, list[Type[BaseTool]]]:
+    """Collect ``{privilege: [tool classes]}`` declared by features under ai/features/.
+
+    A feature that owns tools exposes a ``FEATURE_TOOLS`` mapping in its
+    ``components`` package. Silent when the tree is absent.
+
+    Args:
+        features_dir: Root directory to scan instead of the real
+            ``ai/features`` tree. Intended for tests; defaults to the actual
+            features directory when omitted.
+
+    Returns:
+        A mapping of privilege name to the list of tool classes declared
+        for it.
+    """
+    root = features_dir or default_features_dir()
+    discovered: dict[str, list[Type[BaseTool]]] = {}
+    if not root.is_dir():
+        return discovered
+
+    for init_file in sorted(root.glob("*/*/components/__init__.py")):
+        feature = init_file.parent.parent.name
+        domain = init_file.parent.parent.parent.name
+        # A non-identifier or keyword name (e.g. "evil.pkg", "class") cannot
+        # form an importable package name.
+        if not (
+            domain.isidentifier()
+            and feature.isidentifier()
+            and not keyword.iskeyword(domain)
+            and not keyword.iskeyword(feature)
+        ):
+            log.warning(
+                "Skipping feature with non-identifier directory name",
+                domain=domain,
+                feature=feature,
+            )
+            continue
+        if features_dir is None:
+            # Real tree: the normal import machinery binds parent packages and
+            # caches in sys.modules, keeping tool classes identity-stable for
+            # any later plain import of the components package.
+            module = importlib.import_module(
+                f"ai.features.{domain}.{feature}.components"
+            )
+        else:
+            # Synthetic tree (tests): execute a throwaway module from the file
+            # without touching sys.modules or the real package namespace.
+            spec = importlib.util.spec_from_file_location(
+                f"_feature_tools_{domain}_{feature}", init_file
+            )
+            if spec is None or spec.loader is None:
+                log.warning(
+                    "Skipping feature whose components package has no loadable spec",
+                    domain=domain,
+                    feature=feature,
+                )
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        for privilege, tool_classes in getattr(module, "FEATURE_TOOLS", {}).items():
+            discovered.setdefault(privilege, []).extend(tool_classes)
+    return discovered
+
+
+# read_write_gitlab is a superset of read_only_gitlab, so a read-only tool joins both.
+_PRIVILEGE_SUPERSETS: dict[str, list[str]] = {
+    "read_only_gitlab": ["read_only_gitlab", "read_write_gitlab"],
+    "read_only_files": ["read_only_files", "read_write_files"],
+}
+
+
+def _tool_name(tool_cls: Union[Type[BaseTool], Type[BaseModel]]) -> str:
+    """Registry name of a tool class; no-op tools use ``tool_title`` instead of a ``name`` field."""
+    title = getattr(tool_cls, "tool_title", None)
+    if title is not None:
+        return title
+    name = tool_cls.model_fields["name"].default
+    if not isinstance(name, str):
+        raise ValueError(
+            f"{tool_cls.__name__} declares no default for its name field, so it "
+            "cannot be checked for registry collisions"
+        )
+    return name
+
+
+def agent_privileges_for_tool(tool_name: str) -> list[str]:
+    """Names of the agent privileges that grant ``tool_name``; empty when no privilege does (e.g. MCP tools)."""
+    return [
+        privilege
+        for privilege, tool_classes in _AGENT_PRIVILEGES.items()
+        if any(_tool_name(tool_cls) == tool_name for tool_cls in tool_classes)
+    ]
+
+
+def _merge_feature_tools(
+    privileges: dict[str, list[Type[BaseTool]]],
+    discovered: dict[str, list[Type[BaseTool]]],
+    reserved: Iterable[Union[Type[BaseTool], Type[BaseModel]]] = (),
+) -> None:
+    """Merge feature-declared tools into the privilege map.
+
+    A feature tool must declare a privilege that already exists in the map and a tool name no other tool uses, so a typo
+    cannot leave a tool silently ungated or shadow another tool in the registry.
+    """
+    taken = {_tool_name(tc) for tcs in privileges.values() for tc in tcs}
+    taken.update(_tool_name(tc) for tc in reserved)
+
+    for privilege, tool_classes in discovered.items():
+        if privilege == _RUN_MCP_TOOLS_PRIVILEGE:
+            raise ValueError(
+                f"Feature tools {[_tool_name(tc) for tc in tool_classes]} declare "
+                f"{privilege!r}, which the registry rebuilds at runtime; tools "
+                "declared under it would be silently dropped"
+            )
+        if privilege not in privileges:
+            raise ValueError(
+                f"Feature tools {[_tool_name(tc) for tc in tool_classes]} declare "
+                f"unknown privilege {privilege!r}; known privileges: "
+                f"{sorted(privileges)}"
+            )
+        for tool_cls in tool_classes:
+            name = _tool_name(tool_cls)
+            if name in taken:
+                raise ValueError(
+                    f"Feature tool name {name!r} is already registered; "
+                    "tool names must be unique across the registry"
+                )
+            taken.add(name)
+        for target in _PRIVILEGE_SUPERSETS.get(privilege, [privilege]):
+            # Rebind instead of extending: the privilege lists alias module-level
+            # constants, which an in-place extend would silently mutate.
+            # The taken-name guard above already rejected duplicates.
+            privileges[target] = privileges.get(target, []) + list(tool_classes)
+
+
+def _reserved_tool_names(
+    privileges: dict[str, ToolsOrConfigs],
+) -> set[str]:
+    """Names no MCP tool may take, whatever origin it claims."""
+    candidates: list[Union[Type[BaseTool], Type[BaseModel]]] = [
+        *_DEFAULT_TOOLS,
+        *NO_OP_TOOLS,
+        *_CAPABILITY_DEPENDENT_TOOLS,
+    ]
+    for privilege, entries in privileges.items():
+        if privilege == _RUN_MCP_TOOLS_PRIVILEGE:
+            continue
+        candidates.extend(e for e in entries if not isinstance(e, dict))
+
+    reserved = set()
+    for tool_cls in candidates:
+        try:
+            reserved.add(_tool_name(tool_cls))
+        except ValueError:
+            continue
+    return reserved
+
+
+def _drop_shadowing_mcp_tools(
+    mcp_tools: list[McpToolConfig], reserved: set[str], governed_names: set[str]
+) -> list[McpToolConfig]:
+    """Drop MCP tools that would answer for a tool GitLab owns.
+
+    A reserved name is refused whatever the entry claims about its origin, because
+    client_injected is only trustworthy behind Workhorse. Tools from a server GitLab
+    configured are always server-prefixed, so they never hold a reserved name anyway.
+
+    A governed name is refused only for client-injected entries: an admin rule naming a
+    GitLab MCP tool must make it prompt, not remove it.
+
+    On a name collision the non-client-injected entry wins. Workhorse already orders the
+    lists so that it does, but that contract lives in another repo, so enforce it here
+    rather than depend on it.
+    """
+    kept: dict[str, McpToolConfig] = {}
+    for config in mcp_tools:
+        incumbent = kept.get(config["llm_name"])
+        if config["llm_name"] in reserved:
+            refusal_reason = "reserved"
+        elif config["client_injected"] and config["llm_name"] in governed_names:
+            refusal_reason = "governed"
+        elif (
+            incumbent is not None
+            and config["client_injected"]
+            and not incumbent["client_injected"]
+        ):
+            refusal_reason = "collision"
+        else:
+            refusal_reason = None
+
+        if refusal_reason:
+            log.warning(
+                "Dropped MCP tool shadowing a name GitLab owns",
+                extra={
+                    "original_name": config["original_name"],
+                    "llm_name": config["llm_name"],
+                    "client_injected": config["client_injected"],
+                    "refusal_reason": refusal_reason,
+                },
+            )
+            continue
+        kept[config["llm_name"]] = config
+    return list(kept.values())
+
+
 TOOL_CALL_APPROVED_QUERY = """
 query($workflowId: AiDuoWorkflowsWorkflowID!, $toolName: String!, $toolCallArgs: String!) {
     duoWorkflowWorkflows(workflowId: $workflowId) {
@@ -257,6 +480,7 @@ class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
     _ask_tool_names: set[str]
+    _policy_permitted_preapprovals: Optional[set[str]]
     _mcp_tool_names: list[str]
 
     @classmethod
@@ -271,6 +495,9 @@ class ToolsRegistry:
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
         ask_tools: Optional[list[str]] = None,
+        allow_client_injected_mcp_tools: bool = False,
+        allowed_tools: Optional[list[str]] = None,
+        admin_allowed_preapprovals: Optional[set[str]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -302,6 +529,9 @@ class ToolsRegistry:
             language_server_version=language_server_version,
             denied_tools=denied_tools or [],
             ask_tools=ask_tools or [],
+            allow_client_injected_mcp_tools=allow_client_injected_mcp_tools,
+            allowed_tools=allowed_tools or [],
+            admin_allowed_preapprovals=admin_allowed_preapprovals,
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
         )
@@ -317,24 +547,35 @@ class ToolsRegistry:
         language_server_version: Optional[LanguageServerVersion] = None,
         denied_tools: Optional[list[str]] = None,
         ask_tools: Optional[list[str]] = None,
+        allow_client_injected_mcp_tools: bool = False,
+        allowed_tools: Optional[list[str]] = None,
+        admin_allowed_preapprovals: Optional[set[str]] = None,
     ):
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
 
         # Always enable mcp tools until it's reliably passed by clients as an agent privilege
         enabled_tools.append(_RUN_MCP_TOOLS_PRIVILEGE)
 
+        registered_mcp_tools: list[McpToolConfig] = []
         if _RUN_MCP_TOOLS_PRIVILEGE in enabled_tools:
-            tools_for_agent_privileges[_RUN_MCP_TOOLS_PRIVILEGE] = mcp_tools or []
+            registered_mcp_tools = _drop_shadowing_mcp_tools(
+                mcp_tools or [],
+                _reserved_tool_names(tools_for_agent_privileges),
+                set(ask_tools or []) | set(denied_tools or []),
+            )
+            tools_for_agent_privileges[_RUN_MCP_TOOLS_PRIVILEGE] = registered_mcp_tools
 
         self._enabled_tools = {
             **{tool_cls.tool_title: tool_cls for tool_cls in NO_OP_TOOLS},  # type: ignore
             **{tool.name: tool for tool in [tool_cls() for tool_cls in _DEFAULT_TOOLS]},
         }
 
-        self._preapproved_tool_names = set(self._enabled_tools.keys())
+        # Not privilege-derived, so the governance ceiling never strips them.
+        baseline_preapproved = set(self._enabled_tools.keys())
+        self._preapproved_tool_names = set(baseline_preapproved)
         self._denied_tools: set[str] = set(denied_tools or [])
         self._ask_tool_names: set[str] = set(ask_tools or [])
-        self._mcp_tool_names = [tool["llm_name"] for tool in mcp_tools or []]
+        self._mcp_tool_names = [tool["llm_name"] for tool in registered_mcp_tools]
 
         self._gl_http_client = gl_http_client
         self._workflow_id = workflow_id
@@ -354,6 +595,7 @@ class ToolsRegistry:
                         metadata=tool_metadata,  # type: ignore[arg-type]
                     )
                     tool._original_mcp_name = tool_cls_or_config["original_name"]
+                    tool._client_injected = tool_cls_or_config["client_injected"]
                 else:
                     tool = tool_cls_or_config(metadata=tool_metadata)  # type: ignore[assignment]
 
@@ -414,10 +656,65 @@ class ToolsRegistry:
             # by itself.
             if tool_cls in _PREAPPROVED_CAPABILITY_TOOLS:
                 self._preapproved_tool_names.add(tool_name)
+                baseline_preapproved.add(tool_name)
 
-        # Applied last so it outranks every pre-approval source above: an admin `ask`
-        # rule must always reach the user, never be silently auto-approved.
+        if allow_client_injected_mcp_tools:
+            client_injected = {
+                name
+                for name, tool in self._enabled_tools.items()
+                if getattr(tool, "_client_injected", False)
+            }
+            self._preapproved_tool_names.update(client_injected)
+            # A client names its own MCP tools, so no admin allow list can rule on them.
+            baseline_preapproved.update(client_injected)
+
+        # Per-tool admin `allow` rules pre-approve a tool even when its privilege group
+        # is not pre-approved as a whole (a mixed group). Scoped to enabled tools so an
+        # allow cannot introduce a tool the flow never had, and to GitLab-origin tools:
+        # a client names its own MCP tools, so an allow on a GitLab MCP tool name must
+        # not reach a client entry that shares it. The flag above covers the opted-in case.
+        self._preapproved_tool_names |= {
+            name
+            for name in allowed_tools or []
+            if name in self._enabled_tools
+            and not getattr(self._enabled_tools[name], "_client_injected", False)
+        }
+
+        # The workflow row is writable by the session owner, so the pre-approvals derived
+        # from it are capped at what admin policy allows. `None` means the ceiling is off.
+        # An allowed name only admits a GitLab-origin tool, matching the union above.
+        if admin_allowed_preapprovals is None:
+            self._policy_permitted_preapprovals = None
+        else:
+            self._policy_permitted_preapprovals = {
+                name
+                for name in admin_allowed_preapprovals
+                if not getattr(self._enabled_tools.get(name), "_client_injected", False)
+            } | baseline_preapproved
+        removed = self._preapproved_tool_names - self.pre_approvals_allowed_by_policy(
+            self._preapproved_tool_names
+        )
+        if removed:
+            log.info(
+                "Removed tools from pre-approval: not permitted by admin policy",
+                workflow_id=workflow_id,
+                tool_names=sorted(removed),
+            )
+        self._preapproved_tool_names -= removed
+
+        # Applied last so it outranks every pre-approval source above. Only binds where
+        # a user can be prompted: headless sessions arrive with `ask_tools` already
+        # emptied upstream, so an ask rule cannot force a prompt there.
         self._preapproved_tool_names -= self._ask_tool_names
+
+    def pre_approvals_allowed_by_policy(self, tool_names: Iterable[str]) -> set[str]:
+        """Reduce a pre-approval list, such as a flow config's, to what admin policy permits.
+
+        Returns the names unchanged when the ceiling is off for this session.
+        """
+        names = set(tool_names)
+        permitted = self._policy_permitted_preapprovals
+        return names if permitted is None else names & permitted
 
     def ask_listed_tool_names(self, tool_names: Iterable[str]) -> set[str]:
         """Return the subset of ``tool_names`` an admin `ask` rule forces to prompt."""
@@ -445,8 +742,9 @@ class ToolsRegistry:
     def is_preapproved(self, tool_name: str) -> bool:
         """Check if a tool is preapproved (no approval ever needed).
 
-        This is a local check against the privilege-level preapproval list. Use this for routing decisions where you
-        don't need per-call checks.
+        This is a local check against the registry's pre-approved names, which come from privilege groups, capability
+        tools, admin `allow` rules, and client-injected tools where a session opted in. Use this for routing decisions
+        where you don't need per-call checks.
         """
         return tool_name in self._preapproved_tool_names
 
@@ -610,3 +908,15 @@ class ToolsRegistry:
             approval_policy=self,
             denied_tools=denied_tools,
         )
+
+
+# Reserve every name the registry can enable outside the privilege map, so a
+# feature tool cannot shadow a default, no-op, or capability-dependent tool.
+# Runs after every class in this module is defined: a feature components module
+# may import modules that themselves import this one (for example the flow
+# platform), which arrives here partially initialized during discovery.
+_merge_feature_tools(
+    _AGENT_PRIVILEGES,
+    discover_feature_tools(),
+    reserved=[*_DEFAULT_TOOLS, *NO_OP_TOOLS, *_CAPABILITY_DEPENDENT_TOOLS],
+)

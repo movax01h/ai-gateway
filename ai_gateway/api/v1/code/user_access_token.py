@@ -22,6 +22,7 @@ from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
 from lib.jwt import (
     GITLAB_ROOT_NAMESPACE_ID_CLAIM,
+    instance_uid_claim,
     root_namespace_id_from_claims_extra,
     root_namespace_id_from_header,
 )
@@ -110,7 +111,7 @@ async def user_access_token(
         )
 
     elif user_claims.gitlab_realm == "self-managed":
-        extra_claims.update({"gitlab_instance_uid": user_claims.gitlab_instance_uid})
+        extra_claims.update(instance_uid_claim(user_claims))
 
     try:
         token, expires_at = token_authority.encode(

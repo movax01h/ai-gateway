@@ -12,12 +12,14 @@ from duo_workflow_service.interceptors import (
     X_GITLAB_INSTANCE_ID_HEADER,
     X_GITLAB_IS_A_GITLAB_MEMBER,
     X_GITLAB_IS_GITLAB_MEMBER,
+    X_GITLAB_USER_ID_HEADER,
 )
 from duo_workflow_service.tracking.duo_workflow_metrics import workflow_start_time
 from lib.context import (
     client_type,
     gitlab_instance_id,
     gitlab_realm,
+    gitlab_user_id,
     gitlab_version,
     is_gitlab_team_member,
 )
@@ -98,6 +100,9 @@ class MetadataContextInterceptor(grpc.aio.ServerInterceptor):
         # GitLab version
         if value := metadata.get(X_GITLAB_VERSION_HEADER.lower()):
             gitlab_version.set(value)
+
+        # Instance-local GitLab user ID (always set, None when absent)
+        gitlab_user_id.set(metadata.get(X_GITLAB_USER_ID_HEADER) or None)
 
         # GitLab team member
         team_member_value: str | None = metadata.get(

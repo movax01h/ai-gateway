@@ -5,7 +5,12 @@ from uuid import uuid4
 
 import structlog
 from anthropic import APIStatusError
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+)
 from langgraph.types import Overwrite
 
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
@@ -18,6 +23,10 @@ from duo_workflow_service.agents.tool_call_validator import (
     validate_tool_calls,
 )
 from duo_workflow_service.agents.web_search import WebSearchState
+from duo_workflow_service.audit_events.web_search import capture_web_searches
+from duo_workflow_service.checkpointer.write_mode import (
+    compaction_ui_chat_log_update,
+)
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     CompactionOptimizer,
@@ -29,12 +38,13 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
 )
 from duo_workflow_service.entities.server_tool_blocks import (
     AgentTextSegment,
-    build_anthropic_tool_ui_chat_log,
-    is_anthropic_server_tool_result_block,
+    ServerToolResults,
     split_content_around_server_tools,
+    warn_unmatched_server_tool_results,
 )
 from duo_workflow_service.entities.state import (
     TIER_ACCESS_DENIED_SUB_TYPE,
+    ApprovalSource,
     ApprovalStateRejection,
     ChatWorkflowState,
     MessageTypeEnum,
@@ -55,7 +65,11 @@ from duo_workflow_service.slash_commands.goal_parser import is_slash_command
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from duo_workflow_service.tools import Toolset
 from duo_workflow_service.tracking.errors import log_exception
-from lib.context import LLMFinishReason, extract_finish_reason
+from lib.context import (
+    LLMFinishReason,
+    extract_finish_reason,
+    record_approval_source,
+)
 from lib.internal_events.event_enum import EventEnum
 
 log = structlog.stdlib.get_logger("chat_agent")
@@ -138,9 +152,10 @@ class ChatAgent:
 
     async def _get_approvals(
         self, message: AIMessage, preapproved_tools: List[str], state: ChatWorkflowState
-    ) -> tuple[bool, list[UiChatLog]]:
+    ) -> tuple[bool, list[UiChatLog], list[str]]:
         approval_required = False
         approval_messages = []
+        requested_ids: list[str] = []
 
         for call in message.tool_calls:
             tool_name = call["name"]
@@ -150,15 +165,30 @@ class ChatAgent:
                 "_is_auto_approved_by_agentic_mock_model",
                 False,
             )
-            needs_approval = (
-                self.tools_registry
-                and await self.tools_registry.approval_required(tool_name, tool_args)
-                and tool_name not in preapproved_tools
-                and not auto_approved_by_agentic_mock_model
-            )
+
+            # Component pre-approval and the mock-model auto-approve short-circuit
+            # the policy check entirely, so don't consult the (possibly remote)
+            # approval policy for them.
+            if (
+                not self.tools_registry
+                or tool_name in preapproved_tools
+                or auto_approved_by_agentic_mock_model
+            ):
+                needs_approval = False
+                skip_source = ApprovalSource.PREAPPROVED_CONFIG
+            else:
+                needs_approval, skip_source = await self._resolve_approval(
+                    tool_name, tool_args
+                )
+
+            if not needs_approval:
+                record_approval_source(call.get("id"), skip_source)
 
             if needs_approval:
                 approval_required = True
+                call_id = call.get("id")
+                if call_id:
+                    requested_ids.append(call_id)
 
                 if self._tracker:
                     self._tracker.track_tool_governance_event(
@@ -202,7 +232,36 @@ class ChatAgent:
                     )
                 )
 
-        return approval_required, approval_messages
+        return approval_required, approval_messages, requested_ids
+
+    async def _resolve_approval(
+        self, tool_name: str, tool_args: dict
+    ) -> tuple[bool, ApprovalSource]:
+        """Resolve, in one policy round-trip, whether a tool call needs approval and (when it skips) the source that
+        authorized the skip.
+
+        ``resolve_approval_source`` returns ``None`` exactly when a fresh human
+        decision is needed, otherwise the authorizing source. The source is only
+        meaningful for the skip case, so the returned ``ApprovalSource`` is a
+        don't-care placeholder when ``needs_approval`` is True.
+
+        Resolution is best-effort and must not raise into the approval flow, but it also must
+        never turn a resolution failure into an unprompted tool call: on failure
+        (UnknownToolError, a transport error from the policy check) it degrades to requiring a
+        fresh human decision (fail-closed), not to a skip.
+        """
+        try:
+            resolved = await self.toolset.resolve_approval_source(tool_name, tool_args)
+        except Exception:  # pylint: disable=broad-except
+            log.debug(
+                "Could not resolve approval source; requiring approval",
+                extra={"tool_name": tool_name},
+            )
+            return True, ApprovalSource.PREAPPROVED_CONFIG
+
+        if resolved is None:
+            return True, ApprovalSource.PREAPPROVED_CONFIG
+        return False, resolved
 
     def _handle_wrong_messages_order_for_tool_execution(
         self, history: List[BaseMessage]
@@ -287,6 +346,10 @@ class ChatAgent:
         }
 
         self._build_ui_chat_log(agent_response, state, result)
+        capture_web_searches(
+            agent_response.content,
+            agent_response.response_metadata.get("model_name"),
+        )
 
         if isinstance(agent_response, AIMessage) and agent_response.tool_calls:
             await self._build_tool_response(agent_response, state, result)
@@ -322,11 +385,9 @@ class ChatAgent:
             return
 
         tier_payload = self._extract_tier_access_denied(state)
-        results_by_use_id = {
-            block["tool_use_id"]: block
-            for block in content
-            if is_anthropic_server_tool_result_block(block) and block.get("tool_use_id")
-        }
+        # Final message: complete enough for unmatched results to mean a shape change.
+        warn_unmatched_server_tool_results(content)
+        results = ServerToolResults(content)
 
         entries: list[UiChatLog] = []
         for segment in split_content_around_server_tools(content, agent_response.id):
@@ -337,11 +398,7 @@ class ChatAgent:
                     self._make_agent_entry(segment.text, segment.key, seg_tier)
                 )
             else:
-                entries.append(
-                    build_anthropic_tool_ui_chat_log(
-                        segment.block, results_by_use_id.get(segment.block.get("id"))
-                    )
-                )
+                entries.append(results.build_ui_chat_log(segment.block))
 
         result["ui_chat_log"] = entries
 
@@ -407,13 +464,20 @@ class ChatAgent:
         result["status"] = WorkflowStatusEnum.EXECUTION
 
         preapproved_tools = state.get("preapproved_tools") or []
-        tools_need_approval, approval_messages = await self._get_approvals(
-            agent_response, preapproved_tools, state
-        )
+        (
+            tools_need_approval,
+            approval_messages,
+            requested_ids,
+        ) = await self._get_approvals(agent_response, preapproved_tools, state)
 
         if len(agent_response.tool_calls) > 0 and tools_need_approval:
             result["status"] = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
             result["ui_chat_log"].extend(approval_messages)
+            # Persist which calls required a fresh decision so the approval-resume
+            # path (ChatWorkflow._record_approved_tool_sources) attributes the
+            # client's source to exactly those, not pre-approved/session-reused
+            # calls in the same batch.
+            result["tool_call_approval_requested"] = requested_ids
 
     def _create_error_response(self, error: Exception) -> Dict[str, Any]:
         log.info("We are hitting an error while making an llm call.")
@@ -550,7 +614,7 @@ class ChatAgent:
             "conversation_history": self._replace_history_update(
                 state, result.messages
             ),
-            "ui_chat_log": list(result.ui_chat_logs),
+            "ui_chat_log": compaction_ui_chat_log_update(list(result.ui_chat_logs)),
         }
 
     async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
@@ -620,7 +684,8 @@ class ChatAgent:
             optimized_history,
             optimization_results,
         ) = await self._optimizer_pipeline.optimize(history)
-        history_modified |= any(result.was_modified for result in optimization_results)
+        history_optimized = any(result.was_modified for result in optimization_results)
+        history_modified |= history_optimized
         history = optimized_history
         # The LLM call reads the state, so rebind the working history on a copy.
         state = cast(
@@ -683,8 +748,13 @@ class ChatAgent:
                 response["conversation_history"] = self._replace_history_update(
                     state, [*history, agent_response]
                 )
-            response["ui_chat_log"] = self._append_optimizer_ui_logs(
+            ui_chat_logs = self._append_optimizer_ui_logs(
                 response["ui_chat_log"], optimizer_ui_logs
+            )
+            response["ui_chat_log"] = (
+                compaction_ui_chat_log_update(ui_chat_logs)
+                if history_optimized
+                else ui_chat_logs
             )
             return response
 
@@ -716,7 +786,11 @@ class ChatAgent:
             return {
                 "conversation_history": history_update,
                 "status": WorkflowStatusEnum.INPUT_REQUIRED,
-                "ui_chat_log": ui_chat_logs,
+                "ui_chat_log": (
+                    compaction_ui_chat_log_update(ui_chat_logs)
+                    if history_optimized
+                    else ui_chat_logs
+                ),
             }
         except Exception as error:
             log_exception(error, extra={"context": "Error processing chat agent"})

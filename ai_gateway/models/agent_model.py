@@ -72,9 +72,13 @@ class AgentModel(TextGenModelBase):
         if isinstance(response, AIMessage) and isinstance(
             response.usage_metadata, dict
         ):
+            output_tokens = int(response.usage_metadata.get("output_tokens") or 0)
+            max_tokens = getattr(self.prompt.model, "max_tokens", None)
             metadata = TokensConsumptionMetadata(
                 input_tokens=int(response.usage_metadata.get("input_tokens") or 0),
-                output_tokens=int(response.usage_metadata.get("output_tokens") or 0),
+                output_tokens=output_tokens,
+                max_output_tokens_used=isinstance(max_tokens, int)
+                and output_tokens >= max_tokens,
             )
 
         return TextGenModelOutput(

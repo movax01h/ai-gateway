@@ -100,6 +100,38 @@ async def test_gitlab_realm_header(interceptor_setup):
 
 
 @pytest.mark.asyncio
+async def test_gitlab_user_id_header(interceptor_setup):
+    """Test that the instance-local GitLab user ID header is propagated to context."""
+    interceptor, handler_call_details, continuation = interceptor_setup(
+        [
+            ("x-gitlab-user-id", "42"),
+        ]
+    )
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.gitlab_user_id"
+    ) as mock_gitlab_user_id:
+        await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_gitlab_user_id.set.assert_called_once_with("42")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata_list", [[], [("x-gitlab-user-id", "")]])
+async def test_gitlab_user_id_header_missing_or_empty_resets_to_none(
+    interceptor_setup, metadata_list
+):
+    interceptor, handler_call_details, continuation = interceptor_setup(metadata_list)
+
+    with patch(
+        "duo_workflow_service.interceptors.metadata_context_interceptor.gitlab_user_id"
+    ) as mock_gitlab_user_id:
+        await interceptor.intercept_service(continuation, handler_call_details)
+
+        mock_gitlab_user_id.set.assert_called_once_with(None)
+
+
+@pytest.mark.asyncio
 async def test_gitlab_instance_id_header(interceptor_setup):
     """Test that GitLab instance ID header is properly set."""
     interceptor, handler_call_details, continuation = interceptor_setup(

@@ -1,6 +1,6 @@
 {
   "name": "@gitlab-org/duo-workflow-service",
-  "version": "0.1.59",
+  "version": "0.1.71",
   "description": "Node client for the GitLab Duo Workflow Service",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,7 +11,7 @@
   "author": "GitLab",
   "license": "GitLab Enterprise Edition (EE) license",
   "dependencies": {
-    "@grpc/grpc-js": "^1.13.3"
+    "@grpc/grpc-js": "^1.14.5"
   },
   "devDependencies": {
     "ts-proto": "^2.7.0",

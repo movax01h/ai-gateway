@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
 
 class FlowValidationError(ValueError):
@@ -44,3 +44,48 @@ class NotifiableAgentException(Exception):
         super().__init__(ui_message)
         self.ui_message = ui_message
         self.internal_detail = internal_detail
+
+
+class MissingAdditionalContextError(KeyError):
+    """Raised when a required flow input reads an additional context category the caller did not supply.
+
+    Additional context is exposed under ``context:inputs.<category>``, so a missing category means the request lacked
+    input the flow requires, not a service fault. Subclasses ``KeyError`` so existing handling of missing inputs keeps
+    working.
+
+    Args:
+        message: The full missing-input message.
+        category: The additional context category that was not supplied.
+    """
+
+    def __init__(self, message: str, category: str) -> None:
+        super().__init__(message)
+        self.message = message
+        self.category = category
+
+
+TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT = (
+    "An administrator blocked the {tool_name} tool, so it cannot be used. "
+    "Tell the user it is blocked and continue without it."
+)
+
+
+class ToolBlockedByAdministratorError(NotifiableAgentException):
+    """Raised when the agent calls a tool that governance deny rules removed from its toolset.
+
+    Halts the flow with a static UI message. The denied tool names stay server-side.
+
+    Args:
+        tool_names: Names of the denied tools the agent called. Logged server-side only.
+    """
+
+    UI_MESSAGE = (
+        "This flow stopped because an administrator blocked a tool it tried to use."
+    )
+
+    def __init__(self, tool_names: list[str]) -> None:
+        super().__init__(
+            self.UI_MESSAGE,
+            internal_detail=f"Denied tools called: {', '.join(tool_names)}",
+        )
+        self.tool_names = tool_names

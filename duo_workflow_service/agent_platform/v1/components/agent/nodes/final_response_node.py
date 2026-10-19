@@ -24,6 +24,7 @@ from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import DefaultUILogWriter, UIHistory
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import ToolInvokedEvent
+from duo_workflow_service.entities.state import ApprovalSource
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.response_schema_tracking_context import (
     response_schema_tracking_results,
@@ -202,6 +203,9 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
                     workflow_id=self._flow_id or "",
                     tool_name=self._response_schema.tool_title,
                     tool_args=final_response_call.get("args", {}),
+                    # Synthetic response-formatting tool authorized by config; it
+                    # never prompts.
+                    approval_source=ApprovalSource.PREAPPROVED_CONFIG.value,
                 )
             )
 

@@ -2,15 +2,18 @@
 import ast
 import asyncio
 import functools
+import hashlib
+import hmac
 import json
 import os
 import re
 import signal
 from itertools import chain
-from typing import AsyncIterable, AsyncIterator, Optional, cast, override
+from typing import Any, AsyncIterable, AsyncIterator, Optional, cast, override
 
 import aiohttp
 import grpc
+import litellm
 import structlog
 from anthropic import APIStatusError
 from dependency_injector.wiring import Provide, inject
@@ -28,18 +31,33 @@ from grpc_reflection.v1alpha import reflection
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+from litellm.exceptions import (
+    ContextWindowExceededError as LiteLLMContextWindowExceededError,
+)
 from pydantic import ValidationError as PydanticValidationError
 
 import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.config import Config, get_config, setup_litellm
 from ai_gateway.container import ContainerApplication
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    RestrictedModelAccessError,
+    ensure_restricted_model_access,
+)
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
-from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    FlowValidationError,
+    MissingAdditionalContextError,
+)
 from duo_workflow_service.agent_platform.utils.validation import FlowValidator
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    discover_feature_flow_configs,
+)
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
+    CheckpointSaveError,
     EnvelopeVersionMismatchException,
     InvalidRequestException,
     InvalidWorkflowIdException,
@@ -50,11 +68,17 @@ from duo_workflow_service.executor.outbox import (
     OutboxSignal,
     OutgoingMessageTooLargeError,
 )
-from duo_workflow_service.flow_request import normalize_flow_request
+from duo_workflow_service.flow_request import (
+    InlineFlowRequest,
+    RegistryFlowRequest,
+    normalize_catalog_items,
+    normalize_flow_request,
+)
 from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.gitlab.gitlab_api import extract_id_from_global_id
 from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
+    oidc_gitlab_url,
 )
 from duo_workflow_service.interceptors.authentication_interceptor import (
     current_user as current_user_context_var,
@@ -94,6 +118,7 @@ from duo_workflow_service.server_helpers import (
 )
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     BadStatusEvent,
+    CreatedWorkflowHasCheckpoints,
     ForbiddenStatusEvent,
 )
 from duo_workflow_service.structured_logging import set_workflow_id, setup_logging
@@ -103,15 +128,20 @@ from duo_workflow_service.tools.duo_base_tool import (
 )
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.tracking.errors import log_exception
-from duo_workflow_service.tracking.sentry_error_tracking import setup_error_tracking
+from duo_workflow_service.tracking.sentry_error_tracking import (
+    setup_async_error_tracking,
+    setup_error_tracking,
+)
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.registry import ResolvedFlow, resolve_flow
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
+    DWS_SERVER_SHUTDOWN_STOP_REASON,
     INFRA_STOP_REASONS,
     MAX_MESSAGE_SIZE,
     OUTGOING_MESSAGE_TOO_LARGE,
+    SERVER_SHUTDOWN_STOP_REASONS,
     AdditionalContext,
 )
 from lib.billing_events import (
@@ -121,20 +151,42 @@ from lib.billing_events import (
     ExecutionEnvironment,
     SelfHostedLLMOperations,
 )
+from lib.container_wiring import wire_and_validate
 from lib.context import client_capabilities, language_server_version
+from lib.context.model import current_model_metadata_context, restricted_access_ctx
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
     InternalEventAdditionalProperties,
+    merge_event_context_extra,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
+from lib.jwt import instance_uid_claim
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
-CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service"]
+# "ai" is wired recursively so a feature moved under ai/features/ keeps its
+# DWS @inject sites resolving with no per-module bookkeeping.
+CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
+FLOW_CONFIG_ID_CLAIM = "flow_config_id"
+FLOW_VERSION_CLAIM = "flow_version"
+FLOW_CONFIG_SCHEMA_VERSION_CLAIM = "flow_config_schema_version"
+# Set by GenerateToken only after the caller passed the restricted-flow instance check.
+RESTRICTED_FLOW_VERIFIED_CLAIM = "restricted_flow_verified"
+FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
+WORKFLOW_ID_CLAIM = "workflow_id"
+# Rails sets this on every token it self-signs for DWS, so with no workflow_id the token is unbound.
+BINDS_WORKFLOW_CLAIM = "binds_workflow"
+SAAS_REALM = "saas"
+# Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
+# these may mint workflow tokens for a flow that restricted models are restricted to,
+# and ExecuteWorkflow accepts their instance token's flow claim for restricted models.
+# Empty means no instance qualifies.
+RESTRICTED_FLOW_INSTANCE_UIDS_ENV = "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS"
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
+    BINDS_WORKFLOW_CLAIM,
     "tool_access_policies",
     "gitlab_root_namespace_id",
 }
@@ -145,6 +197,64 @@ _PROPAGATED_EXTRA_CLAIMS = {
 # Also used to increase the max header size of the HTTP client:
 # https://docs.aiohttp.org/en/stable/client_reference.html
 MAX_METADATA_SIZE = 24 * 1024
+
+WORKFLOW_TASK_NAME_PREFIX = "workflow:"
+# Self-hosted billing events carry a source set by customer-run components, so only
+# values shaped like Rails source_type enum names are kept.
+SELF_HOSTED_SOURCE_TYPE_PATTERN = re.compile(r"[a-z0-9_]{1,64}")
+DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S = 3.0
+# Cloud Run sends SIGKILL 10s after SIGTERM; drain plus the gRPC grace period must finish before that.
+DEFAULT_SHUTDOWN_KILL_DEADLINE_S = 10.0
+
+
+_WORKFLOW_ID_FORMS = re.compile(
+    r"(?:#|gid://gitlab/Ai::DuoWorkflows::Workflow/)?([1-9][0-9]{0,19})"
+)
+
+
+def _workflow_id_number(value: Any) -> Optional[int]:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and (match := _WORKFLOW_ID_FORMS.fullmatch(value)):
+        return int(match.group(1))
+    return None
+
+
+def _workflow_binding_matches(bound: Any, requested: str) -> bool:
+    """Compare a token's bound workflow id with the one the client asked to run.
+
+    Only a plain id, a `#`-prefixed id or a workflow global id is accepted, matched in full. Anything else, or a bound
+    id that is not positive, is a mismatch.
+    """
+    bound_id = _workflow_id_number(bound)
+    return (
+        bound_id is not None
+        and bound_id > 0
+        and bound_id == _workflow_id_number(requested)
+    )
+
+
+def _flow_config_digest(flow_config: Struct) -> str:
+    canonical_json = json.dumps(
+        MessageToDict(flow_config), sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(canonical_json.encode()).hexdigest()
+
+
+async def _require_registry_claim(
+    context: grpc.ServicerContext,
+    claims_extra: dict[str, Any],
+    claim: str,
+    actual: Optional[str],
+    message: str,
+) -> None:
+    if claim not in claims_extra:
+        return
+
+    authorized = claims_extra[claim]
+    if not isinstance(authorized, str) or not authorized or authorized != actual:
+        await context.abort(grpc.StatusCode.PERMISSION_DENIED, message)
+
 
 # Mapping as in some versions of GitLab.com these are hard-coded as `experimental`
 # even though the flows were built upon v1 architecture.
@@ -220,13 +330,77 @@ def _format_pydantic_validation_error(error: PydanticValidationError) -> str:
     return f"{error.title}: {message}" if message else error.title
 
 
+def _collapse_message_patterns(raw: str) -> str | None:
+    """Collapse known per-request message patterns to stable, generic messages.
+
+    Returns None when no known pattern matches, so the caller falls through to the remaining isinstance checks and the
+    str(error) default.
+    """
+    if re.match(
+        r"Failed to create flow from FlowConfig protobuf: \d+ validation errors? for ",
+        raw,
+    ):
+        # FlowConfig parsing wraps a Pydantic ValidationError, embedding the full
+        # field-by-field breakdown (e.g. "2 validation errors for FlowConfig\n
+        # prompts.0.unit_primitives.0\n..."). Collapse it to a generic message so we
+        # don't surface the enum list / internals. The count varies ("1 validation
+        # error" / "N validation errors"), which is why the pattern matches both.
+        return "Failed to create flow from FlowConfig protobuf: validation error"
+    if schema_match := re.match(r"input '.*?' does not match specified schema", raw):
+        # Additional-context validation wraps a jsonschema.ValidationError, whose str()
+        # dumps the full schema and offending instance (e.g. "... does not match
+        # specified schema: ...\n\nFailed validating ...\n\nOn instance: {...}").
+        # Keep only the "input '<category>' does not match specified schema" prefix so
+        # we don't surface the schema/instance internals to the client.
+        return schema_match.group()
+    if graphql_match := re.search(r"GraphQL errors: \[.*\]", raw, re.DOTALL):
+        # GraphQL failures are raised as Exception("GraphQL errors: {data['errors']}"),
+        # embedding a per-request payload (variable names, locations, messages) e.g.
+        # "GraphQL errors: [{'message': 'Variable $workflowId of type
+        # AiDuoWorkflowsWorkflowID! was provided invalid value', ...}]". The list
+        # varies per request and fragments SLO grouping, so strip the ": [...]" payload
+        # and keep only the stable "GraphQL errors" label. Any leading prefix (e.g.
+        # "Invalid workflow ID: ") is preserved.
+        return raw[: graphql_match.start()] + "GraphQL errors"
+    if openai_match := re.search(
+        r"An error occurred while processing your request\.", raw
+    ):
+        # OpenAI APIError messages append retry/help-center guidance and a per-request
+        # ID, e.g. "An error occurred while processing your request. You can retry your
+        # request, or contact us through our help center at help.openai.com if the
+        # error persists. Please include the request ID req_0003666c... in your
+        # message." The request ID varies per request and fragments SLO grouping, so
+        # keep only the stable leading sentence. Any leading prefix (e.g. a LiteLLM
+        # wrapper) is preserved.
+        return raw[: openai_match.end()]
+    if re.search(r"Missing required input '.*?' not found in state\.", raw):
+        # Flow state inputs raise KeyError("Missing required input
+        # 'context:issue_iid': 'issue_iid' not found in state. If this is populated
+        # from a flow's additional_context, ..."). The input path and missing key
+        # vary per flow and fragment error grouping, so collapse it to a stable
+        # message.
+        return "Missing required input not found in state"
+    return None
+
+
 def _extract_error_message(error: BaseException) -> str:
     """Extract a clean, normalized error message from a workflow error.
 
     Parses structured error bodies from LiteLLM and Anthropic exceptions to surface only the human-readable message.
     Also normalizes dynamic token counts (e.g. '205531 tokens') to '<N> tokens' for consistent log grouping.
     """
-    if isinstance(error, LiteLLMBadRequestError):
+    if isinstance(error, LiteLLMContextWindowExceededError):
+        # The provider wrappers and JSON payload vary per provider/model, e.g.
+        # "litellm.ContextWindowExceededError: litellm.BadRequestError:
+        # BedrockException: Context Window Error - {"message":"The model returned
+        # the following errors: Input is too long for requested model."}", which
+        # fragments log/SLO grouping. Collapse the details to a stable message.
+        # This branch MUST come before LiteLLMBadRequestError:
+        # ContextWindowExceededError is a subclass of BadRequestError (verified
+        # via ContextWindowExceededError.__mro__), so it would otherwise be
+        # captured by the more general branch.
+        message = "Context window exceeded"
+    elif isinstance(error, LiteLLMBadRequestError):
         raw = (error.message or "").removeprefix("litellm.BadRequestError: ")
         # Bedrock validation errors embed a per-request, position-dependent payload,
         # e.g. "BedrockException - {\"message\":\"1 validation error detected: Value at
@@ -238,6 +412,19 @@ def _extract_error_message(error: BaseException) -> str:
         # regex won't match and we fall through.
         if re.search(r"BedrockException - \{.*\}", raw, flags=re.DOTALL):
             message = "BedrockException"
+        elif re.search(
+            r"Fireworks_aiException - \{.*\d+ request validation errors?: .*\}",
+            raw,
+            flags=re.DOTALL,
+        ):
+            # Fireworks request validation errors embed a per-request payload listing
+            # every offending field along with its value (often the full conversation
+            # content), e.g. "Fireworks_aiException - {\"error\":{...,\"message\":\"51
+            # request validation errors: Input should be a valid string, field:
+            # 'messages[4].content.str', value: [...]\"}}". The count, indices and
+            # values vary per request and fragment error grouping, so collapse it to a
+            # stable message.
+            message = "Fireworks_aiException - validation error"
         else:
             # Find the JSON bytes repr anywhere in the string, e.g.:
             # "Vertex_aiException BadRequestError - b'{...}'"
@@ -277,39 +464,18 @@ def _extract_error_message(error: BaseException) -> str:
         # that has status finished'}"), which fragments log grouping. Keep only the
         # stable part; both are available as attributes on the exception.
         message = "Session status cannot be updated due to bad status event"
+    elif isinstance(error, CheckpointSaveError):
+        # The Rails error body embedded in the message varies per request (PG error,
+        # SQL fragment, offending JSON), which fragments log grouping and leaks
+        # internals to the client. Collapse it to a stable, generic message.
+        message = "Failed to save checkpoint"
     elif isinstance(error, PydanticValidationError):
         # Component/flow construction failures raised straight from a Pydantic model
         # (e.g. a DeterministicStepComponent whose tool isn't enabled for the flow).
         # str(error) embeds the whole offending input dict, so keep only the stable part.
         message = _format_pydantic_validation_error(error)
-    elif re.match(
-        r"Failed to create flow from FlowConfig protobuf: \d+ validation errors? for ",
-        str(error),
-    ):
-        # FlowConfig parsing wraps a Pydantic ValidationError, embedding the full
-        # field-by-field breakdown (e.g. "2 validation errors for FlowConfig\n
-        # prompts.0.unit_primitives.0\n..."). Collapse it to a generic message so we
-        # don't surface the enum list / internals. The count varies ("1 validation
-        # error" / "N validation errors"), which is why the pattern matches both.
-        message = "Failed to create flow from FlowConfig protobuf: validation error"
-    elif schema_match := re.match(
-        r"input '.*?' does not match specified schema", str(error)
-    ):
-        # Additional-context validation wraps a jsonschema.ValidationError, whose str()
-        # dumps the full schema and offending instance (e.g. "... does not match
-        # specified schema: ...\n\nFailed validating ...\n\nOn instance: {...}").
-        # Keep only the "input '<category>' does not match specified schema" prefix so
-        # we don't surface the schema/instance internals to the client.
-        message = schema_match.group()
-    elif graphql_match := re.search(r"GraphQL errors: \[.*\]", str(error), re.DOTALL):
-        # GraphQL failures are raised as Exception("GraphQL errors: {data['errors']}"),
-        # embedding a per-request payload (variable names, locations, messages) e.g.
-        # "GraphQL errors: [{'message': 'Variable $workflowId of type
-        # AiDuoWorkflowsWorkflowID! was provided invalid value', ...}]". The list
-        # varies per request and fragments SLO grouping, so strip the ": [...]" payload
-        # and keep only the stable "GraphQL errors" label. Any leading prefix (e.g.
-        # "Invalid workflow ID: ") is preserved.
-        message = str(error)[: graphql_match.start()] + "GraphQL errors"
+    elif (collapsed := _collapse_message_patterns(str(error))) is not None:
+        message = collapsed
     elif isinstance(error, ModelError):
         raw = error.message
         # agent_node sets message=str(APIStatusError) which embeds a Python dict, e.g.:
@@ -334,6 +500,72 @@ def _extract_error_message(error: BaseException) -> str:
     message = re.sub(r"\b\d+\b(?= tokens)", "<N>", message)
     message = re.sub(r"(max_tokens:).*", r"\1 too large", message)
     return message
+
+
+def _find_restricted_model_access_error(
+    error: Optional[BaseException],
+) -> Optional[RestrictedModelAccessError]:
+    """Return the first RestrictedModelAccessError in the error's explicit cause chain, if any.
+
+    `__context__` is not followed: Python sets it on any exception raised inside an except block, so an unrelated
+    failure would be reported as a denial.
+    """
+    seen: set[int] = set()
+    while error is not None and id(error) not in seen:
+        if isinstance(error, RestrictedModelAccessError):
+            return error
+        seen.add(id(error))
+        error = error.__cause__
+    return None
+
+
+def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
+    """Whether the caller token is GitLab.com's own instance token.
+
+    Requires the token to be signed by the configured GitLab OIDC issuer, to carry the SaaS realm claim, and its subject
+    to be an allowlisted instance UUID. An empty allowlist matches nothing.
+    """
+    claims = user.claims
+    if user.is_debug or not claims:
+        return False
+    allowlist = {
+        uid.strip()
+        for uid in os.environ.get(RESTRICTED_FLOW_INSTANCE_UIDS_ENV, "").split(",")
+        if uid.strip()
+    }
+    return (
+        bool(claims.issuer)
+        and claims.issuer.rstrip("/") == oidc_gitlab_url().rstrip("/")
+        and claims.gitlab_realm == SAAS_REALM
+        and claims.subject in allowlist
+    )
+
+
+def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
+    """Return the signed flow id a workflow token may use restricted models for.
+
+    The token must carry a flow_config_id claim and be either one this service minted (see GenerateToken) with the SaaS
+    realm claim and the restricted_flow_verified claim, or GitLab.com's allowlisted instance token (see
+    _is_gitlab_com_instance_token). Debug users never qualify.
+
+    The SaaS realm claim alone doesn't prove the instance check ran: GenerateToken copies the caller's x-gitlab-realm
+    header for flows that weren't restricted when the token was minted. Only the restricted_flow_verified claim, set
+    after that check passed, does.
+    """
+    claims = user.claims
+    if user.is_debug or not claims or not claims.extra:
+        return None
+    flow_config_id = claims.extra.get(FLOW_CONFIG_ID_CLAIM)
+    if not isinstance(flow_config_id, str) or not flow_config_id:
+        return None
+    issued_by_dws = (
+        claims.issuer == CloudConnectorConfig().service_name
+        and claims.gitlab_realm == SAAS_REALM
+        and claims.extra.get(RESTRICTED_FLOW_VERIFIED_CLAIM) is True
+    )
+    if not issued_by_dws and not _is_gitlab_com_instance_token(user):
+        return None
+    return flow_config_id
 
 
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
@@ -371,8 +603,81 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             flow_request = normalize_flow_request(
                 start_req, language_server_version.get()
             )
+            # Normalized here so that unusable items abort the call before any workflow
+            # setup happens.
+            catalog_items = normalize_catalog_items(start_req, flow_request)
         except ValueError as e:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+
+        claims_extra = user.claims.extra if user.claims else None
+        if not user.is_debug and claims_extra is not None:
+            registry = (
+                flow_request if isinstance(flow_request, RegistryFlowRequest) else None
+            )
+            await _require_registry_claim(
+                context,
+                claims_extra,
+                FLOW_CONFIG_ID_CLAIM,
+                registry.config_id if registry else None,
+                "Workflow token is not authorized for the requested flow",
+            )
+            # Compared as the unresolved string (e.g. "^3.0.0") Rails sent to both
+            # the token and the executor; legacy requests normalize to 1.0.0.
+            await _require_registry_claim(
+                context,
+                claims_extra,
+                FLOW_VERSION_CLAIM,
+                registry.version if registry else None,
+                "Workflow token is not authorized for the requested flow version",
+            )
+            # The same config ID and version can exist under both v1 and experimental.
+            await _require_registry_claim(
+                context,
+                claims_extra,
+                FLOW_CONFIG_SCHEMA_VERSION_CLAIM,
+                registry.schema_version if registry else None,
+                "Workflow token is not authorized for the requested flow schema version",
+            )
+
+        if (
+            not user.is_debug
+            and claims_extra is not None
+            and FLOW_CONFIG_DIGEST_CLAIM in claims_extra
+        ):
+            authorized_digest = claims_extra[FLOW_CONFIG_DIGEST_CLAIM]
+            if (
+                not isinstance(authorized_digest, str)
+                or not authorized_digest
+                or not isinstance(flow_request, InlineFlowRequest)
+                or not hmac.compare_digest(
+                    authorized_digest, _flow_config_digest(flow_request.config_struct)
+                )
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    "Workflow token is not authorized for the supplied flow config",
+                )
+
+        if not user.is_debug and claims_extra is not None:
+            if WORKFLOW_ID_CLAIM in claims_extra:
+                if not _workflow_binding_matches(
+                    claims_extra[WORKFLOW_ID_CLAIM], start_req.workflowID
+                ):
+                    log.warning(
+                        "Workflow token bound to a different workflow",
+                        bound_workflow_id=str(claims_extra[WORKFLOW_ID_CLAIM]),
+                        requested_workflow_id=start_req.workflowID[:64],
+                    )
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        "Workflow token is not authorized for the requested workflow",
+                    )
+            elif claims_extra.get(BINDS_WORKFLOW_CLAIM) is True:
+                log.info(
+                    "Workflow token without a workflow binding",
+                    token_issuer=user.claims.issuer if user.claims else None,
+                    requested_workflow_id=start_req.workflowID[:64],
+                )
 
         workflow_definition = map_workflow_definition(
             flow_request.to_legacy_identifier()
@@ -397,6 +702,34 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     grpc.StatusCode.PERMISSION_DENIED,
                     f"Unauthorized to execute {workflow_definition or 'workflow'}",
                 )
+
+        # Restricted models (model_restrictions.yml) are usable only by the flows they are
+        # restricted to, on a signed flow claim; no debug bypass. Prompt construction
+        # enforces this for every model; the request's default model is checked here
+        # so a denied run fails before any workflow setup.
+        authorized_flow = _restricted_access_flow(user)
+        restricted_access_ctx.set(authorized_flow)
+        if (default_metadata := current_model_metadata_context.get()) is not None:
+            llm_definition = default_metadata.llm_definition
+            try:
+                ensure_restricted_model_access(
+                    identifiers=[
+                        llm_definition.gitlab_identifier,
+                        getattr(default_metadata, "name", None),
+                    ],
+                    models=[
+                        default_metadata.to_params().get("model"),
+                        llm_definition.params.model,
+                    ],
+                )
+            except RestrictedModelAccessError as e:
+                log.warning(
+                    "Restricted model denied at workflow start",
+                    flow_config_id=authorized_flow,
+                    gitlab_realm=user.claims.gitlab_realm if user.claims else None,
+                    model=llm_definition.gitlab_identifier,
+                )
+                await context.abort(grpc.StatusCode.PERMISSION_DENIED, str(e))
 
         workflow_id = start_req.workflowID
         set_workflow_id(workflow_id)
@@ -477,6 +810,19 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         monitoring_context.set_flow_identity(**resolved_flow.tracking_fields())
 
+        # Mirror the resolved flow identity onto the event context so every
+        # internal event for this session carries it, under the same names the
+        # structured logs already use (structured_logging.add_workflow_identity).
+        merge_event_context_extra(**monitoring_context.event_context_fields())
+
+        # Only some request shapes can carry items; the workflow classes behind the rest
+        # do not accept the argument.
+        catalog_kwargs = (
+            {"catalog_items": catalog_items}
+            if flow_request.supports_catalog_items()
+            else {}
+        )
+
         workflow: AbstractWorkflow = resolved_flow.factory(
             workflow_id=workflow_id,
             workflow_metadata=workflow_metadata,
@@ -494,9 +840,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             # the workflow only pins a checkpoint when one was actually requested.
             resume_checkpoint_ts=start_workflow_request.startRequest.resume_checkpoint_ts
             or None,
+            **catalog_kwargs,
         )
 
-        workflow_task = asyncio.create_task(workflow.run(goal))
+        workflow_task = asyncio.create_task(
+            workflow.run(goal), name=f"{WORKFLOW_TASK_NAME_PREFIX}{workflow_id}"
+        )
 
         async def receive_events():
             while True:
@@ -555,8 +904,12 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     await asyncio.wait_for(
                         workflow_task, timeout=self.TASK_CANCELLATION_TIMEOUT
                     )
-                except (asyncio.TimeoutError, asyncio.CancelledError) as ex:
+                except asyncio.TimeoutError as ex:
+                    # The task ignored the cancellation for too long.
                     log_exception(ex, extra={"source": __name__})
+                except asyncio.CancelledError as ex:
+                    # The cancellation requested above has been honoured.
+                    log.info("Workflow task cancelled", reason=str(ex))
 
         try:
             async for action in self.send_events(workflow, workflow_task):
@@ -574,13 +927,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 context.set_code(grpc.StatusCode.OK)
                 context.set_details("workflow already finished")
             elif AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST in str(workflow.last_error):
-                # Infrastructure-initiated stop (e.g. Workhorse pod rotation).
-                # WORKHORSE_SERVER_SHUTDOWN signals a graceful pod drain — return
-                # UNAVAILABLE so Workhorse knows to retry on another pod.
-                # Other infra stops (e.g. WebSocket ping failure) return OK.
+                # Infrastructure-initiated stop. UNAVAILABLE is the code Workhorse
+                # treats as "the session is resumable": for its own pod drain it is
+                # the ack its stop handshake waits for, and for a DWS drain it makes
+                # Workhorse send CloseGoingAway (1001) so the client reconnects and
+                # resumes from the last checkpoint. Workhorse never retries the gRPC
+                # call itself. Other infra stops (e.g. WebSocket ping failure) return OK.
                 if (
                     monitoring_context.workflow_stop_reason
-                    == "WORKHORSE_SERVER_SHUTDOWN"
+                    in SERVER_SHUTDOWN_STOP_REASONS
                 ):
                     context.set_code(grpc.StatusCode.UNAVAILABLE)
                     context.set_details(
@@ -618,6 +973,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
                 context.set_details(str(workflow.last_error.__cause__))
             elif workflow.last_error and isinstance(
+                workflow.last_error, CreatedWorkflowHasCheckpoints
+            ):
+                # The session's stored data is inconsistent (a `created` workflow with
+                # checkpoints), not a service fault. The checkpoint is left out of the
+                # details: it varies per request and can carry conversation content.
+                context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+                context.set_details(CreatedWorkflowHasCheckpoints.DETAILS)
+            elif workflow.last_error and isinstance(
                 workflow.last_error, InvalidRequestException
             ):
                 # The request contained invalid input (e.g. an empty goal on resume).
@@ -626,6 +989,21 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # itself was wrong, not the system state.
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(str(workflow.last_error))
+            elif workflow.last_error and isinstance(
+                workflow.last_error, MissingAdditionalContextError
+            ):
+                # A required flow input reads an additional context category the
+                # caller never supplied: the request lacked input the flow needs, not
+                # a service fault. Unlike InvalidRequestException the run had already
+                # started, so the workflow still fails as usual; only the gRPC status
+                # tells the caller its input was wrong.
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details(workflow.last_error.message)
+            elif restricted_error := _find_restricted_model_access_error(
+                workflow.last_error
+            ):
+                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                context.set_details(str(restricted_error))
             elif workflow.last_error:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(
@@ -660,7 +1038,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # This exception is raised when RPC is cancelled by the client.
                 context.set_code(grpc.StatusCode.CANCELLED)
                 context.set_details("RPC cancelled by client")
-                log_exception(err, extra={"source": __name__})
+                log.info("RPC cancelled by client", reason=err_str)
 
             await abort_workflow(workflow_task, err)
             # Task cancellation must be reraised to the grpc server side so that the rpc task can be shutdown properly.
@@ -946,17 +1324,60 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         gitlab_realm = metadata.get("x-gitlab-realm")
         gitlab_instance_id = metadata.get("x-gitlab-instance-id")
 
-        extra_claims = {}
+        extra_claims: dict[str, Any] = {}
 
         if hasattr(user, "claims") and user.claims:
-            extra_claims = {
-                "gitlab_instance_uid": getattr(user.claims, "gitlab_instance_uid", None)
-            }
+            extra_claims = instance_uid_claim(user.claims)
             if user.claims.extra:
                 incoming_extra = dict(user.claims.extra)
                 for claim in _PROPAGATED_EXTRA_CLAIMS:
                     if claim in incoming_extra:
                         extra_claims[claim] = incoming_extra[claim]
+
+        # A flow that restricted models are restricted to is available only on
+        # GitLab.com: other callers are refused rather than given an unbound token.
+        if request.flow_config_id:
+            if (
+                request.flow_config_id
+                in ModelSelectionConfig.instance().all_restricted_flows()
+            ):
+                if not _is_gitlab_com_instance_token(user):
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        f"Flow '{request.flow_config_id}' is only available on GitLab.com",
+                    )
+                # A caller token already bound to a flow can't mint one for another flow.
+                caller_flow_config_id = (user.claims.extra or {}).get(
+                    FLOW_CONFIG_ID_CLAIM
+                )
+                if (
+                    caller_flow_config_id
+                    and caller_flow_config_id != request.flow_config_id
+                ):
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        f"Caller token is not authorized for flow '{request.flow_config_id}'",
+                    )
+                # The caller's signed realm claim is SaaS; don't trust the header here.
+                gitlab_realm = SAAS_REALM
+                extra_claims[RESTRICTED_FLOW_VERIFIED_CLAIM] = True
+            extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
+
+        if request.flow_version:
+            extra_claims[FLOW_VERSION_CLAIM] = request.flow_version
+
+        if request.flow_config_schema_version:
+            extra_claims[FLOW_CONFIG_SCHEMA_VERSION_CLAIM] = (
+                request.flow_config_schema_version
+            )
+
+        if request.HasField("flow_config"):
+            extra_claims[FLOW_CONFIG_DIGEST_CLAIM] = _flow_config_digest(
+                request.flow_config
+            )
+
+        if request.workflowID:
+            extra_claims[WORKFLOW_ID_CLAIM] = request.workflowID
 
         scopes = []
         if user.is_debug:
@@ -1014,10 +1435,17 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         billed_once_features: set[str] = set()
 
         async for client_event in request_iterator:
+            source = (
+                client_event.sourceType
+                if SELF_HOSTED_SOURCE_TYPE_PATTERN.fullmatch(client_event.sourceType)
+                else None
+            )
+
             log.info(
                 "Received self-hosted client event",
                 request_id=client_event.requestID,
                 workflow_id=client_event.workflowID,
+                source=source,
             )
 
             gl_context = GLReportingEventContext.from_workflow_definition(
@@ -1041,7 +1469,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
             else:
                 try:
-                    billing_service.track_billing(
+                    tracked = billing_service.track_billing(
                         user,
                         gl_context,
                         workflow_id=client_event.workflowID,
@@ -1051,16 +1479,18 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                         unit_of_measure="request",
                         quantity=1,
                         llm_ops=SelfHostedLLMOperations.get_operations(),
+                        source=source,
                     )
 
                     if is_bill_once_feature:
                         billed_once_features.add(feature_prefix)
 
-                    log.info(
-                        "Successfully sent billing event for self-hosted LLM auth",
-                        request_id=client_event.requestID,
-                        workflow_id=client_event.workflowID,
-                    )
+                    if tracked:
+                        log.info(
+                            "Successfully sent billing event for self-hosted LLM auth",
+                            request_id=client_event.requestID,
+                            workflow_id=client_event.workflowID,
+                        )
                 except Exception as e:
                     log_exception(
                         e,
@@ -1128,6 +1558,10 @@ async def serve(config: Config, port: int) -> None:
     check:
     https://github.com/grpc/grpc/blob/master/doc/keepalive.md
     """
+    # Has to run here rather than in `setup_error_tracking`: the asyncio
+    # instrumentation patches the event loop, which is only running by now.
+    setup_async_error_tracking()
+
     connection_pool.set_options(
         pool_size=100,
         timeout=aiohttp.ClientTimeout(total=30),
@@ -1211,6 +1645,66 @@ async def serve(config: Config, port: int) -> None:
         await server.wait_for_termination()
         log.info("Server shutdown complete")
 
+        # litellm's exit hook only closes clients in its own cache, not the one
+        # ContainerModels installs. Left open, it is collected at interpreter
+        # teardown, where logging its "Unclosed client session" warning fails.
+        # Best-effort: a failure here must not replace one shutdown traceback
+        # with another.
+        try:
+            await litellm.module_level_aclient.close()
+        except Exception:
+            log.exception("Failed to close litellm module-level client")
+
+
+def _running_workflow_tasks() -> list[asyncio.Task]:
+    return [
+        task
+        for task in asyncio.all_tasks()
+        if task.get_name().startswith(WORKFLOW_TASK_NAME_PREFIX) and not task.done()
+    ]
+
+
+async def drain_workflow_tasks(timeout: float) -> None:
+    """Cancel every in-flight workflow task so each RPC ends through the resumable infra-stop path.
+
+    Each task is cancelled with `AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST` after its MonitoringContext stop reason is
+    set to `DWS_SERVER_SHUTDOWN_STOP_REASON`, which makes the handler return UNAVAILABLE. Waits at most `timeout`
+    seconds for the tasks to finish and never raises: stragglers are logged as a warning and left to `server.stop`.
+
+    Args:
+        timeout: Seconds to wait for cancelled workflow tasks to finish.
+    """
+    tasks = _running_workflow_tasks()
+    if not tasks:
+        return
+
+    log.info("Draining in-flight workflows before shutdown", workflow_count=len(tasks))
+    for task in tasks:
+        # The task's context shares the MonitoringContext object with its RPC handler, which reads the stop reason.
+        monitoring_context = task.get_context().get(current_monitoring_context)
+        if monitoring_context:
+            monitoring_context.workflow_stop_reason = DWS_SERVER_SHUTDOWN_STOP_REASON
+        task.cancel(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST)
+
+    _, pending = await asyncio.wait(tasks, timeout=timeout)
+    if pending:
+        log.warning(
+            "Workflows still running after shutdown drain timeout",
+            workflow_count=len(pending),
+            workflow_tasks=[task.get_name() for task in pending],
+        )
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        log.warning(f"Invalid {name}, using default", value=raw, default=default)
+        return default
+
 
 def setup_signal_handlers(
     server: grpc.aio.Server,
@@ -1221,15 +1715,31 @@ def setup_signal_handlers(
 
     grace_period_env = os.environ.get("DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S")
     grace_period = int(grace_period_env) if grace_period_env else None
+    drain_timeout = _float_env(
+        "DUO_WORKFLOW_SHUTDOWN_DRAIN_TIMEOUT_S", DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S
+    )
+    kill_deadline = _float_env(
+        "DUO_WORKFLOW_SHUTDOWN_KILL_DEADLINE_S", DEFAULT_SHUTDOWN_KILL_DEADLINE_S
+    )
+    if drain_timeout + (grace_period or 0) >= kill_deadline:
+        log.warning(
+            "Shutdown drain plus gRPC grace period reaches the SIGKILL deadline; "
+            "workflows still draining at that point will be killed mid-flight",
+            drain_timeout_s=drain_timeout,
+            grace_period_s=grace_period,
+            kill_deadline_s=kill_deadline,
+        )
+
+    async def shutdown():
+        await set_health_status(
+            health_servicer, health_pb2.HealthCheckResponse.NOT_SERVING
+        )
+        await drain_workflow_tasks(drain_timeout)
+        await server.stop(grace=grace_period)
 
     def handle_shutdown(sig):
         log.info(f"Received signal {sig}, initiating graceful shutdown")
-        asyncio.create_task(
-            set_health_status(
-                health_servicer, health_pb2.HealthCheckResponse.NOT_SERVING
-            )
-        )
-        asyncio.create_task(server.stop(grace=grace_period))
+        asyncio.create_task(shutdown())
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, functools.partial(handle_shutdown, sig))
@@ -1282,7 +1792,7 @@ def choose_legacy_unit_primitive(
 
 def setup_container(config: Config):
     container_application = ContainerApplication()
-    container_application.wire(packages=CONTAINER_APPLICATION_PACKAGES)
+    wire_and_validate(container_application, packages=CONTAINER_APPLICATION_PACKAGES)
     container_application.config.from_dict(config.model_dump())
 
 
@@ -1302,6 +1812,8 @@ def run(config: Config):
     setup_error_tracking()
     setup_monitoring()
     setup_logging()
+    # After observability setup, so a duplicate feature id is reported, not lost.
+    discover_feature_flow_configs()
     setup_profiling()
     if not self_hosted_mode:
         validate_llm_access()

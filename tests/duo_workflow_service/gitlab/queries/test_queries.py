@@ -153,6 +153,7 @@ class TestQueryVersionSelection:
                 id="19.2_has_incrementalCheckpointsEnabled",
             ),
             pytest.param("19.4.0", "currentThread", id="19.4_has_currentThread"),
+            pytest.param("19.4.0", "sourceType", id="19.4_has_sourceType"),
         ],
     )
     def test_version_gate_features(self, version: str, expected_feature: str):

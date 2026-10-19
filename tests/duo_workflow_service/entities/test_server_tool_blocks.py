@@ -1,14 +1,20 @@
 import pytest
+from structlog.testing import capture_logs
 
 from duo_workflow_service.entities.server_tool_blocks import (
     AgentTextSegment,
     ServerToolBoundary,
-    build_anthropic_tool_ui_chat_log,
-    is_anthropic_server_tool_result_block,
-    is_anthropic_server_tool_use_block,
+    ServerToolResults,
+    _is_anthropic_server_tool_result_block,
+    _is_anthropic_server_tool_use_block,
+    is_web_search_call,
     split_content_around_server_tools,
+    warn_unmatched_server_tool_results,
 )
 from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
+)
 
 
 @pytest.mark.parametrize(
@@ -24,7 +30,7 @@ from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus
     ],
 )
 def test_is_anthropic_server_tool_use_block(block, expected):
-    assert is_anthropic_server_tool_use_block(block) is expected
+    assert _is_anthropic_server_tool_use_block(block) is expected
 
 
 @pytest.mark.parametrize(
@@ -41,10 +47,10 @@ def test_is_anthropic_server_tool_use_block(block, expected):
     ],
 )
 def test_is_anthropic_server_tool_result_block(block, expected):
-    assert is_anthropic_server_tool_result_block(block) is expected
+    assert _is_anthropic_server_tool_result_block(block) is expected
 
 
-def test_build_anthropic_tool_ui_chat_log_pending_without_result():
+def test_build_ui_chat_log_anthropic_pending_without_result():
     use_block = {
         "type": "server_tool_use",
         "id": "srvtu_1",
@@ -52,7 +58,7 @@ def test_build_anthropic_tool_ui_chat_log_pending_without_result():
         "input": {"query": "latest AI research"},
     }
 
-    entry = build_anthropic_tool_ui_chat_log(use_block)
+    entry = ServerToolResults([use_block]).build_ui_chat_log(use_block)
 
     assert entry["message_type"] == MessageTypeEnum.TOOL
     assert entry["message_sub_type"] == "web_search"
@@ -65,34 +71,58 @@ def test_build_anthropic_tool_ui_chat_log_pending_without_result():
     assert "tool_response" not in entry["tool_info"]
 
 
-def test_build_anthropic_tool_ui_chat_log_success_with_result():
+@pytest.mark.parametrize(
+    ("partial_json", "args"),
+    [
+        ('{"url": "https://x"}', {"url": "https://x"}),
+        ('{"url": "https:', {}),
+    ],
+)
+def test_build_ui_chat_log_anthropic_reads_streamed_input(partial_json, args):
     use_block = {
         "type": "server_tool_use",
         "id": "srvtu_1",
-        "name": "web_search",
-        "input": {"query": "gitlab duo"},
-    }
-    result_content = [
-        {"type": "web_search_result", "url": "https://x", "title": "X"},
-    ]
-    result_block = {
-        "type": "web_search_tool_result",
-        "tool_use_id": "srvtu_1",
-        "content": result_content,
+        "name": "web_fetch",
+        "input": {},
+        "partial_json": partial_json,
     }
 
-    entry = build_anthropic_tool_ui_chat_log(
-        use_block, result_block, component_name="chat"
+    entry = ServerToolResults([use_block]).build_ui_chat_log(use_block)
+
+    assert entry["tool_info"]["args"] == args
+
+
+def test_build_ui_chat_log_anthropic_success_with_result():
+    result_content = [{"type": "web_search_result", "url": "https://x", "title": "X"}]
+    content = [
+        {
+            "type": "server_tool_use",
+            "id": "srvtu_1",
+            "name": "web_search",
+            "input": {"query": "gitlab duo"},
+        },
+        {
+            "type": "web_search_tool_result",
+            "tool_use_id": "srvtu_1",
+            "content": result_content,
+        },
+    ]
+
+    entry = ServerToolResults(content).build_ui_chat_log(
+        content[0], component_name="chat"
     )
 
     assert entry["status"] == ToolStatus.SUCCESS
     assert entry["message_id"] == "srvtu_1"
     assert entry["component_name"] == "chat"
-    assert entry["tool_info"]["tool_response"] == result_content
+    # Rendered as a string, not stored as the result list: the CLI and IDE
+    # validate tool_response as a string and drop the chat log otherwise.
+    assert entry["tool_info"]["tool_response"] == "X: https://x"
+    assert_client_valid_tool_info(entry["tool_info"])
 
 
-def test_build_anthropic_tool_ui_chat_log_defaults_for_missing_fields():
-    entry = build_anthropic_tool_ui_chat_log({"type": "server_tool_use"})
+def test_build_ui_chat_log_anthropic_defaults_for_missing_fields():
+    entry = ServerToolResults([]).build_ui_chat_log({"type": "server_tool_use"})
 
     assert entry["message_sub_type"] == "server_tool"
     assert entry["tool_info"]["name"] == "server_tool"
@@ -100,20 +130,219 @@ def test_build_anthropic_tool_ui_chat_log_defaults_for_missing_fields():
     assert entry["message_id"] is None
 
 
-def test_build_anthropic_tool_ui_chat_log_redacts_secrets_in_result():
+_PAIRED = [
+    {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"},
+    {"type": "web_search_tool_result", "tool_use_id": "srvtu_1", "content": []},
+]
+_EMPTY_SEARCH = [
+    {
+        "type": "web_search_call",
+        "id": "ws_1",
+        "status": "completed",
+        "action": {"type": "search", "sources": []},
+    }
+]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [pytest.param(_PAIRED, id="anthropic"), pytest.param(_EMPTY_SEARCH, id="openai")],
+)
+def test_build_ui_chat_log_omits_an_empty_tool_response(content):
+    entry = ServerToolResults(content).build_ui_chat_log(content[0])
+
+    assert entry["status"] == ToolStatus.SUCCESS
+    assert "tool_response" not in entry["tool_info"]
+    assert "sources" not in entry["tool_info"]
+
+
+def test_build_ui_chat_log_result_never_carries_raw_content():
     leaked_token = "gh" + "p_" + "1234567890abcdefghijklmnopqrstuvwxyz"
-    use_block = {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"}
-    result_block = {
+    content = [
+        {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"},
+        {
+            "type": "web_search_tool_result",
+            "tool_use_id": "srvtu_1",
+            "content": [
+                {"type": "web_search_result", "snippet": f"token {leaked_token}"}
+            ],
+        },
+    ]
+
+    entry = ServerToolResults(content).build_ui_chat_log(content[0])
+
+    # A web_search_result block with no text and no url renders as a marker,
+    # and nothing inside it -- a leaked token included -- reaches the card.
+    tool_response = entry["tool_info"]["tool_response"]
+    assert isinstance(tool_response, str)
+    assert leaked_token not in tool_response
+
+
+def test_build_ui_chat_log_lists_the_sources_by_title_and_url():
+    """The card the CLI and IDE show for a web search names the sources, not N identical markers."""
+    content = [
+        {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"},
+        {
+            "type": "web_search_tool_result",
+            "tool_use_id": "srvtu_1",
+            "content": [
+                {
+                    "type": "web_search_result",
+                    "url": "https://docs.example/a",
+                    "title": "A",
+                    "encrypted_content": "Q" * 40,
+                },
+                {"type": "web_search_result", "url": "https://docs.example/b"},
+            ],
+        },
+    ]
+
+    entry = ServerToolResults(content).build_ui_chat_log(content[0])
+
+    assert entry["tool_info"]["tool_response"] == (
+        "A: https://docs.example/a\nhttps://docs.example/b"
+    )
+
+
+_ANTHROPIC_SOURCES = [
+    {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"},
+    {
         "type": "web_search_tool_result",
         "tool_use_id": "srvtu_1",
-        "content": [{"type": "web_search_result", "snippet": f"token {leaked_token}"}],
+        "content": [
+            {
+                "type": "web_search_result",
+                "url": "https://docs.example/a",
+                "title": "A",
+                "encrypted_content": "Q" * 40,
+                "page_age": "1 day",
+            },
+            {"type": "web_search_result", "url": "javascript:alert(1)", "title": "X"},
+            {"type": "web_search_result", "url": "ftp://docs.example/c", "title": "Z"},
+            {"type": "web_search_result", "url": "data:text/html,x", "title": "D"},
+            {"type": "web_search_result", "url": "http://[not-closed", "title": "Y"},
+            {"type": "web_search_result", "url": "HTTPS://docs.example/b"},
+            {"type": "web_search_result", "url": "https://docs.example/e", "title": ""},
+        ],
+    },
+]
+_OPENAI_SOURCES = [
+    {
+        "type": "web_search_call",
+        "id": "ws_1",
+        "status": "completed",
+        "action": {
+            "type": "search",
+            "sources": [
+                {"type": "url", "url": "https://docs.example/a", "title": "A"},
+                {"type": "url", "url": "javascript:alert(1)", "title": "X"},
+                {"type": "url", "url": "ftp://docs.example/c", "title": "Z"},
+                {"type": "url", "url": "data:text/html,x", "title": "D"},
+                {"type": "url", "url": "http://[not-closed", "title": "Y"},
+                {"type": "url", "url": "HTTPS://docs.example/b"},
+                {"type": "url", "url": "https://docs.example/e", "title": ""},
+            ],
+        },
     }
+]
 
-    entry = build_anthropic_tool_ui_chat_log(use_block, result_block)
 
-    snippet = entry["tool_info"]["tool_response"][0]["snippet"]
-    assert leaked_token not in snippet
-    assert "[REDACTED]" in snippet
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(_ANTHROPIC_SOURCES, id="anthropic"),
+        pytest.param(_OPENAI_SOURCES, id="openai"),
+    ],
+)
+def test_build_ui_chat_log_carries_the_sources_for_the_web_card(content):
+    entry = ServerToolResults(content).build_ui_chat_log(content[0])
+
+    # Only title and http(s) url, scheme in any case; a malformed url must not raise.
+    # A missing or empty title falls back to the url.
+    assert entry["tool_info"]["sources"] == [
+        {"title": "A", "url": "https://docs.example/a"},
+        {"title": "Y", "url": "http://[not-closed"},
+        {"title": "HTTPS://docs.example/b", "url": "HTTPS://docs.example/b"},
+        {"title": "https://docs.example/e", "url": "https://docs.example/e"},
+    ]
+    assert isinstance(entry["tool_info"]["tool_response"], str)
+    assert_client_valid_tool_info(entry["tool_info"])
+
+
+def test_build_ui_chat_log_has_no_sources_for_a_failed_search():
+    """Anthropic returns one error object, not a list, when a search fails."""
+    error = {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"}
+    content = [
+        {"type": "server_tool_use", "id": "srvtu_1", "name": "web_search"},
+        {"type": "web_search_tool_result", "tool_use_id": "srvtu_1", "content": error},
+    ]
+
+    entry = ServerToolResults(content).build_ui_chat_log(content[0])
+
+    assert "sources" not in entry["tool_info"]
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_events"),
+    [
+        pytest.param(_PAIRED, [], id="a-paired-result-is-quiet"),
+        pytest.param(
+            [
+                _PAIRED[0],
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "srvtu_other",
+                    "content": [],
+                },
+            ],
+            [
+                {
+                    "event": "Server tool result has no matching server tool use block",
+                    "log_level": "warning",
+                    "tool_use_id": "srvtu_other",
+                    "block_type": "web_search_tool_result",
+                }
+            ],
+            id="an-unmatched-anthropic-result",
+        ),
+        pytest.param(
+            [{"type": "web_search_call", "id": "ws_1", "action": {"type": "search"}}],
+            [],
+            id="a-mapped-openai-action-is-quiet",
+        ),
+        pytest.param(
+            [{"type": "web_search_call", "id": "ws_1", "action": {"type": "unknown"}}],
+            [
+                {
+                    "event": "Server tool call has an unmapped action type; card falls back to web_search",
+                    "log_level": "warning",
+                    "action_type": "unknown",
+                }
+            ],
+            id="an-unmapped-openai-action",
+        ),
+    ],
+)
+def test_warn_unmatched_server_tool_results(content, expected_events):
+    with capture_logs() as logs:
+        warn_unmatched_server_tool_results(content)
+
+    assert logs == expected_events
+
+
+def test_split_content_around_server_tools_splits_on_openai_calls():
+    content = [
+        {"type": "reasoning", "id": "rs_1", "summary": []},  # skipped
+        {"type": "web_search_call", "id": "ws_1", "status": "completed"},
+        {"type": "text", "text": "Done."},
+    ]
+
+    segments = list(split_content_around_server_tools(content, "resp_1"))
+
+    assert segments == [
+        ServerToolBoundary(block=content[1], index=0),
+        AgentTextSegment(key="resp_1:seg1", text="Done.", index=1),
+    ]
 
 
 def test_split_content_around_server_tools_segments_and_boundaries():
@@ -147,3 +376,48 @@ def test_split_content_around_server_tools_skips_empty_segments():
         ServerToolBoundary(block=content[0], index=0),
         ServerToolBoundary(block=content[1], index=1),
     ]
+
+
+@pytest.mark.parametrize(
+    ("block", "expected"),
+    [
+        ({"type": "server_tool_use", "name": "web_search", "input": {}}, True),
+        (
+            {
+                "type": "server_tool_use",
+                "name": "web_search",
+                "input": {"query": "gitlab duo"},
+            },
+            True,
+        ),
+        (
+            {
+                "type": "server_tool_use",
+                "name": "web_fetch",
+                "input": {"url": "https://x"},
+            },
+            False,
+        ),
+        ({"type": "web_search_call", "action": {"type": "search"}}, True),
+        # An unmapped action falls back to `web_search`, matching the card builder.
+        ({"type": "web_search_call", "action": {"type": "unknown"}}, True),
+        ({"type": "web_search_call", "action": {"type": "open_page"}}, False),
+        ({"type": "tool_use", "name": "read_file", "input": {}}, False),
+        # The fallback tool answers to the same name; only the type tells them apart.
+        (
+            {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "web_search",
+                "input": {"query": "gitlab duo"},
+            },
+            False,
+        ),
+        ({"name": "web_search", "input": {}}, False),
+        ({}, False),
+        ("a plain text block", False),
+        (None, False),
+    ],
+)
+def test_is_web_search_call(block, expected):
+    assert is_web_search_call(block) is expected

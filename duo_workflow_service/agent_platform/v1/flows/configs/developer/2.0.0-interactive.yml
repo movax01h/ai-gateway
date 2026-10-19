@@ -6,7 +6,7 @@ environment: chat
 # shared `developer_agent_prompt` (see
 # ai_gateway/prompts/definitions/developer_agent_prompt/system/1.0.0.jinja),
 # which extends `common/developer/system` and overrides the operating-mode and
-# git-push blocks for interactive use. This flow (no subagents):
+# git-push blocks for interactive use. This flow:
 #   * runs in the `chat` environment and loops through a HumanInputComponent so
 #     the user can steer the agent turn by turn,
 #   * requires tool approval, and
@@ -74,6 +74,11 @@ components:
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
+    subagents:
+      - source: workspace
+        item_type: agent_template
+        item_id: "*"
+
   - name: "user_input"
     type: HumanInputComponent
     sends_response_to: "developer_agent"
@@ -81,6 +86,11 @@ components:
     message_template: ""
     ui_log_events:
       - on_user_response
+
+include:
+  - source: workspace
+    item_type: agent_template
+    item_id: "*"
 
 routers:
   - from: "developer_agent"

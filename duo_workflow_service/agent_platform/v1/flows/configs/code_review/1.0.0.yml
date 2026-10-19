@@ -41,7 +41,7 @@ components:
       - from: "context:fetch_mr_diffs.tool_responses"
         as: "mr_diffs"
     toolset:
-      - "list_repository_tree"
+      - "find_files"
     max_correction_attempts: 3
     ui_log_events:
       - "on_tool_call_input"

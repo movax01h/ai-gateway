@@ -64,7 +64,13 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
                     fireworks_api_base_url=config.fireworks_api_base_url,
                 )
                 model_metadata_by_tag = ModelMetadataByTag(
-                    default=default, by_tag=by_tag
+                    default=default,
+                    by_tag=by_tag,
+                    # A pinned identifier is the user's choice. Routing only rewrites a
+                    # default that came from the feature setting.
+                    feature_setting=(
+                        None if data.get("identifier") else data.get("feature_setting")
+                    ),
                 )
             else:
                 # `data` may be a "provider stickiness" replay of previously checkpointed

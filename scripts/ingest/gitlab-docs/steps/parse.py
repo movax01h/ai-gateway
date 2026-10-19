@@ -6,6 +6,8 @@ import json
 import os
 import re
 
+import yaml
+
 MAX_CHARS_PER_EMBEDDING = 1500
 MIN_CHARS_PER_EMBEDDING = 100
 
@@ -23,16 +25,36 @@ def _title(content: str) -> str | None:
     return title or None
 
 
+def _front_matter_title(front_matter: str) -> str | None:
+    """Extract the ``title`` key from YAML front matter."""
+    try:
+        data = yaml.safe_load(front_matter)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    title = data.get("title")
+    if not isinstance(title, str):
+        return None
+    return title.strip() or None
+
+
 def _parse_content_and_metadata(
     content: str, md5sum: str, source_name: str, url: str
 ) -> tuple[str, dict]:
-    """Strip YAML front matter and build metadata dict."""
+    """Strip YAML front matter and build metadata dict.
+
+    The title comes from the front matter ``title`` key, which GitLab docs use for the page title. Older docs set the
+    title as a markdown heading instead, so the first heading is the fallback.
+    """
+    front_matter_title = None
     match = METADATA_REGEX.match(content)
     if match:
+        front_matter_title = _front_matter_title(match.group("metadata"))
         content = content[match.end() :].strip()
 
     metadata = {
-        "title": _title(content),
+        "title": front_matter_title or _title(content),
         "md5sum": md5sum,
         "source": source_name,
         "source_type": "doc",

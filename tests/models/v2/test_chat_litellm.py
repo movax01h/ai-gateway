@@ -1,8 +1,10 @@
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import litellm
 import pytest
+from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -13,21 +15,29 @@ from langchain_core.messages import (
 from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_core.runnables import Runnable
+from litellm.types.utils import Delta, PromptTokensDetailsWrapper
 
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
 from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
 from ai_gateway.models.v2.chat_litellm import (
+    _WEB_SEARCH_UNAVAILABLE_NOTE,
     ChatLiteLLM,
+    _drop_unsupported_web_search,
     _force_gpt_5_max_completion_tokens,
+    _litellm_maps_web_search,
     _remove_deprecated_temperature_parameters,
     _rewrite_trailing_assistant_prefill,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 from ai_gateway.vendor.langchain_litellm.litellm import (
+    _convert_delta_to_message_chunk,
     _convert_dict_to_message,
     _convert_message_to_dict,
     _create_usage_metadata,
+    _get_attr_or_key,
+    _ServerToolStream,
+    _split_server_tool_calls,
 )
 
 
@@ -219,17 +229,15 @@ async def test_fireworks_prompt_caching_disabled(mock_acompletion_with_retry):
     assert call_kwargs["prompt_cache_max_len"] == 0
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("token_usage", "expected_usage_metadata"),
     [
+        # No cache fields at all.
         (
-            {
-                "prompt_tokens": 1,
-                "completion_tokens": 2,
-            },
+            {"prompt_tokens": 1, "completion_tokens": 2},
             UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3),
         ),
+        # Anthropic-style: cache_creation_input_tokens + cache_read_input_tokens.
         (
             {
                 "prompt_tokens": 1,
@@ -244,34 +252,363 @@ async def test_fireworks_prompt_caching_disabled(mock_acompletion_with_retry):
                 input_token_details=InputTokenDetails(cache_creation=3, cache_read=4),
             ),
         ),
+        # OpenAI-style — object form (PromptTokensDetailsWrapper): cache_read only.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": PromptTokensDetailsWrapper(cached_tokens=5),
+            },
+            UsageMetadata(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                input_token_details=InputTokenDetails(cache_read=5),
+            ),
+        ),
+        # OpenAI-style — object form: both cache_read and cache_write.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": PromptTokensDetailsWrapper(
+                    cached_tokens=5, cache_write_tokens=3
+                ),
+            },
+            UsageMetadata(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                input_token_details=InputTokenDetails(cache_read=5, cache_creation=3),
+            ),
+        ),
+        # OpenAI-style — dict form (streaming path after model_dump()): cache_read only.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cached_tokens": 5},
+            },
+            UsageMetadata(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                input_token_details=InputTokenDetails(cache_read=5),
+            ),
+        ),
+        # OpenAI-style — dict form: both cache_read and cache_write.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cached_tokens": 5, "cache_write_tokens": 3},
+            },
+            UsageMetadata(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                input_token_details=InputTokenDetails(cache_read=5, cache_creation=3),
+            ),
+        ),
+        # OpenAI-style — object form with cached_tokens=None and cache_write_tokens=None:
+        # no input_token_details emitted (treat missing/None as 0).
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": PromptTokensDetailsWrapper(
+                    cached_tokens=None, cache_write_tokens=None
+                ),
+            },
+            UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3),
+        ),
+        # OpenAI-style — dict form with all-zero values: no input_token_details emitted.
+        (
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+            },
+            UsageMetadata(input_tokens=1, output_tokens=2, total_tokens=3),
+        ),
     ],
 )
-async def test_create_usage_metadata(token_usage, expected_usage_metadata):
+def test_create_usage_metadata(token_usage, expected_usage_metadata):
     assert _create_usage_metadata(token_usage) == expected_usage_metadata
 
 
 @pytest.mark.parametrize(
-    ("bind_tools_params", "expected_tools"),
+    ("obj", "key", "expected"),
     [
+        # dict form (streaming path after model_dump())
+        ({"cached_tokens": 5}, "cached_tokens", 5),
+        ({"cached_tokens": 5}, "cache_write_tokens", None),
+        ({}, "cached_tokens", None),
+        # object form (non-streaming PromptTokensDetailsWrapper)
+        (PromptTokensDetailsWrapper(cached_tokens=7), "cached_tokens", 7),
+        (PromptTokensDetailsWrapper(cached_tokens=7), "cache_write_tokens", None),
         (
-            {"web_search_options": {}},
-            [{"type": "function", "function": {"name": "get_issue"}}],
+            PromptTokensDetailsWrapper(cached_tokens=7, cache_write_tokens=3),
+            "cache_write_tokens",
+            3,
         ),
-        ({}, [{"type": "function", "function": {"name": "get_issue"}}]),
     ],
 )
-def test_bind_tools_with_web_search_options(bind_tools_params, expected_tools):
-    """Test that web search tool is added when web_search_options is in bind_tools_params."""
-    chat = ChatLiteLLM(model="gpt-3.5-turbo")
+def test_get_attr_or_key(obj, key, expected):
+    assert _get_attr_or_key(obj, key) == expected
 
-    existing_tools = [{"name": "get_issue"}]
-    result = chat.bind_tools(
-        tools=existing_tools,
-        **bind_tools_params,
-    )
+
+@pytest.mark.parametrize(
+    ("bind_tools_params", "expect_web_search_forwarded"),
+    [
+        pytest.param({"web_search_options": {}}, True, id="with-web-search"),
+        pytest.param({}, False, id="without-web-search"),
+    ],
+)
+def test_bind_tools_web_search_options(bind_tools_params, expect_web_search_forwarded):
+    """web_search_options must pass through as a kwarg without altering the tools list."""
+    chat = ChatLiteLLM(model="claude-sonnet-4-6")
+
+    result = chat.bind_tools(tools=[{"name": "get_issue"}], **bind_tools_params)
 
     assert isinstance(result, Runnable)
-    assert result.kwargs["tools"] == expected_tools
+    assert result.kwargs["tools"] == [
+        {"type": "function", "function": {"name": "get_issue"}}
+    ]
+    assert ("web_search_options" in result.kwargs) is expect_web_search_forwarded
+
+
+class TestLitellmMapsWebSearch:
+    """Canary: tests hit the real LiteLLM supported-params registry, so a LiteLLM
+    bump that changes parameter mappings will fail here intentionally."""
+
+    @pytest.mark.parametrize(
+        ("model", "provider", "expected"),
+        [
+            pytest.param("claude-sonnet-4-6", "vertex_ai", True, id="vertex-claude"),
+            pytest.param(
+                "bedrock/global.anthropic.claude-sonnet-4-6",
+                "bedrock",
+                False,
+                id="bedrock-converse",
+            ),
+            pytest.param("foo", "not_a_provider", False, id="unknown-provider"),
+            pytest.param(None, "vertex_ai", False, id="missing-model"),
+        ],
+    )
+    def test_reports_litellm_mapping(self, model, provider, expected):
+        assert _litellm_maps_web_search(model, provider) is expected
+
+
+class TestDropUnsupportedWebSearch:
+    @pytest.mark.parametrize(
+        ("model", "provider"),
+        [
+            pytest.param("claude-sonnet-4-6", "vertex_ai", id="vertex-claude"),
+            pytest.param("claude-haiku-4-5", "vertex_ai", id="vertex-haiku"),
+        ],
+    )
+    def test_kept_for_capable_provider(self, model, provider):
+        kwargs = {
+            "model": model,
+            "custom_llm_provider": provider,
+            "web_search_options": {},
+        }
+
+        _drop_unsupported_web_search(kwargs)
+
+        assert kwargs["web_search_options"] == {}
+
+    @pytest.mark.parametrize(
+        ("model", "provider"),
+        [
+            # Bedrock never runs Anthropic's server-side tools, on either routing path.
+            pytest.param(
+                "bedrock/global.anthropic.claude-sonnet-4-6", "bedrock", id="bedrock"
+            ),
+            pytest.param(
+                "anthropic.claude-sonnet-4-5-v1:0", "bedrock", id="bedrock-invoke"
+            ),
+            pytest.param("accounts/x/models/y", "fireworks_ai", id="fireworks"),
+            pytest.param("mistral-large", "mistral", id="mistral"),
+            # Self-hosted endpoints have no hosted search tool at all.
+            pytest.param("some-model", "custom_openai", id="self-hosted"),
+            pytest.param("some-model", None, id="no-provider"),
+        ],
+    )
+    def test_dropped_for_incapable_provider(self, model, provider):
+        kwargs = {
+            "model": model,
+            "custom_llm_provider": provider,
+            "web_search_options": {},
+        }
+
+        _drop_unsupported_web_search(kwargs)
+
+        assert "web_search_options" not in kwargs
+
+    def test_dropped_when_litellm_does_not_map_the_model(self):
+        """A capable provider is not enough; the installed LiteLLM must map the parameter for that model too."""
+        kwargs = {
+            "model": "gpt-5",
+            "custom_llm_provider": "openai",
+            "web_search_options": {},
+        }
+
+        with patch(
+            "ai_gateway.models.v2.chat_litellm._WEB_SEARCH_CAPABLE_PROVIDERS",
+            frozenset({"openai"}),
+        ):
+            _drop_unsupported_web_search(kwargs)
+
+        assert "web_search_options" not in kwargs
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param(
+                {"model": "claude-sonnet-4-6", "custom_llm_provider": "bedrock"},
+                id="absent",
+            ),
+            pytest.param(
+                {
+                    "model": "claude-sonnet-4-6",
+                    "custom_llm_provider": "bedrock",
+                    "web_search_options": None,
+                },
+                id="none",
+            ),
+        ],
+    )
+    def test_noop_when_web_search_was_not_requested(self, kwargs):
+        original = dict(kwargs)
+
+        _drop_unsupported_web_search(kwargs)
+
+        assert kwargs == original
+
+    def test_drop_is_logged(self):
+        """A request that asked for web search and did not get it must stay diagnosable."""
+        kwargs = {
+            "model": "bedrock/global.anthropic.claude-sonnet-4-6",
+            "custom_llm_provider": "bedrock",
+            "web_search_options": {},
+        }
+
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            _drop_unsupported_web_search(kwargs)
+
+        mock_log.warning.assert_called_once()
+        assert mock_log.warning.call_args.kwargs["custom_llm_provider"] == "bedrock"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("provider", "expect_forwarded"),
+        [
+            pytest.param("vertex_ai", True, id="vertex"),
+            pytest.param("bedrock", False, id="bedrock"),
+        ],
+    )
+    async def test_gate_applies_on_the_way_to_litellm(self, provider, expect_forwarded):
+        """The gate runs in `acompletion_with_retry`, where model and provider are finally merged."""
+        chat = ChatLiteLLM(model="claude-sonnet-4-6")
+
+        with patch.object(
+            _LChatLiteLLM, "acompletion_with_retry", new=AsyncMock()
+        ) as mock_parent:
+            await chat.acompletion_with_retry(
+                model="claude-sonnet-4-6",
+                custom_llm_provider=provider,
+                web_search_options={},
+            )
+
+        forwarded = mock_parent.call_args.kwargs
+
+        assert ("web_search_options" in forwarded) is expect_forwarded
+
+
+class TestWebSearchPolicyFallback:
+    POLICY_ERROR = (
+        "Organization Policy constraint constraints/vertexai.allowedPartnerModelFeatures "
+        "violated attempting to use a disallowed feature web_search for Partner model "
+        "claude-sonnet-4-6."
+    )
+
+    @staticmethod
+    def _bad_request(message):
+        return litellm.BadRequestError(
+            message=message, model="claude-sonnet-4-6", llm_provider="vertex_ai"
+        )
+
+    async def _call(self, side_effect, **kwargs):
+        chat = ChatLiteLLM(model="claude-sonnet-4-6")
+        with patch.object(
+            _LChatLiteLLM, "acompletion_with_retry", new=AsyncMock()
+        ) as mock_parent:
+            mock_parent.side_effect = side_effect
+            result = await chat.acompletion_with_retry(
+                model="claude-sonnet-4-6",
+                custom_llm_provider="vertex_ai",
+                messages=[{"role": "user", "content": "hi"}],
+                **kwargs,
+            )
+        return result, mock_parent
+
+    @pytest.mark.asyncio
+    async def test_retries_without_web_search_on_policy_error(self):
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            result, mock_parent = await self._call(
+                [self._bad_request(self.POLICY_ERROR), "response"],
+                web_search_options={},
+            )
+
+        assert self.POLICY_ERROR in mock_log.warning.call_args.kwargs["error"]
+
+        assert result == "response"
+        assert mock_parent.call_count == 2
+        retried = mock_parent.call_args_list[1].kwargs
+        assert "web_search_options" not in retried
+        assert retried["messages"][0] == {"role": "user", "content": "hi"}
+        assert retried["messages"][-1] == {
+            "role": "system",
+            "content": _WEB_SEARCH_UNAVAILABLE_NOTE,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("message", "kwargs"),
+        [
+            pytest.param(
+                "prompt is too long", {"web_search_options": {}}, id="other-error"
+            ),
+            pytest.param(POLICY_ERROR, {}, id="no-web-search"),
+        ],
+    )
+    async def test_reraises(self, message, kwargs):
+        with pytest.raises(litellm.BadRequestError):
+            await self._call([self._bad_request(message)], **kwargs)
+
+    @pytest.mark.asyncio
+    async def test_streaming_retries_without_web_search(self):
+        async def stream():
+            yield streaming_chunk({"content": "answer"}, finish_reason="stop")
+
+        chat = ChatLiteLLM(model="claude-sonnet-4-6", custom_llm_provider="vertex_ai")
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(side_effect=[self._bad_request(self.POLICY_ERROR), stream()]),
+        ) as mock_parent:
+            chunks = [
+                chunk.message.content
+                async for chunk in chat._astream(
+                    messages=[HumanMessage(content="hi")], web_search_options={}
+                )
+            ]
+
+        assert "answer" in chunks
+        assert "web_search_options" in mock_parent.call_args_list[0].kwargs
+        assert "web_search_options" not in mock_parent.call_args_list[1].kwargs
 
 
 @pytest.mark.asyncio
@@ -792,12 +1129,18 @@ class TestDeprecatedTemperatureRemoval:
             "claude-opus-4-8",
             "claude-opus-4.8",
             "anthropic.claude-opus-4-8-20250101-v1:0",
+            "claude-opus-5",
+            "bedrock/eu.anthropic.claude-opus-5",
+            "claude_opus_5",
             "claude-sonnet-5",
             "anthropic.claude-sonnet-5",
             "claude-fable-5",
             "anthropic.claude-fable-5",
             "claude-mythos-5",
             "anthropic.claude-mythos-5",
+            "claude-haiku-5-5",
+            "claude_haiku_5_5",
+            "bedrock/global.anthropic.claude-haiku-5-5",
         ],
     )
     def test_removes_temperature(self, model):
@@ -827,6 +1170,11 @@ class TestDeprecatedTemperatureRemoval:
             "claude-opus-4.6",
             "claude-3-5-sonnet",
             "claude-sonnet-4-5",
+            "claude-haiku-4-5",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-4-5@20251001",
+            "bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "claude-3-5-haiku-20241022",
             "gpt-5",
         ],
     )
@@ -1190,3 +1538,576 @@ class TestReasoningContentRoundTrip:
             assistant_dicts[0]["reasoning_content"] == "I should read the file first."
         )
         assert assistant_dicts[0]["tool_calls"][0]["id"] == "call_1"
+
+
+class TestUserIdentityHeader:
+    @pytest.fixture(name="chat")
+    def chat_fixture(self):
+        return ChatLiteLLM(
+            model="test-model",
+            custom_llm_provider="custom_openai",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+            extra_headers={"X-Api-Subscription": "sub"},
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_non_stream_response"]
+    )
+    async def test_forwards_user_id_alongside_static_headers(
+        self, chat, mock_acompletion_with_retry, gitlab_user_id_in_context
+    ):
+        await chat._agenerate(messages=[HumanMessage(content="hi")])
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert call_kwargs["extra_headers"] == {
+            "X-Api-Subscription": "sub",
+            "x-gitlab-user-id": gitlab_user_id_in_context,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_stream_response"]
+    )
+    async def test_forwards_user_id_when_streaming(
+        self, chat, mock_acompletion_with_retry, gitlab_user_id_in_context
+    ):
+        await chat._agenerate(messages=[HumanMessage(content="hi")], stream=True)
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert (
+            call_kwargs["extra_headers"]["x-gitlab-user-id"]
+            == gitlab_user_id_in_context
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_non_stream_response"]
+    )
+    async def test_keeps_session_affinity_header(
+        self, mock_acompletion_with_retry, gitlab_user_id_in_context
+    ):
+        chat = ChatLiteLLM(
+            model="test-model",
+            custom_llm_provider="fireworks_ai",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+        await chat._agenerate(
+            messages=[HumanMessage(content="hi")], session_id="test-session-123"
+        )
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert call_kwargs["extra_headers"] == {
+            "x-session-affinity": "test-session-123",
+            "x-gitlab-user-id": gitlab_user_id_in_context,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("no_gitlab_user_id_in_context")
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_non_stream_response"]
+    )
+    async def test_sends_only_static_headers_without_user_id(
+        self, chat, mock_acompletion_with_retry
+    ):
+        await chat._agenerate(messages=[HumanMessage(content="hi")])
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert call_kwargs["extra_headers"] == {"X-Api-Subscription": "sub"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("gitlab_user_id_in_context")
+    @pytest.mark.parametrize(
+        "acompletion_response_fixture", ["acompletion_non_stream_response"]
+    )
+    async def test_does_not_forward_user_id_when_not_configured(
+        self, mock_acompletion_with_retry
+    ):
+        chat = ChatLiteLLM(
+            model="test-model",
+            custom_llm_provider="custom_openai",
+            custom_models_enabled=True,
+        )
+
+        await chat._agenerate(messages=[HumanMessage(content="hi")])
+
+        call_kwargs = mock_acompletion_with_retry.call_args[1]
+        assert "extra_headers" not in call_kwargs
+
+
+# --- Server-side tool calls: split off the client ones, surface as content blocks ---
+
+SERVER_TOOL_ID = "srvtoolu_01ABC"
+CLIENT_TOOL_ID = "toolu_01XYZ"
+
+
+def server_tool_call(
+    index=0, name="web_search", arguments="", tool_call_id=SERVER_TOOL_ID
+):
+    return {
+        "id": tool_call_id,
+        "index": index,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+
+
+def client_tool_call(
+    index=0, name="get_issue", arguments="", tool_call_id=CLIENT_TOOL_ID
+):
+    return {
+        "id": tool_call_id,
+        "index": index,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+
+
+def continuation_chunk(index, arguments):
+    """A `partial_json` delta: carries neither id nor name, only an index."""
+    return {
+        "id": None,
+        "index": index,
+        "type": "function",
+        "function": {"name": None, "arguments": arguments},
+    }
+
+
+def web_search_result(tool_use_id=SERVER_TOOL_ID, url="https://x"):
+    return {
+        "type": "web_search_tool_result",
+        "tool_use_id": tool_use_id,
+        "content": [{"type": "web_search_result", "url": url, "title": "X"}],
+    }
+
+
+def server_tool_use_block(query="gitlab 18.9", tool_use_id=SERVER_TOOL_ID):
+    return {
+        "type": "server_tool_use",
+        "id": tool_use_id,
+        "name": "web_search",
+        "input": {"query": query},
+    }
+
+
+class TestSplitServerToolCalls:
+    def test_client_tool_call_is_kept(self):
+        assert _split_server_tool_calls([client_tool_call()]) == (
+            [client_tool_call()],
+            [],
+        )
+
+    def test_server_tool_call_becomes_a_content_block(self):
+        call = server_tool_call(arguments='{"query":"gitlab 18.9"}')
+
+        assert _split_server_tool_calls([call]) == ([], [server_tool_use_block()])
+
+    @pytest.mark.parametrize("arguments", ["", "not json", "[1,2]"])
+    def test_unusable_arguments_yield_an_empty_input(self, arguments):
+        _, blocks = _split_server_tool_calls([server_tool_call(arguments=arguments)])
+
+        assert blocks[0]["input"] == {}
+
+    def test_pydantic_tool_call_objects(self):
+        """Non-streaming responses carry LiteLLM pydantic objects rather than dicts."""
+        server = SimpleNamespace(id=SERVER_TOOL_ID, index=0)
+        client = SimpleNamespace(id=CLIENT_TOOL_ID, index=1)
+
+        client_calls, blocks = _split_server_tool_calls([server, client])
+
+        assert client_calls == [client]
+        assert blocks[0]["id"] == SERVER_TOOL_ID
+
+
+class TestConvertDictToMessage:
+    def test_server_tool_call_and_result_become_content_blocks(self):
+        message = _convert_dict_to_message(
+            {
+                "role": "assistant",
+                "content": "done",
+                "tool_calls": [server_tool_call(arguments='{"query":"gitlab 18.9"}')],
+                "provider_specific_fields": {
+                    "web_search_results": [web_search_result()]
+                },
+            }
+        )
+
+        assert isinstance(message, AIMessage)
+        assert message.tool_calls == []
+        assert "tool_calls" not in message.additional_kwargs
+        assert message.content == [
+            server_tool_use_block(),
+            web_search_result(),
+            {"type": "text", "text": "done"},
+        ]
+
+    def test_server_tool_call_without_a_result_is_dropped(self):
+        message = _convert_dict_to_message(
+            {"role": "assistant", "content": "text", "tool_calls": [server_tool_call()]}
+        )
+
+        assert message.content == "text"
+
+    def test_content_stays_a_string_without_server_tools(self):
+        message = _convert_dict_to_message({"role": "assistant", "content": "done"})
+
+        assert message.content == "done"
+
+    def test_client_tool_call_is_preserved(self):
+        message = _convert_dict_to_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [client_tool_call(arguments='{"id":5}')],
+            }
+        )
+
+        assert [call["name"] for call in message.tool_calls] == ["get_issue"]
+        assert message.tool_calls[0]["args"] == {"id": 5}
+
+
+def _merge_deltas(deltas, server_tools=None):
+    server_tools = server_tools or _ServerToolStream()
+    merged = None
+    for delta in deltas:
+        chunk = _convert_delta_to_message_chunk(delta, AIMessageChunk, server_tools)
+        merged = chunk if merged is None else merged + chunk
+    return merged
+
+
+class TestConvertDeltaToMessageChunk:
+    def test_streamed_server_tool_call_lands_between_the_text_runs(self):
+        results = {"web_search_results": [web_search_result()]}
+        merged = _merge_deltas(
+            [
+                {"content": "Let me look."},
+                {"tool_calls": [server_tool_call(index=1)]},
+                {"tool_calls": [continuation_chunk(1, '{"query":"gitlab ')]},
+                {"tool_calls": [continuation_chunk(1, '18.9"}')]},
+                # The cumulative results repeat on every later chunk.
+                {"provider_specific_fields": results},
+                {"content": "Based on my search", "provider_specific_fields": results},
+            ]
+        )
+
+        assert merged.tool_calls == []
+        assert merged.additional_kwargs == {}
+        assert merged.content == [
+            "Let me look.",
+            server_tool_use_block(),
+            web_search_result(),
+            "Based on my search",
+        ]
+
+    def test_name_from_a_later_chunk_is_kept(self):
+        results = {"web_search_results": [web_search_result()]}
+        merged = _merge_deltas(
+            [
+                {"tool_calls": [server_tool_call(index=1, name=None)]},
+                {"tool_calls": [server_tool_call(index=1, tool_call_id=None)]},
+                {"tool_calls": [continuation_chunk(1, '{"query":"gitlab 18.9"}')]},
+                {"provider_specific_fields": results},
+            ]
+        )
+
+        assert merged.content[-2:] == [server_tool_use_block(), web_search_result()]
+
+    def test_delta_objects_are_read_like_dicts(self):
+        """Some providers stream LiteLLM `Delta` objects rather than dicts."""
+        results = {"web_search_results": [web_search_result()]}
+        merged = _merge_deltas(
+            [
+                Delta(role="assistant", content="", tool_calls=[server_tool_call()]),
+                Delta(
+                    role="assistant", content="done", provider_specific_fields=results
+                ),
+            ]
+        )
+
+        assert merged.content[-3:] == [
+            {**server_tool_use_block(), "input": {}},
+            web_search_result(),
+            "done",
+        ]
+
+    def test_server_tool_call_without_an_index_is_ignored(self):
+        stream = _ServerToolStream()
+
+        assert stream.split_tool_calls([server_tool_call(index=None)]) == []
+        assert (
+            stream.content_blocks({"web_search_results": [web_search_result()]}) == []
+        )
+
+    def test_streamed_client_tool_call_survives_merge(self):
+        merged = _merge_deltas(
+            [
+                {"tool_calls": [server_tool_call(index=1)]},
+                {"tool_calls": [continuation_chunk(1, '{"query":"x"}')]},
+                {"tool_calls": [client_tool_call(index=2)]},
+                {"tool_calls": [continuation_chunk(2, '{"id":')]},
+                {"tool_calls": [continuation_chunk(2, "5}")]},
+            ]
+        )
+
+        assert [call["name"] for call in merged.tool_calls] == ["get_issue"]
+        assert merged.tool_calls[0]["args"] == {"id": 5}
+
+
+def streaming_chunk(delta, finish_reason=None):
+    return {
+        "choices": [{"delta": delta, "finish_reason": finish_reason, "index": 0}],
+        "usage": {},
+    }
+
+
+class TestStreamStateIsolation:
+    """The server-tool index set must not outlive a single stream."""
+
+    @staticmethod
+    def _stream_with_server_tool_at_index_1():
+        return [
+            streaming_chunk({"tool_calls": [server_tool_call(index=1)]}),
+            streaming_chunk({"tool_calls": [continuation_chunk(1, '{"query":"x"}')]}),
+            streaming_chunk({}, finish_reason="stop"),
+        ]
+
+    @staticmethod
+    def _stream_with_client_tool_at_index_1():
+        return [
+            streaming_chunk({"tool_calls": [client_tool_call(index=1)]}),
+            streaming_chunk({"tool_calls": [continuation_chunk(1, '{"id":5}')]}),
+            streaming_chunk({}, finish_reason="stop"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_astream_does_not_leak_indices_between_streams(self):
+        streams = [
+            self._stream_with_server_tool_at_index_1(),
+            self._stream_with_client_tool_at_index_1(),
+        ]
+
+        async def fake_acompletion(*_args, **_kwargs):
+            async def generator():
+                for chunk in streams.pop(0):
+                    yield chunk
+
+            return generator()
+
+        chat = _LChatLiteLLM(model="claude-sonnet-4-6")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "acompletion_with_retry",
+            new=AsyncMock(side_effect=fake_acompletion),
+        ):
+            merged_messages = []
+            for _ in range(2):
+                merged = None
+                async for generation in chat._astream(messages=[]):
+                    merged = (
+                        generation.message
+                        if merged is None
+                        else merged + generation.message
+                    )
+                merged_messages.append(merged)
+
+        server_stream, client_stream = merged_messages
+
+        assert server_stream.tool_calls == []
+        # Same index as the dropped server call, but a genuine client call.
+        assert [call["name"] for call in client_stream.tool_calls] == ["get_issue"]
+        assert client_stream.tool_calls[0]["args"] == {"id": 5}
+
+    def test_sync_stream_does_not_leak_indices_between_streams(self):
+        streams = [
+            self._stream_with_server_tool_at_index_1(),
+            self._stream_with_client_tool_at_index_1(),
+        ]
+
+        def fake_completion(*_args, **_kwargs):
+            return iter(streams.pop(0))
+
+        chat = _LChatLiteLLM(model="claude-sonnet-4-6")
+
+        with patch.object(
+            _LChatLiteLLM,
+            "completion_with_retry",
+            side_effect=fake_completion,
+        ):
+            merged_messages = []
+            for _ in range(2):
+                merged = None
+                for generation in chat._stream(messages=[]):
+                    merged = (
+                        generation.message
+                        if merged is None
+                        else merged + generation.message
+                    )
+                merged_messages.append(merged)
+
+        server_stream, client_stream = merged_messages
+
+        assert server_stream.tool_calls == []
+        assert [call["name"] for call in client_stream.tool_calls] == ["get_issue"]
+        assert client_stream.tool_calls[0]["args"] == {"id": 5}
+
+
+class TestReasoningEffort:
+    def test_merges_reasoning_effort_into_model_kwargs(self):
+        model = ChatLiteLLM(model="gpt-oss", reasoning_effort="low")
+
+        assert model.model_kwargs["reasoning_effort"] == "low"
+        assert model.model_kwargs["allowed_openai_params"] == ["reasoning_effort"]
+
+    def test_no_reasoning_effort_leaves_model_kwargs_untouched(self):
+        model = ChatLiteLLM(model="gpt-oss")
+
+        assert "reasoning_effort" not in model.model_kwargs
+        assert "allowed_openai_params" not in model.model_kwargs
+
+    def test_preserves_existing_allowed_openai_params(self):
+        model = ChatLiteLLM(
+            model="gpt-oss",
+            reasoning_effort="low",
+            model_kwargs={"allowed_openai_params": ["foo"]},
+        )
+
+        assert model.model_kwargs["allowed_openai_params"] == [
+            "foo",
+            "reasoning_effort",
+        ]
+
+
+class TestNonStreamedModelName:
+    """The non-streamed result names the model the request was sent with, as the streamed path does."""
+
+    @staticmethod
+    def _response():
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hi"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+        }
+
+    @pytest.mark.parametrize(
+        ("init_kwargs", "request_kwargs", "expected_model"),
+        [
+            ({"model": "constructor-model"}, {}, "constructor-model"),
+            (
+                {"model": "constructor-model", "model_name": "named-model"},
+                {},
+                "named-model",
+            ),
+            ({}, {"model": "request-model"}, "request-model"),
+            (
+                {"model": "constructor-model", "model_name": "named-model"},
+                {"model": "request-model"},
+                "request-model",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_agenerate_names_the_requested_model(
+        self, init_kwargs, request_kwargs, expected_model
+    ):
+        chat = ChatLiteLLM(custom_llm_provider="openai", **init_kwargs)
+
+        with patch(
+            "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.acompletion_with_retry",
+            new=AsyncMock(return_value=self._response()),
+        ):
+            result = await chat._agenerate(
+                messages=[HumanMessage(content="Hello")], **request_kwargs
+            )
+
+        message = result.generations[0].message
+        assert message.response_metadata["model_name"] == expected_model
+        assert result.llm_output["model"] == expected_model
+
+    @pytest.mark.parametrize(
+        ("init_kwargs", "request_kwargs", "expected_model"),
+        [
+            ({"model": "constructor-model"}, {}, "constructor-model"),
+            ({}, {"model": "request-model"}, "request-model"),
+        ],
+    )
+    def test_generate_names_the_requested_model(
+        self, init_kwargs, request_kwargs, expected_model
+    ):
+        chat = ChatLiteLLM(custom_llm_provider="openai", **init_kwargs)
+
+        with patch(
+            "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.completion_with_retry",
+            new=lambda *_args, **_kwargs: self._response(),
+        ):
+            result = chat._generate(
+                messages=[HumanMessage(content="Hello")], **request_kwargs
+            )
+
+        message = result.generations[0].message
+        assert message.response_metadata["model_name"] == expected_model
+        assert result.llm_output["model"] == expected_model
+
+    @pytest.mark.asyncio
+    async def test_usage_is_keyed_by_the_requested_model(self):
+        chat = ChatLiteLLM(custom_llm_provider="openai")
+
+        with patch(
+            "ai_gateway.vendor.langchain_litellm.litellm.ChatLiteLLM.acompletion_with_retry",
+            new=AsyncMock(return_value=self._response()),
+        ):
+            with get_usage_metadata_callback() as usage_callback:
+                await chat.ainvoke(
+                    [HumanMessage(content="Hello")], model="request-model", stream=False
+                )
+
+        assert usage_callback.usage_metadata == {
+            "request-model": UsageMetadata(
+                input_tokens=7, output_tokens=3, total_tokens=10
+            )
+        }
+
+    @pytest.mark.parametrize(
+        ("init_kwargs", "expected_model"),
+        [
+            ({"model": "constructor-model"}, "constructor-model"),
+            (
+                {"model": "constructor-model", "model_name": "named-model"},
+                "named-model",
+            ),
+        ],
+    )
+    def test_create_chat_result_without_params_falls_back_to_the_instance_model(
+        self, init_kwargs, expected_model
+    ):
+        chat = ChatLiteLLM(custom_llm_provider="openai", **init_kwargs)
+
+        result = chat._create_chat_result(self._response())
+
+        assert (
+            result.generations[0].message.response_metadata["model_name"]
+            == expected_model
+        )
+        assert result.llm_output["model"] == expected_model
+
+    def test_create_chat_result_falls_back_when_the_request_model_is_empty(self):
+        chat = ChatLiteLLM(
+            model="constructor-model",
+            model_name="named-model",
+            custom_llm_provider="openai",
+        )
+
+        result = chat._create_chat_result(self._response(), {"model": None})
+
+        assert (
+            result.generations[0].message.response_metadata["model_name"]
+            == "named-model"
+        )
+        assert result.llm_output["model"] == "named-model"

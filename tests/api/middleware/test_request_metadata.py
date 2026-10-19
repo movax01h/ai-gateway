@@ -73,3 +73,38 @@ async def test_non_http_scope_passthrough(middleware):
         mock_team_member.set.assert_not_called()
 
     middleware.app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+async def test_gitlab_user_id_is_set_from_header(middleware):
+    scope = {
+        "type": "http",
+        "path": "/api/endpoint",
+        "headers": [(b"x-gitlab-user-id", b"42")],
+    }
+
+    with patch(
+        "ai_gateway.api.middleware.request_metadata.gitlab_user_id"
+    ) as mock_user_id:
+        await middleware(scope, AsyncMock(), AsyncMock())
+
+        mock_user_id.set.assert_called_once_with("42")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers",
+    [
+        [(b"other-header", b"value")],
+        [(b"x-gitlab-user-id", b"")],
+    ],
+)
+async def test_gitlab_user_id_resets_to_none_when_missing_or_empty(middleware, headers):
+    scope = {"type": "http", "path": "/api/endpoint", "headers": headers}
+
+    with patch(
+        "ai_gateway.api.middleware.request_metadata.gitlab_user_id"
+    ) as mock_user_id:
+        await middleware(scope, AsyncMock(), AsyncMock())
+
+        mock_user_id.set.assert_called_once_with(None)

@@ -52,6 +52,23 @@ You can view the HTML report by running:
 open htmlcov/index.html
 ```
 
+Coverage is measured through [`sys.monitoring`](https://docs.python.org/3/library/sys.monitoring.html)
+rather than coverage.py's default C trace function, set by `core = "sysmon"` under
+`[tool.coverage.run]` in `pyproject.toml`. It reports the same line numbers and costs far less:
+on `tests/api` the overhead of adding `--cov` drops from +98% to +18%. Because it lives in the
+config file, any invocation picks it up, including a bare `poetry run pytest --cov`.
+
+If you need the old behavior, for example to compare against a historical measurement, override
+it for a single run:
+
+```shell
+COVERAGE_CORE=ctrace poetry run pytest --cov --cov-report term
+```
+
+`sys.monitoring` cannot measure branches on Python 3.12. Coverage only measures lines here, but if
+`branch = true` is ever added to `[tool.coverage.run]`, coverage.py warns and falls back to the C
+tracer by itself.
+
 -**Important**: To prevent issues with `pytest-xdist` failing on `capture_logs` [requests](https://www.structlog.org/en/stable/testing.html) and leaking state in test environment, we've disabled `cache_logger_on_first_use=False` for testing purposes to preserve event state.
 
 ### Running a single test file
@@ -139,6 +156,15 @@ async def test_how_many_open_issues(analytics_agent, initial_state, mock_gitlab_
 - Agent tests require the `ANTHROPIC_API_KEY` environment variable.
 - The execution and validation models are configurable via `--execution-model` and `--validation-model` CLI options
   (Anthropic models only).
+- A pass rate per test file is printed at the end of each run and written to
+  `.test-reports/agent_tests/<suite>-summary.md` and `.json`, so results are comparable across runs
+  and across agent variants. Skipped tests are excluded from the denominator, and `--reruns` retries
+  are counted once.
+- Some suites cache the agent responses they score on disk, so that several test files can score the
+  same response without generating it twice. Pass `--refresh-cache` to regenerate.
+- `agent_tests/flow_creator/` is the benchmark baseline for the Flow Creation
+  foundational agent. See its
+  [README](../agent_tests/flow_creator/README.md) before interpreting its scores.
 
 ### Run agent tests locally
 
@@ -166,6 +192,8 @@ EXECUTION_MODEL=claude-haiku-4-5-20251001 VALIDATION_MODEL=claude-haiku-4-5-2025
 Agent tests run as manual jobs in CI (for example, `tests:agents:analytics`).
 Each agent has its own CI job extending the `.tests:agents` base template.
 The jobs require the `ANTHROPIC_API_KEY` CI variable to be configured.
+A job runs automatically on merge request pipelines that change the agent's flow config or its tests.
+Pass-rate summaries, generated artifacts, and a JUnit report are published as job artifacts.
 
 ## Sanity test
 
@@ -193,14 +221,29 @@ Tracking the false-failure rate is a prerequisite for making the job blocking (P
 
 ### `CEF_SERVICE_ACCOUNT_PAT`
 
-Authentication uses a GitLab PAT stored as a masked CI/CD variable named `CEF_SERVICE_ACCOUNT_PAT`.
+Authentication uses a GitLab PAT read from Vault at job runtime via JWT (OIDC) auth: the job
+requests a `VAULT_ID_TOKEN` for `https://vault.gitlab.net` and exposes the secret as
+`CEF_SERVICE_ACCOUNT_PAT`. The secret lives at the canonical project's shared path:
+
+```plaintext
+gitlab-com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/shared/cef-service-account
+```
+
+with the PAT in the `personal_access_token` field (browse the enclosing
+[`shared/` directory in Vault](https://vault.gitlab.net/ui/vault/secrets/ci/kv/list/gitlab-com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/shared/)).
+
+That path is written out in full in `.gitlab/ci/sanity-check.gitlab-ci.yml` on purpose. Building it
+from the `VAULT_SECRETS_PATH`/`VAULT_SECRETS_SHARED_PATH` variables provisioned for the job does not
+work, because those are derived from `CI_PROJECT_PATH`: pipelines in the
+[security mirror](https://gitlab.com/gitlab-org/security/modelops/applied-ml/code-suggestions/ai-assist)
+would resolve `gitlab-com/gitlab-org/security/modelops/.../shared/cef-service-account`, where no
+such secret exists. Both projects share the one canonical secret, so keep the path literal.
 
 - **How to rotate**: from the
   [AI Evaluation](https://gitlab.com/groups/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/-/settings/service_accounts)
   group's service account settings, open `cef-service-prod` and generate a new access token
-  (`read_api` scope), then replace the `CEF_SERVICE_ACCOUNT_PAT` value under this project's
-  **Settings > CI/CD > Variables** (keep it masked). Revoke the old token once the new one is confirmed
-  working.
+  (`read_api` scope), then update the `personal_access_token` field of the Vault secret above.
+  Revoke the old token once the new one is confirmed working.
 - **Who/cadence**: managed by the AI Core Infra group. The token belongs to the `cef-service-prod`
   service account in the
   [AI Evaluation](https://gitlab.com/groups/gitlab-org/modelops/ai-model-validation-and-research/ai-evaluation/)

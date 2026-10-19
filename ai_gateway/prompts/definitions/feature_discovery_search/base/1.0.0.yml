@@ -2,7 +2,6 @@
 name: Feature discovery search
 model:
   params:
-    temperature: 0.0
     max_tokens: 1024
 unit_primitive: feature_discovery_search
 prompt_template:
@@ -11,4 +10,4 @@ prompt_template:
   user: |
     {% include 'feature_discovery_search/user/1.0.0.jinja' %}
 params:
-  timeout: 3
+  timeout: 5

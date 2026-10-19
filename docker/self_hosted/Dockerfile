@@ -22,6 +22,10 @@ ENV ENABLE_DUO_WORKFLOW_SERVICE=true
 # This prevents failed connection attempts to api.smith.langchain.com.
 ENV LANGSMITH_TRACING_V2=false
 
+# Use LiteLLM's bundled model cost map by default for self-hosted/air-gapped environments.
+# This prevents failed connection attempts to raw.githubusercontent.com at startup.
+ENV LITELLM_LOCAL_MODEL_COST_MAP=True
+
 RUN poetry run index_docs -o "./tmp/docs.db" -v ${TAG##self-hosted-}
 
 CMD ["./scripts/run.sh"]

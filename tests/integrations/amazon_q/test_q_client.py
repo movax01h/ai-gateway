@@ -1,16 +1,46 @@
 # pylint: disable=file-naming-for-tests
+import json
 from typing import Any, Optional
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
 
 import pytest
+import requests
 from botocore.exceptions import ClientError
 from fastapi import HTTPException
 from pydantic import BaseModel
 
 from ai_gateway.auth.glgo import GlgoAuthority
-from ai_gateway.integrations.amazon_q.client import AmazonQClient, AmazonQClientFactory
+from ai_gateway.integrations.amazon_q.client import (
+    GLGO_ERROR_LOG_LIMIT,
+    AmazonQClient,
+    AmazonQClientFactory,
+)
 from ai_gateway.integrations.amazon_q.errors import AWSException
 from lib.context import StarletteUser, cloud_connector_token_context_var
+
+GLGO_URL = "https://auth.token.gitlab.com/cc/token"
+# The verbatim glgo error from the incident: every Amazon Q request failed on it while the key rotation behind it
+# was invisible from the AI Gateway logs.
+GLGO_ERROR = (
+    "verifying cct: failed to verify input token signature: key provider 0 failed: "
+    'failed to find key with key ID "9658e70e" in key set'
+)
+
+
+def _glgo_response(
+    status_code: int, text: str, content_type: str = "application/json"
+) -> requests.Response:
+    response = requests.Response()
+    response.status_code = status_code
+    response.url = GLGO_URL
+    response.headers["Content-Type"] = content_type
+    response._content = text.encode()  # pylint: disable=protected-access
+
+    return response
+
+
+def _glgo_error_response(status_code: int, error: str) -> requests.Response:
+    return _glgo_response(status_code, json.dumps({"error": error}))
 
 
 # Create a custom ClientError subclass with the name "AccessDeniedException"
@@ -89,6 +119,112 @@ class TestAmazonQClientFactory:
             amazon_q_client_factory._get_glgo_token(mock_user)
         assert exc.value.status_code == 500
         assert exc.value.detail == "Cannot obtain OIDC token"
+
+    @pytest.mark.parametrize(
+        ("exception", "expected_extra"),
+        [
+            # Nothing to report for exceptions that never reached the token authority.
+            (KeyError(), {}),
+            (requests.exceptions.ConnectionError(), {}),
+            # glgo's own error envelope: the reported reason is what we were missing during the outage.
+            (
+                requests.exceptions.HTTPError(
+                    f"400 Client Error: Bad Request for url: {GLGO_URL}",
+                    response=_glgo_error_response(status_code=400, error=GLGO_ERROR),
+                ),
+                {"glgo_status_code": 400, "glgo_error": GLGO_ERROR},
+            ),
+            # An error page from something in front of glgo is outside our trust boundary: describe it, never quote
+            # it, because it may echo the bearer token or the cct we sent.
+            (
+                requests.exceptions.HTTPError(
+                    response=_glgo_response(
+                        status_code=502,
+                        text="<html>Bad gateway: Authorization: Bearer eyJhbGci</html>",
+                        content_type="text/html",
+                    ),
+                ),
+                {
+                    "glgo_status_code": 502,
+                    "glgo_response_unrecognized": True,
+                    "glgo_response_content_type": "text/html",
+                    "glgo_response_length": 56,
+                },
+            ),
+            # Valid JSON, but not the shape glgo produces.
+            (
+                requests.exceptions.HTTPError(
+                    response=_glgo_response(status_code=403, text='["denied"]'),
+                ),
+                {
+                    "glgo_status_code": 403,
+                    "glgo_response_unrecognized": True,
+                    "glgo_response_content_type": "application/json",
+                    "glgo_response_length": 10,
+                },
+            ),
+        ],
+    )
+    def test_glgo_token_error_is_logged_with_upstream_details(
+        self,
+        amazon_q_client_factory,
+        mock_user,
+        mock_glgo_authority,
+        exception,
+        expected_extra,
+    ):
+        cloud_connector_token_context_var.set(mock_user.cloud_connector_token)
+        mock_glgo_authority.token.side_effect = exception
+
+        with patch(
+            "ai_gateway.integrations.amazon_q.client.log_exception"
+        ) as mock_log_exception:
+            with pytest.raises(HTTPException):
+                amazon_q_client_factory._get_glgo_token(mock_user)
+
+        mock_log_exception.assert_called_once_with(exception, extra=expected_extra)
+
+    def test_glgo_token_error_is_truncated(
+        self, amazon_q_client_factory, mock_user, mock_glgo_authority
+    ):
+        cloud_connector_token_context_var.set(mock_user.cloud_connector_token)
+        mock_glgo_authority.token.side_effect = requests.exceptions.HTTPError(
+            response=_glgo_error_response(status_code=502, error="x" * 5000)
+        )
+
+        with patch(
+            "ai_gateway.integrations.amazon_q.client.log_exception"
+        ) as mock_log_exception:
+            with pytest.raises(HTTPException):
+                amazon_q_client_factory._get_glgo_token(mock_user)
+
+        extra = mock_log_exception.call_args.kwargs["extra"]
+        assert extra["glgo_error"] == "x" * GLGO_ERROR_LOG_LIMIT
+
+    def test_glgo_token_error_context_never_breaks_the_error_path(
+        self, amazon_q_client_factory, mock_user, mock_glgo_authority
+    ):
+        cloud_connector_token_context_var.set(mock_user.cloud_connector_token)
+
+        broken_response = MagicMock()
+        type(broken_response).status_code = PropertyMock(
+            side_effect=RuntimeError("boom")
+        )
+        mock_glgo_authority.token.side_effect = requests.exceptions.HTTPError(
+            response=broken_response
+        )
+
+        with patch(
+            "ai_gateway.integrations.amazon_q.client.log_exception"
+        ) as mock_log_exception:
+            with pytest.raises(HTTPException) as exc:
+                amazon_q_client_factory._get_glgo_token(mock_user)
+
+        assert exc.value.status_code == 500
+        assert exc.value.detail == "Cannot obtain OIDC token"
+        assert mock_log_exception.call_args.kwargs["extra"] == {
+            "glgo_context_unavailable": True
+        }
 
     def test_get_aws_credentials(
         self, amazon_q_client_factory, mock_user, mock_sts_client

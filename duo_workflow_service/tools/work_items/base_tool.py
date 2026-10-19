@@ -1,7 +1,9 @@
+import asyncio
 import json
 import re
 import urllib
 from enum import Enum
+from itertools import chain
 from typing import (
     Annotated,
     Any,
@@ -23,12 +25,17 @@ from duo_workflow_service.gitlab.resource_resolver import resolve_identifier_to_
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.version_compatibility import (
+    get_gitlab_version,
+    supports_agent_plan_readiness,
     supports_agent_plan_widget,
+    supports_labels_by_name,
 )
 from duo_workflow_service.tools.work_items.queries.work_items import (
     CREATE_WORK_ITEM_MUTATION,
+    GET_GROUP_LABELS_QUERY,
     GET_GROUP_WORK_ITEM_NOTES_QUERY,
     GET_GROUP_WORK_ITEM_QUERY,
+    GET_PROJECT_LABELS_QUERY,
     GET_PROJECT_WORK_ITEM_NOTES_QUERY,
     GET_PROJECT_WORK_ITEM_QUERY,
     GET_WORK_ITEM_TYPE_BY_NAME_QUERY,
@@ -53,6 +60,12 @@ STATE_EVENT_MAPPING = {
 TODO_ACTION_MAPPING = {
     "add": "ADD",
     "mark_as_done": "MARK_AS_DONE",
+}
+
+LABEL_ARGS = {
+    "label_ids": ("labelIds", "labels"),
+    "add_label_ids": ("addLabelIds", "add_labels"),
+    "remove_label_ids": ("removeLabelIds", "remove_labels"),
 }
 
 
@@ -101,6 +114,11 @@ class WorkItemBaseTool(DuoBaseTool):
     _LIST_WORK_ITEMS_QUERIES = {
         "group": (LIST_GROUP_WORK_ITEMS_QUERY, "namespace"),
         "project": (LIST_PROJECT_WORK_ITEMS_QUERY, "project"),
+    }
+
+    _GET_LABELS_QUERIES = {
+        "group": (GET_GROUP_LABELS_QUERY, "group"),
+        "project": (GET_PROJECT_LABELS_QUERY, "project"),
     }
 
     async def _validate_parent_url(
@@ -156,7 +174,6 @@ class WorkItemBaseTool(DuoBaseTool):
     @staticmethod
     def _decode_path(path: str) -> str:
         """Make sure the path is safe for GraphQL (i.e., decoded slashes)."""
-
         return urllib.parse.unquote(path)
 
     def _parse_parent_work_item_url(self, url: str) -> ResolvedParent:
@@ -192,6 +209,111 @@ class WorkItemBaseTool(DuoBaseTool):
             )
         except GitLabUrlParseError as e:
             raise ToolException(f"Failed to parse work item URL: {e}")
+
+    async def _resolve_label_names(
+        self, parent: ResolvedParent, kwargs: Dict[str, Any]
+    ) -> List[str]:
+        """Replaces label names in kwargs with global IDs, returning a warning per unknown name."""
+        names_by_arg = {
+            id_arg: list(dict.fromkeys(kwargs.pop(name_arg, None) or []))
+            for id_arg, (_, name_arg) in LABEL_ARGS.items()
+        }
+        unique_names = list(dict.fromkeys(chain.from_iterable(names_by_arg.values())))
+        if not unique_names:
+            return []
+
+        if not supports_labels_by_name():
+            return [
+                "Labels could not be set by name: that requires GitLab 19.4 or later "
+                f"and this instance reports {get_gitlab_version()}. Pass label IDs instead."
+            ]
+
+        results = await asyncio.gather(
+            *(self._resolve_label_id(parent, name) for name in unique_names)
+        )
+        label_ids = {name: label_id for name, label_id, _ in results}
+
+        for id_arg, names in names_by_arg.items():
+            resolved = [label_ids[name] for name in names if label_ids.get(name)]
+            if resolved:
+                kwargs[id_arg] = list(kwargs.get(id_arg) or []) + resolved
+
+        return list(dict.fromkeys(warning for _, _, warning in results if warning))
+
+    async def _resolve_label_id(
+        self, parent: ResolvedParent, name: str
+    ) -> Tuple[str, Optional[str], Optional[str]]:
+        """Returns the name with either its global ID or a warning listing similar labels."""
+        exact = await self._query_labels(parent, name)
+        if exact is None:
+            return name, None, self._unreadable_labels_warning(parent)
+
+        if exact:
+            # A group and its ancestors share the GroupLabel scope.
+            own_scope = f"gid://gitlab/{parent.type.capitalize()}Label/"
+            own = [m for m in exact if m["id"].startswith(own_scope)]
+            if len(own) > 1:
+                own = (
+                    await self._query_labels(parent, name, include_ancestors=False)
+                    or []
+                )
+            return name, (own or exact)[0]["id"], None
+
+        similar = await self._query_labels(parent, name, with_similar=True)
+        if similar is None:
+            return name, None, self._unreadable_labels_warning(parent)
+
+        hint = (
+            f"Similar labels: {', '.join(repr(m['title']) for m in similar[:10])}."
+            if similar
+            else "Ask the user which existing label to use."
+        )
+        return (
+            name,
+            None,
+            f"Label '{name}' was not applied: it does not exist in "
+            f"{parent.type} '{parent.full_path}'. {hint}",
+        )
+
+    async def _query_labels(
+        self,
+        parent: ResolvedParent,
+        name: str,
+        with_similar: bool = False,
+        include_ancestors: bool = True,
+    ) -> Optional[List[Dict[str, str]]]:
+        """Returns the matching labels, or None when they could not be read at all."""
+        query, root_key = self._GET_LABELS_QUERIES[parent.type]
+        variables = {
+            "fullPath": parent.full_path,
+            "name": name,
+            "withSimilar": with_similar,
+            "includeAncestors": include_ancestors,
+        }
+
+        try:
+            response = await self.gitlab_client.graphql(query, variables)
+        except Exception as error:  # pylint: disable=broad-except
+            # A failed lookup must not cost the rest of the create or update.
+            log.warning(
+                "Label lookup failed",
+                label=name,
+                parent=parent.full_path,
+                error=str(error),
+            )
+            return None
+
+        root = (response or {}).get(root_key) or {}
+        return (root.get("similar" if with_similar else "exact") or {}).get("nodes")
+
+    @staticmethod
+    def _unreadable_labels_warning(parent: ResolvedParent) -> str:
+        """One systemic cause, so it is reported once rather than per label name."""
+        return (
+            f"Labels were not applied by name: the labels of {parent.type} "
+            f"'{parent.full_path}' could not be read. Pass label IDs instead, "
+            "or ask the user which label to use."
+        )
 
     async def _resolve_work_item_type_id(self, full_path: str, type_name: str) -> str:
         """Returns type ID or raises ToolException."""
@@ -279,10 +401,52 @@ class WorkItemBaseTool(DuoBaseTool):
         if status_widget:
             input_data["statusWidget"] = status_widget
 
-        if kwargs.get("agent_plan") is not None and supports_agent_plan_widget():
-            input_data["agentPlanWidget"] = {"content": kwargs["agent_plan"]}
+        agent_plan_widget = WorkItemBaseTool._build_agent_plan_widget(kwargs)
+
+        if agent_plan_widget:
+            input_data["agentPlanWidget"] = agent_plan_widget
 
         return input_data, warnings
+
+    @staticmethod
+    def _build_agent_plan_widget(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Build agentPlanWidget input from the plan content and/or its readiness fields.
+
+        The three fields are independent inputs to the same widget: a
+        plan-drafting flow writes `content`, while a scoring flow writes only
+        `readinessScore` and `readinessScoreFeedback` against a plan it did
+        not author. Sending an absent field as `null` would clear it, so each
+        key is included only when supplied.
+
+        The fields are also gated independently by GitLab version: the widget
+        type and its `content` field exist from 19.0, while the readiness
+        fields were only added to the widget input in 19.4. On a 19.0-19.3
+        instance `content` goes out without the readiness fields; before 19.0
+        none does, because sending an unknown argument fails the mutation with
+        a schema error.
+
+        Args:
+            kwargs: Input parameters that may contain `agent_plan`,
+                `readiness_score` and/or `readiness_score_feedback`.
+
+        Returns:
+            Dictionary with the agentPlanWidget input, or `None` when no
+            field was supplied or none survived the version gates.
+        """
+        widget: Dict[str, Any] = {}
+        readiness_supported = supports_agent_plan_readiness()
+
+        if kwargs.get("agent_plan") is not None and supports_agent_plan_widget():
+            widget["content"] = kwargs["agent_plan"]
+
+        if kwargs.get("readiness_score") is not None and readiness_supported:
+            widget["readinessScore"] = kwargs["readiness_score"]
+
+        feedback = kwargs.get("readiness_score_feedback")
+        if feedback is not None and readiness_supported:
+            widget["readinessScoreFeedback"] = feedback
+
+        return widget or None
 
     @staticmethod
     def _build_weight_widget(
@@ -291,15 +455,15 @@ class WorkItemBaseTool(DuoBaseTool):
         """Build weightWidget input for work item create/update.
 
         Args:
-            kwargs: Input parameters that may contain ``weight`` and/or
-                ``clear_weight``.
+            kwargs: Input parameters that may contain `weight` and/or
+                `clear_weight`.
             warnings: List to collect validation warnings.
 
         Returns:
-            Dictionary with ``{"weight": <int|None>}`` or ``None`` if neither
-            ``weight`` nor ``clear_weight`` is provided. ``clear_weight=True``
-            sends ``null`` to clear the value and takes precedence over
-            ``weight``.
+            Dictionary with `{"weight": <int|None>}` or `None` if neither
+            `weight` nor `clear_weight` is provided. `clear_weight=True`
+            sends `null` to clear the value and takes precedence over
+            `weight`.
         """
         clear_weight = kwargs.get("clear_weight")
         weight = kwargs.get("weight")
@@ -365,39 +529,17 @@ class WorkItemBaseTool(DuoBaseTool):
     ) -> Optional[Dict[str, Any]]:
         widget = {}
 
-        # For work item creation, use labelIds
-        if kwargs.get("label_ids"):
-            valid_labels, invalid_labels = WorkItemBaseTool._normalize_gids(
-                kwargs["label_ids"], "Label"
-            )
-            if valid_labels:
-                widget["labelIds"] = valid_labels
-            if invalid_labels:
-                warnings.append(
-                    f"Some label_ids were invalid and skipped: {invalid_labels}"
-                )
+        for id_arg, (graphql_key, name_arg) in LABEL_ARGS.items():
+            if not kwargs.get(id_arg):
+                continue
 
-        # For work item updates, use addLabelIds and removeLabelIds
-        if kwargs.get("add_label_ids"):
-            valid_add, invalid_add = WorkItemBaseTool._normalize_gids(
-                kwargs["add_label_ids"], "Label"
-            )
-            if valid_add:
-                widget["addLabelIds"] = valid_add
-            if invalid_add:
+            valid, invalid = WorkItemBaseTool._normalize_gids(kwargs[id_arg], "Label")
+            if valid:
+                widget[graphql_key] = valid
+            if invalid:
                 warnings.append(
-                    f"Some add_label_ids were invalid and skipped: {invalid_add}"
-                )
-
-        if kwargs.get("remove_label_ids"):
-            valid_remove, invalid_remove = WorkItemBaseTool._normalize_gids(
-                kwargs["remove_label_ids"], "Label"
-            )
-            if valid_remove:
-                widget["removeLabelIds"] = valid_remove
-            if invalid_remove:
-                warnings.append(
-                    f"Some remove_label_ids were invalid and skipped: {invalid_remove}"
+                    f"{id_arg} accepts numeric IDs or 'gid://gitlab/Label/<id>', "
+                    f"so {invalid} was skipped. Pass label names in '{name_arg}' instead."
                 )
 
         return widget
@@ -489,13 +631,13 @@ class WorkItemBaseTool(DuoBaseTool):
         """Build statusWidget input for work item create/update.
 
         Args:
-            kwargs: Input parameters that may contain ``status_id``.
+            kwargs: Input parameters that may contain `status_id`.
             warnings: List to collect validation warnings.
 
         Returns:
-            Dictionary with ``{"status": <gid>}`` or ``None`` if ``status_id`` is
-            not provided. ``status_id`` must be the global ID of an existing
-            status, which can be looked up with the ``get_work_item_statuses``
+            Dictionary with `{"status": <gid>}` or `None` if `status_id` is
+            not provided. `status_id` must be the global ID of an existing
+            status, which can be looked up with the `get_work_item_statuses`
             tool.
         """
         status_id = kwargs.get("status_id")
@@ -601,21 +743,13 @@ class WorkItemBaseTool(DuoBaseTool):
                 f"Work item type '{type_name}' cannot be created in a project – only in groups."
             )
 
-        return await self._execute_create_work_item(
-            namespace_path=resolved.full_path,
-            input_kwargs=kwargs,
-            type_name=type_name,
-        )
+        label_warnings = await self._resolve_label_names(resolved, kwargs)
 
-    async def _execute_create_work_item(
-        self,
-        namespace_path: str,
-        input_kwargs: Dict[str, Any],
-        type_name: str,
-    ) -> str:
+        namespace_path = resolved.full_path
         type_id = await self._resolve_work_item_type_id(namespace_path, type_name)
 
-        input_fields, warnings = self._build_work_item_input_fields(input_kwargs)
+        input_fields, warnings = self._build_work_item_input_fields(kwargs)
+        warnings += label_warnings
         variables = {
             "input": {
                 "namespacePath": namespace_path,
@@ -651,12 +785,15 @@ class WorkItemBaseTool(DuoBaseTool):
     async def _update_work_item(self, resolved, kwargs: dict) -> str:
         work_item_id = resolved.id
 
+        label_warnings = await self._resolve_label_names(resolved.parent, kwargs)
+
         if not kwargs.get("type_name"):
             kwargs["type_name"] = (
                 (resolved.full_data or {}).get("workItemType", {}).get("name", "")
             )
 
         input_fields, warnings = self._build_work_item_input_fields(kwargs)
+        warnings += label_warnings
 
         state = kwargs.get("state")
         if state in STATE_EVENT_MAPPING:
@@ -703,8 +840,8 @@ class WorkItemBaseTool(DuoBaseTool):
             mr_page_size: Number of related MRs to return per page (1–100).
                 Defaults to None (server default).
             mr_pagination_cursor: Cursor for paginating related MRs.
-                Use ``endCursor`` from the DEVELOPMENT widget's
-                ``relatedMergeRequests.pageInfo`` in a previous response.
+                Use `endCursor` from the DEVELOPMENT widget's
+                `relatedMergeRequests.pageInfo` in a previous response.
 
         Returns:
             Work item dict or None if not found.

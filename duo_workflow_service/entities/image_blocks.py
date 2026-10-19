@@ -1,0 +1,389 @@
+"""Image content blocks, independent of how the image got into the conversation.
+
+An image can enter a turn from more than one direction — a file the user
+attached (see :mod:`duo_workflow_service.entities.attachments`), or a tool
+result such as ``read_file`` returning a screenshot. Everything in this module
+works on the *content block* alone and never on the producing entity, so both
+directions share one shape, one token estimate, and one checkpoint policy.
+
+Shape
+-----
+LangChain standard blocks::
+
+    {"type": "image", "id": ..., "base64": "<payload>", "mime_type": "image/png"}
+
+Each provider integration translates these into its own native form, so
+producers must not emit provider-specific shapes. Build them with
+:func:`image_content_block` rather than by hand.
+
+Lifetime
+--------
+:func:`strip_image_payloads` drops inline payloads before a message is
+checkpointed, leaving a short placeholder.
+
+An image is therefore visible to the model **until the first checkpoint write of
+the turn it arrived on**, not for the whole turn and not for later ones. Any
+interrupt writes a checkpoint and resumes by reloading history from it
+(``aget_tuple`` -> ``checkpoint_decoder``), and a tool-call approval is exactly
+that. So "screenshot + fix the bug it shows" followed by an approval finishes
+the turn without the image. This is a known v1 limitation, accepted because the
+payload cannot live in the checkpoint as things stand: 2.5 MB decoded is ~3.3 MB
+of base64 against a 4 MiB message cap, before any history. The durable fix is to
+strip at next-turn ingestion rather than on every write, so the payload survives
+the turn it belongs to; see the follow-up issue referenced from the module that
+produces attachments.
+
+The placeholder deliberately says nothing about where the image came from,
+because this module cannot know: a block carries no provenance. A producer that
+can say something useful should emit its own text block next to the image -- the
+path a tool read it from, or the filename a user attached. That block is not an
+image block, so it survives stripping untouched and is what lets the model say
+which file it can no longer see rather than guessing.
+
+Reading and rendering
+---------------------
+:func:`block_text` and :func:`with_block_text` are the one place that knows how
+a block carries text. Every consumer that reads or rewrites block text goes
+through them and adds its own policy on top.
+
+:func:`content_as_text` turns any message content -- a string, a block list or a
+dict -- into one string, for the surfaces that cannot take a list: the ui_chat_log
+tool card and the compaction summarizer. Images become the placeholder above;
+every other block without text becomes a marker naming its type.
+"""
+
+from enum import StrEnum
+from http import HTTPStatus
+from typing import Any, Optional
+
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages.content import create_image_block
+
+__all__ = [
+    "IMAGE_BLOCK_TOKEN_ESTIMATE",
+    "ImageLimitKind",
+    "ImageScope",
+    "block_text",
+    "content_as_text",
+    "image_content_block",
+    "image_limit_kind",
+    "is_image_block",
+    "is_image_content_block",
+    "is_internal_image_block",
+    "render_image_blocks_as_text",
+    "strip_image_payloads",
+    "with_block_text",
+    "without_image_blocks",
+    "without_image_payloads",
+]
+
+
+class _InternalImageBlock(dict[str, Any]):
+    """An image block built by :func:`image_content_block`, and nothing else.
+
+    The type is the provenance mark. It adds no key, so the block is the standard LangChain shape byte for byte,
+    serialises as a plain dict and survives ``deepcopy``. JSON cannot produce an instance, and neither can a copy
+    through ``dict()``, a spread or a pydantic message model: those are plain dicts again, which is the safe
+    direction, because a plain dict is scanned. The mark is read once, on the raw tool result right after
+    construction, and that is the only place redaction sees a block.
+
+    Only one consumer asks for it: the redaction exemption, where skipping a scan is the single decision for which
+    "looks like an image block" is not good enough. Everything else keeps the loose shape check on purpose, because
+    stripping or token-charging a lookalike is protective rather than harmful.
+    """
+
+
+# Flat per-image token cost charged wherever a conversation is budgeted.
+#
+# Not a magic number: it is the ceiling of what an image can cost, from
+# Anthropic's published resolution tiers. The model sees an image as 28 px
+# patches, one visual token each, after downscaling it to the tier's long edge:
+# at most 4784 tokens (2576 px) on Claude 4.7 and later, at most 1568 tokens
+# (1568 px) on older models. 4800 rounds the larger tier up.
+# https://platform.claude.com/docs/en/build-with-claude/vision#resolution-and-token-cost
+#
+# Being the ceiling is the point. A budget estimate that can only ever be too
+# high makes context management compact early, which is recoverable. One that
+# can be too low overflows the model's window mid-turn, which is not. The
+# alternative of measuring the base64 string as if it were prose over-counts by
+# two orders of magnitude and would compact away most of the conversation.
+IMAGE_BLOCK_TOKEN_ESTIMATE = 4800
+
+
+def image_content_block(base64: str, mime_type: str) -> dict[str, Any]:
+    """Build the LangChain standard image block for an inline payload.
+
+    The single constructor for image blocks. Going through it keeps every producer on the standard shape, which each
+    provider integration knows how to translate; a hand-rolled provider-specific block would reach exactly one provider
+    intact.
+    """
+    return _InternalImageBlock(create_image_block(base64=base64, mime_type=mime_type))
+
+
+def is_image_block(block: Any) -> bool:
+    """Return whether *block* is a standard image content block.
+
+    The two shapes LangChain defines: inline data under ``base64``, or a remote
+    ``url``, either one non-empty. Anything else that says ``type: image`` is
+    not one this service can recognise as an image, and nothing treats it as
+    one.
+    """
+    if not isinstance(block, dict) or block.get("type") != "image":
+        return False
+    url = block.get("url")
+    return bool(block.get("base64")) or (isinstance(url, str) and bool(url))
+
+
+def is_image_content_block(block: Any) -> bool:
+    """Return whether *block* is an image content block carrying inline data.
+
+    The subset of :func:`is_image_block` that has a payload. Only these are
+    stripped from history and charged the token estimate; a block referencing
+    a remote ``url`` costs nothing to keep.
+    """
+    return is_image_block(block) and bool(block.get("base64"))
+
+
+def is_internal_image_block(block: Any) -> bool:
+    """Return whether *block* is an image block this module built.
+
+    Provenance, where :func:`is_image_content_block` reports shape. Any dict can claim ``type: image`` and a ``base64``
+    key, but only the constructor above produces the marker type, and no data format can. This answers "did we make
+    it, from bytes a producer checked" rather than "does it look right". Use it wherever getting it wrong is unsafe,
+    and the shape check wherever getting it wrong is merely wasteful.
+    """
+    return isinstance(block, _InternalImageBlock) and is_image_content_block(block)
+
+
+def strip_image_payloads(content: Any) -> Any:
+    """Replace inline image payloads in message *content* with text placeholders.
+
+    Called when serialising any message for a checkpoint, whatever its role.
+    Keeping base64 out of the checkpoint bounds its size, which matters because
+    checkpoints are re-read on every resume and re-emitted whole on each new
+    thread group.
+
+    The cost is that the image is visible only until the *first* checkpoint write
+    of its own turn. Because every interrupt writes a checkpoint and then resumes
+    from it, a tool-call approval mid-turn is enough to lose it -- this is not
+    limited to later turns. See the module docstring for why that is accepted for
+    now and what the durable fix looks like.
+
+    Args:
+        content: ``BaseMessage.content`` — a string or a list of content blocks.
+
+    Returns:
+        *content* unchanged when it holds no inline image data, otherwise a new
+        list with each image block replaced by a ``text`` block placeholder.
+    """
+    if not isinstance(content, list):
+        return content
+    if not any(is_image_content_block(block) for block in content):
+        return content
+
+    stripped: list[Any] = []
+    for block in content:
+        if is_image_content_block(block):
+            stripped.append(
+                {
+                    "type": "text",
+                    "text": _placeholder(block.get("mime_type")),
+                }
+            )
+        else:
+            stripped.append(block)
+    return stripped
+
+
+class ImageLimitKind(StrEnum):
+    """Why the provider rejected a request that carried images.
+
+    ``single_image`` and ``request`` are read from Anthropic's wording and pick the scope
+    order and the note for the model. ``unclassified`` is every other 400 or 413: the
+    rejection still recovers, since the newest images are the only unproven content in
+    the request, but the note cannot name a cause.
+    """
+
+    SINGLE_IMAGE = "single_image"
+    REQUEST = "request"
+    UNCLASSIFIED = "unclassified"
+
+
+class ImageScope(StrEnum):
+    SEEN = "seen"
+    CURRENT = "current"
+
+
+def image_limit_kind(status_code: int, message: str) -> Optional[ImageLimitKind]:
+    """Classify a provider rejection, or return ``None`` for a status the image fallback does not cover.
+
+    Only the wording decides between the kinds, never whether to recover: a 400 or 413
+    of any wording is ``unclassified`` at worst. Anthropic names the rejected block
+    ``...image.source.base64.data`` for size errors.
+    """
+    if status_code == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
+        return ImageLimitKind.REQUEST
+    if status_code != HTTPStatus.BAD_REQUEST:
+        return None
+    if "image.source.base64" not in message:
+        return ImageLimitKind.UNCLASSIFIED
+    if "max allowed size" in message and "many-image" not in message:
+        return ImageLimitKind.SINGLE_IMAGE
+    return ImageLimitKind.REQUEST
+
+
+def without_image_payloads(
+    messages: list[BaseMessage], *, scope: ImageScope
+) -> tuple[list[BaseMessage], int]:
+    """Replace inline images with the checkpoint placeholder in the messages *scope* selects, by the last
+    ``AIMessage``."""
+    last_answer = max(
+        (i for i, message in enumerate(messages) if isinstance(message, AIMessage)),
+        default=-1,
+    )
+    replaced = list(messages)
+    removed = 0
+    for index, message in enumerate(messages):
+        if (scope is ImageScope.SEEN) == (index > last_answer):
+            continue
+        if not isinstance(message.content, list):
+            continue
+        count = sum(1 for block in message.content if is_image_content_block(block))
+        if not count:
+            continue
+        replaced[index] = message.model_copy(
+            update={"content": strip_image_payloads(message.content)}
+        )
+        removed += count
+    return (replaced, removed) if removed else (messages, 0)
+
+
+def _placeholder(mime_type: Optional[str]) -> str:
+    """Return the text that stands in for a stripped image.
+
+    Provenance-neutral on purpose: the same text has to read correctly for a
+    file the user attached (which cannot be fetched again) and for a tool result
+    (which can). Naming either one would mislead the model about the other.
+    """
+    return f"[{mime_type or 'image'} omitted from history]"
+
+
+def without_image_blocks(content: Any) -> Any:
+    """Return a copy of *content* with every inline image block removed.
+
+    Walks nested dicts and lists and drops each block matching :func:`is_image_content_block`, the whole block rather
+    than only its payload. Everything else is kept, and *content* itself is not modified. If *content* is itself an
+    image block, the result is ``{}``.
+
+    Unlike :func:`strip_image_payloads`, which leaves the model a text placeholder in a flat block list, this leaves
+    no trace. Use it for copies that should never see image data.
+
+    Matches on shape, not provenance, so image blocks that were rebuilt as plain dicts are still removed. Widen
+    :func:`is_image_content_block` when the block schema grows.
+    """
+    if is_image_content_block(content):
+        # A bare image block as the whole response: nothing on it to scan.
+        return {}
+    if isinstance(content, dict):
+        return {
+            k: without_image_blocks(v)
+            for k, v in content.items()
+            if not is_image_content_block(v)
+        }
+    if isinstance(content, list):
+        return [
+            without_image_blocks(item)
+            for item in content
+            if not is_image_content_block(item)
+        ]
+    return content
+
+
+def block_text(block: Any) -> Optional[str]:
+    """Return the text *block* carries, or `None` if it carries none.
+
+    A bare string is its own text. A dict with a string `text` field carries
+    that. Anything else -- an image block, a provider-specific block, a stray
+    scalar -- carries none. What `None` means is up to the caller: a marker on
+    the tool card, a byte cost in truncation.
+    """
+    if isinstance(block, str):
+        return block
+    if isinstance(block, dict) and isinstance(block.get("text"), str):
+        return block["text"]
+    return None
+
+
+def with_block_text(block: Any, text: str) -> Any:
+    """Return *block* carrying *text* instead, in the shape it arrived in.
+
+    Only for blocks :func:`block_text` returned a string for, so *block* is a
+    string or a dict.
+    """
+    return text if isinstance(block, str) else {**block, "text": text}
+
+
+def content_as_text(content: Any) -> str:
+    """Render message *content* as one string.
+
+    For the two surfaces that need a string but may be handed a content-block
+    list: the ui_chat_log tool card and the compaction summarizer prompt. The
+    card is the hard constraint. The CLI and the IDE validate every ui_chat_log
+    entry, accept `tool_response` only as a string (or a message whose
+    `content` is one), and drop the whole checkpoint's chat log on the first
+    entry that fails.
+
+    Text blocks and bare strings are kept as they are, one block per line. An
+    inline image becomes the same placeholder :func:`strip_image_payloads`
+    writes into history. A block that names a source, a string `url` with an
+    optional `title`, renders as `title: url`; web search results are the
+    live case, and only those two fields are shown. Any other block becomes
+    `[<type> omitted]`, so nothing disappears silently.
+    That last rule is why this is not `BaseMessage.text`, which drops
+    non-text blocks without a trace.
+
+    A `dict` is treated as a one-block list, `None` as `""`, any other
+    scalar goes through `str`. Anything carrying a `content` attribute is
+    rendered by that content, so a caller that passes a message (or any of the
+    duck-typed objects the redactor accepts) instead of `message.content`
+    gets the same string and never a repr with the payload inside it.
+    """
+    content = getattr(content, "content", content)
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    if isinstance(content, dict):
+        content = [content]
+    if isinstance(content, tuple):
+        content = list(content)
+    if not isinstance(content, list):
+        return str(content)
+    # One block per line: the shape that reaches a card is a text lead-in
+    # followed by a placeholder or a marker, and those read as separate lines.
+    return "\n".join(_block_as_text(block) for block in strip_image_payloads(content))
+
+
+def render_image_blocks_as_text(content: Any) -> Any:
+    """Render image-bearing block lists as text; return other content unchanged.
+
+    Use before scanning a tool result or storing it as plain flow state, where the checkpoint encoder's stripping of
+    message images does not apply. Keeps image payloads out of scans, checkpoints and later text prompts, while
+    structured results carrying no image are returned unchanged.
+    """
+    if isinstance(content, list) and any(is_image_block(block) for block in content):
+        return content_as_text(content)
+    return content
+
+
+def _block_as_text(block: Any) -> str:
+    text = block_text(block)
+    if text is not None:
+        return text
+    if isinstance(block, dict) and isinstance(block.get("url"), str) and block["url"]:
+        title = block.get("title")
+        if isinstance(title, str) and title:
+            return f"{title}: {block['url']}"
+        return block["url"]
+    kind = block.get("type") if isinstance(block, dict) else None
+    return f"[{kind or type(block).__name__} omitted]"

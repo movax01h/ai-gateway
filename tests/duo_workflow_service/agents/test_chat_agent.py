@@ -21,6 +21,9 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
 from duo_workflow_service.agents.web_search import WebSearchState
+from duo_workflow_service.audit_events.collector import AuditEventCollector
+from duo_workflow_service.audit_events.context import audit_collector_context
+from duo_workflow_service.audit_events.event_types import AuditEventType
 from duo_workflow_service.checkpointer.gitlab_workflow import _serialize_channel_blobs
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
@@ -35,11 +38,13 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
+    ApprovalSource,
     ChatWorkflowState,
     MessageTypeEnum,
     ToolStatus,
     UiChatLog,
     _conversation_history_reducer,
+    _ui_chat_log_reducer,
 )
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Project
@@ -49,9 +54,17 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.tools import MalformedToolCallError, Toolset
+from lib.context import current_model_metadata_context
+from lib.context.approval_sources import (
+    approval_sources,
+    get_approval_source,
+    init_approval_sources,
+)
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
+)
 
 
 @pytest.fixture(name="mock_datetime")
@@ -79,7 +92,7 @@ def prompt_name_fixture():
 
 @pytest.fixture(name="workflow_type")
 def workflow_type_fixture() -> str:
-    return CategoryEnum.WORKFLOW_CHAT.value
+    return "chat"
 
 
 @pytest.fixture(name="mock_toolset")
@@ -906,14 +919,17 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input, mock_to
 
     mock_tools_registry = Mock(spec=ToolsRegistry)
 
-    # Configure approval_required to return different values for different tools
-    def approval_side_effect(tool_name, _tool_args=None):
-        # preapproved_tool: no approval needed
-        # tool_requiring_approval: approval needed
-        # another_preapproved_tool: no approval needed
-        return tool_name == "tool_requiring_approval"
+    # _get_approvals resolves the decision and its source in a single call:
+    # resolve_approval_source returns None exactly when a fresh human decision
+    # is needed, otherwise the source that authorized the skip.
+    def resolve_side_effect(tool_name, _tool_args=None):
+        # tool_requiring_approval: needs a fresh decision (None); the others are
+        # session-reused skips.
+        if tool_name == "tool_requiring_approval":
+            return None
+        return ApprovalSource.SESSION_APPROVAL
 
-    mock_tools_registry.approval_required.side_effect = approval_side_effect
+    mock_toolset.resolve_approval_source = AsyncMock(side_effect=resolve_side_effect)
 
     chat_agent = ChatAgent(
         name="Chat Agent",
@@ -970,6 +986,144 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input, mock_to
 
 
 @pytest.mark.asyncio
+async def test_silent_reuse_records_session_approval_source(input, mock_toolset):
+    """A tool call that skips approval by reusing a prior/session approval must still be attributed so its
+    ToolInvokedEvent carries the source."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    # No fresh prompt: the registry reports the call is already approved.
+    mock_tools_registry.approval_required = AsyncMock(return_value=False)
+    # The toolset attributes that skip to a reused session approval.
+    mock_toolset.resolve_approval_source = AsyncMock(
+        return_value=ApprovalSource.SESSION_APPROVAL
+    )
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    ai_message = AIMessage(
+        content="reuse",
+        tool_calls=[
+            {
+                "name": "run_command",
+                "args": {"command": "ls"},
+                "id": "call_reuse",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    init_approval_sources()
+    try:
+        result = await chat_agent.run(input)
+        assert result["status"] == WorkflowStatusEnum.EXECUTION
+        assert get_approval_source("call_reuse") == "session_approval"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_preapproved_tool_records_preapproved_source(input, mock_toolset):
+    """A component-preapproved tool call is attributed as preapproved_config."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    mock_tools_registry.approval_required = AsyncMock(return_value=False)
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    ai_message = AIMessage(
+        content="preapproved",
+        tool_calls=[
+            {
+                "name": "read_file",
+                "args": {"path": "/a"},
+                "id": "call_pre",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    init_approval_sources()
+    try:
+        await chat_agent.run({**input, "preapproved_tools": ["read_file"]})
+        assert get_approval_source("call_pre") == "preapproved_config"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_resolution_failure_requires_approval_instead_of_skipping(
+    input, mock_toolset
+):
+    """If resolving the approval source raises, the failure must degrade to requiring a fresh human decision (fail-
+    closed), not to silently skipping approval."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    # No fresh prompt, but resolving the source blows up (e.g. UnknownToolError
+    # or a transport error from the policy check).
+    mock_tools_registry.approval_required = AsyncMock(return_value=False)
+    mock_toolset.resolve_approval_source = AsyncMock(
+        side_effect=RuntimeError("policy check unavailable")
+    )
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    ai_message = AIMessage(
+        content="reuse",
+        tool_calls=[
+            {
+                "name": "run_command",
+                "args": {"command": "ls"},
+                "id": "call_raise",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    init_approval_sources()
+    try:
+        result = await chat_agent.run(input)
+        # A resolution failure must not let the call run unprompted.
+        assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+        assert "call_raise" in result["tool_call_approval_requested"]
+        assert get_approval_source("call_raise") is None
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
 async def test_approval_enriches_tool_info_with_project_name(input):
     """Test that approval messages use resolve_project_name_for_tool to enrich tool_info args."""
     mock_model = Mock()
@@ -979,13 +1133,15 @@ async def test_approval_enriches_tool_info_with_project_name(input):
     mock_prompt_adapter.get_model.return_value = mock_model
 
     mock_tools_registry = Mock(spec=ToolsRegistry)
-    mock_tools_registry.approval_required.return_value = True
+    approval_toolset = Mock(spec=Toolset)
+    # None => a fresh human decision is required.
+    approval_toolset.resolve_approval_source = AsyncMock(return_value=None)
 
     chat_agent = ChatAgent(
         name="Chat Agent",
         prompt_adapter=mock_prompt_adapter,
         tools_registry=mock_tools_registry,
-        toolset=Mock(spec=Toolset),
+        toolset=approval_toolset,
         system_template_override=None,
         optimizer_pipeline=_make_passthrough_pipeline(),
     )
@@ -1043,7 +1199,8 @@ async def test_approval_includes_suggested_patterns_for_commands(input, mock_too
     mock_prompt_adapter.get_model.return_value = mock_model
 
     mock_tools_registry = Mock(spec=ToolsRegistry)
-    mock_tools_registry.approval_required = AsyncMock(return_value=True)
+    # None => a fresh human decision is required.
+    mock_toolset.resolve_approval_source = AsyncMock(return_value=None)
 
     chat_agent = ChatAgent(
         name="Chat Agent",
@@ -1405,6 +1562,76 @@ class TestChatAgentOptimizerPipeline:
         assert blobs[0]["step_action"] == "compaction"
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_trimmed_ui_chat_log_shares_the_compaction_group_start(
+        self, system_template_override, mock_toolset
+    ):
+        """The trim and the history rewrite land in one aput as two non-append deltas, so the checkpointer sees a single
+        compaction and both channels get a full snapshot (gitlab-org/gitlab#628017)."""
+        original = [HumanMessage(content=f"m{i}") for i in range(6)]
+        replaced = [AIMessage(content="summary"), HumanMessage(content="m5")]
+        result = _successful_compaction_result()
+        result.messages = replaced
+        result.ui_chat_logs = [
+            build_compaction_tool_card(
+                trigger="auto", result=result, status=ToolStatus.SUCCESS
+            )
+        ]
+        pipeline = _make_optimizer_pipeline_with_result(
+            result, optimized_history=replaced
+        )
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline
+        )
+
+        history_channel = BinaryOperatorAggregate(dict, _conversation_history_reducer)
+        history_channel.update([{"Chat Agent": original}])
+        ui_channel = BinaryOperatorAggregate(list, _ui_chat_log_reducer)
+        earlier_entries = [
+            UiChatLog(
+                message_type=MessageTypeEnum.USER,
+                message_sub_type=None,
+                content=f"m{i}",
+                timestamp="2026-01-01T00:00:00+00:00",
+                status=ToolStatus.SUCCESS,
+                correlation_id=None,
+                tool_info=None,
+                additional_context=None,
+                message_id=f"m{i}",
+            )
+            for i in range(6)
+        ]
+        ui_channel.update([earlier_entries])
+        baseline = {
+            "conversation_history": history_channel.get(),
+            "ui_chat_log": ui_channel.get(),
+        }
+
+        state = {
+            **self._input_state(),
+            "conversation_history": history_channel.get(),
+            "ui_chat_log": ui_channel.get(),
+        }
+        response = await chat_agent.run(state)
+        history_channel.update([response["conversation_history"]])
+        ui_channel.update([response["ui_chat_log"]])
+
+        checkpoint = {
+            "channel_values": {
+                "conversation_history": history_channel.checkpoint(),
+                "ui_chat_log": ui_channel.checkpoint(),
+            }
+        }
+        blobs, is_compaction = _serialize_channel_blobs(
+            checkpoint, {"conversation_history": "2", "ui_chat_log": "2"}, baseline
+        )
+
+        assert is_compaction
+        assert {b["step_action"] for b in blobs} == {"compaction"}
+        assert len(ui_channel.get()) == 2
+        assert ui_channel.get()[-1]["message_sub_type"] == "compaction"
+
+    @pytest.mark.asyncio
     async def test_retry_correction_trace_persists_as_overwrite(
         self, system_template_override, mock_toolset
     ):
@@ -1521,6 +1748,65 @@ class TestChatAgentOptimizerPipeline:
         assert compaction_entry["tool_info"]["args"]["messages_summarized"] == 3
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_auto_compaction_trims_ui_chat_log_when_blobs_hold_history(
+        self, system_template_override, mock_toolset
+    ):
+        """Under incremental-only writes the step replaces ``ui_chat_log`` with its own entries and the summary card.
+
+        The blobs already hold every earlier entry, so state stops carrying the full log (gitlab-org/gitlab#628017).
+        """
+        result = _successful_compaction_result()
+        result.ui_chat_logs = [
+            build_compaction_tool_card(
+                trigger="auto", result=result, status=ToolStatus.SUCCESS
+            )
+        ]
+        pipeline = _make_optimizer_pipeline_with_result(result)
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline
+        )
+        state = self._input_state()
+        state["ui_chat_log"] = [
+            UiChatLog(
+                message_type=MessageTypeEnum.USER,
+                message_sub_type=None,
+                content="earlier",
+                timestamp="2026-01-01T00:00:00+00:00",
+                status=ToolStatus.SUCCESS,
+                correlation_id=None,
+                tool_info=None,
+                additional_context=None,
+                message_id="earlier-id",
+            )
+        ]
+
+        response = await chat_agent.run(state)
+
+        update = response["ui_chat_log"]
+        assert isinstance(update, Overwrite)
+        assistant_entry, compaction_entry = update.value
+        assert assistant_entry["content"] == "Assistant reply"
+        assert compaction_entry["message_sub_type"] == "compaction"
+        assert state["ui_chat_log"][0]["message_id"] == "earlier-id"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_ui_chat_log_still_appends_when_optimizer_left_history_alone(
+        self, system_template_override, mock_toolset
+    ):
+        result = OptimizationResult(messages=[HumanMessage(content="hi")])
+        pipeline = _make_optimizer_pipeline_with_result(result)
+        chat_agent = self._build_chat_agent(
+            system_template_override, mock_toolset, pipeline
+        )
+
+        response = await chat_agent.run(self._input_state())
+
+        assert isinstance(response["ui_chat_log"], list)
+        assert len(response["ui_chat_log"]) == 1
+
+    @pytest.mark.asyncio
     async def test_no_ui_logs_when_optimizer_produces_none(
         self, system_template_override, mock_toolset
     ):
@@ -1577,6 +1863,46 @@ class TestChatAgentOptimizerPipeline:
         assert len(ui_logs) == 2
         assert ui_logs[0]["message_id"].startswith("error-")
         assert ui_logs[1]["message_sub_type"] == "compaction"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    @patch("duo_workflow_service.agents.chat_agent.log_exception")
+    async def test_slash_command_validation_error_trims_ui_chat_log_after_compaction(
+        self,
+        _mock_log_exception,
+        system_template_override,
+        mock_toolset,
+    ):
+        result = _successful_compaction_result()
+        result.ui_chat_logs = [
+            build_compaction_tool_card(
+                trigger="auto", result=result, status=ToolStatus.SUCCESS
+            )
+        ]
+        pipeline = _make_optimizer_pipeline_with_result(result)
+
+        mock_prompt_adapter = Mock()
+        mock_prompt_adapter.get_response = AsyncMock(
+            side_effect=SlashCommandValidationError(
+                "The command '/invalid' does not exist."
+            )
+        )
+        mock_prompt_adapter.get_model.return_value = Mock()
+        chat_agent = ChatAgent(
+            name="Chat Agent",
+            prompt_adapter=mock_prompt_adapter,
+            tools_registry=Mock(spec=ToolsRegistry),
+            system_template_override=system_template_override,
+            toolset=mock_toolset,
+            optimizer_pipeline=pipeline,
+        )
+
+        response = await chat_agent.run(self._input_state())
+
+        update = response["ui_chat_log"]
+        assert isinstance(update, Overwrite)
+        assert update.value[0]["message_id"].startswith("error-")
+        assert update.value[1]["message_sub_type"] == "compaction"
 
 
 def _manual_success_result() -> CompactionResult:
@@ -1741,6 +2067,43 @@ class TestChatAgentManualCompaction:
         assert isinstance(history_update, Overwrite)
         assert history_update.value["Chat Agent"] == compactor_result.messages
         assert state["conversation_history"]["Chat Agent"] == full_history
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_success_trims_ui_chat_log_when_blobs_hold_history(
+        self, chat_agent, mock_manual_compactor, input
+    ):
+        """Under incremental-only writes ``/compact`` replaces ``ui_chat_log`` with the summary card alone."""
+        history = [
+            HumanMessage(content="task"),
+            AIMessage(content="working on it"),
+            HumanMessage(content="/compact"),
+        ]
+        state = self._state_with_history(input, history)
+        compactor_result = mock_manual_compactor.optimize_manual.return_value
+
+        result = await chat_agent.run(state)
+
+        update = result["ui_chat_log"]
+        assert isinstance(update, Overwrite)
+        assert update.value == list(compactor_result.ui_chat_logs)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("incremental_checkpoints_only")
+    async def test_failure_keeps_appending_ui_chat_log(
+        self, chat_agent, mock_manual_compactor, input
+    ):
+        """A failed ``/compact`` leaves history alone, so the status entries append as before."""
+        mock_manual_compactor.optimize_manual.return_value = _manual_failure_result()
+        history = [
+            HumanMessage(content="task"),
+            AIMessage(content="working on it"),
+            HumanMessage(content="/compact"),
+        ]
+
+        result = await chat_agent.run(self._state_with_history(input, history))
+
+        assert isinstance(result["ui_chat_log"], list)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1939,6 +2302,7 @@ def _web_search_ai_message(msg_id="agent-msg-id"):
             {"type": "text", "text": " Here is what I found."},
         ],
         id=msg_id,
+        response_metadata={"model_name": "claude-haiku-4-5"},
     )
 
 
@@ -1965,9 +2329,13 @@ class TestServerToolResponse:
         assert tool["status"] == ToolStatus.SUCCESS
         assert tool["message_id"] == "srvtu_1"
         assert tool["tool_info"]["args"] == {"query": "gitlab duo"}
-        assert tool["tool_info"]["tool_response"] == [
-            {"type": "web_search_result", "url": "https://x"}
+        # Rendered as a string: the CLI and IDE validate tool_response as one
+        # and drop the whole chat log otherwise.
+        assert tool["tool_info"]["tool_response"] == "https://x"
+        assert tool["tool_info"]["sources"] == [
+            {"title": "https://x", "url": "https://x"}
         ]
+        assert_client_valid_tool_info(tool["tool_info"])
         assert summary["message_id"] == "agent-msg-id:seg1"
         assert summary["content"] == " Here is what I found."
 
@@ -1989,6 +2357,46 @@ class TestServerToolResponse:
 
         assert len(result["ui_chat_log"]) == 1
         assert result["ui_chat_log"][0]["status"] == ToolStatus.PENDING
+
+    def test_openai_web_search_call_splits_text_and_carries_citations(self, chat_agent):
+        msg = AIMessage(
+            content=[
+                {"type": "text", "text": "Let me look that up."},
+                {
+                    "type": "web_search_call",
+                    "id": "ws_1",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "gitlab duo"},
+                },
+                {
+                    "type": "text",
+                    "text": " Here is what I found.",
+                    "annotations": [
+                        {
+                            "type": "url_citation",
+                            "url": "https://x",
+                            "title": "X",
+                            "start_index": 0,
+                            "end_index": 1,
+                        }
+                    ],
+                },
+            ],
+            id="resp_1",
+        )
+        result = {}
+
+        chat_agent._build_ui_chat_log(msg, {"conversation_history": {}}, result)
+
+        pre, tool, summary = result["ui_chat_log"]
+        assert pre["content"] == "Let me look that up."
+        assert tool["message_type"] == MessageTypeEnum.TOOL
+        # Rendered as a string: the CLI and IDE validate tool_response as one
+        # and drop the whole chat log otherwise (same as the Anthropic path).
+        assert tool["tool_info"]["tool_response"] == "X: https://x"
+        assert_client_valid_tool_info(tool["tool_info"])
+        assert summary["message_id"] == "resp_1:seg1"
+        assert summary["content"] == " Here is what I found."
 
     def test_plain_string_produces_single_agent_entry(self, chat_agent):
         result = {}
@@ -2036,6 +2444,131 @@ class TestServerToolResponse:
         assert tool_entries == []
 
 
+class TestWebSearchAuditEvent:
+    """Audit events for searches the model runs itself."""
+
+    @pytest.fixture(name="collector")
+    def collector_fixture(self):
+        collector = AuditEventCollector(
+            client=Mock(), workflow_id="42", flush_interval_seconds=1_000
+        )
+        token = audit_collector_context.set(collector)
+        try:
+            yield collector
+        finally:
+            audit_collector_context.reset(token)
+
+    @staticmethod
+    def _captured(collector):
+        return collector._buffer  # pylint: disable=protected-access
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("block", "audits"),
+        [
+            pytest.param(
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_search",
+                    "input": {"query": "gitlab duo"},
+                },
+                True,
+                id="anthropic-search",
+            ),
+            pytest.param(
+                {
+                    "type": "web_search_call",
+                    "id": "ws_1",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "urllib3 CVE"},
+                },
+                True,
+                id="openai-search",
+            ),
+            pytest.param(
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_fetch",
+                    "input": {"url": "https://x"},
+                },
+                False,
+                id="web-fetch-is-not-a-search",
+            ),
+            pytest.param(
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "web_search",
+                    "input": {"query": "gitlab duo"},
+                },
+                False,
+                id="fallback-tool-is-audited-by-the-tool-itself",
+            ),
+        ],
+    )
+    async def test_audits_searches_only(self, chat_agent, collector, block, audits):
+        await chat_agent._build_response(
+            AIMessage(content=[block], id="agent-msg-id"), {"conversation_history": {}}
+        )
+
+        assert len(self._captured(collector)) == (1 if audits else 0)
+
+    @pytest.mark.asyncio
+    async def test_event_carries_session_and_model_identity(
+        self, chat_agent, collector
+    ):
+        metadata = Mock()
+        metadata.llm_definition.provider = "Gemini Enterprise Agent Platform"
+        model_token = current_model_metadata_context.set(metadata)
+        try:
+            await chat_agent._build_response(
+                _web_search_ai_message(), {"conversation_history": {}}
+            )
+        finally:
+            current_model_metadata_context.reset(model_token)
+
+        event = self._captured(collector)[0]
+        assert event.event_type == AuditEventType.AI_WEB_SEARCH_INVOKED
+        assert event.workflow_id == "42"
+        assert (event.model_name, event.provider, event.search_source) == (
+            "claude-haiku-4-5",
+            "Gemini Enterprise Agent Platform",
+            "native",
+        )
+
+    @pytest.mark.asyncio
+    async def test_audits_every_search_in_one_message(self, chat_agent, collector):
+        """Two searches in one response are two separate reaches outside GitLab."""
+        blocks = [
+            {
+                "type": "server_tool_use",
+                "id": block_id,
+                "name": "web_search",
+                "input": {"query": "gitlab duo"},
+            }
+            for block_id in ("srvtu_1", "srvtu_2")
+        ]
+        await chat_agent._build_response(
+            AIMessage(content=blocks, id="agent-msg-id"), {"conversation_history": {}}
+        )
+
+        assert len(self._captured(collector)) == 2
+
+    @pytest.mark.asyncio
+    async def test_no_collector_still_builds_the_card(self, chat_agent):
+        result = await chat_agent._build_response(
+            _web_search_ai_message(), {"conversation_history": {}}
+        )
+
+        assert [e["message_type"] for e in result["ui_chat_log"]] == [
+            MessageTypeEnum.AGENT,
+            MessageTypeEnum.TOOL,
+            MessageTypeEnum.AGENT,
+        ]
+
+
 class TestToolApprovalRequestTracking:
     """Test suite for approval-request internal event tracking in ChatAgent."""
 
@@ -2048,7 +2581,18 @@ class TestToolApprovalRequestTracking:
         mock_prompt_adapter.get_model.return_value = mock_model
 
         mock_tools_registry = Mock(spec=ToolsRegistry)
-        mock_tools_registry.approval_required.side_effect = approval_side_effect
+
+        # _get_approvals resolves the decision and its source in a single call.
+        # Map the "needs approval" intent (approval_side_effect -> True) to a
+        # None source (fresh decision required); otherwise a session-reuse skip.
+        def resolve_side_effect(tool_name, tool_args=None):
+            if approval_side_effect(tool_name, tool_args):
+                return None
+            return ApprovalSource.SESSION_APPROVAL
+
+        mock_toolset.resolve_approval_source = AsyncMock(
+            side_effect=resolve_side_effect
+        )
 
         return ChatAgent(
             name="Chat Agent",

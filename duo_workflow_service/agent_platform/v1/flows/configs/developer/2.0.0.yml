@@ -66,6 +66,20 @@ components:
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
+    # Claims the include entry below. With zero items this stays a plain agent;
+    # with one or more it is promoted to a supervisor managing them.
+    subagents:
+      - source: workspace
+        item_type: agent_template
+        item_id: "*"
+
+# What this flow can pull in from outside. One AgentComponent is synthesized per item,
+# built against a prompt the service ships, so nothing is declared here for them.
+include:
+  - source: workspace
+    item_type: agent_template
+    item_id: "*"
+
 routers:
   - from: "git_unshallow"
     to: "developer_agent"

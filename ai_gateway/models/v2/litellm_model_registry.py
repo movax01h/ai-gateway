@@ -25,10 +25,14 @@ Expected JSON structure::
                 "max_output_tokens": 262144,
                 "supports_function_calling": true,
                 "supports_tool_choice": true,
-                "supports_response_schema": true
+                "supports_response_schema": true,
+                "supports_vision": false
             }
         }
     }
+
+``supports_vision`` is what the vision gate and LiteLLM's own Fireworks check
+read; set it per deployment when LiteLLM's bundled table is wrong or silent.
 """
 
 import json
@@ -49,6 +53,7 @@ __all__ = [
     "register_builtin_models",
     "register_external_models",
     "register_fireworks_models",
+    "register_fireworks_vision_flags",
 ]
 
 ENV_VAR_NAME = "AIGW_LITELLM__MODEL_METADATA_FILE"
@@ -62,7 +67,7 @@ log = structlog.stdlib.get_logger("litellm_model_registry")
 # lands in a stable, pinned PyPI release, so any model_selection entry that
 # outpaces our LiteLLM pin needs to be registered here by hand. Doing so lets
 # the AI Gateway route requests without waiting on a LiteLLM dependency bump.
-# Capability flags and costs mirror the predecessor entry that already ships
+# Capability flags mirror the predecessor entry that already ships
 # natively (Opus 4.6 for Opus 4.8, Sonnet 4.6 for Sonnet 5), since each was
 # launched at parity. Remove the manual entry once LiteLLM ships a native one
 # and the pin is bumped past it.
@@ -72,10 +77,6 @@ _OPUS_4_8_BEDROCK_METADATA: Dict[str, Any] = {
     "max_input_tokens": 1_000_000,
     "max_output_tokens": 128_000,
     "max_tokens": 128_000,
-    "input_cost_per_token": 5e-06,
-    "output_cost_per_token": 2.5e-05,
-    "cache_creation_input_token_cost": 6.25e-06,
-    "cache_read_input_token_cost": 5e-07,
     "supports_function_calling": True,
     "supports_tool_choice": True,
     "supports_response_schema": True,
@@ -92,10 +93,22 @@ _SONNET_5_BEDROCK_METADATA: Dict[str, Any] = {
     "max_input_tokens": 1_000_000,
     "max_output_tokens": 64_000,
     "max_tokens": 64_000,
-    "input_cost_per_token": 3e-06,
-    "output_cost_per_token": 1.5e-05,
-    "cache_creation_input_token_cost": 3.75e-06,
-    "cache_read_input_token_cost": 3e-07,
+    "supports_function_calling": True,
+    "supports_tool_choice": True,
+    "supports_response_schema": True,
+    "supports_prompt_caching": True,
+    "supports_pdf_input": True,
+    "supports_vision": True,
+    "supports_reasoning": True,
+    "supports_computer_use": True,
+}
+
+_HAIKU_5_5_BEDROCK_METADATA: Dict[str, Any] = {
+    "litellm_provider": "bedrock_converse",
+    "mode": "chat",
+    "max_input_tokens": 1_000_000,
+    "max_output_tokens": 128_000,
+    "max_tokens": 128_000,
     "supports_function_calling": True,
     "supports_tool_choice": True,
     "supports_response_schema": True,
@@ -117,6 +130,11 @@ BUILTIN_MODEL_METADATA: Dict[str, Dict[str, Any]] = {
     "us.anthropic.claude-sonnet-5-v1:0": _SONNET_5_BEDROCK_METADATA,
     "eu.anthropic.claude-sonnet-5-v1:0": _SONNET_5_BEDROCK_METADATA,
     "bedrock/global.anthropic.claude-sonnet-5": _SONNET_5_BEDROCK_METADATA,
+    # Bedrock cross-region inference profiles for Claude Haiku 5.5.
+    "global.anthropic.claude-haiku-5-5": _HAIKU_5_5_BEDROCK_METADATA,
+    "us.anthropic.claude-haiku-5-5": _HAIKU_5_5_BEDROCK_METADATA,
+    "eu.anthropic.claude-haiku-5-5": _HAIKU_5_5_BEDROCK_METADATA,
+    "bedrock/global.anthropic.claude-haiku-5-5": _HAIKU_5_5_BEDROCK_METADATA,
 }
 
 
@@ -214,6 +232,73 @@ def register_fireworks_models(llm_definitions: dict[str, LLMDefinition]) -> None
         "Registered Fireworks LiteLLM models from model selection config",
         count=len(metadata),
         models=list(metadata.keys()),
+    )
+
+
+def register_fireworks_vision_flags(llm_definitions: dict[str, LLMDefinition]) -> None:
+    """Write each Fireworks chat definition's ``supports_vision`` flag into LiteLLM's registry.
+
+    LiteLLM refuses images client-side when its own table says a Fireworks model has no vision (it is wrong about
+    Minimax M3), and its lookup tries ``fireworks_ai/<short name>`` before the full path, so both keys get the flag,
+    for ``params.model`` and for a router's ``params.identifier``. ``register_model`` merges, so only the flag changes.
+    A short key claimed by two definitions with different flags is left to LiteLLM and logged.
+    """
+    flags: Dict[str, bool] = {}
+    owners: Dict[str, str] = {}
+    collisions: set[str] = set()
+    for llm_def in llm_definitions.values():
+        params = llm_def.params
+        if not isinstance(params, ChatLiteLLMParams):
+            continue
+        if (
+            params.custom_llm_provider != "fireworks_ai"
+            or llm_def.supports_vision is None
+        ):
+            continue
+        for model_id in (params.model, params.identifier):
+            if not model_id:
+                continue
+            for key in (
+                f"fireworks_ai/{model_id}",
+                f"fireworks_ai/{model_id.rsplit('/', 1)[-1]}",
+            ):
+                if key in flags and flags[key] != llm_def.supports_vision:
+                    collisions.add(key)
+                    log.warning(
+                        "Fireworks vision flag collision; key left to LiteLLM",
+                        key=key,
+                        models=[owners[key], llm_def.gitlab_identifier],
+                    )
+                    continue
+                flags[key] = llm_def.supports_vision
+                owners[key] = llm_def.gitlab_identifier
+
+    metadata = {
+        key: {
+            "litellm_provider": "fireworks_ai",
+            "mode": "chat",
+            **litellm.model_cost.get(key, {}),
+            "supports_vision": flag,
+        }
+        for key, flag in flags.items()
+        if key not in collisions
+    }
+    if not metadata:
+        return
+    try:
+        register_model(metadata)
+    except Exception as exc:  # pylint: disable=broad-except
+        log.warning(
+            "Failed to register Fireworks vision flags in LiteLLM",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            keys=sorted(metadata),
+        )
+        return
+    log.info(
+        "Registered Fireworks vision flags in LiteLLM",
+        count=len(metadata),
+        keys=sorted(metadata),
     )
 
 

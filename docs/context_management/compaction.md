@@ -210,6 +210,10 @@ When compaction runs, a **compaction tool card** is emitted to the user-facing c
 - **Legacy Chat Workflow** (`ChatAgent`): via `_append_optimizer_ui_logs`, which appends the `CompactionResult.ui_chat_logs` entries after the agent's response entries.
 - **Flow Registry flows** (`AgentNode`): via the `compaction_result.ui_chat_logs` entries returned by `maybe_compact_history`, which are appended to the `ui_chat_log` state key after any existing entries (reasoning logs, etc.).
 
+Under incremental-only checkpoints, a step that rewrote the history (compaction or the legacy token trim) returns `ui_chat_log` as an `Overwrite` with only the step's new entries, plus the summary card when compaction ran, instead of appending to the full history. This keeps the group-start snapshot blob under the size cap on long sessions. The full message history still exists in the write-path deltas. The Rails `duoMessages` history read folds those deltas across compaction groups, using `message_id` to skip entries already present in a trimmed snapshot; checkpoint state reconstruction stays group-bounded.
+
+Subagent graphs compiled with `compile_as_subagent` don't trim, because the dispatch node appends their final `ui_chat_log` to the parent's. Instances without the capability keep appending the full list, so their behavior doesn't change.
+
 ### State Management
 
 Compaction integrates with state management differently depending on the workflow type:

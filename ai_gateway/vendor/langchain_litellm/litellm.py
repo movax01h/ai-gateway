@@ -148,6 +148,146 @@ def _create_fireworks_retry_decorator(
     )
 
 
+# Tool calls with IDs prefixed `srvtoolu_` were already executed server-side
+# (e.g. web_search). LiteLLM merges them with client-side `toolu_` calls
+# into one `tool_calls` list, so we filter by prefix to avoid re-dispatching.
+_SERVER_TOOL_USE_ID_PREFIX = "srvtoolu_"
+
+
+def _tool_call_getter(tc: Any) -> Callable[..., Any]:
+    return tc.get if isinstance(tc, dict) else lambda a, d=None: getattr(tc, a, d)
+
+
+def _is_server_tool_call_id(tool_call_id: Any) -> bool:
+    return isinstance(tool_call_id, str) and tool_call_id.startswith(
+        _SERVER_TOOL_USE_ID_PREFIX
+    )
+
+
+def _server_tool_use_block(tool_call_id: str, name: Any, arguments: Any) -> dict:
+    try:
+        tool_input = json.loads(arguments) if arguments else {}
+    except (json.JSONDecodeError, TypeError):
+        tool_input = {}
+    return {
+        "type": "server_tool_use",
+        "id": tool_call_id,
+        "name": name or "web_search",
+        "input": tool_input if isinstance(tool_input, dict) else {},
+    }
+
+
+def _web_search_results(provider_specific_fields: Any) -> List[dict]:
+    if not isinstance(provider_specific_fields, dict):
+        return []
+    results = provider_specific_fields.get("web_search_results")
+    return [r for r in results if isinstance(r, dict)] if results else []
+
+
+def _split_server_tool_calls(
+    raw_tool_calls: Sequence[Any],
+) -> Tuple[List[Any], List[dict]]:
+    """Partition into client-dispatchable calls and Anthropic `server_tool_use` blocks."""
+    client_tool_calls: List[Any] = []
+    server_blocks: List[dict] = []
+
+    for tc in raw_tool_calls:
+        _get = _tool_call_getter(tc)
+        tool_call_id = _get("id")
+        if not _is_server_tool_call_id(tool_call_id):
+            client_tool_calls.append(tc)
+            continue
+        function = _get("function") or {}
+        _fget = _tool_call_getter(function)
+        server_blocks.append(
+            _server_tool_use_block(tool_call_id, _fget("name"), _fget("arguments"))
+        )
+
+    return client_tool_calls, server_blocks
+
+
+def _server_tool_content(
+    text: Any, server_blocks: List[dict], results: List[dict]
+) -> Any:
+    """Anthropic's `(call, result)` pairs ahead of the text; LiteLLM concatenates all text, so the true position of each
+    call within it is already lost."""
+    if not server_blocks:
+        return text
+
+    results_by_use_id = {r["tool_use_id"]: r for r in results if r.get("tool_use_id")}
+    content: List[Any] = []
+    for block in server_blocks:
+        result = results_by_use_id.get(block["id"])
+        if result is None:
+            logger.warning("dropping server tool call without a result: %s", block["id"])
+            continue
+        content.extend((block, result))
+    if not content:
+        return text
+    if text:
+        content.append({"type": "text", "text": text})
+    return content
+
+
+class _ServerToolStream:
+    """Per-stream state: server calls arrive as tool-call chunks whose arguments are
+    split across deltas, and their results repeat in full on every later chunk."""
+
+    def __init__(self) -> None:
+        self._calls: Dict[int, dict] = {}
+        self._emitted: set[str] = set()
+
+    def split_tool_calls(self, raw_tool_calls: Sequence[Any]) -> List[Any]:
+        """Accumulate server calls into this stream's state, return the client ones."""
+        client_tool_calls: List[Any] = []
+
+        for tc in raw_tool_calls:
+            _get = _tool_call_getter(tc)
+            tool_call_id = _get("id")
+            index = _get("index")
+            known = isinstance(index, int) and index in self._calls
+
+            if not (_is_server_tool_call_id(tool_call_id) or known):
+                client_tool_calls.append(tc)
+                continue
+            if not isinstance(index, int):
+                continue
+
+            # Continuation chunks carry no id and only a slice of the arguments.
+            call = self._calls.setdefault(index, {"id": tool_call_id, "arguments": ""})
+            function = _get("function") or {}
+            _fget = _tool_call_getter(function)
+            if not call.get("name"):
+                call["name"] = _fget("name")
+            call["arguments"] += _fget("arguments") or ""
+
+        return client_tool_calls
+
+    def content_blocks(self, provider_specific_fields: Any) -> List[dict]:
+        """Emit each `(call, result)` pair once, as soon as its result shows up."""
+        results_by_use_id = {
+            r["tool_use_id"]: r
+            for r in _web_search_results(provider_specific_fields)
+            if r.get("tool_use_id")
+        }
+        blocks: List[dict] = []
+
+        for call in self._calls.values():
+            tool_call_id = call["id"]
+            result = results_by_use_id.get(tool_call_id)
+            if result is None or tool_call_id in self._emitted:
+                continue
+            self._emitted.add(tool_call_id)
+            blocks.append(
+                _server_tool_use_block(
+                    tool_call_id, call.get("name"), call["arguments"]
+                )
+            )
+            blocks.append(result)
+
+        return blocks
+
+
 def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
     role = _dict["role"]
     if role == "user":
@@ -157,12 +297,21 @@ def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
         # Also OpenAI returns None for tool invocations
         content = _dict.get("content", "") or ""
 
-        additional_kwargs = {}
+        additional_kwargs: Dict[str, Any] = {}
         if _dict.get("function_call"):
             additional_kwargs["function_call"] = dict(_dict["function_call"])
 
-        if _dict.get("tool_calls"):
-            additional_kwargs["tool_calls"] = _dict["tool_calls"]
+        client_tool_calls, server_blocks = _split_server_tool_calls(
+            _dict.get("tool_calls") or []
+        )
+        if client_tool_calls:
+            additional_kwargs["tool_calls"] = client_tool_calls
+
+        content = _server_tool_content(
+            content,
+            server_blocks,
+            _web_search_results(_dict.get("provider_specific_fields")),
+        )
 
         # Preserve reasoning_content so it survives the inbound (non-streaming)
         # conversion and remains available for subsequent turns.  Providers such
@@ -183,7 +332,9 @@ def _convert_dict_to_message(_dict: Mapping[str, Any]) -> BaseMessage:
 
 
 def _convert_delta_to_message_chunk(
-    delta: Union[Delta, Dict[str, Any]], default_class: Type[BaseMessageChunk]
+    delta: Union[Delta, Dict[str, Any]],
+    default_class: Type[BaseMessageChunk],
+    server_tools: _ServerToolStream,
 ) -> BaseMessageChunk:
     # Handle both Delta objects and dicts
     if isinstance(delta, dict):
@@ -192,13 +343,16 @@ def _convert_delta_to_message_chunk(
         function_call = delta.get("function_call")
         raw_tool_calls = delta.get("tool_calls")
         reasoning_content = delta.get("reasoning_content")
+        provider_specific_fields = delta.get("provider_specific_fields")
     else:
         role = delta.role
         content = delta.content or ""
         function_call = delta.function_call
         raw_tool_calls = delta.tool_calls
         reasoning_content = getattr(delta, "reasoning_content", None)
+        provider_specific_fields = getattr(delta, "provider_specific_fields", None)
 
+    additional_kwargs: Dict[str, Any]
     if function_call:
         additional_kwargs = {"function_call": dict(function_call)}
     # The hasattr check is necessary because litellm explicitly deletes the
@@ -209,6 +363,12 @@ def _convert_delta_to_message_chunk(
         additional_kwargs = {"reasoning_content": reasoning_content}
     else:
         additional_kwargs = {}
+
+    raw_tool_calls = server_tools.split_tool_calls(raw_tool_calls or [])
+    blocks = server_tools.content_blocks(provider_specific_fields)
+    if blocks:
+        # Text deltas stay bare strings; the merged list keeps both in order.
+        content = [*blocks, content] if content else blocks
 
     tool_call_chunks = []
     if raw_tool_calls:
@@ -442,11 +602,11 @@ class ChatLiteLLM(BaseChatModel):
             "custom_llm_provider": self.custom_llm_provider,
             **self.model_kwargs,
         }
-        guardrail_params = bedrock_guardrail_params(
-            self.custom_llm_provider, self.bedrock_guardrail_config
+        params.update(
+            bedrock_guardrail_params(
+                self.custom_llm_provider, self.bedrock_guardrail_config
+            )
         )
-        if guardrail_params:
-            params["guardrailConfig"] = guardrail_params["guardrailConfig"]
         return params
 
     @property
@@ -591,17 +751,18 @@ class ChatLiteLLM(BaseChatModel):
         response = self.completion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         )
-        return self._create_chat_result(response)
+        return self._create_chat_result(response, params)
 
-    def _create_chat_result(self, response: Mapping[str, Any]) -> ChatResult:
+    def _create_chat_result(
+        self, response: Mapping[str, Any], params: Optional[Mapping[str, Any]] = None
+    ) -> ChatResult:
         generations = []
         token_usage = response.get("usage", {})
+        model_name = (params or {}).get("model") or self.model_name or self.model
         for res in response["choices"]:
             message = _convert_dict_to_message(res["message"])
             if isinstance(message, AIMessage):
-                message.response_metadata = {
-                    "model_name": self.model_name or self.model
-                }
+                message.response_metadata = {"model_name": model_name}
                 message.usage_metadata = _create_usage_metadata(token_usage)
             gen = ChatGeneration(
                 message=message,
@@ -610,10 +771,7 @@ class ChatLiteLLM(BaseChatModel):
                 ),
             )
             generations.append(gen)
-        set_model_value = self.model
-        if self.model_name is not None:
-            set_model_value = self.model_name
-        llm_output = {"token_usage": token_usage, "model": set_model_value}
+        llm_output = {"token_usage": token_usage, "model": model_name}
         return ChatResult(generations=generations, llm_output=llm_output)
 
     def _create_message_dicts(
@@ -642,6 +800,7 @@ class ChatLiteLLM(BaseChatModel):
         params = {**params, **kwargs, "stream": True}
         params["stream_options"] = self.stream_options
         default_chunk_class = AIMessageChunk
+        server_tools = _ServerToolStream()
         for chunk in self.completion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         ):
@@ -653,7 +812,9 @@ class ChatLiteLLM(BaseChatModel):
             if len(chunk["choices"]) == 0:
                 continue
             delta = chunk["choices"][0]["delta"]
-            chunk = _convert_delta_to_message_chunk(delta, default_chunk_class)
+            chunk = _convert_delta_to_message_chunk(
+                delta, default_chunk_class, server_tools
+            )
             if usage_metadata and isinstance(chunk, AIMessageChunk):
                 chunk.usage_metadata = usage_metadata
 
@@ -687,6 +848,8 @@ class ChatLiteLLM(BaseChatModel):
 
         default_chunk_class: Type[BaseMessageChunk] = AIMessageChunk
         added_model_name = False
+        # Per-stream, never shared: continuation chunks carry no id, results repeat.
+        server_tools = _ServerToolStream()
         async for raw_chunk in await self.acompletion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         ):
@@ -704,7 +867,9 @@ class ChatLiteLLM(BaseChatModel):
 
             delta = raw_chunk["choices"][0]["delta"]
             usage = raw_chunk.get("usage", {})
-            chunk = _convert_delta_to_message_chunk(delta, default_chunk_class)
+            chunk = _convert_delta_to_message_chunk(
+                delta, default_chunk_class, server_tools
+            )
             if isinstance(chunk, AIMessageChunk):
                 if not added_model_name:
                     chunk.response_metadata = {
@@ -766,7 +931,7 @@ class ChatLiteLLM(BaseChatModel):
         response = await self.acompletion_with_retry(
             messages=message_dicts, run_manager=run_manager, **params
         )
-        result = self._create_chat_result(response)
+        result = self._create_chat_result(response, params)
 
         # Extract logprobs as score for Fireworks (matching LiteLlmTextGenModel behavior)
         if self.custom_llm_provider == "fireworks_ai":
@@ -942,9 +1107,32 @@ class ChatLiteLLM(BaseChatModel):
         return "litellm-chat"
 
 
+def _get_attr_or_key(obj: Any, key: str) -> Any:
+    """Retrieve *key* from *obj* whether it is a mapping or an attribute-bearing object.
+
+    LiteLLM returns ``prompt_tokens_details`` as a ``PromptTokensDetailsWrapper``
+    pydantic object in the non-streaming path, but as a plain ``dict`` after
+    ``model_dump()`` is called in the streaming paths (``_stream`` /
+    ``_astream``).  This helper handles both shapes without an ``isinstance``
+    check so callers stay concise.
+
+    Args:
+        obj: A mapping (e.g. ``dict``) or an object with attributes.
+        key: The key / attribute name to look up.
+
+    Returns:
+        The value associated with *key*, or ``None`` if absent.
+    """
+    getter = getattr(obj, "get", None)
+    if getter is not None:
+        return getter(key)
+    return getattr(obj, key, None)
+
+
 def _create_usage_metadata(token_usage: Mapping[str, Any]) -> UsageMetadata:
     input_tokens = token_usage.get("prompt_tokens", 0)
     output_tokens = token_usage.get("completion_tokens", 0)
+    prompt_tokens_details = token_usage.get("prompt_tokens_details")
     extra_kwargs = {}
 
     if (
@@ -958,6 +1146,30 @@ def _create_usage_metadata(token_usage: Mapping[str, Any]) -> UsageMetadata:
             cache_creation=cache_creation_input_tokens,
             cache_read=cache_read_input_tokens,
         )
+
+    elif prompt_tokens_details:
+        # OpenAI-style usage: litellm surfaces OpenAI's
+        # ``usage.prompt_tokens_details`` as ``prompt_tokens_details``.
+        # Per the OpenAI prompt-caching docs:
+        #   - ``cached_tokens``       → tokens read from the cache  (cache_read)
+        #   - ``cache_write_tokens``  → tokens written to the cache (cache_write)
+        # See https://platform.openai.com/docs/guides/prompt-caching
+        #
+        # ``prompt_tokens_details`` may be a ``PromptTokensDetailsWrapper``
+        # pydantic object (non-streaming) or a plain ``dict`` (streaming, after
+        # ``model_dump()``).  ``_get_attr_or_key`` handles both shapes.
+        cache_read = _get_attr_or_key(prompt_tokens_details, "cached_tokens") or 0
+        cache_write = (
+            _get_attr_or_key(prompt_tokens_details, "cache_write_tokens") or 0
+        )
+
+        if cache_read or cache_write:
+            input_token_details = InputTokenDetails()
+            if cache_read:
+                input_token_details["cache_read"] = cache_read
+            if cache_write:
+                input_token_details["cache_creation"] = cache_write
+            extra_kwargs["input_token_details"] = input_token_details
 
     return UsageMetadata(
         input_tokens=input_tokens,

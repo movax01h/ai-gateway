@@ -10,6 +10,13 @@ These tests are aimed to run against a mocked instance of AI Gateway. They ensur
 
 The `test:performance` job triggers a multi-project pipeline in [Component Performance Testing](https://gitlab.com/gitlab-org/quality/component-performance-testing-aigw-poc) project. This project spins up the AI Gateway instance as per the Docker Compose file, and runs the k6_test against it.
 
+The job finds tests recursively, so it runs and measures every `.js` file anywhere under `performance_tests/k6_test`.
+Tests that should be kept, but not measured in CI, live outside that directory in
+[`performance_tests/k6_legacy`](../../performance_tests/k6_legacy/). For example, `v2_code_completions.js` covers
+`/v2/code/completions`, which still serves production traffic until `v2` is removed. CI measures code completions
+against `/v4/code/suggestions` with `k6_test/v4_code_suggestions_completion.js`. To run a legacy test manually, set
+`AI_GATEWAY_IP` and run `k6 run performance_tests/k6_legacy/v2_code_completions.js`.
+
 ## Adding a new test
 
 To add a new test:

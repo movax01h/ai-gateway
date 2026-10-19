@@ -1,0 +1,12 @@
+---
+description: Tracks requests to the self_hosted_models unit primitive
+internal_events: true
+action: request_self_hosted_models
+product_group: ai_model_services
+product_categories:
+  - custom_models
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6798
+tiers:
+  - premium
+  - ultimate

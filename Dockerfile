@@ -1,4 +1,4 @@
-FROM python:3.12.13-slim AS base-image
+FROM python:3.12.15-slim AS base-image
 
 # HF_HOME and POETRY_* are needed to allow the docker image to be run from a non-root users
 # without having issues with permissions
@@ -41,6 +41,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN poetry install --compile --no-interaction --no-ansi --no-cache --only main
 
+# Remove ecdsa to avoid CVE-2024-23342 (unpatched upstream). It is only pulled in
+# unconditionally by python-jose and never imported: jose uses the cryptography
+# backend for EC keys, and cryptography is always installed here.
+RUN rm -rf /home/aigateway/app/venv/*/lib*/python3.12/site-packages/ecdsa*
+
 ##
 ## Final image copies dependencies from install-image
 ##
@@ -49,6 +54,7 @@ FROM base-image AS final
 RUN apt-get update && apt-get install -y --no-install-recommends \
     parallel \
     curl \
+    && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd aigateway
@@ -59,7 +65,7 @@ COPY --chown=aigateway:aigateway --from=install-image /home/aigateway/app/venv/ 
 
 RUN poetry run python scripts/bootstrap.py
 
-# Pull foundational agents from the catalog
+# Pull foundational agents from the catalog into ai/features/foundational_agents/
 RUN poetry run fetch-foundational-agents "https://gitlab.com" "$GITLAB_API_TOKEN" "duo_planner:348,security_analyst_agent:356,ci_expert_agent:1004583,onboarding_guide:1003979" \
     --flow-registry-version v1
 

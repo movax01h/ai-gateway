@@ -10,7 +10,8 @@ It takes a GitLab issue URL as input and automatically resolves it by creating c
 
 ## How to Use
 
-note: This workflow is intended for remote execution as it pushes the code and creates a merge request automatically.
+> [!note]
+> This workflow is intended for remote execution as it pushes the code and creates a merge request automatically.
 
 1. Verify that all setup [prerequisites](https://docs.gitlab.com/user/duo_agent_platform/flows/issue_to_mr/#prerequisites)
    have been satisfied.

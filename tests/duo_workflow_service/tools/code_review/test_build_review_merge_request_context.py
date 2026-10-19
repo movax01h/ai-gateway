@@ -15,6 +15,7 @@ from duo_workflow_service.tools.code_review.build_review_merge_request_context i
     BuildReviewMergeRequestContext,
     BuildReviewMergeRequestContextInput,
 )
+from duo_workflow_service.tools.code_review.diff_format import walk_diff_lines
 
 
 @pytest.fixture(name="mr_data")
@@ -108,107 +109,6 @@ instructions:
             2. Follow Ruby naming conventions
 """
     return {"content": base64.b64encode(yaml_content.encode("utf-8")).decode("utf-8")}
-
-
-def test_parse_and_format_diff(metadata):
-    """Test that raw diffs are correctly parsed into structured format."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = """@@ -1,3 +1,4 @@ class Calculator
-def add(a, b)
--  a + b
-+  a - b
-end"""
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    # Check chunk header
-    assert "<chunk_header>@@ -1,3 +1,4 @@ class Calculator</chunk_header>" in result
-
-    # Check context line
-    assert (
-        '<line type="context" old_line="1" new_line="1">def add(a, b)</line>' in result
-    )
-
-    # Check deleted line
-    assert '<line type="deleted" old_line="2" new_line="">  a + b</line>' in result
-
-    # Check added line
-    assert '<line type="added" old_line="" new_line="2">  a - b</line>' in result
-
-    # Check context line
-    assert '<line type="context" old_line="3" new_line="3">end</line>' in result
-
-
-def test_parse_and_format_diff_with_special_characters(metadata):
-    """Test that special XML characters are properly escaped."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = """@@ -1,1 +1,1 @@
--if x < 5 && y > 3:
-+if x < 10 && y > 5:"""
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    # Check that < > & are escaped
-    assert "<" in result
-    assert ">" in result
-    assert "&&" in result
-    assert '<line type="deleted"' in result
-    assert '<line type="added"' in result
-
-
-def test_parse_and_format_diff_with_empty_lines(metadata):
-    """Test that empty lines are properly handled."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = """@@ -1,4 +1,4 @@
-class Calculator
--
-+  # New comment
-end"""
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    # Check that empty lines are included
-    assert (
-        '<line type="context" old_line="1" new_line="1">class Calculator</line>'
-        in result
-    )
-    assert '<line type="deleted" old_line="2" new_line=""></line>' in result
-    assert (
-        '<line type="added" old_line="" new_line="2">  # New comment</line>' in result
-    )
-
-
-def test_parse_and_format_diff_binary_file(metadata):
-    """Test that binary files return empty string."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = "Binary files differ"
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    assert result == ""
-
-
-def test_parse_and_format_diff_no_newline_at_end(metadata):
-    """Test handling of 'No newline at end of file' marker."""
-    tool = BuildReviewMergeRequestContext(metadata=metadata)
-
-    raw_diff = """@@ -1,2 +1,2 @@
-line 1
--line 2
-\\ No newline at end of file
-+line 2"""
-
-    result = tool._parse_and_format_diff(raw_diff)
-
-    assert '<line type="context"' in result
-    assert '<line type="deleted"' in result
-    assert '<line type="nonewline"' in result
-    assert "No newline at end of file" in result
-    assert '<line type="added"' in result
 
 
 @pytest.mark.asyncio
@@ -515,6 +415,140 @@ async def test_build_review_context_with_custom_instructions(
     assert "Ruby Code Quality" in response
     assert "Apply these additional review instructions to matching files:" in response
     assert "According to custom instructions in" in response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flag_kwargs,hint_expected",
+    [
+        ({}, True),
+        ({"include_instruction_format_hint": False}, False),
+        # A flow config can only pass a string literal, so the args schema has to
+        # coerce it. Invoked through ainvoke to exercise that coercion.
+        ({"include_instruction_format_hint": "false"}, False),
+    ],
+)
+@patch("yaml.safe_load")
+async def test_build_review_context_instruction_format_hint(
+    mock_yaml_load,
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+    custom_instructions_yaml,
+    flag_kwargs,
+    hint_expected,
+):
+    """A flow that renders the attribution itself disables the format hint."""
+    mock_yaml_load.return_value = {
+        "instructions": [
+            {
+                "name": "Ruby Code Quality",
+                "fileFilters": ["*.rb"],
+                "instructions": "1. Ensure proper error handling",
+            }
+        ]
+    }
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(custom_instructions_yaml)
+            ),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool.ainvoke(
+        {
+            "project_id": "test%2Fproject",
+            "merge_request_iid": 123,
+            **flag_kwargs,
+        }
+    )
+
+    assert "Ruby Code Quality" in response
+    assert "Apply these additional review instructions to matching files:" in response
+    assert ("According to custom instructions in" in response) is hint_expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flag_kwargs,expected",
+    [
+        ({}, False),
+        ({"include_changed_files_list": True}, True),
+        ({"include_changed_files_list": False}, False),
+        ({"include_changed_files_list": "true"}, True),
+    ],
+)
+async def test_build_review_context_changed_files_list(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data,
+    flag_kwargs,
+    expected,
+):
+    """The checklist lists only reviewable paths, and stays out of the default output."""
+    original_file_content = {
+        "content": base64.b64encode(b"original content").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(status_code=200, body=json.dumps(diffs_data)),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool.ainvoke(
+        {"project_id": "test%2Fproject", "merge_request_iid": 123, **flag_kwargs}
+    )
+
+    if expected:
+        assert "<changed_files>\n- calculator.rb\n</changed_files>" in response
+    else:
+        assert "<changed_files>" not in response
+
+
+@pytest.mark.asyncio
+async def test_build_review_context_changed_files_list_includes_pure_renames(
+    gitlab_client_mock,
+    metadata,
+    mr_data,
+    diffs_data_with_renames,
+):
+    """A pure rename has no reviewable diff but is still a changed file; a rename with changes is listed once."""
+    original_file_content = {
+        "content": base64.b64encode(b"class Calculator\nend").decode("utf-8")
+    }
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=[
+            GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps(diffs_data_with_renames)
+            ),
+            Exception("Custom instructions not found"),
+            GitLabHttpResponse(status_code=200, body=json.dumps(original_file_content)),
+        ]
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id="test%2Fproject",
+        merge_request_iid=123,
+        include_changed_files_list=True,
+    )
+
+    assert (
+        "<changed_files>\n- calculator.rb\n- Calculator.md\n</changed_files>"
+        in response
+    )
 
 
 @pytest.mark.asyncio
@@ -1474,14 +1508,52 @@ def test_baseline_sha_is_hidden_from_the_model_but_open_to_the_flow(metadata):
     )
 
 
-def test_walk_diff_lines_keeps_metadata_skipping_outside_a_hunk(metadata):
+def test_output_flags_are_hidden_from_the_model_but_open_to_the_flow(metadata):
+    # Same reason as baseline_sha: security_review and fix_pipeline expose this tool in
+    # an agent toolset, and neither prompt describes these flags, so the model must not
+    # be able to reshape the output while a flow config still can.
     tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    model_facing = convert_to_openai_tool(tool)["function"]["parameters"]["properties"]
+    assert "include_instruction_format_hint" not in model_facing
+    assert "include_changed_files_list" not in model_facing
+    # Flags a model may legitimately choose are still its to choose.
+    assert "lightweight" in model_facing
+    assert "only_diffs" in model_facing
+
+    # DeterministicStepComponent calls ainvoke with a plain dict, which validates
+    # against args_schema. The injected fields have to survive that.
+    parsed = tool._parse_input(
+        {
+            "project_id": 1,
+            "merge_request_iid": 123,
+            "include_instruction_format_hint": "false",
+            "include_changed_files_list": "true",
+        },
+        None,
+    )
+    assert parsed["include_instruction_format_hint"] is False
+    assert parsed["include_changed_files_list"] is True
+
+    # And the flow config's inputs: list still validates against that schema.
+    validate_against_schema(
+        tool.args_schema,
+        {
+            "project_id",
+            "merge_request_iid",
+            "include_instruction_format_hint",
+            "include_changed_files_list",
+        },
+    )
+
+
+def test_walk_diff_lines_keeps_metadata_skipping_outside_a_hunk():
     raw = (
         "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
         "@@ -1,1 +1,2 @@\n ctx\n+added\n"
     )
 
-    walked = [(kind, new, text) for kind, _, new, text in tool._walk_diff_lines(raw)]
+    walked = [(kind, new, text) for kind, _, new, text in walk_diff_lines(raw)]
 
     assert walked == [
         ("chunk_header", 1, "@@ -1,1 +1,2 @@"),

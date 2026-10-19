@@ -11,6 +11,12 @@ class FeatureFlag(StrEnum):
     USE_GENERIC_GITLAB_API_TOOLS = "use_generic_gitlab_api_tools"
     AI_PROMPT_SCANNING = "ai_prompt_scanning"
     DAP_WEB_SEARCH = "dap_web_search"
+    # Gates the experimental `for_each` fan-out, which runs a component's body
+    # once per item of a list, see
+    # duo_workflow_service/agent_platform/experimental/components/for_each. Not
+    # yet defined in gitlab/config/feature_flags -- to be added alongside the
+    # first flow config that opts in.
+    DAP_FOR_EACH = "dap_for_each"
     # Gates SupervisorAgentComponentV2 (parallel subagent delegation via native
     # LangGraph Send tasks) on top of the per-component `parallel_subagents: true`
     # flow config flag, see
@@ -18,22 +24,26 @@ class FeatureFlag(StrEnum):
     # in gitlab/config/feature_flags -- to be added alongside the first flow config
     # that opts in.
     DAP_PARALLEL_SUBAGENTS = "dap_parallel_subagents"
+    # Gates attaching customer-defined workspace agents to foundational flows as
+    # subagents, see duo_workflow_service/agent_platform/v1/catalog. Definition:
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/dap_workspace_agents.yml
+    DAP_WORKSPACE_AGENTS = "dap_workspace_agents"
     DEPENDENCY_BUMP_WEB_SEARCH = "dependency_bump_web_search"
-    AGENTIC_FOUNDATIONAL_FLOW_TOOL = "agentic_foundational_flow_tool"
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
     DUO_CHAT_GENERATIVE_UI = "duo_chat_generative_ui"
-    # Definition:
-    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/config/feature_flags/gitlab_com_derisk/ai_gateway_multi_default_models.yml
-    AI_GATEWAY_MULTI_DEFAULT_MODELS = "ai_gateway_multi_default_models"
-    # Definition:
-    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/dw_read_blobs_api.yml
-    DW_READ_BLOBS_API = "dw_read_blobs_api"
-    # Definition:
-    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/wip/duo_workflow_read_incremental_checkpoints.yml
-    DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS = (
-        "duo_workflow_read_incremental_checkpoints"
-    )
+    DUO_DEVELOPER_MODEL_ROUTING = "duo_developer_model_routing"
     AI_MODEL_RELEASE = "ai_model_release"
+    CAP_CODE_COMPLETION_CONTEXT = "cap_code_completion_context"
+    # Gates tool-read image support, conversion and advertisement together, see
+    # duo_workflow_service/tools/filesystem.py. Definition:
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/beta/dap_tool_image_input.yml
+    # Rollout: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2806
+    DAP_TOOL_IMAGE_INPUT = "dap_tool_image_input"
+    # Sends OpenAI tools with `strict: false`, so GPT no longer fills every optional argument, see
+    # ai_gateway/models/v2/openai.py. Definition (added in gitlab-org/gitlab!261800):
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/gitlab_com_derisk/dap_openai_non_strict_tools.yml
+    # Issue: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2766
+    DAP_OPENAI_NON_STRICT_TOOLS = "dap_openai_non_strict_tools"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

@@ -99,7 +99,50 @@ export interface StartWorkflowRequest {
    * tip of an existing branch to continue that branch. When unset, execution continues from the latest
    * checkpoint.
    */
-  resume_checkpoint_ts?: string | undefined;
+  resume_checkpoint_ts?:
+    | string
+    | undefined;
+  /**
+   * catalog_items carries the catalog items to attach to the flow. Supported only for flows
+   * shipped with the service on schema version "v1"; sending items with any other request is an
+   * error. A supported flow that declares no `include` section ignores them.
+   */
+  catalog_items?: CatalogItems | undefined;
+}
+
+/**
+ * CatalogItems is a versioned envelope for the catalog items carried by one workflow run.
+ * The version is a oneof so a new schema can be added without breaking existing clients. Exactly
+ * one version is set; a server that does not recognise it rejects the request.
+ */
+export interface CatalogItems {
+  /** catalog_items_v1 is the v1 schema for catalog item declarations. */
+  catalog_items_v1?: CatalogItemsV1 | undefined;
+}
+
+/** CatalogItemsV1 is the v1 schema for catalog item declarations, keyed by item kind. */
+export interface CatalogItemsV1 {
+  /**
+   * workspace_agents lists the agent templates authored in the customer's workspace, attached to
+   * the flow as subagents.
+   */
+  workspace_agents: WorkspaceAgent[];
+}
+
+/**
+ * WorkspaceAgent is an agent template a customer authored in their workspace, attached to a flow as
+ * a subagent. The server namespaces the name it receives, so the name inside the running flow is
+ * not the one sent here.
+ */
+export interface WorkspaceAgent {
+  /** name identifies the agent, and must be unique among the items sent. Required. */
+  name: string;
+  /** description is what the coordinating agent sees when choosing whom to delegate to. Required. */
+  description: string;
+  /** toolset lists the tools this agent may use. Optional; an empty list is valid. */
+  toolset: string[];
+  /** prompt is the system prompt defining the agent's behaviour. Required. */
+  prompt: string;
 }
 
 /** ActionResponse carries the executor's result for a previously requested action. */
@@ -115,7 +158,15 @@ export interface ActionResponse {
     | HttpResponse
     | undefined;
   /** scheduleNotificationResponse acknowledges a ScheduleNotification action. */
-  scheduleNotificationResponse?: ScheduleNotificationResponse | undefined;
+  scheduleNotificationResponse?:
+    | ScheduleNotificationResponse
+    | undefined;
+  /**
+   * imageResponse carries a successful image result from an image-capable executor action.
+   * Only emit it when the instance is known to support the field (a Workhorse without the
+   * bindings silently drops it in transit).
+   */
+  imageResponse?: ImageResponse | undefined;
 }
 
 /** HeartbeatRequest is sent periodically by the client to keep the session alive. */
@@ -169,6 +220,24 @@ export interface ScheduleNotificationResponse {
    * timestamp. Empty when the notification was not accepted.
    */
   fires_at: string;
+}
+
+/**
+ * ImageResponse holds a successful image result from an executor action, so the service
+ * can build an image block without inferring the type from text. Failed reads use
+ * PlainTextResponse.error.
+ */
+export interface ImageResponse {
+  /**
+   * mime_type is the declared image format (e.g. image/png). The service validates it
+   * against its allowlist and the payload's actual bytes.
+   */
+  mime_type: string;
+  /**
+   * data is the encoded image file (e.g. PNG, JPEG), not raw pixel data. Base64-encoded
+   * on JSON transports.
+   */
+  data: Buffer;
 }
 
 /** Action is a server-initiated request for the executor to perform a specific operation. */
@@ -281,6 +350,8 @@ export interface TrackLlmCallForSelfHosted {
   featureQualifiedName: string;
   /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
+  /** sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown. */
+  sourceType: string;
 }
 
 /** RunShellCommand requests execution of a raw shell command string. */
@@ -364,7 +435,27 @@ export interface RunGitCommand {
 /** GenerateTokenRequest initiates a token generation request for a workflow session. */
 export interface GenerateTokenRequest {
   /** workflowDefinition optionally specifies the workflow definition for which the token is issued. */
-  workflowDefinition?: string | undefined;
+  workflowDefinition?:
+    | string
+    | undefined;
+  /** flow_config_id identifies the foundational flow authorized for this token. */
+  flow_config_id?:
+    | string
+    | undefined;
+  /** flow_config is the authoritative inline catalog flow configuration to bind to the issued token. */
+  flow_config?:
+    | { [key: string]: any }
+    | undefined;
+  /** workflowID identifies the workflow run this token is issued for. */
+  workflowID?:
+    | string
+    | undefined;
+  /** flow_version is the foundational flow version authorized for this token. */
+  flow_version?:
+    | string
+    | undefined;
+  /** flow_config_schema_version is the foundational flow schema version authorized for this token. */
+  flow_config_schema_version?: string | undefined;
 }
 
 /** GenerateTokenResponse returns the generated token and its expiry information. */
@@ -531,7 +622,11 @@ export interface McpTool {
     | ToolAnnotations
     | undefined;
   /** trusted indicates whether the tool is considered trusted and may be invoked without user confirmation. */
-  trusted?: boolean | undefined;
+  trusted?:
+    | boolean
+    | undefined;
+  /** client_injected marks a tool the client supplied; Workhorse owns the field and overwrites whatever the client sent. */
+  client_injected?: boolean | undefined;
 }
 
 /** Icons is a container for a list of Icon images. */
@@ -597,6 +692,12 @@ export enum Approval_ApprovalSource {
   APPROVAL_SOURCE_AUTO_MODE = 3,
   /** APPROVAL_SOURCE_PREAPPROVED_CONFIG - APPROVAL_SOURCE_PREAPPROVED_CONFIG indicates the approval was granted via a pre-approved tool/pattern configuration. */
   APPROVAL_SOURCE_PREAPPROVED_CONFIG = 4,
+  /**
+   * APPROVAL_SOURCE_SESSION_APPROVAL - APPROVAL_SOURCE_SESSION_APPROVAL is produced server-side when a tool call is
+   * silently approved by replaying a prior session-scoped approval, rather than a
+   * fresh decision. Clients must never stamp this value themselves.
+   */
+  APPROVAL_SOURCE_SESSION_APPROVAL = 5,
   UNRECOGNIZED = -1,
 }
 
@@ -617,6 +718,9 @@ export function approval_ApprovalSourceFromJSON(object: any): Approval_ApprovalS
     case 4:
     case "APPROVAL_SOURCE_PREAPPROVED_CONFIG":
       return Approval_ApprovalSource.APPROVAL_SOURCE_PREAPPROVED_CONFIG;
+    case 5:
+    case "APPROVAL_SOURCE_SESSION_APPROVAL":
+      return Approval_ApprovalSource.APPROVAL_SOURCE_SESSION_APPROVAL;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -636,6 +740,8 @@ export function approval_ApprovalSourceToJSON(object: Approval_ApprovalSource): 
       return "APPROVAL_SOURCE_AUTO_MODE";
     case Approval_ApprovalSource.APPROVAL_SOURCE_PREAPPROVED_CONFIG:
       return "APPROVAL_SOURCE_PREAPPROVED_CONFIG";
+    case Approval_ApprovalSource.APPROVAL_SOURCE_SESSION_APPROVAL:
+      return "APPROVAL_SOURCE_SESSION_APPROVAL";
     case Approval_ApprovalSource.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -769,6 +875,8 @@ export interface TrackSelfHostedClientEvent {
   featureQualifiedName: string;
   /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
+  /** sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown. */
+  sourceType: string;
 }
 
 /** TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event. */
@@ -929,6 +1037,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     flowVersion: undefined,
     streaming: undefined,
     resume_checkpoint_ts: undefined,
+    catalog_items: undefined,
   };
 }
 
@@ -981,6 +1090,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     if (message.resume_checkpoint_ts !== undefined) {
       writer.uint32(138).string(message.resume_checkpoint_ts);
+    }
+    if (message.catalog_items !== undefined) {
+      CatalogItems.encode(message.catalog_items, writer.uint32(146).fork()).join();
     }
     return writer;
   },
@@ -1120,6 +1232,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.resume_checkpoint_ts = reader.string();
           continue;
         }
+        case 18: {
+          if (tag !== 146) {
+            break;
+          }
+
+          message.catalog_items = CatalogItems.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1157,6 +1277,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
       resume_checkpoint_ts: isSet(object.resume_checkpoint_ts)
         ? globalThis.String(object.resume_checkpoint_ts)
         : undefined,
+      catalog_items: isSet(object.catalog_items) ? CatalogItems.fromJSON(object.catalog_items) : undefined,
     };
   },
 
@@ -1210,6 +1331,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.resume_checkpoint_ts !== undefined) {
       obj.resume_checkpoint_ts = message.resume_checkpoint_ts;
     }
+    if (message.catalog_items !== undefined) {
+      obj.catalog_items = CatalogItems.toJSON(message.catalog_items);
+    }
     return obj;
   },
 
@@ -1236,6 +1360,241 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.flowVersion = object.flowVersion ?? undefined;
     message.streaming = object.streaming ?? undefined;
     message.resume_checkpoint_ts = object.resume_checkpoint_ts ?? undefined;
+    message.catalog_items = (object.catalog_items !== undefined && object.catalog_items !== null)
+      ? CatalogItems.fromPartial(object.catalog_items)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCatalogItems(): CatalogItems {
+  return { catalog_items_v1: undefined };
+}
+
+export const CatalogItems: MessageFns<CatalogItems> = {
+  encode(message: CatalogItems, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.catalog_items_v1 !== undefined) {
+      CatalogItemsV1.encode(message.catalog_items_v1, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CatalogItems {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCatalogItems();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.catalog_items_v1 = CatalogItemsV1.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CatalogItems {
+    return {
+      catalog_items_v1: isSet(object.catalog_items_v1) ? CatalogItemsV1.fromJSON(object.catalog_items_v1) : undefined,
+    };
+  },
+
+  toJSON(message: CatalogItems): unknown {
+    const obj: any = {};
+    if (message.catalog_items_v1 !== undefined) {
+      obj.catalog_items_v1 = CatalogItemsV1.toJSON(message.catalog_items_v1);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CatalogItems>, I>>(base?: I): CatalogItems {
+    return CatalogItems.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CatalogItems>, I>>(object: I): CatalogItems {
+    const message = createBaseCatalogItems();
+    message.catalog_items_v1 = (object.catalog_items_v1 !== undefined && object.catalog_items_v1 !== null)
+      ? CatalogItemsV1.fromPartial(object.catalog_items_v1)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCatalogItemsV1(): CatalogItemsV1 {
+  return { workspace_agents: [] };
+}
+
+export const CatalogItemsV1: MessageFns<CatalogItemsV1> = {
+  encode(message: CatalogItemsV1, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.workspace_agents) {
+      WorkspaceAgent.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CatalogItemsV1 {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCatalogItemsV1();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspace_agents.push(WorkspaceAgent.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CatalogItemsV1 {
+    return {
+      workspace_agents: globalThis.Array.isArray(object?.workspace_agents)
+        ? object.workspace_agents.map((e: any) => WorkspaceAgent.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: CatalogItemsV1): unknown {
+    const obj: any = {};
+    if (message.workspace_agents?.length) {
+      obj.workspace_agents = message.workspace_agents.map((e) => WorkspaceAgent.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CatalogItemsV1>, I>>(base?: I): CatalogItemsV1 {
+    return CatalogItemsV1.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CatalogItemsV1>, I>>(object: I): CatalogItemsV1 {
+    const message = createBaseCatalogItemsV1();
+    message.workspace_agents = object.workspace_agents?.map((e) => WorkspaceAgent.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseWorkspaceAgent(): WorkspaceAgent {
+  return { name: "", description: "", toolset: [], prompt: "" };
+}
+
+export const WorkspaceAgent: MessageFns<WorkspaceAgent> = {
+  encode(message: WorkspaceAgent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.description !== "") {
+      writer.uint32(18).string(message.description);
+    }
+    for (const v of message.toolset) {
+      writer.uint32(26).string(v!);
+    }
+    if (message.prompt !== "") {
+      writer.uint32(34).string(message.prompt);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): WorkspaceAgent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWorkspaceAgent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.description = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.toolset.push(reader.string());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.prompt = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): WorkspaceAgent {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      description: isSet(object.description) ? globalThis.String(object.description) : "",
+      toolset: globalThis.Array.isArray(object?.toolset) ? object.toolset.map((e: any) => globalThis.String(e)) : [],
+      prompt: isSet(object.prompt) ? globalThis.String(object.prompt) : "",
+    };
+  },
+
+  toJSON(message: WorkspaceAgent): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.description !== "") {
+      obj.description = message.description;
+    }
+    if (message.toolset?.length) {
+      obj.toolset = message.toolset;
+    }
+    if (message.prompt !== "") {
+      obj.prompt = message.prompt;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<WorkspaceAgent>, I>>(base?: I): WorkspaceAgent {
+    return WorkspaceAgent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<WorkspaceAgent>, I>>(object: I): WorkspaceAgent {
+    const message = createBaseWorkspaceAgent();
+    message.name = object.name ?? "";
+    message.description = object.description ?? "";
+    message.toolset = object.toolset?.map((e) => e) || [];
+    message.prompt = object.prompt ?? "";
     return message;
   },
 };
@@ -1246,6 +1605,7 @@ function createBaseActionResponse(): ActionResponse {
     plainTextResponse: undefined,
     httpResponse: undefined,
     scheduleNotificationResponse: undefined,
+    imageResponse: undefined,
   };
 }
 
@@ -1262,6 +1622,9 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     }
     if (message.scheduleNotificationResponse !== undefined) {
       ScheduleNotificationResponse.encode(message.scheduleNotificationResponse, writer.uint32(42).fork()).join();
+    }
+    if (message.imageResponse !== undefined) {
+      ImageResponse.encode(message.imageResponse, writer.uint32(50).fork()).join();
     }
     return writer;
   },
@@ -1305,6 +1668,14 @@ export const ActionResponse: MessageFns<ActionResponse> = {
           message.scheduleNotificationResponse = ScheduleNotificationResponse.decode(reader, reader.uint32());
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.imageResponse = ImageResponse.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1324,6 +1695,7 @@ export const ActionResponse: MessageFns<ActionResponse> = {
       scheduleNotificationResponse: isSet(object.scheduleNotificationResponse)
         ? ScheduleNotificationResponse.fromJSON(object.scheduleNotificationResponse)
         : undefined,
+      imageResponse: isSet(object.imageResponse) ? ImageResponse.fromJSON(object.imageResponse) : undefined,
     };
   },
 
@@ -1340,6 +1712,9 @@ export const ActionResponse: MessageFns<ActionResponse> = {
     }
     if (message.scheduleNotificationResponse !== undefined) {
       obj.scheduleNotificationResponse = ScheduleNotificationResponse.toJSON(message.scheduleNotificationResponse);
+    }
+    if (message.imageResponse !== undefined) {
+      obj.imageResponse = ImageResponse.toJSON(message.imageResponse);
     }
     return obj;
   },
@@ -1360,6 +1735,9 @@ export const ActionResponse: MessageFns<ActionResponse> = {
       (object.scheduleNotificationResponse !== undefined && object.scheduleNotificationResponse !== null)
         ? ScheduleNotificationResponse.fromPartial(object.scheduleNotificationResponse)
         : undefined;
+    message.imageResponse = (object.imageResponse !== undefined && object.imageResponse !== null)
+      ? ImageResponse.fromPartial(object.imageResponse)
+      : undefined;
     return message;
   },
 };
@@ -1851,6 +2229,82 @@ export const ScheduleNotificationResponse: MessageFns<ScheduleNotificationRespon
   },
 };
 
+function createBaseImageResponse(): ImageResponse {
+  return { mime_type: "", data: Buffer.alloc(0) };
+}
+
+export const ImageResponse: MessageFns<ImageResponse> = {
+  encode(message: ImageResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.mime_type !== "") {
+      writer.uint32(10).string(message.mime_type);
+    }
+    if (message.data.length !== 0) {
+      writer.uint32(18).bytes(message.data);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ImageResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseImageResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.mime_type = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.data = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ImageResponse {
+    return {
+      mime_type: isSet(object.mime_type) ? globalThis.String(object.mime_type) : "",
+      data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0),
+    };
+  },
+
+  toJSON(message: ImageResponse): unknown {
+    const obj: any = {};
+    if (message.mime_type !== "") {
+      obj.mime_type = message.mime_type;
+    }
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ImageResponse>, I>>(base?: I): ImageResponse {
+    return ImageResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ImageResponse>, I>>(object: I): ImageResponse {
+    const message = createBaseImageResponse();
+    message.mime_type = object.mime_type ?? "";
+    message.data = object.data ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
 function createBaseAction(): Action {
   return {
     requestID: "",
@@ -2311,7 +2765,7 @@ export const ScheduleNotification: MessageFns<ScheduleNotification> = {
 };
 
 function createBaseTrackLlmCallForSelfHosted(): TrackLlmCallForSelfHosted {
-  return { workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false };
+  return { workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false, sourceType: "" };
 }
 
 export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = {
@@ -2324,6 +2778,9 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
     }
     if (message.featureAiCatalogItem !== false) {
       writer.uint32(24).bool(message.featureAiCatalogItem);
+    }
+    if (message.sourceType !== "") {
+      writer.uint32(34).string(message.sourceType);
     }
     return writer;
   },
@@ -2359,6 +2816,14 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
           message.featureAiCatalogItem = reader.bool();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.sourceType = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2375,6 +2840,7 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
       featureAiCatalogItem: isSet(object.featureAiCatalogItem)
         ? globalThis.Boolean(object.featureAiCatalogItem)
         : false,
+      sourceType: isSet(object.sourceType) ? globalThis.String(object.sourceType) : "",
     };
   },
 
@@ -2389,6 +2855,9 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
     if (message.featureAiCatalogItem !== false) {
       obj.featureAiCatalogItem = message.featureAiCatalogItem;
     }
+    if (message.sourceType !== "") {
+      obj.sourceType = message.sourceType;
+    }
     return obj;
   },
 
@@ -2400,6 +2869,7 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
     message.workflowID = object.workflowID ?? "";
     message.featureQualifiedName = object.featureQualifiedName ?? "";
     message.featureAiCatalogItem = object.featureAiCatalogItem ?? false;
+    message.sourceType = object.sourceType ?? "";
     return message;
   },
 };
@@ -3097,13 +3567,35 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
 };
 
 function createBaseGenerateTokenRequest(): GenerateTokenRequest {
-  return { workflowDefinition: undefined };
+  return {
+    workflowDefinition: undefined,
+    flow_config_id: undefined,
+    flow_config: undefined,
+    workflowID: undefined,
+    flow_version: undefined,
+    flow_config_schema_version: undefined,
+  };
 }
 
 export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
   encode(message: GenerateTokenRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.workflowDefinition !== undefined) {
       writer.uint32(10).string(message.workflowDefinition);
+    }
+    if (message.flow_config_id !== undefined) {
+      writer.uint32(18).string(message.flow_config_id);
+    }
+    if (message.flow_config !== undefined) {
+      Struct.encode(Struct.wrap(message.flow_config), writer.uint32(26).fork()).join();
+    }
+    if (message.workflowID !== undefined) {
+      writer.uint32(34).string(message.workflowID);
+    }
+    if (message.flow_version !== undefined) {
+      writer.uint32(42).string(message.flow_version);
+    }
+    if (message.flow_config_schema_version !== undefined) {
+      writer.uint32(50).string(message.flow_config_schema_version);
     }
     return writer;
   },
@@ -3123,6 +3615,46 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
           message.workflowDefinition = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.flow_config_id = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.flow_config = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.workflowID = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.flow_version = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.flow_config_schema_version = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3135,6 +3667,13 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
   fromJSON(object: any): GenerateTokenRequest {
     return {
       workflowDefinition: isSet(object.workflowDefinition) ? globalThis.String(object.workflowDefinition) : undefined,
+      flow_config_id: isSet(object.flow_config_id) ? globalThis.String(object.flow_config_id) : undefined,
+      flow_config: isObject(object.flow_config) ? object.flow_config : undefined,
+      workflowID: isSet(object.workflowID) ? globalThis.String(object.workflowID) : undefined,
+      flow_version: isSet(object.flow_version) ? globalThis.String(object.flow_version) : undefined,
+      flow_config_schema_version: isSet(object.flow_config_schema_version)
+        ? globalThis.String(object.flow_config_schema_version)
+        : undefined,
     };
   },
 
@@ -3142,6 +3681,21 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     const obj: any = {};
     if (message.workflowDefinition !== undefined) {
       obj.workflowDefinition = message.workflowDefinition;
+    }
+    if (message.flow_config_id !== undefined) {
+      obj.flow_config_id = message.flow_config_id;
+    }
+    if (message.flow_config !== undefined) {
+      obj.flow_config = message.flow_config;
+    }
+    if (message.workflowID !== undefined) {
+      obj.workflowID = message.workflowID;
+    }
+    if (message.flow_version !== undefined) {
+      obj.flow_version = message.flow_version;
+    }
+    if (message.flow_config_schema_version !== undefined) {
+      obj.flow_config_schema_version = message.flow_config_schema_version;
     }
     return obj;
   },
@@ -3152,6 +3706,11 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
   fromPartial<I extends Exact<DeepPartial<GenerateTokenRequest>, I>>(object: I): GenerateTokenRequest {
     const message = createBaseGenerateTokenRequest();
     message.workflowDefinition = object.workflowDefinition ?? undefined;
+    message.flow_config_id = object.flow_config_id ?? undefined;
+    message.flow_config = object.flow_config ?? undefined;
+    message.workflowID = object.workflowID ?? undefined;
+    message.flow_version = object.flow_version ?? undefined;
+    message.flow_config_schema_version = object.flow_config_schema_version ?? undefined;
     return message;
   },
 };
@@ -4514,7 +5073,15 @@ export const ToolAnnotations: MessageFns<ToolAnnotations> = {
 };
 
 function createBaseMcpTool(): McpTool {
-  return { name: "", description: "", inputSchema: "", icons: undefined, annotations: undefined, trusted: undefined };
+  return {
+    name: "",
+    description: "",
+    inputSchema: "",
+    icons: undefined,
+    annotations: undefined,
+    trusted: undefined,
+    client_injected: undefined,
+  };
 }
 
 export const McpTool: MessageFns<McpTool> = {
@@ -4536,6 +5103,9 @@ export const McpTool: MessageFns<McpTool> = {
     }
     if (message.trusted !== undefined) {
       writer.uint32(48).bool(message.trusted);
+    }
+    if (message.client_injected !== undefined) {
+      writer.uint32(56).bool(message.client_injected);
     }
     return writer;
   },
@@ -4595,6 +5165,14 @@ export const McpTool: MessageFns<McpTool> = {
           message.trusted = reader.bool();
           continue;
         }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.client_injected = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4612,6 +5190,7 @@ export const McpTool: MessageFns<McpTool> = {
       icons: isSet(object.icons) ? Icons.fromJSON(object.icons) : undefined,
       annotations: isSet(object.annotations) ? ToolAnnotations.fromJSON(object.annotations) : undefined,
       trusted: isSet(object.trusted) ? globalThis.Boolean(object.trusted) : undefined,
+      client_injected: isSet(object.client_injected) ? globalThis.Boolean(object.client_injected) : undefined,
     };
   },
 
@@ -4635,6 +5214,9 @@ export const McpTool: MessageFns<McpTool> = {
     if (message.trusted !== undefined) {
       obj.trusted = message.trusted;
     }
+    if (message.client_injected !== undefined) {
+      obj.client_injected = message.client_injected;
+    }
     return obj;
   },
 
@@ -4651,6 +5233,7 @@ export const McpTool: MessageFns<McpTool> = {
       ? ToolAnnotations.fromPartial(object.annotations)
       : undefined;
     message.trusted = object.trusted ?? undefined;
+    message.client_injected = object.client_injected ?? undefined;
     return message;
   },
 };
@@ -5559,7 +6142,7 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
 };
 
 function createBaseTrackSelfHostedClientEvent(): TrackSelfHostedClientEvent {
-  return { requestID: "", workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false };
+  return { requestID: "", workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false, sourceType: "" };
 }
 
 export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> = {
@@ -5575,6 +6158,9 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
     }
     if (message.featureAiCatalogItem !== false) {
       writer.uint32(32).bool(message.featureAiCatalogItem);
+    }
+    if (message.sourceType !== "") {
+      writer.uint32(42).string(message.sourceType);
     }
     return writer;
   },
@@ -5618,6 +6204,14 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
           message.featureAiCatalogItem = reader.bool();
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.sourceType = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -5635,6 +6229,7 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
       featureAiCatalogItem: isSet(object.featureAiCatalogItem)
         ? globalThis.Boolean(object.featureAiCatalogItem)
         : false,
+      sourceType: isSet(object.sourceType) ? globalThis.String(object.sourceType) : "",
     };
   },
 
@@ -5652,6 +6247,9 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
     if (message.featureAiCatalogItem !== false) {
       obj.featureAiCatalogItem = message.featureAiCatalogItem;
     }
+    if (message.sourceType !== "") {
+      obj.sourceType = message.sourceType;
+    }
     return obj;
   },
 
@@ -5664,6 +6262,7 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
     message.workflowID = object.workflowID ?? "";
     message.featureQualifiedName = object.featureQualifiedName ?? "";
     message.featureAiCatalogItem = object.featureAiCatalogItem ?? false;
+    message.sourceType = object.sourceType ?? "";
     return message;
   },
 };
@@ -6083,6 +6682,14 @@ export const DuoWorkflowClient = makeGenericClientConstructor(DuoWorkflowService
   service: typeof DuoWorkflowService;
   serviceName: string;
 };
+
+function bytesFromBase64(b64: string): Uint8Array {
+  return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
+}
+
+function base64FromBytes(arr: Uint8Array): string {
+  return globalThis.Buffer.from(arr).toString("base64");
+}
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 

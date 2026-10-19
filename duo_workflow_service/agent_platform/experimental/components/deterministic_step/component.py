@@ -7,9 +7,6 @@ from pydantic import Field, model_validator
 
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
-from duo_workflow_service.agent_platform.experimental.components import (
-    register_component,
-)
 from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     RouterProtocol,
@@ -21,6 +18,9 @@ from duo_workflow_service.agent_platform.experimental.components.deterministic_s
     UILogEventsDeterministicStep,
     deterministic_step_ui_log_writer_class,
 )
+from duo_workflow_service.agent_platform.experimental.components.registry import (
+    register_component,
+)
 from duo_workflow_service.agent_platform.experimental.state import IOKey, IOKeyTemplate
 from duo_workflow_service.agent_platform.experimental.ui_log import UIHistory
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
@@ -28,6 +28,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 )
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
     extract_configured_params,
+    privilege_hint,
     select_validated_tool,
 )
 from duo_workflow_service.tools.toolset import Toolset
@@ -91,13 +92,16 @@ class DeterministicStepComponent(BaseComponent):
             raise ValueError("tool_name is required")
 
         if not toolset:
-            raise ValueError("toolset is required")
+            raise ValueError(
+                f"toolset is required: tool '{tool_name}' for component "
+                f"'{data.get('name')}' is not enabled.{privilege_hint(tool_name)}"
+            )
 
         if tool_name not in toolset:
             available_tools = list(toolset.keys())
             raise KeyError(
                 f"Tool '{tool_name}' not found in toolset. "
-                f"Available tools: {available_tools}"
+                f"Available tools: {available_tools}.{privilege_hint(tool_name)}"
             )
 
         tool = toolset[tool_name]

@@ -182,8 +182,10 @@ def restore_message_consistency(messages: List[BaseMessage]) -> List[BaseMessage
             if not (
                 isinstance(msg, AIMessage)
                 and not msg.tool_calls
-                and isinstance(msg.content, str)
-                and not msg.content.strip()
+                and (
+                    msg.content == []
+                    or (isinstance(msg.content, str) and not msg.content.strip())
+                )
             ):
                 result.append(msg)
             i += 1

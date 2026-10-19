@@ -86,6 +86,42 @@ message StartWorkflowRequest {
     // tip of an existing branch to continue that branch. When unset, execution continues from the latest
     // checkpoint.
     optional string resume_checkpoint_ts = 17 [json_name = "resume_checkpoint_ts"];
+    // catalog_items carries the catalog items to attach to the flow. Supported only for flows
+    // shipped with the service on schema version "v1"; sending items with any other request is an
+    // error. A supported flow that declares no `include` section ignores them.
+    optional CatalogItems catalog_items = 18 [json_name = "catalog_items"];
+}
+
+// CatalogItems is a versioned envelope for the catalog items carried by one workflow run.
+// The version is a oneof so a new schema can be added without breaking existing clients. Exactly
+// one version is set; a server that does not recognise it rejects the request.
+message CatalogItems {
+    // items carries the item declarations for one schema version.
+    oneof items {
+        // catalog_items_v1 is the v1 schema for catalog item declarations.
+        CatalogItemsV1 catalog_items_v1 = 1 [json_name = "catalog_items_v1"];
+    }
+}
+
+// CatalogItemsV1 is the v1 schema for catalog item declarations, keyed by item kind.
+message CatalogItemsV1 {
+    // workspace_agents lists the agent templates authored in the customer's workspace, attached to
+    // the flow as subagents.
+    repeated WorkspaceAgent workspace_agents = 1 [json_name = "workspace_agents"];
+}
+
+// WorkspaceAgent is an agent template a customer authored in their workspace, attached to a flow as
+// a subagent. The server namespaces the name it receives, so the name inside the running flow is
+// not the one sent here.
+message WorkspaceAgent {
+    // name identifies the agent, and must be unique among the items sent. Required.
+    string name = 1;
+    // description is what the coordinating agent sees when choosing whom to delegate to. Required.
+    string description = 2;
+    // toolset lists the tools this agent may use. Optional; an empty list is valid.
+    repeated string toolset = 3;
+    // prompt is the system prompt defining the agent's behaviour. Required.
+    string prompt = 4;
 }
 
 // ActionResponse carries the executor's result for a previously requested action.
@@ -102,6 +138,10 @@ message ActionResponse {
         HttpResponse httpResponse = 4;
         // scheduleNotificationResponse acknowledges a ScheduleNotification action.
         ScheduleNotificationResponse scheduleNotificationResponse = 5;
+        // imageResponse carries a successful image result from an image-capable executor action.
+        // Only emit it when the instance is known to support the field (a Workhorse without the
+        // bindings silently drops it in transit).
+        ImageResponse imageResponse = 6;
     };
 }
 
@@ -147,6 +187,18 @@ message ScheduleNotificationResponse {
     // fires_at is when the executor expects to deliver the message, as an RFC3339 UTC
     // timestamp. Empty when the notification was not accepted.
     string fires_at = 3 [json_name = "fires_at"];
+}
+
+// ImageResponse holds a successful image result from an executor action, so the service
+// can build an image block without inferring the type from text. Failed reads use
+// PlainTextResponse.error.
+message ImageResponse {
+    // mime_type is the declared image format (e.g. image/png). The service validates it
+    // against its allowlist and the payload's actual bytes.
+    string mime_type = 1 [json_name = "mime_type"];
+    // data is the encoded image file (e.g. PNG, JPEG), not raw pixel data. Base64-encoded
+    // on JSON transports.
+    bytes data = 2;
 }
 
 // Action is a server-initiated request for the executor to perform a specific operation.
@@ -220,6 +272,8 @@ message TrackLlmCallForSelfHosted {
     string featureQualifiedName = 2;
     // featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
     bool featureAiCatalogItem = 3;
+    // sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown.
+    string sourceType = 4;
 }
 
 // RunShellCommand requests execution of a raw shell command string.
@@ -302,6 +356,16 @@ message RunGitCommand {
 message GenerateTokenRequest {
     // workflowDefinition optionally specifies the workflow definition for which the token is issued.
     optional string workflowDefinition = 1;
+    // flow_config_id identifies the foundational flow authorized for this token.
+    optional string flow_config_id = 2 [json_name = "flowConfigId"];
+    // flow_config is the authoritative inline catalog flow configuration to bind to the issued token.
+    optional google.protobuf.Struct flow_config = 3 [json_name = "flow_config"];
+    // workflowID identifies the workflow run this token is issued for.
+    optional string workflowID = 4;
+    // flow_version is the foundational flow version authorized for this token.
+    optional string flow_version = 5 [json_name = "flowVersion"];
+    // flow_config_schema_version is the foundational flow schema version authorized for this token.
+    optional string flow_config_schema_version = 6 [json_name = "flowConfigSchemaVersion"];
 }
 
 // GenerateTokenResponse returns the generated token and its expiry information.
@@ -455,6 +519,8 @@ message McpTool {
     optional ToolAnnotations annotations = 5;
     // trusted indicates whether the tool is considered trusted and may be invoked without user confirmation.
     optional bool trusted = 6;
+    // client_injected marks a tool the client supplied; Workhorse owns the field and overwrites whatever the client sent.
+    optional bool client_injected = 7;
 }
 
 // Icons is a container for a list of Icon images.
@@ -506,6 +572,10 @@ message Approval {
         APPROVAL_SOURCE_AUTO_MODE = 3;
         // APPROVAL_SOURCE_PREAPPROVED_CONFIG indicates the approval was granted via a pre-approved tool/pattern configuration.
         APPROVAL_SOURCE_PREAPPROVED_CONFIG = 4;
+        // APPROVAL_SOURCE_SESSION_APPROVAL is produced server-side when a tool call is
+        // silently approved by replaying a prior session-scoped approval, rather than a
+        // fresh decision. Clients must never stamp this value themselves.
+        APPROVAL_SOURCE_SESSION_APPROVAL = 5;
     }
 
     // PolicyRef identifies the policy artifact that produced an automatic approval
@@ -610,6 +680,8 @@ message TrackSelfHostedClientEvent {
     string featureQualifiedName = 3;
     // featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
     bool featureAiCatalogItem = 4;
+    // sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown.
+    string sourceType = 5;
 }
 
 // TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event.

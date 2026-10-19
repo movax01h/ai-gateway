@@ -1,0 +1,649 @@
+import base64
+import copy
+import json
+
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+from duo_workflow_service.entities.image_blocks import (
+    IMAGE_BLOCK_TOKEN_ESTIMATE,
+    ImageLimitKind,
+    ImageScope,
+    block_text,
+    content_as_text,
+    image_content_block,
+    image_limit_kind,
+    is_image_block,
+    is_image_content_block,
+    is_internal_image_block,
+    render_image_blocks_as_text,
+    strip_image_payloads,
+    with_block_text,
+    without_image_blocks,
+    without_image_payloads,
+)
+
+PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\npixels").decode()
+
+
+class TestImageContentBlock:
+    def test_builds_a_langchain_standard_block(self):
+        block = image_content_block(base64=PNG_B64, mime_type="image/png")
+
+        assert block["type"] == "image"
+        assert block["base64"] == PNG_B64
+        assert block["mime_type"] == "image/png"
+
+    def test_the_block_it_builds_is_recognised_as_one(self):
+        """The constructor and the predicate must not drift apart."""
+        assert is_image_content_block(
+            image_content_block(base64=PNG_B64, mime_type="image/webp")
+        )
+
+
+class TestIsImageContentBlock:
+    @pytest.mark.parametrize(
+        "block,expected",
+        [
+            ({"type": "image", "base64": PNG_B64}, True),
+            ({"type": "image", "url": "https://example.com/a.png"}, False),
+            ({"type": "image", "base64": ""}, False),
+            ({"type": "text", "text": "hi"}, False),
+            ("plain string", False),
+            (None, False),
+        ],
+    )
+    def test_only_inline_payloads_match(self, block, expected):
+        assert is_image_content_block(block) is expected
+
+
+class TestIsImageBlock:
+    """The two standard shapes and nothing else.
+
+    ``is_image_content_block`` is the inline subset of this, so every block that carries a payload is also an image
+    block, and a ``type: image`` dict with its payload under any other key is neither.
+    """
+
+    @pytest.mark.parametrize(
+        "block,expected",
+        [
+            ({"type": "image", "base64": PNG_B64}, True),
+            ({"type": "image", "url": "https://example.com/a.png"}, True),
+            ({"type": "image", "base64": ""}, False),
+            ({"type": "image", "url": None}, False),
+            ({"type": "image", "url": ""}, False),
+            ({"type": "image", "source": {"type": "base64", "data": PNG_B64}}, False),
+            ({"type": "image"}, False),
+            ({"type": "text", "text": "hi"}, False),
+            ("plain string", False),
+            (None, False),
+        ],
+    )
+    def test_inline_or_url_and_nothing_else(self, block, expected):
+        assert is_image_block(block) is expected
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {"type": "image", "base64": PNG_B64},
+            {"type": "image", "url": "https://example.com/a.png"},
+            {"type": "image", "source": {"type": "base64", "data": PNG_B64}},
+            {"type": "text", "text": "hi"},
+        ],
+    )
+    def test_inline_blocks_are_a_subset_of_image_blocks(self, block):
+        if is_image_content_block(block):
+            assert is_image_block(block)
+
+
+class TestStripImagePayloads:
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "a plain string",
+            [{"type": "text", "text": "no images here"}],
+            [{"type": "image", "url": "https://example.com/a.png"}],
+            [],
+            None,
+        ],
+    )
+    def test_content_without_inline_images_is_returned_unchanged(self, content):
+        assert strip_image_payloads(content) is content
+
+    def test_image_blocks_become_text_placeholders(self):
+        content = [
+            {"type": "text", "text": "look"},
+            {"type": "image", "base64": PNG_B64, "mime_type": "image/png"},
+        ]
+
+        stripped = strip_image_payloads(content)
+
+        assert stripped[0] == {"type": "text", "text": "look"}
+        assert stripped[1] == {
+            "type": "text",
+            "text": "[image/png omitted from history]",
+        }
+        assert PNG_B64 not in json.dumps(stripped)
+
+    def test_placeholder_falls_back_when_the_mime_type_is_missing(self):
+        (block,) = strip_image_payloads([{"type": "image", "base64": PNG_B64}])
+
+        assert block["text"] == "[image omitted from history]"
+
+    @pytest.mark.parametrize(
+        "word", ["attachment", "read_file", "upload", "tool", "user"]
+    )
+    def test_placeholder_names_no_producer(self, word):
+        """A block carries no provenance, so wording that fits one producer misleads the model about every other one."""
+        (block,) = strip_image_payloads(
+            [{"type": "image", "base64": PNG_B64, "mime_type": "image/png"}]
+        )
+
+        assert word not in block["text"]
+
+    def test_a_sibling_text_block_survives_so_producers_can_leave_a_recovery_hint(self):
+        """A tool that can re-fetch the image says so in its own text block; that block is not an image block, so
+        stripping leaves it intact."""
+        content = [
+            {"type": "text", "text": "Contents of diagram.png:"},
+            {"type": "image", "base64": PNG_B64, "mime_type": "image/png"},
+        ]
+
+        stripped = strip_image_payloads(content)
+
+        assert stripped[0] == {"type": "text", "text": "Contents of diagram.png:"}
+
+    def test_original_content_is_not_mutated(self):
+        content = [{"type": "image", "base64": PNG_B64, "mime_type": "image/png"}]
+
+        strip_image_payloads(content)
+
+        assert content[0]["base64"] == PNG_B64
+
+
+class TestWithoutImageBlocks:
+    IMAGE = {"type": "image", "base64": PNG_B64, "mime_type": "image/png"}
+    TEXT = {"type": "text", "text": "keep"}
+
+    @pytest.mark.parametrize(
+        "content,expected",
+        [
+            # Image-shaped blocks without a payload have nothing to drop and
+            # reach the scanner as they are, the safe direction.
+            ([{"type": "image", "base64": None}], [{"type": "image", "base64": None}]),
+            ([{"type": "image"}], [{"type": "image"}]),
+            ([{"type": "image", "base64": ""}], [{"type": "image", "base64": ""}]),
+            # The shared predicate matches any truthy base64, not only strings,
+            # so the exemption's scope visibly follows `is_image_content_block`.
+            ([{"type": "image", "base64": 1234}], []),
+            # Whole blocks go, wherever they sit; text beside them stays.
+            ([TEXT, IMAGE], [TEXT]),
+            ({"outer": [TEXT, IMAGE], "direct": IMAGE}, {"outer": [TEXT]}),
+            # A bare image block as the whole response leaves nothing to scan.
+            (IMAGE, {}),
+            ("plain text", "plain text"),
+        ],
+    )
+    def test_removes_only_payload_bearing_image_blocks(self, content, expected):
+        assert without_image_blocks(content) == expected
+
+    def test_original_content_is_not_mutated(self):
+        content = {"outer": [self.TEXT, self.IMAGE], "direct": self.IMAGE}
+        before = copy.deepcopy(content)
+
+        without_image_blocks(content)
+
+        assert content == before
+
+
+class TestImageLimitKind:
+    @pytest.mark.parametrize(
+        ("status_code", "message", "expected"),
+        [
+            pytest.param(
+                400,
+                "messages.1.content.5.image.source.base64.data: At least one of the image "
+                "dimensions exceed max allowed size for many-image requests: 2000 pixels",
+                ImageLimitKind.REQUEST,
+                id="anthropic_many_image_rule",
+            ),
+            pytest.param(
+                400,
+                "litellm.BadRequestError: messages.1.content.1.image.source.base64.data: "
+                "At least one of the image dimensions exceed max allowed size: 8000 pixels",
+                ImageLimitKind.SINGLE_IMAGE,
+                id="one_oversized_image",
+            ),
+            pytest.param(
+                400,
+                "messages.1.content.1.image.source.base64.data: image exceeds 5 MB maximum",
+                ImageLimitKind.REQUEST,
+                id="unknown_image_wording_is_a_request_limit",
+            ),
+            pytest.param(
+                413, "request too large", ImageLimitKind.REQUEST, id="body_too_large"
+            ),
+            pytest.param(
+                400,
+                "Error code: 400 - {'error': {'message': 'The image data you provided does not "
+                "represent a valid image. Please check your input and try again.', 'type': "
+                "'invalid_request_error', 'param': 'input', 'code': 'invalid_value'}}",
+                ImageLimitKind.UNCLASSIFIED,
+                id="openai_invalid_image",
+            ),
+            pytest.param(
+                400,
+                "Could not process image",
+                ImageLimitKind.UNCLASSIFIED,
+                id="anthropic_invalid_image",
+            ),
+            pytest.param(
+                400,
+                "Invalid 'input[2].content[1].image_url': image is too large (max 50 MB)",
+                ImageLimitKind.UNCLASSIFIED,
+                id="openai_size_wording_is_not_anthropics",
+            ),
+            pytest.param(
+                400,
+                "tools.0.name: invalid",
+                ImageLimitKind.UNCLASSIFIED,
+                id="any_other_400_is_unclassified_not_ignored",
+            ),
+            pytest.param(500, "image.source.base64 oops", None, id="server_error"),
+        ],
+    )
+    def test_classifies_image_limit_rejections(self, status_code, message, expected):
+        assert image_limit_kind(status_code, message) == expected
+
+
+class TestWithoutImagePayloads:
+    @staticmethod
+    def _image_tool_message(call_id: str) -> ToolMessage:
+        return ToolMessage(
+            content=[
+                {"type": "text", "text": f"Read image file: {call_id}.png"},
+                image_content_block(base64=PNG_B64, mime_type="image/png"),
+            ],
+            tool_call_id=call_id,
+        )
+
+    @pytest.fixture(name="two_rounds")
+    def two_rounds_fixture(self):
+        return [
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "attached"},
+                    image_content_block(base64=PNG_B64, mime_type="image/png"),
+                ]
+            ),
+            AIMessage(
+                content="", tool_calls=[{"id": "a", "name": "read_file", "args": {}}]
+            ),
+            self._image_tool_message("a"),
+            AIMessage(
+                content="", tool_calls=[{"id": "b", "name": "read_file", "args": {}}]
+            ),
+            self._image_tool_message("b"),
+        ]
+
+    def test_seen_keeps_the_current_round(self, two_rounds):
+        replaced, removed = without_image_payloads(two_rounds, scope=ImageScope.SEEN)
+
+        assert removed == 2
+        assert replaced[0].content[1] == {
+            "type": "text",
+            "text": "[image/png omitted from history]",
+        }
+        assert replaced[2].content[0] == {
+            "type": "text",
+            "text": "Read image file: a.png",
+        }
+        assert replaced[2].content[1]["type"] == "text"
+        assert is_image_content_block(replaced[4].content[1])
+        assert replaced[1] is two_rounds[1]
+
+    def test_current_keeps_the_seen_rounds(self, two_rounds):
+        replaced, removed = without_image_payloads(two_rounds, scope=ImageScope.CURRENT)
+
+        assert removed == 1
+        assert is_image_content_block(replaced[0].content[1])
+        assert is_image_content_block(replaced[2].content[1])
+        assert replaced[4].content[1]["type"] == "text"
+
+    @pytest.mark.parametrize("scope", list(ImageScope))
+    def test_returns_the_same_list_when_nothing_changes(self, scope):
+        messages = [HumanMessage(content="hi"), AIMessage(content="hello")]
+
+        replaced, removed = without_image_payloads(messages, scope=scope)
+
+        assert replaced is messages
+        assert removed == 0
+
+    def test_block_lists_without_images_are_left_alone(self):
+        messages = [
+            ToolMessage(
+                content=[{"type": "text", "text": "grep: 3 hits"}], tool_call_id="g"
+            ),
+            AIMessage(content="noted"),
+        ]
+
+        replaced, removed = without_image_payloads(messages, scope=ImageScope.SEEN)
+
+        assert replaced is messages
+        assert removed == 0
+
+    def test_nothing_is_seen_before_the_first_answer(self):
+        messages = [
+            HumanMessage(
+                content=[image_content_block(base64=PNG_B64, mime_type="image/png")]
+            )
+        ]
+
+        replaced, removed = without_image_payloads(messages, scope=ImageScope.SEEN)
+
+        assert replaced is messages
+        assert removed == 0
+
+    def test_input_messages_are_not_mutated(self, two_rounds):
+        without_image_payloads(two_rounds, scope=ImageScope.SEEN)
+        without_image_payloads(two_rounds, scope=ImageScope.CURRENT)
+
+        assert is_image_content_block(two_rounds[0].content[1])
+        assert is_image_content_block(two_rounds[4].content[1])
+
+
+def test_image_token_estimate_is_a_sane_constant():
+    """Guards against a regression to tiktoken-encoding base64 as prose."""
+    assert 0 < IMAGE_BLOCK_TOKEN_ESTIMATE < 10_000
+
+
+class TestContentAsText:
+    """One string out, whatever came in.
+
+    The ui_chat_log tool card is the hard constraint: the CLI and the IDE validate `tool_response` as a string (or a
+    message whose `content` is one) and discard the whole checkpoint's chat log otherwise. Base64 must not ride it,
+    and nothing may leave a block list without a trace.
+    """
+
+    IMAGE_BLOCK = {
+        "type": "image",
+        "base64": "A" * 4096,
+        "mime_type": "image/png",
+    }
+
+    def test_text_and_image_collapse_without_the_payload(self):
+        content = [
+            {"type": "text", "text": "Read image file: ./a.png (image/png, 3 KB)."},
+            self.IMAGE_BLOCK,
+        ]
+
+        result = content_as_text(content)
+
+        assert result == (
+            "Read image file: ./a.png (image/png, 3 KB).\n"
+            "[image/png omitted from history]"
+        )
+        assert "AAAA" not in result
+
+    def test_image_placeholder_is_the_one_history_uses(self):
+        # One voice for a lost image: the card, the summarizer and a resumed
+        # session all say the same thing, because they all go through
+        # strip_image_payloads.
+        (placeholder,) = strip_image_payloads([self.IMAGE_BLOCK])
+
+        assert content_as_text([self.IMAGE_BLOCK]) == placeholder["text"]
+
+    def test_text_only_list_flattens(self):
+        # The case the image gate used to miss: no image, still a list, still
+        # rejected by the client. Thomas's reproduction on !6863.
+        assert content_as_text([{"type": "text", "text": "x"}]) == "x"
+        assert content_as_text([{"type": "text", "text": "a"}, "b"]) == "a\nb"
+
+    def test_unrenderable_blocks_leave_a_marker(self):
+        # A block type this helper does not know about must still be visible;
+        # silently dropping it loses that the tool returned it. This is the
+        # property BaseMessage.text does not have.
+        content = [
+            self.IMAGE_BLOCK,
+            {"type": "audio", "base64": "B" * 32},
+            {"no_type_key": True},
+        ]
+
+        result = content_as_text(content)
+
+        assert result == (
+            "[image/png omitted from history]\n[audio omitted]\n[dict omitted]"
+        )
+        assert "BBBB" not in result
+
+    def test_a_block_naming_a_source_renders_title_and_url(self):
+        """Web search results are the live case: they carry `url` and usually `title`, and no text.
+
+        Only those two fields are shown. The snippet and the encrypted payload a provider adds stay off the card.
+        """
+        content = [
+            {
+                "type": "web_search_result",
+                "url": "https://a.example/x",
+                "title": "A doc",
+                "encrypted_content": "Z" * 32,
+                "page_age": "2026",
+            },
+            {"type": "web_search_result", "url": "https://b.example/y", "title": ""},
+            {"type": "web_search_result", "snippet": "no url here"},
+        ]
+
+        result = content_as_text(content)
+
+        assert result == (
+            "A doc: https://a.example/x\nhttps://b.example/y\n[web_search_result omitted]"
+        )
+        assert "ZZZZ" not in result
+        assert "no url here" not in result
+
+    def test_dict_renders_as_a_single_block(self):
+        assert content_as_text({"type": "text", "text": "hello"}) == "hello"
+        assert content_as_text({"key": "value"}) == "[dict omitted]"
+        assert content_as_text(self.IMAGE_BLOCK) == "[image/png omitted from history]"
+
+    def test_string_passes_through_by_identity(self):
+        content = "a plain string"
+
+        assert content_as_text(content) is content
+
+    def test_object_carrying_content_renders_by_it(self):
+        """Not just messages: the redactor accepts any object with `content`, so this must too.
+
+        Falling through to `str()` would put the object's repr, payload included, on the card.
+        """
+
+        # A stand-in for the duck-typed objects the redactor accepts.
+        class Wrapper:
+            def __init__(self, content):
+                self.content = content
+
+        result = content_as_text(
+            Wrapper([{"type": "text", "text": "hi"}, self.IMAGE_BLOCK])
+        )
+
+        assert result == "hi\n[image/png omitted from history]"
+        assert "AAAA" not in result
+
+    def test_tuple_content_is_treated_as_a_block_list(self):
+        assert content_as_text(({"type": "text", "text": "a"}, "b")) == "a\nb"
+
+    def test_whole_message_renders_by_its_content(self):
+        # Passing the message instead of message.content must not fall through
+        # to str(message), which would put the payload's repr on the card.
+        message = ToolMessage(
+            content=[{"type": "text", "text": "Read"}, self.IMAGE_BLOCK],
+            tool_call_id="c1",
+        )
+
+        result = content_as_text(message)
+
+        assert result == "Read\n[image/png omitted from history]"
+        assert "AAAA" not in result
+
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            (None, ""),
+            (42, "42"),
+            (True, "True"),
+        ],
+    )
+    def test_scalars_become_strings(self, content, expected):
+        assert content_as_text(content) == expected
+
+
+class TestRenderImageBlocksAsText:
+    """Only an image-bearing list is rendered; everything else comes back untouched."""
+
+    def test_an_image_bearing_list_becomes_the_card_text(self):
+        blocks = [
+            {"type": "text", "text": "lead"},
+            {"type": "image", "base64": PNG_B64, "mime_type": "image/png"},
+        ]
+
+        assert (
+            render_image_blocks_as_text(blocks)
+            == "lead\n[image/png omitted from history]"
+        )
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "plain string",
+            [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
+            [{"path": "a.py"}, {"path": "b.py"}],
+            {"type": "image", "base64": PNG_B64, "mime_type": "image/png"},
+            None,
+        ],
+    )
+    def test_anything_else_is_returned_by_identity(self, content):
+        assert render_image_blocks_as_text(content) is content
+
+
+class TestBlockText:
+    """The one reader of the block shape, shared by the card renderer and truncation."""
+
+    def test_string_is_its_own_text(self):
+        assert block_text("plain") == "plain"
+
+    def test_text_block_yields_its_text(self):
+        assert block_text({"type": "text", "text": "hello"}) == "hello"
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {"type": "image", "base64": "QUFB", "mime_type": "image/png"},
+            {"type": "audio", "data": "QUFB"},
+            {"type": "text", "text": 42},
+            {"no_type": True},
+            42,
+            None,
+        ],
+    )
+    def test_blocks_without_text_yield_none(self, block):
+        assert block_text(block) is None
+
+    def test_with_block_text_keeps_the_shape(self):
+        assert with_block_text("old", "new") == "new"
+
+        block = {"type": "text", "text": "old", "cache_control": {"type": "ephemeral"}}
+        replaced = with_block_text(block, "new")
+
+        assert replaced == {
+            "type": "text",
+            "text": "new",
+            "cache_control": {"type": "ephemeral"},
+        }
+        assert block["text"] == "old"
+
+
+class TestInternalImageBlock:
+    """Provenance, where :func:`is_image_content_block` reports shape.
+
+    Only one consumer needs the difference: the redaction exemption, which skips scanning a payload and so must not be
+    satisfiable by a dict that merely looks the part.
+    """
+
+    PAYLOAD = "iVBORw0KGgo" + "A" * 64
+
+    def test_the_constructor_marks_its_own_blocks(self):
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        assert is_internal_image_block(block) is True
+
+    def test_a_hand_built_lookalike_is_not_internal(self):
+        lookalike = {
+            "type": "image",
+            "base64": self.PAYLOAD,
+            "mime_type": "image/png",
+        }
+
+        assert is_internal_image_block(lookalike) is False
+
+    @pytest.mark.parametrize("field, value", [("base64", ""), ("type", "text")])
+    def test_the_mark_without_the_shape_is_not_internal(self, field, value):
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+        block[field] = value
+
+        assert is_internal_image_block(block) is False
+
+    @pytest.mark.parametrize(
+        "copy_it", [dict, lambda b: {**b}], ids=["dict()", "spread"]
+    )
+    def test_a_copy_with_identical_contents_is_not_internal(self, copy_it):
+        """The mark is the type, not the contents.
+
+        A rebuilt dict is scanned again, which is the safe direction.
+        """
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        copied = copy_it(block)
+
+        assert copied == block
+        assert is_internal_image_block(copied) is False
+
+    def test_the_mark_survives_deepcopy(self):
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        assert is_internal_image_block(copy.deepcopy(block)) is True
+
+    def test_the_block_is_standard_shaped(self):
+        """No marker key: the block is the LangChain shape byte for byte and serialises as a plain dict."""
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        assert set(block) <= {"type", "id", "base64", "mime_type"}
+        assert json.loads(json.dumps(block)) == block
+
+    def test_a_json_round_trip_loses_the_mark(self):
+        """A block that arrives as data cannot be internal, however it was produced.
+
+        JSON has no way to spell a type, so a payload deserialised from a tool server, a file or a checkpoint is scanned
+        like any other dict even when it equals our own block field for field.
+        """
+        block = image_content_block(base64=self.PAYLOAD, mime_type="image/png")
+
+        round_tripped = json.loads(json.dumps(block))
+
+        assert round_tripped == block
+        assert is_internal_image_block(round_tripped) is False
+
+    def test_the_shape_check_still_matches_a_lookalike(self):
+        """The stripper and the token counter keep the loose check deliberately.
+
+        Stripping a lookalike from a checkpoint, or charging it the image token estimate, is protective. Only skipping a
+        secret scan is unsafe, so only that consumer asks for provenance.
+        """
+        lookalike = {
+            "type": "image",
+            "base64": self.PAYLOAD,
+            "mime_type": "image/png",
+        }
+
+        assert is_image_content_block(lookalike) is True
+        (stripped,) = strip_image_payloads([lookalike])
+        assert stripped["text"] == "[image/png omitted from history]"

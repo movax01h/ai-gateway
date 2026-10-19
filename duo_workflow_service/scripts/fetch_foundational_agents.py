@@ -28,6 +28,7 @@ from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowCon
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     DEFAULT_FLOW_VERSION,
 )
+from lib.feature_roots import default_features_dir
 
 FETCH_AGENT_OPERATION_NAME = "aiCatalogAgent"
 FETCH_AGENT_QUERY = """
@@ -108,6 +109,22 @@ def fetch_foundational_agent(
     return file_name, flow_config
 
 
+# Domain under ai/features/ that holds catalog-fetched flows. Each agent is a
+# regular feature dir, so flow-config discovery picks it up with no special case.
+FOUNDATIONAL_AGENTS_DIR = default_features_dir() / "foundational_agents"
+
+
+def _agent_config_dir(
+    agent_id: str,
+    flow_config_model: type[V1FlowConfig] | type[ExperimentalFlowConfig],
+) -> str:
+    """Return the directory a fetched *agent_id* is written to for this registry version."""
+    if flow_config_model is V1FlowConfig:
+        return str(FOUNDATIONAL_AGENTS_DIR / agent_id / "config")
+    # The experimental registry has no feature roots; keep its legacy layout.
+    return os.path.join(flow_config_model.DIRECTORY_PATH, agent_id)
+
+
 def save_workflow_to_file(
     agent_id: str,
     flow_def: str,
@@ -115,13 +132,16 @@ def save_workflow_to_file(
 ) -> str:
     """Save a workflow definition to a versioned YAML file.
 
-    Configs are stored in a versioned subdirectory structure::
+    A v1 config is stored as a feature under ``ai/features/foundational_agents/``::
 
-        {DIRECTORY_PATH}/{agent_id}/{DEFAULT_FLOW_VERSION}.yml
+        ai/features/foundational_agents/{agent_id}/config/{DEFAULT_FLOW_VERSION}.yml
 
-    This matches the flow registry layout introduced by the semver restructuring,
-    where each flow name gets its own directory and versions are separate files
-    within that directory.
+    Flow-config discovery registers it like any bundled feature. A fetched
+    agent must not share its name with a bundled feature (discovery fails at
+    boot) or with a legacy flow under ``V1FlowConfig.DIRECTORY_PATH`` (the
+    legacy copy wins at load time, so this function refuses to write it). An
+    experimental config keeps the legacy layout
+    ``{DIRECTORY_PATH}/{agent_id}/{DEFAULT_FLOW_VERSION}.yml``.
 
     **Current limitation — always saves as version 1.0.0**
 
@@ -135,7 +155,7 @@ def save_workflow_to_file(
     **Raises ``FileExistsError`` if the target file already exists**
 
     The function does *not* overwrite an existing file.  If
-    ``{DIRECTORY_PATH}/{agent_id}/1.0.0.yml`` already exists the call raises
+    the target ``1.0.0.yml`` already exists the call raises
     ``FileExistsError`` and no data is written.  This is intentional: it
     prevents accidental overwrites of hand-edited or previously synced configs.
     To update an existing flow, remove the old file manually before running the
@@ -149,8 +169,7 @@ def save_workflow_to_file(
             against ``flow_config_model`` before being written to disk.
         flow_config_model: The Pydantic model class that corresponds to the
             requested flow registry version (``V1FlowConfig`` or
-            ``ExperimentalFlowConfig``).  Its ``DIRECTORY_PATH`` attribute
-            determines the root directory where the file is written.
+            ``ExperimentalFlowConfig``).  It selects the target layout, see above.
 
     Returns:
         The absolute path of the file that was written.
@@ -171,13 +190,22 @@ def save_workflow_to_file(
         #       --flow-registry-version v1
         #
         # This writes:
-        #   duo_workflow_service/agent_platform/v1/flows/configs/developer/1.0.0.yml
+        #   ai/features/foundational_agents/developer/config/1.0.0.yml
     """
     # This always saves as the default version (1.0.0). Bundling multiple
     # major versions side by side for self-hosted instances is not yet
     # supported.
-    agent_dir: str = os.path.join(flow_config_model.DIRECTORY_PATH, agent_id)
+    agent_dir: str = _agent_config_dir(agent_id, flow_config_model)
     filepath: str = os.path.join(agent_dir, f"{DEFAULT_FLOW_VERSION}.yml")
+
+    # The legacy root wins over feature roots at load time, so a same-named
+    # bundled flow would silently shadow the fetched copy. Fail here instead.
+    if flow_config_model is V1FlowConfig:
+        legacy_dir = V1FlowConfig.DIRECTORY_PATH / agent_id
+        if legacy_dir.exists():
+            raise FileExistsError(
+                f"Bundled flow {legacy_dir} would shadow the fetched {agent_id!r}"
+            )
 
     if os.path.exists(filepath):
         raise FileExistsError(f"File {filepath} already exists")

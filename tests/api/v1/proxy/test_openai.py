@@ -278,6 +278,7 @@ class TestProxyOpenAI:
                         "model_id": "gpt-5",
                         "model_engine": "openai",
                         "model_provider": "openai",
+                        "model_vendor": "openai",
                         "prompt_tokens": 1,
                         "completion_tokens": 2,
                         "agent_name": None,
