@@ -1,10 +1,13 @@
 import json
+from typing import Optional
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from ai_gateway.feature_allowlist import ClientModelRequest, check_client_model_metadata
 from ai_gateway.model_metadata import IamRoleNotAllowedError, create_model_metadata
-from lib.context import current_model_metadata_context
+from ai_gateway.model_selection import ModelSelectionError
+from lib.context import StarletteUser, current_model_metadata_context
 
 
 class ModelConfigMiddleware:
@@ -58,11 +61,23 @@ class ModelConfigMiddleware:
                 data = json.loads(body_str)
 
                 if "model_metadata" in data:
-                    model_metadata = create_model_metadata(data["model_metadata"])
+                    raw_metadata = data["model_metadata"]
+                    # Read the request first: create_model_metadata changes the mapping it gets.
+                    request = ClientModelRequest.from_raw(raw_metadata)
+                    model_metadata = check_client_model_metadata(
+                        request,
+                        create_model_metadata(raw_metadata),
+                        surface="http",
+                        user=_authenticated_user(scope),
+                        log_context={"path": scope.get("path")},
+                    )
+                    # None leaves the request on the prompt's own default model.
                     current_model_metadata_context.set(model_metadata)
 
             except IamRoleNotAllowedError as exc:
                 return JSONResponse(status_code=422, content={"detail": str(exc)})
+            except ModelSelectionError as exc:
+                return JSONResponse(status_code=403, content={"detail": str(exc)})
             except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
                 pass
 
@@ -81,3 +96,9 @@ class ModelConfigMiddleware:
             return await receive()
 
         await self.app(scope, replay_receive, send)
+
+
+def _authenticated_user(scope: Scope) -> Optional[StarletteUser]:
+    """Return the user that the authentication middleware set, or None for an unauthenticated request."""
+    user = scope.get("user")
+    return user if isinstance(user, StarletteUser) else None
