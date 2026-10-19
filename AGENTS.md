@@ -230,6 +230,14 @@ make gen-proto-node
 make clean-proto
 ```
 
+After changing `contract/contract.proto` (including resolving merge conflicts in it), regenerate
+the clients with these targets instead of hand-editing them: the `check-proto-*` CI jobs fail on
+any byte diff. Each changed client also needs a version higher than the one on `origin/main`.
+`gen-proto-node` bumps `clients/node/package.json` only when its output changes during that run, so
+compare the Node version with `origin/main` yourself. Bump
+`clients/ruby/lib/gitlab/duo_workflow_service/version.rb` and `clients/ruby/Gemfile.lock` by hand.
+Check both versions again after merging `main`.
+
 > **Apple Silicon (arm64) note:** `make gen-proto-ruby` runs `grpc_tools_ruby_protoc`
 > from the `grpc-tools` gem, which ships an **x86_64-only** `protoc`/`grpc_ruby_plugin`.
 > On Apple Silicon you must have Rosetta 2 installed to execute it, otherwise the step
