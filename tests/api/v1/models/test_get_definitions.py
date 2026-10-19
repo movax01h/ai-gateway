@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from starlette.middleware import Middleware
+from starlette_context.middleware import RawContextMiddleware
 
 from ai_gateway.api.v1.models.get_definitions import router
 from ai_gateway.model_selection import UnitPrimitiveConfig
@@ -15,7 +17,8 @@ from ai_gateway.model_selection.types import DefaultModelEntry
 def client_fixture():
     from fastapi import FastAPI
 
-    app = FastAPI()
+    # The endpoint's feature_category decorator writes to the request context
+    app = FastAPI(middleware=[Middleware(RawContextMiddleware)])
     app.include_router(router)
     return TestClient(app)
 

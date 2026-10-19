@@ -1,17 +1,19 @@
 # from ai_gateway.gitlab_features import GitLabFeatureCategory, GitLabUnitPrimitive
+import functools
 from enum import StrEnum
 from unittest import mock
 from unittest.mock import Mock, patch
 
 import pytest
 from fastapi import HTTPException, Request
-from gitlab_cloud_connector import GitLabFeatureCategory
+from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
 from starlette_context import request_cycle_context
 
 from ai_gateway.api.feature_category import (
     current_feature_category,
     feature_categories,
     feature_category,
+    get_feature_categories,
 )
 
 
@@ -148,3 +150,56 @@ async def test_feature_categories(
                     ),
                 ]
             )
+
+
+def _passthrough_decorator(func):
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        return await func(*args, **kwargs)
+
+    return wrapper
+
+
+@pytest.mark.parametrize(
+    ("decorators", "expected"),
+    [
+        ([], frozenset()),
+        (
+            [feature_category(GitLabFeatureCategory.DUO_CHAT)],
+            frozenset({GitLabFeatureCategory.DUO_CHAT}),
+        ),
+        (
+            [
+                feature_categories(
+                    {
+                        GitLabUnitPrimitive.EXPLAIN_VULNERABILITY: GitLabFeatureCategory.VULNERABILITY_MANAGEMENT,
+                        GitLabUnitPrimitive.GENERATE_COMMIT_MESSAGE: GitLabFeatureCategory.CODE_REVIEW_WORKFLOW,
+                    }
+                )
+            ],
+            frozenset(
+                {
+                    GitLabFeatureCategory.VULNERABILITY_MANAGEMENT,
+                    GitLabFeatureCategory.CODE_REVIEW_WORKFLOW,
+                }
+            ),
+        ),
+        # Categories stay visible under other decorators, as on the proxy endpoints
+        (
+            [
+                _passthrough_decorator,
+                feature_category(GitLabFeatureCategory.DUO_CHAT),
+            ],
+            frozenset({GitLabFeatureCategory.DUO_CHAT}),
+        ),
+    ],
+)
+def test_get_feature_categories(decorators, expected):
+    async def endpoint():
+        pass
+
+    # Apply bottom-up, matching how stacked decorators are applied
+    for decorator in reversed(decorators):
+        endpoint = decorator(endpoint)
+
+    assert get_feature_categories(endpoint) == expected
