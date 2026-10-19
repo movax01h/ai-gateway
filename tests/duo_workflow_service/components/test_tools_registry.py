@@ -3157,6 +3157,7 @@ _EXPECTED_CEILING_EXEMPT = [
     "ascp_list_scans",
     "build_review_merge_request_context",
     "ci_linter",
+    "detect_review_context_truncation",
     "evaluate_vuln_fp_status",
     "extract_lines_from_text",
     "fetch_glql_schema",
