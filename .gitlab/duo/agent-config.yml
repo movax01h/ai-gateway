@@ -24,6 +24,10 @@ setup_script:
     socat
     jq
     ripgrep
+    unzip
+    ruby
+    ruby-dev
+    ruby-bundler
   - apt-get clean
   - rm -rf /var/lib/apt/lists/*
 
@@ -36,6 +40,10 @@ setup_script:
   - export MISE_DATA_DIR="$CI_PROJECT_DIR/.cache/mise/data"
   - export MISE_CACHE_DIR="$CI_PROJECT_DIR/.cache/mise/cache"
   - export NPM_CONFIG_CACHE="$CI_PROJECT_DIR/.cache/npm"
+  - export BUF_CACHE_DIR="$CI_PROJECT_DIR/.cache/buf"
+  - export BUNDLE_PATH="$CI_PROJECT_DIR/.cache/bundle"
+  # $HOME is read-only in the session sandbox.
+  - export BUNDLE_USER_HOME="$CI_PROJECT_DIR/.cache/bundle-home"
 
   # Install Poetry
   - pip install "poetry==$POETRY_VERSION"
@@ -49,8 +57,16 @@ setup_script:
   # Mise and its tool installations are cached between runs (see cache section).
   - curl -sSL https://mise.run | sh
   - export PATH="$HOME/.local/bin:$MISE_DATA_DIR/shims:$PATH"
-  - mise install vale markdownlint-cli2 lefthook nodejs lychee
+  # go and buf back the protobuf targets (gen-proto-go, lint-proto hook).
+  - mise install vale markdownlint-cli2 lefthook nodejs lychee go buf
   - eval "$(mise env)"
+
+  # Pre-fetch protoc and the Go plugins: the session sandbox blocks the
+  # GitHub release download that gen-proto-go and gen-proto-node need.
+  - make bin/protoc gen-proto-go-install
+
+  # Pre-install the Ruby client gems so gen-proto-ruby works offline in the session.
+  - (cd clients/ruby && bundle install)
 
   # Install commitlint (required by lefthook pre-push lint-commit hook)
   - npm ci
@@ -64,6 +80,8 @@ setup_script:
 
   # Verify installations
   - poetry --version && python --version && git --version && npm --version && srt --version
+  - go version && buf --version && bin/protoc --version && command -v protoc-gen-go protoc-gen-go-grpc
+  - ruby --version && bundle --version
   - echo "Setup complete"
 
 cache:
