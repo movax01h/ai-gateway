@@ -153,7 +153,11 @@ from lib.billing_events import (
 )
 from lib.container_wiring import wire_and_validate
 from lib.context import client_capabilities, language_server_version
-from lib.context.model import current_model_metadata_context, restricted_access_ctx
+from lib.context.model import (
+    current_model_metadata_context,
+    current_model_metadata_with_size_context,
+    restricted_access_ctx,
+)
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
@@ -179,9 +183,9 @@ WORKFLOW_ID_CLAIM = "workflow_id"
 BINDS_WORKFLOW_CLAIM = "binds_workflow"
 SAAS_REALM = "saas"
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
-# these may mint workflow tokens for a flow that restricted models are restricted to,
-# and ExecuteWorkflow accepts their instance token's flow claim for restricted models.
-# Empty means no instance qualifies.
+# these get workflow tokens that unlock the restricted models of the flow they are
+# minted for, and ExecuteWorkflow accepts their instance token's flow claim for
+# restricted models. Empty means no instance qualifies.
 RESTRICTED_FLOW_INSTANCE_UIDS_ENV = "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS"
 
 _PROPAGATED_EXTRA_CLAIMS = {
@@ -549,8 +553,7 @@ def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
     _is_gitlab_com_instance_token). Debug users never qualify.
 
     The SaaS realm claim alone doesn't prove the instance check ran: GenerateToken copies the caller's x-gitlab-realm
-    header for flows that weren't restricted when the token was minted. Only the restricted_flow_verified claim, set
-    after that check passed, does.
+    header unless that check passed. Only the restricted_flow_verified claim, set after that check passed, does.
     """
     claims = user.claims
     if user.is_debug or not claims or not claims.extra:
@@ -705,20 +708,27 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         # Restricted models (model_restrictions.yml) are usable only by the flows they are
         # restricted to, on a signed flow claim; no debug bypass. Prompt construction
-        # enforces this for every model; the request's default model is checked here
-        # so a denied run fails before any workflow setup.
+        # enforces this for every model; the default model and every tagged model are
+        # checked here so a denied run fails before any workflow setup.
         authorized_flow = _restricted_access_flow(user)
         restricted_access_ctx.set(authorized_flow)
-        if (default_metadata := current_model_metadata_context.get()) is not None:
-            llm_definition = default_metadata.llm_definition
+        by_tag_metadata = current_model_metadata_with_size_context.get()
+        for metadata in filter(
+            None,
+            [
+                current_model_metadata_context.get(),
+                *(by_tag_metadata.by_tag.values() if by_tag_metadata else []),
+            ],
+        ):
+            llm_definition = metadata.llm_definition
             try:
                 ensure_restricted_model_access(
                     identifiers=[
                         llm_definition.gitlab_identifier,
-                        getattr(default_metadata, "name", None),
+                        getattr(metadata, "name", None),
                     ],
                     models=[
-                        default_metadata.to_params().get("model"),
+                        metadata.to_params().get("model"),
                         llm_definition.params.model,
                     ],
                 )
@@ -726,6 +736,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 log.warning(
                     "Restricted model denied at workflow start",
                     flow_config_id=authorized_flow,
+                    workflow_definition=workflow_definition,
+                    restricted_flow_verified=(claims_extra or {}).get(
+                        RESTRICTED_FLOW_VERIFIED_CLAIM
+                    )
+                    is True,
                     gitlab_realm=user.claims.gitlab_realm if user.claims else None,
                     model=llm_definition.gitlab_identifier,
                 )
@@ -1334,18 +1349,14 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     if claim in incoming_extra:
                         extra_claims[claim] = incoming_extra[claim]
 
-        # A flow that restricted models are restricted to is available only on
-        # GitLab.com: other callers are refused rather than given an unbound token.
+        # Restricted models are enforced per model, not per flow: any caller gets a token
+        # for a flow that has restricted models and can use its other models. Only
+        # GitLab.com's instance token gets the restricted_flow_verified claim, which
+        # ExecuteWorkflow requires before the flow may use its restricted models.
         if request.flow_config_id:
-            if (
-                request.flow_config_id
-                in ModelSelectionConfig.instance().all_restricted_flows()
-            ):
-                if not _is_gitlab_com_instance_token(user):
-                    await context.abort(
-                        grpc.StatusCode.PERMISSION_DENIED,
-                        f"Flow '{request.flow_config_id}' is only available on GitLab.com",
-                    )
+            if request.flow_config_id in (
+                ModelSelectionConfig.instance().all_restricted_flows()
+            ) and _is_gitlab_com_instance_token(user):
                 # A caller token already bound to a flow can't mint one for another flow.
                 caller_flow_config_id = (user.claims.extra or {}).get(
                     FLOW_CONFIG_ID_CLAIM

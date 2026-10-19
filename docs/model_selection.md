@@ -595,7 +595,9 @@ restricted_models:
 
 A restricted model is refused everywhere else, including the proxy endpoints. Only features whose `feature_setting`
 is one of its `feature_settings` can list it in `unit_primitives.yml`. `validate-model-selection-config` rejects an
-unknown identifier, empty or duplicate `feature_settings`, and duplicate entries.
+unknown identifier, empty or duplicate `feature_settings`, and duplicate entries. It also requires a restricted model
+to be the only model in `default_models` and in each tag it appears in, matching models the way the request-time check
+does (so a variant of a restricted model, such as its Vertex AI entry, counts as restricted).
 
 At request time, the model is usable only when the flow config ID the request is authorized for (from a signed flow
 claim) is one of its `feature_settings`. A flow's feature setting is its flow config ID (for example,

@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import signal
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterable, List, Optional, cast
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
@@ -44,8 +45,13 @@ from ai_gateway.config import (
     ConfigTLS,
 )
 from ai_gateway.container import ContainerApplication
-from ai_gateway.model_metadata import ModelMetadata, ModelMetadataByTag
+from ai_gateway.model_metadata import (
+    ModelMetadata,
+    ModelMetadataByTag,
+    TypeModelMetadata,
+)
 from ai_gateway.model_selection import RestrictedModelAccessError
+from ai_gateway.model_selection.model_selection_config import LLMDefinition
 from ai_gateway.model_selection.models import BaseModelParams, ModelClassProvider
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
@@ -6460,26 +6466,31 @@ async def test_generate_token_does_not_verify_unrestricted_flow_with_saas_header
         ),
     ],
 )
+@pytest.mark.parametrize("header_realm", ["saas", "self-managed"])
 @patch("duo_workflow_service.server.TokenAuthority")
-async def test_generate_token_refuses_restricted_flow_for_other_callers(
-    mock_token_authority, mock_context, caller, env
+async def test_generate_token_binds_restricted_flow_unverified_for_other_callers(
+    mock_token_authority, mock_context, caller, env, header_realm
 ):
-    """Self-managed, Dedicated and every other caller get an error, never an unbound token."""
+    """Self-managed, Dedicated and every other caller get a flow token that unlocks no restricted model.
+
+    The realm comes from the header as for any other flow, so a forged SaaS header yields a SaaS-realm token, still
+    without the restricted_flow_verified claim.
+    """
     mock_token_authority.return_value.encode.return_value = ("token", 0)
     current_user.set(caller)
+    mock_context.invocation_metadata.return_value = [("x-gitlab-realm", header_realm)]
 
     with patch.dict(os.environ, {**RESTRICTED_MODEL_ENV, **env}):
-        with pytest.raises(grpc.RpcError):
-            await DuoWorkflowService().GenerateToken(
-                contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"),
-                mock_context,
-            )
+        await DuoWorkflowService().GenerateToken(
+            contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"),
+            mock_context,
+        )
 
-    mock_context.abort.assert_called_once_with(
-        grpc.StatusCode.PERMISSION_DENIED,
-        "Flow 'bl_security' is only available on GitLab.com",
-    )
-    mock_token_authority.return_value.encode.assert_not_called()
+    mock_context.abort.assert_not_called()
+    encode = mock_token_authority.return_value.encode.call_args
+    assert encode.args[1] == header_realm
+    assert encode.kwargs["extra_claims"]["flow_config_id"] == "bl_security"
+    assert "restricted_flow_verified" not in encode.kwargs["extra_claims"]
 
 
 @pytest.mark.asyncio
@@ -6885,6 +6896,38 @@ async def test_execute_workflow_other_flow_runs_without_restricted_access(
     assert seen == ["developer"]
 
 
+async def _mint_flow_token(
+    mock_context, issuer: str, realm: str, header_realm: str
+) -> None:
+    """Mint a bl_security flow token through GenerateToken and make it the current user.
+
+    The caller's instance token has the given issuer and realm claims, and header_realm is the request's realm header.
+    Both tokens go through real JWT encode/decode.
+    """
+    provider = CompositeProvider(
+        [LocalAuthProvider(structlog, TEST_PRIVATE_KEY, TEST_PUBLIC_KEY)], structlog
+    )
+    incoming_token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
+        GITLAB_COM_INSTANCE_UID,
+        realm,
+        CloudConnectorUser(authenticated=True, claims=UserClaims()),
+        "1234",
+        ["duo_agent_platform"],
+        extra_claims={"iss": issuer},
+    )
+    current_user.set(provider.authenticate(incoming_token))
+    mock_context.invocation_metadata.return_value = [
+        ("x-gitlab-global-user-id", "user-1"),
+        ("x-gitlab-realm", header_realm),
+    ]
+    response = await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"), mock_context
+    )
+    mock_context.abort.assert_not_called()
+    current_user.set(provider.authenticate(response.token))
+    mock_context.invocation_metadata.return_value = []
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("restricted_model_metadata")
 @pytest.mark.parametrize(
@@ -6913,40 +6956,214 @@ async def test_restricted_model_end_to_end_through_minted_token(
     allowed,
 ):
     """GenerateToken mints the token ExecuteWorkflow authorizes, via real JWT encode/decode."""
-    provider = CompositeProvider(
-        [LocalAuthProvider(structlog, TEST_PRIVATE_KEY, TEST_PUBLIC_KEY)], structlog
-    )
-    incoming_token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
-        GITLAB_COM_INSTANCE_UID,
-        incoming_realm,
-        CloudConnectorUser(authenticated=True, claims=UserClaims()),
-        "1234",
-        ["duo_agent_platform"],
-        extra_claims={"iss": incoming_issuer},
-    )
-    current_user.set(provider.authenticate(incoming_token))
-    mock_context.invocation_metadata.return_value = [
-        ("x-gitlab-global-user-id", "user-1"),
-        ("x-gitlab-realm", "saas"),
-    ]
+    await _mint_flow_token(mock_context, incoming_issuer, incoming_realm, "saas")
 
-    request = contract_pb2.GenerateTokenRequest(flow_config_id="bl_security")
     if not allowed:
         with pytest.raises(grpc.RpcError):
-            await DuoWorkflowService().GenerateToken(request, mock_context)
-        mock_context.abort.assert_called_once_with(
-            grpc.StatusCode.PERMISSION_DENIED,
-            "Flow 'bl_security' is only available on GitLab.com",
+            await _execute_registry_flow(
+                "bl_security", mock_context, mock_resolve_flow, MagicMock()
+            )
+        mock_context.abort.assert_awaited_once_with(
+            grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
         )
+        mock_resolve_flow.assert_not_called()
         return
-
-    response = await DuoWorkflowService().GenerateToken(request, mock_context)
-    current_user.set(provider.authenticate(response.token))
-    mock_context.invocation_metadata.return_value = []
 
     seen = await _execute_registry_flow(
         "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
     )
+    assert seen == ["bl_security"]
+
+
+# Callers whose minted bl_security token lacks the restricted_flow_verified claim.
+UNVERIFIED_CALLERS = pytest.mark.parametrize(
+    ("incoming_issuer", "incoming_realm", "header_realm"),
+    [
+        pytest.param(
+            "https://gitlab.com", "self-managed", "self-managed", id="self-managed"
+        ),
+        pytest.param(
+            "https://gitlab.com", "self-managed", "saas", id="forged-saas-header"
+        ),
+        pytest.param("https://customers.gitlab.com", "saas", "saas", id="dedicated"),
+    ],
+)
+
+
+@contextmanager
+def _models_in_context(default: ModelMetadata, by_tag: dict[str, TypeModelMetadata]):
+    """Set the request's default model and tagged models for the duration of the block."""
+    by_tag_token = current_model_metadata_with_size_context.set(
+        ModelMetadataByTag(default=default, by_tag=by_tag)
+    )
+    default_token = current_model_metadata_context.set(default)
+    try:
+        yield
+    finally:
+        current_model_metadata_context.reset(default_token)
+        current_model_metadata_with_size_context.reset(by_tag_token)
+
+
+def _gitlab_model(name: str, llm_definition: LLMDefinition) -> ModelMetadata:
+    return ModelMetadata(provider="gitlab", name=name, llm_definition=llm_definition)
+
+
+@pytest.mark.asyncio
+@UNVERIFIED_CALLERS
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(
+    os.environ,
+    {
+        **RESTRICTED_MODEL_ENV,
+        "DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY": TEST_PRIVATE_KEY,
+    },
+)
+async def test_unverified_restricted_flow_token_runs_only_unrestricted_models(
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_context,
+    fake_restricted_model,
+    llm_definition,
+    model_factory,
+    incoming_issuer,
+    incoming_realm,
+    header_realm,
+):
+    """A non-GitLab.com caller runs the restricted flow when all its models are unrestricted.
+
+    The token is minted by GenerateToken and authenticated through real JWT encode/decode. Prompt construction still
+    denies the restricted model to this token.
+    """
+    await _mint_flow_token(mock_context, incoming_issuer, incoming_realm, header_realm)
+    restricted = _gitlab_model(
+        fake_restricted_model.gitlab_identifier, fake_restricted_model
+    )
+    built: dict = {}
+
+    def build_prompts():
+        for key, metadata in (
+            ("default", get_model_metadata()),
+            ("large", get_model_metadata("large")),
+            ("restricted", restricted),
+        ):
+            config = PromptConfig(
+                name="test_prompt",
+                model=ModelConfig(params=BaseModelParams(model=None)),
+                unit_primitive=GitLabUnitPrimitive.DUO_AGENT_PLATFORM,
+                prompt_template={"system": "Hi", "user": "{{content}}"},
+            )
+            try:
+                built[key] = Prompt(
+                    ModelClassProvider.LITE_LLM, model_factory, config, metadata
+                )
+            except RestrictedModelAccessError as e:
+                built[key] = e
+
+    with _models_in_context(
+        _gitlab_model("default_model", llm_definition),
+        {"large": _gitlab_model("large_model", llm_definition)},
+    ):
+        seen = await _execute_registry_flow(
+            "bl_security",
+            mock_context,
+            mock_resolve_flow,
+            mock_workflow_class,
+            on_build=build_prompts,
+        )
+
+    mock_context.abort.assert_not_called()
+    assert seen == [None]
+    assert isinstance(built["default"], Prompt)
+    assert isinstance(built["large"], Prompt)
+    assert isinstance(built["restricted"], RestrictedModelAccessError)
+
+
+@pytest.mark.asyncio
+@UNVERIFIED_CALLERS
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(
+    os.environ,
+    {
+        **RESTRICTED_MODEL_ENV,
+        "DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY": TEST_PRIVATE_KEY,
+    },
+)
+async def test_unverified_restricted_flow_token_denied_tagged_restricted_model_at_start(
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_context,
+    fake_restricted_model,
+    llm_definition,
+    incoming_issuer,
+    incoming_realm,
+    header_realm,
+):
+    """A restricted model behind a tag fails the run before any workflow setup, like a restricted default."""
+    await _mint_flow_token(mock_context, incoming_issuer, incoming_realm, header_realm)
+
+    with _models_in_context(
+        _gitlab_model("default_model", llm_definition),
+        {
+            "large": _gitlab_model(
+                fake_restricted_model.gitlab_identifier, fake_restricted_model
+            )
+        },
+    ):
+        with pytest.raises(grpc.RpcError), capture_logs() as cap_logs:
+            await _execute_registry_flow(
+                "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+            )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
+    )
+    mock_resolve_flow.assert_not_called()
+    mock_workflow_class.assert_not_called()
+    denied = next(
+        e for e in cap_logs if e["event"] == "Restricted model denied at workflow start"
+    )
+    assert denied["flow_config_id"] is None
+    assert denied["workflow_definition"] == "bl_security/v1"
+    assert denied["restricted_flow_verified"] is False
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.server._restricted_access_flow", return_value="bl_security"
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_start_check_uses_authorized_flow_for_tagged_models(
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_restricted_access_flow,
+    mock_context,
+    fake_restricted_model,
+    llm_definition,
+):
+    """The start check allows a tagged restricted model for the flow ExecuteWorkflow authorized.
+
+    The token has no restricted_flow_verified claim, so only the authorized flow can allow the model, not the claims.
+    """
+    current_user.set(_workflow_token_user(restricted_flow_verified=False))
+
+    with _models_in_context(
+        _gitlab_model("default_model", llm_definition),
+        {
+            "large": _gitlab_model(
+                fake_restricted_model.gitlab_identifier, fake_restricted_model
+            )
+        },
+    ):
+        seen = await _execute_registry_flow(
+            "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+        )
+
+    mock_restricted_access_flow.assert_called_once()
+    mock_context.abort.assert_not_called()
     assert seen == ["bl_security"]
 
 
@@ -6977,6 +7194,28 @@ async def test_execute_workflow_denies_restricted_model_on_malformed_flow_claim(
     mock_context.abort.assert_awaited_once()
     assert mock_context.abort.await_args.args[0] == grpc.StatusCode.PERMISSION_DENIED
     mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_restricted_model_denial_logs_string_verified_claim_as_false(
+    mock_resolve_flow, mock_context
+):
+    """The denial log reads the verified claim like access does: only the boolean True counts."""
+    extra = {"flow_config_id": "bl_security", "restricted_flow_verified": "true"}
+    current_user.set(_workflow_token_user(extra=extra))
+
+    with pytest.raises(grpc.RpcError), capture_logs() as cap_logs:
+        await _execute_registry_flow(
+            "bl_security", mock_context, mock_resolve_flow, MagicMock()
+        )
+
+    denied = next(
+        e for e in cap_logs if e["event"] == "Restricted model denied at workflow start"
+    )
+    assert denied["restricted_flow_verified"] is False
 
 
 @pytest.mark.parametrize(
@@ -7097,64 +7336,30 @@ def test_restricted_access_flow_ignores_malformed_instance_token_flow_claim(extr
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
 @patch.dict(os.environ, RESTRICTED_MODEL_ENV)
-async def test_execute_workflow_restricted_tag_model_is_denied_at_prompt_build(
+async def test_execute_workflow_restricted_tag_model_is_denied_at_start(
     mock_resolve_flow,
     mock_workflow_class,
     mock_context,
     fake_restricted_model,
     llm_definition,
-    model_factory,
 ):
-    """A restricted model reachable only through a tag passes the up-front check but no prompt can use it."""
+    """A restricted model reachable only through a tag fails the run for another flow before any workflow setup."""
     current_user.set(_workflow_token_user(flow_config_id="developer"))
-    default = ModelMetadata(
-        provider="gitlab", name="default_model", llm_definition=llm_definition
+
+    with _models_in_context(
+        _gitlab_model("default_model", llm_definition),
+        {
+            "large": _gitlab_model(
+                fake_restricted_model.gitlab_identifier, fake_restricted_model
+            )
+        },
+    ):
+        with pytest.raises(grpc.RpcError):
+            await _execute_registry_flow(
+                "developer", mock_context, mock_resolve_flow, mock_workflow_class
+            )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
     )
-    restricted = ModelMetadata(
-        provider="gitlab",
-        name=fake_restricted_model.gitlab_identifier,
-        llm_definition=fake_restricted_model,
-    )
-    by_tag_token = current_model_metadata_with_size_context.set(
-        ModelMetadataByTag(default=default, by_tag={"large": restricted})
-    )
-    default_token = current_model_metadata_context.set(default)
-    built: dict = {}
-
-    def build_prompt(tags):
-        config = PromptConfig(
-            name="test_prompt",
-            model=ModelConfig(params=BaseModelParams(model=None)),
-            unit_primitive=GitLabUnitPrimitive.DUO_AGENT_PLATFORM,
-            prompt_template={"system": "Hi", "user": "{{content}}"},
-        )
-        return Prompt(
-            ModelClassProvider.LITE_LLM,
-            model_factory,
-            config,
-            get_model_metadata(tags),
-        )
-
-    def build_prompts():
-        for tag in (None, "large"):
-            try:
-                built[tag] = build_prompt(tag)
-            except RestrictedModelAccessError as e:
-                built[tag] = e
-
-    try:
-        seen = await _execute_registry_flow(
-            "developer",
-            mock_context,
-            mock_resolve_flow,
-            mock_workflow_class,
-            on_build=build_prompts,
-        )
-    finally:
-        current_model_metadata_context.reset(default_token)
-        current_model_metadata_with_size_context.reset(by_tag_token)
-
-    assert seen == ["developer"]
-    mock_context.abort.assert_not_called()
-    assert isinstance(built[None], Prompt)
-    assert isinstance(built["large"], RestrictedModelAccessError)
+    mock_resolve_flow.assert_not_called()
