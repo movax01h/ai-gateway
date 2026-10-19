@@ -95,7 +95,7 @@ def _iter_entry_names(entries: Any) -> Iterator[str]:
     """Yield each tool name in a ``toolset`` or ``pre_approved_tools`` list.
 
     An entry is either a plain string or a single-key ``{"tool_name": {options}}`` mapping
-    (``FlowGraphBuilder._parse_toolset``, ``strip_ask_listed_pre_approvals``).
+    (``FlowGraphBuilder._parse_toolset``, ``filter_pre_approvals_by_policy``).
     """
     for entry in entries or []:
         if isinstance(entry, dict):
@@ -114,7 +114,7 @@ def _iter_declared_tool_names(config: FlowConfig) -> Iterator[tuple[str, str]]:
 
     * ``toolset`` — entries are plain strings or single-key ``{"tool_name": {options}}``
       mappings (``FlowGraphBuilder._parse_toolset``);
-    * ``pre_approved_tools`` — same entry forms (``strip_ask_listed_pre_approvals``);
+    * ``pre_approved_tools`` — same entry forms (``filter_pre_approvals_by_policy``);
     * ``tool_name`` — the scalar tool of a ``DeterministicStepComponent``.
 
     Collecting only ``toolset`` would leave the other two paths unchecked.

@@ -418,6 +418,43 @@ def _reserved_tool_names(
     return reserved
 
 
+def _privilege_tool_names(*privileges: str) -> set[str]:
+    """Static tool names in these privilege groups, read at call time so merged feature tools count."""
+    names = set()
+    for privilege in privileges:
+        for entry in _AGENT_PRIVILEGES.get(privilege, []):
+            if isinstance(entry, dict):
+                continue
+            try:
+                names.add(_tool_name(entry))
+            except ValueError:
+                continue
+    return names
+
+
+def ceiling_exempt_tool_names(ruled: Iterable[str]) -> set[str]:
+    """Tools the governance ceiling keeps pre-approved although Rails cannot put them in allow.
+
+    `ruled` is the claim's raw ask and deny lists. Rails always pre-approves start_flows, and its read-only groups
+    default to allow on every surface, so DWS tools Rails cannot name there would otherwise prompt. A rule on any
+    non-write tool may have demoted a read-only group in Rails, so it turns the read-only part off: at worst an
+    extra prompt, never an extra pre-approval.
+    """
+    ruled = set(ruled)
+    read_only = _privilege_tool_names("read_only_gitlab", "read_only_files")
+    # The write groups also hold the read tools, so only the names beyond those count as write.
+    write_only = (
+        _privilege_tool_names(
+            "read_write_gitlab", "read_write_files", "run_commands", "use_git"
+        )
+        - read_only
+    )
+    exempt = _privilege_tool_names("start_flows") - ruled
+    if not ruled - write_only:
+        exempt |= read_only - ruled
+    return exempt
+
+
 def _drop_shadowing_mcp_tools(
     mcp_tools: list[McpToolConfig], reserved: set[str], governed_names: set[str]
 ) -> list[McpToolConfig]:

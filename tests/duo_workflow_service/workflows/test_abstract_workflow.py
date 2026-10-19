@@ -1,6 +1,7 @@
 # pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
 import contextvars
+import json
 import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
@@ -29,6 +30,7 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.components.tools_registry import ceiling_exempt_tool_names
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -55,6 +57,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
 from lib.events import GLReportingEventContext
+from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
@@ -588,6 +591,7 @@ async def test_compile_and_run_graph(
         ask_tools=[],
         allow_client_injected_mcp_tools=False,
         allowed_tools=[],
+        admin_allowed_preapprovals=None,
     )
 
 
@@ -2989,3 +2993,216 @@ def test_client_injected_is_stamped_when_nothing_else_stamped_it(issuer, expecte
     )
 
     assert workflow._mcp_tools[0]["client_injected"] is expected
+
+
+async def _configure_kwargs_for(claim, workflow_config, can_ask=True, issuer=None):
+    """Run the graph with a claim and return what ToolsRegistry.configure received."""
+    workflow_config["allow_agent_to_request_user"] = can_ask
+    workflow_config["allow_client_injected_mcp_tools"] = True
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            issuer=issuer,
+            extra={"tool_access_policies": claim},
+        ),
+    )
+    with (
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs"
+        ),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow"
+        ) as mock_gitlab_workflow,
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure"
+        ) as mock_configure,
+    ):
+        mock_configure.return_value = MagicMock()
+        mock_checkpointer = AsyncMock()
+        mock_checkpointer.initial_status_event = "START"
+        mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+        workflow = MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("software_development"),
+            user,
+        )
+        await workflow._compile_and_run_graph("Test goal")
+
+    return mock_configure.call_args.kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    "claim,can_ask,expected",
+    [
+        # No field or false: older GitLab, or the flag is off.
+        ('{"allow": ["read_file"], "ask": [], "deny": []}', True, None),
+        (
+            '{"allow": ["read_file"], "ask": [], "deny": [], "ceiling": false}',
+            True,
+            None,
+        ),
+        (
+            '{"allow": ["read_file"], "ask": [], "deny": [], "ceiling": true}',
+            True,
+            {"read_file"},
+        ),
+        # A session that cannot ask is still capped; the owner cannot opt out.
+        (
+            '{"allow": ["read_file"], "ask": [], "deny": [], "ceiling": true}',
+            False,
+            {"read_file"},
+        ),
+        # The raw ask list is used, so an ask rule stays out of the ceiling headless too.
+        (
+            '{"allow": ["read_file", "grep"], "ask": ["grep"], "deny": [], "ceiling": true}',
+            False,
+            {"read_file"},
+        ),
+        # Ask everything in a headless session still turns the ceiling on.
+        ('{"allow": [], "ask": ["grep"], "deny": [], "ceiling": true}', False, set()),
+        # A deny-only claim turns it on too.
+        ('{"allow": [], "ask": [], "deny": ["grep"], "ceiling": true}', True, set()),
+        # An empty claim is an ungoverned session: no ceiling even if asked for.
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True, None),
+        # Unparsable: fails closed only when the claim still asks for the ceiling.
+        ('{"allow": 5, "ceiling": true}', True, set()),
+        ('{"allow": 5}', True, None),
+        # Any value other than absent or false fails closed.
+        ('{"allow": 5, "ceiling": "true"}', True, set()),
+        ("not json", True, None),
+    ],
+)
+async def test_compile_and_run_graph_reads_the_ceiling_from_the_signed_claim(
+    workflow_config, claim, can_ask, expected
+):
+    kwargs = await _configure_kwargs_for(claim, workflow_config, can_ask=can_ask)
+
+    assert kwargs["admin_allowed_preapprovals"] == _with_exemptions(claim, expected)
+
+
+def _with_exemptions(claim, expected):
+    """Add the tools the ceiling always keeps, unless the claim failed to parse."""
+    if expected is None:
+        return None
+    try:
+        data = json.loads(claim)
+    except ValueError:
+        return expected
+    if not isinstance(data.get("allow", []), list):
+        return expected
+    return expected | ceiling_exempt_tool_names(
+        set(data.get("ask", [])) | set(data.get("deny", []))
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_ceiling_ignores_a_feature_flag_header_without_the_claim(workflow_config):
+    """The switch is only the signed claim, so a header the client controls changes nothing."""
+    token = current_feature_flag_context.set({"duo_workflow_governance_ceiling"})
+    try:
+        kwargs = await _configure_kwargs_for(
+            '{"allow": ["read_file"], "ask": [], "deny": []}', workflow_config
+        )
+    finally:
+        current_feature_flag_context.reset(token)
+
+    assert kwargs["admin_allowed_preapprovals"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+@pytest.mark.parametrize(
+    "ceiling,issuer,expected",
+    [
+        # Ceiling on and nothing stamped the request: no client-injected exemption.
+        (True, "gitlab-duo-workflow-service", False),
+        # Ceiling on and Workhorse stamped the request: the exemption stays.
+        (True, "https://gitlab.com", True),
+        # Ceiling off: unchanged, whatever stamped the request.
+        (False, "gitlab-duo-workflow-service", True),
+    ],
+)
+async def test_client_injected_exemption_needs_a_stamped_request_when_the_ceiling_is_on(
+    workflow_config, ceiling, issuer, expected
+):
+    claim = json.dumps(
+        {"allow": ["read_file"], "ask": [], "deny": [], "ceiling": ceiling}
+    )
+
+    kwargs = await _configure_kwargs_for(claim, workflow_config, issuer=issuer)
+
+    assert kwargs["allow_client_injected_mcp_tools"] is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_client_injected_exemption_fails_closed_when_the_origin_is_unknown(
+    workflow_config,
+):
+    """With the ceiling on, an unknown issuer must not keep client-injected tools exempt."""
+    claim = '{"allow": ["read_file"], "ask": [], "deny": [], "ceiling": true}'
+
+    with patch(
+        "duo_workflow_service.workflows.abstract_workflow.CloudConnectorConfig"
+    ) as config:
+        config.return_value = MagicMock()
+        type(config.return_value).service_name = PropertyMock(
+            side_effect=NoServiceNameError("not configured")
+        )
+        kwargs = await _configure_kwargs_for(
+            claim, workflow_config, issuer="https://gitlab.com"
+        )
+
+    assert kwargs["allow_client_injected_mcp_tools"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_ceiling_drops_client_preapprovals_it_does_not_permit(workflow_config):
+    """Chat reads preapproved_tools by name, so the ceiling drops names it does not permit."""
+    workflow_config["allow_agent_to_request_user"] = True
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": ["read_file", "gitlab_search"], '
+                '"ask": [], "deny": [], "ceiling": true}'
+            },
+        ),
+    )
+    with (
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs"
+        ),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow"
+        ) as mock_gitlab_workflow,
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure"
+        ) as mock_configure,
+    ):
+        registry = MagicMock()
+        # The registry withholds gitlab_search, as it does for a client tool borrowing the name.
+        registry.pre_approvals_allowed_by_policy.side_effect = lambda names: (
+            {"read_file"} & set(names)
+        )
+        mock_configure.return_value = registry
+        mock_checkpointer = AsyncMock()
+        mock_checkpointer.initial_status_event = "START"
+        mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+        workflow = MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("chat"),
+            user,
+        )
+        await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._preapproved_tools == ["read_file"]

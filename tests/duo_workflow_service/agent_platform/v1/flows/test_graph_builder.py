@@ -106,6 +106,7 @@ class TestFlowGraphBuilder:
         tools_registry.toolset.return_value = Mock(name="toolset")
         tools_registry.mcp_tool_names.return_value = ["mcp_tool"]
         tools_registry.ask_listed_tool_names.return_value = set()
+        tools_registry.pre_approvals_allowed_by_policy.side_effect = set
         return tools_registry
 
     @pytest.fixture(name="mock_prompt_registry")
@@ -361,6 +362,40 @@ class TestFlowGraphBuilder:
         mock_tools_registry.ask_listed_tool_names.assert_called_once_with(
             ["read_file", "run_command"]
         )
+        assert comp_class.params["pre_approved_tools"] == expected
+
+    @pytest.mark.usefixtures("mock_graph")
+    @pytest.mark.parametrize(
+        "permitted,expected",
+        [
+            # Ceiling off: every entry is kept, in order, duplicates included.
+            (None, ["run_command", "read_file", "run_command"]),
+            # Ceiling on: entries outside the policy are dropped, order kept.
+            ({"read_file"}, ["read_file"]),
+        ],
+        ids=["ceiling_off", "ceiling_on"],
+    )
+    def test_pre_approved_tools_are_capped_by_the_ceiling_in_order(
+        self, builder, mock_tools_registry, permitted, expected
+    ):
+        if permitted is not None:
+            mock_tools_registry.pre_approvals_allowed_by_policy.side_effect = (
+                lambda names: set(names) & permitted
+            )
+
+        comp_class = _ComponentClassStub(_component_stub("agent"))
+        comp_config: dict[str, Any] = {
+            "name": "agent",
+            "type": "AgentComponent",
+            "pre_approved_tools": ["run_command", "read_file", "run_command"],
+        }
+
+        with (
+            _component_classes({"AgentComponent": comp_class}),
+            patch(f"{_MODULE}.Router"),
+        ):
+            builder.build(_config(components=[comp_config]))
+
         assert comp_class.params["pre_approved_tools"] == expected
 
     @pytest.mark.usefixtures("mock_graph")
