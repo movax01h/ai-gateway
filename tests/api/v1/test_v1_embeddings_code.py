@@ -89,6 +89,9 @@ class BaseTestCodeEmbeddings:
     def _route(self):
         raise NotImplementedError("Implement in child class.")
 
+    def _expected_embeddings_operation(self):
+        raise NotImplementedError("Implement in child class.")
+
     def _token_usage_event_extra(self, mock_track_internal_event: Mock):
         # `request_generate_embeddings_codebase` is emitted through the same mock,
         # so the token usage event has to be picked out by name.
@@ -320,6 +323,23 @@ class BaseTestCodeEmbeddings:
 
         extra = self._token_usage_event_extra(mock_track_internal_event)
         assert extra["input_characters"] == expected_input_characters
+
+    @pytest.mark.usefixtures("mock_litellm_aembedding")
+    def test_embeddings_operation_in_token_usage_event(
+        self,
+        mock_client: TestClient,
+        mock_track_internal_event: Mock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        extra = self._token_usage_event_extra(mock_track_internal_event)
+        assert extra["embeddings_operation"] == self._expected_embeddings_operation()
 
     @pytest.mark.parametrize(
         ("model_provider", "model_identifier", "model_name", "endpoint"),
@@ -652,6 +672,9 @@ class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
     def _route(self):
         return "/embeddings/code_embeddings/index"
 
+    def _expected_embeddings_operation(self):
+        return "index"
+
     @pytest.mark.usefixtures(
         "mock_litellm_aembedding", "mock_litellm_aembedding_response"
     )
@@ -672,3 +695,6 @@ class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
 class TestCodeEmbeddingsSearch(BaseTestCodeEmbeddings):
     def _route(self):
         return "/embeddings/code_embeddings/search"
+
+    def _expected_embeddings_operation(self):
+        return "search"
