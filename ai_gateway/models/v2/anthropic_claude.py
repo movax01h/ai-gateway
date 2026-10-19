@@ -25,9 +25,17 @@ __all__ = ["ChatAnthropic"]
 
 _ANTHROPIC_API_URL = "https://api.anthropic.com"
 
+_WEB_SEARCH_MAX_USES = 5
+"""Cap on `web_search` invocations per request.
+
+Anthropic has no default, so without it a single request can search without bound. Past it, Anthropic returns a `max_uses_exceeded` result and the model
+answers from what it already found.
+"""
+
 _WEB_SEARCH_TOOL: dict[str, Any] = {
     "type": "web_search_20250305",
     "name": "web_search",
+    "max_uses": _WEB_SEARCH_MAX_USES,
 }
 
 _WEB_FETCH_MAX_USES = 5
