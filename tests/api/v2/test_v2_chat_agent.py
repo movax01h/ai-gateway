@@ -12,7 +12,7 @@ from pydantic import AnyUrl
 from starlette.testclient import TestClient
 
 from ai_gateway.api.v2 import api_router
-from ai_gateway.api.v2.chat.agent import _should_strip_reasoning
+from ai_gateway.api.v2.chat.agent import _should_strip_reasoning, create_event_stream
 from ai_gateway.api.v2.chat.typing import (
     AgentRequest,
     AgentRequestOptions,
@@ -28,7 +28,11 @@ from ai_gateway.chat.agents import (
     ReActAgentInputs,
 )
 from ai_gateway.chat.agents.typing import AgentFinalAnswer, TypeAgentEvent
-from ai_gateway.chat.context.current_page import Context, MergeRequestContext
+from ai_gateway.chat.context.current_page import (
+    MAX_TITLE_LENGTH,
+    Context,
+    MergeRequestContext,
+)
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadata,
@@ -1129,6 +1133,88 @@ class TestChatAgent:
             "request_duo_classic_chat",
             category="ai_gateway.api.v2.chat.agent",
         )
+
+
+@pytest.mark.usefixtures("mock_model", "mocked_tools", "mock_track_internal_event")
+class TestChatAgentPageContextTitle:
+    @pytest.fixture(name="model_response")
+    def model_response_fixture(self):
+        return "thought\nFinal Answer: answer\n"
+
+    @pytest.fixture(name="spy_create_event_stream")
+    def spy_create_event_stream_fixture(self):
+        # Wrap rather than replace, so the real agent still renders the title into its prompt
+        with patch(
+            "ai_gateway.api.v2.chat.agent.create_event_stream",
+            wraps=create_event_stream,
+        ) as spy:
+            yield spy
+
+    def _post_title(self, mock_client: TestClient, context_type: str, title: str):
+        return mock_client.post(
+            "/chat/agent",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Summarize this",
+                        "context": {"type": context_type, "title": title},
+                    },
+                ],
+            },
+        )
+
+    def _assert_streamed_answer(self, response):
+        assert response.status_code == 200
+        # The status is sent before the agent runs, so check the streamed events too
+        assert [
+            chunk_to_model(chunk, AgentFinalAnswer)
+            for chunk in response.text.strip().split("\n")
+        ] == [AgentFinalAnswer(text=c) for c in "answer"]
+
+    def _received_title(self, spy_create_event_stream: Mock) -> str:
+        agent_request = spy_create_event_stream.call_args.kwargs["agent_request"]
+        return agent_request.messages[0].context.title
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "context_type", ["commit", "epic", "issue", "merge_request", "work_item"]
+    )
+    async def test_title_at_limit_is_kept(
+        self,
+        mock_client: TestClient,
+        spy_create_event_stream: Mock,
+        context_type: str,
+    ):
+        title = "a" * MAX_TITLE_LENGTH
+
+        response = self._post_title(mock_client, context_type, title)
+
+        self._assert_streamed_answer(response)
+        assert self._received_title(spy_create_event_stream) == title
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "context_type", ["commit", "epic", "issue", "merge_request", "work_item"]
+    )
+    @pytest.mark.parametrize("title_length", [MAX_TITLE_LENGTH + 1, 100_000])
+    async def test_title_over_limit_is_truncated(
+        self,
+        mock_client: TestClient,
+        spy_create_event_stream: Mock,
+        context_type: str,
+        title_length: int,
+    ):
+        title = "a" * MAX_TITLE_LENGTH + "b" * (title_length - MAX_TITLE_LENGTH)
+
+        response = self._post_title(mock_client, context_type, title)
+
+        self._assert_streamed_answer(response)
+        assert self._received_title(spy_create_event_stream) == "a" * MAX_TITLE_LENGTH
 
 
 class TestChatUsage:
