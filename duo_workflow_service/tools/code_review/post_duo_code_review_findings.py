@@ -34,6 +34,7 @@ __all__ = [
     "build_summary",
     "render_previous_findings",
     "select_findings",
+    "truncation_notice",
 ]
 
 
@@ -83,6 +84,33 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
             "silently rewritten into a working one."
         ),
     )
+    review_truncation: Optional[Any] = Field(
+        default=None,
+        description=(
+            "The `detect_review_context_truncation` result. When the context was "
+            "truncated, a fixed line at the top of the summary says so."
+        ),
+    )
+
+
+def truncation_notice(review_truncation: Optional[Any]) -> Optional[str]:
+    """The line that opens the summary when the reviewer saw only part of the merge request.
+
+    Written here rather than by the reviewer, so it appears on every truncated review whatever the reviewer concluded.
+    """
+    if not isinstance(review_truncation, dict) or not review_truncation.get(
+        "truncated"
+    ):
+        return None
+
+    lead = "This merge request was too large for a full review."
+    percent_shown = review_truncation.get("percent_shown")
+    if percent_shown is None:
+        return f"**{lead} This review does not cover all of the diff.**"
+    return (
+        f"**{lead} This review covers about "
+        f"{max(1, round(percent_shown))}% of the diff.**"
+    )
 
 
 class PostDuoCodeReviewFindings(DuoBaseTool):
@@ -111,10 +139,14 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
         previous_findings: Optional[List[Dict[str, Any]]] = None,
         existing_discussions: Optional[Any] = None,
         min_confidence: int = 0,
+        review_truncation: Optional[Any] = None,
         **kwargs: Any,
     ) -> str:
         published, suppressed = select_findings(findings or [], min_confidence)
         summary_text = build_summary(published, summary)
+        notice = truncation_notice(review_truncation)
+        if notice:
+            summary_text = f"{notice}\n\n{summary_text}"
         previous = render_previous_findings(
             previous_findings or [], resolved_discussion_ids(existing_discussions)
         )

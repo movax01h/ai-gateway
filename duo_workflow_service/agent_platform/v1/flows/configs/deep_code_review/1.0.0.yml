@@ -105,7 +105,18 @@ components:
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
-  # Step 4: Publish in pure code from the reviewer's schema-validated answer.
+  # Step 4: Detect in code whether the review context was truncated. No UI log,
+  # so the large context stays out of the chat log; only the small result
+  # reaches publish_review.
+  - name: "check_truncation"
+    type: DeterministicStepComponent
+    tool_name: "detect_review_context_truncation"
+    inputs:
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "review_context"
+        optional: true
+
+  # Step 5: Publish in pure code from the reviewer's schema-validated answer.
   # `findings` is required so a missing answer fails the flow instead of posting
   # a clean review. min_confidence 4 comes from the benchmark sweep (gitlab#618672).
   - name: "publish_review"
@@ -130,6 +141,9 @@ components:
       - from: *min_confidence
         as: "min_confidence"
         literal: true
+      - from: "context:check_truncation.tool_responses"
+        as: "review_truncation"
+        optional: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -148,6 +162,8 @@ routers:
   - from: "fetch_existing_discussions"
     to: "review"
   - from: "review"
+    to: "check_truncation"
+  - from: "check_truncation"
     to: "publish_review"
   - from: "publish_review"
     to: "end"

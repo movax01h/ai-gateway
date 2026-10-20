@@ -1,7 +1,7 @@
 """Guards for the shipped deep_code_review flow config.
 
 These tests assert on the content of ``deep_code_review/1.0.0.yml`` (the
-four-step pipeline and the router that skips the discussion fetch on a first
+five-step pipeline and the router that skips the discussion fetch on a first
 review, the reviewer's schema id, toolset and ``max_cycles``, the fetch step's
 pinned inputs, and the publish step's schema-validated answer and
 ``min_confidence`` literal), plus the reviewer response schema those inputs
@@ -52,6 +52,7 @@ class TestDeepCodeReviewConfig:
             "fetch_mr_data",
             "fetch_existing_discussions",
             "review",
+            "check_truncation",
             "publish_review",
         ]
         assert components["fetch_mr_data"]["type"] == "DeterministicStepComponent"
@@ -60,6 +61,7 @@ class TestDeepCodeReviewConfig:
             == "DeterministicStepComponent"
         )
         assert components["review"]["type"] == "AgentComponent"
+        assert components["check_truncation"]["type"] == "DeterministicStepComponent"
         assert components["publish_review"]["type"] == "DeterministicStepComponent"
 
     def test_flow_declares_the_code_review_context_input(self):
@@ -195,6 +197,20 @@ class TestDeepCodeReviewConfig:
             discussions["from"] == "context:fetch_existing_discussions.tool_responses"
         )
         assert discussions["optional"] is True
+
+    def test_publish_reads_truncation_from_an_unlogged_step(self):
+        """The check step reads the large review context, so it writes no UI log; only its small result reaches the
+        logged publish step."""
+        components = self._components()
+        check = components["check_truncation"]
+
+        assert check["tool_name"] == "detect_review_context_truncation"
+        assert "ui_log_events" not in check
+        context = self._input(check, "review_context")
+        assert context["from"] == "context:fetch_mr_data.tool_responses"
+        truncation = self._input(components["publish_review"], "review_truncation")
+        assert truncation["from"] == "context:check_truncation.tool_responses"
+        assert truncation["optional"] is True
 
     @classmethod
     def _finding_model(cls) -> type:
