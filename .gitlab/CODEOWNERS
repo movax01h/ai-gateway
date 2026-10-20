@@ -14,10 +14,8 @@
 
 # Duo Code Review flows, tools, and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
-/duo_workflow_service/agent_platform/v1/flows/configs/deep_code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/review_merge_request_dap/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/deep_code_review_reviewer/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/code_review_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/explore_directories_for_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw
@@ -66,10 +64,8 @@
 
 # Duo Code Review flow configs, tools, and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
-/duo_workflow_service/agent_platform/v1/flows/configs/deep_code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/review_merge_request_dap/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/deep_code_review_reviewer/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/code_review_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/explore_directories_for_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw

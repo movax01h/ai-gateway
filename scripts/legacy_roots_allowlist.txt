@@ -227,9 +227,6 @@ ai_gateway/prompts/definitions/create_repository_branch/base
 ai_gateway/prompts/definitions/create_repository_branch/gpt
 ai_gateway/prompts/definitions/create_repository_branch/system
 ai_gateway/prompts/definitions/create_repository_branch/user
-ai_gateway/prompts/definitions/deep_code_review_reviewer/base
-ai_gateway/prompts/definitions/deep_code_review_reviewer/system
-ai_gateway/prompts/definitions/deep_code_review_reviewer/user
 ai_gateway/prompts/definitions/ensure_clean_git_state/base
 ai_gateway/prompts/definitions/ensure_clean_git_state/system
 ai_gateway/prompts/definitions/ensure_clean_git_state/user
@@ -402,7 +399,6 @@ duo_workflow_service/agent_platform/v1/flows/configs
 duo_workflow_service/agent_platform/v1/flows/configs/agentic_chat
 duo_workflow_service/agent_platform/v1/flows/configs/code_review
 duo_workflow_service/agent_platform/v1/flows/configs/convert_to_gl_ci
-duo_workflow_service/agent_platform/v1/flows/configs/deep_code_review
 duo_workflow_service/agent_platform/v1/flows/configs/duo_permissions_assistant
 duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline
 duo_workflow_service/agent_platform/v1/flows/configs/flow_creator
