@@ -25,9 +25,15 @@ ACTION_LATENCY = Histogram(
 
 
 class ToolExceptionWithResponse(ToolException):
-    def __init__(self, error, response: Optional[str] = None):
+    def __init__(
+        self,
+        error,
+        response: Optional[str] = None,
+        server_error: Optional[str] = None,
+    ):
         super().__init__(error)
         self.response = response
+        self.server_error = server_error
 
 
 def record_metrics(action_class: str, duration: float):
@@ -70,8 +76,9 @@ async def _execute_action_and_get_action_response(
                 request_id=event.actionResponse.requestID,
                 action_class=action_class,
             )
-            raise ToolException(
-                f"HTTP action error: {event.actionResponse.httpResponse.error}"
+            server_error = event.actionResponse.httpResponse.error
+            raise ToolExceptionWithResponse(
+                f"HTTP action error: {server_error}", server_error=server_error
             )
 
         if event.actionResponse.plainTextResponse.error:
@@ -80,7 +87,9 @@ async def _execute_action_and_get_action_response(
                 request_id=event.actionResponse.requestID,
                 action_class=action_class,
             )
-            error = f"Action error: {event.actionResponse.plainTextResponse.error}"
+            server_error = event.actionResponse.plainTextResponse.error
+            error = f"Action error: {server_error}"
+            response = None
             # Some actions (e.g. RunCommand) can have important error information in the `response` field.
             if event.actionResponse.plainTextResponse.response:
                 response = truncate_string(
@@ -88,8 +97,7 @@ async def _execute_action_and_get_action_response(
                     tool_name=action_class,
                     truncation_config=TruncationConfig(),
                 )
-                raise ToolExceptionWithResponse(error, response)
-            raise ToolException(error)
+            raise ToolExceptionWithResponse(error, response, server_error=server_error)
 
         # Record all metrics in the separate function
         record_metrics(action_class, duration)

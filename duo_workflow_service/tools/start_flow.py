@@ -201,8 +201,8 @@ def _strip_forbidden_boilerplate(message: str) -> Optional[str]:
 class StartFlowError(ToolException):
     """Raised when starting a flow fails.
 
-    `response` is read by ToolsExecutor._handle_tool_error to surface the
-    failure reason in the UI chat log, not just the LLM-facing message.
+    `response` is also stored as `server_error`, so ToolsExecutor shows it as
+    the tool card text instead of the LLM-facing message.
 
     Args:
         message: Human-readable description of the failure, forwarded to the LLM.
@@ -212,6 +212,7 @@ class StartFlowError(ToolException):
     def __init__(self, message: str, response: Optional[str] = None):
         super().__init__(message)
         self.response = response
+        self.server_error = response
 
 
 class StartDeveloperFlowInput(BaseModel):
