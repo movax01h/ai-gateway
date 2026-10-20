@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain.tools import BaseTool, ToolException
 from pydantic import BaseModel
+from structlog.testing import capture_logs
 
 from ai_gateway.model_selection.models import ModelClassProvider
 from contract import contract_pb2
@@ -74,6 +75,7 @@ from duo_workflow_service.tools.wiki import GetWikiPage
 from lib.context import current_model_metadata_context
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.feature_roots import default_features_dir
+from lib.language_server import LanguageServerVersion
 
 
 @pytest.fixture(name="gl_http_client")
@@ -1259,6 +1261,167 @@ def test_toolset_filters_denied_mcp_tools(tool_metadata, mcp_tools):
 
     assert "extra_tool" not in toolset._all_tools
     assert "read_file" in toolset._all_tools
+
+
+class TestUnavailableTools:
+    """Requested tools a toolset drops are logged, never silently lost."""
+
+    @pytest.mark.parametrize(
+        ("registry_kwargs", "client_capable", "requested", "expected_fields"),
+        [
+            pytest.param(
+                {"enabled_tools": ["use_git"]},
+                False,
+                ["read_file", "run_git_command"],
+                {
+                    "missing_privilege_tools": ["read_file"],
+                    "granting_privileges": ["read_only_files", "read_write_files"],
+                },
+                id="missing_privilege",
+            ),
+            pytest.param(
+                # read_file_chunked shares read_file's name; with no file privilege
+                # the privilege, not the capability, is why read_file is missing.
+                {"enabled_tools": ["use_git"]},
+                True,
+                ["read_file"],
+                {
+                    "missing_privilege_tools": ["read_file"],
+                    "granting_privileges": ["read_only_files", "read_write_files"],
+                },
+                id="missing_privilege_superseding_tool",
+            ),
+            pytest.param(
+                {
+                    "enabled_tools": ["read_only_files"],
+                    "language_server_version": LanguageServerVersion.from_string(
+                        "0.0.0"
+                    ),
+                },
+                False,
+                ["read_file"],
+                {"unsupported_client_tools": ["read_file"]},
+                id="unsupported_client_language_server",
+            ),
+            pytest.param(
+                {"enabled_tools": []},
+                False,
+                ["notify_me_when"],
+                {"unsupported_client_tools": ["notify_me_when"]},
+                id="unsupported_client_capability",
+            ),
+            pytest.param(
+                # The client can render web search, but is_available() is False.
+                {"enabled_tools": []},
+                True,
+                ["web_search"],
+                {"unsupported_client_tools": ["web_search"]},
+                id="unsupported_client_is_available",
+            ),
+            pytest.param(
+                {"enabled_tools": ["use_git"]},
+                False,
+                ["read_files_typo"],
+                {"unknown_tools": ["read_files_typo"]},
+                id="unknown",
+            ),
+            pytest.param(
+                {"enabled_tools": ["use_git", "read_only_files"]},
+                False,
+                ["read_files_typo", "edit_file", "list_dir", "notify_me_when"],
+                {
+                    "missing_privilege_tools": ["edit_file"],
+                    "unsupported_client_tools": ["notify_me_when"],
+                    "unknown_tools": ["read_files_typo"],
+                    "granting_privileges": ["read_write_files"],
+                },
+                id="mixed_reasons",
+            ),
+            pytest.param(
+                # Union of granting privileges, deduplicated and sorted.
+                {"enabled_tools": ["use_git"]},
+                False,
+                ["read_file", "edit_file"],
+                {
+                    "missing_privilege_tools": ["edit_file", "read_file"],
+                    "granting_privileges": ["read_only_files", "read_write_files"],
+                },
+                id="granting_privileges_union",
+            ),
+        ],
+    )
+    def test_logs_unavailable_tools_with_reason(
+        self,
+        monkeypatch,
+        tool_metadata,
+        registry_kwargs,
+        client_capable,
+        requested,
+        expected_fields,
+    ):
+        monkeypatch.setattr(
+            tools_registry, "is_client_capable", lambda _caps: client_capable
+        )
+        monkeypatch.setattr(
+            tools.AgentCoreWebSearch, "is_available", classmethod(lambda cls: False)
+        )
+        registry = ToolsRegistry(
+            preapproved_tools=[], tool_metadata=tool_metadata, **registry_kwargs
+        )
+
+        with capture_logs() as cap_logs:
+            toolset = registry.toolset(requested)
+
+        unavailable = {
+            name
+            for key in (
+                "missing_privilege_tools",
+                "unsupported_client_tools",
+                "unknown_tools",
+            )
+            for name in expected_fields.get(key, [])
+        }
+        # Logging only: every requested tool that is not reported is still granted.
+        assert set(toolset._all_tools) == set(requested) - unavailable
+        entries = [
+            e
+            for e in cap_logs
+            if e["event"] == "Requested tools unavailable in toolset"
+        ]
+        assert len(entries) == 1
+        # Exact match: fixed field names only, and empty fields are omitted.
+        assert entries[0] == {
+            "event": "Requested tools unavailable in toolset",
+            "log_level": "info",
+            **expected_fields,
+        }
+
+    @pytest.mark.parametrize(
+        ("requested", "denied_tools"),
+        [
+            pytest.param(["read_file", "list_dir"], [], id="everything_granted"),
+            pytest.param(["read_file", "list_dir"], ["read_file"], id="denied"),
+        ],
+    )
+    def test_silent_when_nothing_unavailable(
+        self, tool_metadata, requested, denied_tools
+    ):
+        """Governance-denied tools are reported by denied_tools, not as unavailable."""
+        registry = ToolsRegistry(
+            enabled_tools=["read_only_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            denied_tools=denied_tools,
+        )
+
+        with capture_logs() as cap_logs:
+            registry.toolset(requested)
+
+        assert not [
+            e
+            for e in cap_logs
+            if e["event"] == "Requested tools unavailable in toolset"
+        ]
 
 
 @pytest.mark.asyncio
