@@ -290,6 +290,12 @@ instructions:
       1. Integration tests in `integration_tests/` may make real calls but must be clearly marked.
       1. Follow the testing pyramid: most tests at unit level, fewer at integration/system level.
       1. Verify that new fixtures in `conftest.py` are scoped appropriately (`function`, `module`, `session`).
+      1. Tests for streaming endpoints (`StreamingResponse`) must assert on the streamed body or events, not only
+        on `response.status_code`. Why: the status line is sent before the work runs, so it is `200` even when the
+        agent or model fails mid-stream, and a status-only assertion passes while the feature is broken.
+      1. Flag a single test that checks several behaviours by branching on a parameter (e.g. `if expected_status == 422:`
+        inside the test body). Suggest splitting it into separate tests, each with its own unconditional assertions.
+        Why: branching hides which behaviour failed and lets one branch go unasserted.
 
   - name: Documentation
     fileFilters:
