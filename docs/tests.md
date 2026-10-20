@@ -123,6 +123,13 @@ export AI_GATEWAY_URL=http://localhost:5052
 make test-integration
 ```
 
+## LiteLLM parameter tests
+
+LiteLLM parameter tests check that LiteLLM accepts the parameters our code sends for every LiteLLM model in `models.yml`.
+They run LiteLLM's real code against a fake HTTP transport, so they need no credentials.
+They are located in the `litellm_param_tests/` directory and run in the `tests:litellm-params` job on Renovate LiteLLM bump merge requests.
+See [LiteLLM parameter tests](litellm_param_tests.md).
+
 ## Agent tests
 
 Agent tests validate Duo Workflow Service agent behavior by executing against a real Anthropic LLM.
