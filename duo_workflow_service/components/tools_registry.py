@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import (
     Any,
     Iterable,
+    Literal,
     NotRequired,
     Optional,
     Sequence,
@@ -186,6 +187,9 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
 ]
 
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
+
+# Why ``ToolsRegistry.toolset`` dropped a requested tool; see ``_unavailable_reason``.
+UnavailableReason = Literal["missing_privilege", "unsupported_client", "unknown"]
 
 # Using Sequence instead of list because it's covariant, allowing subclasses
 ToolsOrConfigs = Union[Sequence[Type[BaseTool]], Sequence[McpToolConfig]]
@@ -519,6 +523,7 @@ class ToolsRegistry:
     _ask_tool_names: set[str]
     _policy_permitted_preapprovals: Optional[set[str]]
     _mcp_tool_names: list[str]
+    _enabled_privileges: set[str]
 
     @classmethod
     async def configure(
@@ -592,6 +597,7 @@ class ToolsRegistry:
 
         # Always enable mcp tools until it's reliably passed by clients as an agent privilege
         enabled_tools.append(_RUN_MCP_TOOLS_PRIVILEGE)
+        self._enabled_privileges = set(enabled_tools)
 
         registered_mcp_tools: list[McpToolConfig] = []
         if _RUN_MCP_TOOLS_PRIVILEGE in enabled_tools:
@@ -915,8 +921,10 @@ class ToolsRegistry:
             tool_names = [t for t in tool_names if t not in denied_tools]
 
         all_tools = {}
+        unavailable_tools: dict[str, UnavailableReason] = {}
         for tool_name in tool_names:
             if tool_name not in self._enabled_tools:
+                unavailable_tools[tool_name] = self._unavailable_reason(tool_name)
                 continue
             tool = self._enabled_tools[tool_name]
             # Clone tools that have options to avoid shared-state mutation
@@ -938,6 +946,9 @@ class ToolsRegistry:
             if tool_name in self._preapproved_tool_names
         }
 
+        if unavailable_tools:
+            _report_unavailable_tools(unavailable_tools)
+
         return Toolset(
             pre_approved=pre_approved,
             all_tools=all_tools,
@@ -945,6 +956,65 @@ class ToolsRegistry:
             approval_policy=self,
             denied_tools=denied_tools,
         )
+
+    def _unavailable_reason(self, tool_name: str) -> UnavailableReason:
+        """Why a requested tool is not enabled. Governance-denied tools never get here.
+
+        ``missing_privilege``: no privilege that grants the tool was enabled, typically a flow
+        asking for more than its privileges in gitlab-org/gitlab allow. ``unsupported_client``:
+        the privilege was enabled (or none is needed), but the client cannot run the tool.
+        ``unknown``: the registry does not know the name, typically a typo in a custom flow.
+        """
+        granting = set(agent_privileges_for_tool(tool_name))
+        if granting and not granting & self._enabled_privileges:
+            return "missing_privilege"
+        if granting or any(
+            _tool_name(tool_cls) == tool_name
+            for tool_cls in _CAPABILITY_DEPENDENT_TOOLS
+        ):
+            return "unsupported_client"
+        return "unknown"
+
+
+def _report_unavailable_tools(
+    unavailable_tools: dict[str, UnavailableReason],
+) -> None:
+    """Log the tools a toolset dropped, so a dropped tool is never silent.
+
+    The structlog processors add ``workflow_id`` and the flow identity (``workflow_definition``,
+    ``flow_name``), so neither is passed in.
+
+    Field names are fixed (one list per reason) and tool names are values, never keys: tool
+    names come from custom flow configs, and keys would add a log field per name.
+    ``granting_privileges`` is the union of privileges that grant any ``missing_privilege_tools``
+    entry; one of them per tool is enough. Empty fields are omitted.
+
+    Info, not warning: dropping is also intended behaviour. Chat requests one tool list on every
+    surface and lets the session's privileges trim it, so web chat drops the file and command
+    tools on each compile. Filter on ``missing_privilege_tools`` and ``unknown_tools`` to find
+    real flow/privilege mismatches.
+    """
+
+    def tools_with(reason: UnavailableReason) -> list[str]:
+        return sorted(name for name, r in unavailable_tools.items() if r == reason)
+
+    missing_privilege_tools = tools_with("missing_privilege")
+    fields = {
+        "missing_privilege_tools": missing_privilege_tools,
+        "unsupported_client_tools": tools_with("unsupported_client"),
+        "unknown_tools": tools_with("unknown"),
+        "granting_privileges": sorted(
+            {
+                privilege
+                for name in missing_privilege_tools
+                for privilege in agent_privileges_for_tool(name)
+            }
+        ),
+    }
+    log.info(
+        "Requested tools unavailable in toolset",
+        **{key: value for key, value in fields.items() if value},
+    )
 
 
 # Reserve every name the registry can enable outside the privilege map, so a
