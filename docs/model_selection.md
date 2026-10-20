@@ -275,6 +275,64 @@ handled externally through environment credentials, while FireworksAI requires d
 regional deployment. Custom authentication logic can be implemented by extending the `parameters_for_gitlab_provider`
 method in the `ai_gateway/model_metadata.py` module.
 
+#### Per-model Anthropic credentials
+
+Models served directly by Anthropic use the shared `ANTHROPIC_API_KEY` unless their `params` carry a credential of
+their own. Both options below are meant to be injected per environment through `AIGW_MODEL_SELECTION__MODEL_PARAMS`
+rather than committed to `models.yml`, and they apply to the prompt registry and the `/v1/proxy/anthropic` path alike:
+
+- `api_key`: a static key for a different Anthropic organization or workspace (for example, one with data retention
+  enabled for the Fable models).
+- `workload_identity`: the same routing without a static key, through
+  [Anthropic Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/wif-providers/gcp). The
+  gateway mints a Google-signed identity token from its Application Default Credentials (the same ADC that Vertex AI
+  calls use) and exchanges it for a short-lived Anthropic access token, refreshed before expiry. The two fields are
+  mutually exclusive.
+
+```shell
+AIGW_MODEL_SELECTION__MODEL_PARAMS='{
+  "claude_fable_5_1": {
+    "workload_identity": {
+      "federation_rule_id": "fdrl_...",
+      "organization_id": "00000000-0000-0000-0000-000000000000",
+      "service_account_id": "svac_...",
+      "workspace_id": "wrkspc_..."
+    }
+  }
+}'
+```
+
+`workload_identity` fields:
+
+| Field | Required | What it is |
+| --- | --- | --- |
+| `federation_rule_id` | Yes | The `fdrl_...` rule in the Claude Console that maps the Google identity to an Anthropic service account. |
+| `organization_id` | Yes | The Anthropic organization UUID. |
+| `service_account_id` | Yes | The `svac_...` service account the rule targets. |
+| `workspace_id` | When the rule covers more than one workspace | The `wrkspc_...` workspace the token is scoped to. |
+| `audience` | No, defaults to `https://api.anthropic.com` | The `aud` claim requested on the Google identity token. It must equal the rule's `match.audience`. |
+
+In GCP the workload's attached service account signs the identity token directly. For local development, ADC is a
+user credential that cannot mint identity tokens for a custom audience, so log in with service account impersonation:
+
+```shell
+gcloud auth application-default login --impersonate-service-account=<email>
+```
+
+This is the supported local path. It needs `roles/iam.serviceAccountTokenCreator` on the target account (the ADC login itself needs `getAccessToken`).
+Impersonating a service account from a different Google account or project than ADC resolves to is not supported.
+
+The federation rule should pin the Google service account's `sub` (its numeric unique ID) and `email` claims; see
+the Anthropic guide linked above. To check what identity ADC resolves to before configuring the rule:
+
+```shell
+gcloud auth application-default print-access-token >/dev/null && echo "ADC ok"
+gcloud iam service-accounts describe <email> --format='value(uniqueId)'
+gcloud auth print-identity-token --impersonate-service-account=<email> \
+  --audiences=https://api.anthropic.com --include-email \
+  | jq -rR 'split(".")[1] | gsub("-";"+") | gsub("_";"/") | @base64d | fromjson'
+```
+
 ## Configuring model selection
 
 Each Unit Primitive can be configured with:
