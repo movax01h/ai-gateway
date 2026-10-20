@@ -20,6 +20,8 @@ duo-workflow-svc-eks:
       LANGSMITH_PROJECT: "duo-workflow-staging"
       DUO_WORKFLOW_SERVICE_ENVIRONMENT: "staging"
       AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-dev"
+      AIGW_INTERNAL_EVENT__ENDPOINT: "https://snowplowstg.trx.gitlab.net"
+      AIGW_BILLING_EVENT__ENDPOINT: "https://billing.stgsub.gitlab.net"
     scalability:
       min_instances: 1
       max_instances: 8
