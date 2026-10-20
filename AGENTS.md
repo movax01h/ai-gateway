@@ -513,9 +513,9 @@ The default template (`.gitlab/merge_request_templates/Default.md`) includes:
 - Documentation added/updated
 - Executor implementation verified (if applicable)
 
-**Labels**: Auto-applies `~"group::ai core infra"`. The author must also select exactly one
-type label: `~"type::bug"`, `~"type::feature"`, or `~"type::maintenance"` (the template includes
-commented-out `/label` quick actions for each — uncomment the one that applies).
+**Labels**: The template applies none (its only quick action is `/assign me`). Add `/label` quick
+actions yourself: the owning group's `group::` label (for example `~"group::ai core infra"`) and
+exactly one type label: `~"type::bug"`, `~"type::feature"`, or `~"type::maintenance"`.
 
 ### Review Process
 
