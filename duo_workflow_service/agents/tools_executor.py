@@ -22,9 +22,11 @@ from duo_workflow_service.entities.state import (
     DuoWorkflowStateType,
     MessageTypeEnum,
     Plan,
+    ToolError,
     ToolInfo,
     ToolStatus,
     UiChatLog,
+    build_tool_error,
     render_for_display,
 )
 from duo_workflow_service.errors.typing import TierAccessDeniedException
@@ -343,6 +345,7 @@ class ToolsExecutor:
         error_message: Optional[str] = None,
         tool_response: Optional[Any] = None,
         project_name: Optional[str] = None,
+        tool_error: Optional[ToolError] = None,
     ):
         chat_log = self._create_tool_ui_chat_log(
             tool_call=tool_call,
@@ -350,6 +353,7 @@ class ToolsExecutor:
             error_message=error_message,
             tool_response=tool_response,
             project_name=project_name,
+            tool_error=tool_error,
         )
         if chat_log:
             ui_chat_logs.append(chat_log)
@@ -416,7 +420,13 @@ class ToolsExecutor:
             )
 
         except ToolException as error:
-            return self._handle_tool_error(tool_call, error, chat_logs, project_name)
+            return self._handle_tool_error(
+                tool_call,
+                error,
+                chat_logs,
+                project_name,
+                error_text=getattr(error, "server_error", None) or str(error),
+            )
 
         except Exception as error:
             # Convert any unexpected exception to ToolException to avoid blocking workflow
@@ -495,12 +505,17 @@ class ToolsExecutor:
             },
         )
 
+        field_errors = "; ".join(
+            f"{'.'.join(map(str, line['loc']))}: {line['msg']}"
+            for line in error.errors(include_url=False, include_input=False)
+        )
         self._add_tool_ui_chat_log(
             tool_call=tool_call,
             status=ToolStatus.FAILURE,
             ui_chat_logs=chat_logs,
             error_message="Validation error",
             project_name=project_name,
+            tool_error=build_tool_error(field_errors, tool_name),
         )
 
         return {
@@ -514,6 +529,7 @@ class ToolsExecutor:
         error: ToolException,
         chat_logs: List[UiChatLog],
         project_name: Optional[str] = None,
+        error_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         tool_name = tool_call["name"]
         error_type = type(error).__name__
@@ -521,7 +537,9 @@ class ToolsExecutor:
         log_exception(error, extra={"context": "Tools executor raised error"})
 
         response = getattr(error, "response", None)
-        tool_response = f"Tool {tool_name} raised ToolException: {error!s} {response}"
+        tool_response = f"Tool {tool_name} raised ToolException: {error!s}"
+        if response:
+            tool_response = f"{tool_response} {response}"
         self._track_internal_event(
             event_name=EventEnum.WORKFLOW_TOOL_FAILURE,
             tool_name=tool_name,
@@ -531,9 +549,15 @@ class ToolsExecutor:
             },
         )
 
+        details = response if response != error_text else None
+        tool_error = (
+            build_tool_error(error_text, tool_name, details) if error_text else None
+        )
         error_message = f"Tool call failed: {error_type}"
-        if response:
-            error_message = f"{error_message} {textwrap.shorten(str(response), 100)}"
+        if tool_error:
+            error_message += f": {textwrap.shorten(tool_error['message'], 300)}"
+            if "details" in tool_error:
+                error_message += f" {textwrap.shorten(tool_error['details'], 100)}"
 
         status = self._detect_failure_status(str(error))
         self._add_tool_ui_chat_log(
@@ -542,6 +566,7 @@ class ToolsExecutor:
             ui_chat_logs=chat_logs,
             error_message=error_message,
             project_name=project_name,
+            tool_error=tool_error,
         )
 
         return {
@@ -631,6 +656,7 @@ class ToolsExecutor:
         error_message: Optional[str] = None,
         tool_response: Optional[Any] = None,
         project_name: Optional[str] = None,
+        tool_error: Optional[ToolError] = None,
     ) -> Optional[UiChatLog]:
         tool_name = tool_call["name"]
         tool_args = tool_call.get("args", {})
@@ -668,6 +694,18 @@ class ToolsExecutor:
                         name=tool_response.name or tool_name,
                         tool_call_id=tool_response.tool_call_id,
                     ),
+                )
+            elif tool_error is not None:
+                tool_info = ToolInfo(
+                    name=tool_name,
+                    args=tool_args,
+                    tool_response=ToolMessage(
+                        content=tool_error["message"],
+                        status="error",
+                        name=tool_name,
+                        tool_call_id=tool_call_id or "",
+                    ),
+                    error=tool_error,
                 )
             else:
                 tool_info = ToolInfo(name=tool_name, args=tool_args)

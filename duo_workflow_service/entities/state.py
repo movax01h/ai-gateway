@@ -190,6 +190,11 @@ class SourceLink(TypedDict):
     url: str
 
 
+class ToolError(TypedDict):
+    message: str
+    details: NotRequired[str]
+
+
 class ToolInfo(TypedDict):
     name: str
     args: dict[str, Any]
@@ -215,6 +220,7 @@ class ToolInfo(TypedDict):
     # contract for generative UI. Source/server identity for MCP tools is a
     # separate follow-up (needs a `server` field on the McpTool proto).
     tool_version: NotRequired[str]
+    error: NotRequired[ToolError]
 
 
 class UiChatLog(TypedDict):
@@ -349,6 +355,19 @@ def build_tool_info(
     if tool_response is not None:
         info["tool_response"] = render_for_display(tool_response, tool_name=name)
     return info
+
+
+def build_tool_error(message: str, tool_name: str, details: Any = None) -> ToolError:
+    """Build the ToolError dict for a failed tool card.
+
+    Both `message` and `details` go through :func:`render_for_display`, so
+    secrets are replaced by `[REDACTED]` and each field is capped at
+    `TOOL_RESPONSE_MAX_DISPLAY_MSG` characters.
+    """
+    tool_error = ToolError(message=render_for_display(message, tool_name=tool_name))
+    if details:
+        tool_error["details"] = render_for_display(details, tool_name=tool_name)
+    return tool_error
 
 
 class WorkflowState(TypedDict):

@@ -26,6 +26,7 @@ from duo_workflow_service.entities.state import (
     TOOL_RESPONSE_MAX_DISPLAY_MSG,
     MessageTypeEnum,
     TaskStatus,
+    ToolError,
     ToolInfo,
     ToolStatus,
     WorkflowState,
@@ -33,6 +34,7 @@ from duo_workflow_service.entities.state import (
     render_for_display,
 )
 from duo_workflow_service.errors.typing import TierAccessDeniedException
+from duo_workflow_service.executor.action import ToolExceptionWithResponse
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.security.prompt_scanner import DetectionType, ScanResult
 from duo_workflow_service.security.scanner_factory import PromptInjectionDetectedError
@@ -44,6 +46,11 @@ from duo_workflow_service.tools.planner import (
     RemoveTask,
     SetTaskStatus,
     UpdateTaskDescription,
+)
+from duo_workflow_service.tools.start_flow import (
+    _MISSING_PROJECT_DETAIL,
+    _MISSING_PROJECT_MESSAGE,
+    StartFlowError,
 )
 from duo_workflow_service.tools.toolset import ToolType
 from lib.context import client_capabilities
@@ -927,6 +934,26 @@ async def test_state_manipulation(
         assert tool_log["tool_info"] is None
 
 
+_ACCESS_DENIED = (
+    "Access denied: Cannot access '.git/config' as it matches Duo Context Exclusion patterns. "
+    "Path '.git/config' matches excluded pattern: '.git'."
+)
+
+
+def _failed_tool_info(tool_call_id: str, args: dict, error: ToolError) -> ToolInfo:
+    return ToolInfo(
+        name="test_tool",
+        args=args,
+        tool_response=ToolMessage(
+            content=error["message"],
+            status="error",
+            name="test_tool",
+            tool_call_id=tool_call_id,
+        ),
+        error=error,
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     (
@@ -970,21 +997,25 @@ async def test_state_manipulation(
             "Tool test_tool raised validation error 1 validation error for validation_error",
             False,
             "Failed: Using test_tool: invalid=data - Validation error",
-            ToolInfo(name="test_tool", args={"invalid": "data"}),
+            _failed_tool_info(
+                "2",
+                {"invalid": "data"},
+                ToolError(message="invalid: Extra inputs are not permitted"),
+            ),
             {"tool_call_fields": ["invalid"]},
         ),
         (
             {"id": "3", "name": "test_tool", "args": {"file_path": ".git/config"}},
-            ToolException(
-                "Access denied: Cannot access '.git/config' as it matches Duo Context Exclusion patterns. "
-                "Path '.git/config' matches excluded pattern: '.git'."
-            ),
+            ToolException(_ACCESS_DENIED),
             None,  # tool_args_schema
             "Tool test_tool raised ToolException: Access denied: Cannot access '.git/config' as it "
             "matches Duo Context Exclusion patterns. Path '.git/config' matches excluded pattern: '.git'.",
             False,  # expected_error
-            "Failed: Using test_tool: file_path=.git/config - Tool call failed: ToolException",
-            ToolInfo(name="test_tool", args={"file_path": ".git/config"}),
+            "Failed: Using test_tool: file_path=.git/config - Tool call failed: ToolException: "
+            "Access denied: Cannot access '.git/config'",
+            _failed_tool_info(
+                "3", {"file_path": ".git/config"}, ToolError(message=_ACCESS_DENIED)
+            ),
             {"context": "Tools executor raised error"},
         ),
     ],
@@ -1085,6 +1116,7 @@ async def test_run_error_handling(
     assert tool_log["message_type"] == MessageTypeEnum.TOOL
     assert tool_log["content"].startswith(expected_log_prefix)
     assert tool_log["tool_info"] == expected_tool_info
+    assert_client_valid_tool_info(tool_log["tool_info"])
 
     mock_duo_workflow_metrics.count_agent_platform_tool_failure.assert_called_once_with(
         flow_type=flow_type.value,
@@ -1098,6 +1130,141 @@ async def test_run_error_handling(
     )
 
     tool.ainvoke.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_side_effect", "expected_response", "expected_card", "expected_tool_info"),
+    [
+        (
+            ToolException("Action error: schema violation: X"),
+            "Tool test_tool raised ToolException: Action error: schema violation: X",
+            "Failed: Using test_tool:  - Tool call failed: ToolException: Action error: schema violation: X",
+            _failed_tool_info(
+                "1", {}, ToolError(message="Action error: schema violation: X")
+            ),
+        ),
+        (
+            ToolExceptionWithResponse(
+                "Action error: schema violation: X", server_error="schema violation: X"
+            ),
+            "Tool test_tool raised ToolException: Action error: schema violation: X",
+            "Failed: Using test_tool:  - Tool call failed: ToolExceptionWithResponse: "
+            "schema violation: X",
+            _failed_tool_info("1", {}, ToolError(message="schema violation: X")),
+        ),
+        (
+            ToolExceptionWithResponse(
+                "Action error: exit status 1", "command output", "exit status 1"
+            ),
+            "Tool test_tool raised ToolException: Action error: exit status 1 command output",
+            "Failed: Using test_tool:  - Tool call failed: ToolExceptionWithResponse: "
+            "exit status 1 command output",
+            _failed_tool_info(
+                "1", {}, ToolError(message="exit status 1", details="command output")
+            ),
+        ),
+        (
+            ToolExceptionWithResponse(
+                "Action error: bad token glpat-AAAAABBBBCCCCDDDDEEEE",
+                "echo glpat-AAAAABBBBCCCCDDDDEEEE",
+                "bad token glpat-AAAAABBBBCCCCDDDDEEEE",
+            ),
+            "Tool test_tool raised ToolException: Action error: bad token glpat-AAAAABBBBCCCCDDDDEEEE "
+            "echo glpat-AAAAABBBBCCCCDDDDEEEE",
+            "Failed: Using test_tool:  - Tool call failed: ToolExceptionWithResponse: "
+            "bad token [REDACTED] echo [REDACTED]",
+            _failed_tool_info(
+                "1",
+                {},
+                ToolError(message="bad token [REDACTED]", details="echo [REDACTED]"),
+            ),
+        ),
+        (
+            StartFlowError(_MISSING_PROJECT_MESSAGE, response=_MISSING_PROJECT_DETAIL),
+            f"Tool test_tool raised ToolException: {_MISSING_PROJECT_MESSAGE} "
+            f"{_MISSING_PROJECT_DETAIL}",
+            "Failed: Using test_tool:  - Tool call failed: StartFlowError: "
+            f"{_MISSING_PROJECT_DETAIL}",
+            _failed_tool_info("1", {}, ToolError(message=_MISSING_PROJECT_DETAIL)),
+        ),
+        (
+            StartFlowError(
+                "Failed to start flow: HTTP 403: Flow is disabled.",
+                response="Flow is disabled.",
+            ),
+            "Tool test_tool raised ToolException: Failed to start flow: HTTP 403: "
+            "Flow is disabled. Flow is disabled.",
+            "Failed: Using test_tool:  - Tool call failed: StartFlowError: Flow is disabled.",
+            _failed_tool_info("1", {}, ToolError(message="Flow is disabled.")),
+        ),
+        (
+            StartFlowError("Custom catalog flows need a project."),
+            "Tool test_tool raised ToolException: Custom catalog flows need a project.",
+            "Failed: Using test_tool:  - Tool call failed: StartFlowError: "
+            "Custom catalog flows need a project.",
+            _failed_tool_info(
+                "1", {}, ToolError(message="Custom catalog flows need a project.")
+            ),
+        ),
+        (
+            ToolExceptionWithResponse(
+                "Action error: exit status 1", "exit status 1", "exit status 1"
+            ),
+            "Tool test_tool raised ToolException: Action error: exit status 1 exit status 1",
+            "Failed: Using test_tool:  - Tool call failed: ToolExceptionWithResponse: "
+            "exit status 1",
+            _failed_tool_info("1", {}, ToolError(message="exit status 1")),
+        ),
+        (
+            RuntimeError("connection refused: postgres://10.0.0.5:5432"),
+            "Tool test_tool raised ToolException: Unexpected error executing tool "
+            "test_tool: connection refused: postgres://10.0.0.5:5432",
+            "Failed: Using test_tool:  - Tool call failed: ToolException",
+            ToolInfo(name="test_tool", args={}),
+        ),
+    ],
+)
+@pytest.mark.usefixtures("mock_datetime")
+@patch("duo_workflow_service.agents.tools_executor.log_exception")
+async def test_run_tool_exception_messages(
+    _mock_log_exception,
+    workflow_state,
+    internal_event_client: Mock,
+    flow_type: GLReportingEventContext,
+    tool_side_effect,
+    expected_response,
+    expected_card,
+    expected_tool_info,
+):
+    tool = mock_tool(side_effect=tool_side_effect)
+    mock_toolset = MagicMock(spec=Toolset)
+    mock_toolset.__contains__ = MagicMock(return_value=True)
+    mock_toolset.__getitem__ = MagicMock(return_value=tool)
+
+    tools_executor = ToolsExecutor(
+        tools_agent_name="planner",
+        toolset=mock_toolset,
+        workflow_id="123",
+        workflow_type=flow_type,
+        internal_event_client=internal_event_client,
+    )
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content=[{"type": "text", "text": "test"}],
+            tool_calls=[{"id": "1", "name": "test_tool", "args": {}}],
+            response_metadata={"stop_reason": "tool_call"},
+            id="ai-msg-tool-exception-test",
+        ),
+    ]
+
+    result = await tools_executor.run(workflow_state)
+
+    assert result[0]["conversation_history"]["planner"][0].content == expected_response
+    tool_log = cast(Command, result[1]).update["ui_chat_log"][1]  # type: ignore[index]
+    assert tool_log["content"] == expected_card
+    assert tool_log["status"] == ToolStatus.FAILURE
+    assert tool_log["tool_info"] == expected_tool_info
 
 
 @pytest.mark.asyncio
@@ -1180,8 +1347,20 @@ async def test_run_error_max_tokens(
         "Failed: Using read_file: file_path=some-long-file-name-that-is-truncated-"
         " - Tool call failed: IncompleteToolCallDueToMaxTokens"
     )
+    max_tokens_message = (
+        "Max tokens reached for tool read_file. "
+        "Try a simpler request or using a different tool."
+    )
     assert tool_log["tool_info"] == ToolInfo(
-        args={"file_path": "some-long-file-name-that-is-truncated-"}, name="read_file"
+        args={"file_path": "some-long-file-name-that-is-truncated-"},
+        name="read_file",
+        tool_response=ToolMessage(
+            content=max_tokens_message,
+            status="error",
+            name="read_file",
+            tool_call_id="read-file-max-tokens",
+        ),
+        error=ToolError(message=max_tokens_message),
     )
 
     mock_duo_workflow_metrics.count_agent_platform_tool_failure.assert_called_once_with(

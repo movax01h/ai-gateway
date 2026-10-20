@@ -12,6 +12,7 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     _conversation_history_reducer,
     _ui_chat_log_reducer,
+    build_tool_error,
     build_tool_info,
     policy_ref_to_log_dict,
     render_for_display,
@@ -444,6 +445,17 @@ def test_build_tool_info_truncates_long_string_response():
         f"{TOOL_RESPONSE_MAX_DISPLAY_MSG + 100:,} characters shown ...]"
     )
     assert_client_valid_tool_info(result)
+
+
+class TestBuildToolError:
+    def test_caps_message_and_details(self):
+        long_text = "x" * (TOOL_RESPONSE_MAX_DISPLAY_MSG + 100)
+
+        result = build_tool_error(long_text, tool_name="t", details=long_text)
+
+        assert result["message"] == render_for_display(long_text, tool_name="t")
+        assert result["details"] == render_for_display(long_text, tool_name="t")
+        assert "display truncated" in result["message"]
 
 
 class TestRenderForDisplay:
