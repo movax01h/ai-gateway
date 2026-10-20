@@ -8,6 +8,7 @@ import httpx
 import structlog
 from anthropic import AsyncAnthropic
 from anthropic._base_client import _DefaultAsyncHttpxClient
+from anthropic.lib.credentials import AccessTokenProvider
 from google.cloud.aiplatform.gapic import PredictionServiceAsyncClient
 from pydantic import BaseModel
 
@@ -282,7 +283,15 @@ def anthropic_facilitator_headers() -> dict[str, str]:
     return {ANTHROPIC_FACILITATOR_KEY_HEADER: key.get_secret_value()}
 
 
-def init_anthropic_client() -> AsyncAnthropic:
+def init_anthropic_client(
+    credentials: Optional[AccessTokenProvider] = None,
+) -> AsyncAnthropic:
+    """Build an `AsyncAnthropic` client with the gateway's connection pool and request logging.
+
+    Without `credentials` the SDK resolves `ANTHROPIC_API_KEY` from the environment. With them, it
+    authenticates through that provider instead (e.g. workload identity federation) and does not
+    consult the environment, so a static key cannot shadow the federated token.
+    """
     # Setting 30 seconds to the keep-alive expiry to avoid TLS handshake on every request.
     # See https://www.python-httpx.org/advanced/resource-limits/ for more information.
     limits: httpx.Limits = httpx.Limits(
@@ -292,6 +301,9 @@ def init_anthropic_client() -> AsyncAnthropic:
     http_client: httpx.AsyncClient = _DefaultAsyncHttpxClient(
         limits=limits, event_hooks={"request": [log_request]}
     )
+
+    if credentials is not None:
+        return AsyncAnthropic(credentials=credentials, http_client=http_client)
 
     return AsyncAnthropic(http_client=http_client)
 

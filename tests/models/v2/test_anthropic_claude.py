@@ -2,11 +2,15 @@ from unittest.mock import patch
 
 import pytest
 from anthropic import AsyncAnthropic
+from anthropic.lib.credentials import AccessToken
+from anthropic.lib.credentials._auth import AccessTokenAuth
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import Runnable
 
+from ai_gateway.model_selection.models import AnthropicWorkloadIdentityParams
 from ai_gateway.models.v2 import ChatAnthropic
 from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
+from ai_gateway.models.v2.anthropic_claude import _workload_identity_client
 
 
 class TestChatAnthropic:
@@ -75,6 +79,45 @@ class TestChatAnthropic:
 
         assert model.anthropic_api_url == "http://anthropic.test"
         assert model._async_client.base_url == "http://anthropic.test"
+
+    def test_workload_identity_replaces_the_api_key(self, monkeypatch):
+        """A federated model gets its own client: no x-api-key, bearer auth via the SDK's token
+        cache, shared across instances built from the same definition."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "shared-key")
+        _workload_identity_client.cache_clear()
+        params = AnthropicWorkloadIdentityParams(
+            federation_rule_id="fdrl_test",
+            organization_id="00000000-0000-0000-0000-000000000000",
+            service_account_id="svac_test",
+        )
+
+        def provider(*, force_refresh: bool = False):
+            return AccessToken(token="sk-ant-oat01-x", expires_at=2**40)
+
+        with patch(
+            "ai_gateway.models.v2.anthropic_claude.anthropic_wif.credentials",
+            return_value=provider,
+        ):
+            model = ChatAnthropic(
+                async_client=AsyncAnthropic(api_key="shared-key"),
+                model="claude-fable-5-1",
+                workload_identity=params.model_dump(),
+            )
+            twin = ChatAnthropic(
+                async_client=AsyncAnthropic(api_key="shared-key"),
+                model="claude-fable-5-1",
+                workload_identity=params,
+            )
+
+        _workload_identity_client.cache_clear()
+
+        client = model._async_client
+        assert client.api_key is None
+        assert client.auth_headers == {}
+        assert client.credentials is provider
+        assert isinstance(client.custom_auth, AccessTokenAuth)
+        assert client.default_headers["anthropic-version"] == "2023-06-01"
+        assert client._token_cache is twin._async_client._token_cache
 
     @pytest.mark.parametrize(
         ("betas", "expected_header"),
