@@ -49,6 +49,12 @@
 # Workflow session prompts under ai/features/workflow/ are co-owned by Agent Observability (see work item 90)
 /ai/features/workflow/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
 
+# Security features under ai/features/
+/ai/features/security/ @gitlab-org/maintainers/duo-workflow-service
+
+# SkillGuard flow and prompts (Code Security)
+/ai/features/security/skillguard_scan/ @mbenayoun @mtolpin @philipcunningham
+
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude
 * @gitlab-org/maintainers/duo-workflow-service
@@ -96,6 +102,9 @@
 
 # Workflow session prompts under ai/features/workflow/
 /ai/features/workflow/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
+
+# SkillGuard flow and prompts (Code Security)
+/ai/features/security/skillguard_scan/ @mbenayoun @mtolpin @philipcunningham
 
 # Fix Pipeline prompts and response schemas
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend

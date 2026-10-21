@@ -1687,6 +1687,52 @@ graph TD;
     classDef last fill:#bfb6fc;
 ```
 
+## Graph: `skillguard_scan 1.0.0 (v1)` (Flow Registry)
+
+```mermaid
+---
+config:
+    flowchart:
+        curve: linear
+---
+graph TD;
+    __start__(__start__):::first;
+    __end__(__end__):::last;
+    __start__ --> setup_tools;
+    setup_tools(setup_tools<br>#91;DeterministicStepComponent#93;);
+    discover_and_deterministic(discover_and_deterministic<br>#91;DeterministicStepComponent#93;);
+    fact_check_supervisor(fact_check_supervisor<br>#91;AgentComponent#93;<br>max_delegations: 100);
+    fact_check_agent(fact_check_agent<br>#91;AgentComponent#93;):::subagent;
+    companion_scan(companion_scan<br>#91;DeterministicStepComponent#93;);
+    purpose_supervisor(purpose_supervisor<br>#91;AgentComponent#93;<br>max_delegations: 100);
+    purpose_agent(purpose_agent<br>#91;AgentComponent#93;):::subagent;
+    audit_supervisor(audit_supervisor<br>#91;AgentComponent#93;<br>max_delegations: 100);
+    audit_agent(audit_agent<br>#91;AgentComponent#93;):::subagent;
+    judge_supervisor(judge_supervisor<br>#91;AgentComponent#93;<br>max_delegations: 100);
+    judge_agent(judge_agent<br>#91;AgentComponent#93;):::subagent;
+    generate_report(generate_report<br>#91;DeterministicStepComponent#93;);
+    fact_check_supervisor <-.->|"subagent"| fact_check_agent;
+    purpose_supervisor <-.->|"subagent"| purpose_agent;
+    audit_supervisor <-.->|"subagent"| audit_agent;
+    judge_supervisor <-.->|"subagent"| judge_agent;
+    setup_tools -.->|"success"| discover_and_deterministic;
+    setup_tools -.->|"default_route"| abort;
+    discover_and_deterministic -.->|"success"| fact_check_supervisor;
+    discover_and_deterministic -.->|"default_route"| abort;
+    fact_check_supervisor --> companion_scan;
+    companion_scan -.->|"success"| purpose_supervisor;
+    companion_scan -.->|"default_route"| abort;
+    purpose_supervisor --> audit_supervisor;
+    audit_supervisor --> judge_supervisor;
+    judge_supervisor --> generate_report;
+    generate_report -.->|"success"| __end__;
+    generate_report -.->|"default_route"| abort;
+    classDef default fill:#f2f0ff,line-height:1.2;
+    classDef first fill-opacity:0;
+    classDef last fill:#bfb6fc;
+    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;
+```
+
 ## Graph: `slack_assistant 1.0.0 (v1)` (Flow Registry)
 
 ```mermaid
