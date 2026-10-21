@@ -140,12 +140,13 @@ make lint
 make format
 
 # Individual linters
-make check-ruff          # Ruff lint + format check (replaces flake8/black/isort)
-make check-pylint        # Code analysis
+make check-ruff          # Ruff lint + format check
+make check-pylint        # Custom pylint checkers only (ruff owns general rules)
 make check-mypy          # Type checking
 make check-codespell     # Spell checking
 make check-docformatter  # Docstring formatting
 make check-editorconfig  # Editorconfig conformance
+make check-yamllint      # YAML linting
 make check-graphql       # GraphQL schema validation
 make lint-proto          # buf lint for protobuf contracts
 
@@ -269,7 +270,7 @@ poetry run validate-model-selection-config
 
 - **Line length**: `ruff format` targets 88 characters (default); not hard-enforced as a lint error (`E501` is ignored) — Pylint and docformatter allow up to 120 characters
 - **Import sorting**: Handled by Ruff's `isort`-compatible rule group (`I`), configured in `[tool.ruff.lint.isort]`
-- **Code formatter**: `ruff format` (replaced Black; migration tracked in work item #2237)
+- **Code formatter**: `ruff format`
 - **Docstrings**: Google-style, formatted with `docformatter` (max 120 chars)
 - **Indentation**: `check-editorconfig` requires every line of a `.py` file to be indented in multiples of 4,
   including lines inside multi-line string literals; build such text from single-line strings instead
@@ -467,9 +468,12 @@ Lefthook automatically runs on commit (skipped on `main`), scoped to staged file
 
 1. **Python files** (`*.py`): `check-mypy`, `check-ruff`, `check-pylint`, `check-codespell`, `check-docformatter`, `check-editorconfig`
 1. **GraphQL files** (`*.graphql`): `check-graphql`
+1. **YAML files** (`*.yml`, `*.yaml`): `check-yamllint`
 1. **Proto files** (`contract/*.proto`): `lint-proto` (buf lint)
-1. **Markdown files** (`*.md`): vale and markdownlint
+1. **Markdown files** (`*.md`): `lint-doc` (vale, markdownlint, lychee)
 1. **All other files**: `check-codespell`, `check-editorconfig`
+1. **Path-scoped checks**: `check-legacy-roots` when legacy prompt or flow roots change, and
+   `check-duo-workflow-flow-schema` when flow config or schema sources change
 1. **Pre-push**: `lint-commit` validates commit messages with `commitlint` against `main`
 
 **Before committing**:
