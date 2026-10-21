@@ -464,6 +464,12 @@ Lefthook automatically runs on commit (skipped on `main`), scoped to staged file
 1. **All other files**: `check-codespell`, `check-editorconfig`
 1. **Pre-push**: `lint-commit` validates commit messages with `commitlint` against `main`
 
+`lint-commit` checks every commit since the merge base, not only the ones you
+push. If it fails only on commits already on the remote branch that you didn't
+author, push with `LEFTHOOK_EXCLUDE=lint-commit git push ...` (other hooks still
+run) and report that CI `lint:commit` will keep failing until those commits are
+reworded, which rewrites history and needs the author's approval.
+
 **Before committing**:
 
 ```shell
