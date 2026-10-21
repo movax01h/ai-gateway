@@ -143,6 +143,27 @@ class TestUserAccessTokenInstanceIdSelfManaged:
 
             assert decoded["gitlab_instance_uid"] == "cdot-uid"
 
+    class TestCustomersDotTokenWithoutInstanceUid:
+        @pytest.fixture(name="auth_user")
+        def auth_user_fixture(self):
+            claims = UserClaims(
+                scopes=["complete_code", "ai_gateway_model_provider_proxy"],
+                gitlab_realm="self-managed",
+                issuer="https://customers.gitlab.com",
+                subject="instance-reported-subject",
+                gitlab_instance_uid="",
+                gitlab_instance_id="1234",
+            )
+            return CloudConnectorUser(authenticated=True, claims=claims)
+
+        def test_minted_token_carries_no_instance_uid(
+            self, mock_client: TestClient, mock_track_internal_event
+        ):
+            decoded = TestUserAccessTokenInstanceIdSelfManaged._mint(mock_client)
+
+            assert decoded["sub"] == GLOBAL_USER_ID
+            assert decoded.get("gitlab_instance_uid") is None
+
 
 class TestUserAccessTokenSuccessSelfManaged:
     @pytest.fixture(name="auth_user")

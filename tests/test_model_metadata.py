@@ -762,6 +762,19 @@ class TestBedrockIamRole:
 
         assume.assert_not_called()
 
+    def test_subject_of_a_customers_dot_token_is_never_the_external_id(self, assume):
+        user = self._user(
+            instance_uid="",
+            subject=INSTANCE_UID,
+            issuer="https://customers.gitlab.com",
+        )
+
+        with pytest.raises(AssumeRoleError) as exc_info:
+            self._bedrock_metadata(user=user, iam_role=ROLE_ARN).to_params()
+
+        assert exc_info.value.error_code == "MissingInstanceId"
+        assume.assert_not_called()
+
     @pytest.mark.parametrize("instance_uid", ["has a space", "non-ascii-\u00e9", "x"])
     def test_malformed_instance_id_is_an_assume_role_error(self, assume, instance_uid):
         user = self._user(instance_uid=instance_uid)
