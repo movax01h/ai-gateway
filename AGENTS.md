@@ -193,7 +193,9 @@ unverified.
 `check-mypy` type-checks the whole repo (`LINT_WORKING_DIR`: `ai_gateway`,
 `duo_workflow_service`, `tests`, and more) and typically exceeds the ~120s
 per-command timeout in a sandbox. Scope it to the files you changed so it
-completes while keeping the Makefile's `--exclude` flags:
+completes while keeping the Makefile's `--exclude` flags. For scoped
+docformatter checks, pass a directory to `LINT_WORKING_DIR`, not a single file;
+the Makefile runs docformatter recursively (`-r`).
 
 ```shell
 CI=true make check-mypy LINT_WORKING_DIR="path/to/changed_file.py"
