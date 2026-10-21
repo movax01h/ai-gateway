@@ -2464,7 +2464,7 @@ class TestWebSearchAuditEvent:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("block", "audits"),
+        ("block", "event_type"),
         [
             pytest.param(
                 {
@@ -2473,18 +2473,8 @@ class TestWebSearchAuditEvent:
                     "name": "web_search",
                     "input": {"query": "gitlab duo"},
                 },
-                True,
-                id="anthropic-search",
-            ),
-            pytest.param(
-                {
-                    "type": "web_search_call",
-                    "id": "ws_1",
-                    "status": "completed",
-                    "action": {"type": "search", "query": "urllib3 CVE"},
-                },
-                True,
-                id="openai-search",
+                AuditEventType.AI_WEB_SEARCH_INVOKED,
+                id="search",
             ),
             pytest.param(
                 {
@@ -2493,8 +2483,8 @@ class TestWebSearchAuditEvent:
                     "name": "web_fetch",
                     "input": {"url": "https://x"},
                 },
-                False,
-                id="web-fetch-is-not-a-search",
+                AuditEventType.AI_WEB_FETCH_INVOKED,
+                id="fetch",
             ),
             pytest.param(
                 {
@@ -2503,40 +2493,97 @@ class TestWebSearchAuditEvent:
                     "name": "web_search",
                     "input": {"query": "gitlab duo"},
                 },
-                False,
+                None,
                 id="fallback-tool-is-audited-by-the-tool-itself",
             ),
         ],
     )
-    async def test_audits_searches_only(self, chat_agent, collector, block, audits):
+    async def test_audits_native_web_calls_only(
+        self, chat_agent, collector, block, event_type
+    ):
         await chat_agent._build_response(
             AIMessage(content=[block], id="agent-msg-id"), {"conversation_history": {}}
         )
 
-        assert len(self._captured(collector)) == (1 if audits else 0)
+        assert [event.event_type for event in self._captured(collector)] == (
+            [event_type] if event_type else []
+        )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("block", "field", "value"),
+        [
+            pytest.param(
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_search",
+                    "input": {"query": "gitlab duo"},
+                },
+                "search_source",
+                "native",
+                id="search",
+            ),
+            pytest.param(
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_fetch",
+                    "input": {"url": "https://x"},
+                },
+                "url",
+                "https://x",
+                id="fetch",
+            ),
+        ],
+    )
     async def test_event_carries_session_and_model_identity(
-        self, chat_agent, collector
+        self, chat_agent, collector, block, field, value
     ):
         metadata = Mock()
         metadata.llm_definition.provider = "Gemini Enterprise Agent Platform"
         model_token = current_model_metadata_context.set(metadata)
         try:
             await chat_agent._build_response(
-                _web_search_ai_message(), {"conversation_history": {}}
+                AIMessage(
+                    content=[block],
+                    id="agent-msg-id",
+                    response_metadata={"model_name": "claude-haiku-4-5"},
+                ),
+                {"conversation_history": {}},
             )
         finally:
             current_model_metadata_context.reset(model_token)
 
-        event = self._captured(collector)[0]
-        assert event.event_type == AuditEventType.AI_WEB_SEARCH_INVOKED
+        [event] = self._captured(collector)
         assert event.workflow_id == "42"
-        assert (event.model_name, event.provider, event.search_source) == (
+        assert (event.model_name, event.provider, getattr(event, field)) == (
             "claude-haiku-4-5",
             "Gemini Enterprise Agent Platform",
-            "native",
+            value,
         )
+
+    @pytest.mark.asyncio
+    async def test_skips_find_in_page_on_an_audited_url(self, chat_agent, collector):
+        def call(action):
+            return {"type": "web_search_call", "status": "completed", "action": action}
+
+        blocks = [
+            call({"type": "open_page", "url": "https://x"}),
+            call({"type": "open_page", "url": "https://x"}),
+            call({"type": "find_in_page", "url": "https://x", "pattern": "CVE"}),
+            call({"type": "find_in_page", "url": "https://y", "pattern": "CVE"}),
+            call({"type": "find_in_page", "pattern": "CVE"}),
+        ]
+        await chat_agent._build_response(
+            AIMessage(content=blocks, id="agent-msg-id"), {"conversation_history": {}}
+        )
+
+        assert [event.url for event in self._captured(collector)] == [
+            "https://x",
+            "https://x",
+            "https://y",
+        ]
 
     @pytest.mark.asyncio
     async def test_audits_every_search_in_one_message(self, chat_agent, collector):

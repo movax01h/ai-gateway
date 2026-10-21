@@ -23,6 +23,7 @@ from duo_workflow_service.audit_events.event_types import (
     ToolResponseReceivedEvent,
     UserInputReceivedEvent,
     UserOutputDisplayedEvent,
+    WebFetchInvokedEvent,
     WebSearchInvokedEvent,
 )
 from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
@@ -821,6 +822,7 @@ _TEXT_EVENTS = [
     LlmRequestFailedEvent(
         workflow_id="wf-1", model_name="m", error_type="Timeout", error_message=SECRET
     ),
+    WebFetchInvokedEvent(workflow_id="wf-1", model_name="m", provider="p", url=SECRET),
 ]
 
 

@@ -7,7 +7,8 @@ from duo_workflow_service.entities.server_tool_blocks import (
     ServerToolResults,
     _is_anthropic_server_tool_result_block,
     _is_anthropic_server_tool_use_block,
-    is_web_search_call,
+    fetched_url,
+    native_web_call,
     split_content_around_server_tools,
     warn_unmatched_server_tool_results,
 )
@@ -381,14 +382,13 @@ def test_split_content_around_server_tools_skips_empty_segments():
 @pytest.mark.parametrize(
     ("block", "expected"),
     [
-        ({"type": "server_tool_use", "name": "web_search", "input": {}}, True),
         (
             {
                 "type": "server_tool_use",
                 "name": "web_search",
                 "input": {"query": "gitlab duo"},
             },
-            True,
+            "web_search",
         ),
         (
             {
@@ -396,13 +396,18 @@ def test_split_content_around_server_tools_skips_empty_segments():
                 "name": "web_fetch",
                 "input": {"url": "https://x"},
             },
-            False,
+            "web_fetch",
         ),
-        ({"type": "web_search_call", "action": {"type": "search"}}, True),
+        ({"type": "server_tool_use", "name": "code_execution", "input": {}}, None),
+        ({"type": "web_search_call", "action": {"type": "search"}}, "web_search"),
         # An unmapped action falls back to `web_search`, matching the card builder.
-        ({"type": "web_search_call", "action": {"type": "unknown"}}, True),
-        ({"type": "web_search_call", "action": {"type": "open_page"}}, False),
-        ({"type": "tool_use", "name": "read_file", "input": {}}, False),
+        ({"type": "web_search_call", "action": {"type": "unknown"}}, "web_search"),
+        ({"type": "web_search_call", "action": {"type": "open_page"}}, "web_fetch"),
+        (
+            {"type": "web_search_call", "action": {"type": "find_in_page"}},
+            "find_in_page",
+        ),
+        ({"type": "tool_use", "name": "read_file", "input": {}}, None),
         # The fallback tool answers to the same name; only the type tells them apart.
         (
             {
@@ -411,13 +416,62 @@ def test_split_content_around_server_tools_skips_empty_segments():
                 "name": "web_search",
                 "input": {"query": "gitlab duo"},
             },
-            False,
+            None,
         ),
-        ({"name": "web_search", "input": {}}, False),
-        ({}, False),
-        ("a plain text block", False),
-        (None, False),
+        ({"name": "web_search", "input": {}}, None),
+        ({}, None),
+        ("a plain text block", None),
+        (None, None),
     ],
 )
-def test_is_web_search_call(block, expected):
-    assert is_web_search_call(block) is expected
+def test_native_web_call(block, expected):
+    assert native_web_call(block) == expected
+
+
+@pytest.mark.parametrize(
+    ("block", "expected"),
+    [
+        (
+            {
+                "type": "server_tool_use",
+                "name": "web_fetch",
+                "input": {"url": "https://x"},
+            },
+            "https://x",
+        ),
+        (
+            {
+                "type": "web_search_call",
+                "action": {"type": "open_page", "url": "https://x"},
+            },
+            "https://x",
+        ),
+        ({"type": "server_tool_use", "name": "web_fetch", "input": {}}, None),
+        (
+            {
+                "type": "server_tool_use",
+                "name": "web_fetch",
+                "input": {},
+                "partial_json": '{"url": "https://x"}',
+            },
+            "https://x",
+        ),
+        (
+            {
+                "type": "server_tool_use",
+                "name": "web_fetch",
+                "input": {},
+                "partial_json": '{"url": "https:',
+            },
+            None,
+        ),
+        ({"type": "web_search_call", "action": {"type": "open_page"}}, None),
+        ({"type": "server_tool_use", "name": "web_fetch", "input": {"url": 1}}, None),
+        (
+            {"type": "web_search_call", "action": {"type": "open_page", "url": {}}},
+            None,
+        ),
+    ],
+)
+def test_fetched_url(block, expected):
+    assert fetched_url(block) == expected

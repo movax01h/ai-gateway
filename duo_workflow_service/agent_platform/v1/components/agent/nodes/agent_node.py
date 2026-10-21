@@ -28,7 +28,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
-from duo_workflow_service.audit_events.web_search import capture_web_searches
+from duo_workflow_service.audit_events.web_tools import capture_native_web_calls
 from duo_workflow_service.checkpointer.write_mode import (
     compaction_ui_chat_log_update,
 )
@@ -687,7 +687,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 ):
                     self._emit_reasoning(completion)
 
-                capture_web_searches(
+                capture_native_web_calls(
                     completion.content,
                     completion.response_metadata.get("model_name"),
                 )

@@ -23,7 +23,7 @@ from duo_workflow_service.agents.tool_call_validator import (
     validate_tool_calls,
 )
 from duo_workflow_service.agents.web_search import WebSearchState
-from duo_workflow_service.audit_events.web_search import capture_web_searches
+from duo_workflow_service.audit_events.web_tools import capture_native_web_calls
 from duo_workflow_service.checkpointer.write_mode import (
     compaction_ui_chat_log_update,
 )
@@ -346,7 +346,7 @@ class ChatAgent:
         }
 
         self._build_ui_chat_log(agent_response, state, result)
-        capture_web_searches(
+        capture_native_web_calls(
             agent_response.content,
             agent_response.response_metadata.get("model_name"),
         )

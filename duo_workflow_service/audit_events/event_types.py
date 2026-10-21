@@ -32,6 +32,7 @@ class AuditEventType(str, Enum):
     AI_TOOL_EXECUTION_RETRIED = auto()
     AI_LLM_REQUEST_FAILED = auto()
     AI_WEB_SEARCH_INVOKED = auto()
+    AI_WEB_FETCH_INVOKED = auto()
 
 
 class AuditEvent(BaseModel):
@@ -173,3 +174,10 @@ class WebSearchInvokedEvent(AuditEvent):
     provider: str
     search_source: str
     """`native` when the model searched itself, `agentcore` when our tool did."""
+
+
+class WebFetchInvokedEvent(AuditEvent):
+    event_type: AuditEventType = AuditEventType.AI_WEB_FETCH_INVOKED
+    model_name: str
+    provider: str
+    url: Optional[str] = None

@@ -39,7 +39,9 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ai_gateway.models.v2.web_search_support import supports_native_web_search
-from duo_workflow_service.audit_events.web_search import capture_web_search_invoked
+from duo_workflow_service.audit_events.context import get_audit_collector
+from duo_workflow_service.audit_events.event_types import WebSearchInvokedEvent
+from duo_workflow_service.audit_events.web_tools import current_model
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from lib.context import current_model_metadata_context
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
@@ -529,7 +531,19 @@ class AgentCoreWebSearch(DuoBaseTool):
 
     def _audit_web_search(self) -> None:
         """Emitted on top of `ai_tool_invoked`, so both search paths share one event name."""
-        capture_web_search_invoked("agentcore")
+        collector = get_audit_collector()
+        if collector is None:
+            return
+
+        model_name, provider = current_model()
+        collector.capture(
+            WebSearchInvokedEvent(
+                workflow_id=collector.workflow_id,
+                model_name=model_name,
+                provider=provider,
+                search_source="agentcore",
+            )
+        )
 
     def format_display_message(
         self, args: WebSearchInput, _tool_response: Any = None
