@@ -174,7 +174,8 @@ ruff-fix: install-lint-deps
 .PHONY: docformatter
 docformatter: install-lint-deps
 	@echo "Running docformatter format..."
-	@poetry run docformatter -i -r ${LINT_WORKING_DIR}
+	@# docformatter exits 3 when it rewrote files; only other codes are failures.
+	@poetry run docformatter -i -r ${LINT_WORKING_DIR} || [ $$? -eq 3 ]
 
 .PHONY: check-model-selection
 check-model-selection:
