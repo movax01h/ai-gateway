@@ -113,7 +113,7 @@ class BaseComponent(BaseModel, ABC):
 
 class EndComponent(BaseComponent):
     # The status the terminal writes. ``COMPLETED`` ends the session; an
-    # environment that ends only the turn seeds ``INPUT_REQUIRED`` instead.
+    # environment that ends only the turn seeds ``IDLE`` instead.
     status: WorkflowStatusEnum = WorkflowStatusEnum.COMPLETED
 
     @override

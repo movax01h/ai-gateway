@@ -2374,6 +2374,11 @@ async def test_aput_writes_with_interrupt(gitlab_workflow, http_client):
             WorkflowStatusEventEnum.REQUIRE_INPUT,
             _FlushPoint.ON_NEXT_CHECKPOINT,
         ),
+        (
+            WorkflowStatusEnum.IDLE,
+            WorkflowStatusEventEnum.IDLE,
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+        ),
     ],
 )
 async def test_aput_writes_defers_status_until_checkpoint_saved(
@@ -2920,6 +2925,7 @@ async def test_created_status_with_existing_checkpoint_raises_error(
         WorkflowStatusEnum.FINISHED,
         WorkflowStatusEnum.STOPPED,
         WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.IDLE,
         WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
         WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
     ],
@@ -3443,6 +3449,7 @@ async def test_archived_workflow_raises_error(
         ("running", WorkflowStatusEventEnum.RETRY),
         ("failed", WorkflowStatusEventEnum.RETRY),
         ("input_required", WorkflowStatusEventEnum.RESUME),
+        ("idle", WorkflowStatusEventEnum.RESUME),
         ("stopped", WorkflowStatusEventEnum.STOP_RECOVERY),
     ],
 )
@@ -3552,6 +3559,7 @@ async def test_track_workflow_completion_omits_tracking_when_absent(
         WorkflowStatusEnum.FINISHED,
         WorkflowStatusEnum.STOPPED,
         WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.IDLE,
         WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
         WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
     ],
@@ -3597,11 +3605,20 @@ async def test_track_workflow_completion_with_billing_event_includes_tool_names(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [
+        pytest.param("finished", id="finished"),
+        # The run that ends IDLE is a whole turn of a session that stays open.
+        pytest.param(WorkflowStatusEnum.IDLE, id="idle"),
+    ],
+)
 async def test_track_workflow_completion_fires_orbit_session_summary(
     gitlab_workflow,
     internal_event_client,
     workflow_id,
     workflow_type,
+    status,
 ):
     """Test that orbit_dap_session_summary fires when orbit tools were used."""
     from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
@@ -3611,7 +3628,7 @@ async def test_track_workflow_completion_fires_orbit_session_summary(
     orbit_tool_call_count.set(3)
     total_tool_call_count.set(7)
 
-    await gitlab_workflow._track_workflow_completion("finished")
+    await gitlab_workflow._track_workflow_completion(status)
 
     assert internal_event_client.track_event.call_count == 2
 
@@ -3654,7 +3671,10 @@ async def test_track_workflow_completion_skips_orbit_summary_when_no_orbit_calls
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "pause_status",
-    [WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED],
+    [
+        WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+    ],
 )
 async def test_track_workflow_completion_skips_orbit_summary_on_pause(
     gitlab_workflow,
@@ -3686,6 +3706,8 @@ async def test_track_workflow_completion_skips_orbit_summary_on_pause(
         # A gracefully handled user stop raises nothing, so only the Rails status
         # distinguishes it from a normal finish.
         pytest.param("stopped", "stopped", id="stopped"),
+        # A turn that ends with the session still open is reported per turn.
+        pytest.param(WorkflowStatusEnum.IDLE, "idle", id="idle"),
     ],
 )
 async def test_track_workflow_completion_fires_tool_loop_session_summary(
@@ -6164,6 +6186,61 @@ async def test_update_workflow_status_translates_stop_recovery_to_retry(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "declared_capabilities,expected_rails_event",
+    [
+        ({"idle_status_event"}, WorkflowStatusEventEnum.IDLE),
+        (set(), WorkflowStatusEventEnum.REQUIRE_INPUT),
+        ({"idle_status"}, WorkflowStatusEventEnum.REQUIRE_INPUT),
+    ],
+    ids=[
+        "instance_accepting_idle_gets_idle",
+        "older_instance_gets_require_input",
+        "client_capability_alone_gets_require_input",
+    ],
+)
+async def test_update_workflow_status_projects_idle_per_instance(
+    gitlab_workflow, workflow_id, declared_capabilities, expected_rails_event
+):
+    """Rails only receives the `idle` status event when the instance advertises it accepts it."""
+    gitlab_workflow._status_handler = AsyncMock()
+    capabilities_token = client_capabilities.set(declared_capabilities)
+    version_token = gitlab_version.set("19.6.0")
+    try:
+        await gitlab_workflow._update_workflow_status(WorkflowStatusEventEnum.IDLE)
+    finally:
+        client_capabilities.reset(capabilities_token)
+        gitlab_version.reset(version_token)
+
+    gitlab_workflow._status_handler.update_workflow_status.assert_called_once_with(
+        workflow_id, expected_rails_event
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status", [WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEnum.IDLE]
+)
+async def test_track_workflow_completion_tracks_pause_awaiting_input(
+    gitlab_workflow, internal_event_client: Mock, status
+):
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._billing_event_service = Mock()
+
+    await gitlab_workflow._track_workflow_completion(status)
+
+    internal_event_client.track_event.assert_called_once()
+    call_kwargs = internal_event_client.track_event.call_args[1]
+    assert call_kwargs["event_name"] == EventEnum.WORKFLOW_PAUSE.value
+    additional_props = call_kwargs["additional_properties"]
+    assert additional_props.label == EventLabelEnum.WORKFLOW_PAUSE_LABEL.value
+    assert (
+        additional_props.property
+        == EventPropertyEnum.WORKFLOW_PAUSE_BY_PLAN_AWAIT_INPUT.value
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "status_code,body",
     [
         (404, []),
@@ -6851,8 +6928,9 @@ async def test_aput_writes_reports_a_blocked_session_from_a_nested_lineage(
             WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
             WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
         ),
+        (WorkflowStatusEnum.IDLE, WorkflowStatusEventEnum.IDLE),
     ],
-    ids=["input_required", "tool_call_approval", "plan_approval"],
+    ids=["input_required", "tool_call_approval", "plan_approval", "idle"],
 )
 async def test_aput_writes_defers_an_awaiting_status_from_a_nested_lineage(
     gitlab_workflow, http_client, workflow_id, status, expected_event

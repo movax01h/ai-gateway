@@ -52,9 +52,9 @@ from duo_workflow_service.checkpointer.entry_dispatch import (
     rails_status_dispatch,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    AT_REST_STATUSES,
     BILLABLE_STATUSES,
     CHECKPOINT_STATUS_TO_STATUS_EVENT,
-    INTERNAL_TO_RAILS_STATUS_EVENT,
     NOOP_WORKFLOW_STATUSES,
     STATUS_TO_EVENT_PROPERTY,
     TERMINAL_WORKFLOW_STATUS_EVENTS,
@@ -87,6 +87,7 @@ from duo_workflow_service.gitlab.http_client import (
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.json_encoder.encoder import dumps_checkpoint
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.status_projection import rails_status_event
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     ForbiddenStatusEvent,
     GitLabStatusUpdater,
@@ -521,7 +522,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         if self._offline_mode:
             return
 
-        rails_status = INTERNAL_TO_RAILS_STATUS_EVENT.get(status, status)
+        rails_status = rails_status_event(status)
         await self._status_handler.update_workflow_status(
             self._workflow_id, rails_status
         )
@@ -798,11 +799,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         ``status`` is the Rails status, passed on the clean path only. A user stop
         that the graph handles gracefully raises nothing, so it arrives here with
         no exception and is indistinguishable from a normal finish by exception
-        alone -- only the status tells the two apart.
+        alone -- only the status tells the two apart. ``idle`` marks a turn that
+        ended with the session still open, so it is not a session ending.
         """
         if not exc_type:
             if status == "stopped":
                 return "stopped"
+            if status == WorkflowStatusEnum.IDLE:
+                return "idle"
             return "success"
         if isinstance(exc_value, asyncio.exceptions.CancelledError):
             if str(exc_value) in (
@@ -1105,8 +1109,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # Only fire session summaries on terminal statuses. Pause statuses
         # (INPUT_REQUIRED, PLAN_APPROVAL_REQUIRED) would produce partial summaries
         # because the counters are reset on each resume.
+        # IDLE is not a pause: the run that ends there is a whole turn, and a
+        # session that stays open would otherwise only report failed turns.
         # Non-resumable terminations (indicated by the presence of `exc_type`) also trigger a summary.
-        if status in ("finished", "stopped") or exc_type:
+        if status in ("finished", "stopped", WorkflowStatusEnum.IDLE) or exc_type:
             # label/property are intentionally omitted: they are validator-required
             # placeholders that will be dropped once the schema is published. See
             # orbit_dap_session_summary.yml and
@@ -1122,7 +1128,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
 
             self._track_tool_loop_session_summary(exc_type, exc_value, status=status)
 
-        if status == WorkflowStatusEnum.INPUT_REQUIRED:
+        if status in AT_REST_STATUSES:
             event = EventEnum.WORKFLOW_PAUSE
             label = EventLabelEnum.WORKFLOW_PAUSE_LABEL.value
             prop = EventPropertyEnum.WORKFLOW_PAUSE_BY_PLAN_AWAIT_INPUT.value
