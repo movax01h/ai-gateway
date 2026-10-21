@@ -968,3 +968,58 @@ async def test_interceptor_no_logs_when_all_fields_present(
 
         mock_log.warning.assert_not_called()
         mock_log.info.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra_claims,header,expected",
+    [
+        pytest.param(
+            {"feature_enablement_type": "duo_pro"},
+            "duo_core",
+            "duo_pro",
+            id="claim_used",
+        ),
+        pytest.param(
+            {"feature_enablement_type": ""},
+            "duo_pro",
+            "",
+            id="empty_claim_used",
+        ),
+        pytest.param({}, "duo_pro", "duo_pro", id="absent_claim_falls_back_to_header"),
+        pytest.param(None, "duo_pro", "duo_pro", id="no_claims_uses_header"),
+        pytest.param({}, None, None, id="absent_claim_and_header"),
+    ],
+)
+async def test_interceptor_feature_enablement_type_from_jwt_claim(
+    interceptor,
+    mock_continuation,
+    extra_claims,
+    header,
+    expected,
+):
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=[],
+            subject="1234",
+            gitlab_realm="saas",
+            gitlab_instance_uid="00000000-1111-2222-3333-000000000000",
+            extra=extra_claims,
+        ),
+    )
+    metadata = {
+        "x-gitlab-realm": "saas",
+        "x-gitlab-instance-id": "test-instance-id",
+        "x-gitlab-global-user-id": "test-global-user-id",
+        "x-gitlab-host-name": "test-gitlab-host",
+    }
+    if header is not None:
+        metadata["x-gitlab-feature-enablement-type"] = header
+
+    handler_call_details = create_handler_call_details(metadata)
+    current_user.set(user)
+
+    await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    assert current_event_context.get().feature_enablement_type == expected

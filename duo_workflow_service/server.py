@@ -177,7 +177,7 @@ from lib.internal_events.context import (
     merge_event_context_extra,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
-from lib.jwt import instance_uid_claim
+from lib.jwt import FEATURE_ENABLEMENT_TYPE_CLAIM, instance_uid_claim
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
@@ -202,6 +202,7 @@ RESTRICTED_FLOW_INSTANCE_UIDS_ENV = "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
     BINDS_WORKFLOW_CLAIM,
+    FEATURE_ENABLEMENT_TYPE_CLAIM,
     "tool_access_policies",
     "gitlab_root_namespace_id",
 }
