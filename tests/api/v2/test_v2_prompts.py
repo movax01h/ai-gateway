@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain_core.messages.ai import AIMessage, UsageMetadata
 from pydantic import AnyUrl
+from structlog.testing import capture_logs
 
 from ai_gateway.api.v2 import api_router
 from ai_gateway.model_metadata import (
@@ -397,6 +398,28 @@ class TestNonStreamedEmptyTokenUsage:
 
         assert response.status_code == 200
         assert "usage" not in response.json()
+
+
+@pytest.mark.usefixtures("frozen_datetime_now", "mock_registry_get")
+class TestPromptFeatureCategory:
+    @pytest.fixture(name="unit_primitive")
+    def unit_primitive_fixture(self):
+        return GitLabUnitPrimitive.EXPLAIN_VULNERABILITY
+
+    def test_category_of_prompt_unit_primitive(self, mock_client):
+        with capture_logs() as cap_logs:
+            response = mock_client.post(
+                "/prompts/test",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                },
+                json={"inputs": {"name": "John", "age": 20}},
+            )
+
+        assert response.status_code == 200
+        [access_log] = [log for log in cap_logs if log.get("method") == "POST"]
+        assert access_log.get("meta.feature_category") == "vulnerability_management"
 
 
 class TestUnauthorizedScopes:

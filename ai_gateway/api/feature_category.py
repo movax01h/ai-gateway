@@ -3,6 +3,7 @@ import typing
 
 from fastapi import HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
+from gitlab_cloud_connector.data_model import CloudConnectorCatalog, load_catalog
 from starlette_context import context
 
 X_GITLAB_UNIT_PRIMITIVE = "x-gitlab-unit-primitive"
@@ -14,6 +15,15 @@ _UNKNOWN_FEATURE_CATEGORY = "unknown"
 # Attribute set on decorated endpoints so the declared categories can be inspected without a request.
 # `functools.wraps` copies it to any decorator applied on top.
 _FEATURE_CATEGORIES_ATTR = "_gitlab_feature_categories"
+
+# Loaded once per process, like `_config` in `ai_gateway/config.py`: `load_catalog` parses every unit primitive
+# definition on each call.
+_catalog = load_catalog()
+
+
+def get_catalog() -> CloudConnectorCatalog:
+    """Get the Cloud Connector catalog, loaded once per process."""
+    return _catalog
 
 
 def feature_category(name: GitLabFeatureCategory):
@@ -92,6 +102,20 @@ def feature_categories(mapping: dict[GitLabUnitPrimitive, GitLabFeatureCategory]
         return wrapper
 
     return decorator
+
+
+def set_feature_category_for_unit_primitive(
+    unit_primitive: GitLabUnitPrimitive,
+) -> None:
+    """Record the feature category that owns a unit primitive in the request context.
+
+    The category comes from the Cloud Connector catalog, so it may not be a `GitLabFeatureCategory` member. If the
+    catalog has no entry for the unit primitive, the current category is left unchanged.
+    """
+    for definition in get_catalog().unit_primitives:
+        if definition.name == unit_primitive:
+            context[_CATEGORY_CONTEXT_KEY] = definition.feature_category
+            return
 
 
 def get_feature_categories(
