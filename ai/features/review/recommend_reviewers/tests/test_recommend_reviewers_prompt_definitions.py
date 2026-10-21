@@ -6,15 +6,15 @@ copied from an older template dropping the opt-out.
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
 
+from ai_gateway.prompts import feature_roots
 from ai_gateway.prompts.base import jinja_env
 
-_PROMPTS_DEFINITIONS_DIR = (
-    Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
-)
+_REVIEW_FEATURES_DIR = Path(__file__).parent.parent.parent
 
 _RECOMMEND_REVIEWERS_PROMPT_DIRS = [
     "recommend_reviewers_assign",
@@ -22,10 +22,19 @@ _RECOMMEND_REVIEWERS_PROMPT_DIRS = [
 ]
 
 
+@pytest.fixture(name="discover_prompts", autouse=True)
+def discover_prompts_fixture():
+    # The prompts live under ai/features/, which the registry registers at startup.
+    # Restore the registry so other tests keep the roots they set up themselves.
+    with patch.dict(feature_roots._FEATURE_PROMPT_ROOTS):
+        feature_roots.discover_feature_prompts()
+        yield
+
+
 def _collect_base_yaml_files() -> list[Path]:
     files: list[Path] = []
     for prompt_dir in _RECOMMEND_REVIEWERS_PROMPT_DIRS:
-        base_dir = _PROMPTS_DEFINITIONS_DIR / prompt_dir / "base"
+        base_dir = _REVIEW_FEATURES_DIR / prompt_dir / "prompts" / "base"
         files.extend(sorted(base_dir.glob("*.yml")))
     return files
 
@@ -36,14 +45,14 @@ _BASE_YAML_FILES = _collect_base_yaml_files()
 def test_every_recommend_reviewers_dir_has_base_yaml() -> None:
     """Fail loudly instead of silently skipping the parametrized test if a directory moves."""
     for prompt_dir in _RECOMMEND_REVIEWERS_PROMPT_DIRS:
-        base_dir = _PROMPTS_DEFINITIONS_DIR / prompt_dir / "base"
+        base_dir = _REVIEW_FEATURES_DIR / prompt_dir / "prompts" / "base"
         assert list(base_dir.glob("*.yml")), f"no base YAML under {prompt_dir}/base"
 
 
 @pytest.mark.parametrize(
     "yaml_file",
     _BASE_YAML_FILES,
-    ids=[f.relative_to(_PROMPTS_DEFINITIONS_DIR).as_posix() for f in _BASE_YAML_FILES],
+    ids=[f.relative_to(_REVIEW_FEATURES_DIR).as_posix() for f in _BASE_YAML_FILES],
 )
 def test_recommend_reviewers_prompt_has_cache_control_injection_points_disabled(
     yaml_file: Path,
@@ -52,7 +61,7 @@ def test_recommend_reviewers_prompt_has_cache_control_injection_points_disabled(
     content = yaml.safe_load(yaml_file.read_text())
     params = content.get("params", {})
     assert params.get("cache_control_injection_points") == [], (
-        f"{yaml_file.relative_to(_PROMPTS_DEFINITIONS_DIR)} must have "
+        f"{yaml_file.relative_to(_REVIEW_FEATURES_DIR)} must have "
         "'params.cache_control_injection_points: []' to disable prompt caching"
     )
 
