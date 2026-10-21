@@ -97,7 +97,12 @@ def _qualified_config_id(config_path: Path) -> str:
     ``experimental`` ship a ``fix_pipeline/1.0.0``, so the shorter id is ambiguous for any
     sweep spanning both generations.
     """
-    return f"{config_path.parents[3].name}/{config_path.parent.name}/{config_path.stem}"
+    generation = (
+        "experimental"
+        if config_path.is_relative_to(ExperimentalFlowConfig.DIRECTORY_PATH)
+        else "v1"
+    )
+    return f"{generation}/{_config_id(config_path)}"
 
 
 def _component_names(config: dict) -> set[str]:
