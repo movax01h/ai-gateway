@@ -576,7 +576,7 @@ configurable_unit_primitives:
   - feature_setting: "review_merge_request_dap_deep"
     unit_primitives: []
     default_models:
-      - identifier: "claude_sonnet_5_5_vertex"
+      - identifier: "claude_sonnet_5_vertex"
     selectable_models:
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
