@@ -63,6 +63,7 @@ __all__ = [
     "attachment_rejection_block",
     "parse_attachments",
     "partition_attachment_envelopes",
+    "payload_matches_mime_type",
     "split_attachment_envelopes",
     "with_attachment_references",
 ]
@@ -149,6 +150,16 @@ _MAGIC_NUMBERS: dict[str, Callable[[bytes], bool]] = {
 }
 
 
+def payload_matches_mime_type(payload: bytes, mime_type: str) -> bool:
+    """Whether *payload* starts like the format *mime_type* declares.
+
+    A ``mime_type`` with no recogniser returns ``False``, so callers that accept
+    only known formats gate on ``ALLOWED_IMAGE_MIME_TYPES`` first.
+    """
+    recogniser = _MAGIC_NUMBERS.get(mime_type)
+    return recogniser is not None and recogniser(payload)
+
+
 def _clean_filename(raw: Any, index: int) -> Optional[str]:
     """Return *raw* reduced to something safe to put in a prompt, a log and the transcript.
 
@@ -216,8 +227,7 @@ def _verify_declared_type(payload: bytes, mime_type: str, filename: str) -> None
     Raises:
         ValueError: If the payload does not match its declared media type.
     """
-    recogniser = _MAGIC_NUMBERS.get(mime_type)
-    if recogniser is None or recogniser(payload):
+    if mime_type not in _MAGIC_NUMBERS or payload_matches_mime_type(payload, mime_type):
         return
 
     raise ValueError(

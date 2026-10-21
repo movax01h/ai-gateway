@@ -2,11 +2,8 @@ import functools
 import typing
 
 from fastapi import HTTPException, Request, status
-from gitlab_cloud_connector import (
-    FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS,
-    GitLabFeatureCategory,
-    GitLabUnitPrimitive,
-)
+from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
+from gitlab_cloud_connector.data_model import CloudConnectorCatalog, load_catalog
 from starlette_context import context
 
 X_GITLAB_UNIT_PRIMITIVE = "x-gitlab-unit-primitive"
@@ -14,6 +11,19 @@ X_GITLAB_UNIT_PRIMITIVE = "x-gitlab-unit-primitive"
 _CATEGORY_CONTEXT_KEY = "meta.feature_category"
 _UNIT_PRIMITIVE_CONTEXT_KEY = "meta.unit_primitive"
 _UNKNOWN_FEATURE_CATEGORY = "unknown"
+
+# Attribute set on decorated endpoints so the declared categories can be inspected without a request.
+# `functools.wraps` copies it to any decorator applied on top.
+_FEATURE_CATEGORIES_ATTR = "_gitlab_feature_categories"
+
+# Loaded once per process, like `_config` in `ai_gateway/config.py`: `load_catalog` parses every unit primitive
+# definition on each call.
+_catalog = load_catalog()
+
+
+def get_catalog() -> CloudConnectorCatalog:
+    """Get the Cloud Connector catalog, loaded once per process."""
+    return _catalog
 
 
 def feature_category(name: GitLabFeatureCategory):
@@ -36,6 +46,7 @@ def feature_category(name: GitLabFeatureCategory):
             context[_CATEGORY_CONTEXT_KEY] = name
             return await func(*args, **kwargs)
 
+        setattr(wrapper, _FEATURE_CATEGORIES_ATTR, frozenset({name}))
         return wrapper
 
     return decorator
@@ -50,10 +61,10 @@ def feature_categories(mapping: dict[GitLabUnitPrimitive, GitLabFeatureCategory]
     Example:
 
     ```
-    @feature_category({
+    @feature_categories({
         GitLabUnitPrimitive.EXPLAIN_VULNERABILITY: GitLabFeatureCategory.VULNERABILITY_MANAGEMENT,
         GitLabUnitPrimitive.GENERATE_COMMIT_MESSAGE: GitLabFeatureCategory.CODE_REVIEW_WORKFLOW,
-    }
+    })
     ```
     """
     for category in mapping.values():
@@ -87,48 +98,34 @@ def feature_categories(mapping: dict[GitLabUnitPrimitive, GitLabFeatureCategory]
             context[_UNIT_PRIMITIVE_CONTEXT_KEY] = unit_primitive
             return await func(request, *args, **kwargs)
 
+        setattr(wrapper, _FEATURE_CATEGORIES_ATTR, frozenset(mapping.values()))
         return wrapper
 
     return decorator
 
 
-def track_metadata(request_param: str, mapping: dict[str, GitLabUnitPrimitive]):
-    """Track feature category and unit primitive from request path.
+def set_feature_category_for_unit_primitive(
+    unit_primitive: GitLabUnitPrimitive,
+) -> None:
+    """Record the feature category that owns a unit primitive in the request context.
 
-    Example:
-
-    ```
-    @track_metadata(
-        "chat_invokable",
-        mapping={
-            "explain_vulnerability": GitLabUnitPrimitive.EXPLAIN_VULNERABILITY,
-            "troubleshoot_job": GitLabUnitPrimitive.TROUBLESHOOT_JOB,
-        }
-    )
-    ```
+    The category comes from the Cloud Connector catalog, so it may not be a `GitLabFeatureCategory` member. If the
+    catalog has no entry for the unit primitive, the current category is left unchanged.
     """
+    for definition in get_catalog().unit_primitives:
+        if definition.name == unit_primitive:
+            context[_CATEGORY_CONTEXT_KEY] = definition.feature_category
+            return
 
-    def decorator(func: typing.Callable) -> typing.Callable:
-        @functools.wraps(func)
-        async def wrapper(
-            request: Request, *args: typing.Any, **kwargs: typing.Any
-        ) -> typing.Any:
-            request_param_val = request.path_params[request_param]
 
-            if request_param_val in mapping:
-                unit_primitive = mapping[request_param_val]
-                gitlab_feature_category = FEATURE_CATEGORIES_FOR_PROXY_ENDPOINTS[
-                    unit_primitive
-                ]
+def get_feature_categories(
+    endpoint: typing.Callable,
+) -> frozenset[GitLabFeatureCategory]:
+    """Get the feature categories declared on an endpoint with `feature_category` or `feature_categories`.
 
-                context[_CATEGORY_CONTEXT_KEY] = gitlab_feature_category.value
-                context[_UNIT_PRIMITIVE_CONTEXT_KEY] = unit_primitive.value
-
-            return await func(request, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
+    Returns an empty set if the endpoint declares none.
+    """
+    return getattr(endpoint, _FEATURE_CATEGORIES_ATTR, frozenset())
 
 
 def current_feature_category() -> str:

@@ -122,7 +122,7 @@ def mock_run_tool_node_class_fixture():
 @pytest.fixture(name="mock_log_exception")
 def mock_log_exception_fixture():
     with patch(
-        "duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.log_exception"
+        "duo_workflow_service.workflows.convert_to_gitlab_ci.workflow.log_workflow_failure"
     ) as mock:
         yield mock
 

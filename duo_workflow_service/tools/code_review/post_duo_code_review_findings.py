@@ -19,6 +19,7 @@ from duo_workflow_service.tools.code_review.findings import (
     build_review_payload,
     build_summary,
     render_previous_findings,
+    resolved_discussion_ids,
     select_findings,
     severity_counts,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "build_summary",
     "render_previous_findings",
     "select_findings",
+    "truncation_notice",
 ]
 
 
@@ -61,8 +63,16 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
         default=None,
         description=(
             "The reviewer's `previous_findings` array from a re-review. Each item "
-            "has file, status (fixed, verified, partially_fixed, still_outstanding) "
-            "and note. Rendered as a list only when something still needs attention."
+            "has file, status (fixed, verified, partially_fixed, still_outstanding, disputed), "
+            "note and optional discussion_id. Rendered as a list only when something still "
+            "needs attention."
+        ),
+    )
+    existing_discussions: Optional[Any] = Field(
+        default=None,
+        description=(
+            "The `list_mr_discussions` output the reviewer reconciled against. Previous "
+            "findings on threads it marks resolved are left out of the list."
         ),
     )
     min_confidence: int = Field(
@@ -73,6 +83,33 @@ class PostDuoCodeReviewFindingsInput(BaseModel):
             "clamped, so a misconfigured threshold stays visible instead of being "
             "silently rewritten into a working one."
         ),
+    )
+    review_truncation: Optional[Any] = Field(
+        default=None,
+        description=(
+            "The `detect_review_context_truncation` result. When the context was "
+            "truncated, a fixed line at the top of the summary says so."
+        ),
+    )
+
+
+def truncation_notice(review_truncation: Optional[Any]) -> Optional[str]:
+    """The line that opens the summary when the reviewer saw only part of the merge request.
+
+    Written here rather than by the reviewer, so it appears on every truncated review whatever the reviewer concluded.
+    """
+    if not isinstance(review_truncation, dict) or not review_truncation.get(
+        "truncated"
+    ):
+        return None
+
+    lead = "This merge request was too large for a full review."
+    percent_shown = review_truncation.get("percent_shown")
+    if percent_shown is None:
+        return f"**{lead} This review does not cover all of the diff.**"
+    return (
+        f"**{lead} This review covers about "
+        f"{max(1, round(percent_shown))}% of the diff.**"
     )
 
 
@@ -100,12 +137,19 @@ class PostDuoCodeReviewFindings(DuoBaseTool):
         findings: Optional[List[Dict[str, Any]]] = None,
         summary: Optional[str] = None,
         previous_findings: Optional[List[Dict[str, Any]]] = None,
+        existing_discussions: Optional[Any] = None,
         min_confidence: int = 0,
+        review_truncation: Optional[Any] = None,
         **kwargs: Any,
     ) -> str:
         published, suppressed = select_findings(findings or [], min_confidence)
         summary_text = build_summary(published, summary)
-        previous = render_previous_findings(previous_findings or [])
+        notice = truncation_notice(review_truncation)
+        if notice:
+            summary_text = f"{notice}\n\n{summary_text}"
+        previous = render_previous_findings(
+            previous_findings or [], resolved_discussion_ids(existing_discussions)
+        )
         logger.info(
             "Publishing code review findings",
             published=len(published),

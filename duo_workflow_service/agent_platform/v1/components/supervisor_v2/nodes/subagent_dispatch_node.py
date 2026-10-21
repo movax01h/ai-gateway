@@ -23,6 +23,7 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKey,
     merge_nested_dict,
 )
+from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
     InvalidRequestException,
@@ -50,6 +51,15 @@ _CALL_ID_KEY = IOKey(
 # entries with). Not subsession-scoped: `ui_chat_log` is a flat, append-reduced
 # channel shared by every component in the flow.
 _UI_CHAT_LOG_KEY = IOKey(target="ui_chat_log")
+
+# The subagent's own terminal status, written by the `EndComponent` that
+# `compile_as_subagent` terminates the subgraph with. A bare target like
+# `_UI_CHAT_LOG_KEY`, and read unconditionally for the same reason: the subgraph
+# is invoked with the parent's own `FlowState`, which carries `status` because
+# the flow itself ends through that channel. `optional=True` would not buy a
+# fallback here in any case -- `IOKey.value_from_state` only consults it while
+# walking `subkeys`.
+_STATUS_KEY = IOKey(target="status")
 
 # Failures that are *not* attributable to the subagent's own work, and so must
 # terminate the whole flow the way they did before subagents ran behind this
@@ -207,15 +217,38 @@ class SubagentDispatchNode:
         final_answer = self._subagent_answer_key.value_from_state(result_state)
         ui_chat_log = _UI_CHAT_LOG_KEY.value_from_state(result_state) or []
 
-        # Reaching here means the subagent's graph ran to its own terminal node,
-        # so this run is COMPLETED whether or not it produced an answer -- an
-        # answerless completion is `DelegationCollectNode`'s to report, since
-        # only it knows how to phrase that back to the supervisor.
+        # The subsession reports its own outcome: `compile_as_subagent` terminates
+        # the subagent graph with an `EndComponent`, so a run that reached its
+        # terminal node says `COMPLETED` in its own state. Anything else means the
+        # graph returned without terminating -- a topology bug rather than this
+        # subagent's failure to answer, but one this call still has to report
+        # instead of recording a completed run that never completed.
+        subsession_status = _STATUS_KEY.value_from_state(result_state)
+        completed = subsession_status == WorkflowStatusEnum.COMPLETED
+        if not completed:
+            self._logger.error(
+                "Subagent graph returned without reaching its terminal node",
+                subagent_name=self.name,
+                subsession_id=subsession_id,
+                subsession_status=subsession_status,
+            )
+
         state_update = run_key.to_nested_dict(
             SubsessionRun(
                 subsession_id=subsession_id,
-                status=DelegationStatus.COMPLETED,
-                error=None,
+                status=(
+                    DelegationStatus.COMPLETED if completed else DelegationStatus.ERROR
+                ),
+                error=(
+                    None
+                    if completed
+                    else (
+                        "The subagent stopped before finishing "
+                        f"(status: {subsession_status})."
+                    )
+                ),
+                # An answerless completion is `DelegationCollectNode`'s to report,
+                # since only it knows how to phrase that back to the supervisor.
                 final_answer=None if final_answer is None else str(final_answer),
             )
         )

@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
-from typing import Callable, ClassVar, List, Literal, Optional, Self
+from typing import Callable, ClassVar, List, Literal, Optional, Self, override
 
 import structlog
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
@@ -13,6 +13,7 @@ from duo_workflow_service.agent_platform.v1.components import (
     BaseComponent,
     ComponentRegistry,
 )
+from lib.feature_roots import default_features_dir
 from lib.version import resolve_version
 
 __all__ = [
@@ -38,22 +39,6 @@ MCP_AUTO_INJECT_ENVIRONMENTS = frozenset(("chat", "chat-partial"))
 # flow_id -> that feature's config/ dir under ai/features/<domain>/<feature>/ (Layout B).
 # Only the V1 FlowConfig uses these; the experimental subclass keeps the empty default.
 _FEATURE_FLOW_ROOTS: dict[str, Path] = {}
-
-
-def _default_features_dir() -> Path:
-    """Return the ``ai/features`` dir (repo root in dev, the WORKDIR in the image).
-
-    Walks up from this file to the nearest ancestor that contains
-    ``pyproject.toml``, so a later move of this module cannot silently point
-    discovery at the wrong directory. Without a marker (a non-editable
-    install, or a faked filesystem in tests) it falls back to the fixed-depth
-    derivation: absence of moved features must never fail the caller.
-    """
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "pyproject.toml").is_file():
-            return parent / "ai" / "features"
-    return here.parents[4] / "ai" / "features"
 
 
 def register_flow_config_root(flow_id: str, config_dir: Path) -> None:
@@ -91,7 +76,7 @@ def discover_feature_flow_configs(features_dir: Optional[Path] = None) -> None:
         ValueError: If two features register the same flow id with different
             config directories (see ``register_flow_config_root``).
     """
-    root = features_dir or _default_features_dir()
+    root = features_dir or default_features_dir()
     logger.info(
         "Discovering feature flow configs", root=str(root), exists=root.is_dir()
     )
@@ -180,6 +165,23 @@ class BaseFlowConfig(BaseModel):
     description: Optional[str] = None
     product_group: Optional[str] = None
 
+    # The registry flow id and concrete version this config was loaded from. Set only by
+    # ``from_yaml_config``, so a config built from caller-supplied data (an inline flow)
+    # cannot claim a registry identity. Private attributes are not part of the schema:
+    # input cannot set them and ``model_dump`` does not emit them.
+    _config_id: Optional[str] = PrivateAttr(default=None)
+    _config_version: Optional[str] = PrivateAttr(default=None)
+
+    @property
+    def config_id(self) -> Optional[str]:
+        """The registry flow id this config was loaded from; ``None`` when not loaded from the registry."""
+        return self._config_id
+
+    @property
+    def config_version(self) -> Optional[str]:
+        """The concrete version this config was loaded from; ``None`` when not loaded from the registry."""
+        return self._config_version
+
     def input_json_schemas_by_category(self):
         json_schemas_by_category: dict[str, dict] = {}
         if not self.flow.inputs:
@@ -249,9 +251,15 @@ class BaseFlowConfig(BaseModel):
                 Path traversal is prevented by _safe_resolve.
 
         Returns:
-            The loaded config, with ``resolved_version`` set to the concrete semver the
-            constraint resolved to (e.g. "2.1.0").
+            The loaded config, with ``resolved_version`` and ``config_version`` set to the
+            concrete semver the constraint resolved to (e.g. "2.1.0"), and ``config_id``
+            set to ``flow_id``.
         """
+        # A registry id is a bare directory name. A path that resolves to the same
+        # directory would load the flow under an id it does not match.
+        if flow_id in ("", ".", "..") or Path(flow_id).name != flow_id:
+            raise ValueError(f"Invalid flow id: '{flow_id}' is not a bare name")
+
         version_query = flow_version or DEFAULT_FLOW_VERSION
 
         # Version candidates from the feature root (ai/features/<domain>/<feature>/config/)
@@ -303,13 +311,17 @@ class BaseFlowConfig(BaseModel):
         try:
             with open(yaml_path, "r", encoding="utf-8") as file:
                 yaml_content = yaml.safe_load(file)
-            return cls(**yaml_content, resolved_version=version)
+            config = cls(**yaml_content, resolved_version=version)
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"{flow_id}/{version} file not found at {yaml_path}"
             )
         except yaml.YAMLError as e:
             raise yaml.YAMLError(f"Error parsing YAML file: {e}") from e
+
+        config._config_id = flow_id
+        config._config_version = version
+        return config
 
 
 def list_flow_configs(flow_config_cls: type[BaseFlowConfig]) -> List[dict[str, str]]:
@@ -409,10 +421,47 @@ class FlowConfig(BaseFlowConfig):
     def feature_config_roots(cls) -> dict[str, Path]:
         return dict(_FEATURE_FLOW_ROOTS)
 
+    def to_config(self) -> "FlowConfig":
+        """Return the complete config the graph builder reads, which a full config already is."""
+        return self
+
 
 class PartialFlowConfig(FlowConfig):
     flow: Optional[FlowConfigMetadata] = None  # type: ignore[assignment]
     routers: Optional[list[dict]] = None  # type: ignore[assignment]
+
+    @override
+    def to_config(self) -> FlowConfig:
+        """Complete the fields the chat-partial environment lets authors omit.
+
+        ``flow.entry_point`` defaults to the single component, and ``routers`` to that component's route to ``end``.
+        Declared values are kept.
+
+        Returns:
+            A ``FlowConfig`` that keeps this config's ``config_id`` and ``config_version``.
+            This config is not mutated.
+        """
+        flow = self.flow
+        entry_point = flow.entry_point if flow else None
+        if entry_point is None:
+            entry_point = self.components[0]["name"]
+            flow = FlowConfigMetadata(
+                entry_point=entry_point,
+                inputs=flow.inputs if flow else None,
+            )
+
+        config = FlowConfig.model_validate(
+            {
+                **dict(self),
+                "flow": flow,
+                "routers": self.routers or [{"from": entry_point, "to": "end"}],
+            }
+        )
+        # Validation builds the config from public fields only, so carry the private
+        # registry identity over explicitly.
+        config._config_id = self._config_id
+        config._config_version = self._config_version
+        return config
 
 
 def load_component_class(

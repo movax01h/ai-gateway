@@ -26,14 +26,14 @@ class FeatureQualifiedNameStatic(StrEnum):
 class GLReportingEventContext:
     """Stores flow context for legacy and Flow Registry definitions used in UsageQuota and Billing events.
 
-    This class replaces the deprecated CategoryEnum and provides a unified way to handle:
+    This class replaces the former ``CategoryEnum`` and provides a unified way to handle:
     - Legacy workflow types (e.g., "software_development", "chat")
     - Flow Registry definitions with versioning (e.g., "my_flow/v1")
     - AI Catalog items (flows with flow_config)
     - Static feature names (e.g., "code_suggestions", "duo_chat_classic")
 
-    The class maintains backward compatibility with CategoryEnum through the `value` property, which returns the
-    legacy workflow type string that can be used in places expecting CategoryEnum values.
+    The `value` property returns the legacy workflow type string (e.g., "software_development"), which is what
+    internal events, metrics, and billing payloads still expect.
 
     Examples:
         Legacy workflow:

@@ -7,13 +7,16 @@ from typing import Any, Type
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
+import structlog
 from langchain_core.tools import BaseTool, ToolException
 from pydantic import BaseModel, Field
+from structlog.testing import capture_logs
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.duo_base_tool import (
     DuoBaseTool,
     format_tool_display_message,
+    log_failed_request,
 )
 
 
@@ -280,6 +283,60 @@ def test_process_http_response(response, expected_result, should_raise):
     else:
         result = tool._process_http_response("test_identifier", response)
         assert result == expected_result
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_level"),
+    [
+        (301, "error"),
+        (400, "warning"),
+        (403, "warning"),
+        (404, "warning"),
+        (499, "warning"),
+        (500, "error"),
+        (503, "error"),
+    ],
+)
+def test_process_http_response_log_level(status_code, expected_level):
+    tool = DummyTool()
+    logger = structlog.stdlib.get_logger("test")
+
+    with capture_logs() as cap_logs, pytest.raises(ToolException):
+        tool._process_http_response(
+            "Get repository file", GitLabHttpResponse(status_code, "body"), logger
+        )
+
+    assert cap_logs == [
+        {
+            "event": "Get repository file request failed",
+            "log_level": expected_level,
+            "status_code": status_code,
+            "response_body": "body",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_level"),
+    [(404, "warning"), (500, "error"), ("unknown", "error")],
+)
+def test_log_failed_request(status_code, expected_level):
+    with capture_logs() as cap_logs:
+        log_failed_request(
+            structlog.stdlib.get_logger("test"),
+            "Request failed",
+            status_code,
+            project_id=1,
+        )
+
+    assert cap_logs == [
+        {
+            "event": "Request failed",
+            "log_level": expected_level,
+            "status_code": status_code,
+            "project_id": 1,
+        }
+    ]
 
 
 def test_process_http_response_error_message_truncation():

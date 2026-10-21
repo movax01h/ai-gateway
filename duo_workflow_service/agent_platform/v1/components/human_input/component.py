@@ -55,6 +55,13 @@ class HumanInputComponent(BaseComponent):
     - on_user_input_prompt: Agent's prompt/question to user, includes information about request type in message_sub_type
     - on_user_response: User's response/input
 
+    ``interaction_type`` is a UI rendering hint only: it is carried to the
+    client as ``message_sub_type`` so it can pick a reply control (or none),
+    but it does not change how this component waits for or processes a
+    resume - an ``"external"`` pause is still unblocked by the same
+    RESPONSE/MODIFY events as ``"input"``, typically answered through a
+    different UI (e.g. a linked resource) than the flow session page.
+
     Implicit default inputs:
     - cancelled_turn: Reads the cancelled-turn context envelope written by the
     engine during stop-recovery (``context:inputs.cancelled_turn``). Optional —
@@ -110,7 +117,7 @@ class HumanInputComponent(BaseComponent):
         "chat-partial",
     )
 
-    interaction_type: Literal["approval", "input"] = "approval"
+    interaction_type: Literal["approval", "input", "external"] = "approval"
 
     sends_response_to: str
     message_template: str
@@ -129,7 +136,7 @@ class HumanInputComponent(BaseComponent):
         """Validate that required UI log events are present.
 
         Both ON_USER_INPUT_PROMPT and ON_USER_RESPONSE are required:
-        - ON_USER_INPUT_PROMPT: Needed to transport interaction type (approval / input) to UI
+        - ON_USER_INPUT_PROMPT: Needed to transport interaction type (approval / input / external) to UI
         - ON_USER_RESPONSE: Needed to display user's messages in the UI
 
         Raises:

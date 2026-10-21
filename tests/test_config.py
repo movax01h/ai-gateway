@@ -7,7 +7,7 @@ from unittest import mock
 
 import litellm
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from ai_gateway.config import (
     Config,
@@ -30,7 +30,6 @@ from ai_gateway.config import (
     ConfigModelLimits,
     ConfigModelSelection,
     ConfigMtls,
-    ConfigProcessLevelFeatureFlags,
     ConfigSnowplow,
     ConfigTLS,
     ConfigVertexSearch,
@@ -147,27 +146,6 @@ def test_config_auth_bypass_external(values: dict, expected: ConfigAuth):
         config = Config(_env_file=None)
 
         assert config.auth == expected
-
-
-@pytest.mark.parametrize(
-    ("values", "expected"),
-    [
-        ({}, ConfigProcessLevelFeatureFlags()),
-        (
-            {
-                "AIGW_PROCESS_LEVEL_FEATURE_FLAGS__DUO_CLASSIC_CHAT_DUO_CORE_CUTOFF": "yes"
-            },
-            ConfigProcessLevelFeatureFlags(duo_classic_chat_duo_core_cutoff=True),
-        ),
-    ],
-)
-def test_config_process_level_feature_flags(
-    values: dict, expected: ConfigProcessLevelFeatureFlags
-):
-    with mock.patch.dict(os.environ, values, clear=True):
-        config = Config(_env_file=None)
-
-        assert config.process_level_feature_flags == expected
 
 
 @pytest.mark.parametrize(
@@ -706,12 +684,6 @@ def test_config_audit_event(values: dict, expected: ConfigAuditEvent):
         ),
         (
             {
-                "AIGW_BEDROCK_GUARDRAIL_CONFIG": '{"guardrailIdentifier": "abc123", "guardrailVersion": ""}'
-            },
-            ConfigBedrockGuardrail(guardrailIdentifier="abc123", guardrailVersion=""),
-        ),
-        (
-            {
                 "AIGW_BEDROCK_GUARDRAIL_CONFIG": (
                     '{"guardrailIdentifier":'
                     ' "arn:aws:bedrock:us-east-1:123456789012:guardrail/abc123"}'
@@ -877,6 +849,7 @@ def test_config_bedrock_guardrail_invalid_identifier(invalid_identifier):
 @pytest.mark.parametrize(
     "invalid_version",
     [
+        "",
         "0",
         "01",
         "abc",
@@ -963,6 +936,10 @@ def test_config_bedrock_guardrail_identifier_at_max_length():
                 }
             ),
         ),
+        (
+            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE": "enforce"},
+            ConfigModelSelection(feature_allowlist_mode="enforce"),
+        ),
     ],
 )
 def test_config_model_selection(values: dict, expected: ConfigModelSelection):
@@ -970,6 +947,20 @@ def test_config_model_selection(values: dict, expected: ConfigModelSelection):
         config = Config(_env_file=None)
 
         assert config.model_selection == expected
+
+
+def test_config_model_selection_feature_allowlist_mode_defaults_to_log():
+    with mock.patch.dict(os.environ, {}, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.model_selection.feature_allowlist_mode == "log"
+
+
+def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode():
+    values = {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE": "strict"}
+    with mock.patch.dict(os.environ, values, clear=True):
+        with pytest.raises(ValidationError):
+            Config(_env_file=None)
 
 
 def test_config_model_releases_not_revealed_in_repr():
@@ -1490,3 +1481,29 @@ class TestConfigDuoChat:
 
         with pytest.raises(ValidationError):
             ConfigDuoChat(model_request_timeout=-1.0)
+
+
+class TestAnthropicFacilitatorKey:
+    """The field is read unprefixed, so the alias has to beat the class's `AIGW_` prefix."""
+
+    def test_reads_unprefixed_env_var(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_FACILITATOR_KEY", "fake-facilitator-key")
+        config = Config(_env_file=None)
+
+        assert isinstance(config.anthropic_facilitator_key, SecretStr)
+        assert (
+            config.anthropic_facilitator_key.get_secret_value()
+            == "fake-facilitator-key"
+        )
+
+    def test_ignores_prefixed_env_var(self, monkeypatch):
+        """The Runway secret is provisioned unprefixed; `AIGW_`-prefixed is not the name."""
+        monkeypatch.delenv("ANTHROPIC_FACILITATOR_KEY", raising=False)
+        monkeypatch.setenv("AIGW_ANTHROPIC_FACILITATOR_KEY", "fake-facilitator-key")
+
+        assert Config(_env_file=None).anthropic_facilitator_key is None
+
+    def test_defaults_to_none(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_FACILITATOR_KEY", raising=False)
+
+        assert Config(_env_file=None).anthropic_facilitator_key is None

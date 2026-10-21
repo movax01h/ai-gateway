@@ -99,6 +99,7 @@ class TestEditorContentCompletionStream:
             language="python",
             gitlab_realm="self-managed",
             is_direct_connection=False,
+            is_context_cap_enabled=False,
             gitlab_instance_id="1234",
             gitlab_global_user_id="test-user-id",
             gitlab_host_name="",

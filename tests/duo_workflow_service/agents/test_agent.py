@@ -37,8 +37,8 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
+from lib.events import GLReportingEventContext
 from lib.guardrails import GUARDRAIL_INTERVENED_WARNING
-from lib.internal_events.event_enum import CategoryEnum
 from lib.prompts.utilities import render_security_block
 from tests.conftest import FakeModel
 
@@ -76,7 +76,7 @@ def _noop_pipeline() -> HistoryOptimizerPipeline:
 def agent_fixture(
     prompt: Prompt,
     gl_http_client: GitlabHttpClient,
-    workflow_type: CategoryEnum,
+    workflow_type: GLReportingEventContext,
     check_events: bool,
 ) -> Agent:
     return Agent(
@@ -445,7 +445,9 @@ def test_create_agent_with_prompt_registry(
         internal_event_category="test_category",
         tools=tools,
         workflow_id="workflow_123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         check_events=True,
         http_client=gl_http_client,
     )
@@ -458,7 +460,7 @@ def test_create_agent_with_prompt_registry(
         internal_event_extra={
             "agent_name": "test_agent",
             "workflow_id": "workflow_123",
-            "workflow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            "workflow_type": "software_development",
         },
     )
 
@@ -483,7 +485,9 @@ def test_build_agent_with_compaction_config_uses_compaction_optimizer(
         prompt_version="^1.0.0",
         tools=tools,
         workflow_id="workflow_123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         http_client=gl_http_client,
         compaction=compaction_config,
     )
@@ -508,7 +512,9 @@ def test_build_agent_without_compaction_config_uses_legacy_trim(
         prompt_version="^1.0.0",
         tools=tools,
         workflow_id="workflow_123",
-        workflow_type=CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        workflow_type=GLReportingEventContext.from_workflow_definition(
+            "software_development"
+        ),
         http_client=gl_http_client,
     )
 
@@ -525,7 +531,7 @@ class TestAgentOptimizerPipeline:
         self,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
@@ -568,7 +574,7 @@ class TestAgentOptimizerPipeline:
         self,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
@@ -622,7 +628,7 @@ class TestAgentOptimizerPipeline:
         self,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
@@ -662,7 +668,7 @@ class TestAgentOptimizerPipeline:
         self,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
@@ -698,7 +704,7 @@ class TestAgentOptimizerPipeline:
         self,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):
@@ -752,7 +758,7 @@ class TestAgentOptimizerPipeline:
         self,
         prompt: Prompt,
         gl_http_client: GitlabHttpClient,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         workflow_state: DuoWorkflowStateType,
         prompt_name: str,
     ):

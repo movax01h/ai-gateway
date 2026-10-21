@@ -34,6 +34,17 @@ class AuthenticationError(Exception):
     pass
 
 
+def oidc_gitlab_url() -> str:
+    """Return the GitLab instance whose OIDC keys sign the instance tokens we accept."""
+    # Reuse the AIGW_GITLAB_URL so that GitLab Self-Hosted Duo customers can
+    # use the same URL for both AIGW and Duo Workflow Service
+    return (
+        os.environ.get("DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL")
+        or os.environ.get("AIGW_GITLAB_URL")
+        or "https://gitlab.com"
+    )
+
+
 class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
     _REFLECTION_METHODS = (
         "/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo",
@@ -115,13 +126,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
         return grpc.unary_unary_rpc_method_handler(handler)
 
     def _init_oidc_auth_provider(self) -> AuthProvider:
-        # Reuse the AIGW_GITLAB_URL so that GitLab Self-Hosted Duo customers can
-        # use the same URL for both AIGW and Duo Workflow Service
-        gitlab_url: str = (
-            os.environ.get("DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL")
-            or os.environ.get("AIGW_GITLAB_URL")
-            or "https://gitlab.com"
-        )
+        gitlab_url: str = oidc_gitlab_url()
         customer_portal_url: str = os.environ.get(
             "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
             "https://customers.gitlab.com",

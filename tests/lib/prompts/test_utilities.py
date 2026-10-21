@@ -114,7 +114,7 @@ class TestPromptTemplateToMessages:
         assert result[4].variable_name == "history"
         assert result[4].optional is True
 
-    def test_security_injected_only_once(self):
+    def test_tool_output_security_added_only_once(self):
         """Test that security include is only prepended to the first system message."""
         tpl = {
             "system_static": "Static system content",
@@ -134,6 +134,17 @@ class TestPromptTemplateToMessages:
         assert isinstance(result[3], MessagesPlaceholder)
         assert result[3].variable_name == "history"
         assert result[3].optional is True
+
+    def test_no_security_injection_when_disabled(self):
+        tpl = {
+            "system": "System content",
+            "user": "Hello!",
+        }
+
+        result = prompt_template_to_messages(tpl, tool_output_security=False)
+
+        assert result[0] == ("system", "System content")
+        assert result[1] == ("user", "Hello!")
 
     def test_no_security_injection_without_system_role(self):
         """Test that security include is not added when there's no system role."""

@@ -42,11 +42,13 @@ from ai_gateway.api.v4 import api_router as http_api_router_v4
 from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.instrumentators.threads import monitor_threads
+from ai_gateway.model_selection import RestrictedModelAccessError
 from ai_gateway.models import ModelAPIError
 from ai_gateway.models.base import ModelAPICallError
 from ai_gateway.profiling import setup_profiling
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
 from ai_gateway.structured_logging import can_log_request_data, setup_app_logging
+from lib.aws_assume_role import AssumeRoleError
 from lib.container_wiring import wire_and_validate
 
 __all__ = [
@@ -60,7 +62,6 @@ _SKIP_ENDPOINTS = [
     "/v1/models/definitions",
 ]
 CONTAINER_APPLICATION_MODULES = [
-    "ai_gateway.api.v1.chat.agent",
     "ai_gateway.api.v1.embeddings.code_embeddings",
     "ai_gateway.api.v1.search.docs",
     "ai_gateway.api.v2.code.completions",
@@ -113,6 +114,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         structlog.stdlib.get_logger("internal_events_client").warning(
             "Failed to shutdown internal events client", error=str(e)
+        )
+    try:
+        container_application.snowplow.client().shutdown()
+    except Exception as e:
+        structlog.stdlib.get_logger("snowplow_client").warning(
+            "Failed to shutdown Snowplow client", error=str(e)
         )
 
 
@@ -234,6 +241,15 @@ async def model_api_exception_handler(request: Request, exc: ModelAPIError) -> R
     return await http_exception_handler(request, wrapped_exception)
 
 
+async def restricted_model_access_exception_handler(
+    request: Request, exc: RestrictedModelAccessError
+) -> Response:
+    return await http_exception_handler(
+        request,
+        StarletteHTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)),
+    )
+
+
 async def validation_exception_handler(
     request: Request,  # pylint: disable=unused-argument
     exc: RequestValidationError,
@@ -251,6 +267,23 @@ async def validation_exception_handler(
     )
 
 
+async def assume_role_exception_handler(
+    request: Request, exc: AssumeRoleError
+) -> Response:
+    # The role ARN is left out of the response: it stays in the logs, and the STS
+    # error code is enough for the caller to tell what went wrong.
+    return await http_exception_handler(
+        request,
+        StarletteHTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Failed to assume the requested IAM role: "
+                f"{exc.error_code or 'Unknown'}"
+            ),
+        ),
+    )
+
+
 def setup_custom_exception_handlers(app: FastAPI):
     app.add_exception_handler(
         StarletteHTTPException, cast(ExceptionHandler, custom_http_exception_handler)
@@ -259,7 +292,14 @@ def setup_custom_exception_handlers(app: FastAPI):
         ModelAPIError, cast(ExceptionHandler, model_api_exception_handler)
     )
     app.add_exception_handler(
+        AssumeRoleError, cast(ExceptionHandler, assume_role_exception_handler)
+    )
+    app.add_exception_handler(
         RequestValidationError, cast(ExceptionHandler, validation_exception_handler)
+    )
+    app.add_exception_handler(
+        RestrictedModelAccessError,
+        cast(ExceptionHandler, restricted_model_access_exception_handler),
     )
 
 

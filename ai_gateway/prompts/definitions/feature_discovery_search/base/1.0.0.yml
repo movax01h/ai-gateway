@@ -10,4 +10,4 @@ prompt_template:
   user: |
     {% include 'feature_discovery_search/user/1.0.0.jinja' %}
 params:
-  timeout: 3
+  timeout: 5

@@ -1,7 +1,8 @@
 # Module boundaries
 
 > Modules are being implemented. Follow [work item 43](https://gitlab.com/groups/gitlab-org/modelops/applied-ml/code-suggestions/-/work_items/43)
-> for status.
+> for status. To add or move a feature today, see
+> [Adding and moving features](adding_and_moving_features.md).
 
 Application code is organized by **capability**, not by deployment artifact or
 technical layer. Each feature owns its full definition (config, prompts, schemas,
@@ -21,6 +22,7 @@ single CODEOWNERS describes ownership across them.
 ```plaintext
 ai/
   features/                   # feature consumers: each owns its full definition
+    foundational_agents/      #   catalog-fetched flows, written at image build (<flow>/config/<semver>.yml)
     pipeline/                 #   capability area (stable name, NOT a team name)
       fix_pipeline/           #     feature (flow)
       pipeline_summary/       #     feature (prompt-only)
@@ -78,6 +80,11 @@ ai/features/<area>/<feature>/
 The presence of `config/` and `components/` is what makes a feature a flow. The
 engine in `platform/flow_engine/` interprets `config/`; a prompt-only feature
 calls the prompt registry directly.
+
+A feature's `prompts/` directory registers under two prompt IDs: `<feature>` and
+`<domain>/<feature>`. The second form keeps a nested legacy ID such as
+`chat/react` unchanged when the prompt moves to `ai/features/chat/react/`, so a
+nested ID fixes the domain of its feature.
 
 Feature-specific tools live in the feature, under `components/`. The platform
 owns the *tool framework* (base classes, registration, the calling convention) in
@@ -144,6 +151,8 @@ and `components/`.
 - The **flow config loader** discovers configs across feature directories and
   resolves a flow by identifier. Cross-flow references are resolved through the
   registry by identifier, not by relative path between feature directories.
+  Flows fetched from the AI Catalog into `ai/features/foundational_agents/` are
+  discovered the same way; a fetched flow ID must not collide with a bundled one.
 - The **tool registry** discovers feature-specific tools under each feature's
   `components/`, alongside generic platform tools.
 
@@ -242,6 +251,12 @@ roulette and other automation with accurate per-capability owners.
 is kept minimal: every definition that can belong to a single feature lives with
 that feature. The platform registries always include `ai/shared/` as a scan root.
 
+A shared definition uses the feature layout without the domain level:
+`ai/shared/<name>/prompts/` registers the prompt ID `<name>`. Include-only
+directories work the same way, so `ai/shared/common/prompts/` serves includes
+such as `common/branch_naming/1.0.0.jinja`. A shared name must not match a
+feature name. Response schemas are not read from `ai/shared/` yet.
+
 ## Model selection
 
 `model_selection` is split by meaning: selection **policy** (`*.yml`) is a
@@ -324,7 +339,7 @@ This mirrors Infrastructure's
   consumers treated as customers (the same pattern as COM's Tenant Observability
   Stack).
 
-Unlike COM, components are **not** split into separate repositories. COM separates
+Unlike COM, components are not split into separate repositories. COM separates
 repos to gain independent deployment lifecycles and self-managed portability;
 neither applies here, because AI Gateway and DWS ship in the same Docker image and
 features co-deploy with the engine. The need is *ownership* decoupling, not

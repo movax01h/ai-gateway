@@ -60,11 +60,13 @@ class WorkflowConfig(TypedDict):
     workflow_id: str
     agent_privileges_names: list
     pre_approved_agent_privileges_names: list
+    allow_client_injected_mcp_tools: bool
     workflow_status: str
     mcp_enabled: bool
     incremental_checkpoints_enabled: bool
     allow_agent_to_request_user: bool
     web_search_enabled: bool
+    web_search_allowed_for_group: bool
     gitlab_host: str
     first_checkpoint: Optional[Checkpoint]
     latest_checkpoint: Optional[Checkpoint]
@@ -72,6 +74,22 @@ class WorkflowConfig(TypedDict):
     archived: bool
     stalled: bool
     features: NotRequired[WorkflowFeatures]
+    source_type: NotRequired[Optional[str]]
+
+
+def _group_allows_web_search(project_data: dict, namespace_data: dict) -> bool:
+    """Web-search grant from the workflow's top-level group, off unless granted.
+
+    None means GitLab < 19.4, where an admin has no way to grant it at all.
+    """
+    for container in ((project_data.get("namespace") or {}), namespace_data):
+        allowed = ((container.get("rootNamespace") or {}).get("aiSettings") or {}).get(
+            "webSearchEnabled"
+        )
+        if allowed is not None:
+            return allowed
+
+    return False
 
 
 async def fetch_workflow_and_container_data(
@@ -158,12 +176,19 @@ async def fetch_workflow_and_container_data(
         )
 
     status_check = project_data.get("duoWorkflowStatusCheck") or {}
+    # lowercase it to match the Rails source_type values used in agent_platform_session_created events.
+    source_type = (
+        workflow.get("sourceType").lower() if workflow.get("sourceType") else None
+    )
 
     workflow_config = WorkflowConfig(
         workflow_id=workflow_id,
         agent_privileges_names=workflow.get("agentPrivilegesNames", []),
         pre_approved_agent_privileges_names=workflow.get(
             "preApprovedAgentPrivilegesNames", []
+        ),
+        allow_client_injected_mcp_tools=bool(
+            workflow.get("allowClientInjectedMcpTools", False)
         ),
         workflow_status=workflow.get("statusName", ""),
         mcp_enabled=workflow.get("mcpEnabled", False),
@@ -172,12 +197,16 @@ async def fetch_workflow_and_container_data(
         ),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
         web_search_enabled=workflow.get("webSearchEnabled", False),
+        web_search_allowed_for_group=_group_allows_web_search(
+            project_data, namespace_data
+        ),
         first_checkpoint=workflow.get("firstCheckpoint", None),
         latest_checkpoint=workflow.get("latestCheckpoint", None),
         gitlab_host=gitlab_host,
         prompt_injection_protection_level=prompt_injection_protection_level,
         archived=workflow.get("archived", None),
         stalled=workflow.get("stalled", None),
+        source_type=source_type,
         features={
             "foundational_flows": {
                 "enabled": status_check.get("foundationalFlowsEnabled", True),
@@ -217,6 +246,7 @@ def empty_workflow_config() -> WorkflowConfig:
         "workflow_id": "",
         "agent_privileges_names": [],
         "pre_approved_agent_privileges_names": [],
+        "allow_client_injected_mcp_tools": False,
         "allow_agent_to_request_user": False,
         "mcp_enabled": False,
         "incremental_checkpoints_enabled": False,
@@ -228,4 +258,5 @@ def empty_workflow_config() -> WorkflowConfig:
         "archived": False,
         "stalled": False,
         "web_search_enabled": False,
+        "web_search_allowed_for_group": False,
     }

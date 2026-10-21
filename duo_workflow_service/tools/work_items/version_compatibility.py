@@ -46,8 +46,8 @@ def get_query_with_agent_plan_widget(base_query: str) -> str:
     """Return the query with the WorkItemWidgetAgentPlan fragment injected when supported.
 
     On GitLab < 19.0 the type does not exist and including it in the query causes a schema
-    validation error even when guarded with ``@include(if: false)``.  Each affected
-    ``.graphql`` file contains a ``# AGENT_PLAN_WIDGET_PLACEHOLDER`` comment that this
+    validation error even when guarded with `@include(if: false)`. Each affected
+    `.graphql` file contains a `# AGENT_PLAN_WIDGET_PLACEHOLDER` comment that this
     function replaces with the fragment on GitLab >= 19.0, or removes on older versions.
 
     Args:

@@ -5,11 +5,16 @@ import unittest
 from unittest.mock import Mock, patch
 
 import pytest
+from pydantic import ValidationError
 from requests import HTTPError
 
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     DEFAULT_FLOW_VERSION,
 )
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    FlowConfig as V1FlowConfig,
+)
+from duo_workflow_service.scripts import fetch_foundational_agents as script
 from duo_workflow_service.scripts.fetch_foundational_agents import (
     FETCH_AGENT_OPERATION_NAME,
     FETCH_AGENT_QUERY,
@@ -21,6 +26,7 @@ from duo_workflow_service.scripts.fetch_foundational_agents import (
     parse_arguments,
     save_workflow_to_file,
 )
+from lib.feature_roots import default_features_dir
 
 
 class TestGraphQLRequest:
@@ -252,6 +258,20 @@ class TestFetchFoundationalAgent:
             fetch_foundational_agent("http://test.com", "token", "agent_1:123")
 
 
+_V1_FLOW_DEF = (
+    "version: v1\nenvironment: chat\ncomponents: []\nrouters: []\n"
+    'flow:\n  entry_point: "x"\n'
+)
+
+
+def _model(temp_dir: str) -> Mock:
+    """A non-v1 flow config model (experimental layout) rooted at *temp_dir*."""
+    model = Mock()
+    model.DIRECTORY_PATH = temp_dir
+    model.model_validate = Mock(return_value=None)
+    return model
+
+
 class TestSaveWorkflowToFile:
     """Test cases for save_workflow_to_file function."""
 
@@ -261,14 +281,11 @@ class TestSaveWorkflowToFile:
         flow_def = "version: v1\ncomponents:\n  - name: test_agent"
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            # Create a mock flow config model
-            mock_flow_config_model = Mock()
-            mock_flow_config_model.DIRECTORY_PATH = temp_dir
-            mock_flow_config_model.model_validate = Mock(return_value=None)
+            mock_flow_config_model = _model(temp_dir)
 
             filepath = save_workflow_to_file(agent_id, flow_def, mock_flow_config_model)
 
-            # New structure: {DIRECTORY_PATH}/{agent_id}/{DEFAULT_FLOW_VERSION}.yml
+            # Legacy layout: {DIRECTORY_PATH}/{agent_id}/{DEFAULT_FLOW_VERSION}.yml
             expected_filepath = os.path.join(
                 temp_dir, "test_agent", f"{DEFAULT_FLOW_VERSION}.yml"
             )
@@ -289,9 +306,7 @@ class TestSaveWorkflowToFile:
         flow_def = "version: v1\ncomponents:\n  - name: new_agent"
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            mock_flow_config_model = Mock()
-            mock_flow_config_model.DIRECTORY_PATH = temp_dir
-            mock_flow_config_model.model_validate = Mock(return_value=None)
+            mock_flow_config_model = _model(temp_dir)
 
             agent_dir = os.path.join(temp_dir, agent_id)
             assert not os.path.exists(agent_dir)
@@ -313,9 +328,7 @@ class TestSaveWorkflowToFile:
             with open(filepath, "w") as f:
                 f.write("existing content")
 
-            # Create a mock flow config model
-            mock_flow_config_model = Mock()
-            mock_flow_config_model.DIRECTORY_PATH = temp_dir
+            mock_flow_config_model = _model(temp_dir)
 
             with pytest.raises(
                 FileExistsError, match=f"File {filepath} already exists"
@@ -328,15 +341,81 @@ class TestSaveWorkflowToFile:
         flow_def = "version: v1\ncomponents:\n  - name: test_agent"
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            # Create a mock flow config model that raises validation error
-            mock_flow_config_model = Mock()
-            mock_flow_config_model.DIRECTORY_PATH = temp_dir
+            mock_flow_config_model = _model(temp_dir)
             mock_flow_config_model.model_validate.side_effect = ValueError(
                 "Invalid flow config"
             )
 
             with pytest.raises(ValueError, match="Invalid flow config"):
                 save_workflow_to_file(agent_id, flow_def, mock_flow_config_model)
+
+    def test_v1_config_is_written_as_a_feature(self, tmp_path, monkeypatch):
+        """A v1 config lands at ai/features/foundational_agents/<agent>/config/1.0.0.yml."""
+        store = tmp_path / "ai" / "features" / "foundational_agents"
+        monkeypatch.setattr(script, "FOUNDATIONAL_AGENTS_DIR", store)
+        flow_def = _V1_FLOW_DEF
+
+        filepath = save_workflow_to_file("agent", flow_def, V1FlowConfig)
+
+        assert filepath == str(
+            store / "agent" / "config" / f"{DEFAULT_FLOW_VERSION}.yml"
+        )
+        assert (
+            store / "agent" / "config" / f"{DEFAULT_FLOW_VERSION}.yml"
+        ).read_text() == flow_def
+        # The legacy root is never written for v1.
+        assert not (V1FlowConfig.DIRECTORY_PATH / "agent").exists()
+
+    def test_v1_config_refuses_to_overwrite(self, tmp_path, monkeypatch):
+        """The exists-check applies to the nested <agent>/config/ layout too."""
+        store = tmp_path / "foundational_agents"
+        monkeypatch.setattr(script, "FOUNDATIONAL_AGENTS_DIR", store)
+        existing = store / "agent" / "config" / f"{DEFAULT_FLOW_VERSION}.yml"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("existing content")
+
+        with pytest.raises(FileExistsError, match="already exists"):
+            save_workflow_to_file("agent", _V1_FLOW_DEF, V1FlowConfig)
+
+        assert existing.read_text() == "existing content"
+
+    def test_v1_config_refuses_a_name_bundled_in_the_legacy_root(
+        self, tmp_path, monkeypatch
+    ):
+        """A legacy flow of the same name would shadow the fetched copy at load time."""
+        store = tmp_path / "foundational_agents"
+        monkeypatch.setattr(script, "FOUNDATIONAL_AGENTS_DIR", store)
+        legacy = tmp_path / "configs"
+        (legacy / "agent").mkdir(parents=True)
+        monkeypatch.setattr(V1FlowConfig, "DIRECTORY_PATH", legacy)
+
+        with pytest.raises(FileExistsError, match="would shadow"):
+            save_workflow_to_file("agent", _V1_FLOW_DEF, V1FlowConfig)
+
+        assert not (store / "agent").exists()
+
+    def test_v1_config_validation_error_writes_nothing(self, tmp_path, monkeypatch):
+        """An invalid v1 config leaves no directory behind in the store."""
+        store = tmp_path / "foundational_agents"
+        monkeypatch.setattr(script, "FOUNDATIONAL_AGENTS_DIR", store)
+
+        with pytest.raises(ValidationError):
+            save_workflow_to_file(
+                "agent", "version: v1\ncomponents: []\n", V1FlowConfig
+            )
+
+        assert not (store / "agent").exists()
+
+    def test_v1_store_is_the_foundational_agents_domain(self):
+        """The real store is the foundational_agents domain under ai/features."""
+        assert (
+            script.FOUNDATIONAL_AGENTS_DIR
+            == default_features_dir() / "foundational_agents"
+        )
+        assert script.FOUNDATIONAL_AGENTS_DIR.parent.name == "features"
+        assert not script.FOUNDATIONAL_AGENTS_DIR.is_relative_to(
+            V1FlowConfig.DIRECTORY_PATH
+        )
 
 
 class TestParseArguments:

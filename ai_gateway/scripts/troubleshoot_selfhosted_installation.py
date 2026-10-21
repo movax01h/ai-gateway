@@ -303,31 +303,29 @@ def check_suggestions_model_access(
 ):
     print(f"Testing if the {model_family} model is accessible for Code Generation ...")
 
-    url = f"http://{endpoint}/v2/code/generations"
+    url = f"http://{endpoint}/v4/code/suggestions"
 
     headers = {"accept": "application/json", "Content-Type": "application/json"}
     payload = {
-        "project_path": "string",
-        "project_id": 0,
-        "current_file": {
-            "file_name": "test.py",
-            "language_identifier": "python",
-            "content_above_cursor": "def hello():\n  ",
-            "content_below_cursor": "",
+        "prompt_components": [
+            {
+                "type": "code_editor_generation",
+                "payload": {
+                    "file_name": "test.py",
+                    "language_identifier": "python",
+                    "content_above_cursor": "def hello():\n  ",
+                    "content_below_cursor": "",
+                    "stream": False,
+                },
+            }
+        ],
+        "model_metadata": {
+            "provider": "openai",
+            "name": model_family,
+            "endpoint": model_endpoint,
+            "api_key": api_key,
+            "identifier": model_identifier,
         },
-        "model_provider": "litellm",
-        "model_endpoint": model_endpoint,
-        "model_api_key": api_key,
-        "model_identifier": model_identifier,
-        "model_name": model_family,
-        "telemetry": [],
-        "stream": False,
-        "choices_count": 0,
-        "context": [],
-        "agent_id": "string",
-        "prompt_id": "code_suggestions/generations",
-        "prompt_version": 2,
-        "prompt": "",
     }
 
     model_endpoint_message = (

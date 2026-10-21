@@ -146,6 +146,56 @@ class TestEditorContentCompletionNonStream:
         }
 
 
+class TestCodeContextPayload:
+    @pytest.mark.usefixtures("mock_completions")
+    @pytest.mark.parametrize(
+        ("content_length", "expected_status"),
+        [(500000, 200), (500001, 422)],
+    )
+    def test_limits_context_content_to_500k_chars(
+        self,
+        mock_client: TestClient,
+        route: str,
+        content_length: int,
+        expected_status: int,
+    ):
+        data = {
+            "prompt_components": [
+                {
+                    "type": "code_editor_completion",
+                    "payload": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "def hello_world():\n    print(",
+                        "content_below_cursor": "",
+                        "language_identifier": "python",
+                    },
+                },
+                {
+                    "type": "code_context",
+                    "payload": {
+                        "type": "file",
+                        "name": "utils.py",
+                        "content": "x" * content_length,
+                    },
+                },
+            ],
+        }
+
+        response = mock_client.post(
+            route,
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+                "X-Gitlab-Global-User-Id": "test-user-id",
+            },
+            json=data,
+        )
+
+        assert response.status_code == expected_status
+
+
 class TestEditorContentGenerationStream:
     @pytest.mark.parametrize(
         (

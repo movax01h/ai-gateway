@@ -49,6 +49,7 @@ class LLMOperation(BaseModel):
         model_id: Identifier of the LLM model used
         model_engine: Engine that executed the model (e.g., 'litellm', 'anthropic')
         model_provider: Provider of the model (e.g., 'anthropic', 'openai')
+        model_vendor: Vendor serving the model (e.g., 'anthropic', 'fireworks_ai', 'bedrock'), if known
         prompt_tokens: Number of tokens in the prompt
         completion_tokens: Number of tokens in the completion
         agent_name: Name of the agent that triggered this operation, if any
@@ -61,6 +62,7 @@ class LLMOperation(BaseModel):
     model_id: str
     model_engine: str
     model_provider: str
+    model_vendor: str | None = None
     prompt_tokens: int
     completion_tokens: int
     agent_name: str | None = None
@@ -115,7 +117,8 @@ class BillingEventService:
         llm_ops: list[LLMOperation] | None = None,
         tool_execs: ToolExecutions | None = None,
         orbit_called: bool = False,
-    ) -> None:
+        source: str | None = None,
+    ) -> bool:
         """Track billing for a workflow execution with LLM operation metadata.
 
         LLM operations are retrieved in priority order:
@@ -137,6 +140,11 @@ class BillingEventService:
                 for new implementations.
             tool_execs: Optional explicit tool names to track.
             orbit_called: Whether any Orbit tools were called during the workflow session.
+            source: Optional entry point that started the workflow session (e.g. merge_request_code_conflict).
+
+        Returns:
+            True if the billing event was tracked, False if the client skipped it (for example, because billing
+            events are disabled).
 
         Raises:
             ValueError: If no LLM operations are available from any source
@@ -165,8 +173,10 @@ class BillingEventService:
         }
         if workflow_id:
             metadata["workflow_id"] = workflow_id
+        if source:
+            metadata["source"] = source
 
-        self.client.track_billing_event(
+        return self.client.track_billing_event(
             user,
             event,
             category,

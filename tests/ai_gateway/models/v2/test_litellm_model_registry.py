@@ -1,11 +1,17 @@
 """Tests for the external LiteLLM model metadata registry."""
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
 import litellm
 import pytest
+from litellm.litellm_core_utils.fallback_generalizations import (
+    get_fallback_generalization_rules,
+    set_fallback_generalizations,
+)
+from litellm.litellm_core_utils.get_model_cost_map import get_model_cost_map
 from litellm.utils import supports_tool_choice
 
 from ai_gateway.model_selection.model_selection_config import (
@@ -13,6 +19,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
     CompletionLiteLLMDefinition,
     EmbeddingLiteLLMDefinition,
+    ModelSelectionConfig,
 )
 from ai_gateway.model_selection.models import (
     ChatAnthropicParams,
@@ -28,6 +35,7 @@ from ai_gateway.models.v2.litellm_model_registry import (
     register_builtin_models,
     register_external_models,
     register_fireworks_models,
+    register_fireworks_vision_flags,
 )
 
 VALID_JSON = json.dumps(
@@ -108,6 +116,36 @@ class TestSonnet5BedrockMetadata:
         model_name = "bedrock/global.anthropic.claude-sonnet-5"
         assert registered[model_name]["supports_tool_choice"] is True
         assert registered[model_name]["max_output_tokens"] == 64_000
+
+
+class TestHaiku55BedrockMetadata:
+    """Tests for the manually-registered Claude Haiku 5.5 Bedrock metadata."""
+
+    @pytest.mark.parametrize(
+        "model_name",
+        [
+            "global.anthropic.claude-haiku-5-5",
+            "us.anthropic.claude-haiku-5-5",
+            "eu.anthropic.claude-haiku-5-5",
+            "bedrock/global.anthropic.claude-haiku-5-5",
+        ],
+    )
+    def test_builtin_metadata_has_haiku_5_5_bedrock_keys(self, model_name: str) -> None:
+        """Every Haiku 5.5 Bedrock cross-region inference profile is registered."""
+        assert model_name in BUILTIN_MODEL_METADATA
+        assert (
+            BUILTIN_MODEL_METADATA[model_name]["litellm_provider"] == "bedrock_converse"
+        )
+        assert BUILTIN_MODEL_METADATA[model_name]["supports_tool_choice"] is True
+
+    def test_registered_with_litellm(self, mock_register) -> None:
+        """register_builtin_models passes the Haiku 5.5 Bedrock model string used in models.yml to LiteLLM."""
+        register_builtin_models()
+
+        registered = mock_register.call_args.args[0]
+        model_name = "bedrock/global.anthropic.claude-haiku-5-5"
+        assert registered[model_name]["max_input_tokens"] == 1_000_000
+        assert registered[model_name]["max_output_tokens"] == 128_000
 
 
 class TestLoadExternalModelMetadata:
@@ -346,6 +384,81 @@ class TestIntegrationWithLiteLLM:
         assert supports_tool_choice(key) is True
 
 
+class TestSelfHostedBundledCostMap:
+    """Every managed LiteLLM model must resolve against the cost map bundled with LiteLLM, as in self-hosted images."""
+
+    @pytest.fixture(name="bundled_model_cost")
+    def bundled_model_cost_fixture(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> Iterator[None]:
+        """Replace the live cost map with the one LiteLLM bundles.
+
+        The self-hosted images set ``LITELLM_LOCAL_MODEL_COST_MAP=True``, and LiteLLM reads it once, when it is imported.
+        By now it is already imported, so setting the variable alone changes nothing: load the map again with the
+        variable set and swap it in. The swap, the fallback rules that come with the map and LiteLLM's lookup caches are
+        restored when the test ends.
+        """
+        rules = get_fallback_generalization_rules()
+        monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+        monkeypatch.setattr(
+            litellm,
+            "model_cost",
+            get_model_cost_map(url=litellm.model_cost_map_url),
+        )
+        litellm.utils._invalidate_model_cost_lowercase_map()
+        yield
+        monkeypatch.undo()
+        set_fallback_generalizations(rules)
+        litellm.utils._invalidate_model_cost_lowercase_map()
+
+    def test_managed_litellm_models_resolve_with_tool_support(
+        self, bundled_model_cost: None
+    ) -> None:
+        """Each managed LiteLLM model in ``models.yml`` supports tool calls on the bundled map plus our
+        registrations."""
+        llm_definitions = ModelSelectionConfig(
+            default_models_override={}
+        ).get_llm_definitions()
+
+        register_builtin_models()
+        register_fireworks_models(llm_definitions)
+
+        failures = []
+        for identifier, definition in llm_definitions.items():
+            # Entries without a provider are self-hosted placeholders: the customer
+            # names the model, so there is nothing for the map to resolve.
+            if not isinstance(definition, ChatLiteLLMDefinition) or (
+                not definition.provider
+            ):
+                continue
+
+            params = definition.params
+            try:
+                info = litellm.get_model_info(
+                    model=params.model, custom_llm_provider=params.custom_llm_provider
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                failures.append(f"{identifier} ({params.model}): {exc}")
+                continue
+
+            missing = [
+                flag
+                for flag in ("supports_function_calling", "supports_tool_choice")
+                if not info.get(flag)
+            ]
+            if missing:
+                failures.append(
+                    f"{identifier} ({params.model}): {', '.join(missing)} not set"
+                )
+
+        assert not failures, (
+            "These models do not resolve with tool support on LiteLLM's bundled cost map, so "
+            "self-hosted images would fail their first tool call. Add the model to "
+            "BUILTIN_MODEL_METADATA in ai_gateway/models/v2/litellm_model_registry.py:\n"
+            + "\n".join(failures)
+        )
+
+
 class TestRegisterFireworksModels:
     """Tests for ``register_fireworks_models``."""
 
@@ -464,3 +577,194 @@ class TestRegisterFireworksModels:
 
         # Should not raise
         register_fireworks_models({"glm": fireworks_chat_definition})
+
+
+class TestRegisterFireworksVisionFlags:
+    """Tests for ``register_fireworks_vision_flags``."""
+
+    SHORT_KEY = "fireworks_ai/minimax-m3"
+    FULL_KEY = "fireworks_ai/accounts/fireworks/models/minimax-m3"
+
+    @staticmethod
+    def definition(
+        supports_vision, model="accounts/fireworks/models/minimax-m3"
+    ) -> ChatLiteLLMDefinition:
+        return ChatLiteLLMDefinition(
+            name="Minimax Test",
+            gitlab_identifier="minimax_test_fireworks",
+            max_context_tokens=200_000,
+            supports_vision=supports_vision,
+            params=ChatLiteLLMParams(model=model, custom_llm_provider="fireworks_ai"),
+        )
+
+    @pytest.mark.parametrize("supports_vision", [True, False])
+    def test_creates_both_keys_when_litellm_has_no_entry(
+        self, mock_register, supports_vision
+    ) -> None:
+        with patch.dict(litellm.model_cost, {}, clear=True):
+            register_fireworks_vision_flags(
+                {
+                    "m": self.definition(
+                        supports_vision, model="accounts/gitlab/deployments/abc"
+                    )
+                }
+            )
+
+        entry = {
+            "litellm_provider": "fireworks_ai",
+            "mode": "chat",
+            "supports_vision": supports_vision,
+        }
+        assert mock_register.call_args.args[0] == {
+            "fireworks_ai/abc": entry,
+            "fireworks_ai/accounts/gitlab/deployments/abc": entry,
+        }
+
+    def test_overrides_the_flag_and_keeps_the_rest_of_an_existing_entry(
+        self, mock_register
+    ) -> None:
+        existing = {
+            "litellm_provider": "fireworks_ai",
+            "mode": "chat",
+            "supports_vision": False,
+            "input_cost_per_token": 1e-6,
+            "supports_function_calling": True,
+        }
+        with patch.dict(
+            litellm.model_cost,
+            {self.SHORT_KEY: dict(existing), self.FULL_KEY: dict(existing)},
+        ):
+            register_fireworks_vision_flags({"m": self.definition(True)})
+
+        registered = mock_register.call_args.args[0]
+        assert set(registered) == {self.SHORT_KEY, self.FULL_KEY}
+        for key in (self.SHORT_KEY, self.FULL_KEY):
+            assert registered[key] == {**existing, "supports_vision": True}
+
+    def test_definition_without_the_flag_is_left_alone(self, mock_register) -> None:
+        register_fireworks_vision_flags({"m": self.definition(None)})
+
+        mock_register.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "definition",
+        [
+            ChatAnthropicDefinition(
+                name="Claude Test",
+                gitlab_identifier="claude_test",
+                max_context_tokens=200_000,
+                supports_vision=True,
+                params=ChatAnthropicParams(model="claude-test-model"),
+            ),
+            ChatLiteLLMDefinition(
+                name="Vertex Test",
+                gitlab_identifier="vertex_test",
+                max_context_tokens=200_000,
+                supports_vision=False,
+                params=ChatLiteLLMParams(
+                    model="claude-test", custom_llm_provider="vertex_ai"
+                ),
+            ),
+            CompletionLiteLLMDefinition(
+                name="Codestral Test",
+                gitlab_identifier="codestral_test_fireworks",
+                max_context_tokens=32_000,
+                supports_vision=False,
+                params=CompletionLiteLLMParams(
+                    model="codestral-test",
+                    custom_llm_provider="fireworks_ai",
+                    completion_type=CompletionType.FIM,
+                    fim_format="</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]",
+                ),
+            ),
+        ],
+        ids=["anthropic-class", "litellm-other-provider", "fireworks-completion"],
+    )
+    def test_non_fireworks_chat_definitions_are_left_alone(
+        self, mock_register, definition
+    ) -> None:
+        register_fireworks_vision_flags({"m": definition})
+
+        mock_register.assert_not_called()
+
+    def test_logs_once_with_every_key(self, mock_register) -> None:
+        with patch("ai_gateway.models.v2.litellm_model_registry.log") as log_mock:
+            register_fireworks_vision_flags({"m": self.definition(True)})
+
+        log_mock.info.assert_called_once()
+        assert sorted(log_mock.info.call_args.kwargs["keys"]) == [
+            self.FULL_KEY,
+            self.SHORT_KEY,
+        ]
+
+    def test_a_short_key_claimed_with_two_flags_is_left_to_litellm(
+        self, mock_register
+    ) -> None:
+        clash = self.definition(False, model="accounts/gitlab/deployments/minimax-m3")
+        clash.gitlab_identifier = "minimax_clash"
+
+        with (
+            patch.dict(litellm.model_cost, {}, clear=True),
+            patch("ai_gateway.models.v2.litellm_model_registry.log") as log_mock,
+        ):
+            register_fireworks_vision_flags({"a": self.definition(True), "b": clash})
+
+        registered = mock_register.call_args.args[0]
+        assert self.SHORT_KEY not in registered
+        assert registered[self.FULL_KEY]["supports_vision"] is True
+        assert (
+            registered["fireworks_ai/accounts/gitlab/deployments/minimax-m3"][
+                "supports_vision"
+            ]
+            is False
+        )
+        assert log_mock.warning.call_args.kwargs["key"] == self.SHORT_KEY
+
+    def test_register_model_exception_does_not_propagate(self, mock_register) -> None:
+        mock_register.side_effect = RuntimeError("litellm internal error")
+
+        # Should not raise
+        register_fireworks_vision_flags({"m": self.definition(True)})
+
+    def test_a_router_identifier_gets_its_own_keys_too(self, mock_register) -> None:
+        definition = ChatLiteLLMDefinition(
+            name="Router Test",
+            gitlab_identifier="router_test_fireworks",
+            max_context_tokens=32_000,
+            supports_vision=False,
+            params=ChatLiteLLMParams(
+                model="router-model",
+                identifier="accounts/gitlab/routers/router-model-2",
+                custom_llm_provider="fireworks_ai",
+            ),
+        )
+
+        with patch.dict(litellm.model_cost, {}, clear=True):
+            register_fireworks_vision_flags({"r": definition})
+
+        assert set(mock_register.call_args.args[0]) == {
+            "fireworks_ai/router-model",
+            "fireworks_ai/accounts/gitlab/routers/router-model-2",
+            "fireworks_ai/router-model-2",
+        }
+
+    def test_the_fireworks_adapter_itself_reads_the_synced_flag(self) -> None:
+        """LiteLLM's own Fireworks lookup, the one that refuses images, must see our flag under the key it tries
+        first."""
+        from litellm.llms.fireworks_ai.chat.transformation import FireworksAIConfig
+
+        model = "accounts/fireworks/models/minimax-m3"
+        stale = {
+            "litellm_provider": "fireworks_ai",
+            "mode": "chat",
+            "supports_vision": False,
+        }
+        seeded = {self.FULL_KEY: dict(stale), self.SHORT_KEY: dict(stale)}
+
+        with patch.dict(litellm.model_cost, seeded):
+            register_fireworks_vision_flags({"m": self.definition(True, model=model)})
+            verdict = FireworksAIConfig()._get_model_cost_capability_exact(
+                model=model, capability="supports_vision"
+            )
+
+        assert verdict is True

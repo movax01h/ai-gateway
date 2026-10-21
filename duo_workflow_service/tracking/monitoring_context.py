@@ -56,6 +56,22 @@ class MonitoringContext(BaseModel):
         }
         return {key: value for key, value in fields.items() if value}
 
+    def event_context_fields(self) -> dict[str, str]:
+        """Return the flow identity fields renamed for the ai_context Snowplow schema.
+
+        Mirrors the names ``structured_logging.add_workflow_identity`` already
+        renders in the structured logs, so DWS events, DWS logs, and
+        ``Gitlab::Tracking::AiContext`` stay consistent. Unset or empty values
+        are omitted so that legacy flows (which carry no versioning
+        information) contribute nothing.
+        """
+        fields = {
+            "flow_name": self.flow_id,
+            "item_version": self.flow_version,
+            "item_schema_version": self.schema_version,
+        }
+        return {key: value for key, value in fields.items() if value}
+
 
 current_monitoring_context: ContextVar[MonitoringContext] = ContextVar(
     "current_monitoring_context", default=MonitoringContext()

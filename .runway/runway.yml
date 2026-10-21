@@ -15,7 +15,7 @@ spec:
     - europe-west2
     - europe-west3
     - europe-west9
-  request_timeout: 90
+  request_timeout: 240
   observability:
     scrape_targets:
       - "localhost:8082"
@@ -29,7 +29,7 @@ spec:
     path: "/monitoring/healthz"
     timeout_seconds: 10
     period_seconds: 15
-    failure_threshold: 5
+    failure_threshold: 10
   scalability:
     min_instances: 8
     max_instances: 100

@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, List, NoReturn, Optional, override
+from typing import Any, Dict, List, Mapping, NoReturn, Optional, override
 from uuid import uuid4
 
 from dependency_injector.wiring import Provide, inject
@@ -29,6 +29,7 @@ from duo_workflow_service.agents.chat_agent_factory import create_agent
 from duo_workflow_service.agents.tools_executor import ToolsExecutor
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
+    decode_gitlab_checkpoint_payload,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.schema import (
@@ -50,18 +51,22 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
+    resolve_approval_attribution,
 )
 from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
-from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.tracking.errors import log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import AbstractWorkflow
 from duo_workflow_service.workflows.chat.commands import (
     ForcedToolCall,
+    forced_tool_call_message_id,
+    is_forced_tool_call_message,
     parse_forced_tool_call,
     strip_command_context,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.context import record_approval_policy_ref, record_approval_source
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
@@ -150,6 +155,15 @@ _SEARCH_TOOLS = [
     "gitlab_blob_search",  # Code search
     "gitlab_merge_request_search",  # MR search
 ]
+
+# Native chat tools that a GitLab MCP server tool supersedes. Keys are MCP tool
+# names as Rails lists them in the x-gitlab-enabled-mcp-server-tools header
+# (unprefixed; Workhorse exposes them to the agent as `gitlab_<name>`). When a
+# key is enabled for a session that may use MCP tools, its native tools are left
+# out so the agent is not offered two tools for the same job.
+NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS: Mapping[str, tuple[str, ...]] = {
+    "search": tuple(_SEARCH_TOOLS),
+}
 
 # Tools with special processing that should always be included
 _SPECIAL_PROCESSING_TOOLS = [
@@ -303,7 +317,7 @@ class Workflow(AbstractWorkflow):
         """
         return AIMessage(
             content="",
-            id=f"forced-{uuid4()!s}",
+            id=forced_tool_call_message_id(),
             tool_calls=[
                 {
                     "name": forced.name,
@@ -329,6 +343,95 @@ class Workflow(AbstractWorkflow):
             return Routes.TOOL_USE
 
         return Routes.CONTINUE
+
+    def _post_tools_route(self, state: ChatWorkflowState) -> Routes:
+        """Route the step after the tools node.
+
+        A call the client forced and that *did the thing* ends the turn there. The model never chose it, so it has
+        nothing left to decide, and handing control back costs a turn spent re-deriving what the tool has already done.
+        Worse, the transcript does not say the call was the client's -- so the model reads it as its own, and nothing
+        but its judgement stops it running the tool a second time. For a ``/flow:`` command that second run is a second
+        flow session.
+
+        Anything short of done goes on to the model. A call that failed, and a call that never ran at all, both leave
+        the user with no way forward: the turn would end on an error they cannot act on, and retyping the command is
+        their only move. The model can at least say what went wrong, and offer to do it itself.
+        See ``_turn_completed_a_forced_call``.
+        """
+        if self._turn_completed_a_forced_call(state):
+            return Routes.STOP
+
+        return Routes.CONTINUE
+
+    def _turn_completed_a_forced_call(self, state: ChatWorkflowState) -> bool:
+        """Whether the tool results just written answer a call the client chose, and that call succeeded.
+
+        Answered from the assistant turn the tools node ran, not from ``self._forced_tool_call``: that is scoped to the
+        session and says only that *some* turn carried a command. Routing on it would make every later turn in a
+        session that began with one skip the model too.
+
+        "Succeeded" is read off the chat log rather than the tool results, because the transcript cannot tell the two
+        apart: ``ToolsExecutor._process_response`` wraps a handler's error string in a bare ``ToolMessage``, which
+        defaults to ``status="success"``. The card is where the distinction survives -- every failure handler builds one
+        with ``ToolStatus.FAILURE`` -- and it is also what the user is actually looking at. Matched on ``message_id``,
+        which ``_create_tool_ui_chat_log`` sets to the tool call's id, so the log accumulating across turns cannot make
+        an earlier card answer for this one.
+
+        Two cases produce no card at all and so fall through to the model. A tool missing from the session's toolset:
+        ``ToolsExecutor`` answers an unknown tool with "Tool ... not found" and moves on *before* building a chat log
+        entry, reachable in production when a governance deny rule strips the tool. And a tool whose
+        ``format_display_message`` renders empty, since ``_create_tool_ui_chat_log`` returns ``None`` rather than an
+        empty card. Neither left anything on screen, which is the same position a failure leaves the user in, so both
+        take the same route.
+        """
+        history: List[BaseMessage] = state["conversation_history"].get(
+            self._agent.name, []
+        )
+        answered = next(
+            (
+                message
+                for message in reversed(history)
+                if isinstance(message, AIMessage)
+            ),
+            None,
+        )
+
+        if answered is None or not is_forced_tool_call_message(answered):
+            return False
+
+        succeeded = {
+            entry.get("message_id")
+            for entry in state.get("ui_chat_log", [])
+            if entry.get("status") == ToolStatus.SUCCESS
+        }
+
+        return bool(answered.tool_calls) and all(
+            call.get("id") in succeeded for call in answered.tool_calls
+        )
+
+    def _forced_call_complete(self, state: ChatWorkflowState) -> dict[str, Any]:
+        """End a turn the client dispatched, leaving the reply to the tool's own card.
+
+        The tools node has already written what the user sees -- for ``start_flow``, an entry naming the flow and
+        linking the new session -- so a templated sentence on top of it would only say the same thing twice.
+
+        The status is why this is a node and not an edge to ``END``. Ending a chat turn means leaving
+        ``INPUT_REQUIRED`` behind, and ``ChatAgent._build_response`` is otherwise the only thing that writes it.
+        Skipping the agent without it strands the checkpoint on ``CREATED`` (a fresh thread) or ``RUNNING`` (a resumed
+        one), neither of which maps to a Rails status event, so the session stays ``running`` until the stuck-workflow
+        reaper fails it.
+
+        A terminal status is left alone. No turn can arrive here already failed today: every turn enters at
+        ``NOT_STARTED`` (a fresh thread) or ``EXECUTION`` (``get_graph_input`` sets it on a resumed one), and
+        ``ToolsExecutor.run`` only writes ``ERROR`` when a tool result carries a ``status`` key, which none of its
+        handlers set. The guard is for the day one does: overwriting ``ERROR`` with ``INPUT_REQUIRED`` would report a
+        failed command to Rails as a turn waiting on the user, and the failure would never surface. One comparison is a
+        cheaper way to hold that than a docstring promising the call never happens.
+        """
+        if state["status"] == WorkflowStatusEnum.ERROR:
+            return {}
+
+        return {"status": WorkflowStatusEnum.INPUT_REQUIRED}
 
     def _are_tools_called(self, state: ChatWorkflowState) -> Routes:
         if state["status"] in [WorkflowStatusEnum.CANCELLED, WorkflowStatusEnum.ERROR]:
@@ -505,6 +608,7 @@ class Workflow(AbstractWorkflow):
                         self._track_tool_approval_resolved(
                             EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_APPROVAL
                         )
+                        self._record_approved_tool_sources(checkpoint_tuple)
                     case "rejection":
                         new_chat_message = self._approval.rejection.message  # type: ignore
                         state_update["approval"] = ApprovalStateRejection(
@@ -686,6 +790,60 @@ class Workflow(AbstractWorkflow):
 
         return (checkpoint_tuple or {}).get("threadTs")
 
+    def _record_approved_tool_sources(self, checkpoint_tuple: Any) -> None:
+        """Attribute an approval source to the tool calls the user just approved.
+
+        Only the calls persisted in ``tool_call_approval_requested`` (those that needed a
+        fresh decision) are attributed with the client's source, leaving pre-approved /
+        session-reused calls in the same mixed batch untouched. A checkpoint predating
+        that field falls back to attributing every call.
+
+        KNOWN GAP: those other calls' own attributions were recorded in the
+        *pre-interrupt* invocation, but the approval_sources registry is a per-invocation
+        ContextVar reset in ``GitLabWorkflow.__aenter__``, so they do not actually survive
+        to this point and surface as ``approval_source: null``. Tracked in
+        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938
+        (see ``test_record_approved_tool_sources_loses_preapproved_attribution_across_real_resume``).
+
+        Best-effort: any failure here (corrupt checkpoint payload, unexpected state shape)
+        is logged and swallowed rather than disturbing the already-decided approval flow.
+        """
+        if checkpoint_tuple is None or self._approval is None:
+            return
+        if not isinstance(checkpoint_tuple, Mapping):
+            return
+
+        try:
+            approved = getattr(self._approval, "approval", None)
+            source, policy_ref = resolve_approval_attribution(approved)
+
+            # Despite the name, `checkpoint_tuple` is a GitLabCheckpoint dict (the raw
+            # latest_checkpoint/first_checkpoint cached in workflow_config), not a
+            # LangGraph CheckpointTuple, so decode it before reading channel_values.
+            decoded_checkpoint = decode_gitlab_checkpoint_payload(checkpoint_tuple)
+            channel_values = decoded_checkpoint.get("channel_values") or {}
+            histories = channel_values.get("conversation_history") or {}
+            messages = histories.get(self._agent.name) or []
+            last_message = messages[-1] if messages else None
+            if not isinstance(last_message, AIMessage):
+                return
+
+            tool_calls = getattr(last_message, "tool_calls", []) or []
+            requested_ids = channel_values.get("tool_call_approval_requested")
+            for tool_call in tool_calls:
+                tool_call_id = tool_call.get("id")
+                if requested_ids is not None and tool_call_id not in requested_ids:
+                    continue
+                record_approval_source(tool_call_id, source)
+                record_approval_policy_ref(tool_call_id, policy_ref)
+        except Exception:  # pylint: disable=broad-exception-caught
+            self.log.warning(
+                "Failed to record approval sources for approved tool calls; "
+                "their ToolInvokedEvents will carry approval_source: null",
+                exc_info=True,
+            )
+            return
+
     def _track_tool_approval_resolved(self, outcome: EventPropertyEnum) -> None:
         """Track that a pending tool approval was resolved."""
         self._tracker.track_tool_governance_event(
@@ -714,6 +872,8 @@ class Workflow(AbstractWorkflow):
 
         agents_toolset = tools_registry.toolset(tools + tools_registry.mcp_tool_names())
 
+        web_search_enabled, web_search_allowed_for_group = self._web_search_settings()
+
         self._agent: ChatAgent = create_agent(
             user=self._user,
             tools_registry=tools_registry,
@@ -725,7 +885,8 @@ class Workflow(AbstractWorkflow):
             system_template_override=self.system_template_override,
             agent_name_override=self._agent_name_override,
             compaction=CompactionConfig(trim_threshold=0.7),
-            web_search_enabled=self._workflow_config.get("web_search_enabled", False),
+            web_search_enabled=web_search_enabled,
+            web_search_allowed_for_group=web_search_allowed_for_group,
             tracker=self._tracker,
         )
 
@@ -739,6 +900,7 @@ class Workflow(AbstractWorkflow):
 
         graph.add_node("agent", self._agent.run)
         graph.add_node("run_tools", tools_runner)
+        graph.add_node("forced_call_complete", self._forced_call_complete)
 
         graph.set_conditional_entry_point(
             self._entry_route,
@@ -756,11 +918,26 @@ class Workflow(AbstractWorkflow):
                 Routes.STOP: END,
             },
         )
-        graph.add_edge("run_tools", "agent")
+        graph.add_conditional_edges(
+            "run_tools",
+            self._post_tools_route,
+            {
+                Routes.CONTINUE: "agent",
+                Routes.STOP: "forced_call_complete",
+            },
+        )
+        graph.add_edge("forced_call_complete", END)
 
         return graph.compile(checkpointer=checkpointer)
 
-    def _get_tools(self):
+    def _web_search_settings(self) -> tuple[bool, bool]:
+        """The per-conversation opt-in and the top-level group's grant, both off by default."""
+        return (
+            self._workflow_config.get("web_search_enabled", False),
+            self._workflow_config.get("web_search_allowed_for_group", False),
+        )
+
+    def _get_tools(self) -> list[str]:
         # Evaluate feature flag at runtime to determine which read-only tools to use
         if is_feature_enabled(FeatureFlag.USE_GENERIC_GITLAB_API_TOOLS):
             # Use generic tools instead of simple read-only tools
@@ -775,23 +952,11 @@ class Workflow(AbstractWorkflow):
                 + _NON_GITLAB_TOOLS
             )
 
-        # Check if search MCP tool is enabled
-        enabled_mcp_tools = get_enabled_mcp_server_tools()
-        if "search" in enabled_mcp_tools:
-            # Filter out all search tools when MCP search is enabled
-            read_only_tools = [
-                tool for tool in read_only_tools if tool not in _SEARCH_TOOLS
-            ]
-
         # Custom AI Catalog flows are enabled per project rather than by the
         # foundational-flow settings, so start_flow stays available however
         # those are narrowed. The tool's own schema drops the members that are
         # not enabled.
-        flow_tools = (
-            CHAT_FLOW_TOOLS
-            if is_feature_enabled(FeatureFlag.AGENTIC_FOUNDATIONAL_FLOW_TOOL)
-            else []
-        )
+        flow_tools = CHAT_FLOW_TOOLS
 
         utility_tools = (
             CHAT_UTILITY_TOOLS
@@ -805,11 +970,12 @@ class Workflow(AbstractWorkflow):
             else []
         )
 
-        # The per-conversation opt-in gates the fallback tool just as it gates native
-        # `web_search_options`, so turning search off holds for every model.
+        # The opt-in and the group grant gate the fallback tool just as they gate
+        # native `web_search_options`, so turning search off holds for every model.
+        web_search_enabled, web_search_allowed_for_group = self._web_search_settings()
         web_search_tools = (
             CHAT_WEB_SEARCH_TOOLS
-            if self._workflow_config.get("web_search_enabled", False)
+            if web_search_enabled and web_search_allowed_for_group
             else []
         )
 
@@ -824,7 +990,29 @@ class Workflow(AbstractWorkflow):
             + CHAT_SESSION_CONTEXT_TOOLS
             + genui_tools
         )
-        return available_tools
+
+        replaced_tools = self._native_tools_replaced_by_mcp()
+        return [tool for tool in available_tools if tool not in replaced_tools]
+
+    def _native_tools_replaced_by_mcp(self) -> set[str]:
+        """Native tools superseded by a GitLab MCP server tool available in this session.
+
+        Rails lists the GitLab MCP server tools it enables in the ``x-gitlab-enabled-mcp-server-tools`` header whenever
+        the ``mcp_client`` flag is on, but the tools only reach the agent when the root namespace allows MCP tools.
+        Without that check the native tools are dropped with no MCP replacement, leaving the agent without the
+        capability altogether.
+        """
+        if not self._mcp_enabled():
+            return set()
+
+        enabled_mcp_server_tools = get_enabled_mcp_server_tools()
+
+        return {
+            native_tool
+            for mcp_tool, native_tools in NATIVE_TOOLS_REPLACED_BY_MCP_SERVER_TOOLS.items()
+            if mcp_tool in enabled_mcp_server_tools
+            for native_tool in native_tools
+        }
 
     @override
     async def _handle_compile_and_run_exception(
@@ -843,7 +1031,7 @@ class Workflow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):
-        log_exception(
+        log_workflow_failure(
             error, extra={"workflow_id": self._workflow_id, "source": __name__}
         )
 

@@ -18,6 +18,10 @@ from typing import (
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    MissingAdditionalContextError,
+)
+
 # TODO: Remove dependency on legacy duo workflow packages
 from duo_workflow_service.entities.state import (
     UiChatLog,
@@ -55,6 +59,12 @@ class FlowEventType(StrEnum):
 class FlowEvent(TypedDict):
     event_type: FlowEventType
     message: NotRequired[str]
+    # On APPROVE, the resolved ApprovalSource string and any client-supplied policy
+    # provenance, threaded to ToolApprovalFetchNode so the executed calls'
+    # ToolInvokedEvent audit events carry the authorizing source. Absent on
+    # non-APPROVE events.
+    approval_source: NotRequired[str]
+    policy_ref: NotRequired[dict[str, str]]
 
 
 def merge_nested_dict(existing: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
@@ -308,6 +318,22 @@ class IOKey(BaseIOKey):
             return self.subkeys[-1]
         return self.target
 
+    def __contains__(self, other: object) -> bool:
+        """Return ``True`` if ``other`` addresses a path nested inside this key.
+
+        ``other in key`` means ``other`` has the same target and its subkey
+        path starts with ``key``'s subkey path, so every leaf under ``key``
+        is considered to be contained by it.  A bare key (no subkeys) contains
+        every key with the same target.
+        """
+        if not isinstance(other, IOKey):
+            return False
+        if other.target != self.target:
+            return False
+        prefix = self.subkeys or []
+        path = other.subkeys or []
+        return path[: len(prefix)] == prefix
+
     def template_variable_from_state(self, state: FlowState) -> dict[str, Any]:
         return {self.template_variable_name: self.value_from_state(state)}
 
@@ -322,7 +348,7 @@ class IOKey(BaseIOKey):
         # thereby state[self.target] will always succeed
         current = state[self.target]  # type: ignore[literal-required]
         if self.subkeys:
-            for key in self.subkeys:
+            for depth, key in enumerate(self.subkeys):
                 if self.optional:
                     if current is None:
                         return None
@@ -334,14 +360,29 @@ class IOKey(BaseIOKey):
                     try:
                         current = current[key]
                     except KeyError as e:
-                        raise KeyError(
+                        message = (
                             f"Missing required input '{self.target}:"
                             f"{'.'.join(self.subkeys)}': '{key}' not found in state. "
                             "If this is populated from a flow's additional_context, confirm "
                             "the caller supplied that category, or mark this input "
                             "'optional: true' if it may legitimately be absent."
-                        ) from e
+                        )
+                        if self._is_additional_context_category(depth):
+                            raise MissingAdditionalContextError(
+                                message, category=key
+                            ) from e
+                        raise KeyError(message) from e
         return current
+
+    def _is_additional_context_category(self, depth: int) -> bool:
+        # Additional context lives under `context:inputs.<category>`, so the subkey
+        # right after `inputs` is the category the caller supplies.
+        return (
+            self.target == FlowStateKeys.CONTEXT
+            and depth == 1
+            and self.subkeys is not None
+            and self.subkeys[0] == "inputs"
+        )
 
     def to_nested_dict(self, value: Any) -> dict[str, Any]:
         """Generate nested dictionary matching target and subkeys list, with value supplied as argument.

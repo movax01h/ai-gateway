@@ -1,6 +1,7 @@
 import copy
 import logging
 import sys
+from contextvars import ContextVar
 from pathlib import Path
 
 import litellm
@@ -17,6 +18,12 @@ from lib.verbose_ai_logs import enabled_instance_verbose_ai_logs
 access_logger = structlog.stdlib.get_logger("api.access")
 ENABLE_REQUEST_LOGGING = False
 CUSTOM_MODELS_ENABLED = False
+
+# Set while a metadata-only DWS flow runs. It overrides every switch below, so no request body
+# reaches the logs for that run.
+request_data_logging_suppressed: ContextVar[bool] = ContextVar(
+    "request_data_logging_suppressed", default=False
+)
 
 
 # https://github.com/hynek/structlog/issues/35#issuecomment-591321744
@@ -164,6 +171,9 @@ def setup_logging(
 
 
 def can_log_request_data():
+    if request_data_logging_suppressed.get():
+        return False
+
     return (
         ENABLE_REQUEST_LOGGING
         or (CUSTOM_MODELS_ENABLED and enabled_instance_verbose_ai_logs())

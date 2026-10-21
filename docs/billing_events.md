@@ -120,6 +120,7 @@ Key configuration options:
 
 - `AIGW_BILLING_EVENT__ENABLED`: Enable/disable billing event tracking
 - `AIGW_BILLING_EVENT__ENDPOINT`: Snowplow collector endpoint
+- `AIGW_BILLING_EVENT__API_KEY`: Optional. Sent as a bearer token in the `Authorization` header of every request to the collector, for collectors that require authentication such as a GitLab instance's events collector endpoint
 - `AIGW_BILLING_EVENT__BATCH_SIZE`: Number of events per batch (set to 1 for local testing)
 - `AIGW_BILLING_EVENT__THREAD_COUNT`: Number of worker threads
 

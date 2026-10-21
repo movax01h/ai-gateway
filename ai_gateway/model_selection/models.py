@@ -4,6 +4,7 @@ from typing import Iterable, Mapping, Optional
 from pydantic import BaseModel, ConfigDict, model_validator
 
 __all__ = [
+    "AnthropicWorkloadIdentityParams",
     "BaseModelParams",
     "ChatAmazonQParams",
     "ChatAnthropicParams",
@@ -96,11 +97,44 @@ class BaseModelParams(BaseModel):
     extra_headers: Mapping[str, str] | None = None
 
 
-class ChatLiteLLMParams(BaseModelParams):
+class LiteLLMProviderParams(BaseModel):
+    """LiteLLM-only params, declared once so the models.yml layer (ChatLiteLLMParams) and the prompt layer
+    (PromptProviderParams.litellm) cannot drift apart."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reasoning_effort: str | None = None
+
+
+class ChatLiteLLMParams(BaseModelParams, LiteLLMProviderParams):
     custom_llm_provider: str | None = None
     """Easily switch to huggingface, replicate, together ai, sagemaker, etc.
     Example - https://litellm.vercel.app/docs/providers/vllm#batch-completion"""
     identifier: str | None = None
+
+
+class AnthropicWorkloadIdentityParams(BaseModel):
+    """Anthropic Workload Identity Federation (WIF) settings for one model.
+
+    The identity token presented to Anthropic is a Google-signed OIDC token minted from the gateway's Application
+    Default Credentials, so the model is served from the Anthropic organization/workspace the federation rule targets
+    without a static API key.
+
+    Frozen so a definition can key the per-model credential caches.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    federation_rule_id: str
+    """The `fdrl_...` rule that maps the Google identity to an Anthropic service account."""
+    organization_id: str
+    """The Anthropic organization UUID the rule belongs to."""
+    service_account_id: str
+    """The `svac_...` service account the rule targets; required by the token exchange."""
+    workspace_id: str | None = None
+    """The `wrkspc_...` workspace to scope the token to; required when the rule spans several."""
+    audience: str = "https://api.anthropic.com"
+    """The `aud` claim requested on the identity token; must match the rule's `match.audience`."""
 
 
 class ChatAnthropicParams(BaseModelParams):
@@ -109,6 +143,18 @@ class ChatAnthropicParams(BaseModelParams):
     # This allows us to override the API key per model via `AIGW_MODEL_SELECTION__MODEL_PARAMS`, which enable us to
     # switch between Anthropic organizations/workspaces when needed.
     api_key: str | None = None
+
+    # Same override mechanism, but federated: the organization/workspace is reached through an Anthropic WIF
+    # token exchange instead of a static key. Mutually exclusive with `api_key`.
+    workload_identity: AnthropicWorkloadIdentityParams | None = None
+
+    @model_validator(mode="after")
+    def validate_single_credential(self) -> "ChatAnthropicParams":
+        if self.api_key and self.workload_identity:
+            raise ValueError(
+                "api_key and workload_identity are mutually exclusive; a static key would shadow the federated token"
+            )
+        return self
 
 
 class ChatAmazonQParams(BaseModelParams):

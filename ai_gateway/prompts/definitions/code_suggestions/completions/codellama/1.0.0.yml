@@ -5,6 +5,7 @@ model:
     temperature: 0.95
     max_tokens: 128
 unit_primitive: complete_code
+tool_output_security: false
 prompt_template:
   user: |
     <PRE> {{prefix}} <SUF> {{suffix}} <MID>

@@ -132,7 +132,6 @@ LEGACY_MODEL_MAPPING = {
         "1.0.2": "claude_sonnet_4_5_20250929",
         "1.1.0-dev": "claude_sonnet_4_5_20250929",
         "1.1.0": "claude_sonnet_4_5_20250929",
-        "1.2.0-dev": "gemini_2_5_flash_vertex",
         "1.2.0": "claude_sonnet_4_6_vertex",
         "2.0.0": "claude_sonnet_4_5_20250929_vertex",
         "2.0.1": "claude_sonnet_4_5_20250929_vertex",
@@ -149,11 +148,6 @@ LEGACY_MODEL_MAPPING = {
     "glab_ask_git_command": {
         "1.0.0": "claude_haiku_4_5_20251001",
         "1.0.1": "claude_haiku_4_5_20251001",
-    },
-    "measure_comment_temperature": {
-        "1.0.0": "gemini_2_5_flash_vertex",
-        "1.0.1": "gemini_2_5_flash_vertex",
-        "1.0.2": "gemini_2_5_flash_vertex",
     },
     "resolve_vulnerability": {
         "0.0.1-dev": "claude_sonnet_4_5_20250929",
@@ -195,6 +189,7 @@ PROMPT_ID_TO_FEATURE_SETTING: dict[str, str] = {
     "classify_code_review_mention_intent": "duo_agent_platform",
     "generate_session_title": "duo_agent_platform",
     "summarize_duo_workflow": "duo_agent_platform",
+    "classify_goal_tier": "duo_agent_platform",
 }
 
 
@@ -241,8 +236,8 @@ class LocalPromptRegistry(BasePromptRegistry):
         prompt_id: str,
         family: list[str],
     ) -> Path:
-        # A moved feature owns its prompts under ai/features/<domain>/<feature>/prompts/;
-        # everything else still lives under the legacy definitions/ root.
+        # A prompt under ai/features/ or ai/shared/ resolves from its registered
+        # root; everything else still lives under the legacy definitions/ root.
         prompts_definitions_dir = feature_prompt_root(prompt_id) or (
             Path(__file__).parent / "definitions" / prompt_id
         )

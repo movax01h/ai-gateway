@@ -54,27 +54,6 @@ class TestDiscovery:
         )
         assert "prompt_only" not in roots
 
-    def test_default_features_dir_is_the_repo_tree(self):
-        # parents[4] from flow_config.py must land on the repo root.
-        default = flow_config._default_features_dir()
-        assert default.name == "features"
-        assert default.parent.name == "ai"
-        assert default.is_dir()
-
-    def test_default_features_dir_falls_back_without_marker(
-        self, monkeypatch, tmp_path: Path
-    ):
-        # No marker (wheel install, faked filesystem): fall back to the
-        # fixed-depth derivation instead of failing the caller.
-        orphan = tmp_path / "a" / "b" / "c" / "d" / "e" / "flow_config.py"
-        orphan.parent.mkdir(parents=True)
-        monkeypatch.setattr(flow_config, "__file__", str(orphan))
-
-        assert (
-            flow_config._default_features_dir()
-            == (tmp_path / "a" / "ai" / "features").resolve()
-        )
-
     def test_missing_tree_is_silent(self, tmp_path: Path):
         flow_config.discover_feature_flow_configs(tmp_path / "nope")
         assert "anything" not in flow_config.FlowConfig.feature_config_roots()

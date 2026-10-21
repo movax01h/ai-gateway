@@ -1,0 +1,13 @@
+---
+description: Tracks requests to the ask_merge_request unit primitive
+internal_events: true
+action: request_ask_merge_request
+product_group: duo_chat
+product_categories:
+  - duo_chat
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6798
+tiers:
+  - free
+  - premium
+  - ultimate

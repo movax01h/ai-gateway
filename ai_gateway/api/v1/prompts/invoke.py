@@ -9,7 +9,11 @@ from poetry.core.constraints.version.exceptions import ParseConstraintError
 from pydantic import BaseModel, RootModel, model_validator
 from starlette.responses import StreamingResponse
 
-from ai_gateway.api.feature_category import feature_category
+from ai_gateway.api.content_utils import content_to_text
+from ai_gateway.api.feature_category import (
+    feature_category,
+    set_feature_category_for_unit_primitive,
+)
 from ai_gateway.async_dependency_resolver import get_prompt_registry
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from lib.context import StarletteUser, get_current_user
@@ -35,7 +39,7 @@ router = APIRouter()
 
 
 def _process_chunk(chunk: BaseMessage):
-    return chunk.content
+    return content_to_text(chunk.content)
 
 
 @router.post(
@@ -103,6 +107,10 @@ async def _invoke(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Prompt '{prompt_id}' is not supported",
         )
+
+    # Attribute the request to the feature that owns the prompt. Requests that fail before this point keep the
+    # endpoint's default category.
+    set_feature_category_for_unit_primitive(prompt.unit_primitive)
 
     try:
         if prompt_request.stream:

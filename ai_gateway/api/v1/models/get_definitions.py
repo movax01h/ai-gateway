@@ -1,8 +1,9 @@
 from fastapi import APIRouter, status
-from gitlab_cloud_connector import GitLabUnitPrimitive
+from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
+from ai_gateway.api.feature_category import feature_category
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.types import (
     DeprecationInfo,
@@ -37,12 +38,15 @@ class _GetModelResponseModel(BaseModel):
     deprecation: DeprecationInfo | None = None
     description: str | None = None
     cost_indicator: str | None = None
+    requires_paid_credits: bool = False
 
 
 class _GetModelResponseUnitPrimitive(BaseModel):
     feature_setting: str
     default_model: str  # deprecated, maintained for backward compatibility
     default_models: list[str]
+    # Display only; inference never reads this. The field is `dict[str, str]`,
+    # so a tag with several models reports its first.
     models_for_tags: dict[str, str]
     models_for_size_preference: dict[
         str, str
@@ -64,6 +68,7 @@ class _GetModelResponse(BaseModel):
     status_code=status.HTTP_200_OK,
     description="List of available large language models powering GitLab Duo features",
 )
+@feature_category(GitLabFeatureCategory.AI_ABSTRACTION_LAYER)
 async def get_models():
     selection_config = ModelSelectionConfig.instance()
     llm_definitions = selection_config.get_resolved_llm_definitions()
@@ -98,6 +103,11 @@ async def get_models():
                 cost_indicator=(
                     first_definition.cost_indicator if first_definition else None
                 ),
+                requires_paid_credits=(
+                    first_definition.requires_paid_credits
+                    if first_definition
+                    else False
+                ),
             )
             values["default_model"] = pseudo_identifier
             # Surface the pseudo-model in the dropdown as the prominent default row;
@@ -109,6 +119,9 @@ async def get_models():
         else:
             values["default_model"] = default_models[0]
 
+        values["models_for_tags"] = {
+            tag: entry["models"][0] for tag, entry in values["models_for_tags"].items()
+        }
         # Expose models_for_size_preference as a deprecated alias for models_for_tags
         # so existing consumers are not broken by the rename.
         values["models_for_size_preference"] = values["models_for_tags"]
@@ -128,6 +141,7 @@ async def get_models():
             deprecation=definition.deprecation,
             description=definition.description,
             cost_indicator=definition.cost_indicator,
+            requires_paid_credits=definition.requires_paid_credits,
         )
         for definition in llm_definitions.values()
     ]

@@ -8,6 +8,7 @@ from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.code_review.post_duo_code_review_findings import (
     PostDuoCodeReviewFindings,
     PostDuoCodeReviewFindingsInput,
+    truncation_notice,
 )
 
 FINDING = {
@@ -114,6 +115,7 @@ async def test_post_duo_code_review_findings_renders_the_comment_body(
                 "Fails open when the check errors."
             ),
             "severity": "critical",
+            "category": "fail-open",
             "confidence": 9,
         }
     ]
@@ -207,6 +209,111 @@ async def test_post_duo_code_review_findings_re_review_with_outstanding_threads(
         "- **Fixed:** `app/models/user.rb`: Nil check on `user`.",
         "- **Still outstanding:** `b.rb`: Nil check on `user`.",
     ]
+
+
+@pytest.mark.asyncio
+async def test_post_duo_code_review_findings_re_review_skips_resolved_threads(
+    gitlab_client_mock, metadata
+):
+    """A re-review whose open points all sit on resolved threads is published as clean."""
+    gitlab_client_mock.apost = AsyncMock(return_value=success_response())
+    tool = PostDuoCodeReviewFindings(metadata=metadata)
+
+    await tool._arun(
+        project_id=123,
+        merge_request_iid=45,
+        findings=[],
+        summary="- Nothing new",
+        previous_findings=[
+            {**previous("fixed"), "discussion_id": "d1"},
+            {**previous("still_outstanding", file="b.rb"), "discussion_id": "d2"},
+        ],
+        existing_discussions=json.dumps(
+            [
+                {"discussion_id": "d1", "resolved": True},
+                {"discussion_id": "d2", "resolved": True},
+            ]
+        ),
+    )
+
+    _, review = posted_review(gitlab_client_mock)
+    assert review == {"findings": [], "summary": "- Nothing new"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("findings", [[], [FINDING]], ids=["clean", "with_findings"])
+async def test_post_duo_code_review_findings_opens_a_truncated_summary_with_a_notice(
+    gitlab_client_mock, metadata, findings
+):
+    gitlab_client_mock.apost = AsyncMock(return_value=success_response())
+    tool = PostDuoCodeReviewFindings(metadata=metadata)
+
+    await tool.ainvoke(
+        {
+            "project_id": 123,
+            "merge_request_iid": 45,
+            "findings": findings,
+            "summary": "- Well tested",
+            "review_truncation": {"truncated": True, "percent_shown": 20.5},
+        }
+    )
+
+    _, review = posted_review(gitlab_client_mock)
+    notice = truncation_notice({"truncated": True, "percent_shown": 20.5})
+    assert review["summary"].startswith(f"{notice}\n\n- Well tested")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "review_truncation",
+    [None, {"truncated": False, "percent_shown": None}, '{"truncated": true}'],
+    ids=["unknown", "complete", "not_a_dict"],
+)
+async def test_post_duo_code_review_findings_leaves_a_complete_summary_alone(
+    gitlab_client_mock, metadata, review_truncation
+):
+    gitlab_client_mock.apost = AsyncMock(return_value=success_response())
+    tool = PostDuoCodeReviewFindings(metadata=metadata)
+
+    await tool.ainvoke(
+        {
+            "project_id": 123,
+            "merge_request_iid": 45,
+            "findings": [],
+            "summary": "- Well tested",
+            "review_truncation": review_truncation,
+        }
+    )
+
+    _, review = posted_review(gitlab_client_mock)
+    assert review["summary"] == "- Well tested"
+
+
+@pytest.mark.parametrize(
+    ("review_truncation", "expected"),
+    [
+        (None, None),
+        ({"truncated": False, "percent_shown": None}, None),
+        (
+            {"truncated": True, "percent_shown": 20.5},
+            "**This merge request was too large for a full review. This review covers "
+            "about 20% of the diff.**",
+        ),
+        (
+            {"truncated": True, "percent_shown": 0.2},
+            "**This merge request was too large for a full review. This review covers "
+            "about 1% of the diff.**",
+        ),
+        (
+            {"truncated": True, "percent_shown": None},
+            "**This merge request was too large for a full review. This review does "
+            "not cover all of the diff.**",
+        ),
+    ],
+    ids=["unknown", "complete", "truncated", "tiny_share", "share_unknown"],
+)
+def test_truncation_notice(review_truncation, expected):
+    assert truncation_notice(review_truncation) == expected
 
 
 @pytest.mark.asyncio

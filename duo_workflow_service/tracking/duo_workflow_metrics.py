@@ -18,6 +18,7 @@ workflow_start_time: ContextVar[Optional[float]] = ContextVar(
 log = structlog.stdlib.get_logger("monitoring")
 
 AUDIT_EVENTS_BATCH_SIZE_BUCKETS = [1, 5, 10, 25, 50, 100, 200, 500]
+# The collector caps a batch near MAX_BUFFER_BYTES (~3.75 MiB); buckets stop at 3 MiB.
 AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS = [
     512,
     1_024,
@@ -26,6 +27,8 @@ AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS = [
     65_536,
     262_144,
     1_048_576,
+    2_097_152,
+    3_145_728,
 ]
 
 # Buckets for outgoing gRPC action sizes (bytes).
@@ -233,7 +236,14 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
         self.audit_events_dropped_counter = Counter(
             "duo_workflow_audit_events_dropped_total",
             "Count of audit events dropped before delivery",
-            ["reason"],
+            ["reason", "event_type", "field"],
+            registry=registry,
+        )
+
+        self.audit_events_truncated_counter = Counter(
+            "duo_workflow_audit_events_truncated_total",
+            "Count of audit events whose content was excerpted to fit the size cap",
+            ["event_type", "field"],
             registry=registry,
         )
 
@@ -272,6 +282,24 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             "duo_workflow_oversized_outgoing_action_total",
             "Outgoing actions dropped or failed for exceeding MAX_MESSAGE_SIZE",
             ["action_class"],
+            registry=registry,
+        )
+
+        # No tool_name label: MCP tool names are client-supplied, so labelling by tool is
+        # unbounded and the internal event already carries the name. `flow_type` is just as
+        # client-supplied, but already labels 15 metrics here, so omitting it buys nothing.
+        #
+        # Legacy workflows (ToolsApprovalComponent) only emit blocked, through ToolsExecutor; they
+        # emit no approval requested/resolved events. For a rate, divide by
+        # duo_workflow_tool_call_seconds_count, which carries the same flow_type.
+        #
+        # Chat emits one resolved per user decision, not per call (documented in
+        # config/events/resolve_duo_workflow_tool_approval.yml), so resolved and requested
+        # are not 1:1 there. Alert on levels, not on their ratio.
+        self.tool_governance_counter = Counter(
+            "duo_workflow_tool_governance_total",
+            "Count of human-in-the-loop tool governance decisions",
+            ["flow_type", "event", "outcome"] + METADATA_LABELS,
             registry=registry,
         )
 
@@ -363,6 +391,27 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
         self.agent_platform_session_abort_counter.labels(
             flow_type=flow_type,
             session_type=session_type_context.get(),
+            **build_metadata_labels(),
+        ).inc()
+
+    def count_tool_governance_event(
+        self,
+        flow_type: str = "unknown",
+        event: str = "unknown",
+        outcome: str = "none",
+    ) -> None:
+        """Count one governance decision.
+
+        `event` must be an ``EventEnum`` value and `outcome` an ``EventPropertyEnum`` value or
+        ``"none"``. Both are bounded on purpose; see the counter definition for why.
+
+        `outcome` defaults to ``"none"`` rather than the ``"unknown"`` used elsewhere in this
+        class, so events that carry no outcome land on one label value, not two.
+        """
+        self.tool_governance_counter.labels(
+            flow_type=flow_type,
+            event=event,
+            outcome=outcome,
             **build_metadata_labels(),
         ).inc()
 
@@ -483,17 +532,43 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
         self.audit_events_sent_counter.labels(result=result).inc(amount)
 
     def count_audit_events_dropped(
-        self, reason: str = "unknown", amount: int = 1
+        self,
+        reason: str = "unknown",
+        event_type: str = "unknown",
+        field: str = "none",
+        amount: int = 1,
     ) -> None:
         """Increment the audit events dropped counter.
 
         Args:
             reason: Why the events were dropped before delivery. Expected values:
                 ``"http_error"`` (non-retryable HTTP status), ``"retries_exhausted"``,
-                ``"version_unsupported"``.
+                ``"version_unsupported"``, ``"event_too_large"`` (a single event
+                exceeds the size cap), ``"cancelled"`` (final flush was cancelled).
+            event_type: Type of the dropped event. Set for ``event_too_large``, which
+                drops one identified event; ``"unknown"`` for batch-level drops that
+                span mixed event types.
+            field: Name of the oversized field. Set for ``event_too_large``; ``"none"``
+                for reasons not attributable to a single field.
             amount: Number of individual events dropped.
         """
-        self.audit_events_dropped_counter.labels(reason=reason).inc(amount)
+        self.audit_events_dropped_counter.labels(
+            reason=reason, event_type=event_type, field=field
+        ).inc(amount)
+
+    def count_audit_events_truncated(
+        self, event_type: str = "unknown", field: str = "none"
+    ) -> None:
+        """Increment the audit events truncated counter.
+
+        Args:
+            event_type: Type of the truncated audit event.
+            field: Name of the excerpted field. Shares the ``"none"`` sentinel with
+                the dropped counter for consistency; callers always pass a real field.
+        """
+        self.audit_events_truncated_counter.labels(
+            event_type=event_type, field=field
+        ).inc()
 
     def count_audit_events_auto_flush_skipped(self) -> None:
         """Increment the counter of buffer-full auto-flush attempts skipped because no event loop was running."""

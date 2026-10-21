@@ -1,14 +1,20 @@
 # pylint: disable=direct-environment-variable-reference,unknown-option-value,too-many-instance-attributes,dangerous-default-value
 import asyncio
+import json
 import os
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, NoReturn, Optional
 from uuid import uuid4
 
 import structlog
 from dependency_injector.wiring import Provide, inject
-from gitlab_cloud_connector import CloudConnectorUser
+from gitlab_cloud_connector import (
+    CloudConnectorConfig,
+    CloudConnectorUser,
+    NoServiceNameError,
+)
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.runnables import RunnableConfig
 
@@ -21,14 +27,19 @@ from langgraph.checkpoint.base import (  # pylint: disable=no-langgraph-langchai
 from langgraph.errors import (  # pylint: disable=no-langgraph-langchain-imports
     GraphRecursionError,
 )
-from langgraph.types import Command
+from langgraph.types import Command, Durability
 from langsmith import traceable, tracing_context
 from pydantic import BaseModel, ConfigDict
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.structured_logging import request_data_logging_suppressed
 from contract import contract_pb2
-from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
+from duo_workflow_service.agent_platform.constants import (
+    METADATA_ONLY_FLOWS,
+    RECURSION_LIMIT,
+    SYNC_CHECKPOINT_FLOWS,
+)
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -52,6 +63,7 @@ from duo_workflow_service.checkpointer.write_mode import (
     incremental_checkpoints_enabled,
 )
 from duo_workflow_service.components import ToolsRegistry
+from duo_workflow_service.components.tools_registry import ceiling_exempt_tool_names
 from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
 from duo_workflow_service.entities.state import (
     ApprovalSource,
@@ -80,10 +92,17 @@ from duo_workflow_service.gitlab.gitlab_api import (
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
+from duo_workflow_service.model_routing import (
+    route_default_model,
+    track_routing_decision,
+)
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tools.mcp_tools import (
     McpToolConfig,
     convert_mcp_tools_to_configs,
+)
+from duo_workflow_service.tools.version_compatibility import (
+    strips_client_mcp_trust,
 )
 from duo_workflow_service.tracking import (
     MonitoringContext,
@@ -96,6 +115,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
 )
+from lib.context.orbit import is_orbit_tool
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
@@ -112,12 +132,62 @@ DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 
 
+def _claim_requests_ceiling(raw: Any) -> bool:
+    """Whether an unparsable claim still asks for the ceiling, so it can fail closed."""
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return False
+    # Any value other than absent or false fails closed, matching how leniently it parses.
+    return isinstance(data, dict) and data.get("ceiling") not in (None, False)
+
+
+def _request_origin_known() -> bool:
+    """Whether this service knows its own issuer, so a self-issued token can be recognised."""
+    try:
+        _ = CloudConnectorConfig().service_name
+    except NoServiceNameError:
+        return False
+    return True
+
+
+def _nothing_stamped_the_request(user: CloudConnectorUser) -> bool:
+    """Whether the caller reached this service with no Workhorse in between.
+
+    Only GenerateToken mints a token this service signs itself, and only the direct-access flow calls it, so that issuer
+    means the start request was never stamped and its client_injected fields cannot be trusted. Workhorse-mediated
+    tokens are issued by the GitLab instance and carry its issuer.
+    """
+    claims = getattr(user, "claims", None)
+    if not claims:
+        return False
+
+    try:
+        self_issued_by = CloudConnectorConfig().service_name
+    except NoServiceNameError:
+        # Unknown origin must not widen the carve-out, so fall back to the field.
+        return False
+
+    return claims.issuer == self_issued_by
+
+
 class ToolAccessPolicies(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     allow: list[str] = []
     ask: list[str] = []
     deny: list[str] = []
+    # Set by Rails when the governance ceiling is enabled. It is inside the signed claim,
+    # so a client cannot drop it. Older GitLab omits it and the ceiling stays off.
+    ceiling: bool = False
+
+
+@dataclass(frozen=True)
+class GraphInvocation:
+    """The input and config one run of the compiled graph streams from."""
+
+    graph_input: Any
+    graph_config: RunnableConfig
 
 
 class AbstractWorkflow(ABC):
@@ -186,7 +256,10 @@ class AbstractWorkflow(ABC):
         self._http_client = ExecutorGitLabHttpClient(self._outbox)
         self._workflow_type = workflow_type
         self._additional_context = additional_context
-        self._mcp_tools = convert_mcp_tools_to_configs(mcp_tools=mcp_tools)
+        self._mcp_tools = convert_mcp_tools_to_configs(
+            mcp_tools=mcp_tools,
+            force_client_injected=_nothing_stamped_the_request(user),
+        )
         self._approval = approval
         if approval is not None and approval.HasField("approval"):
             approved = approval.approval
@@ -216,6 +289,12 @@ class AbstractWorkflow(ABC):
         self._preapproved_tools = preapproved_tools
         self._denied_tools: list[str] = []
         self._ask_tools: list[str] = []
+        # Admin per-tool `allow` verdicts from the JWT, kept apart from the client's
+        # own preapproved_tools so v1 flows honour governance without also adopting
+        # client-declared pre-approvals they never accepted before.
+        self._governance_allowed_tools: list[str] = []
+        # `None` means the ceiling is off; an empty set means it is on and permits nothing.
+        self._admin_allowed_preapprovals: Optional[set[str]] = None
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
         self._first_response_metric_recorded = False
@@ -243,7 +322,13 @@ class AbstractWorkflow(ABC):
 
             # By default, tracing follows extended_logging. Only disable if LANGSMITH_TRACING_V2 is explicitly "false"
             langsmith_tracing_v2_env = os.getenv("LANGSMITH_TRACING_V2", "").lower()
-            tracing_enabled = extended_logging and (langsmith_tracing_v2_env != "false")
+            # A metadata-only flow sends no trace and logs no LLM request body, whatever the logging settings.
+            metadata_only = self._is_metadata_only()
+            tracing_enabled = (
+                extended_logging
+                and (langsmith_tracing_v2_env != "false")
+                and not metadata_only
+            )
 
             monitoring_context.tracing_enabled = str(tracing_enabled)
             monitoring_context.use_ai_prompt_scanning = is_feature_enabled(
@@ -253,19 +338,29 @@ class AbstractWorkflow(ABC):
             # Setup langsmith parent tracing headers if any
             parent_trace = get_langsmith_trace_headers()
 
-            with tracing_context(parent=parent_trace, enabled=tracing_enabled):
+            suppress_token = request_data_logging_suppressed.set(metadata_only)
+            try:
+                with tracing_context(parent=parent_trace, enabled=tracing_enabled):
+                    try:
+                        # pylint: disable=unexpected-keyword-arg
+                        await self._compile_and_run_graph(
+                            goal=goal,
+                            langsmith_extra={"metadata": tracing_metadata},
+                        )
+                    except TraceableException:
+                        # Intentionally suppressing the exception here after it has been
+                        # properly traced in Langsmith via the TraceableException
+                        pass
+                    finally:
+                        self._outbox.close()
+            finally:
                 try:
-                    # pylint: disable=unexpected-keyword-arg
-                    await self._compile_and_run_graph(
-                        goal=goal,
-                        langsmith_extra={"metadata": tracing_metadata},
-                    )
-                except TraceableException:
-                    # Intentionally suppressing the exception here after it has been
-                    # properly traced in Langsmith via the TraceableException
+                    request_data_logging_suppressed.reset(suppress_token)
+                except ValueError:
+                    # When the coroutine is closed by garbage collection (GeneratorExit),
+                    # this finally block can run in a different Context than the one
+                    # that created the token, and reset() raises ValueError.
                     pass
-                finally:
-                    self._outbox.close()
 
     @abstractmethod
     async def _handle_workflow_failure(
@@ -305,6 +400,25 @@ class AbstractWorkflow(ABC):
     def _recursion_limit(self):
         return RECURSION_LIMIT
 
+    def _registry_flow_id(self) -> Optional[str]:
+        """The Flow Registry id of the config this workflow runs.
+
+        ``None`` unless the workflow runs a config loaded from the registry, so an inline config cannot claim one.
+        """
+        return None
+
+    def _is_metadata_only(self) -> bool:
+        """Whether the session exposes only run metadata: no model or user text in the live stream or audit events."""
+        return self._registry_flow_id() in METADATA_ONLY_FLOWS
+
+    def _checkpoint_durability(self) -> Optional[Durability]:
+        """When LangGraph saves each step's checkpoint; ``None`` keeps its default asynchronous saves.
+
+        ``"sync"`` waits for each save before the next step starts, so a checkpoint GitLab refuses stops the run at the
+        next step instead of when the graph exits. Subgraphs inherit the mode.
+        """
+        return "sync" if self._registry_flow_id() in SYNC_CHECKPOINT_FLOWS else None
+
     async def _tag_langsmith_hard_limit(self) -> None:
         """Attach a LangSmith tag and metadata to the current trace when the hard recursion limit is hit.
 
@@ -322,6 +436,53 @@ class AbstractWorkflow(ABC):
                 flow_type=self._workflow_type.value,
             )
             self._first_response_metric_recorded = True
+
+    def _mcp_enabled(self) -> bool:
+        """Whether the root namespace allows MCP tools (``duo_workflow_mcp_enabled``).
+
+        When it does not, GitLab MCP server tools are withheld from the session, so callers must not assume they are
+        available even if Rails advertises them.
+        """
+        return bool(self._workflow_config.get("mcp_enabled", False))
+
+    def _permitted_mcp_tools(self) -> list[McpToolConfig]:
+        if self._mcp_enabled():
+            return self._mcp_tools
+
+        if not strips_client_mcp_trust():
+            return []
+
+        return [
+            tool
+            for tool in self._mcp_tools
+            if tool.get("trusted", False) and is_orbit_tool(tool["llm_name"])
+        ]
+
+    def _allow_client_injected_mcp_tools(self) -> bool:
+        allowed = bool(
+            self._workflow_config.get("allow_client_injected_mcp_tools", False)
+        )
+        # Without a Workhorse stamp every MCP tool counts as client-injected, so with the
+        # ceiling on none of them may skip it. An unknown origin is treated the same way.
+        if self._admin_allowed_preapprovals is not None and (
+            not _request_origin_known() or _nothing_stamped_the_request(self._user)
+        ):
+            return False
+        return allowed
+
+    def _cap_client_preapprovals(self, tools_registry: ToolsRegistry) -> ToolsRegistry:
+        """Chat reads this list by name, so with the ceiling on drop what it does not permit.
+
+        That includes a client tool that borrows an allowed name. Returns the registry unchanged.
+        """
+        if self._admin_allowed_preapprovals is not None and self._preapproved_tools:
+            permitted = tools_registry.pre_approvals_allowed_by_policy(
+                self._preapproved_tools
+            )
+            self._preapproved_tools = [
+                name for name in self._preapproved_tools if name in permitted
+            ]
+        return tools_registry
 
     def _merge_jwt_governance_claims(self) -> None:
         if self._user.claims and self._user.claims.extra:
@@ -343,32 +504,39 @@ class AbstractWorkflow(ABC):
                         exc_info=True,
                     )
                     self._preapproved_tools = []
+                    if _claim_requests_ceiling(raw):
+                        self._admin_allowed_preapprovals = set()
                     return
-                # Ask needs a human to answer; without one (headless/CI, no
-                # timeout on a pending approval) treat it as absent so behaviour
-                # there is unchanged by this claim. Default False (cannot ask)
-                # matches WorkflowConfig's own construction defaults.
                 can_ask_user = self._workflow_config.get(
                     "allow_agent_to_request_user", False
                 )
-                self._ask_tools = list(set(policies.ask)) if can_ask_user else []
+                ask = set(policies.ask)
+                deny = set(policies.deny) if can_ask_user else set(policies.deny) | ask
+                self._ask_tools = list(ask) if can_ask_user else []
                 # The JWT allow-list is the ceiling: client-supplied preapproved_tools
                 # cannot widen it, else a custom container bypasses Ask/Deny governance.
                 # `ask` counts as active so an "ask everything" policy (empty allow and
                 # deny) still enforces the ceiling.
                 governance_active = (
-                    bool(policies.allow) or bool(policies.deny) or bool(self._ask_tools)
+                    bool(policies.allow) or bool(deny) or bool(self._ask_tools)
                 )
                 if governance_active:
                     # deny > ask > allow, matching Rails' resolution order, so a tool
                     # named in both allow and ask still reaches the user.
-                    self._preapproved_tools = list(
-                        set(policies.allow) - set(self._ask_tools)
+                    self._preapproved_tools = list(set(policies.allow) - ask)
+                    self._governance_allowed_tools = list(self._preapproved_tools)
+                # Uses the raw ask list: `_ask_tools` is emptied for sessions that cannot ask,
+                # and an ask rule must still keep a tool out of pre-approval there.
+                if policies.ceiling and (
+                    policies.allow or policies.deny or policies.ask
+                ):
+                    self._admin_allowed_preapprovals = (
+                        set(policies.allow) - set(policies.ask)
+                    ) | ceiling_exempt_tool_names(
+                        set(policies.ask) | set(policies.deny)
                     )
-                if policies.deny:
-                    self._denied_tools = list(
-                        set(self._denied_tools) | set(policies.deny)
-                    )
+                if deny:
+                    self._denied_tools = list(set(self._denied_tools) | deny)
 
     def _extract_trace_output(self, state: dict | None) -> str | None:
         """Extract the final response content from ui_chat_log for LangSmith tracing.
@@ -399,8 +567,10 @@ class AbstractWorkflow(ABC):
         )
         audit_collector = AuditEventCollector(
             client=audit_client,
+            workflow_id=self._workflow_id,
             buffer_size=self._audit_event_buffer_size,
             flush_interval_seconds=self._audit_event_flush_interval,
+            metadata_only=self._is_metadata_only(),
         )
         await audit_collector.start()
         audit_collector_context.set(audit_collector)
@@ -451,7 +621,10 @@ class AbstractWorkflow(ABC):
         last_state = None
         compiled_graph = None
         self.checkpoint_notifier = UserInterface(
-            outbox=self._outbox, goal=goal, node_event_log=node_event_log
+            outbox=self._outbox,
+            goal=goal,
+            node_event_log=node_event_log,
+            metadata_only=self._is_metadata_only(),
         )
 
         try:
@@ -499,20 +672,21 @@ class AbstractWorkflow(ABC):
             if self._namespace and self._support_namespace_level_workflow() is False:
                 raise NamespaceLevelWorkflowNotSupportedException()
 
-            tools_registry = await ToolsRegistry.configure(
-                outbox=self._outbox,
-                workflow_config=self._workflow_config,
-                gl_http_client=self._http_client,
-                project=self._project,
-                workflow_id=self._workflow_id,
-                mcp_tools=(
-                    self._mcp_tools
-                    if self._workflow_config.get("mcp_enabled", False)
-                    else []
-                ),
-                language_server_version=self._language_server_version,
-                denied_tools=self._denied_tools,
-                ask_tools=self._ask_tools,
+            tools_registry = self._cap_client_preapprovals(
+                await ToolsRegistry.configure(
+                    outbox=self._outbox,
+                    workflow_config=self._workflow_config,
+                    gl_http_client=self._http_client,
+                    project=self._project,
+                    workflow_id=self._workflow_id,
+                    mcp_tools=self._permitted_mcp_tools(),
+                    language_server_version=self._language_server_version,
+                    denied_tools=self._denied_tools,
+                    ask_tools=self._ask_tools,
+                    allow_client_injected_mcp_tools=self._allow_client_injected_mcp_tools(),
+                    allowed_tools=self._governance_allowed_tools,
+                    admin_allowed_preapprovals=self._admin_allowed_preapprovals,
+                )
             )
 
             def on_gitlab_status_update(status: WorkflowStatusEventEnum):
@@ -592,20 +766,29 @@ class AbstractWorkflow(ABC):
                     )
                     status_event = WorkflowStatusEventEnum.START
 
+                await self._route_default_model(goal, status_event)
+
                 # Compile is CPU-bound process hence we're using a thread to avoid interrupting the gRPC server.
                 # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1468
                 # for more info.
                 compiled_graph = await asyncio.to_thread(
                     self._compile, goal, tools_registry, checkpointer
                 )
-                graph_input = await self.get_graph_input(
-                    goal, status_event, checkpoint_tuple
+                invocation = await self._resolve_graph_invocation(
+                    compiled_graph=compiled_graph,
+                    graph_config=graph_config,
+                    goal=goal,
+                    status_event=status_event,
+                    checkpoint_tuple=checkpoint_tuple,
                 )
+                # The failure handlers write through the config the graph ran with.
+                graph_config = invocation.graph_config
 
                 async for type, state in compiled_graph.astream(
-                    input=graph_input,
+                    input=invocation.graph_input,
                     config=graph_config,
                     stream_mode=["values", "messages", "updates"],
+                    durability=self._checkpoint_durability(),
                 ):
                     if type == "values":
                         self._record_first_response_metric()
@@ -810,6 +993,43 @@ class AbstractWorkflow(ABC):
         resolve to RESUME/START.
         """
         return None, WorkflowStatusEventEnum.RETRY
+
+    async def _route_default_model(self, goal: str, status_event: str) -> None:
+        # Route once, before the flow is built, so every turn uses the same model.
+        if status_event != WorkflowStatusEventEnum.START:
+            return
+        decision = await route_default_model(
+            goal,
+            self._http_client,
+            self._project,
+            self._additional_context,
+            self._user,
+            self._prompt_registry,
+        )
+        if decision:
+            track_routing_decision(
+                decision, self._workflow_id, self._internal_event_client
+            )
+
+    async def _resolve_graph_invocation(
+        self,
+        *,
+        compiled_graph: Any,
+        graph_config: RunnableConfig,
+        goal: str,
+        status_event: str,
+        checkpoint_tuple: Any,
+    ) -> GraphInvocation:
+        """Resolve what this run streams from, once the graph is compiled.
+
+        The default streams ``get_graph_input`` with ``graph_config`` unchanged. Override this to decide with the
+        compiled graph in hand, for example to read the checkpoint tip through ``aget_state``, or to point the run at
+        another checkpoint. An override hands the entries it does not handle to ``super()``, and derives any config it
+        returns from ``graph_config`` so the callbacks and the recursion limit carry over. The failure handlers receive
+        the returned config.
+        """
+        graph_input = await self.get_graph_input(goal, status_event, checkpoint_tuple)
+        return GraphInvocation(graph_input=graph_input, graph_config=graph_config)
 
     async def get_graph_input(
         self, goal: str, status_event: str, checkpoint_tuple: Any

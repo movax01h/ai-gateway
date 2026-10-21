@@ -82,7 +82,8 @@ deploy:
 
 ## How to Use
 
-note: This workflow is intended for remote execution as it pushes the code and creates a merge request automatically.
+> [!note]
+> This workflow is intended for remote execution as it pushes the code and creates a merge request automatically.
 
 1. Open the Jenkinsfile in your remote project repository.
 1. You should see a button `Convert to GitLab CI/CD` in the file view header section. Click the button, you should see a

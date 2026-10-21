@@ -33,7 +33,11 @@ Both public functions accept any of the following via duck typing, and
 recurse into nested structures automatically:
 
 - ``str`` -- redacted in place.
-- ``dict`` -- values are redacted recursively; keys are left unchanged.
+- ``dict`` -- values are redacted recursively; keys are left unchanged. One
+    exception: the ``base64`` value of an image block *this service built* is
+    left unscanned when it is a large string (see ``_should_skip_redaction`` and
+    ``entities.image_blocks.is_internal_image_block``). A dict that merely looks
+    like an image block is scanned like any other.
 - ``list`` -- each element is redacted recursively.
 - Objects with an ``update`` field (e.g. ``langgraph.types.Command``) --
     ``update`` is redacted recursively; a shallow copy is returned when the field changed.
@@ -58,7 +62,7 @@ Usage::
 """
 
 import copy
-from typing import Any, List
+from typing import Any, Callable, List
 
 import structlog
 from detect_secrets.plugins.artifactory import ArtifactoryDetector
@@ -77,7 +81,10 @@ from detect_secrets.plugins.high_entropy_strings import (
 from detect_secrets.plugins.ibm_cloud_iam import IbmCloudIamDetector
 from detect_secrets.plugins.ibm_cos_hmac import IbmCosHmacDetector
 from detect_secrets.plugins.jwt import JwtTokenDetector
-from detect_secrets.plugins.keyword import KeywordDetector
+from detect_secrets.plugins.keyword import (
+    QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP,
+    KeywordDetector,
+)
 from detect_secrets.plugins.mailchimp import MailchimpDetector
 from detect_secrets.plugins.npm import NpmDetector
 from detect_secrets.plugins.openai import OpenAIDetector
@@ -90,6 +97,8 @@ from detect_secrets.plugins.square_oauth import SquareOAuthDetector
 from detect_secrets.plugins.stripe import StripeDetector
 from detect_secrets.plugins.telegram_token import TelegramBotTokenDetector
 from detect_secrets.plugins.twilio import TwilioKeyDetector
+
+from duo_workflow_service.security.exceptions import SecurityException
 
 log = structlog.stdlib.get_logger("security")
 
@@ -136,10 +145,67 @@ _ENTROPY_DETECTORS: List[BasePlugin] = [
 
 _UI_DETECTORS: List[BasePlugin] = _STRUCTURED_DETECTORS + _ENTROPY_DETECTORS
 
-
 # ---------------------------------------------------------------------------
 # Core redaction helpers
 # ---------------------------------------------------------------------------
+
+
+def _line_excluded(detector: KeywordDetector, text: str, start: int, end: int) -> bool:
+    """Whether ``keyword_exclude`` covers the line containing a match.
+
+    ``analyze_line`` hands one line at a time to ``analyze_string``, so the
+    library scopes this setting to a line.  Checking the whole response instead
+    would let an exclude hit on any unrelated line suppress redaction of every
+    assignment in it.
+    """
+    if not detector.keyword_exclude:
+        return False
+
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    if line_end == -1:
+        line_end = len(text)
+
+    return bool(detector.keyword_exclude.search(text[line_start:line_end]))
+
+
+def _redact_keyword_assignments(detector: KeywordDetector, text: str) -> str:
+    """Redact the captured value of each keyword-assignment match in place.
+
+    ``KeywordDetector.analyze_string`` yields bare values with no position and
+    stops at the first match per pattern, so it cannot drive a substitution.
+    The denylist patterns are applied directly instead, which both keeps the
+    replacement local to the match and reaches every assignment.
+
+    Nothing outside an assignment is rewritten.  A value assigned to a
+    secret-named key is as often the secret's *name* as the secret itself, and
+    the two are indistinguishable from the value alone: ``secret_name =
+    "prod-payments-db-credentials"`` is a name that also appears in the path
+    ``terraform/modules/prod-payments-db-credentials/main.tf``.  Redacting
+    matches only where they were found is what keeps the rest of the response
+    intact.  Secrets repeated outside an assignment are left to the
+    regex-based detectors, which match them wherever they appear.
+    """
+    for pattern, group_number in QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP.items():
+        # Replace right to left so earlier match offsets stay valid.
+        for match in reversed(list(pattern.finditer(text))):
+            start, end = match.span(group_number)
+
+            if start == -1 or end <= start:
+                # A detected assignment whose value cannot be located would
+                # otherwise pass through unredacted, so fail closed.  The
+                # message deliberately carries no matched text.
+                raise SecurityException(
+                    f"Keyword denylist group {group_number} did not capture; "
+                    "cannot locate the value to redact"
+                )
+
+            if _line_excluded(detector, text, start, end):
+                continue
+
+            text = text[:start] + REDACTED_PLACEHOLDER + text[end:]
+
+    return text
 
 
 def _redact_string(text: str, detectors: List[BasePlugin]) -> str:
@@ -152,6 +218,10 @@ def _redact_string(text: str, detectors: List[BasePlugin]) -> str:
     For ``HighEntropyStringsPlugin`` detectors ``analyze_string`` yields
     candidate values; each candidate is only replaced when its Shannon entropy
     exceeds the detector's configured limit.
+
+    ``KeywordDetector`` is handled by ``_redact_keyword_assignments``, which
+    substitutes each match in place rather than replacing the detected value
+    everywhere it appears.
 
     For any other ``BasePlugin`` detector ``analyze_string`` is used and every
     non-empty yielded value is replaced unconditionally.
@@ -175,8 +245,16 @@ def _redact_string(text: str, detectors: List[BasePlugin]) -> str:
                     > detector.entropy_limit
                 ):
                     text = text.replace(secret_value, REDACTED_PLACEHOLDER)
+        elif isinstance(detector, KeywordDetector):
+            text = _redact_keyword_assignments(detector, text)
         else:
-            # Generic BasePlugin fallback (e.g. KeywordDetector)
+            # Global replace corrupts any text sharing the value, which is the
+            # bug this module was fixed for.  A new non-regex detector should
+            # substitute at the match, as `_redact_keyword_assignments` does.
+            log.warning(
+                "Detector fell through to the global-replace fallback",
+                detector_type=type(detector).__name__,
+            )
             for secret_value in detector.analyze_string(text):
                 if secret_value:
                     text = text.replace(secret_value, REDACTED_PLACEHOLDER)
@@ -211,6 +289,71 @@ def _shallow_copy_with(obj: Any, field: str, value: Any) -> Any:
     return cloned
 
 
+_MIN_PAYLOAD_CHARS_TO_SKIP = 4 * 1024
+
+
+def _should_skip_redaction(payload: Any) -> bool:
+    """Whether *payload* is pixel data worth skipping: a string of at least ``_MIN_PAYLOAD_CHARS_TO_SKIP``.
+
+    Anything shorter is scanned like everything else, because a credential is far smaller than any real image. A dict or
+    list is scanned too, since skipping one would skip a whole subtree.
+    """
+    return isinstance(payload, str) and len(payload) >= _MIN_PAYLOAD_CHARS_TO_SKIP
+
+
+def _is_internal_image_block() -> Callable[[Any], bool]:
+    """The "this service built that block" predicate, imported lazily.
+
+    A module-level import cycles: ``entities.__init__`` pulls in ``entities.state``, which imports
+    ``redact_secrets_for_ui`` from here.
+
+    Deliberately not cached. ``sys.modules`` already makes the repeat import a dict lookup, measured at ~85ns against
+    the ~870ms scan the exemption exists to avoid, and a process-global cache cannot be stubbed: a test that patches
+    the predicate to check what the exemption lets through would pass while exercising the real one.
+    """
+    from duo_workflow_service.entities.image_blocks import is_internal_image_block
+
+    return is_internal_image_block
+
+
+def _redact_dict(
+    response: dict[Any, Any], detectors: List[BasePlugin], tool_name: str
+) -> dict[Any, Any]:
+    """Redact every value of *response*, with one exemption.
+
+    The ``base64`` payload of a block this service built is left unscanned when it is a large string. Pattern
+    detectors cannot match inside pixel data and scanning megabytes of it is pure overhead.
+
+    Provenance, not shape. Any dict can claim ``type: image`` and a ``base64`` key, so keying on appearance would let
+    a secret earn the exemption by wearing one. Only the single constructor can mark a block, and the mark is the
+    block's type, which no data format and no copy can produce, so a block that arrived as JSON, or was rebuilt on the
+    way, is scanned: the test is "did we make it". Every sibling key, and every shorter or structured value, is still
+    scanned.
+
+    This is also why the exemption no longer rests on the checkpoint stripper and the card renderer replacing image
+    blocks before they reach a checkpoint or a person. Both still do, and both are worth keeping, but a future path
+    that skips them cannot reopen this.
+
+    The skip is logged, at debug, so a payload that went unscanned can be told apart from one that was scanned and
+    matched nothing; in the output the two are identical.
+    """
+    is_internal_image = _is_internal_image_block()(response)
+    redacted: dict[Any, Any] = {}
+    for key, value in response.items():
+        if is_internal_image and key == "base64" and _should_skip_redaction(value):
+            log.debug(
+                "Skipped secret scan for an internal image payload",
+                tool_name=tool_name,
+                key=key,
+                mime_type=response.get("mime_type"),
+                payload_len=len(value),
+            )
+            redacted[key] = value
+        else:
+            redacted[key] = _redact_recursive(value, detectors, tool_name)
+    return redacted
+
+
 def _redact_recursive(  # noqa: PLR0911  # branchy recursive redaction over value types
     response: Any, detectors: List[BasePlugin], tool_name: str
 ) -> Any:
@@ -239,9 +382,7 @@ def _redact_recursive(  # noqa: PLR0911  # branchy recursive redaction over valu
         return redacted
 
     if isinstance(response, dict):
-        return {
-            k: _redact_recursive(v, detectors, tool_name) for k, v in response.items()
-        }
+        return _redact_dict(response, detectors, tool_name)
 
     if isinstance(response, list):
         return [_redact_recursive(item, detectors, tool_name) for item in response]

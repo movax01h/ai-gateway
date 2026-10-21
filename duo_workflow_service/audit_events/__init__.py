@@ -19,6 +19,8 @@ from duo_workflow_service.audit_events.event_types import (
     ToolResponseReceivedEvent,
     UserInputReceivedEvent,
     UserOutputDisplayedEvent,
+    WebFetchInvokedEvent,
+    WebSearchInvokedEvent,
 )
 
 __all__ = [
@@ -38,6 +40,8 @@ __all__ = [
     "ToolResponseReceivedEvent",
     "UserInputReceivedEvent",
     "UserOutputDisplayedEvent",
+    "WebFetchInvokedEvent",
+    "WebSearchInvokedEvent",
     "audit_collector_context",
     "get_audit_collector",
 ]

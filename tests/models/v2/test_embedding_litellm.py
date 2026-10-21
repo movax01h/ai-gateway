@@ -1,8 +1,11 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import litellm
 import pytest
+from langchain_core.callbacks.usage import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 from litellm.types.utils import (
     CacheCreationTokenDetails,
     PromptTokensDetailsWrapper,
@@ -16,6 +19,36 @@ from ai_gateway.models.v2.embedding_litellm import (
     EmbeddingRateLimitError,
     EmbeddingTimeoutError,
 )
+
+
+@pytest.fixture(name="recorded_http_requests")
+def recorded_http_requests_fixture():
+    """Capture the real outgoing requests, as LiteLLM and the provider SDK finally built them.
+
+    The `mock_litellm_aembedding` fixture stops short of LiteLLM's provider dispatch, so it cannot
+    show whether `extra_headers` leaves as an HTTP header or as a JSON body field.
+    """
+    requests: list[httpx.Request] = []
+
+    async def _send(_self, request: httpx.Request, **_kwargs) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "object": "list",
+                "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
+                "model": "test-embedding-model",
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 0,
+                    "total_tokens": 1,
+                },
+            },
+        )
+
+    with patch.object(httpx.AsyncClient, "send", _send):
+        yield requests
 
 
 class TestEmbeddingLiteLLMProperties:
@@ -255,17 +288,36 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         assert call_kwargs["drop_params"] is True
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("configured_location", "prompt_params_location", "expected"),
+        [
+            (None, "europe-west4", "europe-west4"),
+            ("europe-west2", None, "europe-west2"),
+            ("europe-west2", "us-east4", "us-east4"),
+            (None, None, None),
+        ],
+    )
     async def test_async_invoke_vertex(
-        self, mock_litellm_aembedding, mock_litellm_aembedding_response
+        self,
+        mock_litellm_aembedding,
+        mock_litellm_aembedding_response,
+        configured_location,
+        prompt_params_location,
+        expected,
     ):
         model = EmbeddingLiteLLM(
             model="text-embedding",
             custom_llm_provider="vertex_ai",
+            vertex_location=configured_location,
         )
 
         result = await model.ainvoke(
             input={"contents": ["test text 1", "test text 2"]},
-            vertex_location="europe-west4",
+            **(
+                {"vertex_location": prompt_params_location}
+                if prompt_params_location
+                else {}
+            ),
         )
 
         assert isinstance(result, AIMessage)
@@ -275,7 +327,7 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         assert call_kwargs["input"] == ["test text 1", "test text 2"]
         assert call_kwargs["model"] == "text-embedding"
         assert call_kwargs["custom_llm_provider"] == "vertex_ai"
-        assert call_kwargs["vertex_ai_location"] == "europe-west4"
+        assert call_kwargs.get("vertex_ai_location") == expected
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -331,6 +383,49 @@ class TestEmbeddingLiteLLMAsyncInvoke:
         assert call_kwargs["custom_llm_provider"] == "openai"
         assert call_kwargs["api_base"] == override_api_base or default_api_base
         assert call_kwargs["api_key"] == override_api_key or default_api_key
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("custom_llm_provider", "api_base", "api_key", "expected_api_key"),
+        [
+            # LiteLLM sends nothing without a key, so stand one in.
+            ("openai", "http://custom/v1", None, "dummy_key"),
+            # `openai` without an api_base targets api.openai.com, where the operator's own
+            # credential applies - a placeholder must not shadow it.
+            ("openai", None, None, None),
+            # A key from the model configuration always wins over the placeholder.
+            ("openai", "http://custom/v1", "admin-token", "admin-token"),
+            # `openai_like` is unsupported without a key; ModelMetadata remaps it to `openai`.
+            ("openai_like", "http://custom/v1", None, None),
+            # vertex_ai and bedrock carry their own credentials.
+            ("vertex_ai", "http://custom/v1", None, None),
+        ],
+        ids=[
+            "openai-custom-endpoint",
+            "openai-no-api-base",
+            "openai-configured-key",
+            "openai_like-no-key",
+            "vertex_ai-self-authenticating",
+        ],
+    )
+    async def test_async_invoke_api_key(
+        self,
+        custom_llm_provider,
+        api_base,
+        api_key,
+        expected_api_key,
+        mock_litellm_aembedding,
+    ):
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model",
+            custom_llm_provider=custom_llm_provider,
+            api_base=api_base,
+            api_key=api_key,
+        )
+
+        await model.ainvoke(input={"contents": ["test text"]})
+
+        assert mock_litellm_aembedding.call_args[1].get("api_key") == expected_api_key
 
     @pytest.mark.asyncio
     async def test_async_invoke_with_model_override(
@@ -523,3 +618,229 @@ class TestEmbeddingLiteLLMUserIdentityHeader:
 
         call_kwargs = mock_litellm_aembedding.call_args[1]
         assert "extra_headers" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_user_id_sent_as_http_header(
+        self, model, recorded_http_requests, gitlab_user_id_in_context
+    ):
+        """Assert on the real outgoing request, which a mocked `aembedding` cannot see."""
+        await model.ainvoke(
+            input={"contents": ["test text"]}, api_base="http://custom/v1"
+        )
+
+        assert recorded_http_requests, "no HTTP request was issued"
+        request = recorded_http_requests[-1]
+        assert request.headers.get("x-gitlab-user-id") == gitlab_user_id_in_context
+        assert b"extra_headers" not in request.content
+
+    @pytest.mark.asyncio
+    async def test_user_id_not_sent_as_http_header_for_openai_like(
+        self, recorded_http_requests, gitlab_user_id_in_context
+    ):
+        """`openai_like` buries extra_headers in the JSON body, losing per-user attribution.
+
+        This pins a known LiteLLM limitation, not behavior we want.
+
+        ModelMetadata.to_params remaps `openai_like` to `openai`, but callers that bypass model
+        metadata can still pass `openai_like` with an API key.
+
+        Alternately, if a LiteLLM upgrade starts sending extra_headers as real HTTP headers
+        for `openai_like`, this test fails on a good change: change or remove it.
+        See https://github.com/BerriAI/litellm/issues/44300.
+        """
+        model = EmbeddingLiteLLM(
+            model="test-embedding-model",
+            custom_llm_provider="openai_like",
+            custom_models_enabled=True,
+            user_id_header="x-gitlab-user-id",
+        )
+
+        await model.ainvoke(
+            input={"contents": ["test text"]},
+            api_base="http://custom/v1",
+            api_key="admin-token",
+        )
+
+        assert recorded_http_requests, "no HTTP request was issued"
+        request = recorded_http_requests[-1]
+        assert request.headers.get("x-gitlab-user-id") is None
+        assert (
+            f'"x-gitlab-user-id": "{gitlab_user_id_in_context}"'.encode()
+            in request.content
+        )
+
+
+class TestEmbeddingLiteLLMCallbacks:
+    @pytest.fixture(name="embedding_model")
+    def embedding_model_fixture(self):
+        return EmbeddingLiteLLM(
+            model="test-embedding-model", custom_llm_provider="openai"
+        )
+
+    @pytest.fixture(name="mock_callback_handler")
+    def mock_callback_handler_fixture(self):
+        # LangChain skips an event when the handler's matching `ignore_` flag is truthy,
+        # and every auto-created AsyncMock attribute is truthy
+        return AsyncMock(ignore_llm=False, ignore_chat_model=False)
+
+    @pytest.mark.asyncio
+    async def test_llm_run(
+        self,
+        embedding_model,
+        mock_callback_handler,
+        mock_litellm_aembedding,
+        mock_litellm_aembedding_response,
+    ):
+        ainvoke_result = await embedding_model.ainvoke(
+            input={"contents": ["test text 1", "test text 2"]},
+            config={"callbacks": [mock_callback_handler]},
+        )
+
+        mock_callback_handler.on_llm_start.assert_called_once()
+        mock_callback_handler.on_chat_model_start.assert_not_called()
+
+        serialized, prompts = mock_callback_handler.on_llm_start.call_args.args
+        call_kwargs = mock_callback_handler.on_llm_start.call_args.kwargs
+        assert serialized == {}
+        assert prompts == [""]
+        assert call_kwargs["invocation_params"] == {"model": "test-embedding-model"}
+        assert call_kwargs["name"] == "litellm-embedding"
+
+        mock_callback_handler.on_llm_end.assert_called_once()
+        mock_callback_handler.on_llm_error.assert_not_called()
+
+        (llm_result,) = mock_callback_handler.on_llm_end.call_args.args
+        assert isinstance(llm_result, LLMResult)
+
+        generation = llm_result.generations[0][0]
+        assert isinstance(generation, ChatGeneration)
+        assert generation.message is ainvoke_result
+        assert generation.message.usage_metadata == {
+            "input_tokens": mock_litellm_aembedding_response.usage.prompt_tokens,
+            "output_tokens": mock_litellm_aembedding_response.usage.completion_tokens,
+            "total_tokens": mock_litellm_aembedding_response.usage.total_tokens,
+            "input_token_details": {"cache_read": 4},
+        }
+
+    @pytest.mark.asyncio
+    async def test_usage_metadata_callback(
+        self,
+        embedding_model,
+        mock_litellm_aembedding,
+        mock_litellm_aembedding_response,
+    ):
+        usage_cb = UsageMetadataCallbackHandler()
+
+        await embedding_model.ainvoke(
+            input={"contents": ["test text 1"]},
+            config={"callbacks": [usage_cb]},
+        )
+
+        assert usage_cb.usage_metadata == {
+            mock_litellm_aembedding_response.model: {
+                "input_tokens": 12,
+                "output_tokens": 0,
+                "total_tokens": 12,
+                "input_token_details": {"cache_read": 4},
+            }
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model_attribute_missing", [False, True])
+    async def test_usage_metadata_callback_without_model_in_response(
+        self,
+        model_attribute_missing,
+        embedding_model,
+        mock_litellm_aembedding,
+        mock_litellm_aembedding_response,
+    ):
+        if model_attribute_missing:
+            del mock_litellm_aembedding_response.model
+        else:
+            mock_litellm_aembedding_response.model = None
+
+        usage_cb = UsageMetadataCallbackHandler()
+
+        await embedding_model.ainvoke(
+            input={"contents": ["test text 1"]},
+            config={"callbacks": [usage_cb]},
+        )
+
+        assert list(usage_cb.usage_metadata) == [embedding_model.model]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("litellm_call_error", "expected_result_error"),
+        [
+            (
+                litellm.BadRequestError(
+                    message="Bad request error from litellm",
+                    model="test-embedding-model",
+                    llm_provider="openai",
+                ),
+                EmbeddingBadRequestError,
+            ),
+            (
+                litellm.RateLimitError(
+                    message="Resource exhausted, please try again later",
+                    model="test-embedding-model",
+                    llm_provider="openai",
+                ),
+                EmbeddingRateLimitError,
+            ),
+            (
+                litellm.AuthenticationError(
+                    message="Authentication error",
+                    model="test-embedding-model",
+                    llm_provider="openai",
+                ),
+                EmbeddingAuthenticationError,
+            ),
+            (
+                litellm.Timeout(
+                    message="Request timed out",
+                    model="test-embedding-model",
+                    llm_provider="openai",
+                ),
+                EmbeddingTimeoutError,
+            ),
+            (RuntimeError("Unexpected failure"), RuntimeError),
+        ],
+    )
+    async def test_error_encountered(
+        self,
+        embedding_model,
+        mock_callback_handler,
+        mock_litellm_aembedding,
+        litellm_call_error,
+        expected_result_error,
+    ):
+        mock_litellm_aembedding.side_effect = litellm_call_error
+
+        with pytest.raises(expected_result_error):
+            await embedding_model.ainvoke(
+                input={"contents": ["test text"]},
+                config={"callbacks": [mock_callback_handler]},
+            )
+
+        mock_callback_handler.on_llm_start.assert_called_once()
+        mock_callback_handler.on_llm_error.assert_called_once()
+        mock_callback_handler.on_llm_end.assert_not_called()
+
+        (reported_error,) = mock_callback_handler.on_llm_error.call_args.args
+        assert reported_error is litellm_call_error
+
+    @pytest.mark.asyncio
+    async def test_reports_response_extraction_error(
+        self, embedding_model, mock_callback_handler, mock_litellm_aembedding
+    ):
+        mock_litellm_aembedding.return_value = AsyncMock(data=[])
+
+        with pytest.raises(ValueError):
+            await embedding_model.ainvoke(
+                input={"contents": ["test text"]},
+                config={"callbacks": [mock_callback_handler]},
+            )
+
+        mock_callback_handler.on_llm_error.assert_called_once()
+        mock_callback_handler.on_llm_end.assert_not_called()

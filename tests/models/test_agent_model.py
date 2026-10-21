@@ -211,27 +211,6 @@ class TestAgentModel:  # pylint: disable=too-many-public-methods
         assert response.score == 0.999
 
     @pytest.mark.asyncio
-    async def test_generate_propagates_usage_metadata(self, params):
-        """Test that usage_metadata from AIMessage is propagated to TextGenModelOutput."""
-        prompt = MagicMock(spec=Prompt)
-        prompt.name = "test"
-        prompt.model_name = "test-model"
-        ai_message = AIMessage(
-            content="test content",
-            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
-        )
-        prompt.ainvoke = AsyncMock(return_value=ai_message)
-
-        model = AgentModel(prompt)
-        response = await model.generate(params, stream=False)
-
-        assert isinstance(response, TextGenModelOutput)
-        assert response.text == "test content"
-        assert isinstance(response.metadata, TokensConsumptionMetadata)
-        assert response.metadata.input_tokens == 10
-        assert response.metadata.output_tokens == 5
-
-    @pytest.mark.asyncio
     async def test_generate_without_usage_metadata_has_no_metadata(self, params):
         """Test that missing usage_metadata results in no metadata on TextGenModelOutput."""
         prompt = MagicMock(spec=Prompt)
@@ -248,3 +227,28 @@ class TestAgentModel:  # pylint: disable=too-many-public-methods
 
         assert isinstance(response, TextGenModelOutput)
         assert response.metadata is None
+
+
+class TestAgentModelOutputBudget:
+    @pytest.mark.parametrize(
+        ("usage_metadata", "model_max_tokens"),
+        [
+            ({"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}, None),
+            ({"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}, 5),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_generate_reports_output_token_budget(
+        self, prompt, usage_metadata, model_max_tokens
+    ):
+        response = await AgentModel(prompt).generate(
+            {"name": "n", "content": "c"}, stream=False
+        )
+
+        assert isinstance(response.metadata, TokensConsumptionMetadata)
+        assert response.metadata.input_tokens == usage_metadata["input_tokens"]
+        assert response.metadata.output_tokens == usage_metadata["output_tokens"]
+        expected = model_max_tokens is not None and (
+            usage_metadata["output_tokens"] >= model_max_tokens
+        )
+        assert response.metadata.max_output_tokens_used is expected

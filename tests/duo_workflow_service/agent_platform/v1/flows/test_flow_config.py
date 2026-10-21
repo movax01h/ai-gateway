@@ -1,5 +1,8 @@
 # pylint: disable=too-many-lines
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Annotated, Literal
 from unittest.mock import patch
@@ -16,6 +19,7 @@ from duo_workflow_service.agent_platform.v1.components import (
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     FlowConfigMetadata,
+    PartialFlowConfig,
     _safe_resolve,
     list_configs,
     load_component_class,
@@ -319,7 +323,7 @@ class TestFlowConfig:
     ):
         """Test that path traversal attempts are blocked."""
         with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
-            with pytest.raises(ValueError, match="Path traversal detected"):
+            with pytest.raises(ValueError, match="is not a bare name"):
                 FlowConfig.from_yaml_config(malicious_path)
 
     @pytest.mark.parametrize(
@@ -482,6 +486,101 @@ class TestFlowConfig:
         with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
             config = FlowConfig.from_yaml_config(safe_path)
             assert config.flow.entry_point == "test_agent"
+
+
+class TestToConfig:
+    """Test FlowConfig.to_config() and the completion PartialFlowConfig overrides it with."""
+
+    @staticmethod
+    def _make_partial_config(**overrides) -> PartialFlowConfig:
+        return PartialFlowConfig(
+            version="v1",
+            environment="chat-partial",
+            components=[{"name": "chat_agent", "type": "AgentComponent"}],
+            **overrides,
+        )
+
+    def test_a_full_config_is_already_complete(self):
+        config = FlowConfig(
+            flow=FlowConfigMetadata(entry_point="agent"),
+            components=[{"name": "agent", "type": "AgentComponent"}],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+        )
+
+        assert config.to_config() is config
+
+    def test_a_partial_config_completes_into_a_full_one(self):
+        assert type(self._make_partial_config().to_config()) is FlowConfig
+
+    @pytest.mark.parametrize(
+        "overrides", [{}, {"routers": []}], ids=["omitted", "declared empty"]
+    )
+    def test_routers_default_to_the_entry_component_routing_to_end(self, overrides):
+        completed = self._make_partial_config(**overrides).to_config()
+
+        assert completed.routers == [{"from": "chat_agent", "to": "end"}]
+
+    def test_declared_routers_are_kept(self):
+        routers = [{"from": "chat_agent", "to": "abort"}]
+
+        assert self._make_partial_config(routers=routers).to_config().routers == routers
+
+    def test_entry_point_defaults_to_the_single_component(self):
+        completed = self._make_partial_config().to_config()
+
+        assert completed.flow == FlowConfigMetadata(
+            entry_point="chat_agent", inputs=None
+        )
+
+    def test_entry_point_default_keeps_declared_inputs(self):
+        flow = FlowConfigMetadata(
+            inputs=[{"category": "file", "input_schema": {"path": {"type": "string"}}}]
+        )
+
+        completed = self._make_partial_config(flow=flow).to_config()
+
+        assert completed.flow.entry_point == "chat_agent"
+        assert completed.flow.inputs == flow.inputs
+
+    def test_declared_entry_point_is_kept(self):
+        flow = FlowConfigMetadata(entry_point="chat_agent")
+
+        assert self._make_partial_config(flow=flow).to_config().flow is flow
+
+    def test_components_pass_through_untouched(self):
+        component = {
+            "name": "chat_agent",
+            "type": "AgentComponent",
+            "pre_approved_tools": ["read_file"],
+        }
+        config = PartialFlowConfig(
+            version="v1", environment="chat-partial", components=[dict(component)]
+        )
+
+        assert config.to_config().components == [component]
+
+    def test_the_partial_config_is_not_mutated(self):
+        config = self._make_partial_config()
+
+        config.to_config()
+
+        assert config.flow is None
+        assert config.routers is None
+
+    def test_the_registry_id_survives_completing_a_partial_config(self):
+        partial = PartialFlowConfig.from_yaml_config(
+            "duo_permissions_assistant", "1.0.0"
+        )
+        assert partial.environment == "chat-partial"
+
+        config = partial.to_config()
+
+        assert isinstance(config, FlowConfig)
+        assert not isinstance(config, PartialFlowConfig)
+        assert config.config_id == "duo_permissions_assistant"
+        assert config.config_version == "1.0.0"
 
 
 class TestLoadComponentClass:
@@ -1218,4 +1317,393 @@ class TestSastFixValidationIsDeterministic:
             assert routes[BaseRouter.DEFAULT_ROUTE] == "end", version
             assert set(routes) == {self.PROCEED_ROUTE, BaseRouter.DEFAULT_ROUTE}, (
                 f"{version}: only an exact clean-exit 'proceed' may reach commit_changes"
+            )
+
+
+class TestSastPushPrecedesMergeRequestCreation:
+    """Regression guard for https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2814.
+
+    ``push_and_create_mr`` used to push and call ``create_merge_request`` in one response,
+    so a push rejected by a server-side push rule still produced a merge request — one
+    pointing at a branch that never received the commit. The push now owns a step of its
+    own, and only its reported success reaches the merge request step.
+    """
+
+    FLOW = "resolve_sast_vulnerability"
+    PUSH = "push_commits"
+    CREATE_MR = "push_and_create_mr"
+    # Anything that can run a command can push, which is what has to stay out of the
+    # merge request step.
+    COMMAND_TOOLS = {"run_command", "run_git_command"}
+
+    def _shipped_versions(self):
+        config_dir = FlowConfig.DIRECTORY_PATH / self.FLOW
+        return sorted(path.stem for path in config_dir.glob("*.yml"))
+
+    def _config(self, version):
+        return FlowConfig.from_yaml_config(self.FLOW, version)
+
+    def _component(self, version, name):
+        return next(c for c in self._config(version).components if c["name"] == name)
+
+    def test_every_shipped_version_pushes_in_its_own_agent_step(self):
+        assert self._shipped_versions(), "no shipped configs found for the flow"
+
+        for version in self._shipped_versions():
+            component = self._component(version, self.PUSH)
+
+            # An agent, not a deterministic step: recovering from a rejected push means
+            # reading the remote's error and amending the commit message.
+            assert component["type"] == "AgentComponent", version
+            assert component["prompt_id"] == "resolve_sast_vulnerability_push", version
+            assert self.COMMAND_TOOLS & set(component["toolset"]), version
+
+    def test_every_shipped_version_creates_the_mr_only_after_a_successful_push(self):
+        for version in self._shipped_versions():
+            config = self._config(version)
+            routers = {r["from"]: r for r in config.routers}
+
+            assert (
+                routers["commit_changes"]["condition"]["routes"]["success"] == self.PUSH
+            ), version
+
+            push_router = routers[self.PUSH]["condition"]
+            assert push_router["input"] == f"context:{self.PUSH}.final_answer.status", (
+                version
+            )
+            assert push_router["routes"]["success"] == self.CREATE_MR, version
+            assert push_router["routes"][BaseRouter.DEFAULT_ROUTE] == "end", version
+
+    def test_every_shipped_version_cannot_push_from_the_mr_step(self):
+        """Left in the toolset, the prompt's own history of pushing there would repeat itself."""
+        for version in self._shipped_versions():
+            toolset = set(self._component(version, self.CREATE_MR)["toolset"])
+
+            assert "create_merge_request" in toolset, version
+            assert not self.COMMAND_TOOLS & toolset, (
+                f"{version}: {self.CREATE_MR} can still run git, so it can still push "
+                "a branch the flow has not confirmed"
+            )
+
+
+class TestSastResolvesTargetBranchBeforeGitOperations:
+    """Regression guard for tracked-ref target branch wiring in version 1.0.2."""
+
+    FLOW = "resolve_sast_vulnerability"
+    VERSION = "1.0.2"
+    COMPONENT = "resolve_target_branch"
+    BRANCH_SOURCE = f"context:{COMPONENT}.tool_responses"
+
+    def _config(self):
+        return FlowConfig.from_yaml_config(self.FLOW, self.VERSION)
+
+    def _component(self, name):
+        return next(c for c in self._config().components if c["name"] == name)
+
+    def test_target_branch_is_resolved_deterministically(self):
+        component = self._component(self.COMPONENT)
+
+        assert component["type"] == "DeterministicStepComponent"
+        assert component["tool_name"] == "resolve_vulnerability_target_branch"
+
+    def test_target_branch_resolution_must_succeed_before_git_operations(self):
+        router = next(r for r in self._config().routers if r["from"] == self.COMPONENT)
+        condition = router["condition"]
+
+        assert condition["input"] == f"context:{self.COMPONENT}.execution_result"
+        assert condition["routes"]["success"] == "ensure_clean_git_state"
+        assert condition["routes"][BaseRouter.DEFAULT_ROUTE] == "end"
+
+    @pytest.mark.parametrize(
+        "component_name,input_alias",
+        [
+            ("ensure_clean_git_state", "default_branch"),
+            ("create_repository_branch", "ref"),
+            ("push_and_create_mr", "default_branch"),
+        ],
+    )
+    def test_resolved_branch_is_used_consistently(self, component_name, input_alias):
+        component = self._component(component_name)
+
+        assert {
+            "from": self.BRANCH_SOURCE,
+            "as": input_alias,
+        } in component["inputs"]
+
+
+class TestSastHidesTheSandboxsOwnFiles:
+    """Regression guard for https://gitlab.com/gitlab-org/gitlab/-/work_items/629525.
+
+    The flow runs under ``@anthropic-ai/sandbox-runtime``, which protects a set of
+    sensitive filenames by mounting read-only ``/dev/null`` or empty directories over
+    them. The paths are relative and the working directory is the checkout, so they
+    land in the repository: untracked, unremovable ("Device or resource busy") and
+    unstageable ("can only add regular files"). ``git add .`` exited 128 on one, the
+    commit exited 1 with the fix left unstaged, and because a non-zero exit returns as
+    ordinary text rather than raising, both were recorded as successes. The flow
+    pushed an empty branch and opened a merge request asserting the fix.
+
+    Taking them out of git's view is what makes every later step's reading of the
+    working tree honest again, ``validate_fix_has_changes`` included.
+    """
+
+    FLOW = "resolve_sast_vulnerability"
+    COMPONENT = "exclude_pre_existing_files"
+    # The executor wraps output as "Exit code: N\n<output>", so a clean exit and the
+    # step's own marker are both required before the flow may continue.
+    ROUTE_KEY = "Exit code: 0\nexcluded"
+    # Named only so the tests can assert the flow does NOT hardcode them.
+    SANDBOX_FILENAMES = (
+        ".bashrc",
+        ".bash_profile",
+        ".zshrc",
+        ".gitconfig",
+        ".gitmodules",
+        ".ripgreprc",
+        ".mcp.json",
+        ".vscode",
+        ".idea",
+        ".claude",
+    )
+
+    def _versions(self):
+        """Versions carrying the step, discovered rather than listed.
+
+        A hardcoded list would silently stop covering a version added later.
+        """
+        config_dir = FlowConfig.DIRECTORY_PATH / self.FLOW
+        return [
+            version
+            for version in sorted(path.stem for path in config_dir.glob("*.yml"))
+            if any(
+                c["name"] == self.COMPONENT
+                for c in FlowConfig.from_yaml_config(self.FLOW, version).components
+            )
+        ]
+
+    def _config(self, version):
+        return FlowConfig.from_yaml_config(self.FLOW, version)
+
+    def _component(self, version):
+        return next(
+            c for c in self._config(version).components if c["name"] == self.COMPONENT
+        )
+
+    @staticmethod
+    def _targets(router):
+        if "to" in router:
+            return {router["to"]}
+        return set(router["condition"]["routes"].values())
+
+    def _command(self, version):
+        return next(
+            step_input["from"]
+            for step_input in self._component(version)["inputs"]
+            if step_input["as"] == "command"
+        )
+
+    def test_at_least_one_version_hides_them(self):
+        """Stops every guard below from passing by having nothing to check."""
+        assert self._versions(), (
+            "no shipped version hides the sandbox's files, so nothing stops them "
+            "reaching `git add` and leaving the fix unstaged"
+        )
+
+    def test_it_runs_before_the_fix_and_cannot_fail_open(self):
+        """Recorded after the fix, the fix itself would count as pre-existing.
+
+        And everything downstream reads git's view of the tree, so a failure here has to stop the flow rather than let
+        the sandbox's files reach a commit.
+        """
+        for version in self._versions():
+            config = self._config(version)
+
+            # Component order in the YAML is declaration order, not execution order,
+            # so reachability has to come off the routers: nothing may enter
+            # `execute_fix` except this step.
+            feeders = {
+                router["from"]
+                for router in config.routers
+                if "execute_fix" in self._targets(router)
+            }
+            assert feeders == {self.COMPONENT}, (
+                f"{version}: {sorted(feeders)} can reach execute_fix, so the fix can "
+                "run while the sandbox's files are still visible to git"
+            )
+
+            component = self._component(version)
+            assert component["type"] == "DeterministicStepComponent", version
+            assert component["tool_name"] == "run_command", version
+            for step_input in component.get("inputs", []):
+                assert step_input.get("literal"), version
+
+            router = next(r for r in config.routers if r["from"] == self.COMPONENT)
+            assert router["condition"]["input"] == (
+                f"context:{self.COMPONENT}.tool_responses"
+            ), (
+                f"{version}: routing on execution_result would gate on whether the "
+                "tool raised, and DeterministicStepNode reports success for a command "
+                "that merely exits non-zero, which is this issue's own failure mode"
+            )
+            assert router["condition"]["routes"][self.ROUTE_KEY] == "execute_fix", (
+                version
+            )
+            assert router["condition"]["routes"][BaseRouter.DEFAULT_ROUTE] == "end", (
+                version
+            )
+
+    def test_it_hides_them_from_git_not_from_the_project(self):
+        """``.gitignore`` is a tracked file and would land in the commit.
+
+        The list is derived rather than written down: the sandbox's own list is
+        versioned in the runtime image and was bumped three times in one month, so a
+        hardcoded copy goes stale silently and fails the way the original bug failed.
+        The block is delimited and rewritten because local clones are reused between
+        runs, and a blind append would grow the file every time.
+        """
+        for version in self._versions():
+            command = self._command(version)
+
+            assert ".git/info/exclude" in command, version
+            assert ".gitignore" not in command, (
+                f"{version}: writing .gitignore would commit the sandbox's filenames "
+                "into the user's repository"
+            )
+            assert "ls-files --others --exclude-standard" in command, (
+                f"{version}: the ignore list is not derived from the working tree"
+            )
+            for filename in self.SANDBOX_FILENAMES:
+                assert filename not in command, (
+                    f"{version}: {filename} is hardcoded; the next sandbox release "
+                    "that adds a filename silently stops being handled"
+                )
+            assert "/^# duo-flow-begin$/,/^# duo-flow-end$/d" in command, (
+                f"{version}: the previous block is never stripped, so every run on a "
+                "reused clone appends another copy"
+            )
+            assert command.startswith("set -e;"), (
+                f"{version}: without it the command runs on past a failure and still "
+                "reaches its final printf, reporting the route key either way"
+            )
+            assert command.count("ls-files --others --exclude-standard") >= 2, (
+                f"{version}: the step never re-reads the tree, so an entry that was "
+                "written but does not match still reports success"
+            )
+
+    @staticmethod
+    def _git(repo, *args):
+        subprocess.run(
+            ["git", "-c", "commit.gpgsign=false", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+
+    def _repo(self, tmp_path):
+        """A checkout holding a tracked dotfile, as a real project would."""
+        repo = tmp_path / "checkout"
+        repo.mkdir(parents=True)
+        self._git(repo, "init", "--quiet", ".")
+        self._git(repo, "config", "user.email", "test@example.com")
+        self._git(repo, "config", "user.name", "test")
+        (repo / "app.py").write_text("vulnerable\n")
+        (repo / ".gitlab-ci.yml").write_text("stages: [test]\n")
+        self._git(repo, "add", "--all")
+        self._git(repo, "commit", "--quiet", "--message", "base")
+        return repo
+
+    # Built from the real binaries' locations rather than the inherited PATH, so the
+    # shim takes precedence over git without the test reading the environment.
+    _COREUTILS = ("sh", "sed", "mkdir", "touch", "mv")
+
+    def _run(self, command, repo, shim=None):
+        env = None
+        if shim is not None:
+            real = sorted(
+                {str(Path(shutil.which(tool)).parent) for tool in self._COREUTILS}
+            )
+            env = {"PATH": os.pathsep.join([str(shim), *real]), "HOME": str(repo)}
+        return subprocess.run(
+            ["sh", "-c", command],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+            env=env,
+        )
+
+    def _untracked(self, repo):
+        return subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout.split()
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs a real git")
+    def test_it_leaves_git_blind_to_everything_that_was_already_there(self, tmp_path):
+        """The outcome, not the wiring: `git add .` must stage the fix and nothing else.
+
+        ``.weird[1].json`` is here because the paths are written into a gitignore
+        file, where ``[`` is a character class. An unescaped entry is still written
+        successfully and still leaves the file visible, so only checking the
+        outcome catches it.
+        """
+        for version in self._versions():
+            repo = self._repo(tmp_path / version)
+            for name in (".bashrc", ".zshrc", ".weird[1].json"):
+                (repo / name).write_text("sandbox\n")
+            (repo / ".claude").mkdir()
+            (repo / ".claude" / "agents").write_text("sandbox\n")
+
+            result = self._run(self._command(version), repo)
+
+            assert result.returncode == 0, f"{version}: {result.stderr}"
+            assert result.stdout == "excluded", version
+            assert self._untracked(repo) == [], (
+                f"{version}: the sandbox's files are still visible to git, so "
+                "`git add .` will fail on them and leave the fix unstaged"
+            )
+
+            (repo / "app.py").write_text("fixed\n")
+            (repo / ".gitlab-ci.yml").write_text("stages: [test, sast]\n")
+            (repo / "helper.py").write_text("new\n")
+            self._git(repo, "add", ".")
+            staged = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            ).stdout.split()
+            assert sorted(staged) == [".gitlab-ci.yml", "app.py", "helper.py"], version
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs a real git")
+    def test_it_reports_failure_rather_than_claiming_success(self, tmp_path):
+        """A command that prints its marker anyway is indistinguishable from one that worked.
+
+        The router can only be as honest as the exit code and the output it reads, and
+        ``DeterministicStepNode`` will not notice a non-zero exit on its own.
+        """
+        for version in self._versions():
+            repo = self._repo(tmp_path / version)
+            failing_bin = tmp_path / version / "bin"
+            failing_bin.mkdir(parents=True)
+            broken_git = failing_bin / "git"
+            broken_git.write_text("#!/bin/sh\nexit 7\n")
+            broken_git.chmod(0o755)
+
+            result = self._run(self._command(version), repo, shim=str(failing_bin))
+
+            assert result.returncode != 0, (
+                f"{version}: a broken git still exits 0, so the router sees a clean "
+                "run and the flow continues with the sandbox's files in the tree"
+            )
+            assert "excluded" not in result.stdout, (
+                f"{version}: the step printed its route key despite failing"
             )

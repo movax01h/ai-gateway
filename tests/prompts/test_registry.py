@@ -28,7 +28,7 @@ from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
-from ai_gateway.prompts import LocalPromptRegistry, Prompt
+from ai_gateway.prompts import LocalPromptRegistry, Prompt, feature_roots
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
@@ -176,6 +176,10 @@ models:
         model: embedding_test
         custom_llm_provider: vertex_ai
 """,
+    )
+    fs.create_file(
+        model_selection_dir / "model_restrictions.yml",
+        contents="restricted_models: []\n",
     )
     fs.create_file(
         model_selection_dir / "unit_primitives.yml",
@@ -440,8 +444,16 @@ params:
     - Bar
 """,
     )
+    # embeddings_code lives under ai/features/, so fake it at the moved root.
     fs.create_file(
-        prompts_definitions_dir / "embeddings_code" / "base" / "1.0.0.yml",
+        ai_gateway_dir.parent
+        / "ai"
+        / "features"
+        / "semantic_search"
+        / "embeddings_code"
+        / "prompts"
+        / "base"
+        / "1.0.0.yml",
         contents="""
 ---
 name: Code Embeddings
@@ -451,8 +463,14 @@ prompt_template:
 """,
     )
 
-    with patch(
-        "ai_gateway.prompts.registry.LEGACY_MODEL_MAPPING", {"test": {"0.0.1": "haiku"}}
+    # Start from an empty feature-root registry so discovery only sees the fake
+    # tree, regardless of what earlier tests in the same worker registered.
+    with (
+        patch(
+            "ai_gateway.prompts.registry.LEGACY_MODEL_MAPPING",
+            {"test": {"0.0.1": "haiku"}},
+        ),
+        patch.dict(feature_roots._FEATURE_PROMPT_ROOTS, clear=True),
     ):
         yield
 
@@ -1773,6 +1791,7 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "fix_pipeline_checkout_existing_branch",
         "fix_pipeline_code_suggestions",
         "fix_pipeline_context",
+        "fix_pipeline_create_branch",
         "fix_pipeline_create_new_mr",
         "fix_pipeline_decide_fix",
         "fix_pipeline_execution",
@@ -1791,6 +1810,7 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "resolve_sast_evaluate_mr_readiness",
         "resolve_sast_vulnerability_commit",
         "resolve_sast_vulnerability_execution",
+        "resolve_sast_vulnerability_push",
         "resolve_sast_vulnerability_push_and_create_mr",
         "sast_fp_detection_agent_prompt",
         "sast_post_results_to_gitlab_agent_prompt",

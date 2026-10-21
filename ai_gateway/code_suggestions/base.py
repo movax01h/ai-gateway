@@ -77,10 +77,11 @@ USE_CASES_MODELS_MAP = {
         KindGitLabModel.GITLAB_DEFAULT_MODEL,
         KindGitLabModel.CLAUDE_4_5_SONNET,
         KindGitLabModel.CLAUDE_4_5_SONNET_VERTEX,
+        KindGitLabModel.CLAUDE_5_5_SONNET,
+        KindGitLabModel.CLAUDE_5_5_SONNET_VERTEX,
     },
     KindUseCase.CODE_GENERATIONS: {
         KindVertexTextModel.CODE_BISON_002,
-        KindVertexTextModel.GEMINI_2_5_FLASH,
         KindLiteLlmModel.CODEGEMMA,
         KindLiteLlmModel.CODELLAMA,
         KindLiteLlmModel.CODESTRAL,
@@ -109,7 +110,7 @@ SAAS_PROMPT_MODEL_MAP = {
     },
     "1.2.0-dev": {
         "model_provider": ModelProvider.VERTEX_AI,
-        "model_version": KindVertexTextModel.GEMINI_2_5_FLASH,
+        "model_version": KindAnthropicModel.CLAUDE_SONNET_4_6_VERTEX,
     },
     "1.2.0": {
         "model_provider": ModelProvider.VERTEX_AI,
@@ -134,15 +135,16 @@ SAAS_PROMPT_MODEL_MAP = {
 }
 
 
-class CodeSuggestionsOutput(NamedTuple):
-    class Metadata(NamedTuple):  # type: ignore[misc]
-        tokens_consumption_metadata: Optional[TokensConsumptionMetadata] = None
+class CodeSuggestionsMetadata(NamedTuple):
+    tokens_consumption_metadata: TokensConsumptionMetadata | None = None
 
+
+class CodeSuggestionsOutput(NamedTuple):
     text: str
     model_metadata: ModelMetadata
     score: Optional[float] = None
     lang_id: Optional[LanguageId] = None
-    metadata: Optional["CodeSuggestionsOutput.Metadata"] = None  # type: ignore[name-defined]
+    metadata: CodeSuggestionsMetadata | None = None
 
     @property
     def lang(self) -> str:

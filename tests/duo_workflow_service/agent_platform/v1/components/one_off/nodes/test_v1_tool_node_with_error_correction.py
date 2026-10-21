@@ -7,8 +7,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    ToolBlockedByAdministratorError,
+)
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -245,8 +248,16 @@ class TestToolNodeWithErrorCorrectionRun:
         assert isinstance(success_message, HumanMessage)
         assert SUCCESS_SENTINEL in success_message.content
 
-        # Verify tool execution was called
-        mock_tool.ainvoke.assert_called_once_with(mock_tool_call["args"])
+        # Verify tool execution was called with a ToolCall-shaped dict so
+        # tool_call_id threads through to the audit callback handler.
+        mock_tool.ainvoke.assert_called_once_with(
+            {
+                "name": mock_tool_call["name"],
+                "args": mock_tool_call["args"],
+                "id": mock_tool_call["id"],
+                "type": "tool_call",
+            }
+        )
 
         # Verify security sanitization was called
         mock_prompt_security.assert_called_once()
@@ -260,6 +271,23 @@ class TestToolNodeWithErrorCorrectionRun:
             ui_history_one_off.log.success.call_args.kwargs["message_id"]
             == mock_tool_call["id"]
         )
+
+    @pytest.mark.asyncio
+    async def test_run_unwraps_tool_message_result(
+        self,
+        tool_node_with_error_correction,
+        flow_state_with_tool_calls_one_off,
+        mock_tool,
+        mock_tool_call,
+        mock_prompt_security,
+    ):
+        mock_tool.ainvoke.return_value = ToolMessage(
+            content="raw tool output", tool_call_id=mock_tool_call["id"]
+        )
+
+        await tool_node_with_error_correction.run(flow_state_with_tool_calls_one_off)
+
+        assert mock_prompt_security.call_args.kwargs["response"] == "raw tool output"
 
     @pytest.mark.asyncio
     async def test_run_with_io_keys_storage(
@@ -309,6 +337,70 @@ class TestToolNodeWithErrorCorrectionRun:
         security_args = mock_prompt_security.call_args
         assert (
             f"Tool {mock_tool_call['name']} not found" in security_args[1]["response"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_denied_tool_halts_before_sibling_calls_execute(
+        self,
+        tool_node_with_error_correction,
+        component_name,
+        mock_toolset,
+        mock_tool,
+        mock_internal_event_client,
+    ):
+        """A denied call in a batch halts the flow before any sibling call runs."""
+        mock_toolset.__contains__ = Mock(side_effect=lambda name: name == "test_tool")
+        mock_toolset.denied_tools = {"denied_tool"}
+        message = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "test_tool", "args": {}, "id": "call_1"},
+                {"name": "denied_tool", "args": {}, "id": "call_2"},
+            ],
+        )
+        state = {
+            "status": "execution",
+            FlowStateKeys.CONVERSATION_HISTORY: {component_name: [message]},
+            "ui_chat_log": [],
+            "context": {},
+        }
+
+        with pytest.raises(ToolBlockedByAdministratorError) as exc_info:
+            await tool_node_with_error_correction.run(state)
+
+        assert exc_info.value.tool_names == ["denied_tool"]
+        mock_tool.ainvoke.assert_not_called()
+        mock_internal_event_client.track_event.assert_called_once()
+        assert (
+            mock_internal_event_client.track_event.call_args[1]["event_name"]
+            == EventEnum.WORKFLOW_TOOL_BLOCKED.value
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_halts_when_deny_emptied_the_toolset(
+        self,
+        tool_node_with_error_correction,
+        component_name,
+        mock_toolset,
+        mock_internal_event_client,
+    ):
+        mock_toolset.__len__ = Mock(return_value=0)
+        mock_toolset.denied_tools = {"post_duo_code_review"}
+        state = {
+            "status": "execution",
+            FlowStateKeys.CONVERSATION_HISTORY: {component_name: []},
+            "ui_chat_log": [],
+            "context": {},
+        }
+
+        with pytest.raises(ToolBlockedByAdministratorError) as exc_info:
+            await tool_node_with_error_correction.run(state)
+
+        assert exc_info.value.tool_names == ["post_duo_code_review"]
+        mock_internal_event_client.track_event.assert_called_once()
+        assert (
+            mock_internal_event_client.track_event.call_args[1]["event_name"]
+            == EventEnum.WORKFLOW_TOOL_BLOCKED.value
         )
 
     @pytest.mark.asyncio
@@ -452,10 +544,10 @@ class TestToolNodeWithErrorCorrectionRun:
         tool_node_with_error_correction,
         base_flow_state,
         component_name,
+        mock_toolset,
     ):
         """Test run when toolset is empty."""
-        # Configure toolset to be empty
-        tool_node_with_error_correction._toolset = []
+        mock_toolset.__len__ = Mock(return_value=0)
 
         state = base_flow_state.copy()
         state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: []}

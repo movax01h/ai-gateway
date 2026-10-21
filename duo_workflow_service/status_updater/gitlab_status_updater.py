@@ -6,6 +6,7 @@ import structlog
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.gitlab.gitlab_api import Checkpoint
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -33,6 +34,24 @@ class BadStatusEvent(UnsupportedStatusEvent):
         )
         self.status_event = status_event
         self.error_body = error_body
+
+
+class CreatedWorkflowHasCheckpoints(UnsupportedStatusEvent):
+    """Raised when a workflow still in `created` status already has checkpoints.
+
+    The checkpoint is kept as an attribute and embedded in the message for logs, but it varies per request and can
+    carry conversation content, so callers that surface the error (e.g. the gRPC status details) use the stable
+    ``DETAILS`` instead.
+
+    Attributes:
+        checkpoint: The checkpoint found for the workflow.
+    """
+
+    DETAILS = "Workflow with status 'created' should not have existing checkpoints"
+
+    def __init__(self, checkpoint: Checkpoint) -> None:
+        super().__init__(f"{self.DETAILS}. Found checkpoint: {checkpoint}")
+        self.checkpoint = checkpoint
 
 
 class ForbiddenStatusEvent(Exception):

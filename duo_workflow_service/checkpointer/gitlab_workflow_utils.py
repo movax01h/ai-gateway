@@ -2,13 +2,14 @@ import base64
 import json
 import zlib
 from enum import StrEnum
+from typing import Any, Callable, Mapping, Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from langgraph.checkpoint.base import Checkpoint
 
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.gitlab.http_client import checkpoint_decoder
-from duo_workflow_service.json_encoder.encoder import CustomEncoder
+from duo_workflow_service.json_encoder.encoder import dumps_checkpoint
 from lib.internal_events.event_enum import EventPropertyEnum
 
 STATUS_TO_EVENT_PROPERTY = {
@@ -62,23 +63,40 @@ def compress_checkpoint(data: Checkpoint) -> str:
     Returns:
         Base64-encoded compressed checkpoint string
     """
-    json_str = json.dumps(dict(data), cls=CustomEncoder)
+    json_str = dumps_checkpoint(dict(data))
     compressed = zlib.compress(json_str.encode("utf-8"))
     return base64.b64encode(compressed).decode("utf-8")
 
 
-def uncompress_checkpoint(compressed_data: str) -> dict:
-    """Uncompress compressed checkpoint data and decode using checkpoint_decoder.
+def uncompress_checkpoint(
+    compressed_data: str,
+    object_hook: Optional[Callable[[dict], Any]] = checkpoint_decoder,
+) -> dict:
+    """Uncompress compressed checkpoint data and decode it with ``object_hook``.
 
     Args:
         compressed_data: Base64-encoded zlib compressed string
+        object_hook: JSON object hook. Defaults to ``checkpoint_decoder``, which rebuilds messages and ``Send``
+            packets. Pass ``None`` to keep every object a plain dict.
 
     Returns:
-        Uncompressed checkpoint dictionary with decoded objects
+        Uncompressed checkpoint dictionary
     """
     decoded = base64.b64decode(compressed_data.encode("utf-8"))
     uncompressed = zlib.decompress(decoded)
-    return json.loads(uncompressed.decode("utf-8"), object_hook=checkpoint_decoder)
+    return json.loads(uncompressed.decode("utf-8"), object_hook=object_hook)
+
+
+def decode_gitlab_checkpoint_payload(checkpoint: Mapping[str, Any]) -> dict:
+    """Decode a GraphQL-shaped GitLab checkpoint into its inner checkpoint dict.
+
+    The ``latest_checkpoint`` / ``first_checkpoint`` entries cached in ``WorkflowConfig``
+    are stored verbatim from the GraphQL response and still encoded: newer instances
+    (19.0+) send ``compressedCheckpoint``, older ones send ``checkpoint`` as a JSON string.
+    """
+    if "compressedCheckpoint" in checkpoint:
+        return uncompress_checkpoint(checkpoint["compressedCheckpoint"])
+    return json.loads(checkpoint["checkpoint"], object_hook=checkpoint_decoder)
 
 
 NOOP_WORKFLOW_STATUSES = [WorkflowStatusEnum.APPROVAL_ERROR]
@@ -103,6 +121,16 @@ CHECKPOINT_STATUS_TO_STATUS_EVENT = {
     "PLAN_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
     "TOOL_CALL_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
 }
+
+# Status events that end the session, as opposed to pausing it awaiting the user. Only
+# the top-level checkpoint lineage may send these; see `GitLabWorkflow.aput_writes`.
+TERMINAL_WORKFLOW_STATUS_EVENTS = frozenset(
+    [
+        WorkflowStatusEventEnum.FINISH,
+        WorkflowStatusEventEnum.DROP,
+        WorkflowStatusEventEnum.STOP,
+    ]
+)
 
 # Maps WorkflowStatus(status key in LangGraph's WorkflowState) to checkpoint status.
 # Checkpoint status represents status human-readable workflow status (displayed in the UI)
@@ -133,7 +161,9 @@ def add_compression_param(endpoint: str) -> str:
         URL with accept_compressed=true parameter added
     """
     parsed = urlparse(endpoint)
-    params = parse_qs(parsed.query)
+    # keep_blank_values: a blank `checkpoint_ns=` means the top-level lineage; dropping
+    # it would turn that into the list endpoint's unfiltered "every lineage" default.
+    params = parse_qs(parsed.query, keep_blank_values=True)
     params["accept_compressed"] = ["true"]
 
     new_query = urlencode(params, doseq=True)

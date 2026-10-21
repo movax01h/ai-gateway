@@ -10,7 +10,7 @@ from duo_workflow_service.components import PlanApprovalComponent, ToolsRegistry
 from duo_workflow_service.components.planner.component import PlannerComponent, Routes
 from duo_workflow_service.entities import Plan, Task, WorkflowState, WorkflowStatusEnum
 from duo_workflow_service.tools import DuoBaseTool
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 
 @pytest.fixture(name="approval_component")
@@ -196,7 +196,7 @@ class TestPlannerComponent:
         self,
         mock_build_agent: Mock,
         planner_component: PlannerComponent,
-        workflow_type: CategoryEnum,
+        workflow_type: GLReportingEventContext,
         mock_tool: Mock,
     ):
         """Test that Agent is created with correct parameters."""

@@ -16,6 +16,7 @@ from ai_gateway.code_suggestions.processing.pre import (
 )
 from ai_gateway.code_suggestions.prompts import PromptTemplate
 from ai_gateway.models.base_chat import Message, Role
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 
 # This template takes 4 tokens (ignore placeholders)
 # with the Salesforce/codegen2-16B tokenizer
@@ -593,3 +594,61 @@ class TestPromptBuilderPrefixBased:
         actual = builder.build()
 
         assert actual == expected_prompt
+
+    def _build_with_capped_context(self, monkeypatch):
+        monkeypatch.setattr(PromptBuilderPrefixBased, "CODE_CONTEXT_MAX_TOKENS", 1)
+        builder = PromptBuilderPrefixBased(2048, TokenizerTokenStrategy(self.tokenizer))
+        builder.add_content(
+            "prefix_text",
+            suffix="random_text",
+            suffix_reserved_percent=0.5,
+            context_max_percent=1.0,
+            code_context=["context_text"],
+        )
+
+        return builder.build()
+
+    @pytest.fixture
+    def cap_flag_enabled(self):
+        token = current_feature_flag_context.set(
+            {FeatureFlag.CAP_CODE_COMPLETION_CONTEXT}
+        )
+        yield
+        current_feature_flag_context.reset(token)
+
+    @pytest.fixture
+    def cap_flag_disabled(self):
+        token = current_feature_flag_context.set(set())
+        yield
+        current_feature_flag_context.reset(token)
+
+    @pytest.mark.usefixtures("cap_flag_enabled")
+    def test_code_context_absolute_cap(self, monkeypatch):
+        actual = self._build_with_capped_context(monkeypatch)
+
+        assert actual.prefix == "context\nprefix_text"
+        assert actual.metadata.code_context.post.length_tokens <= 1
+
+    @pytest.mark.usefixtures("cap_flag_enabled")
+    def test_code_context_absolute_cap_cuts_at_line_boundary(self, monkeypatch):
+        monkeypatch.setattr(PromptBuilderPrefixBased, "CODE_CONTEXT_MAX_TOKENS", 3)
+        builder = PromptBuilderPrefixBased(2048, TokenizerTokenStrategy(self.tokenizer))
+        builder.add_content(
+            "prefix_text",
+            suffix="random_text",
+            suffix_reserved_percent=0.5,
+            context_max_percent=1.0,
+            code_context=["context\ntext\nprefix"],
+        )
+
+        actual = builder.build()
+
+        assert actual.prefix == "context\nprefix_text"
+        assert actual.metadata.code_context.post.length_tokens == 1
+
+    @pytest.mark.usefixtures("cap_flag_disabled")
+    def test_code_context_absolute_cap_disabled(self, monkeypatch):
+        actual = self._build_with_capped_context(monkeypatch)
+
+        assert actual.prefix == "context_text\nprefix_text"
+        assert actual.metadata.code_context.post.length_tokens == 3

@@ -68,8 +68,11 @@ RUN microdnf install --nodocs --best --assumeyes --setopt=install_weak_deps=0 \
 # This prevents: __Pyx_GetCurrentInterpreterId failed. Try setting the C define CYTHON_PEP489_MULTI_PHASE_INIT=0
 RUN POETRY_INSTALLER_NO_BINARY=dependency_injector poetry install --compile --no-interaction --no-ansi --no-cache --only main
 
+# Remove ecdsa to avoid CVE-2024-23342 (unpatched upstream). It is only pulled in
+# unconditionally by python-jose and never imported: jose uses the cryptography
+# backend for EC keys, and cryptography is always installed here.
 RUN find /home/aigateway/app/venv -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true && \
-    rm -rf /home/aigateway/app/venv/*/lib*/python3.12/site-packages/{pip,setuptools,wheel}*
+    rm -rf /home/aigateway/app/venv/*/lib*/python3.12/site-packages/{ecdsa,pip,setuptools,wheel}*
 
 ##
 ## Final image
@@ -86,7 +89,7 @@ RUN poetry env use venv/ai-gateway-*/bin/python
 
 RUN poetry run python scripts/bootstrap.py
 
-# Pull foundational agents from the catalog
+# Pull foundational agents from the catalog into ai/features/foundational_agents/
 RUN poetry run fetch-foundational-agents "https://gitlab.com" "$GITLAB_API_TOKEN" "duo_planner:348,security_analyst_agent:356,ci_expert_agent:1004583,onboarding_guide:1003979" \
     --flow-registry-version v1
 

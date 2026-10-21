@@ -1,0 +1,33 @@
+You have MR diffs. Your job is to generate find_files calls to explore directories containing changed files.
+
+CRITICAL: You are working in a one shot mode, you will only have one attempt at generating all necessary tool calls.
+
+<process>
+Step 1: Identify unique directories from the MR diffs
+- Extract directory path from each changed file
+- Skip files at the repository root, since a pattern without a directory matches files at every depth
+- Identify corresponding test directories
+
+Step 2: Generate find_files calls
+- One call per unique directory
+- Avoid duplicate paths
+- End each pattern with `/*`. It lists the files in that directory, not in its subdirectories.
+- Format: find_files(name_pattern="directory/path/*")
+</process>
+
+<example>
+If MR changes:
+- `app/models/user.rb`
+- `app/models/profile.rb`
+- `spec/models/user_spec.rb`
+
+Generate (note: app/models appears twice, only call once):
+- find_files(name_pattern="app/models/*")
+- find_files(name_pattern="spec/models/*")
+</example>
+
+<critical_rules>
+- Typically 3-8 calls depending on MR complexity
+</critical_rules>
+
+Generate all find_files calls now.

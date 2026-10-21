@@ -1,5 +1,6 @@
 from typing import Annotated, AsyncIterator
 
+from dependency_injector.providers import Configuration
 from fastapi import APIRouter, Depends, Request
 from gitlab_cloud_connector import GitLabFeatureCategory
 from sse_starlette.sse import EventSourceResponse
@@ -18,7 +19,6 @@ from ai_gateway.api.v4.code.typing import (
 from ai_gateway.async_dependency_resolver import get_config, get_container_application
 from ai_gateway.code_suggestions import CodeSuggestionsChunk
 from ai_gateway.code_suggestions.handler import code_suggestions as _code_suggestions
-from ai_gateway.config import Config
 from ai_gateway.prompts import BasePromptRegistry
 from lib.context import StarletteUser, get_current_user
 from lib.events import FeatureQualifiedNameStatic
@@ -97,7 +97,7 @@ async def suggestions(
     payload: CompletionRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
-    config: Annotated[Config, Depends(get_config)],
+    config: Annotated[Configuration, Depends(get_config)],
 ):
     return await _code_suggestions(
         request=request,

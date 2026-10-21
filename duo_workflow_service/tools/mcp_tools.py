@@ -20,6 +20,7 @@ class McpTool(DuoBaseTool):
     """A tool that executes MCP (Model Control Protocol) operations asynchronously."""
 
     _original_mcp_name: str | None = None
+    _client_injected: bool = False
 
     async def _execute(self, **arguments):
         metadata = self.metadata or {}
@@ -129,10 +130,13 @@ class McpToolConfig(TypedDict):
     llm_name: str
     description: str
     args_schema: dict
+    client_injected: bool
+    trusted: bool
 
 
 def convert_mcp_tools_to_configs(
     mcp_tools: list[contract_pb2.McpTool],
+    force_client_injected: bool = False,
 ) -> list[McpToolConfig]:
     """Converts a list of MCP tools into configuration dictionaries.
 
@@ -141,6 +145,8 @@ def convert_mcp_tools_to_configs(
 
     Args:
         mcp_tools: A list of MCP tools defined using the contract_pb2.McpTool protocol buffer.
+        force_client_injected: Treat every tool as client-supplied, ignoring the field on
+            the wire. Set when nothing stamped the request, so the field is unreliable.
 
     Returns:
         A list of configuration dictionaries for creating McpTool instances.
@@ -157,7 +163,8 @@ def convert_mcp_tools_to_configs(
         except json.JSONDecodeError:
             args_schema = {}
 
-        is_trusted = getattr(tool, "trusted", False)
+        client_injected = force_client_injected or tool.client_injected
+        is_trusted = getattr(tool, "trusted", False) and not client_injected
         description = (
             tool.description
             if is_trusted
@@ -170,6 +177,8 @@ def convert_mcp_tools_to_configs(
                 llm_name=llm_name,
                 description=description,
                 args_schema=args_schema,
+                client_injected=client_injected,
+                trusted=is_trusted,
             )
         )
 

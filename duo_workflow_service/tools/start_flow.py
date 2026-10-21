@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Annotated, Any, ClassVar, Literal, Optional, Type, Union
 from urllib.parse import unquote
 
@@ -8,7 +9,11 @@ from packaging.version import Version
 from pydantic import BaseModel, Field, create_model, model_validator
 
 from duo_workflow_service.gitlab.gitlab_api import WorkflowFeatures
-from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
+from duo_workflow_service.gitlab.url_parser import (
+    SESSION_URL_PATH,
+    GitLabUrlParseError,
+    GitLabUrlParser,
+)
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 log = structlog.stdlib.get_logger(__name__)
@@ -28,12 +33,16 @@ FLOW_IDENTIFIER_MAP = {
 # FLOW_IDENTIFIER_MAP and handled on its own branch throughout.
 CATALOG_FLOW_NAME = "catalog_flow"
 
+_FORBIDDEN_BOILERPLATE_RE = re.compile(r"^403\s+forbidden\s*-?\s*", re.IGNORECASE)
+
 _DESCRIPTION_PREFIX = (
     "Delegate a task to a specialist GitLab agent that works "
-    "asynchronously over multiple steps. Always use this tool when the "
-    "user's request matches one of the agents below — specialist "
-    "agents are purpose-built for their domain and deliver better "
-    "outcomes than inline handling.\n"
+    "asynchronously over multiple steps. Prefer using this tool when the "
+    "user's request matches one of the agents below, unless the user "
+    "asks you to work directly. In that case, use your available tools "
+    "and do not refuse solely because a specialist flow exists. "
+    "Specialist agents are purpose-built for their domain and can "
+    "deliver better outcomes than inline handling.\n"
     "\n"
     "Available agents:\n"
 )
@@ -65,10 +74,7 @@ _CATALOG_FLOW_DESCRIPTION = (
     "here — only use this agent when the user supplies that ID.\n"
 )
 
-_DESCRIPTION_SUFFIX = (
-    "\n\nReturns a session URL the user can follow to track progress. The user "
-    "is prompted to approve the handoff before the agent starts."
-)
+_DESCRIPTION_SUFFIX = "\n\nReturns a session URL the user can follow to track progress."
 
 
 def enabled_flow_identifiers(
@@ -111,47 +117,92 @@ _FORBIDDEN_FAILURE_DETAIL = (
     "This flow isn't available, or you don't have sufficient permissions to start it."
 )
 
-# Catalog flows are addressed by an ID the user supplies by hand, so a wrong
-# one is the likeliest failure and worth naming. Rails distinguishes the cases:
-# an unknown consumer ID is a 404, one belonging to another project or group is
-# a 403, and its service layer folds everything else — including permission
-# failures — into a 400.
-_CATALOG_FAILURE_DETAILS = {
-    400: (
-        "This flow can't be started. Check that the ID is correct and that the "
-        "flow is still enabled in this project."
-    ),
-    403: (
-        "This flow isn't enabled in this project, or you don't have sufficient "
-        "permissions to start it."
-    ),
-    404: "No flow with that ID is enabled in this project.",
-}
+_MISSING_PROJECT_MESSAGE = (
+    "This agent runs in a project, and no project was given or is available "
+    "from the current context. Ask the user which project to use, then retry "
+    "with its URL as project_url. Agents without a project_url field can only "
+    "be started from a chat opened in that project."
+)
+
+_MISSING_PROJECT_DETAIL = "This agent needs a project to run in."
 
 
-def _failure_detail(status_code: int, flow_name: str) -> str:
+def _extract_rails_message(body: Any) -> Optional[str]:
+    """Pull the human-readable message out of a parsed Rails error body.
+
+    Rails API errors are shaped as ``{"message": ...}`` (Grape
+    ``error!``/``render_api_error!``); the value is a plain string for most
+    failures and a dict of ``field -> [errors]`` for validation failures. Both
+    are already written for the API caller, so they are safe to surface.
+
+    Args:
+        body: The already-parsed response body (``apost`` JSON-parses by
+            default).
+    """
+    if not isinstance(body, dict):
+        return None
+
+    message = body.get("message")
+    if isinstance(message, str):
+        return message.strip() or None
+    if isinstance(message, dict) and message:
+        parts = [
+            f"{field}: {', '.join(str(e) for e in errors)}"
+            for field, errors in message.items()
+        ]
+        return "; ".join(parts) or None
+    return None
+
+
+def _failure_detail(status_code: int, flow_name: str, body: Any) -> str:
     """User-facing explanation for a failed start request.
+
+    Prefers the message Rails returned (it names the actual problem, so the
+    agent can act on it instead of retrying blindly), and falls back to a
+    fixed reason only when there is no usable message — e.g. a server error
+    with no body, or an unexpected payload shape.
 
     Args:
         status_code: HTTP status Rails returned.
         flow_name: Flow the request was for, used to pick the catalog-specific
             wording.
+        body: Parsed response body from Rails.
 
     Returns:
         A reason suitable for both the LLM-facing message and the UI chat log.
     """
-    if flow_name == CATALOG_FLOW_NAME and status_code in _CATALOG_FAILURE_DETAILS:
-        return _CATALOG_FAILURE_DETAILS[status_code]
-    if status_code == 403:
-        return _FORBIDDEN_FAILURE_DETAIL
+    if status_code < 500:
+        message = _extract_rails_message(body)
+        if status_code == 403 and message:
+            message = _strip_forbidden_boilerplate(message)
+        if message:
+            if flow_name == CATALOG_FLOW_NAME:
+                return f"{message} (flow ID: see ai_catalog_item_consumer_id)"
+            return message
+        if status_code == 403:
+            # A bare 403 carries no reason (e.g. Rails rejecting a workflow
+            # without a project), so fall back to the fixed permissions
+            # wording rather than surfacing the boilerplate status line.
+            return _FORBIDDEN_FAILURE_DETAIL
+
     return _GENERIC_FAILURE_DETAIL
+
+
+def _strip_forbidden_boilerplate(message: str) -> Optional[str]:
+    """Strip the ``403 Forbidden[ - reason]`` prefix Rails' ``forbidden!`` adds.
+
+    Returns:
+        The remaining reason text, or None if only the boilerplate status line
+        was present (a bare 403).
+    """
+    return _FORBIDDEN_BOILERPLATE_RE.sub("", message, count=1).strip() or None
 
 
 class StartFlowError(ToolException):
     """Raised when starting a flow fails.
 
-    ``response`` is read by ToolsExecutor._handle_tool_error to surface the
-    failure reason in the UI chat log, not just the LLM-facing message.
+    `response` is also stored as `server_error`, so ToolsExecutor shows it as
+    the tool card text instead of the LLM-facing message.
 
     Args:
         message: Human-readable description of the failure, forwarded to the LLM.
@@ -161,6 +212,7 @@ class StartFlowError(ToolException):
     def __init__(self, message: str, response: Optional[str] = None):
         super().__init__(message)
         self.response = response
+        self.server_error = response
 
 
 class StartDeveloperFlowInput(BaseModel):
@@ -177,7 +229,7 @@ class StartDeveloperFlowInput(BaseModel):
         default=None,
         description=(
             "Full URL of the GitLab project to run the task in. "
-            "Omit to use the project from the current chat context."
+            "Omit only to use the current project, when there is one."
         ),
     )
     issue_url: Optional[str] = Field(
@@ -371,6 +423,14 @@ class StartFlow(DuoBaseTool):
             self._resolve_goal_project_and_linkable(flow_name, flow_data)
         )
 
+        # Rails only starts project-level workflows; without a project it falls
+        # back to the user's default namespace and rejects with a bare 403,
+        # which leaves the agent guessing at permissions.
+        if not project_id:
+            raise StartFlowError(
+                _MISSING_PROJECT_MESSAGE, response=_MISSING_PROJECT_DETAIL
+            )
+
         payload: dict[str, Any] = {
             "workflow_definition": backend_flow_id,
             "goal": effective_goal,
@@ -400,19 +460,19 @@ class StartFlow(DuoBaseTool):
                 },
             ]
 
-        return await self._post_flow(payload, flow_name)
+        return await self._post_flow(payload, flow_name, project_id=project_id)
 
     async def _start_catalog_flow(self, flow_data: dict) -> str:
         """Start a custom AI Catalog flow by item consumer ID.
 
-        Rails treats ``ai_catalog_item_consumer_id`` and ``workflow_definition``
+        Rails treats `ai_catalog_item_consumer_id` and `workflow_definition`
         as mutually exclusive branches, routing the former to
-        ``Ai::Catalog::Flows::ExecuteService``. That service falls back to the
+        `Ai::Catalog::Flows::ExecuteService`. That service falls back to the
         flow's own description when no goal is given, so an absent goal is
         omitted rather than sent as null.
 
         Args:
-            flow_data: The validated ``StartCatalogFlowInput`` as a dict.
+            flow_data: The validated `StartCatalogFlowInput` as a dict.
 
         Returns:
             The same JSON payload shape as the foundational flows.
@@ -435,24 +495,39 @@ class StartFlow(DuoBaseTool):
         if goal:
             payload["goal"] = goal
 
-        return await self._post_flow(payload, CATALOG_FLOW_NAME)
+        return await self._post_flow(payload, CATALOG_FLOW_NAME, project_id=project_id)
 
-    async def _post_flow(self, payload: dict[str, Any], flow_name: str) -> str:
+    async def _post_flow(
+        self,
+        payload: dict[str, Any],
+        flow_name: str,
+        project_id: Optional[str | int] = None,
+    ) -> str:
         """POST a start request to Rails and format the tool response.
 
         Args:
             payload: The request body, already shaped for the target branch.
             flow_name: Name reported back in the response, used by the chat UI
                 to label the session card.
+            project_id: The project the flow is started for, as resolved for
+                the payload: a project path (e.g. ``group/project``) or a
+                numeric ID from the chat context. Drives the session URL.
 
         Returns:
-            A JSON string carrying ``status``, ``workflow_id``, ``session_url``
-            and ``flow_name``.
+            A JSON string carrying `status`, `workflow_id`, `session_url`
+            and `flow_name`.
         """
         response = await self.gitlab_client.apost(
             path="/api/v4/ai/duo_workflows/agent_workflows",
             body=json.dumps(payload),
         )
+
+        body = response.body
+        if isinstance(body, str):
+            try:
+                body = json.loads(body)
+            except (json.JSONDecodeError, ValueError):
+                body = None
 
         if not response.is_success():
             log.error(
@@ -464,22 +539,14 @@ class StartFlow(DuoBaseTool):
                 # without this there is no way to tell which one failed.
                 ai_catalog_item_consumer_id=payload.get("ai_catalog_item_consumer_id"),
             )
-            detail = _failure_detail(response.status_code, flow_name)
+            detail = _failure_detail(response.status_code, flow_name, body)
             raise StartFlowError(
                 f"Failed to start flow: HTTP {response.status_code}: {detail}",
                 response=detail,
             )
 
-        body = response.body
-        if isinstance(body, str):
-            body = json.loads(body)
-
-        workflow_id = body.get("id")
-        session_url = (
-            f"{self.project['web_url']}/-/automate/agent-sessions/{workflow_id}"
-            if self.project and workflow_id
-            else None
-        )
+        workflow_id = body.get("id") if isinstance(body, dict) else None
+        session_url = self._build_session_url(workflow_id, body, project_id)
 
         return json.dumps(
             {
@@ -490,6 +557,46 @@ class StartFlow(DuoBaseTool):
             }
         )
 
+    def _build_session_url(
+        self,
+        workflow_id: Any,
+        body: Optional[dict],
+        project_id: Optional[str | int] = None,
+    ) -> Optional[str]:
+        """Build the URL of the started session for the user to follow.
+
+        Built from the project the flow was started for, which can differ from the caller's current project. Rails
+        has no page for a namespace-level session, so those get ``None`` rather than a link that would 404.
+
+        Args:
+            workflow_id: The created workflow's ID.
+            body: The parsed response body; provides ``project_id`` and ``gitlab_url``.
+            project_id: A project path when parsed from a URL (joined to ``gitlab_url``), or the numeric ID of the
+                current project (whose ``web_url`` is used).
+
+        Returns:
+            The session URL, or ``None`` when no project page exists or no base URL is available.
+        """
+        if not workflow_id:
+            return None
+
+        if not isinstance(body, dict) or not body.get("project_id"):
+            return None
+
+        if isinstance(project_id, str):
+            base_url = body.get("gitlab_url")
+            if base_url:
+                return (
+                    f"{base_url.rstrip('/')}/{project_id}"
+                    f"{SESSION_URL_PATH}{workflow_id}"
+                )
+            return None
+
+        if project_id and self.project and self.project.get("web_url"):
+            return f"{self.project['web_url']}{SESSION_URL_PATH}{workflow_id}"
+
+        return None
+
     def _resolve_goal_project_and_linkable(
         self, flow_name: str, flow_data: dict
     ) -> tuple[str, Optional[str | int], dict[str, int]]:
@@ -499,21 +606,21 @@ class StartFlow(DuoBaseTool):
         is extracted from the URL so the workflow runs against the correct
         project — even when it differs from the current chat context.
         For security flows (sast_fp_detection, resolve_sast_vulnerability,
-        secrets_fp_detection), the project falls back to ``self.project``
+        secrets_fp_detection), the project falls back to `self.project`
         when available, since the vulnerability ID already encodes the
         resource identity.
 
         Args:
-            flow_name: The flow identifier (e.g. ``"developer"``).
+            flow_name: The flow identifier (e.g. `"developer"`).
             flow_data: The full flow input as a dict.
 
         Returns:
-            A tuple of ``(goal_string, project_id_or_path, linkable_ids)``.
-            ``linkable_ids`` is a dict that may contain ``"issue_id"`` and/or
-            ``"merge_request_id"`` as IIDs (integers) when the flow input
+            A tuple of `(goal_string, project_id_or_path, linkable_ids)`.
+            `linkable_ids` is a dict that may contain `"issue_id"` and/or
+            `"merge_request_id"` as IIDs (integers) when the flow input
             provides enough information to resolve them.
 
-        Pydantic validation on ``StartFlowInput`` guarantees that all
+        Pydantic validation on `StartFlowInput` guarantees that all
         required fields are present before this method is reached.
         """
         linkable_ids: dict[str, int] = {}
@@ -590,8 +697,8 @@ class StartFlow(DuoBaseTool):
     def _parse_merge_request_url(self, url: str) -> tuple[str, int]:
         """Parse a merge request URL into (project_path, iid).
 
-        Returns the decoded project path (e.g. ``group/project``) so it
-        can be used directly with the Rails ``find_project!`` helper.
+        Returns the decoded project path (e.g. `group/project`) so it can be used directly with the Rails
+        `find_project!` helper.
         """
         try:
             encoded_path, iid = GitLabUrlParser.parse_merge_request_url(
@@ -606,9 +713,9 @@ class StartFlow(DuoBaseTool):
     def _parse_issue_url(self, url: str) -> tuple[str, int]:
         """Parse an issue or work-item URL into (project_path, iid).
 
-        Accepts both ``/-/issues/<iid>`` and ``/-/work_items/<iid>`` URL
+        Accepts both `/-/issues/<iid>` and `/-/work_items/<iid>` URL
         formats.  Returns the decoded project path so it can serve as a
-        fallback ``project_id`` when no other project context is available.
+        fallback `project_id` when no other project context is available.
         """
         try:
             encoded_path, iid = GitLabUrlParser.parse_issue_url(url, self.gitlab_host)
@@ -619,8 +726,8 @@ class StartFlow(DuoBaseTool):
     def _parse_pipeline_url(self, url: str) -> tuple[str, int]:
         """Parse a pipeline URL into (project_path, iid).
 
-        Returns the decoded project path (e.g. ``group/project``) so it
-        can be used directly with the Rails ``find_project!`` helper.
+        Returns the decoded project path (e.g. `group/project`) so it can be used directly with the Rails
+        `find_project!` helper.
         """
         try:
             encoded_path, iid = GitLabUrlParser.parse_pipeline_url(
@@ -678,9 +785,16 @@ class StartFlow(DuoBaseTool):
         ):
             detail = str(flow_dict.get("vulnerability_id", ""))
         elif flow_name == CATALOG_FLOW_NAME:
-            detail = flow_dict.get("goal") or str(
-                flow_dict.get("ai_catalog_item_consumer_id", "")
-            )
+            goal = flow_dict.get("goal")
+            if not goal:
+                # A catalog flow started without a goal falls back to its own
+                # description, leaving the consumer id as the only thing to show. That
+                # id is not the user's intent, and the "with goal" template below
+                # presented it as one -- a flow run from a slash command carries no
+                # goal, so it read as "with goal: 28".
+                consumer_id = flow_dict.get("ai_catalog_item_consumer_id", "")
+                return f"Starting flow {flow_name} (ID {consumer_id})"
+            detail = goal
         else:
             detail = str(flow_dict)
 

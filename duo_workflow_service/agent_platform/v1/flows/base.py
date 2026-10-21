@@ -31,7 +31,10 @@ from duo_workflow_service.agent_platform.v1.flows.inputs import (
 )
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.agent_platform.v1.state.base import FlowEvent, FlowEventType
-from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
+from duo_workflow_service.checkpointer.gitlab_workflow import (
+    TOP_LEVEL_CHECKPOINT_NS,
+    GitLabWorkflow,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
@@ -42,14 +45,16 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
+    resolve_approval_attribution,
 )
 from duo_workflow_service.errors.typing import (
     GENERIC_WORKFLOW_ERROR_MESSAGE,
+    CheckpointFetchError,
     EnvelopeVersionMismatchException,
 )
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
-from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.tracking.errors import log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
 )
@@ -129,13 +134,22 @@ async def persist_error_to_ui_chat_log(
         additional_context=None,
     )
 
+    settled_logs = [
+        (
+            {**entry, "status": ToolStatus.FAILURE}
+            if entry.get("status") == ToolStatus.PENDING
+            else entry
+        )
+        for entry in existing_logs
+    ]
+
     try:
         # We pass the full ui_chat_log list (existing + error)
         # because aupdate_state does not reliably apply the
         # _ui_chat_log_reducer after a graph failure.
         await compiled_graph.aupdate_state(
             graph_config,
-            {"ui_chat_log": Overwrite(value=existing_logs + [error_log])},
+            {"ui_chat_log": Overwrite(value=settled_logs + [error_log])},
         )
     except Exception as exc:
         log.warning(
@@ -244,6 +258,10 @@ class Flow(AbstractWorkflow):
                             category=category,
                             error=str(e),
                         )
+
+    @override
+    def _registry_flow_id(self) -> Optional[str]:
+        return self._config.config_id
 
     @override
     def get_workflow_state(  # type: ignore[override]
@@ -485,6 +503,12 @@ class Flow(AbstractWorkflow):
         match self._approval.WhichOneof("user_decision"):
             case UserDecision.APPROVE:
                 event = FlowEvent(event_type=FlowEventType.APPROVE)
+                source, policy_ref = resolve_approval_attribution(
+                    self._approval.approval
+                )
+                event["approval_source"] = source
+                if policy_ref is not None:
+                    event["policy_ref"] = policy_ref
             case UserDecision.REJECT:
                 if message := self._approval.rejection.message:
                     # Rejection with feedback. The user's message is written to
@@ -561,9 +585,25 @@ class Flow(AbstractWorkflow):
         if not isinstance(checkpointer, GitLabWorkflow):
             return None, WorkflowStatusEventEnum.RETRY
 
+        # When Rails can serve the boundary alone by id, the walk pages only each checkpoint's status.
+        status_only = self._workflow_config.get(
+            "incremental_checkpoints_enabled", False
+        )
         boundary: Optional[CheckpointTuple] = None
         oldest: Optional[CheckpointTuple] = None
-        async for candidate in checkpointer.checkpoints_reversed():
+        async for candidate in checkpointer.checkpoints_reversed(
+            channels=["status"] if status_only else None
+        ):
+            # `checkpoints_reversed` returns every checkpoint lineage mixed together, but
+            # the boundary is pinned into the top-level graph's own config, so only its
+            # own lineage can supply one: a nested subagent's pause is not a boundary for
+            # the flow.
+            candidate_ns = (candidate.config.get("configurable") or {}).get(
+                "checkpoint_ns", TOP_LEVEL_CHECKPOINT_NS
+            )
+            if candidate_ns != TOP_LEVEL_CHECKPOINT_NS:
+                continue
+
             status = candidate.checkpoint.get("channel_values", {}).get("status")
             if status == WorkflowStatusEnum.INPUT_REQUIRED:
                 boundary = candidate
@@ -581,6 +621,15 @@ class Flow(AbstractWorkflow):
         )
         if boundary is None:
             boundary = oldest
+        elif status_only:
+            # START needs only the boundary's id, but the RESUME delta below reads its ui_chat_log.
+            boundary_id = boundary.config["configurable"]["checkpoint_id"]
+            boundary = await checkpointer.fetch_checkpoint(boundary_id)
+            if boundary is None:
+                # The list just returned it; resuming unpinned would skip the rollback.
+                raise CheckpointFetchError(
+                    f"Stop-recovery boundary checkpoint {boundary_id} was not found"
+                )
 
         tip_tuple = self._decode_tip_checkpoint(checkpointer)
         # Rollback anchor and delta baseline are two different questions: in
@@ -676,7 +725,7 @@ class Flow(AbstractWorkflow):
         if isinstance(error, NotifiableAgentException) and error.internal_detail:
             log_extra["internal_detail"] = error.internal_detail
 
-        log_exception(error, extra=log_extra)
+        log_workflow_failure(error, extra=log_extra)
 
         if compiled_graph is not None:
             existing_logs = (

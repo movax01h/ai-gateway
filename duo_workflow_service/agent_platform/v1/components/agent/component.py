@@ -10,11 +10,12 @@ from typing import (
     override,
 )
 
+import structlog
 from dependency_injector.wiring import Provide, inject
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.constants import TAG_NOSTREAM
-from langgraph.graph import END, StateGraph
+from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import (
     BaseModel,
@@ -30,7 +31,11 @@ from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.model_variables import MODEL_TEMPLATE_VARIABLES
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
-from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
+from duo_workflow_service.agent_platform.constants import (
+    CHAT_PARTIAL_ENVIRONMENT,
+    INTERACTIVE_ENVIRONMENTS,
+    NODE_ROLE_SEPARATOR,
+)
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -53,10 +58,12 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
 )
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
+    EndComponent,
     ExtraInputVariablesError,
     MissingInputVariablesError,
     RouterProtocol,
 )
+from duo_workflow_service.agent_platform.v1.routers.router import Router
 from duo_workflow_service.agent_platform.v1.state import (
     FlowEventType,
     FlowState,
@@ -69,6 +76,7 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
 )
+from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.conversation.history_optimizer.builder import (
     FlowContext,
     build_history_optimizer_pipeline,
@@ -86,6 +94,8 @@ from lib.context import get_model_metadata
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventsClient
 
+log = structlog.stdlib.get_logger("agent_component")
+
 __all__ = [
     "RUNTIME_INJECTED_VARS",
     "SUBSESSION_ID_CONTEXT_KEY",
@@ -93,6 +103,7 @@ __all__ = [
     "AgentComponentBase",
     "MaxCyclesConfig",
     "RoutingError",
+    "default_iteration_warning_offset",
 ]
 
 # Injected at execution time by the node runner, or by the AIGW prompt layer for
@@ -102,11 +113,27 @@ RUNTIME_INJECTED_VARS = (
     | MODEL_TEMPLATE_VARIABLES
 )
 
-# Default number of cycles before `max_cycles` at which the agent is warned that it
-# is approaching the soft limit. Shared by the legacy plain-int `max_cycles` form
-# (see `AgentComponentBase.resolve_max_cycles`) and `MaxCyclesConfig`'s own field
-# default, so both forms warn 10 cycles out unless explicitly overridden.
+# Upper bound on the default number of cycles before `max_cycles` at which the agent
+# is warned that it is approaching the soft limit. Both the legacy plain-int
+# `max_cycles` form (see `AgentComponentBase.resolve_max_cycles`) and
+# `MaxCyclesConfig` resolve an omitted offset through
+# `default_iteration_warning_offset`, which uses this for budgets of 20 or more and
+# half the budget below that, never dropping below one cycle.
 _DEFAULT_ITERATION_WARNING_OFFSET: int = 10
+
+
+def default_iteration_warning_offset(threshold: int) -> Optional[int]:
+    """Offset to use when the config did not set one.
+
+    Ten cycles out, or half the budget when that is smaller, floored at one cycle. A tight
+    budget is exactly where the warning earns its keep: it tells the agent up front that it
+    has very little room before tool calls are cut off, which it cannot infer otherwise.
+    ``None`` only for a single-cycle budget, where there is no cycle left to warn on and the
+    limit message covers it.
+    """
+    offset = min(_DEFAULT_ITERATION_WARNING_OFFSET, max(threshold // 2, 1))
+    return offset if offset < threshold else None
+
 
 # Context key under which a subagent's per-invocation subsession ID is exposed when the
 # component is compiled as a standalone subgraph via ``AgentComponent.compile_as_subagent``
@@ -134,10 +161,11 @@ class MaxCyclesConfig(BaseModel):
     threshold. The plain-int form (`max_cycles: 280`) remains supported and resolves to this same behavior with the
     default `iteration_warning_offset`.
 
-    When `iteration_warning_offset` is omitted, it auto-clamps to `min(_DEFAULT_ITERATION_WARNING_OFFSET, threshold -
-    1)` so small thresholds (e.g. a 4-cycle budget) still get a warning instead of the offset silently exceeding the
-    threshold. When it is explicitly set to a value `>= threshold`, this is treated as a deliberate misconfiguration
-    and raises a `ValueError` — the caller should either lower it or set it to `null` to disable the warning.
+    When `iteration_warning_offset` is omitted, it resolves via `default_iteration_warning_offset`: ten cycles out,
+    or half the threshold when that is smaller (a 4-cycle budget warns on cycle 2), floored at one cycle so even a
+    2-cycle budget is warned. When it is explicitly set to a value `>= threshold`, this is treated as a
+    deliberate misconfiguration and raises a `ValueError` — the caller should either lower it or set it to `null` to
+    disable the warning.
     """
 
     threshold: int
@@ -153,15 +181,15 @@ class MaxCyclesConfig(BaseModel):
 
     @model_validator(mode="after")
     def resolve_or_validate_offset(self) -> Self:
-        """Auto-clamp the offset when omitted, or validate it against threshold when explicitly set.
+        """Derive the offset when omitted, or validate it against threshold when explicitly set.
 
-        `model_fields_set` distinguishes "not provided" (auto-clamp, mirroring the legacy plain-int form's smart
+        `model_fields_set` distinguishes "not provided" (derived, mirroring the legacy plain-int form's smart
         default) from "explicitly provided" (validate strictly — the caller chose both values together, so an
         offset `>= threshold` is a clear misconfiguration worth a hard error rather than a silent no-op).
         """
         if "iteration_warning_offset" not in self.model_fields_set:
-            self.iteration_warning_offset = min(
-                _DEFAULT_ITERATION_WARNING_OFFSET, self.threshold - 1
+            self.iteration_warning_offset = default_iteration_warning_offset(
+                self.threshold
             )
         elif (
             self.iteration_warning_offset is not None
@@ -173,23 +201,6 @@ class MaxCyclesConfig(BaseModel):
                 "instead."
             )
         return self
-
-
-class _TerminalRouter:
-    """``RouterProtocol`` implementation that always routes straight to ``END``.
-
-    Used by ``AgentComponent.compile_as_subagent`` to terminate the standalone
-    subgraph after ``final_response``: unlike a component attached to a parent
-    flow graph, a standalone subagent subgraph has no external router to hand
-    off to — its result is consumed by whoever called ``ainvoke`` on the
-    compiled graph, not by further graph routing.
-    """
-
-    def attach(self, graph: StateGraph) -> None:
-        """No-op — no additional wiring is needed for the terminal router."""
-
-    def route(self, _state: FlowState) -> Annotated[str, "Next node"]:
-        return END
 
 
 class AgentComponentBase(BaseComponent):
@@ -234,7 +245,7 @@ class AgentComponentBase(BaseComponent):
     supported_environments: ClassVar[tuple[str, ...]] = (
         "ambient",
         "chat",
-        "chat-partial",
+        CHAT_PARTIAL_ENVIRONMENT,
     )
 
     prompt_id: str
@@ -258,6 +269,12 @@ class AgentComponentBase(BaseComponent):
 
     max_cycles: Union[int, MaxCyclesConfig] = _DEFAULT_MAX_CYCLES
     max_wrap_up_retries: int = 3
+    identical_tool_call_limit: int = 0
+    # Opt-in (per flow config): bind the provider-native web-search tool so the
+    # agent can look up e.g. changelogs / migration guides. Still gated at runtime
+    # by the dependency_bump_web_search flag and the client's "web_search"
+    # capability, and only honored by native-Anthropic models (LiteLLM discards it).
+    enable_web_search: bool = False
 
     prompt_registry: BasePromptRegistry = Provide[
         ContainerApplication.pkg_prompts.prompt_registry
@@ -323,18 +340,17 @@ class AgentComponentBase(BaseComponent):
     def resolve_max_cycles(self) -> Self:
         """Resolve `max_cycles` (plain int or `MaxCyclesConfig`) into the threshold/offset used by `AgentNode`.
 
-        The plain-int form always warns before the threshold (i.e. the warning is on by default), clamped to
-        `min(_DEFAULT_ITERATION_WARNING_OFFSET, threshold - 1)` so small thresholds (e.g. a 4-cycle budget) still get
-        a warning — on the very first cycle, in that case — rather than the offset silently exceeding the threshold.
-        The nested form allows overriding or disabling it entirely (`iteration_warning_offset: null`).
+        The plain-int form warns before the threshold by default, using `default_iteration_warning_offset` so a
+        small threshold (e.g. a 4-cycle budget) warns partway through, and a very tight one still warns at all. The
+        nested form allows overriding or disabling it entirely (`iteration_warning_offset: null`).
         """
         if isinstance(self.max_cycles, MaxCyclesConfig):
             self._max_cycles_threshold = self.max_cycles.threshold
             self._iteration_warning_offset = self.max_cycles.iteration_warning_offset
         else:
             self._max_cycles_threshold = self.max_cycles
-            self._iteration_warning_offset = min(
-                _DEFAULT_ITERATION_WARNING_OFFSET, self.max_cycles - 1
+            self._iteration_warning_offset = default_iteration_warning_offset(
+                self.max_cycles
             )
         return self
 
@@ -344,6 +360,21 @@ class AgentComponentBase(BaseComponent):
         """Validate that max_wrap_up_retries is at least 1."""
         if v < 1:
             raise ValueError("max_wrap_up_retries must be at least 1.")
+        return v
+
+    @field_validator("identical_tool_call_limit")
+    @classmethod
+    def validate_identical_tool_call_limit(cls, v: int) -> int:
+        """Validate identical_tool_call_limit: 0 disables the guard, otherwise at least 3.
+
+        The guard only trips once two executed runs returned identical results, which
+        needs three repeats; 1 and 2 would be limits the guard can never reach.
+        """
+        if v != 0 and v < 3:
+            raise ValueError(
+                "identical_tool_call_limit must be 0 (disabled) or >= 3; the guard "
+                "compares the results of the two previous executions."
+            )
         return v
 
     @property
@@ -408,6 +439,9 @@ class AgentComponentBase(BaseComponent):
     _RUNTIME_INJECTED_VARS: ClassVar[frozenset[str]] = (
         RUNTIME_INJECTED_VARS
         | frozenset({"web_search_supported", "web_search_enabled"})
+        # Passed only by AgentComponent.attach via prompt_template_inputs; supervisor
+        # subclasses don't supply it.
+        | frozenset({"tools_enabled"})
     )
 
     @model_validator(mode="after")
@@ -498,9 +532,39 @@ class AgentComponentBase(BaseComponent):
             internal_events_client=self.internal_event_client,
         )
 
+    def _web_search_enabled(self) -> bool:
+        """Whether the provider-native web-search tool is active for this build.
+
+        Requires the per-flow opt-in AND the runtime feature flag AND the client's
+        `web_search` capability. Used both to bind the tool and to tell the prompt
+        (via `tools_enabled`) so it can branch its web-search guidance.
+        """
+        return (
+            self.enable_web_search
+            and is_feature_enabled(FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH)
+            and is_client_capable("web_search")
+        )
+
+    def _tools_enabled(self) -> dict[str, bool]:
+        """Map of optional tool/capability -> active, exposed to the prompt template.
+
+        The keys are not computed the same way: `web_search` is a capability gate for the
+        provider-native search route, `run_command` is toolset membership.
+        """
+        return {
+            "web_search": self._web_search_enabled(),
+            # Presence is the whole answer: `run_command` reaches the toolset only if the
+            # `run_commands` privilege was granted and no tool policy denied it. Checked
+            # by name because RunCommand and ShellCommand both register under it.
+            "run_command": "run_command" in self.toolset,
+        }
+
     def _build_prompt(self, tools: list, tool_choice: str) -> Any:
         """Build the agent prompt with the given tool list and tool choice."""
         model_metadata = get_model_metadata(self.model_tags)
+        extra_params: dict[str, Any] = {}
+        if self._web_search_enabled():
+            extra_params["bind_tools_params"] = {"web_search_options": {}}
         return self.prompt_registry.get_on_behalf(
             self.user,
             self.prompt_id,
@@ -514,6 +578,7 @@ class AgentComponentBase(BaseComponent):
                 "workflow_id": self.flow_id,
                 "workflow_type": self.flow_type.value,
             },
+            **extra_params,
         )
 
     def __entry_hook__(self) -> Annotated[str, "Entry node name"]:
@@ -612,6 +677,7 @@ class AgentComponentBase(BaseComponent):
             session_id_key=session_id_key,
             tracker=tracker,
             approval_requests_key=approval_requests_key,
+            halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
         )
 
         node_tool_approval_fetch = ToolApprovalFetchNode(
@@ -685,7 +751,45 @@ class AgentComponent(AgentComponentBase):
     ui_log_events: list[UILogEventsAgent] = Field(default_factory=list)
     ui_role_as: Literal["agent", "tool"] = "agent"
 
+    # What the chat surface shows on every turn: the answer, the reasoning that
+    # precedes tool calls, and the tool cards. Both LLM output events are here so
+    # ``_agent_node_invoke_config`` streams tokens for a component on this floor.
+    CHAT_PARTIAL_UI_LOG_EVENTS: ClassVar[tuple[UILogEventsAgent, ...]] = (
+        UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+        UILogEventsAgent.ON_AGENT_REASONING,
+        UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+        UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+    )
+
     _allowed_input_targets = tuple(FlowState.__annotations__.keys())
+
+    @model_validator(mode="after")
+    def apply_chat_partial_defaults(self) -> Self:
+        """Fill the defaults the chat surface guarantees when the environment is ``chat-partial``.
+
+        ``model_fields_set`` tells a declared value from an omitted one, so a
+        declared value wins, including an empty ``ui_log_events``.
+        ``pre_approved_tools`` is not applied on this surface (ai-assist#2744),
+        so a declared list is cleared.
+        """
+        if self.environment != CHAT_PARTIAL_ENVIRONMENT:
+            return self
+
+        if "ui_log_events" not in self.model_fields_set:
+            self.ui_log_events = list(self.CHAT_PARTIAL_UI_LOG_EVENTS)
+
+        if "require_tool_approval" not in self.model_fields_set:
+            self.require_tool_approval = True
+
+        if self.pre_approved_tools:
+            log.info(
+                "Ignoring pre_approved_tools on a chat-partial component; the chat surface does not apply it",
+                component=self.name,
+                pre_approved_tools=self.pre_approved_tools,
+            )
+            self.pre_approved_tools = []
+
+        return self
 
     @override
     def _agent_node_invoke_config(self) -> RunnableConfig:
@@ -830,6 +934,23 @@ class AgentComponent(AgentComponentBase):
         entries so the UI can attribute them to the right subsession — is read
         from ``context[SUBSESSION_ID_CONTEXT_KEY]`` when the caller sets it.
 
+        The subgraph is terminated by its own ``EndComponent``, exactly as a
+        flow is (``GraphBuilder._build_components``), so a subsession that ran
+        to completion says so in its own state (``status ==
+        WorkflowStatusEnum.COMPLETED``) instead of leaving the caller to infer
+        it from ``ainvoke`` having returned. ``SubagentDispatchNode`` reads that
+        status back. Today every exit from this graph leads back into it and the
+        only route to ``END`` is ``final_response -> terminate_flow``, so the
+        read-back cannot disagree; it is a check on an invariant a future
+        subclass could break, not a live failure mode.
+
+        That terminal node writes ``status`` in the subgraph's own checkpoint
+        lineage, which is only safe because ``GitLabWorkflow.aput_writes``
+        suppresses session-ending status events from non-top-level lineages: the
+        write is in the same ``status`` channel the flow itself ends through, so
+        unfiltered it would make the first subagent to finish end the whole
+        session.
+
         No checkpointer is passed to ``compile()`` here — as long as the caller
         invokes the returned graph with the *same* ``RunnableConfig`` it was
         itself given, LangGraph treats the invocation as a genuinely nested
@@ -874,24 +995,20 @@ class AgentComponent(AgentComponentBase):
         # parent's, so a trim here would drop the entries before it.
         self._trim_ui_chat_log = False
         graph = StateGraph(FlowState)
-        self.attach(graph, _TerminalRouter())
+        end_component = EndComponent(
+            name="end",
+            flow_id=self.flow_id,
+            flow_type=self.flow_type,
+            user=self.user,
+        )
+        end_component.attach(graph)
+        # An unconditional `Router` (`input=None`): unlike a component attached
+        # to a parent flow graph, a subagent subgraph has no routing decision to
+        # make after the agent answers — the next node is always the terminal
+        # one.
+        Router(from_component=self, to_component=end_component).attach(graph)
         graph.set_entry_point(self.__entry_hook__())
         return graph.compile()
-
-    @staticmethod
-    def _auto_tool_choice_enabled() -> bool:
-        """Whether a response schema is bound with ``tool_choice="auto"`` instead of ``"any"``.
-
-        ``"any"`` forces a tool call every turn, which disables extended thinking on Anthropic models, so an agent
-        never consolidates and loops until ``max_cycles``. ``"auto"`` lets it deliberate in text between tool calls;
-        the final answer stays schema-enforced, since only the schema tool call ends the loop.
-
-        Flagged rather than exposed as a component field: the choice is an implementation detail of how the schema is
-        bound, not something a flow author should have to get right, and a flag keeps the rollout controllable per
-        instance/group without shipping a new flow config revision. Read in both ``attach`` and the router, which run
-        under the same request context, so the two always agree.
-        """
-        return is_feature_enabled(FeatureFlag.DAP_SCHEMA_AUTO_TOOL_CHOICE)
 
     def _agent_node_router(self, state: FlowState) -> str:
         history_iokey = self._conversation_history_key.to_iokey(state)
@@ -915,16 +1032,8 @@ class AgentComponent(AgentComponentBase):
 
         if not last_message.tool_calls:
             if self._response_schema is not None:
-                if self._auto_tool_choice_enabled():
-                    # Text-only deliberation turn; loop back, bounded by max_cycles.
-                    return self.__entry_hook__()
-                raise NotifiableAgentException(
-                    "An internal error occurred: the agent did not produce the expected tool call.",
-                    internal_detail=(
-                        f"Schema mode requires a tool call but got a text-only response "
-                        f"for component {self.name}"
-                    ),
-                )
+                # Text-only deliberation turn; loop back, bounded by max_cycles.
+                return self.__entry_hook__()
             return f"{self.name}{NODE_ROLE_SEPARATOR}final_response"
 
         if self._response_schema is not None and any(
@@ -992,13 +1101,15 @@ class AgentComponent(AgentComponentBase):
 
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         # Response schema is already resolved in validate_and_resolve_response_schema()
-        tool_choice: Literal["any", "auto"]
         if self._response_schema is not None:
             tools = self.toolset.bindable + [self._response_schema]
-            tool_choice = "auto" if self._auto_tool_choice_enabled() else "any"
         else:
             tools = self.toolset.bindable
-            tool_choice = "auto"
+
+        # "any" would force a tool call every turn, which disables extended thinking on
+        # Anthropic models, so the agent never consolidates. The final answer stays
+        # schema-enforced because only the schema tool call ends the loop.
+        tool_choice: Literal["any", "auto"] = "auto"
 
         prompt = self._build_prompt(tools=tools, tool_choice=tool_choice)
 
@@ -1023,6 +1134,7 @@ class AgentComponent(AgentComponentBase):
             cycle_budget=self._cycle_budget,
             response_schema_tool_choice=tool_choice,
             trim_ui_chat_log=self._trim_ui_chat_log,
+            prompt_template_inputs={"tools_enabled": self._tools_enabled()},
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,
@@ -1041,6 +1153,9 @@ class AgentComponent(AgentComponentBase):
             ),
             tracker=tracker,
             session_id_key=self._session_id_key,
+            identical_call_limit=self.identical_tool_call_limit,
+            identical_call_max_wrap_up_retries=self.max_wrap_up_retries,
+            halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
         )
         node_final_response = FinalResponseNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}final_response",

@@ -34,8 +34,8 @@ class UpdateFormFields(DuoBaseTool):
     """Generic tool for updating a UI form by selecting or clearing named fields.
 
     Designed to be reusable across any foundational agent that edits a GitLab UI
-    form. The caller must supply ``form_id`` as instructed by the system prompt;
-    the prompt receives it from the flow's ``form_context`` additional_context
+    form. The caller must supply `form_id` as instructed by the system prompt;
+    the prompt receives it from the flow's `form_context` additional_context
     envelope.
     """
 

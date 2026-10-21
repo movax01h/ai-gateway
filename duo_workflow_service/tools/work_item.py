@@ -398,6 +398,16 @@ class GetWorkItem(WorkItemBaseTool):
 
 
 class GetWorkItemNotesInput(WorkItemResourceInput):
+    notes_filter: Literal["ALL_NOTES", "ONLY_COMMENTS", "ONLY_ACTIVITY"] = Field(
+        default="ALL_NOTES",
+        description=(
+            "Filter the notes returned. ALL_NOTES (default) returns all notes, "
+            "including system notes. ONLY_COMMENTS returns only user comments "
+            "and excludes system notes (e.g. assignee changes, title changes, "
+            "cross-references). ONLY_ACTIVITY returns only system notes and "
+            "excludes user comments."
+        ),
+    )
     sort: Optional[str] = Field(
         default=None,
         description="Return work item notes sorted in asc or desc order. Default is desc.",
@@ -442,6 +452,7 @@ class GetWorkItemNotes(WorkItemBaseTool):
         group_id = kwargs.pop("group_id", None)
         project_id = kwargs.pop("project_id", None)
         work_item_iid = kwargs.pop("work_item_iid", None)
+        notes_filter = kwargs.pop("notes_filter", "ALL_NOTES")
         page_size = kwargs.pop("page_size", 20)
         pagination_cursor = kwargs.pop("pagination_cursor", None)
 
@@ -454,6 +465,7 @@ class GetWorkItemNotes(WorkItemBaseTool):
         query_variables = {
             "fullPath": resolved.parent.full_path,
             "workItemIid": str(resolved.work_item_iid),
+            "filter": notes_filter,
             "first": page_size,
             "after": pagination_cursor,
             **get_query_variables_for_version(
@@ -688,6 +700,13 @@ class UpdateWorkItemInput(WorkItemResourceInput):
         content untouched, which is how a scoring flow reports on a plan it did not
         author.""",
     )
+    readiness_score_feedback: Optional[str] = Field(
+        default=None,
+        description="""Readiness score feedback for the work item's agent plan.
+        Markdown authored by the verdict LLM. Independent of 'agent_plan' and
+        'readiness_score': passing only feedback leaves the existing plan content
+        and score untouched.""",
+    )
 
 
 class UpdateWorkItem(WorkItemBaseTool):
@@ -698,7 +717,7 @@ class UpdateWorkItem(WorkItemBaseTool):
 
     Supports updating title, description, assignees, labels, state, status, health
     status, weight, dates, hierarchy, to-do items, the agent plan and the agent
-    plan's readiness score.
+    plan's readiness score and feedback.
 
     Note: 'state' (opened / closed) is different from 'status_id' (the status
     category widget, e.g. New / In Progress / Done). To set a status, first call
@@ -715,6 +734,7 @@ class UpdateWorkItem(WorkItemBaseTool):
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="add")
     - update_work_item(url="https://gitlab.com/namespace/project/-/work_items/42", todo_action="mark_as_done", todo_id="gid://gitlab/Todo/123")
     - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score=72)
+    - update_work_item(project_id='namespace/project', work_item_iid=42, readiness_score_feedback="1. **blocking**: Name the migration file\n2. **non-blocking**: Add a regression test\n3. **non-blocking**: Expand rollback notes")
     - update_work_item(project_id='namespace/project', work_item_iid=42, agent_plan="## Why\nFoo can't bar.\n## What\nMake Foo bar.\n## How\nAdd `Foo#bar` calling `Baz.qux`.")
     """
     args_schema: Type[BaseModel] = UpdateWorkItemInput

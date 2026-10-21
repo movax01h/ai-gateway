@@ -6,19 +6,23 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import structlog.testing
+import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import SecretStr, ValidationError
 from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.model_selection.model_selection_config import (
+    MODEL_RESTRICTIONS_CONFIG_PATH,
     ChatAnthropicDefinition,
     ChatLiteLLMDefinition,
     CompletionLiteLLMDefinition,
     EmbeddingLiteLLMDefinition,
+    ModelRestriction,
     ModelSelectionConfig,
+    ModelTagEntry,
     UnitPrimitiveConfig,
 )
-from ai_gateway.model_selection.types import DefaultModelEntry
+from ai_gateway.model_selection.types import DefaultModelEntry, DevConfig
 from lib.feature_flags.context import current_feature_flag_context
 
 
@@ -90,6 +94,15 @@ def mock_fs_fixture(fs: FakeFilesystem):
 # editorconfig-checker-enable
 
 
+@pytest.fixture(autouse=True)
+def empty_model_restrictions(request):
+    """Give every test that fakes the filesystem an empty model_restrictions.yml."""
+    if "fs" in request.fixturenames:
+        request.getfixturevalue("fs").create_file(
+            MODEL_RESTRICTIONS_CONFIG_PATH, contents="restricted_models: []\n"
+        )
+
+
 @pytest.mark.usefixtures("mock_fs")
 def test_load_llm_definitions(selection_config):
     assert selection_config.get_llm_definitions() == {
@@ -116,6 +129,31 @@ def test_load_llm_definitions(selection_config):
             params={"model": "embedding-model-001", "custom_llm_provider": "openai"},
         ),
     }
+
+
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [
+        ({"supports_vision": True}, True),
+        ({"supports_vision": False}, False),
+        ({}, None),
+    ],
+    ids=["declared-true", "declared-false", "absent"],
+)
+def test_supports_vision_reads_the_declared_value_or_none(declared, expected):
+    # Absent is a distinct state from false: it means "ask litellm's registry",
+    # while false means images are stripped before the request.
+    definition = ChatLiteLLMDefinition.model_validate(
+        {
+            "name": "Model",
+            "gitlab_identifier": "gitlab-model",
+            "max_context_tokens": 1000,
+            "params": {"model": "provider-model"},
+            **declared,
+        }
+    )
+
+    assert definition.supports_vision is expected
 
 
 @pytest.mark.usefixtures("mock_fs")
@@ -577,6 +615,25 @@ def test_default_model_entry_weight_all_or_none_validation():
 
 
 @pytest.mark.usefixtures("mock_fs")
+def test_default_model_entry_negative_weight_is_rejected():
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        DefaultModelEntry(identifier="gitlab-model-1", weight=-1)
+
+
+def test_default_model_entry_all_zero_weights_are_rejected():
+    with pytest.raises(
+        ValidationError, match="at least one default_models weight must be above 0"
+    ):
+        UnitPrimitiveConfig(
+            feature_setting="all_zero",
+            unit_primitives=["complete_code"],
+            default_models=[
+                DefaultModelEntry(identifier="gitlab-model-1", weight=0),
+                DefaultModelEntry(identifier="gitlab-model-2", weight=0),
+            ],
+        )
+
+
 def test_default_model_entry_no_weights_passes_validation():
     """UnitPrimitiveConfig is valid when no default_models entries have weights."""
     upc = UnitPrimitiveConfig(
@@ -1131,6 +1188,168 @@ def test_validate_tags_models_not_required_in_selectable(
     # editorconfig-checker-enable
 
     selection_config.validate()  # must not raise
+
+
+@pytest.fixture(name="write_tag_policy")
+def write_tag_policy_fixture(size_preference_model_dir: Path, fs: FakeFilesystem):
+    """Write a unit_primitives.yml whose feature settings carry the given tag entries."""
+
+    def _write(**tags_by_feature: dict) -> None:
+        fs.create_file(
+            size_preference_model_dir / "unit_primitives.yml",
+            contents=yaml.safe_dump(
+                {
+                    "configurable_unit_primitives": [
+                        {
+                            "feature_setting": feature_setting,
+                            "unit_primitives": ["ask_commit"],
+                            "default_models": ["large-model"],
+                            "models_for_tags": tags,
+                        }
+                        for feature_setting, tags in tags_by_feature.items()
+                    ]
+                }
+            ),
+        )
+
+    return _write
+
+
+@pytest.mark.parametrize(
+    ("tag_entry", "expected"),
+    [
+        pytest.param(
+            "small-model",
+            ModelTagEntry(models=["small-model"], keywords=[]),
+            id="bare-model-id",
+        ),
+        pytest.param(
+            {"models": ["small-model"]},
+            ModelTagEntry(models=["small-model"], keywords=[]),
+            id="mapping-without-keywords",
+        ),
+        pytest.param(
+            {"models": ["small-model"], "keywords": ["typo", "readme"]},
+            ModelTagEntry(models=["small-model"], keywords=["typo", "readme"]),
+            id="mapping-with-keywords",
+        ),
+        pytest.param(
+            {"models": ["small-model", "large-model"]},
+            ModelTagEntry(models=["small-model", "large-model"], keywords=[]),
+            id="mapping-with-several-models",
+        ),
+    ],
+)
+def test_tag_entry_spellings_load_to_one_shape(
+    selection_config, write_tag_policy, tag_entry, expected
+):
+    """Every spelling normalises to the same ModelTagEntry."""
+    write_tag_policy(test_model_size={"small": tag_entry})
+
+    tags = selection_config.get_unit_primitive_config_map()[
+        "test_model_size"
+    ].models_for_tags
+
+    assert tags["small"] == expected
+    selection_config.validate()  # must not raise
+
+
+@pytest.mark.parametrize(
+    "tag_entry",
+    [
+        pytest.param("model-that-does-not-exist", id="bare-model-id"),
+        pytest.param(
+            {"models": ["small-model", "model-that-does-not-exist"]}, id="mapping"
+        ),
+    ],
+)
+def test_validate_rejects_tag_models_missing_from_models_yml(
+    selection_config, write_tag_policy, tag_entry
+):
+    write_tag_policy(test_model_size={"small": tag_entry})
+
+    with pytest.raises(ValueError, match="model-that-does-not-exist"):
+        selection_config.validate()
+
+
+def test_tag_entry_rejects_removed_candidates_field(selection_config, write_tag_policy):
+    """`candidates` was removed; a leftover key must fail loudly rather than be ignored."""
+    write_tag_policy(
+        test_model_size={
+            "small": {"models": ["small-model"], "candidates": ["large-model"]}
+        }
+    )
+
+    with pytest.raises(ValueError, match="candidates"):
+        selection_config.get_unit_primitive_config_map()
+
+
+@pytest.mark.parametrize(
+    ("goal", "expected"),
+    [
+        pytest.param(
+            "Fix the typo in the README",
+            ("small", ["typo", "readme"]),
+            id="every-matched-keyword",
+        ),
+        pytest.param(
+            "Plan the refactor of the auth module",
+            ("large", ["refactor"]),
+            id="large-keyword",
+        ),
+        pytest.param("REFACTOR this", ("large", ["refactor"]), id="case-insensitive"),
+        pytest.param(
+            "Refactor the parser and fix a typo",
+            ("large", ["refactor"]),
+            id="first-declared-tag-wins",
+        ),
+        pytest.param("Add pagination to the issues list", None, id="no-match"),
+        pytest.param("", None, id="empty-goal"),
+        pytest.param(
+            "Fix two typos in the docs", ("small", ["typo"]), id="plural-form"
+        ),
+        pytest.param("Refactoring the parser", ("large", ["refactor"]), id="verb-form"),
+        pytest.param(
+            "Renamed the helper for clarity",
+            ("small", ["rename"]),
+            id="verb-form-e-final",
+        ),
+        pytest.param(
+            "Renaming the helpers", ("small", ["rename"]), id="progressive-e-final"
+        ),
+        pytest.param(
+            "Improve the typography of the landing page",
+            None,
+            id="no-match-inside-word",
+        ),
+    ],
+)
+def test_resolve_tag_for_goal(selection_config, write_tag_policy, goal, expected):
+    write_tag_policy(
+        test_model_size={
+            "large": {"models": ["large-model"], "keywords": ["refactor"]},
+            "small": {
+                "models": ["small-model"],
+                "keywords": ["typo", "readme", "rename"],
+            },
+        }
+    )
+
+    assert selection_config.resolve_tag_for_goal("test_model_size", goal) == expected
+
+
+def test_resolve_tag_for_goal_without_keywords(selection_config, write_tag_policy):
+    write_tag_policy(test_model_size={"large": {"models": ["large-model"]}})
+
+    assert selection_config.resolve_tag_for_goal("test_model_size", "Refactor") is None
+
+
+def test_tag_entry_rejects_an_empty_model_list(selection_config, write_tag_policy):
+    """A tag serving no models is a config error, not a silent no-op."""
+    write_tag_policy(test_model_size={"small": {"models": []}})
+
+    with pytest.raises(ValueError):
+        selection_config.get_unit_primitive_config_map()
 
 
 def test_get_unit_primitive_config_map_with_deprecated_models(
@@ -1692,3 +1911,206 @@ class TestEnvModelReleases:
         assert len(error_logs) == 1
         assert error_logs[0]["errors"] == [{"type": "RuntimeError", "msg": "boom"}]
         assert sentinel not in str(cap_logs)
+
+
+class TestAllowedModelsForFeature:
+    @pytest.mark.usefixtures("mock_fs")
+    def test_unions_default_selectable_and_beta_models(self, selection_config):
+        assert selection_config.allowed_models_for_feature("test_config") == {
+            "gitlab-model-1",
+            "gitlab-model-2",
+        }
+
+    def test_includes_dev_and_tag_models(self, selection_config):
+        config = UnitPrimitiveConfig(
+            feature_setting="with_extras",
+            unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+            default_models=["default-model"],
+            selectable_models=["selectable-model"],
+            models_for_tags={"small": ModelTagEntry(models=["tag-model"])},
+            dev=DevConfig(selectable_models=["dev-model"]),
+        )
+
+        with patch.object(
+            selection_config,
+            "get_resolved_unit_primitive_config_map",
+            return_value={"with_extras": config},
+        ):
+            allowed = selection_config.allowed_models_for_feature("with_extras")
+
+        assert allowed == {
+            "default-model",
+            "selectable-model",
+            "tag-model",
+            "dev-model",
+        }
+
+    @pytest.mark.usefixtures("mock_fs")
+    def test_rejects_an_unknown_feature(self, selection_config):
+        with pytest.raises(ValueError, match="Invalid feature setting: nope"):
+            selection_config.allowed_models_for_feature("nope")
+
+
+# editorconfig-checker-disable
+@pytest.fixture(name="match_fs")
+def match_fs_fixture(fs: FakeFilesystem):
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent("""
+            models:
+              - name: Sonnet Bedrock
+                gitlab_identifier: sonnet_bedrock
+                model_class_provider: litellm
+                max_context_tokens: 1000000
+                params:
+                  model: bedrock/global.anthropic.claude-sonnet-4-6
+                  custom_llm_provider: bedrock
+              - name: Sonnet Vertex
+                gitlab_identifier: sonnet_vertex
+                model_class_provider: litellm
+                max_context_tokens: 1000000
+                params:
+                  model: claude-sonnet-4-6
+                  custom_llm_provider: vertex_ai
+              - name: Sonnet Anthropic
+                gitlab_identifier: sonnet_anthropic
+                model_class_provider: anthropic
+                max_context_tokens: 1000000
+                params:
+                  model: claude-sonnet-4-6
+              - name: Gemini Flash
+                gitlab_identifier: gemini_flash
+                model_class_provider: google_genai
+                max_context_tokens: 1000000
+                params:
+                  model: gemini-3.7-flash
+              - name: Gemini Flash Low
+                gitlab_identifier: gemini_flash_low
+                model_class_provider: google_genai
+                max_context_tokens: 1000000
+                params:
+                  model: gemini-3.7-flash
+              - name: Self-Hosted Claude
+                gitlab_identifier: claude_3
+                model_class_provider: litellm
+                max_context_tokens: 200000
+                params:
+                  temperature: 0.0
+            """),
+    )
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents="configurable_unit_primitives: []\n",
+    )
+
+
+# editorconfig-checker-enable
+
+
+@pytest.mark.usefixtures("match_fs")
+class TestFindByIdentifier:
+    def teardown_method(self):
+        current_feature_flag_context.set(set())
+
+    @pytest.mark.parametrize(
+        ("identifier", "expected"),
+        [
+            ("bedrock/eu.anthropic.claude-sonnet-4-6", "sonnet_bedrock"),
+            ("bedrock/converse/us.anthropic.claude-sonnet-4-6", "sonnet_bedrock"),
+            ("vertex_ai/claude-sonnet-4-6@default", "sonnet_vertex"),
+            ("vertex_ai/gemini-3.7-flash", "gemini_flash"),  # first entry wins
+            ("bedrock/eu.anthropic.claude-opus-4-6", None),
+            ("anthropic/claude-sonnet-4-6", "sonnet_anthropic"),
+            ("azure/claude-sonnet-4-6", None),  # no normalizer
+            ("custom_openai/claude-sonnet-4-6", None),
+            ("claude-sonnet-4-6", None),
+        ],
+    )
+    def test_find_by_identifier(self, identifier, expected):
+        config = ModelSelectionConfig(default_models_override={})
+
+        result = config.find_by_identifier(identifier)
+
+        assert (result.gitlab_identifier if result else None) == expected
+
+    def test_refresh_clears_the_index(self, fs: FakeFilesystem):
+        config = ModelSelectionConfig(default_models_override={})
+        assert config.find_by_identifier("vertex_ai/claude-sonnet-4-6") is not None
+
+        models_yml = (
+            Path(__file__).parent.parent.parent
+            / "ai_gateway"
+            / "model_selection"
+            / "models.yml"
+        )
+        fs.remove_object(str(models_yml))
+        fs.create_file(models_yml, contents="models: []\n")
+        config.refresh()
+
+        assert config.find_by_identifier("vertex_ai/claude-sonnet-4-6") is None
+
+    @pytest.mark.parametrize(
+        ("flags", "expected"),
+        [
+            ({"ai_model_release"}, "env_opus_vertex"),
+            (set(), None),
+        ],
+    )
+    def test_env_releases_follow_the_feature_flag(self, flags, expected):
+        payload = json.dumps(
+            {
+                "models": [
+                    {
+                        "name": "Env Opus Vertex",
+                        "gitlab_identifier": "env_opus_vertex",
+                        "model_class_provider": "litellm",
+                        "max_context_tokens": 1000000,
+                        "params": {
+                            "model": "claude-opus-9",
+                            "custom_llm_provider": "vertex_ai",
+                        },
+                    }
+                ],
+                "feature_attachments": {},
+            }
+        )
+        config = ModelSelectionConfig(
+            default_models_override={}, model_releases=payload
+        )
+        current_feature_flag_context.set(flags)
+
+        result = config.find_by_identifier("vertex_ai/claude-opus-9@default")
+
+        assert (result.gitlab_identifier if result else None) == expected
+
+
+def test_shipped_model_restrictions_load():
+    config = ModelSelectionConfig(default_models_override={})
+
+    assert isinstance(config.get_model_restrictions(), list)
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_restrictions_load_from_file_and_reload_on_refresh(selection_config):
+    assert not selection_config.get_model_restrictions()
+    assert selection_config.restricted_flows_for(["gitlab-embedding-model"]) is None
+
+    MODEL_RESTRICTIONS_CONFIG_PATH.write_text(
+        "restricted_models:\n"
+        "  - identifier: gitlab-embedding-model\n"
+        "    feature_settings: [some_flow]\n"
+    )
+    selection_config.refresh()
+
+    assert selection_config.get_model_restrictions() == [
+        ModelRestriction(
+            identifier="gitlab-embedding-model", feature_settings=["some_flow"]
+        )
+    ]
+    assert selection_config.restricted_flows_for(["gitlab-embedding-model"]) == {
+        "some_flow"
+    }
+    selection_config.validate()

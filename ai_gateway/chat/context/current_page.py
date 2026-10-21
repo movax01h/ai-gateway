@@ -1,8 +1,9 @@
-from typing import Literal, Union
+from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AfterValidator, BaseModel, ConfigDict
 
 __all__ = [
+    "MAX_TITLE_LENGTH",
     "CiBuildContext",
     "CommitContext",
     "Context",
@@ -12,6 +13,18 @@ __all__ = [
     "MergeRequestContext",
     "WorkItemContext",
 ]
+
+# Matches GitLab's Issuable::TITLE_LENGTH_MAX. Commit titles are already truncated by GitLab to under 100 characters.
+MAX_TITLE_LENGTH = 255
+
+
+def _truncate_title(title: str) -> str:
+    # Truncate rather than reject: some GitLab import paths skip the title length validation, and rejecting would
+    # break every chat request on that page.
+    return title[:MAX_TITLE_LENGTH]
+
+
+Title = Annotated[str, AfterValidator(_truncate_title)]
 
 
 class Context(BaseModel):
@@ -33,27 +46,27 @@ class CiBuildContext(BaseModel):
 
 class CommitContext(BaseModel):
     type: Literal["commit"]
-    title: str
+    title: Title
 
 
 class EpicContext(BaseModel):
     type: Literal["epic"]
-    title: str
+    title: Title
 
 
 class IssueContext(BaseModel):
     type: Literal["issue"]
-    title: str
+    title: Title
 
 
 class MergeRequestContext(BaseModel):
     type: Literal["merge_request"]
-    title: str
+    title: Title
 
 
 class WorkItemContext(BaseModel):
     type: Literal["work_item"]
-    title: str
+    title: Title
 
 
 # This Union allows to pass page context params and automatically

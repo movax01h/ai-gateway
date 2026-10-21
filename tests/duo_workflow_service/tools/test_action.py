@@ -7,9 +7,12 @@ from langchain_core.tools import ToolException
 
 from contract import contract_pb2
 from duo_workflow_service.executor.action import (
+    ToolExceptionWithResponse,
     _execute_action,
+    _execute_action_accepting_image,
     _execute_action_and_get_action_response,
 )
+from duo_workflow_service.executor.image_result import ImageActionResult
 from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
 from duo_workflow_service.workflows.type_definitions import (
     MAX_MESSAGE_SIZE,
@@ -92,6 +95,61 @@ async def test_execute_action_success_plaintext_response(metadata):
 
 
 @pytest.mark.asyncio
+async def test_execute_action_accepting_image_returns_typed_result(metadata):
+    action = contract_pb2.Action()
+    action.runReadFile.filepath = "./screenshot.png"
+    client_event = contract_pb2.ClientEvent()
+    client_event.actionResponse.requestID = "test-request-img"
+    client_event.actionResponse.imageResponse.mime_type = "image/png"
+    client_event.actionResponse.imageResponse.data = b"\x89PNG\r\n\x1a\n" + b"pixels"
+
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
+
+    result = await _execute_action_accepting_image(metadata, action)
+
+    assert result == ImageActionResult(
+        mime_type="image/png", data=b"\x89PNG\r\n\x1a\n" + b"pixels"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_action_accepting_image_still_returns_plaintext(metadata):
+    action = contract_pb2.Action()
+    client_event = contract_pb2.ClientEvent()
+    client_event.actionResponse.plainTextResponse.response = "plain content"
+
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
+
+    result = await _execute_action_accepting_image(metadata, action)
+
+    assert result == "plain content"
+
+
+@pytest.mark.asyncio
+async def test_execute_action_rejects_image_for_non_image_tools(metadata):
+    """An imageResponse to an action whose tool cannot accept images is a protocol error, not a silent string."""
+    action = contract_pb2.Action()
+    action.runCommand.program = "ls"
+    client_event = contract_pb2.ClientEvent()
+    client_event.actionResponse.requestID = "test-request-img-reject"
+    client_event.actionResponse.imageResponse.mime_type = "image/png"
+    client_event.actionResponse.imageResponse.data = b"\x89PNG\r\n\x1a\n"
+
+    metadata["outbox"].put_action_and_wait_for_response = AsyncMock(
+        return_value=client_event
+    )
+
+    with pytest.raises(
+        ToolException, match="Executor doesn't return expected response fields"
+    ):
+        await _execute_action(metadata, action)
+
+
+@pytest.mark.asyncio
 async def test__execute_action_and_get_action_response_http_error_raises_tool_exception(
     metadata,
 ):
@@ -106,8 +164,13 @@ async def test__execute_action_and_get_action_response_http_error_raises_tool_ex
         return_value=client_event
     )
 
-    with pytest.raises(ToolException, match="HTTP action error: Connection timeout"):
+    with pytest.raises(
+        ToolExceptionWithResponse, match="HTTP action error: Connection timeout"
+    ) as exc_info:
         await _execute_action_and_get_action_response(metadata, action)
+
+    assert exc_info.value.server_error == "Connection timeout"
+    assert exc_info.value.response is None
 
 
 @pytest.mark.asyncio
@@ -125,8 +188,13 @@ async def test__execute_action_and_get_action_response_plaintext_error_raises_to
         return_value=client_event
     )
 
-    with pytest.raises(ToolException, match="Action error: File not found"):
+    with pytest.raises(
+        ToolExceptionWithResponse, match="Action error: File not found"
+    ) as exc_info:
         await _execute_action_and_get_action_response(metadata, action)
+
+    assert exc_info.value.server_error == "File not found"
+    assert exc_info.value.response is None
 
 
 @pytest.mark.asyncio
@@ -286,11 +354,13 @@ async def test__execute_action_and_get_action_response_runcommand_error(
         return_value=client_event
     )
 
-    with pytest.raises(ToolException) as exc_info:
+    with pytest.raises(ToolExceptionWithResponse) as exc_info:
         await _execute_action_and_get_action_response(metadata, action)
 
     expected_text = "Action error: Command failed"
     assert expected_text in str(exc_info.value)
+    assert exc_info.value.server_error == "Command failed"
+    assert exc_info.value.response == "Additional error details from command output"
 
 
 @pytest.mark.asyncio

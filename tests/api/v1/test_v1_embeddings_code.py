@@ -1,7 +1,7 @@
 # pylint: disable=file-naming-for-tests
 from json import JSONDecodeError
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import litellm
 import pytest
@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
 from ai_gateway.api.v1 import api_router
+from ai_gateway.prompts.base import Prompt
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -88,6 +89,22 @@ class BaseTestCodeEmbeddings:
     def _route(self):
         raise NotImplementedError("Implement in child class.")
 
+    def _expected_embeddings_operation(self):
+        raise NotImplementedError("Implement in child class.")
+
+    def _token_usage_event_extra(self, mock_track_internal_event: Mock):
+        # `request_generate_embeddings_codebase` is emitted through the same mock,
+        # so the token usage event has to be picked out by name.
+        token_usage_calls = [
+            call
+            for call in mock_track_internal_event.call_args_list
+            if call.args[0] == "token_usage_generate_embeddings_codebase"
+        ]
+
+        assert len(token_usage_calls) == 1
+
+        return token_usage_calls[0].kwargs["additional_properties"].extra
+
     @pytest.mark.parametrize(
         ("model_identifier", "expected_llm_model", "expected_custom_llm_provider"),
         [("text_embedding_005_vertex", "text-embedding-005", "vertex_ai")],
@@ -133,6 +150,7 @@ class BaseTestCodeEmbeddings:
             "expected_custom_llm_provider",
             "expected_llm_model",
             "expected_api_key",
+            "reported_model_identifier",
         ),
         [
             (
@@ -140,7 +158,8 @@ class BaseTestCodeEmbeddings:
                 None,
                 "openai",
                 "test-embedding-002",
-                None,
+                "dummy_key",
+                "openai/test-embedding-002",
             ),
             (
                 "openai/test-embedding-002",
@@ -148,20 +167,31 @@ class BaseTestCodeEmbeddings:
                 "openai",
                 "test-embedding-002",
                 "test-api-key",
+                "openai/test-embedding-002",
+            ),
+            (
+                "openai_like/test-embedding-002",
+                None,
+                "openai",
+                "test-embedding-002",
+                "dummy_key",
+                "openai/test-embedding-002",
             ),
             (
                 "test-embedding-001",
                 None,
-                "custom_openai",
+                "openai",
                 "test-embedding-001",
-                "dummy_key",  # if custom_llm_provider=custom_openai, a dummy key is set
+                "dummy_key",
+                "test-embedding-001",
             ),
             (
                 "test-embedding-001",
                 "test-api-key",
-                "custom_openai",
+                "openai",
                 "test-embedding-001",
                 "test-api-key",
+                "test-embedding-001",
             ),
         ],
     )
@@ -172,6 +202,7 @@ class BaseTestCodeEmbeddings:
         expected_custom_llm_provider,
         expected_llm_model,
         expected_api_key,
+        reported_model_identifier,
         mock_client: TestClient,
         mock_litellm_aembedding: AsyncMock,
         mock_litellm_aembedding_response: AsyncMock,
@@ -205,10 +236,110 @@ class BaseTestCodeEmbeddings:
         response_json = response.json()
         assert response_json["model"] == {
             "engine": "litellm_embedding",
-            "name": "embedding",
-            "identifier": model_identifier,
+            "name": expected_llm_model,
+            "identifier": reported_model_identifier,
         }
         assert response_json["predictions"] == mock_litellm_aembedding_response.data
+
+    def test_usage_metadata_collected_by_usage_callback(
+        self,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+        mock_litellm_aembedding_response: AsyncMock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+
+        with patch.object(Prompt, "handle_usage_metadata") as mock_handle_usage:
+            response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        mock_handle_usage.assert_called_once()
+
+        _watcher, usage_metadata = mock_handle_usage.call_args.args
+        assert usage_metadata == {
+            mock_litellm_aembedding_response.model: {
+                "input_tokens": 12,
+                "output_tokens": 0,
+                "total_tokens": 12,
+                "input_token_details": {"cache_read": 4},
+            }
+        }
+
+    def test_input_characters_in_token_usage_event(
+        self,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+        mock_track_internal_event: Mock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        extra = self._token_usage_event_extra(mock_track_internal_event)
+
+        assert mock_litellm_aembedding.call_args[1]["input"] == [
+            "test content 1",
+            "test content 2",
+        ]
+        assert extra["input_characters"] == 24
+        # The new key coexists with the existing cache extras
+        assert extra["cache_read"] == 4
+
+    @pytest.mark.parametrize(
+        ("contents", "expected_input_characters"),
+        [
+            ([], 0),
+            ([""], 0),
+            # Counted as Unicode code points: the fox is a single character
+            (["🦊", "ab"], 3),
+            # Whitespace is excluded, including newlines, tabs and indentation
+            (["  def f():\n\treturn 1  "], 14),
+            (["   ", "\n\n"], 0),
+        ],
+    )
+    def test_input_characters_counts_non_whitespace_code_points(
+        self,
+        contents,
+        expected_input_characters,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+        mock_track_internal_event: Mock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+        params["contents"] = contents
+
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        extra = self._token_usage_event_extra(mock_track_internal_event)
+        assert extra["input_characters"] == expected_input_characters
+
+    @pytest.mark.usefixtures("mock_litellm_aembedding")
+    def test_embeddings_operation_in_token_usage_event(
+        self,
+        mock_client: TestClient,
+        mock_track_internal_event: Mock,
+    ):
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="text_embedding_005_vertex"
+        )
+
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+
+        extra = self._token_usage_event_extra(mock_track_internal_event)
+        assert extra["embeddings_operation"] == self._expected_embeddings_operation()
 
     @pytest.mark.parametrize(
         ("model_provider", "model_identifier", "model_name", "endpoint"),
@@ -267,10 +398,27 @@ class BaseTestCodeEmbeddings:
         response_json = response.json()
         assert response_json["predictions"] == mock_litellm_aembedding_response.data
 
+    @pytest.mark.parametrize(
+        ("config_values", "expected_location"),
+        [
+            (
+                {"custom_models": {"enabled": True}, "vertexai_location": None},
+                None,
+            ),
+            (
+                {
+                    "custom_models": {"enabled": True},
+                    "vertexai_location": "europe-west2",
+                },
+                "europe-west2",
+            ),
+        ],
+    )
     def test_successful_response_custom_provider_vertex(
         self,
         mock_client: TestClient,
         mock_litellm_aembedding: AsyncMock,
+        expected_location: str | None,
     ):
         params = self._build_params(
             model_provider="gitlab", model_identifier="text_embedding_005_vertex"
@@ -284,7 +432,7 @@ class BaseTestCodeEmbeddings:
         assert call_kwargs["model"] == "text-embedding-005"
         assert call_kwargs["input"] == params["contents"]
         assert call_kwargs["custom_llm_provider"] == "vertex_ai"
-        assert call_kwargs["vertex_ai_location"] == "global"
+        assert call_kwargs.get("vertex_ai_location") == expected_location
 
     def test_unsupported_provider(
         self,
@@ -524,6 +672,9 @@ class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
     def _route(self):
         return "/embeddings/code_embeddings/index"
 
+    def _expected_embeddings_operation(self):
+        return "index"
+
     @pytest.mark.usefixtures(
         "mock_litellm_aembedding", "mock_litellm_aembedding_response"
     )
@@ -544,3 +695,6 @@ class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
 class TestCodeEmbeddingsSearch(BaseTestCodeEmbeddings):
     def _route(self):
         return "/embeddings/code_embeddings/search"
+
+    def _expected_embeddings_operation(self):
+        return "search"

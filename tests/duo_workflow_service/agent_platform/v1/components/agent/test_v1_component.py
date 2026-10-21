@@ -2,11 +2,13 @@
 """Test suite for AgentComponent class."""
 
 from typing import ClassVar, Literal
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
+from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ai_gateway.response_schemas import (
@@ -15,6 +17,7 @@ from ai_gateway.response_schemas import (
 )
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
+from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -24,10 +27,14 @@ from duo_workflow_service.agent_platform.v1.components.agent.component import (
     MaxCyclesConfig,
     RoutingError,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
+    AgentStuckError,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
 from duo_workflow_service.agent_platform.v1.state import (
+    FlowEvent,
     FlowEventType,
     FlowState,
     FlowStateKeys,
@@ -41,17 +48,7 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 from duo_workflow_service.entities import MessageTypeEnum
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
-from lib.feature_flags import FeatureFlag, current_feature_flag_context
-
-
-@pytest.fixture(name="auto_tool_choice_flag")
-def auto_tool_choice_flag_fixture():
-    """Enable ``dap_schema_auto_tool_choice`` for one test, then restore the previous context."""
-    token = current_feature_flag_context.set(
-        {FeatureFlag.DAP_SCHEMA_AUTO_TOOL_CHOICE.value}
-    )
-    yield
-    current_feature_flag_context.reset(token)
+from lib.feature_flags import FeatureFlag
 
 
 @pytest.fixture(name="prompt_id")
@@ -689,6 +686,120 @@ class TestResponseSchemaDefinition:
         )
         assert component._response_schema is None
 
+    async def _run_graph_with_replies(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        replies,
+        component_name,
+        flow_id,
+        flow_type,
+        user,
+        mock_toolset,
+        mock_prompt_registry,
+        mock_internal_event_client,
+        inline_schema_registry,
+        base_flow_state,
+    ):
+        """Run a schema agent (default max_cycles) in a real graph; return the prompt mock."""
+        mock_toolset.__contains__ = lambda _self, name: name != self.INLINE_SCHEMA_ID
+        prompt = mock_prompt_registry.get_on_behalf.return_value
+        prompt.ainvoke = AsyncMock(side_effect=replies)
+        component = AgentComponent(
+            name=component_name,
+            flow_id=flow_id,
+            flow_type=flow_type,
+            user=user,
+            inputs=["context:user_input"],
+            prompt_id="test_prompt",
+            toolset=mock_toolset,
+            prompt_registry=mock_prompt_registry,
+            internal_event_client=mock_internal_event_client,
+            schema_registry=inline_schema_registry,
+            response_schema_id=self.INLINE_SCHEMA_ID,
+        )
+        router = Mock()
+        router.route.return_value = END
+        graph = StateGraph(FlowState)
+        component.attach(graph, router)
+        graph.set_entry_point(component.__entry_hook__())
+        await graph.compile().ainvoke(
+            base_flow_state, config={"recursion_limit": RECURSION_LIMIT}
+        )
+        return prompt
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content", ["thinking...", [], ""], ids=["text", "empty_list", "empty_string"]
+    )
+    async def test_text_only_replies_stop_the_agent_before_max_cycles(
+        self, content, request, base_flow_state
+    ):
+        """A model that only replies in text, or empty, is stopped after 4 calls, not max_cycles + 2 (282)."""
+        replies = [AIMessage(content=content) for _ in range(300)]
+        with pytest.raises(
+            AgentStuckError, match="replied in text without calling a tool 4 times"
+        ):
+            await self._run_graph_with_replies(
+                replies,
+                **self._graph_fixtures(request),
+                base_flow_state=base_flow_state,
+            )
+        prompt = request.getfixturevalue(
+            "mock_prompt_registry"
+        ).get_on_behalf.return_value
+        assert prompt.ainvoke.await_count == 4
+        request_lengths = [
+            len(call.kwargs["input"]["history"])
+            for call in prompt.ainvoke.await_args_list
+        ]
+        # The persisted nudge makes each request differ, even when an empty reply is dropped.
+        assert request_lengths == sorted(set(request_lengths))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "text_turns", [2, 3], ids=["below_the_cap", "after_the_wrap_up"]
+    )
+    async def test_text_only_replies_then_final_answer_succeed(
+        self, text_turns, request, base_flow_state
+    ):
+        """Deliberation turns, then the schema call, complete normally, including in reply to the wrap-up."""
+        final = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "final",
+                    "name": self.INLINE_SCHEMA_ID,
+                    "args": {"summary": "done", "score": 5},
+                }
+            ],
+        )
+        replies = [AIMessage(content="thinking...") for _ in range(text_turns)]
+        prompt = await self._run_graph_with_replies(
+            [*replies, final],
+            **self._graph_fixtures(request),
+            base_flow_state=base_flow_state,
+        )
+        assert prompt.ainvoke.await_count == text_turns + 1
+        last_request = prompt.ainvoke.await_args_list[-1].kwargs["input"]["history"]
+        assert ("maximum number of iterations" in last_request[-1].content) is (
+            text_turns == 3
+        )
+
+    @staticmethod
+    def _graph_fixtures(request):
+        return {
+            name: request.getfixturevalue(name)
+            for name in (
+                "component_name",
+                "flow_id",
+                "flow_type",
+                "user",
+                "mock_toolset",
+                "mock_prompt_registry",
+                "mock_internal_event_client",
+                "inline_schema_registry",
+            )
+        }
+
 
 class TestAgentComponentInitialization:
     """Test suite for AgentComponent initialization."""
@@ -1001,43 +1112,13 @@ class TestAgentComponentAttachEdges:
             "Conversation history not found for key" in exc_info.value.internal_detail
         )
 
-    def test_routing_with_schema_mode_and_no_tool_calls_raises_error(
+    def test_routing_with_schema_mode_loops_text_only_back_to_agent(
         self,
         agent_component_with_custom_schema,
         mock_state_graph,
         mock_router,
         base_flow_state,
         component_name,
-    ):
-        """Test that schema mode with no tool calls raises NotifiableAgentException."""
-        mock_message = Mock(spec=AIMessage)
-        mock_message.tool_calls = []
-
-        state_with_no_tools = base_flow_state.copy()
-        state_with_no_tools[FlowStateKeys.CONVERSATION_HISTORY] = {
-            component_name: [mock_message]
-        }
-
-        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
-
-        router_calls = mock_state_graph.add_conditional_edges.call_args_list
-        agent_router_call = next(
-            call for call in router_calls if call[0][0] == f"{component_name}#agent"
-        )
-        router_function = agent_router_call[0][1]
-
-        with pytest.raises(NotifiableAgentException) as exc_info:
-            router_function(state_with_no_tools)
-        assert "Schema mode requires a tool call" in exc_info.value.internal_detail
-
-    def test_routing_with_schema_mode_auto_tool_choice_loops_text_only_back_to_agent(
-        self,
-        agent_component_with_custom_schema,
-        mock_state_graph,
-        mock_router,
-        base_flow_state,
-        component_name,
-        auto_tool_choice_flag,
     ):
         """With tool_choice "auto" a text-only turn is deliberation, not an error: it loops back to the agent."""
         mock_message = Mock(spec=AIMessage)
@@ -1058,28 +1139,14 @@ class TestAgentComponentAttachEdges:
 
         assert router_function(state_with_no_tools) == f"{component_name}#agent"
 
-    def test_schema_mode_binds_any_tool_choice_by_default(
+    def test_schema_mode_binds_auto_tool_choice(
         self,
         agent_component_with_custom_schema,
         mock_state_graph,
         mock_router,
         mock_prompt_registry,
     ):
-        """Without the flag the schema tool is still forced, so every existing flow keeps today's behaviour."""
-        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
-
-        _, kwargs = mock_prompt_registry.get_on_behalf.call_args
-        assert kwargs["tool_choice"] == "any"
-
-    def test_schema_mode_binds_auto_tool_choice_under_flag(
-        self,
-        agent_component_with_custom_schema,
-        mock_state_graph,
-        mock_router,
-        mock_prompt_registry,
-        auto_tool_choice_flag,
-    ):
-        """The flag is the only thing switching the schema binding to "auto"."""
+        """A response schema is bound with "auto" so the agent can still deliberate in text."""
         agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
 
         _, kwargs = mock_prompt_registry.get_on_behalf.call_args
@@ -2275,6 +2342,77 @@ class TestAgentComponentToolApprovalExecutionFlow:
         nodes["agent"].run.assert_called_once()
         nodes["tools"].run.assert_not_called()
 
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_tool_approval_request_node_cls")
+    async def test_a_message_at_a_pending_approval_reaches_the_agent_as_feedback(
+        self,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        mock_final_response_node_cls,
+        mock_router,
+        mock_internal_event_client,
+        base_flow_state,
+        component_name,
+        agent_component_with_tool_approval,
+    ):
+        """A message sent instead of a decision resumes the real fetch node, which sends it back to the agent."""
+        pending_call = AIMessage(
+            content="",
+            tool_calls=[{"id": "call_1", "name": "read_file", "args": {}}],
+        )
+        state = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {component_name: [pending_call]},
+            FlowStateKeys.CONTEXT: {
+                **base_flow_state[FlowStateKeys.CONTEXT],
+                component_name: {
+                    "tool_approval_requests": [{"id": "call_1", "name": "read_file"}]
+                },
+            },
+        }
+        agent_run = mock_agent_node_cls.return_value.run
+        agent_run.return_value = {
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                component_name: [AIMessage(content="Reading the other file.")]
+            },
+        }
+        mock_final_response_node_cls.return_value.run.return_value = {}
+        mock_router.route.return_value = END
+
+        graph = StateGraph(FlowState)
+        agent_component_with_tool_approval.attach(graph, mock_router)
+        graph.set_entry_point(f"{component_name}#tool_approval_fetch")
+        compiled = graph.compile(checkpointer=InMemorySaver())
+        config = {"configurable": {"thread_id": "message-at-approval"}}
+
+        await compiled.ainvoke(state, config)
+        assert (await compiled.aget_state(config)).next == (
+            f"{component_name}#tool_approval_fetch",
+        )
+
+        await compiled.ainvoke(
+            Command(
+                resume=FlowEvent(
+                    event_type=FlowEventType.RESPONSE, message="use a different file"
+                )
+            ),
+            config,
+        )
+
+        history = agent_run.call_args.args[0][FlowStateKeys.CONVERSATION_HISTORY][
+            component_name
+        ]
+        assert [type(message) for message in history] == [
+            AIMessage,
+            ToolMessage,
+            HumanMessage,
+        ]
+        assert history[1].tool_call_id == "call_1"
+        assert history[2].content == "use a different file"
+        mock_tool_node_cls.return_value.run.assert_not_called()
+        (resolution,) = mock_internal_event_client.track_event.call_args_list
+        assert resolution.kwargs["additional_properties"].property == "message"
+
     def test_missing_decision_raises_routing_error(
         self,
         all_node_mocks,
@@ -2485,8 +2623,29 @@ class TestAgentNodeInvokeConfig:
             component.attach(mock_state_graph, mock_router)
             return mock_agent_node_cls.call_args[1]["invoke_config"]
 
+    @pytest.mark.parametrize(
+        ("ui_log_events", "case"),
+        [
+            (
+                [
+                    UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+                    UILogEventsAgent.ON_AGENT_REASONING,
+                ],
+                "both streaming events",
+            ),
+            # The chat-partial environment fills this floor into a component that
+            # declares no events, so the floor has to satisfy this component's
+            # streaming rule.
+            (
+                list(AgentComponent.CHAT_PARTIAL_UI_LOG_EVENTS),
+                "chat-partial floor",
+            ),
+        ],
+    )
     def test_both_events_declared_passes_streaming_enabled_config(
         self,
+        ui_log_events,
+        case,  # pylint: disable=unused-argument
         component_name,
         flow_id,
         flow_type,
@@ -2500,10 +2659,7 @@ class TestAgentNodeInvokeConfig:
     ):
         """Attach() passes STREAMING_ENABLED_CONFIG when both streaming events are declared."""
         invoke_config = self._attach_and_get_invoke_config(
-            ui_log_events=[
-                UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
-                UILogEventsAgent.ON_AGENT_REASONING,
-            ],
+            ui_log_events=ui_log_events,
             component_name=component_name,
             flow_id=flow_id,
             flow_type=flow_type,
@@ -2564,6 +2720,64 @@ class TestAgentNodeInvokeConfig:
         assert invoke_config == AgentComponentBase.STREAMING_DISABLED_CONFIG
 
 
+class TestAgentComponentChatPartialDefaults:
+    """Under ``chat-partial`` the component fills the defaults the chat surface guarantees."""
+
+    def test_fills_the_ui_log_events_floor(self, make_agent_component):
+        component = make_agent_component(environment="chat-partial")
+
+        assert component.ui_log_events == list(
+            AgentComponent.CHAT_PARTIAL_UI_LOG_EVENTS
+        )
+
+    def test_requires_tool_approval(self, make_agent_component):
+        component = make_agent_component(environment="chat-partial")
+
+        assert component.require_tool_approval is True
+
+    def test_clears_pre_approved_tools(self, make_agent_component):
+        component = make_agent_component(
+            environment="chat-partial", pre_approved_tools=["read_file"]
+        )
+
+        assert component.pre_approved_tools == []
+
+    def test_the_floor_streams(self, make_agent_component):
+        component = make_agent_component(environment="chat-partial")
+
+        assert (
+            component._agent_node_invoke_config()
+            == AgentComponentBase.STREAMING_ENABLED_CONFIG
+        )
+
+    @pytest.mark.parametrize("declared", [[], [UILogEventsAgent.ON_AGENT_FINAL_ANSWER]])
+    def test_declared_ui_log_events_win(self, make_agent_component, declared):
+        component = make_agent_component(
+            environment="chat-partial", ui_log_events=declared
+        )
+
+        assert component.ui_log_events == declared
+
+    def test_declared_require_tool_approval_wins(self, make_agent_component):
+        component = make_agent_component(
+            environment="chat-partial", require_tool_approval=False
+        )
+
+        assert component.require_tool_approval is False
+
+    @pytest.mark.parametrize("environment", [None, "ambient", "chat"])
+    def test_other_environments_keep_the_component_defaults(
+        self, make_agent_component, environment
+    ):
+        component = make_agent_component(
+            environment=environment, pre_approved_tools=["read_file"]
+        )
+
+        assert component.ui_log_events == []
+        assert component.require_tool_approval is False
+        assert component.pre_approved_tools == ["read_file"]
+
+
 class TestAgentComponentMaxCycles:
     """Test suite for AgentComponentBase max_cycles field and validator."""
 
@@ -2609,16 +2823,19 @@ class TestAgentComponentMaxCyclesWarningOffset:
     @pytest.mark.parametrize(
         "max_cycles, expected_offset",
         [
-            (4, 3),  # matches fix_pipeline's checkout step config
-            (1, 0),
-            (11, 10),  # boundary: last value still clamped
-            (12, 10),  # boundary: first value not clamped
+            (4, 2),  # fix_pipeline's checkout step: warns on cycle 2, not 1
+            (3, 1),
+            (2, 1),  # floored: a tight budget is warned rather than left silent
+            (1, None),  # no cycle left to warn on
+            (11, 5),  # half the budget while that is below the default
+            (19, 9),  # boundary: last threshold where half the budget still wins
+            (22, 10),  # boundary: first threshold where the 10-cycle cap wins
         ],
     )
-    def test_plain_int_form_clamps_offset_for_small_thresholds(
+    def test_plain_int_form_halves_offset_for_small_thresholds(
         self, make_agent_component, max_cycles, expected_offset
     ):
-        """The legacy plain-int form clamps the default offset to min(10, threshold - 1) for small thresholds."""
+        """Plain-int max_cycles defaults the offset to min(10, threshold // 2), floored at one cycle."""
         component = make_agent_component(max_cycles=max_cycles)
         assert component._max_cycles_threshold == max_cycles
         assert component._iteration_warning_offset == expected_offset
@@ -2629,14 +2846,27 @@ class TestAgentComponentMaxCyclesWarningOffset:
         assert component._max_cycles_threshold == 50
         assert component._iteration_warning_offset == 10
 
-    def test_nested_form_clamps_omitted_offset_for_small_threshold(
+    def test_nested_form_halves_omitted_offset_for_small_threshold(
         self, make_agent_component
     ):
-        """MaxCyclesConfig with iteration_warning_offset omitted also clamps for small thresholds, like the plain-int
-        form."""
+        """MaxCyclesConfig with the offset omitted also halves it for small thresholds, like the plain-int form."""
         component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=4))
         assert component._max_cycles_threshold == 4
-        assert component._iteration_warning_offset == 3
+        assert component._iteration_warning_offset == 2
+
+    def test_nested_form_floors_omitted_offset_for_a_tight_budget(
+        self, make_agent_component
+    ):
+        """A 2-cycle budget still warns: the constraint is what the agent most needs to know."""
+        component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=2))
+        assert component._iteration_warning_offset == 1
+
+    def test_nested_form_disables_omitted_offset_for_a_single_cycle_budget(
+        self, make_agent_component
+    ):
+        """One cycle leaves nothing to warn on, so the limit message stands alone."""
+        component = make_agent_component(max_cycles=MaxCyclesConfig(threshold=1))
+        assert component._iteration_warning_offset is None
 
     @pytest.mark.parametrize("iteration_warning_offset", [4, 5, 10])
     def test_nested_form_rejects_explicit_offset_at_or_above_threshold(
@@ -2644,7 +2874,7 @@ class TestAgentComponentMaxCyclesWarningOffset:
     ):
         """MaxCyclesConfig raises when iteration_warning_offset is explicitly set >= threshold.
 
-        Unlike an omitted offset (auto-clamped), an explicitly chosen value that doesn't fit is treated as a deliberate
+        Unlike an omitted offset (halved to fit), an explicitly chosen value that doesn't fit is treated as a deliberate
         misconfiguration.
         """
         with pytest.raises(ValidationError, match="must be less than threshold"):
@@ -2745,3 +2975,211 @@ class TestAgentComponentMaxWrapUpRetries:
 
         call_kwargs = mock_agent_node_cls.call_args[1]
         assert call_kwargs["cycle_budget"].max_wrap_up_retries == 5
+
+
+class TestAgentComponentIdenticalToolCallLimit:
+    """Test suite for AgentComponentBase identical_tool_call_limit field and validator."""
+
+    def test_identical_tool_call_limit_default_is_zero(self, make_agent_component):
+        """identical_tool_call_limit defaults to 0, which disables the loop guard."""
+        component = make_agent_component()
+        assert component.identical_tool_call_limit == 0
+
+    @pytest.mark.parametrize("identical_tool_call_limit", [0, 3, 10])
+    def test_identical_tool_call_limit_valid_values(
+        self, make_agent_component, identical_tool_call_limit
+    ):
+        """identical_tool_call_limit accepts 0 (disabled) or any integer >= 3."""
+        component = make_agent_component(
+            identical_tool_call_limit=identical_tool_call_limit
+        )
+        assert component.identical_tool_call_limit == identical_tool_call_limit
+
+    @pytest.mark.parametrize("identical_tool_call_limit", [-1, 1, 2])
+    def test_identical_tool_call_limit_rejects_unreachable_values(
+        self, make_agent_component, identical_tool_call_limit
+    ):
+        """Below 3 the guard would trip before two results exist to compare, so those limits are rejected."""
+        with pytest.raises(
+            ValidationError,
+            match=r"identical_tool_call_limit must be 0 \(disabled\) or >= 3",
+        ):
+            make_agent_component(identical_tool_call_limit=identical_tool_call_limit)
+
+    @pytest.mark.usefixtures("mock_agent_node_cls", "mock_final_response_node_cls")
+    @pytest.mark.parametrize("identical_tool_call_limit", [0, 3])
+    def test_attach_passes_identical_tool_call_limit_to_tool_node(
+        self,
+        make_agent_component,
+        mock_tool_node_cls,
+        mock_state_graph,
+        mock_router,
+        identical_tool_call_limit,
+    ):
+        """Attach() forwards identical_tool_call_limit to ToolNode as identical_call_limit."""
+        component = make_agent_component(
+            identical_tool_call_limit=identical_tool_call_limit
+        )
+        component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_tool_node_cls.call_args[1]
+        assert call_kwargs["identical_call_limit"] == identical_tool_call_limit
+
+    @pytest.mark.usefixtures("mock_agent_node_cls", "mock_final_response_node_cls")
+    @pytest.mark.parametrize(
+        "kwargs,expected",
+        [({"max_wrap_up_retries": 5}, 5), ({}, 3)],
+    )
+    def test_attach_passes_max_wrap_up_retries_to_tool_node(
+        self,
+        make_agent_component,
+        mock_tool_node_cls,
+        mock_state_graph,
+        mock_router,
+        kwargs,
+        expected,
+    ):
+        """Attach() forwards max_wrap_up_retries to ToolNode so the loop guard shares AgentNode's stuck contract."""
+        component = make_agent_component(identical_tool_call_limit=3, **kwargs)
+        component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_tool_node_cls.call_args[1]
+        assert call_kwargs["identical_call_max_wrap_up_retries"] == expected
+
+
+class TestWebSearchBinding:
+    """`_build_prompt` binds the provider-native web-search tool only when the `enable_web_search` opt-in AND the
+    dependency_bump_web_search flag AND the client's `web_search` capability are all present."""
+
+    _MODULE = "duo_workflow_service.agent_platform.v1.components.agent.component"
+
+    @pytest.mark.parametrize(
+        ("enabled", "flag_on", "client_capable", "expect_bound"),
+        [
+            (True, True, True, True),  # all gates satisfied -> bound
+            (False, True, True, False),  # flow opt-in off
+            (True, False, True, False),  # dependency_bump_web_search flag off
+            (True, True, False, False),  # client lacks web_search capability
+        ],
+    )
+    def test_web_search_binding_is_gated(
+        self,
+        make_agent_component,
+        mock_prompt_registry,
+        enabled,
+        flag_on,
+        client_capable,
+        expect_bound,
+    ):
+        component = make_agent_component(enable_web_search=enabled)
+
+        with (
+            patch(
+                f"{self._MODULE}.is_feature_enabled", return_value=flag_on
+            ) as mock_is_feature_enabled,
+            patch(
+                f"{self._MODULE}.is_client_capable", return_value=client_capable
+            ) as mock_is_client_capable,
+        ):
+            component._build_prompt(tools=[], tool_choice="auto")
+
+        call_kwargs = mock_prompt_registry.get_on_behalf.call_args.kwargs
+        if expect_bound:
+            assert call_kwargs["bind_tools_params"] == {"web_search_options": {}}
+            # the gate must query the correct flag and capability identifiers
+            mock_is_feature_enabled.assert_called_once_with(
+                FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH
+            )
+            mock_is_client_capable.assert_called_once_with("web_search")
+        else:
+            assert "bind_tools_params" not in call_kwargs
+
+    def test_web_search_is_off_by_default(
+        self, make_agent_component, mock_prompt_registry
+    ):
+        """Flows that never opt in must not pay the capability/flag lookups or bind the tool."""
+        component = make_agent_component()
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled") as mock_is_feature_enabled,
+            patch(f"{self._MODULE}.is_client_capable") as mock_is_client_capable,
+        ):
+            component._build_prompt(tools=[], tool_choice="auto")
+
+        assert component.enable_web_search is False
+        assert (
+            "bind_tools_params"
+            not in mock_prompt_registry.get_on_behalf.call_args.kwargs
+        )
+        mock_is_feature_enabled.assert_not_called()
+        mock_is_client_capable.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("enabled", "flag_on", "client_capable", "expected"),
+        [
+            (True, True, True, True),  # all gates satisfied
+            (False, True, True, False),  # flow opt-in off
+            (True, False, True, False),  # dependency_bump_web_search flag off
+            (True, True, False, False),  # client lacks web_search capability
+        ],
+    )
+    def test_tools_enabled_map_reflects_gate(
+        self, make_agent_component, enabled, flag_on, client_capable, expected
+    ):
+        """`_tools_enabled()` exposes the same gate to the prompt (as `tools_enabled`) that decides whether the tool is
+        bound, so the prompt can branch its guidance."""
+        component = make_agent_component(enable_web_search=enabled)
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=flag_on),
+            patch(f"{self._MODULE}.is_client_capable", return_value=client_capable),
+        ):
+            # `run_command` is True because the mock toolset contains every key; it
+            # reflects toolset membership, not the patched flag, which this component
+            # does not consult. `..._follows_toolset_membership` covers that directly.
+            assert component._tools_enabled() == {
+                "web_search": expected,
+                "run_command": True,
+            }
+
+    @pytest.mark.parametrize("in_toolset", [True, False])
+    def test_tools_enabled_run_command_follows_toolset_membership(
+        self, make_agent_component, mock_toolset, in_toolset
+    ):
+        """`run_command` reaches the toolset only when Rails grants the `run_commands` privilege, so membership is the
+        whole answer -- it is what decides whether the prompt describes the tool or its fallback."""
+        # keyed rather than blanket-True: checking membership of the wrong tool name
+        # would answer False here and fail the assertion
+        mock_toolset.__contains__ = Mock(
+            side_effect=lambda name: in_toolset and name == "run_command"
+        )
+        component = make_agent_component()
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=False),
+            patch(f"{self._MODULE}.is_client_capable", return_value=False),
+        ):
+            assert component._tools_enabled()["run_command"] is in_toolset
+
+    @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
+    def test_attach_forwards_tools_enabled_to_agent_node(
+        self,
+        make_agent_component,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+    ):
+        """The prompt template reads `tools_enabled`, which is injected at execution time rather than declared as a
+        component input, so it has to reach AgentNode via prompt_template_inputs."""
+        component = make_agent_component(enable_web_search=True)
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=True),
+            patch(f"{self._MODULE}.is_client_capable", return_value=True),
+        ):
+            component.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_agent_node_cls.call_args[1]
+        assert call_kwargs["prompt_template_inputs"] == {
+            "tools_enabled": {"web_search": True, "run_command": True}
+        }

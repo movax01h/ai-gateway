@@ -6,12 +6,13 @@ from fastapi import status
 from pydantic import BaseModel, ValidationError
 
 from ai_gateway.auth.gcp import access_token
-from ai_gateway.models.anthropic import KindAnthropicModel
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.vertex_text import KindVertexTextModel
 from ai_gateway.proxy.clients.base import (
     BaseProxyModelFactory,
     ProxyModel,
+    enforce_model_allowlist,
     extract_json_body,
 )
 
@@ -87,13 +88,13 @@ def _load_allowed_upstream_models() -> list[str]:
     Note: The check for textmodels will be removed in the future.
     See: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/906
     """
-    google_models = [el.value for el in KindVertexTextModel]
-    anthropic_models = [
+    config = ModelSelectionConfig.instance()
+    google_models = [
         el.value
-        for el in KindAnthropicModel
-        if el.value.endswith("-vertex") or "@" in el.value
+        for el in KindVertexTextModel
+        if config.restricted_flows_for(models=[el.value]) is None
     ]
-    return google_models + anthropic_models
+    return google_models + config.get_proxy_models_for_provider(_UPSTREAM_SERVICE)
 
 
 def _build_headers_to_upstream() -> dict[str, str]:
@@ -123,6 +124,8 @@ class VertexAIProxyModelFactory(BaseProxyModelFactory):
             raise fastapi.HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported model"
             )
+
+        enforce_model_allowlist(request, path_params.model_name)
 
         return ProxyModel(
             base_url=self._base_url,

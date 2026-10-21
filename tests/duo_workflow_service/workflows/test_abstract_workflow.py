@@ -1,15 +1,27 @@
 # pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
+import contextvars
+import json
 import os
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
-from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from gitlab_cloud_connector import (
+    CloudConnectorUser,
+    NoServiceNameError,
+    TokenAuthority,
+    UserClaims,
+)
+from jose import jwt
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 from langgraph.errors import GraphRecursionError
+from langsmith import utils as ls_utils
 from structlog.testing import capture_logs
 
+from ai_gateway.structured_logging import can_log_request_data
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
@@ -18,6 +30,7 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.components.tools_registry import ceiling_exempt_tool_names
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -35,14 +48,18 @@ from duo_workflow_service.tracking import (
 )
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
+    GraphInvocation,
     TraceableException,
+    _nothing_stamped_the_request,
 )
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
+from lib.events import GLReportingEventContext
+from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import CategoryEnum, EventEnum
+from lib.internal_events.event_enum import EventEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
 from lib.verbose_ai_logs import extended_logging_context
 
@@ -50,14 +67,14 @@ from lib.verbose_ai_logs import extended_logging_context
 # Concrete implementation for testing
 class MockGraph:
     async def astream(  # pylint: disable=unused-argument  # astream() signature
-        self, input, config, stream_mode
+        self, input, config, stream_mode, durability=None
     ):
         yield "updates", {"step1": {"key": "value"}}
 
 
 class MockGraphWithUiChatLog:
     async def astream(  # pylint: disable=unused-argument  # astream() signature
-        self, input, config, stream_mode
+        self, input, config, stream_mode, durability=None
     ):
         yield (
             "values",
@@ -96,12 +113,14 @@ class ConfigCapturingGraph:
     def __init__(self):
         self.captured_input: Any = "UNSET"
         self.captured_config: Any = None
+        self.captured_durability: Any = "UNSET"
 
     async def astream(  # pylint: disable=unused-argument  # astream() signature
-        self, input, config, stream_mode
+        self, input, config, stream_mode, durability=None
     ):
         self.captured_input = input
         self.captured_config = config
+        self.captured_durability = durability
         yield "updates", {"step1": {"key": "value"}}
 
 
@@ -158,7 +177,7 @@ def test_extract_trace_output_with_valid_state(user):
     workflow = MockWorkflow(
         "test-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     state = {
@@ -176,7 +195,7 @@ def test_extract_trace_output_with_empty_ui_chat_log(user):
     workflow = MockWorkflow(
         "test-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     state = {"ui_chat_log": []}
@@ -188,7 +207,7 @@ def test_extract_trace_output_with_none_state(user):
     workflow = MockWorkflow(
         "test-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     result = workflow._extract_trace_output(None)
@@ -202,7 +221,9 @@ def workflow_fixture(user):
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow_type = GLReportingEventContext.from_workflow_definition(
+        "software_development"
+    )
     return MockWorkflow(
         workflow_id,
         metadata,
@@ -256,7 +277,7 @@ async def test_init(user):
     workflow = MockWorkflow(
         workflow_id,
         metadata,
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         mcp_tools,
     )
@@ -305,7 +326,7 @@ def test_init_logs_approval_source(user, approval_source_value, expected_logged_
         MockWorkflow(
             "test-workflow-id",
             {"key": "value"},
-            CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            GLReportingEventContext.from_workflow_definition("software_development"),
             user,
             approval=approval,
         )
@@ -367,7 +388,7 @@ def test_init_logs_policy_ref(user, policy_ref, expected_logged_policy_ref):
         MockWorkflow(
             "test-workflow-id",
             {"key": "value"},
-            CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+            GLReportingEventContext.from_workflow_definition("software_development"),
             user,
             approval=approval,
         )
@@ -421,7 +442,77 @@ async def test_set_action_response(workflow):
     )
 
 
+@pytest.mark.parametrize(
+    ("mcp_enabled", "trust_stripped", "expected_tools"),
+    [
+        (
+            True,
+            True,
+            ["orbit_invoke_command", "orbit_fake", "gitlab_search", "context7"],
+        ),
+        (
+            True,
+            False,
+            ["orbit_invoke_command", "orbit_fake", "gitlab_search", "context7"],
+        ),
+        (False, True, ["orbit_invoke_command"]),
+        (False, False, []),
+    ],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.strips_client_mcp_trust")
+def test_permitted_mcp_tools(
+    mock_strips_client_mcp_trust, user, mcp_enabled, trust_stripped, expected_tools
+):
+    mock_strips_client_mcp_trust.return_value = trust_stripped
+    mcp_tools = [
+        contract_pb2.McpTool(
+            name="orbit_invoke_command", inputSchema="{}", trusted=True
+        ),
+        contract_pb2.McpTool(name="orbit_fake", inputSchema="{}", trusted=False),
+        contract_pb2.McpTool(name="gitlab_search", inputSchema="{}", trusted=True),
+        contract_pb2.McpTool(name="context7", inputSchema="{}", trusted=False),
+    ]
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+        mcp_tools,
+    )
+    workflow._workflow_config = {"mcp_enabled": mcp_enabled}
+
+    permitted = workflow._permitted_mcp_tools()
+
+    assert [tool["llm_name"] for tool in permitted] == expected_tools
+
+
+@pytest.mark.parametrize(
+    ("workflow_config", "expected"),
+    [
+        ({"mcp_enabled": True}, True),
+        ({"mcp_enabled": False}, False),
+        ({"mcp_enabled": None}, False),
+        ({}, False),
+    ],
+    ids=["enabled", "disabled", "null", "missing"],
+)
+def test_mcp_enabled(user, workflow_config, expected):
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._workflow_config = workflow_config
+
+    assert workflow._mcp_enabled() is expected
+
+
 @pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.strips_client_mcp_trust",
+    return_value=True,
+)
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
@@ -430,6 +521,7 @@ async def test_compile_and_run_graph(
     mock_tools_registry,
     mock_gitlab_workflow,
     mock_convert_mcp_tools,
+    _mock_strips_client_mcp_trust,
     mock_fetch_workflow_and_container_data,
     project,
     mcp_enabled,
@@ -442,15 +534,35 @@ async def test_compile_and_run_graph(
     mock_checkpointer.initial_status_event = "START"
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
 
-    mcp_tool = MagicMock()
-    mock_convert_mcp_tools.return_value = [mcp_tool]
+    trusted_tool = {
+        "original_name": "orbit_invoke_command",
+        "llm_name": "orbit_invoke_command",
+        "description": "Invoke an Orbit command",
+        "args_schema": {},
+        "trusted": True,
+    }
+    gitlab_tool = {
+        "original_name": "gitlab_search",
+        "llm_name": "gitlab_search",
+        "description": "GitLab search",
+        "args_schema": {},
+        "trusted": True,
+    }
+    external_tool = {
+        "original_name": "context7_search",
+        "llm_name": "context7_search",
+        "description": "Search docs",
+        "args_schema": {},
+        "trusted": False,
+    }
+    mock_convert_mcp_tools.return_value = [trusted_tool, gitlab_tool, external_tool]
 
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
-        [mcp_tool],
+        [MagicMock(), MagicMock(), MagicMock()],
     )
 
     # Run the method
@@ -469,10 +581,17 @@ async def test_compile_and_run_graph(
         gl_http_client=workflow._http_client,
         project=project,
         workflow_id="id",
-        mcp_tools=[mcp_tool] if mcp_enabled else [],
+        mcp_tools=(
+            [trusted_tool, gitlab_tool, external_tool]
+            if mcp_enabled
+            else [trusted_tool]
+        ),
         language_server_version=None,
         denied_tools=[],
         ask_tools=[],
+        allow_client_injected_mcp_tools=False,
+        allowed_tools=[],
+        admin_allowed_preapprovals=None,
     )
 
 
@@ -503,7 +622,7 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -535,7 +654,7 @@ async def test_compile_and_run_graph_skips_merge_when_no_jwt_pre_approved_tools(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -568,7 +687,7 @@ async def test_compile_and_run_graph_skips_merge_when_pre_approved_tools_invalid
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -601,7 +720,7 @@ async def test_compile_and_run_graph_caps_client_preapproved_to_jwt_allow_list(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # client-supplied preapproved tool that is NOT in the JWT allow-list
@@ -640,7 +759,7 @@ async def test_compile_and_run_graph_client_cannot_preapprove_denied_tool(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # client tries to pre-approve a denied tool plus an unrelated one; governance is
@@ -651,6 +770,49 @@ async def test_compile_and_run_graph_client_cannot_preapprove_denied_tool(
     assert "create_merge_request" not in workflow._preapproved_tools
     assert "run_command" not in workflow._preapproved_tools
     assert "create_merge_request" in workflow._denied_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config_value", "expected"),
+    [(True, True), (False, False), (None, False)],
+)
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_forwards_client_injected_setting(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+    config_value,
+    expected,
+):
+    """Rails owns the decision, so an older Rails that omits the field reads as off."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    if config_value is None:
+        workflow_config.pop("allow_client_injected_mcp_tools", None)
+    else:
+        workflow_config["allow_client_injected_mcp_tools"] = config_value
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_realm="saas", extra={})
+        ),
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert (
+        mock_tools_registry.call_args.kwargs["allow_client_injected_mcp_tools"]
+        is expected
+    )
 
 
 @pytest.mark.asyncio
@@ -683,7 +845,7 @@ async def test_compile_and_run_graph_ask_only_policy_enforces_ceiling(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # "ask everything" makes allow+deny empty; a non-empty ask list still marks
@@ -727,7 +889,7 @@ async def test_compile_and_run_graph_ask_outranks_allow(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -740,20 +902,16 @@ async def test_compile_and_run_graph_ask_outranks_allow(
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
-async def test_compile_and_run_graph_ask_is_neutralized_without_a_user_to_ask(
+async def test_compile_and_run_graph_ask_becomes_deny_without_a_user_to_ask(
     mock_tools_registry,
     mock_gitlab_workflow,
     _mock_convert_mcp_tools,
     workflow_config,
 ):
-    """Headless/CI sessions have no channel to answer a prompt, and there is no timeout on a pending approval -- so ask
-    must not veto anything for them, leaving behaviour identical to a claim that never carried `ask` at all."""
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
     mock_checkpointer.initial_status_event = "START"
     mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
-    # The shared fixture already defaults this to False; set it explicitly so
-    # the test doesn't silently pass if that default ever changes.
     workflow_config["allow_agent_to_request_user"] = False
 
     user = CloudConnectorUser(
@@ -768,16 +926,16 @@ async def test_compile_and_run_graph_ask_is_neutralized_without_a_user_to_ask(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
 
     assert workflow._ask_tools == []
-    # allow is untouched by the (neutralized) ask list, exactly as if the
-    # claim had never carried an ask key.
+    assert workflow._denied_tools == ["run_command"]
     assert workflow._preapproved_tools == ["read_file"]
     assert mock_tools_registry.call_args.kwargs["ask_tools"] == []
+    assert mock_tools_registry.call_args.kwargs["denied_tools"] == ["run_command"]
 
 
 @pytest.mark.asyncio
@@ -785,15 +943,12 @@ async def test_compile_and_run_graph_ask_is_neutralized_without_a_user_to_ask(
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
-async def test_compile_and_run_graph_ask_is_neutralized_when_signal_is_missing(
+async def test_compile_and_run_graph_ask_becomes_deny_when_signal_is_missing(
     mock_tools_registry,
     mock_gitlab_workflow,
     _mock_convert_mcp_tools,
     workflow_config,
 ):
-    """If `allow_agent_to_request_user` is ever absent from workflow_config rather than explicitly set, default to
-    "cannot ask" (neutralize ask) rather than "can ask" (enforce the veto) -- missing must fail toward the unchanged-
-    behaviour side, never toward a prompt nobody can answer."""
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
     mock_checkpointer.initial_status_event = "START"
@@ -812,12 +967,13 @@ async def test_compile_and_run_graph_ask_is_neutralized_when_signal_is_missing(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
 
     assert workflow._ask_tools == []
+    assert workflow._denied_tools == ["run_command"]
     assert workflow._preapproved_tools == ["read_file"]
 
 
@@ -826,14 +982,12 @@ async def test_compile_and_run_graph_ask_is_neutralized_when_signal_is_missing(
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
-async def test_compile_and_run_graph_all_ask_policy_does_not_clear_preapproved_without_a_user(
+async def test_compile_and_run_graph_all_ask_policy_denies_without_a_user(
     mock_tools_registry,
     mock_gitlab_workflow,
     _mock_convert_mcp_tools,
     workflow_config,
 ):
-    """An all-ask policy (empty allow and deny) must not clear preapproved_tools when nobody can answer -- governance
-    itself has to treat ask as inactive here, not just the subtraction, or the client's own list gets wiped anyway."""
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
     mock_checkpointer.initial_status_event = "START"
@@ -852,14 +1006,125 @@ async def test_compile_and_run_graph_all_ask_policy_does_not_clear_preapproved_w
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._preapproved_tools = ["run_command", "read_file"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._ask_tools == []
+    assert workflow._denied_tools == ["run_command"]
+    assert workflow._preapproved_tools == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_deny_outranks_allow_without_a_user_to_ask(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    workflow_config["allow_agent_to_request_user"] = False
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": ["run_command", "read_file"], "ask": ["run_command"], "deny": []}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._denied_tools == ["run_command"]
+    assert workflow._preapproved_tools == ["read_file"]
+    assert workflow._governance_allowed_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_passes_governance_allow_to_registry(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    workflow_config,
+):
+    """The admin allow list must reach ToolsRegistry so per-tool allows apply in flows that never read
+    `_preapproved_tools` (agent_platform v1), with ask already subtracted."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    workflow_config["allow_agent_to_request_user"] = True
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": ["gitlab_api_get", "run_command"], "ask": ["run_command"], "deny": []}'
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert mock_tools_registry.call_args.kwargs["allowed_tools"] == ["gitlab_api_get"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_does_not_pass_client_preapprovals_as_governance_allow(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    """Without an active governance claim, the client's own preapproved_tools stay out of the registry allow list, so v1
+    flows keep ignoring them as before."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_realm="saas")
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     workflow._preapproved_tools = ["read_file"]
     await workflow._compile_and_run_graph("Test goal")
 
-    assert workflow._ask_tools == []
-    assert workflow._preapproved_tools == ["read_file"]
+    assert mock_tools_registry.call_args.kwargs["allowed_tools"] == []
 
 
 @pytest.mark.asyncio
@@ -888,7 +1153,7 @@ async def test_compile_and_run_graph_parses_tool_access_policies_dict(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     workflow._preapproved_tools = ["read_file"]
@@ -922,7 +1187,7 @@ async def test_compile_and_run_graph_fails_closed_on_invalid_claim(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # a present-but-unparsable claim must not leave client values in effect
@@ -966,7 +1231,7 @@ async def test_compile_and_run_graph_keeps_client_preapproved_when_governance_in
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # empty allow+ask+deny is indistinguishable from governance-off, so client-supplied
@@ -1002,7 +1267,7 @@ async def test_compile_and_run_graph_skips_merge_when_pre_approved_tools_empty_j
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     await workflow._compile_and_run_graph("Test goal")
@@ -1030,7 +1295,7 @@ async def test_compile_and_run_graph_skips_merge_when_claims_is_none(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -1082,7 +1347,9 @@ async def test_cleanup_with_exception(mock_log_exception, workflow):
 def test_track_internal_event(workflow, internal_event_client: Mock):
     # Test tracking an internal event
     event_name = EventEnum.WORKFLOW_START
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow_type = GLReportingEventContext.from_workflow_definition(
+        "software_development"
+    )
     additional_properties = InternalEventAdditionalProperties()
     workflow._internal_event_client = internal_event_client
 
@@ -1097,6 +1364,42 @@ def test_track_internal_event(workflow, internal_event_client: Mock):
         additional_properties=additional_properties,
         category=workflow_type,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_event", "routed", "tracked"),
+    [
+        (WorkflowStatusEventEnum.START, True, True),
+        (WorkflowStatusEventEnum.START, False, False),
+        (WorkflowStatusEventEnum.RESUME, True, False),
+    ],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.track_routing_decision")
+@patch("duo_workflow_service.workflows.abstract_workflow.route_default_model")
+async def test_route_default_model_only_on_start(
+    mock_route,
+    mock_track,
+    workflow,
+    internal_event_client: Mock,
+    status_event,
+    routed,
+    tracked,
+):
+    decision = MagicMock()
+    mock_route.return_value = decision if routed else None
+    workflow._internal_event_client = internal_event_client
+    workflow._project = None
+
+    await workflow._route_default_model("Fix the typo", status_event)
+
+    assert mock_route.called == (status_event == WorkflowStatusEventEnum.START)
+    if tracked:
+        mock_track.assert_called_once_with(
+            decision, "test-workflow-id", internal_event_client
+        )
+    else:
+        mock_track.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1119,7 +1422,12 @@ async def test_compile_and_run_graph_flushes_notifier(
     notifier = mock_user_interface.return_value
     notifier.flush_deferred_checkpoint = AsyncMock()
 
-    workflow = MockWorkflow("id", {}, CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT, user)
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
 
     await workflow._compile_and_run_graph("Test goal")
 
@@ -1321,7 +1629,7 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
     metadata = kwargs["langsmith_extra"]["metadata"]
     assert metadata["git_url"] == "https://example.com"
     assert metadata["git_sha"] == "abc123"
-    assert metadata["workflow_type"] == CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value
+    assert metadata["workflow_type"] == "software_development"
     assert metadata["thread_id"] == workflow._workflow_id
     # Flow versioning identifiers are unset for legacy flows and must not leak in.
     assert "flow_id" not in metadata
@@ -1428,7 +1736,9 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow_type = GLReportingEventContext.from_workflow_definition(
+        "software_development"
+    )
     workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
 
     token = extended_logging_context.set(extended_logging)
@@ -1444,6 +1754,76 @@ async def test_tracing_enabled_based_on_env_and_extended_logging(
     mock_tracing_context.assert_called_once()
     call_kwargs = mock_tracing_context.call_args[1]
     assert call_kwargs["enabled"] == expected_tracing_enabled
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("registry_flow_id", "expected_tracing", "expected_request_logging"),
+    [(None, True, True), ("developer", True, True), ("bl_security", False, False)],
+)
+async def test_metadata_only_flow_disables_tracing_and_request_logging(
+    registry_flow_id, expected_tracing, expected_request_logging, user
+):
+    """A metadata-only flow sends no LangSmith trace and logs no LLM request body, even with both switched on."""
+    observed = {}
+
+    async def compile_and_run_graph(**_kwargs):
+        observed["tracing"] = ls_utils.tracing_is_enabled()
+        observed["request_logging"] = can_log_request_data()
+
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {"git_url": "https://example.com", "git_sha": "abc123"},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    token = extended_logging_context.set(True)
+    try:
+        with (
+            patch.dict(os.environ, {"LANGSMITH_TRACING_V2": "true"}, clear=False),
+            patch("ai_gateway.structured_logging.ENABLE_REQUEST_LOGGING", True),
+            patch.object(workflow, "_registry_flow_id", return_value=registry_flow_id),
+            patch.object(
+                workflow, "_compile_and_run_graph", side_effect=compile_and_run_graph
+            ),
+        ):
+            await workflow.run("Test goal")
+            # The suppression ends with the run.
+            assert can_log_request_data() is True
+    finally:
+        extended_logging_context.reset(token)
+
+    assert observed == {
+        "tracing": expected_tracing,
+        "request_logging": expected_request_logging,
+    }
+
+
+def test_run_closed_in_different_context_does_not_raise(user):
+    """Closing a suspended run from another Context, as garbage collection does, must not raise."""
+
+    class _Suspend:
+        def __await__(self):
+            yield
+
+    async def compile_and_run_graph(**_kwargs):
+        await _Suspend()
+
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {"git_url": "https://example.com", "git_sha": "abc123"},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    with patch.object(
+        workflow, "_compile_and_run_graph", side_effect=compile_and_run_graph
+    ):
+        coro = workflow.run("Test goal")
+        contextvars.copy_context().run(coro.send, None)
+
+        coro.close()
 
 
 @pytest.mark.asyncio
@@ -1483,7 +1863,9 @@ async def test_tracing_context_with_parent_trace_headers(
         "git_url": "https://example.com",
         "git_sha": "abc123",
     }
-    workflow_type = CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT
+    workflow_type = GLReportingEventContext.from_workflow_definition(
+        "software_development"
+    )
     workflow = MockWorkflow(workflow_id, metadata, workflow_type, user)
 
     token = extended_logging_context.set(extended_logging)
@@ -1518,7 +1900,7 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
 
     class MockGraphWithMessages:
         async def astream(  # pylint: disable=unused-argument  # astream() signature
-            self, input, config, stream_mode
+            self, input, config, stream_mode, durability=None
         ):
             yield "updates", {"step1": {"key": "value"}}
             yield "values", {"status": "running", "ui_chat_log": []}
@@ -1533,7 +1915,7 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -1543,7 +1925,7 @@ async def test_compile_and_run_graph_records_first_response_on_first_graph_updat
 
     assert mock_metrics.record_time_to_first_response.call_count == 1
     assert mock_metrics.record_time_to_first_response.call_args.kwargs == {
-        "flow_type": CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT.value,
+        "flow_type": "software_development",
     }
     assert workflow._first_response_metric_recorded is True
 
@@ -1567,7 +1949,7 @@ async def test_compile_and_run_graph_returns_final_response_content(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -1591,7 +1973,7 @@ async def test_compile_and_run_graph_returns_none_when_no_ui_chat_log(
 
     class MockGraphWithEmptyUiChatLog:
         async def astream(  # pylint: disable=unused-argument  # astream() signature
-            self, input, config, stream_mode
+            self, input, config, stream_mode, durability=None
         ):
             yield "values", {"status": WorkflowStatusEnum.COMPLETED, "ui_chat_log": []}
 
@@ -1604,7 +1986,7 @@ async def test_compile_and_run_graph_returns_none_when_no_ui_chat_log(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
 
@@ -1634,7 +2016,7 @@ async def test_compile_and_run_graph_notifiable_exception_handling(
 
     class MockGraphWithNotifiableException:
         async def astream(  # pylint: disable=unused-argument  # astream() signature
-            self, input, config, stream_mode
+            self, input, config, stream_mode, durability=None
         ):
             yield "updates", {"step1": {"key": "value"}}
             raise NotifiableException(
@@ -1658,7 +2040,7 @@ async def test_compile_and_run_graph_notifiable_exception_handling(
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         [mcp_tool],
     )
@@ -1713,7 +2095,12 @@ async def test_compile_and_run_graph_parses_tool_access_policies_object_format(
             },
         ),
     )
-    workflow = MockWorkflow("id", {}, CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT, user)
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
     await workflow._compile_and_run_graph("Test goal")
 
     assert "create_issue" in workflow._preapproved_tools
@@ -1741,7 +2128,7 @@ async def test_compile_and_run_graph_notifiable_agent_exception_handling(
 
     class MockGraphWithNotifiableAgentException:
         async def astream(  # pylint: disable=unused-argument  # astream() signature
-            self, input, config, stream_mode
+            self, input, config, stream_mode, durability=None
         ):
             yield "updates", {"step1": {"key": "value"}}
             raise NotifiableAgentException(
@@ -1765,7 +2152,7 @@ async def test_compile_and_run_graph_notifiable_agent_exception_handling(
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         [mcp_tool],
     )
@@ -1813,7 +2200,7 @@ async def test_handle_compile_and_run_exception_logs_warning_when_checkpoint_not
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     # Simulate the theoretically-unreachable state where checkpoint_notifier is None
@@ -1849,7 +2236,7 @@ async def test_handle_graph_recursion_limit_logs_error_on_graph_recursion_error(
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     error = GraphRecursionError("Recursion limit reached")
@@ -1869,7 +2256,7 @@ async def test_handle_graph_recursion_limit_tags_langsmith(user):
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     error = GraphRecursionError("Recursion limit reached")
@@ -1896,7 +2283,7 @@ async def test_handle_graph_recursion_limit_no_langsmith_tag_when_run_tree_is_no
     workflow = MockWorkflow(
         "test-workflow-id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     error = GraphRecursionError("Recursion limit reached")
@@ -2008,7 +2395,7 @@ async def test_compile_and_run_graph_pins_graph_config_on_stop_recovery(
     workflow = StopRecoveryMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     workflow.stop_recovery_resolution = (boundary, resolved_event)
@@ -2023,6 +2410,44 @@ async def test_compile_and_run_graph_pins_graph_config_on_stop_recovery(
     else:
         assert configurable["checkpoint_id"] == expected_checkpoint_id
     assert graph.captured_input == expected_input
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    ("registry_flow_id", "expected_durability"),
+    [
+        ("bl_security", "sync"),
+        ("developer", None),
+        (None, None),
+    ],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_checkpoint_durability(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    registry_flow_id,
+    expected_durability,
+    user,
+):
+    """bl_security saves each checkpoint before the next step; other flows keep LangGraph's default."""
+    mock_tools_registry.return_value = MagicMock()
+    _checkpointer(mock_gitlab_workflow)
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._registry_flow_id = MagicMock(return_value=registry_flow_id)
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+
+    await workflow._compile_and_run_graph("goal")
+
+    assert graph.captured_durability == expected_durability
 
 
 @pytest.mark.asyncio
@@ -2042,7 +2467,7 @@ async def test_compile_and_run_graph_dispatches_polymorphically(
     workflow = StopRecoveryMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     graph = ConfigCapturingGraph()
@@ -2081,7 +2506,7 @@ async def test_compile_and_run_graph_stop_recovery_default_behaves_like_retry(
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     graph = ConfigCapturingGraph()
@@ -2092,6 +2517,109 @@ async def test_compile_and_run_graph_stop_recovery_default_behaves_like_retry(
     assert graph.captured_input == expected_input
     assert "checkpoint_id" not in graph.captured_config["configurable"]
     mock_checkpointer.checkpoints_reversed.assert_not_called()
+
+
+def _pinning_invocation_resolver() -> AsyncMock:
+    """A ``_resolve_graph_invocation`` override that replaces the input and pins the run to a checkpoint."""
+
+    async def resolve(**kwargs: Any) -> GraphInvocation:
+        graph_config = kwargs["graph_config"]
+        return GraphInvocation(
+            graph_input={"resolved": True},
+            graph_config={
+                **graph_config,
+                "configurable": {
+                    **graph_config["configurable"],
+                    "checkpoint_id": "pinned",
+                },
+            },
+        )
+
+    return AsyncMock(side_effect=resolve)
+
+
+@pytest.mark.asyncio
+async def test_resolve_graph_invocation_defaults_to_get_graph_input(workflow):
+    """Without an override the run streams ``get_graph_input`` with the config it was given, unchanged."""
+    graph_config = {"configurable": {"thread_id": "test-workflow-id"}}
+
+    invocation = await workflow._resolve_graph_invocation(
+        compiled_graph=ConfigCapturingGraph(),
+        graph_config=graph_config,
+        goal="goal",
+        status_event=WorkflowStatusEventEnum.START,
+        checkpoint_tuple=None,
+    )
+
+    assert invocation.graph_input == {"goal": "goal", "state": "initial"}
+    assert invocation.graph_config is graph_config
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_streams_the_resolved_invocation(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    workflow,
+):
+    """The hook sees the compiled graph, and the graph streams exactly the input and config it returns."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = _checkpointer(mock_gitlab_workflow)
+    mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+    workflow._resolve_graph_invocation = _pinning_invocation_resolver()
+
+    await workflow._compile_and_run_graph("goal")
+
+    workflow._resolve_graph_invocation.assert_awaited_once()
+    received = workflow._resolve_graph_invocation.await_args.kwargs
+    assert received["compiled_graph"] is graph
+    assert received["graph_config"]["configurable"] == {"thread_id": "test-workflow-id"}
+    assert received["goal"] == "goal"
+    assert received["status_event"] == WorkflowStatusEventEnum.RESUME
+    assert received["checkpoint_tuple"] is None
+    assert graph.captured_input == {"resolved": True}
+    assert graph.captured_config["configurable"] == {
+        "thread_id": "test-workflow-id",
+        "checkpoint_id": "pinned",
+    }
+    assert graph.captured_config["callbacks"] is received["graph_config"]["callbacks"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+async def test_compile_and_run_graph_hands_the_resolved_config_to_the_failure_handler(
+    mock_user_interface,
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    workflow,
+):
+    """A run that fails after the hook reports against the config it ran with, not the one it was built with."""
+
+    class FailingGraph:
+        async def astream(  # pylint: disable=unused-argument  # astream() signature
+            self, input, config, stream_mode, durability=None
+        ):
+            yield "updates", {"step1": {"key": "value"}}
+            raise RuntimeError("graph failed")
+
+    mock_user_interface.return_value = AsyncMock()
+    mock_tools_registry.return_value = MagicMock()
+    _checkpointer(mock_gitlab_workflow)
+    workflow._compile = MagicMock(return_value=FailingGraph())
+    workflow._resolve_graph_invocation = _pinning_invocation_resolver()
+
+    with pytest.raises(TraceableException):
+        await workflow._compile_and_run_graph("goal")
+
+    [(_, _, failure_config)] = workflow.handle_failure_calls
+    assert failure_config["configurable"]["checkpoint_id"] == "pinned"
 
 
 @pytest.mark.asyncio
@@ -2121,7 +2649,7 @@ async def test_compile_and_run_graph_pins_requested_resume_checkpoint_ts(
     workflow = ResumingMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts=resume_checkpoint_ts,
     )
@@ -2160,7 +2688,7 @@ async def test_compile_and_run_graph_requested_resume_checkpoint_ts_wins_over_st
     workflow = ResumingStopRecoveryMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts="requested-checkpoint-id",
     )
@@ -2206,7 +2734,7 @@ async def test_compile_and_run_graph_refuses_a_requested_checkpoint_it_cannot_re
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts="requested-checkpoint-id",
     )
@@ -2252,7 +2780,7 @@ async def test_compile_and_run_graph_rejects_a_requested_checkpoint_that_was_nev
     workflow = ResumingMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts="never-written",
     )
@@ -2290,7 +2818,7 @@ async def test_compile_and_run_graph_skips_the_resume_checkpoint_check_without_a
     workflow = MockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
     )
     workflow._compile = MagicMock(return_value=ConfigCapturingGraph())
@@ -2351,7 +2879,7 @@ async def test_compile_and_run_graph_starts_fresh_at_a_pre_run_input_checkpoint(
     workflow = ResumingMockWorkflow(
         "id",
         {},
-        CategoryEnum.WORKFLOW_SOFTWARE_DEVELOPMENT,
+        GLReportingEventContext.from_workflow_definition("software_development"),
         user,
         resume_checkpoint_ts="requested-checkpoint-id",
     )
@@ -2368,3 +2896,313 @@ async def test_compile_and_run_graph_starts_fresh_at_a_pre_run_input_checkpoint(
         graph.captured_config["configurable"]["checkpoint_id"]
         == "requested-checkpoint-id"
     )
+
+
+@pytest.mark.parametrize(
+    ("issuer", "expected"),
+    [
+        # Only GenerateToken mints this issuer, and only direct access calls it.
+        ("gitlab-duo-workflow-service", True),
+        # Rails signs with the instance OIDC issuer; see CloudConnector::Tokens.
+        ("https://gitlab.com", False),
+        ("https://gitlab.example.com", False),
+        ("customers.gitlab.com", False),
+    ],
+)
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_nothing_stamped_the_request_keys_on_the_token_issuer(issuer, expected):
+    user = CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
+    )
+
+    assert _nothing_stamped_the_request(user) is expected
+
+
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_nothing_stamped_the_request_is_false_without_claims():
+    assert (
+        _nothing_stamped_the_request(CloudConnectorUser(authenticated=False)) is False
+    )
+
+
+@patch.dict(os.environ, {}, clear=False)
+def test_nothing_stamped_the_request_is_false_when_no_service_name_is_configured():
+    """Unknown origin must fall back to the field rather than widening the carve-out."""
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(gitlab_realm="saas", issuer="gitlab-duo-workflow-service"),
+    )
+
+    with patch(
+        "duo_workflow_service.workflows.abstract_workflow.CloudConnectorConfig"
+    ) as config:
+        config.return_value = MagicMock()
+        type(config.return_value).service_name = PropertyMock(
+            side_effect=NoServiceNameError("not configured")
+        )
+
+        assert _nothing_stamped_the_request(user) is False
+
+
+def test_self_signed_token_carries_the_service_name_as_issuer():
+    """Pins the assumption the origin check rests on, against the real token library."""
+    with patch.dict(
+        os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"}
+    ):
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        signing_key = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+
+        user = CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_realm="saas", scopes=[])
+        )
+        token, _ = TokenAuthority(signing_key).encode(
+            "sub", "saas", user, "instance-id", []
+        )
+
+        claims = jwt.get_unverified_claims(token)
+
+    assert claims["iss"] == "gitlab-duo-workflow-service"
+
+
+@pytest.mark.parametrize(
+    ("issuer", "expected"),
+    [("gitlab-duo-workflow-service", True), ("https://gitlab.com", False)],
+)
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_client_injected_is_stamped_when_nothing_else_stamped_it(issuer, expected):
+    """A direct caller controls the field, so the service decides instead of reading it."""
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
+        ),
+        mcp_tools=[
+            contract_pb2.McpTool(
+                name="soqlQuery",
+                description="Client tool",
+                inputSchema="{}",
+                client_injected=False,
+            )
+        ],
+    )
+
+    assert workflow._mcp_tools[0]["client_injected"] is expected
+
+
+async def _configure_kwargs_for(claim, workflow_config, can_ask=True, issuer=None):
+    """Run the graph with a claim and return what ToolsRegistry.configure received."""
+    workflow_config["allow_agent_to_request_user"] = can_ask
+    workflow_config["allow_client_injected_mcp_tools"] = True
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            issuer=issuer,
+            extra={"tool_access_policies": claim},
+        ),
+    )
+    with (
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs"
+        ),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow"
+        ) as mock_gitlab_workflow,
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure"
+        ) as mock_configure,
+    ):
+        mock_configure.return_value = MagicMock()
+        mock_checkpointer = AsyncMock()
+        mock_checkpointer.initial_status_event = "START"
+        mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+        workflow = MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("software_development"),
+            user,
+        )
+        await workflow._compile_and_run_graph("Test goal")
+
+    return mock_configure.call_args.kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    "claim,can_ask,expected",
+    [
+        # No field or false: older GitLab, or the flag is off.
+        ('{"allow": ["read_file"], "ask": [], "deny": []}', True, None),
+        (
+            '{"allow": ["read_file"], "ask": [], "deny": [], "ceiling": false}',
+            True,
+            None,
+        ),
+        (
+            '{"allow": ["read_file"], "ask": [], "deny": [], "ceiling": true}',
+            True,
+            {"read_file"},
+        ),
+        # A session that cannot ask is still capped; the owner cannot opt out.
+        (
+            '{"allow": ["read_file"], "ask": [], "deny": [], "ceiling": true}',
+            False,
+            {"read_file"},
+        ),
+        # The raw ask list is used, so an ask rule stays out of the ceiling headless too.
+        (
+            '{"allow": ["read_file", "grep"], "ask": ["grep"], "deny": [], "ceiling": true}',
+            False,
+            {"read_file"},
+        ),
+        # Ask everything in a headless session still turns the ceiling on.
+        ('{"allow": [], "ask": ["grep"], "deny": [], "ceiling": true}', False, set()),
+        # A deny-only claim turns it on too.
+        ('{"allow": [], "ask": [], "deny": ["grep"], "ceiling": true}', True, set()),
+        # An empty claim is an ungoverned session: no ceiling even if asked for.
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True, None),
+        # Unparsable: fails closed only when the claim still asks for the ceiling.
+        ('{"allow": 5, "ceiling": true}', True, set()),
+        ('{"allow": 5}', True, None),
+        # Any value other than absent or false fails closed.
+        ('{"allow": 5, "ceiling": "true"}', True, set()),
+        ("not json", True, None),
+    ],
+)
+async def test_compile_and_run_graph_reads_the_ceiling_from_the_signed_claim(
+    workflow_config, claim, can_ask, expected
+):
+    kwargs = await _configure_kwargs_for(claim, workflow_config, can_ask=can_ask)
+
+    assert kwargs["admin_allowed_preapprovals"] == _with_exemptions(claim, expected)
+
+
+def _with_exemptions(claim, expected):
+    """Add the tools the ceiling always keeps, unless the claim failed to parse."""
+    if expected is None:
+        return None
+    try:
+        data = json.loads(claim)
+    except ValueError:
+        return expected
+    if not isinstance(data.get("allow", []), list):
+        return expected
+    return expected | ceiling_exempt_tool_names(
+        set(data.get("ask", [])) | set(data.get("deny", []))
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_ceiling_ignores_a_feature_flag_header_without_the_claim(workflow_config):
+    """The switch is only the signed claim, so a header the client controls changes nothing."""
+    token = current_feature_flag_context.set({"duo_workflow_governance_ceiling"})
+    try:
+        kwargs = await _configure_kwargs_for(
+            '{"allow": ["read_file"], "ask": [], "deny": []}', workflow_config
+        )
+    finally:
+        current_feature_flag_context.reset(token)
+
+    assert kwargs["admin_allowed_preapprovals"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+@pytest.mark.parametrize(
+    "ceiling,issuer,expected",
+    [
+        # Ceiling on and nothing stamped the request: no client-injected exemption.
+        (True, "gitlab-duo-workflow-service", False),
+        # Ceiling on and Workhorse stamped the request: the exemption stays.
+        (True, "https://gitlab.com", True),
+        # Ceiling off: unchanged, whatever stamped the request.
+        (False, "gitlab-duo-workflow-service", True),
+    ],
+)
+async def test_client_injected_exemption_needs_a_stamped_request_when_the_ceiling_is_on(
+    workflow_config, ceiling, issuer, expected
+):
+    claim = json.dumps(
+        {"allow": ["read_file"], "ask": [], "deny": [], "ceiling": ceiling}
+    )
+
+    kwargs = await _configure_kwargs_for(claim, workflow_config, issuer=issuer)
+
+    assert kwargs["allow_client_injected_mcp_tools"] is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_client_injected_exemption_fails_closed_when_the_origin_is_unknown(
+    workflow_config,
+):
+    """With the ceiling on, an unknown issuer must not keep client-injected tools exempt."""
+    claim = '{"allow": ["read_file"], "ask": [], "deny": [], "ceiling": true}'
+
+    with patch(
+        "duo_workflow_service.workflows.abstract_workflow.CloudConnectorConfig"
+    ) as config:
+        config.return_value = MagicMock()
+        type(config.return_value).service_name = PropertyMock(
+            side_effect=NoServiceNameError("not configured")
+        )
+        kwargs = await _configure_kwargs_for(
+            claim, workflow_config, issuer="https://gitlab.com"
+        )
+
+    assert kwargs["allow_client_injected_mcp_tools"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_ceiling_drops_client_preapprovals_it_does_not_permit(workflow_config):
+    """Chat reads preapproved_tools by name, so the ceiling drops names it does not permit."""
+    workflow_config["allow_agent_to_request_user"] = True
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": '{"allow": ["read_file", "gitlab_search"], '
+                '"ask": [], "deny": [], "ceiling": true}'
+            },
+        ),
+    )
+    with (
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs"
+        ),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow"
+        ) as mock_gitlab_workflow,
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure"
+        ) as mock_configure,
+    ):
+        registry = MagicMock()
+        # The registry withholds gitlab_search, as it does for a client tool borrowing the name.
+        registry.pre_approvals_allowed_by_policy.side_effect = lambda names: (
+            {"read_file"} & set(names)
+        )
+        mock_configure.return_value = registry
+        mock_checkpointer = AsyncMock()
+        mock_checkpointer.initial_status_event = "START"
+        mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+        workflow = MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("chat"),
+            user,
+        )
+        await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._preapproved_tools == ["read_file"]

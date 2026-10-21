@@ -10,3 +10,22 @@ NODE_ROLE_SEPARATOR = "#"
 # (e.g. developer). See AgentComponentBase.max_cycles for the separate, lower
 # soft per-component limit this is not automatically tied to.
 RECURSION_LIMIT = 600
+
+# The environment whose flows run one root ``AgentComponent`` as a chat
+# assistant. The registry forks on it to pick the chat executor, and
+# ``AgentComponent`` fills the chat-surface defaults under it.
+CHAT_PARTIAL_ENVIRONMENT = "chat-partial"
+
+INTERACTIVE_ENVIRONMENTS = frozenset(("chat", CHAT_PARTIAL_ENVIRONMENT))
+
+# Registry flows that expose only the metadata of their runs: which steps and tools
+# ran, their status and timing. The live stream, audit events and tracing carry no
+# model or user text for them. Rails restricts its session read APIs for the same
+# flows through its own setting.
+METADATA_ONLY_FLOWS: frozenset[str] = frozenset({"bl_security"})
+
+# Registry flows that save each step's checkpoint before the next step starts, so a
+# checkpoint GitLab refuses stops the run at the next step. Other flows keep
+# LangGraph's default asynchronous saves, where a refused save surfaces only when
+# the graph exits.
+SYNC_CHECKPOINT_FLOWS: frozenset[str] = frozenset({"bl_security"})

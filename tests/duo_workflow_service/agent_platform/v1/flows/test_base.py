@@ -46,6 +46,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.errors.typing import (
+    CheckpointFetchError,
     EnvelopeVersionMismatchException,
     InvalidRequestException,
 )
@@ -539,6 +540,61 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                     or input.resume.get("message") is None  # type: ignore[union-attr]
                 )
 
+            if expected_event_type == FlowEventType.APPROVE:
+                # A human approve with no client-sent source defaults to
+                # user_explicit so the executed calls stay attributed.
+                assert input.resume["approval_source"] == "user_explicit"  # type: ignore[index]
+
+    @pytest.mark.asyncio
+    async def test_resume_command_carries_client_approval_source_and_policy_ref(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        mock_state_graph,
+        mock_checkpointer,
+        flow_type: GLReportingEventContext,
+    ):
+        """An APPROVE that carries a client-sent source and policy_ref forwards both on the resume FlowEvent, so the
+        approved calls' audit events are attributed with the client's provenance rather than the user_explicit
+        default."""
+        approval = contract_pb2.Approval(
+            approval=contract_pb2.Approval.Approved(
+                approval_source=contract_pb2.Approval.APPROVAL_SOURCE_AUTO_MODE,
+                policy_ref=contract_pb2.Approval.PolicyRef(
+                    origin="gitlab_default",
+                    file=".gitlab/duo/pretooluse.rego",
+                ),
+            )
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-client-source",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=sample_flow_config,
+                approval=approval,
+            )
+
+            mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.RESUME
+            await flow.run("test goal")
+
+            kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+            input = kwargs.get("input")
+
+            assert isinstance(input, Command)
+            assert input.resume["event_type"] == FlowEventType.APPROVE  # type: ignore[index]
+            assert input.resume["approval_source"] == "auto_mode"  # type: ignore[index]
+            assert input.resume["policy_ref"] == {  # type: ignore[index]
+                "origin": "gitlab_default",
+                "file": ".gitlab/duo/pretooluse.rego",
+            }
+
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
     async def test_graph_input_resume_empty_goal_passes_empty_command_to_graph(
@@ -854,7 +910,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             self.mock_components(["AgentComponent", "AnotherComponent"]),
             patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
             ) as mock_log_exception,
         ):
             # Create flow instance
@@ -1081,7 +1137,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             self.mock_components(["AgentComponent"]),
             patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
             patch(
-                "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+                "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
             ) as mock_log_exception,
         ):
             flow = Flow(
@@ -1155,6 +1211,18 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "internal_event_client": flow._internal_event_client,
             "catalog_items": flow._catalog_items,
         }
+
+    def test_registry_flow_id_comes_from_the_registry_load(
+        self, flow_instance, sample_flow_config
+    ):
+        assert flow_instance._registry_flow_id() is None
+        assert flow_instance._is_metadata_only() is False
+
+        # pylint: disable-next=protected-access
+        sample_flow_config._config_id = "bl_security"
+
+        assert flow_instance._registry_flow_id() == "bl_security"
+        assert flow_instance._is_metadata_only() is True
 
     def test_process_additional_context_empty_list(self, flow_instance):
         """Test _process_additional_context with empty list."""
@@ -1445,6 +1513,33 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         assert error_entry["message_id"].startswith("error-")
 
     @pytest.mark.asyncio
+    async def test_handle_workflow_failure_fails_pending_tool_cards(
+        self, flow_instance
+    ):
+        pending = {
+            "message_type": MessageTypeEnum.TOOL,
+            "message_id": "call-1",
+            "status": ToolStatus.PENDING,
+        }
+        done = {
+            "message_type": MessageTypeEnum.TOOL,
+            "message_id": "call-2",
+            "status": ToolStatus.SUCCESS,
+        }
+        notifier = MagicMock()
+        notifier.ui_chat_log = [pending, done]
+        flow_instance.checkpoint_notifier = notifier
+
+        graph = AsyncMock()
+
+        await flow_instance._handle_workflow_failure(RuntimeError("boom"), graph, {})
+
+        ui_chat_log = graph.aupdate_state.call_args[0][1]["ui_chat_log"].value
+        assert ui_chat_log[0] == {**pending, "status": ToolStatus.FAILURE}
+        assert ui_chat_log[1] == done
+        assert pending["status"] == ToolStatus.PENDING
+
+    @pytest.mark.asyncio
     async def test_handle_workflow_failure_does_not_leak_details(self, flow_instance):
         """Internal exception text must not appear in the UI log."""
         notifier = MagicMock()
@@ -1505,7 +1600,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
 
         with patch(
-            "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
         ) as mock_log_exception:
             await flow_instance._handle_workflow_failure(error, graph, {})
 
@@ -1534,7 +1629,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         error = NotifiableAgentException("Safe message only")
 
         with patch(
-            "duo_workflow_service.agent_platform.v1.flows.base.log_exception"
+            "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
         ) as mock_log_exception:
             await flow_instance._handle_workflow_failure(error, graph, {})
 
@@ -1556,7 +1651,9 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         compiled_graph = AsyncMock()
 
         with (
-            patch("duo_workflow_service.agent_platform.v1.flows.base.log_exception"),
+            patch(
+                "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
+            ),
             pytest.raises(TraceableException) as exc_info,
         ):
             await flow_instance._handle_compile_and_run_exception(
@@ -2057,7 +2154,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         )
 
     @staticmethod
-    def _checkpoint_tuple_with_status(checkpoint_id, status):
+    def _checkpoint_tuple_with_status(checkpoint_id, status, checkpoint_ns=""):
         # Deliberately unannotated: langgraph's Checkpoint TypedDict requires
         # many keys irrelevant to these tests, and existing checkpoint-building
         # test fixtures follow the same partial-dict convention.
@@ -2066,6 +2163,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 "configurable": {
                     "thread_id": "test-workflow-123",
                     "checkpoint_id": checkpoint_id,
+                    "checkpoint_ns": checkpoint_ns,
                 }
             },
             checkpoint={
@@ -2171,7 +2269,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             for checkpoint_id, status in statuses_newest_first
         ]
 
-        async def fake_checkpoints_reversed(*, matches=lambda _: True, per_page=20):  # pylint: disable=unused-argument
+        async def fake_checkpoints_reversed(*, matches=lambda _: True, **_kwargs):
             for ct in checkpoint_tuples:
                 if matches(ct.checkpoint.get("channel_values", {})):
                     yield ct
@@ -2220,6 +2318,208 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         else:
             inputs = graph_input["context"]["inputs"]
         assert inputs[CANCELLED_TURN_CATEGORY] == fake_cancelled_turn
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_flow_resolve_stop_recovery_skips_nested_lineages(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+    ):
+        """The boundary is pinned into the top-level graph's config, so only its own lineage can supply one.
+
+        ``checkpoints_reversed`` returns every lineage mixed together, and a delegated subagent that paused on
+        ``require_input`` writes INPUT_REQUIRED into the shared ``status`` channel — resuming the top-level graph from
+        that checkpoint would restore a subagent's state.
+        """
+        goal = "test goal"
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+
+        checkpoint_tuples = [
+            self._checkpoint_tuple_with_status(
+                "cp-nested",
+                WorkflowStatusEnum.INPUT_REQUIRED.value,
+                checkpoint_ns="delegation:task-1",
+            ),
+            self._checkpoint_tuple_with_status(
+                "cp-top", WorkflowStatusEnum.INPUT_REQUIRED.value
+            ),
+        ]
+
+        async def fake_checkpoints_reversed(*, matches=lambda _: True, **_kwargs):
+            for checkpoint_tuple in checkpoint_tuples:
+                if matches(checkpoint_tuple.checkpoint.get("channel_values", {})):
+                    yield checkpoint_tuple
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.cancelled_turn_context",
+            return_value=[],
+        ):
+            await flow_instance.run(goal)
+
+        call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        assert call_kwargs["config"]["configurable"]["checkpoint_id"] == "cp-top", (
+            "the newer nested pause must not become the top-level graph's resume pin"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "statuses_newest_first,expected_boundary_id,expected_input_type",
+        [
+            (
+                [
+                    ("cp-2", WorkflowStatusEnum.EXECUTION),
+                    ("cp-1", WorkflowStatusEnum.INPUT_REQUIRED),
+                    ("cp-0", WorkflowStatusEnum.NOT_STARTED),
+                ],
+                "cp-1",
+                Command,
+            ),
+            (
+                [
+                    ("cp-1", WorkflowStatusEnum.NOT_STARTED),
+                    ("cp-0", WorkflowStatusEnum.NOT_STARTED),
+                ],
+                "cp-0",
+                dict,
+            ),
+        ],
+        ids=["input_required_boundary", "oldest_checkpoint_boundary"],
+    )
+    async def test_flow_resolve_stop_recovery_pages_status_only_with_incremental_checkpoints(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+        mock_fetch_workflow_and_container_data,
+        statuses_newest_first,
+        expected_boundary_id,
+        expected_input_type,
+    ):
+        """With incremental checkpoints, the walk pages only the status channel.
+
+        A RESUME boundary is then fetched in full through by_thread_ts for the delta baseline; a START boundary needs
+        only its id, so it is not fetched.
+        """
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+        project, namespace, workflow_config = (
+            mock_fetch_workflow_and_container_data.return_value
+        )
+        mock_fetch_workflow_and_container_data.return_value = (
+            project,
+            namespace,
+            {**workflow_config, "incremental_checkpoints_enabled": True},
+        )
+        requested_channels = []
+
+        async def fake_checkpoints_reversed(*, channels=None, **_kwargs):
+            requested_channels.append(channels)
+            for checkpoint_id, status in statuses_newest_first:
+                yield self._checkpoint_tuple_with_status(checkpoint_id, status.value)
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+        full_boundary = self._checkpoint_tuple_with_status(
+            expected_boundary_id, WorkflowStatusEnum.INPUT_REQUIRED.value
+        )
+        full_boundary.checkpoint["channel_values"]["ui_chat_log"] = []
+        mock_checkpointer.fetch_checkpoint = AsyncMock(return_value=full_boundary)
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.cancelled_turn_context",
+            return_value=[],
+        ) as mock_cancelled_turn_context:
+            await flow_instance.run("test goal")
+
+        assert requested_channels == [["status"]]
+        call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        assert isinstance(call_kwargs["input"], expected_input_type)
+        assert (
+            call_kwargs["config"]["configurable"]["checkpoint_id"]
+            == expected_boundary_id
+        )
+        delta_boundary = mock_cancelled_turn_context.call_args.kwargs["boundary"]
+        if expected_input_type is Command:
+            mock_checkpointer.fetch_checkpoint.assert_awaited_once_with(
+                expected_boundary_id
+            )
+            assert delta_boundary is full_boundary
+        else:
+            mock_checkpointer.fetch_checkpoint.assert_not_awaited()
+            assert delta_boundary is None
+
+    @pytest.mark.asyncio
+    async def test_flow_resolve_stop_recovery_fails_when_the_boundary_is_missing(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+        mock_fetch_workflow_and_container_data,
+    ):
+        """A RESUME boundary that the walk listed but by_thread_ts cannot find fails the run, instead of resuming
+        without the rollback pin."""
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+        project, namespace, workflow_config = (
+            mock_fetch_workflow_and_container_data.return_value
+        )
+        mock_fetch_workflow_and_container_data.return_value = (
+            project,
+            namespace,
+            {**workflow_config, "incremental_checkpoints_enabled": True},
+        )
+
+        async def fake_checkpoints_reversed(**_kwargs):
+            yield self._checkpoint_tuple_with_status(
+                "cp-0", WorkflowStatusEnum.INPUT_REQUIRED.value
+            )
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+        mock_checkpointer.fetch_checkpoint = AsyncMock(return_value=None)
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.log_workflow_failure"
+        ) as mock_log_exception:
+            await flow_instance.run("test goal")
+
+        mock_state_graph.compile.return_value.astream.assert_not_called()
+        mock_log_exception.assert_called_once()
+        error = mock_log_exception.call_args[0][0]
+        assert isinstance(error, CheckpointFetchError)
+        assert "cp-0" in str(error)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+    async def test_flow_resolve_stop_recovery_keeps_full_pages_without_incremental_checkpoints(
+        self,
+        flow_instance: Flow,
+        mock_checkpointer,
+        mock_state_graph,
+    ):
+        """Without incremental checkpoints Rails has no by_thread_ts read, so the walk pages full checkpoints and
+        resumes from the walked boundary."""
+        mock_checkpointer.initial_status_event = WorkflowStatusEventEnum.STOP_RECOVERY
+        requested_channels = []
+
+        async def fake_checkpoints_reversed(*, channels=None, **_kwargs):
+            requested_channels.append(channels)
+            yield self._checkpoint_tuple_with_status(
+                "cp-0", WorkflowStatusEnum.INPUT_REQUIRED.value
+            )
+
+        mock_checkpointer.checkpoints_reversed = fake_checkpoints_reversed
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.cancelled_turn_context",
+            return_value=[],
+        ):
+            await flow_instance.run("test goal")
+
+        assert requested_channels == [None]
+        mock_checkpointer.fetch_checkpoint.assert_not_awaited()
+        call_kwargs = mock_state_graph.compile.return_value.astream.call_args[1]
+        assert call_kwargs["config"]["configurable"]["checkpoint_id"] == "cp-0"
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
@@ -2311,7 +2611,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "cp-0", WorkflowStatusEnum.INPUT_REQUIRED.value
         )
 
-        async def fake_checkpoints_reversed(*, matches=lambda _: True, per_page=20):  # pylint: disable=unused-argument
+        async def fake_checkpoints_reversed(*, matches=lambda _: True, **_kwargs):
             if matches(boundary_tuple.checkpoint.get("channel_values", {})):
                 yield boundary_tuple
 

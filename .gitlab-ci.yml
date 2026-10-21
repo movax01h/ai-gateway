@@ -23,7 +23,7 @@ workflow:
     - if: $CI_COMMIT_BRANCH =~ /^stable-\d+-\d+-ee$/
     - if: $CI_COMMIT_TAG
 
-image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}python:3.12.13
+image: ${GITLAB_DEPENDENCY_PROXY_ADDRESS}python:3.12.15
 
 default:
   interruptible: true
@@ -67,7 +67,7 @@ variables:
   FIPS_TARGET_IMAGE: "$DOCKER_MODEL_GATEWAY/fips:$CI_COMMIT_SHORT_SHA"
   SELF_HOSTED_FIPS_TARGET_IMAGE: "$DOCKER_MODEL_GATEWAY/self-hosted-fips:$CI_COMMIT_SHORT_SHA"
 
-  DOCS_LINT_IMAGE: "registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2"
+  DOCS_LINT_IMAGE: "registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.24-vale-3.21.0-markdownlint2-0.23.2-lychee-0.24.2-rumdl-0.2.69"
 
   SAST_EXCLUDED_PATHS: "tests, tmp, api"
   CS_IMAGE: $TARGET_IMAGE
@@ -149,21 +149,21 @@ include:
     inputs:
       runway_service_id: ai-gateway
       image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-      runway_version: v4.63.0
+      runway_version: v4.76.1
     rules: *skip-if-not-security
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
     inputs:
       runway_service_id: duo-workflow-svc
       image: "$CI_REGISTRY_IMAGE/model-gateway:${CI_COMMIT_SHORT_SHA}"
-      runway_version: v4.63.0
+      runway_version: v4.76.1
     rules: *skip-if-not-security
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
     file: "ci-tasks/service-project/runway.yml"
     inputs:
       runway_service_id: ai-gateway-custom
       image: "$SELF_HOSTED_TARGET_IMAGE"
-      runway_version: v4.63.0
+      runway_version: v4.76.1
     rules: *skip-if-not-security
 
   # Runway (Kubernetes)
@@ -172,7 +172,7 @@ include:
     ref: v4.62.2
     inputs:
       runway_service_id: ai-gateway-eks
-      runway_version: v4.63.0
+      runway_version: v4.76.1
       runtime: eks
       app_version: "${CI_COMMIT_SHORT_SHA}"
     rules: *skip-if-not-canonical
@@ -181,7 +181,7 @@ include:
     ref: v4.62.2
     inputs:
       runway_service_id: duo-workflow-svc-eks
-      runway_version: v4.63.0
+      runway_version: v4.76.1
       runtime: eks
       app_version: "${CI_COMMIT_SHORT_SHA}"
     rules: *skip-if-not-canonical

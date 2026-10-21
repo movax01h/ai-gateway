@@ -33,9 +33,8 @@ class DiffLine:
 def parse_diff_lines(raw_diff: str) -> list[DiffLine]:
     """Parse a unified diff into structured DiffLine objects.
 
-    Line counters start unset and are only established by a parseable ``@@`` hunk
-    header. Lines under a header we cannot parse are skipped (and logged) rather
-    than emitted with guessed positions, so a malformed hunk never yields a
+    Line counters start unset and are only established by a parseable `@@` hunk header. Lines under a header we cannot
+    parse are skipped (and logged) rather than emitted with guessed positions, so a malformed hunk never yields a
     finding pinned to a bogus line number.
     """
     lines = []
@@ -173,16 +172,16 @@ def find_line_by_anchor(
 ) -> Optional[DiffLine]:
     """Find a diff line by matching the verbatim text of the line being commented on.
 
-    This is the most reliable anchor available: the reviewer copies ``target_code``
-    straight from the ``<line>…</line>`` tag it is flagging, and that tag's text is
-    produced the same way as ``DiffLine.text`` (the diff line with its +/-/space
+    This is the most reliable anchor available: the reviewer copies `target_code`
+    straight from the `<line>…</line>` tag it is flagging, and that tag's text is
+    produced the same way as `DiffLine.text` (the diff line with its +/-/space
     prefix stripped). So an exact text match deterministically locates the line even
     when the model reported a line number from the original file instead of the diff.
 
     Deleted lines are excluded — an inline comment anchors to a line that still exists
     in the new version. Matching is exact first, then whitespace-stripped to tolerate
     indentation the model may have copied imperfectly. When several lines share the
-    same text, the one whose ``new_line`` is closest to ``claimed_new_line`` is chosen
+    same text, the one whose `new_line` is closest to `claimed_new_line` is chosen
     (the model's number is a useful tie-breaker even when it is off); with no claimed
     line, the first match wins.
     """
@@ -214,10 +213,10 @@ def match_comment_to_diff_line(
 ) -> Optional[DiffLine]:
     """Match a comment to the correct diff line.
 
-    Resolution order, most reliable first. (1) ``target_code``: the verbatim
+    Resolution order, most reliable first. (1) `target_code`: the verbatim
     flagged line text (deterministic, see find_line_by_anchor) — this corrects a
     line number the model copied from the original file rather than the diff.
-    (2) line numbers (old_line/new_line). (3) ``suggestion`` content: only fires
+    (2) line numbers (old_line/new_line). (3) `suggestion` content: only fires
     when the suggestion echoes existing diff lines (rare for security fixes, which
     are new code), kept for parity with ProcessCommentsService.
     """
@@ -513,7 +512,7 @@ class SubmitMrReview(DuoBaseTool):
         """Build a combined summary with inline findings for public projects.
 
         Since DiffNote comments cannot be internal/confidential, on public projects all
-        inline comments are folded into the internal summary note instead. ``title`` is
+        inline comments are folded into the internal summary note instead. `title` is
         the caller-supplied heading placed above the folded comments; it defaults to a
         neutral heading so the tool carries no domain-specific wording.
         """
@@ -525,7 +524,7 @@ class SubmitMrReview(DuoBaseTool):
             line_ref = ""
             if c.new_line:
                 line_ref = f":`{c.new_line}`"
-            findings_section += f"**{i}.** `{c.file}`{line_ref}\n\n{self._fix_newlines(c.body)}\n\n---\n\n"
+            findings_section += f"**{i}.** {self._inline_code(c.file)}{line_ref}\n\n{self._fix_newlines(c.body)}\n\n---\n\n"
 
         if existing_summary:
             return (
@@ -556,8 +555,11 @@ class SubmitMrReview(DuoBaseTool):
             location = c.file
             if c.new_line:
                 location += f":{c.new_line}"
-            code = f"\n\n```\n{c.target_code}\n```" if c.target_code else ""
-            section += f"**{i}.** `{location}`{code}\n\n{self._fix_newlines(c.body)}\n\n---\n\n"
+            code = ""
+            if c.target_code:
+                fence = "`" * max(3, self._longest_backtick_run(c.target_code) + 1)
+                code = f"\n\n{fence}\n{c.target_code}\n{fence}"
+            section += f"**{i}.** {self._inline_code(location)}{code}\n\n{self._fix_newlines(c.body)}\n\n---\n\n"
 
         if existing_summary:
             return self._fix_newlines(existing_summary) + "\n\n---\n\n" + section
@@ -678,6 +680,25 @@ class SubmitMrReview(DuoBaseTool):
         self._process_http_response("create draft note", response, logger)
 
     @staticmethod
+    def _longest_backtick_run(text: str) -> int:
+        return max((len(run) for run in re.findall(r"`+", text)), default=0)
+
+    @classmethod
+    def _inline_code(cls, text: str) -> str:
+        """Render text as a single-line inline code span.
+
+        Control and line-separator characters become spaces so the text stays on one line, a literal backslash-n gets a
+        zero-width space so `_fix_newlines` keeps it as text, and the delimiter is longer than any backtick run inside
+        the text.
+        """
+        text = re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]", " ", text)
+        text = text.replace("\\n", "\\\u200bn")
+        if "`" not in text:
+            return f"`{text}`"
+        fence = "`" * (cls._longest_backtick_run(text) + 1)
+        return f"{fence} {text} {fence}"
+
+    @staticmethod
     def _fix_newlines(text: str) -> str:
         """Fix literal \\n sequences that LLMs sometimes produce instead of actual newlines."""
         return text.replace("\\n", "\n")
@@ -693,7 +714,7 @@ class SubmitMrReview(DuoBaseTool):
         """Bulk publish all draft notes, optionally setting verdict and posting summary.
 
         The summary is posted as-is; the caller is responsible for any footer or
-        disclaimer it wants to include in ``summary``.
+        disclaimer it wants to include in `summary`.
         """
         payload: dict[str, Any] = {}
         if verdict:

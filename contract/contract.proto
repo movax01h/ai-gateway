@@ -272,6 +272,8 @@ message TrackLlmCallForSelfHosted {
     string featureQualifiedName = 2;
     // featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
     bool featureAiCatalogItem = 3;
+    // sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown.
+    string sourceType = 4;
 }
 
 // RunShellCommand requests execution of a raw shell command string.
@@ -358,6 +360,12 @@ message GenerateTokenRequest {
     optional string flow_config_id = 2 [json_name = "flowConfigId"];
     // flow_config is the authoritative inline catalog flow configuration to bind to the issued token.
     optional google.protobuf.Struct flow_config = 3 [json_name = "flow_config"];
+    // workflowID identifies the workflow run this token is issued for.
+    optional string workflowID = 4;
+    // flow_version is the foundational flow version authorized for this token.
+    optional string flow_version = 5 [json_name = "flowVersion"];
+    // flow_config_schema_version is the foundational flow schema version authorized for this token.
+    optional string flow_config_schema_version = 6 [json_name = "flowConfigSchemaVersion"];
 }
 
 // GenerateTokenResponse returns the generated token and its expiry information.
@@ -511,6 +519,8 @@ message McpTool {
     optional ToolAnnotations annotations = 5;
     // trusted indicates whether the tool is considered trusted and may be invoked without user confirmation.
     optional bool trusted = 6;
+    // client_injected marks a tool the client supplied; Workhorse owns the field and overwrites whatever the client sent.
+    optional bool client_injected = 7;
 }
 
 // Icons is a container for a list of Icon images.
@@ -670,6 +680,8 @@ message TrackSelfHostedClientEvent {
     string featureQualifiedName = 3;
     // featureAiCatalogItem indicates whether this feature is registered in the AI catalog.
     bool featureAiCatalogItem = 4;
+    // sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown.
+    string sourceType = 5;
 }
 
 // TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event.

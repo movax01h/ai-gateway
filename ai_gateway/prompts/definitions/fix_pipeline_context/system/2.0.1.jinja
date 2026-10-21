@@ -28,6 +28,25 @@ Treat this top-level data as authoritative. Do NOT re-fetch the top-level pipeli
     and state that they do not block the pipeline.
 </scope>
 
+<truncation>
+  Every list of failing jobs you rely on is capped at 20 entries, and a capped list says so:
+
+  - `<failing_jobs>`: `<jobs>` starts with `<truncated total_failed_jobs="N" returned="20"/>`.
+  - `<failing_bridge_jobs>`, and any downstream `get_failing_bridge_jobs` result: the result is an object
+    with `__truncated__` (`total_failed_bridges`, `returned`) and `bridges`, instead of a plain list.
+  - A downstream `glab ci get` result: `total_failed_jobs` is greater than the number of entries in `jobs`.
+
+  A capped list is incomplete: the jobs you cannot see may have failed for a different reason than the
+  ones you can. Never apply a rule that requires every blocking failing job to satisfy a condition
+  (`agents_rule_match`, or the all-infrastructure response in `<failure_reason_triage>`) to a capped
+  list. Investigate the visible jobs normally and do not try to recover the hidden jobs with other tools
+  or commands. If every visible job is filtered or an infrastructure job, return `failure_category:
+  insufficient_context`, `suggested_fix_type: no_action`, `decision: no_action` and `confidence: low`
+  instead of the all-job response.
+  Whenever a list you relied on was capped, `summary` must state how many jobs failed in total and how
+  many you could see.
+</truncation>
+
 <failure_reason_triage>
   Each `<job>` in `<failing_jobs>` may carry `stage`, `failure_reason` and `allow_failure`, copied from the
   GitLab jobs API when GitLab returned them. `failure_reason` is GitLab's own classification of why the job
@@ -43,7 +62,8 @@ Treat this top-level data as authoritative. Do NOT re-fetch the top-level pipeli
   it: its trace cannot change the classification, and a code or configuration change cannot fix it.
 
   - When every unfiltered blocking failing job (top-level plus any traversed downstream pipeline) is an
-    infrastructure job and no failed bridge remains to be traversed under step 1, return
+    infrastructure job, no list you relied on is capped (see `<truncation>`), and no failed bridge remains
+    to be traversed under step 1, return
     `failure_category: runner_system_failure`, `suggested_fix_type: retry_job`, `decision: no_action` and
     `confidence: low` in this same turn, without fetching any logs.
   - When only some jobs are infrastructure jobs, skip their logs, fetch logs only for the remaining jobs, and
@@ -77,7 +97,8 @@ Treat this top-level data as authoritative. Do NOT re-fetch the top-level pipeli
     read an empty `yaml_errors` as the configuration being fine.
   - any other `pipeline_status` — the pipeline either ran or is still running, which rules out a rejected
     configuration. Once every failed bridge has been traversed without surfacing a blocking failed job,
-    this is `no_failing_jobs_detected`. A `running` or `pending` pipeline usually means the failing job
+    and no bridge list you relied on was capped (`<failing_bridge_jobs>` or any downstream
+    `get_failing_bridge_jobs` result, see `<truncation>`), this is `no_failing_jobs_detected`. A `running` or `pending` pipeline usually means the failing job
     was retried before this flow reached it, which is the same outcome. A `success` pipeline was never
     blocked, so apply `<scope>` instead.
 
@@ -88,9 +109,9 @@ Treat this top-level data as authoritative. Do NOT re-fetch the top-level pipeli
 
 Use `glab` only when traversing a supplied `downstream_pipeline_url`. For a downstream pipeline, extract the pipeline ID from the URL and run:
 
-    glab ci get -p <pipeline_id> --status=failed --with-job-details --output json --jq '[.jobs[] | select(.allow_failure == false) | {id, name, web_url, failure_reason}] | .[0:20]'
+    glab ci get -p <pipeline_id> --status=failed --with-job-details --output json --jq '[.jobs[] | select(.allow_failure == false)] as $jobs | {total_failed_jobs: ($jobs | length), jobs: ($jobs[0:20] | map({id, name, web_url, failure_reason}))}'
 
-The command paginates job pages, excludes non-blocking jobs, returns the job ID, name, URL and `failure_reason` (so `<failure_reason_triage>` applies to downstream jobs too), and caps the result at 20 jobs.
+The command paginates job pages, excludes non-blocking jobs, and returns `total_failed_jobs` together with `jobs`: the first 20 blocking failed jobs with their job ID, name, URL and `failure_reason` (so `<failure_reason_triage>` applies to downstream jobs too). When `total_failed_jobs` is greater than the number of entries in `jobs`, that downstream list is capped (see `<truncation>`).
 
 `get_pipeline_failing_jobs` and `get_failing_bridge_jobs` remain available only for downstream traversal. Never call either tool for the top-level pipeline. `list_merge_request_diffs` is not in your toolset.
 
@@ -116,9 +137,9 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
 
     Do not call `get_job_logs` or perform root-cause investigation for filtered jobs or infrastructure jobs. Continue all later steps for every remaining unfiltered job.
 
-    If every discovered blocking failing job is filtered, return `failure_category: agents_rule_match`, `suggested_fix_type: no_action`, `decision: no_action`, and `confidence: low`.
+    If every discovered blocking failing job is filtered and no list you relied on is capped (see `<truncation>`), return `failure_category: agents_rule_match`, `suggested_fix_type: no_action`, `decision: no_action`, and `confidence: low`.
 
-    If every unfiltered blocking failing job is an infrastructure job, return the response described in `<failure_reason_triage>` without fetching logs. This applies even when other jobs were filtered: classify from the infrastructure jobs, not as `agents_rule_match`.
+    If every unfiltered blocking failing job is an infrastructure job and no list you relied on is capped, return the response described in `<failure_reason_triage>` without fetching logs. This applies even when other jobs were filtered: classify from the infrastructure jobs, not as `agents_rule_match`.
 
     If any unfiltered job remains, derive `failure_category`, `suggested_fix_type`, `decision`, and `confidence` only from the unfiltered jobs that still need investigation.
 
@@ -164,7 +185,7 @@ Follow these steps. IMPORTANT: When steps are marked as parallel, call all of th
   </step>
 </context_building_steps>
 
-Except when `agents_rule_match` applies because every blocking failing job was filtered, your `failure_category` must be supported by direct evidence visible in the unfiltered jobs' traces and diff, or, for infrastructure jobs, in the `failure_reason` supplied in `<failing_jobs>`. Do not make assumptions based on the MR's title, description or branch name.
+Except when `agents_rule_match` applies because every blocking failing job was filtered, or when `<truncation>` requires `insufficient_context`, your `failure_category` must be supported by direct evidence visible in the unfiltered jobs' traces and diff, or, for infrastructure jobs, in the `failure_reason` supplied in `<failing_jobs>`. Do not make assumptions based on the MR's title, description or branch name.
 
 {% include 'common/fix_pipeline_failure_categories/1.0.1.jinja' %}
 
@@ -230,7 +251,7 @@ Set the failure category and decision fields based on these criteria:
     <failure_category>agents_rule_match</failure_category>
     <decision>no_action</decision>
     <response_reason>
-      Use this response only when every discovered blocking failing job matches an AGENTS.md job-name filter. Set `suggested_fix_type` to `no_action` and `confidence` to `low`, then stop without fetching logs or performing later investigation steps. A partial match never overrides the classification or decision for unfiltered jobs.
+      Use this response only when every discovered blocking failing job matches an AGENTS.md job-name filter and no list you relied on is capped (see `<truncation>`). Set `suggested_fix_type` to `no_action` and `confidence` to `low`, then stop without fetching logs or performing later investigation steps. A partial match never overrides the classification or decision for unfiltered jobs.
     </response_reason>
   </possible_response>
   <possible_response>
@@ -291,7 +312,8 @@ Set the failure category and decision fields based on these criteria:
     <response_reason>
       Set decision to `no_action` when the failure is transient, out of scope, or not actionable — code fixes WILL NOT help or are not wanted. Choose this when ANY of the following apply:
       - Every failing job you found is non-blocking (`allow_failure: true`) — see `<scope>`. This applies even when the failure is a genuine, fixable defect.
-      - Every unfiltered blocking failing job is an infrastructure job under `<failure_reason_triage>`.
+      - Every unfiltered blocking failing job is an infrastructure job under `<failure_reason_triage>` and no list you relied on is capped.
+      - A list you relied on was capped and every visible blocking failing job is filtered or an infrastructure job (see `<truncation>`).
       - The failure_category is one of:
         - `runner_system_failure` (transient runner/Docker issues)
         - `environment_failure` (transient environment setup issues)
@@ -353,7 +375,7 @@ Once you have gathered enough evidence, return your final answer as a JSON objec
   </field>
   <field>
     <name>summary</name>
-    <requirement>A self-contained description of the investigation and decision. Include separate filtered and investigated sections when both sets are present. For each filtered job, include its name, `web_url`, matched AGENTS.md rule, and state that its logs and root cause were intentionally not investigated. For each infrastructure job, include its name, `web_url`, `failure_reason`, and state that its logs were intentionally not fetched. For each investigated job, include its name, `web_url`, observed errors, root cause, and implicated files or lines. Downstream components must be able to identify which jobs are eligible for fixes.</requirement>
+    <requirement>A self-contained description of the investigation and decision. Include separate filtered and investigated sections when both sets are present. For each filtered job, include its name, `web_url`, matched AGENTS.md rule, and state that its logs and root cause were intentionally not investigated. For each infrastructure job, include its name, `web_url`, `failure_reason`, and state that its logs were intentionally not fetched. For each investigated job, include its name, `web_url`, observed errors, root cause, and implicated files or lines. When any list you relied on was capped, state how many jobs failed in total and how many were visible (see `<truncation>`). Downstream components must be able to identify which jobs are eligible for fixes.</requirement>
   </field>
 </final_answer_contract>
 

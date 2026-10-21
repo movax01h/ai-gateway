@@ -1,27 +1,43 @@
 import json
+import re
+import uuid
 from enum import IntEnum
 from textwrap import dedent
 from typing import Any, ClassVar, List, Optional, Type
+from urllib.parse import quote, unquote, urlparse
 
 import gitmatch
 import structlog
 from langchain_core.tools.base import ToolException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from ai_gateway.models.v2._model_compat import current_model_supports_vision
 from contract import contract_pb2
+from duo_workflow_service.client_capabilities import is_client_capable
+from duo_workflow_service.entities.image_response import (
+    image_response_to_blocks,
+    supported_image_formats_display,
+)
 from duo_workflow_service.executor.action import (
     _execute_action,
+    _execute_action_accepting_image,
     _execute_action_and_get_action_response,
 )
+from duo_workflow_service.executor.image_result import ImageActionResult
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.file_exclusion_policy import (
     CONTEXT_EXCLUSION_MESSAGE,
     FileExclusionPolicy,
 )
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from lib.context import gitlab_user_id
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 DEFAULT_READ_FILE_OFFSET = 0
 DEFAULT_READ_FILE_LIMIT = 2000
+
+_security_log = structlog.stdlib.get_logger("security")
 
 # Trusted path segments for globally-installed agent skills, Duo plugins, and Duo config.
 # Read-only tools need to access absolute paths (e.g. ~/.agents/skills/<skill>/SKILL.md or
@@ -55,15 +71,12 @@ PATH_TRAVERSAL_PATTERNS = ("../", "..\\", "%2e%2e", "%252e%252e", "\u002e\u002e"
 # restrictions.  Kept in one place so all five tools stay in sync.
 GITIGNORED_FILE_NOTE = (
     "NOTE on file-access restrictions:\n"
-    "- Gitignored files: This tool cannot access files listed in .gitignore. If the file is\n"
-    "    not sensitive, you may fall back to the `run_command` tool with a shell command\n"
-    '    (e.g. `cat <file>`, `sed -i`, `echo "content" > file`). Do NOT use `git rm --cached`\n'
-    "    as a workaround.\n"
-    "- Secrets-denylisted files: Files such as `.env`, `.env.*`, `.ssh/`, `.gnupg/`,\n"
-    "    `Dockerfile.secrets`, and similar sensitive paths are protected by the Duo security\n"
-    "    denylist. Do NOT attempt to access these files by any means, including via\n"
-    "    `run_command` or any shell command. This restriction exists to prevent accidental\n"
-    "    exposure of secrets."
+    "- Gitignored files: Cannot access files listed in .gitignore. If the file is not sensitive,\n"
+    "    you may fall back to `run_command` with a shell command (e.g. `cat <file>`).\n"
+    "    Do NOT use `git rm --cached` as a workaround.\n"
+    "- Secrets-denylisted files: Cannot access `.env`, `.env.*`, `.ssh/`, `.gnupg/`,\n"
+    "    `Dockerfile.secrets`, or similar sensitive paths.\n"
+    "- Do NOT attempt to access secrets-denylisted files via `run_command` or any other shell command workaround."
 )
 
 # Security denylist of sensitive directories and files that should not be accessed
@@ -94,10 +107,10 @@ DEFAULT_CONTEXT_EXCLUSIONS = gitmatch.compile(
 
 
 def _contains_path_traversal(file_path: str) -> bool:
-    """Return ``True`` if *file_path* contains any known path-traversal pattern.
+    """Return `True` if *file_path* contains any known path-traversal pattern.
 
-    Shared by ``_is_trusted_absolute_path`` (which fails closed) and
-    ``validate_duo_context_exclusions`` (which raises) so the traversal denylist lives in
+    Shared by `_is_trusted_absolute_path` (which fails closed) and
+    `validate_duo_context_exclusions` (which raises) so the traversal denylist lives in
     one place and the two security-critical checks cannot drift apart.
     """
     return any(pattern in file_path for pattern in PATH_TRAVERSAL_PATTERNS)
@@ -107,10 +120,10 @@ def _is_trusted_absolute_path(file_path: str) -> bool:
     """Return True if *file_path* is absolute, traversal-free, and contains a trusted segment sequence.
 
     Traversal patterns are checked here so this helper is safe to call standalone — a path
-    like ``/home/u/.agents/skills/../../etc/passwd`` is never reported as trusted.
+    like `/home/u/.agents/skills/../../etc/passwd` is never reported as trusted.
 
     Args:
-        file_path: File path to check (backslashes are normalised to ``/`` internally).
+        file_path: File path to check (backslashes are normalised to `/` internally).
 
     Returns:
         True when the path is absolute, traversal-free, and contains a trusted segment
@@ -142,12 +155,12 @@ def validate_duo_context_exclusions(
 
     Args:
         file_path: The file path to check.
-        allow_trusted_absolute: When ``True``, absolute paths whose segments include one
-            of the entries in ``TRUSTED_ABSOLUTE_PATH_SEGMENTS`` are allowed through
-            without hitting the ``gitmatch`` denylist (which rejects all absolute paths).
-            Should only be set to ``True`` for read-only tools (``ReadFile``,
-            ``ReadFileChunked``, ``ReadFiles``).  Write/edit/list tools keep the default
-            ``False`` so they continue to reject absolute paths.
+        allow_trusted_absolute: When `True`, absolute paths whose segments include one
+            of the entries in `TRUSTED_ABSOLUTE_PATH_SEGMENTS` are allowed through
+            without hitting the `gitmatch` denylist (which rejects all absolute paths).
+            Should only be set to `True` for read-only tools (`ReadFile`,
+            `ReadFileChunked`, `ReadFiles`).  Write/edit/list tools keep the default
+            `False` so they continue to reject absolute paths.
 
     Raises:
         ToolException: If the path is in the denylist or an invalid path.
@@ -190,6 +203,238 @@ def validate_duo_context_exclusions(
         return
 
 
+# Descriptions and conversion flip together on two switches, both required
+# (_image_support_enabled): a model refuses image reads unless the description
+# advertises them, and advertising without conversion only earns refusals. The
+# instance flag is evaluated per user rather than per client, so on its own it
+# would advertise to an older client that still refuses binaries. Tools are
+# built once per run and both contexts are set per request, so a flip lands on
+# the next run.
+IMAGE_READ_CAPABILITY = "read_file_image"
+
+_READ_FILE_IMAGE_NOTE = f"""Image files ({supported_image_formats_display()}) are supported: reading one returns the
+    actual image so you can see its contents.
+
+    Images uploaded to issues or merge requests in the current project are
+    also supported: pass the upload reference exactly as it appears in the
+    markdown, e.g. `/uploads/<secret>/screenshot.png`. It is downloaded
+    using the user's own GitLab credentials. Uploads on epics or other
+    groups' items are not reachable this way.
+
+    """
+
+_READ_FILE_CHUNKED_IMAGE_NOTE = f"""\
+- Image files ({supported_image_formats_display()}) are supported and return the actual image so you can see its contents.
+    - Offset/limit do not apply to images.
+
+    Images uploaded to issues or merge requests in the current project are
+    also supported: pass the upload reference exactly as it appears in the
+    markdown, e.g. `/uploads/<secret>/screenshot.png`. It is downloaded
+    using the user's own GitLab credentials. Uploads on epics or other
+    groups' items are not reachable this way.
+
+    """
+
+_READ_FILES_IMAGE_NOTE = """Image files are not supported here: read them individually with read_file.
+
+    """
+
+
+def _image_support_enabled() -> bool:
+    """Whether tool-read images are on for this run: the instance flag and the client capability, both."""
+    return is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT) and is_client_capable(
+        IMAGE_READ_CAPABILITY
+    )
+
+
+def _strip_image_note_if_disabled(tool: DuoBaseTool, note: str) -> None:
+    if not _image_support_enabled():
+        tool.description = tool.description.replace(note, "")
+
+
+_NO_VISION_NOTE = (
+    "This model cannot see images. The file was read, but the image will not be shown to it. "
+    "Do not read it again; ask the user to describe it, or to switch to a model with image support."
+)
+
+
+def _image_response_to_blocks_if_enabled(
+    image: ImageActionResult, file_path: str
+) -> str | list[dict[str, Any]]:
+    """Convert a typed image result when image support is on, refuse readably when off.
+
+    A client sends image responses whatever the server-side switches say, so the off paths have to answer in words the
+    model can act on. The two refusals differ so a mismatch is diagnosable from the transcript alone: the instance flag
+    is off, or the client sent an image without having declared the capability.
+    """
+    if _image_support_enabled():
+        blocks = image_response_to_blocks(image, file_path=file_path)
+        if isinstance(blocks, list) and current_model_supports_vision() is False:
+            blocks = [*blocks, {"type": "text", "text": _NO_VISION_NOTE}]
+        return blocks
+    if not is_feature_enabled(FeatureFlag.DAP_TOOL_IMAGE_INPUT):
+        return (
+            f'Cannot read file: "{file_path}" is an image file, and image '
+            "support is not enabled on this instance."
+        )
+    return (
+        f'Cannot read file: "{file_path}" is an image file, and this client '
+        "did not declare image support."
+    )
+
+
+# `/uploads/<secret>/<filename>`, as GitLab stores it in issue and MR markdown.
+# Secrets are 32 hex chars today, 10 to 32 on old uploads (FileUploader
+# VALID_SECRET_PATTERN), and a filename never contains a slash. The leading
+# slash is optional because models routinely drop it (seen live).
+_UPLOAD_REF_PATTERN = re.compile(
+    r"\A(?P<leading_slash>/?)uploads/(?P<secret>[0-9a-f]{10,32})/(?P<filename>[^/]+)\Z"
+)
+
+# Length of the secret current GitLab mints. Only relevant for the slashless
+# form, which is indistinguishable from a repository path.
+_UPLOAD_SECRET_LENGTH = 32
+
+
+def _resolve_upload_reference(file_path: str, project: Optional[Project]) -> str | None:
+    """Map a markdown upload reference onto its REST API download path.
+
+    Needs a project: the reference carries none and the API lookup is parent-scoped. The
+    executor matches the returned path strictly before attaching the user's credential, so
+    this shape and the client-side check have to stay in sync.
+    """
+    # Upload reading is part of gated image support, both switches: with the
+    # flag off or a client that has not declared the capability, the reference
+    # stays an ordinary path (today's pre-feature behavior) and no download is
+    # ever asked for. An older client could not fetch the API path anyway.
+    if not _image_support_enabled():
+        return None
+    match = _UPLOAD_REF_PATTERN.match(file_path)
+    if not match or not project or not project.get("id"):
+        return None
+
+    # `.` and `..` match the filename group but address the upload directory
+    # rather than a file; sending either would spend the user's credential on
+    # a request that was never a file read.
+    if match["filename"] in (".", ".."):
+        return None
+
+    # Without the leading slash the reference is shaped exactly like a
+    # repository path, so accept only the secret length GitLab mints today:
+    # `uploads/<10 hex>/thing.png` is a believable directory in a real tree,
+    # and rewriting it would send a file read to the API instead. Legacy
+    # short secrets still resolve in their markdown form, with the slash.
+    if not match["leading_slash"] and len(match["secret"]) != _UPLOAD_SECRET_LENGTH:
+        return None
+
+    filename = quote(match["filename"], safe="")
+    return f"/api/v4/projects/{project['id']}/uploads/{match['secret']}/{filename}"
+
+
+def _author_id() -> Optional[int]:
+    """The requesting user's instance-local id, as the standard's integer ``author_id``."""
+    raw = gitlab_user_id.get()
+    return int(raw) if raw and raw.isdigit() else None
+
+
+def _log_upload_read(
+    project: Optional[Project],
+    request_path: str,
+    *,
+    outcome: str,
+    response_type: Optional[str],
+    size_bytes: Optional[int],
+) -> None:
+    """Record the service's decision to ask for an upload, in the security logging standard's shape.
+
+    The SIEM-bound record is the Rails ``ai_tool_invoked`` audit event, which already carries the tool arguments and
+    the author. This line is the service's own part, and it fires on every attempt because a failed download is still
+    credential spend.
+
+    ``outcome`` reports the download, not what the model received: ``success`` means the client answered the request,
+    even when the payload then failed the image checks. That case reads as ``size_bytes`` set with ``response_type``
+    ``text``, since the bytes were pulled into the service before the check refused them.
+
+    Fields this layer cannot fill: ``author_name`` (only ids reach the service), ``target_id`` (uploads are addressed
+    by secret and filename), ``ip_address`` (the request arrives over gRPC) and ``details.token_type`` (the client
+    holds the credential). The upload secret stays out because it is part of the download URL.
+    """
+    web_url = project.get("web_url") if project else None
+    _security_log.info(
+        "Tool read resolved a GitLab upload reference",
+        id=str(uuid.uuid4()),
+        event_type="data.read.upload",
+        author_id=_author_id(),
+        entity_type="Project",
+        entity_id=project.get("id") if project else None,
+        entity_path=urlparse(web_url).path.strip("/") if web_url else None,
+        target_type="upload",
+        # Not `filename`: stdlib LogRecord reserves that name and raises.
+        # Decoded, so the value matches the upload's own name in a SIEM search.
+        target_details=unquote(request_path.rsplit("/", 1)[-1]),
+        details={
+            "outcome": outcome,
+            "provider": "duo_workflow_service",
+            "response_type": response_type,
+        },
+        gitlab={"data_type": "upload", "size_bytes": size_bytes},
+    )
+
+
+async def _read_upload_reference(
+    metadata: Any, project: Optional[Project], file_path: str
+) -> str | list | None:
+    """Download ``file_path`` as an upload, or return ``None`` if it is not one.
+
+    Both read tools funnel through here because ``ReadFileChunked`` supersedes ``ReadFile``
+    under the same tool name, so a difference between the two would be invisible to a test
+    that exercises only one.
+
+    Args:
+        metadata: Tool metadata carrying the executor outbox.
+        project: The workflow's project, which scopes the download.
+        file_path: The path the model asked for.
+
+    Returns:
+        The tool response for an upload reference, or ``None`` when
+        ``file_path`` is an ordinary path the caller should handle itself.
+    """
+    request_path = _resolve_upload_reference(file_path, project)
+    if request_path is None:
+        return None
+
+    # An agent pulling a project upload into model context is worth a trail;
+    # see _log_upload_read for what the trail is and is not.
+    outcome = "failure"
+    response_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    try:
+        # offset/limit are meaningless for a downloaded image and are not sent.
+        response = await _execute_action_accepting_image(
+            metadata,
+            contract_pb2.Action(
+                runReadFile=contract_pb2.ReadFile(filepath=request_path)
+            ),
+        )
+        converted: str | list
+        if isinstance(response, ImageActionResult):
+            size_bytes = len(response.data)
+            converted = _image_response_to_blocks_if_enabled(response, file_path)
+        else:
+            converted = response
+        response_type = "image" if isinstance(converted, list) else "text"
+        outcome = "success"
+        return converted
+    finally:
+        _log_upload_read(
+            project,
+            request_path,
+            outcome=outcome,
+            response_type=response_type,
+            size_bytes=size_bytes,
+        )
+
+
 class ReadFileInput(BaseModel):
     file_path: str = Field(description="the file_path to read the file from")
 
@@ -198,9 +443,10 @@ class ReadFile(DuoBaseTool):
     name: str = "read_file"
     description: str = f"""Read the contents of a file.
 
-    IMPORTANT:
-    - When a task requires reading multiple files, include batches of tool calls in a single response
-    - Do not make separate responses for each file - group related files together
+    {_READ_FILE_IMAGE_NOTE}Batching:
+    - When multiple files need inspection, emit multiple read_file calls concurrently in a single turn.
+    - Do not make separate turns for each file - group all related file reads together.
+    - Avoid redundant re-reads of files that are unchanged since you last read them.
 
     {GITIGNORED_FILE_NOTE}
     """
@@ -211,16 +457,31 @@ class ReadFile(DuoBaseTool):
         "Let me check if class `DuoBaseTool` exists in `./tools/base.py`",
     ]
 
-    async def _execute(self, file_path: str) -> str:
+    @model_validator(mode="after")
+    def _gate_image_support_description(self) -> "ReadFile":
+        _strip_image_note_if_disabled(self, _READ_FILE_IMAGE_NOTE)
+        return self
+
+    async def _execute(self, file_path: str) -> str | list[dict[str, Any]]:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
+        # Upload references are remote GitLab content, not workspace paths, so
+        # they skip the filesystem exclusion check (which rejects all absolute
+        # paths) and go to the executor as the project-scoped API path.
+        upload = await _read_upload_reference(self.metadata, self.project, file_path)
+        if upload is not None:
+            return upload
+
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
-        return await _execute_action(
+        response = await _execute_action_accepting_image(
             self.metadata,  # type: ignore
             contract_pb2.Action(runReadFile=contract_pb2.ReadFile(filepath=file_path)),
         )
+        if isinstance(response, ImageActionResult):
+            return _image_response_to_blocks_if_enabled(response, file_path)
+        return response
 
     def format_display_message(
         self, args: ReadFileInput, _tool_response: Any = None
@@ -254,14 +515,16 @@ class ReadFileChunked(DuoBaseTool):
     name: str = "read_file"
     description: str = f"""Read a file from the local filesystem.
 
-    Usage:
-    - By default, returns up to 2000 lines from the start of the file.
-    - The offset parameter is the line number to start from (0-indexed).
-    - To read later sections, call this tool again with a larger offset.
-    - If the file is truncated, a hint is returned at the end with the next offset value — use it to continue reading.
-    - Call this tool in parallel when you need to read multiple files.
-    - Avoid tiny repeated slices; if you need more context, read a larger window.
+    Batching:
+    - When multiple files need inspection, emit multiple read_file calls concurrently in a single turn.
+    - Do not make separate turns for each file - group all related file reads together.
+    - Avoid redundant re-reads of files that are unchanged since you last read them.
 
+    Usage:
+    - Only read files directly relevant to the current task. Do NOT speculatively read unrelated files or entire directories.
+    - Returns up to 2000 lines from offset (0-indexed).
+    - For large files (>100 lines), specify offset and limit to inspect only the relevant section.
+    {_READ_FILE_CHUNKED_IMAGE_NOTE}
     {GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFileChunkedInput
@@ -269,18 +532,30 @@ class ReadFileChunked(DuoBaseTool):
     supersedes: ClassVar[Optional[Type[DuoBaseTool]]] = ReadFile
     required_capability: ClassVar[frozenset[str]] = frozenset({"read_file_chunked"})
 
+    @model_validator(mode="after")
+    def _gate_image_support_description(self) -> "ReadFileChunked":
+        _strip_image_note_if_disabled(self, _READ_FILE_CHUNKED_IMAGE_NOTE)
+        return self
+
     async def _execute(
         self,
         file_path: str,
         offset: int = DEFAULT_READ_FILE_OFFSET,
         limit: int = DEFAULT_READ_FILE_LIMIT,
-    ) -> str:
+    ) -> str | list[dict[str, Any]]:
         if not FileExclusionPolicy.is_allowed_for_project(self.project, file_path):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
+        # Same upload branch as ReadFile: this class replaces it under the same
+        # tool name whenever the client is chunked-capable, so upload
+        # references land here on modern clients.
+        upload = await _read_upload_reference(self.metadata, self.project, file_path)
+        if upload is not None:
+            return upload
+
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
-        return await _execute_action(
+        response = await _execute_action_accepting_image(
             self.metadata,  # type: ignore
             contract_pb2.Action(
                 runReadFile=contract_pb2.ReadFile(
@@ -288,6 +563,9 @@ class ReadFileChunked(DuoBaseTool):
                 )
             ),
         )
+        if isinstance(response, ImageActionResult):
+            return _image_response_to_blocks_if_enabled(response, file_path)
+        return response
 
     def format_display_message(
         self, args: ReadFileChunkedInput, _tool_response: Any = None
@@ -307,10 +585,15 @@ class ReadFiles(DuoBaseTool):
     name: str = "read_files"
     description: str = f"""Read one or more files in a single operation.
 
-    {GITIGNORED_FILE_NOTE}
+    {_READ_FILES_IMAGE_NOTE}{GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFilesInput
     handle_tool_error: bool = True
+
+    @model_validator(mode="after")
+    def _gate_image_support_description(self) -> "ReadFiles":
+        _strip_image_note_if_disabled(self, _READ_FILES_IMAGE_NOTE)
+        return self
 
     async def _execute(self, file_paths: list[str]) -> str:
         policy = FileExclusionPolicy(self.project)
@@ -450,9 +733,13 @@ class FindFiles(DuoBaseTool):
     description: str = """Find files by name patterns (equivalent to 'find' command).
 
     **Primary use cases:**
+    - Discover codebase structure and locate files before searching inside them
     - Find files by filename or extension patterns
     - Locate specific files across the codebase
     - Get list of files matching naming conventions
+
+    **Best practice:**
+    Use `find_files` first to locate candidate files and understand repository layout before running `grep`.
 
     **Replaces these commands:**
     - find . -name "*.py" → find_files(name_pattern="*.py")
@@ -571,34 +858,16 @@ class EditFile(DuoBaseTool):
         f"""\
         Use this tool to edit an existing file by replacing `old_str` with `new_str`.
 
+        Batching:
+        - When a code change affects multiple files (or code and tests), dispatch independent edit_file calls concurrently in a single turn.
+        - Avoid sequential single-file edit turns and intermediate git status checks.
+
         IMPORTANT:
-        - You must read the file with read_file before editing it; editing without reading first fails.
+        - You must read the file with read_file before editing it.
         - `old_str` must match the file exactly (including whitespace) and be unique; include enough surrounding context. Only the first match is replaced.
-        - To edit multiple files, batch the tool calls in a single response rather than one response per file.
-        - Secret-like values may appear as `[REDACTED]`. This is a placeholder, not the real content, so an `old_str` containing it will never match. Anchor edits on surrounding non-secret text.
+        - Secret-like values may appear as `[REDACTED]`. Anchor edits on surrounding non-secret text.
 
-        {GITIGNORED_FILE_NOTE}
-
-        Examples:
-
-        - Single edit (change a function signature):
-            edit_file(
-                file_path="src/utils.py",
-                old_str="def process_data(data):\\n    return data.upper()",
-                new_str="def process_data(data, transform=True):\\n    return data.upper() if transform else data"
-            )
-
-        - Batch multiple files in one response (rename a function):
-            edit_file(
-                file_path="src/utils.py",
-                old_str="def get_config():",
-                new_str="def fetch_config():"
-            )
-            edit_file(
-                file_path="src/app.py",
-                old_str="config = get_config()",
-                new_str="config = fetch_config()"
-            )"""
+        {GITIGNORED_FILE_NOTE}"""
     )
     args_schema: Type[BaseModel] = EditFileInput
     handle_tool_error: bool = True

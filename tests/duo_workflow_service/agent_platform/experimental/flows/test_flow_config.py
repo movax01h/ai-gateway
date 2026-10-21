@@ -8,6 +8,7 @@ import yaml
 from langgraph.graph import StateGraph
 from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform.constants import METADATA_ONLY_FLOWS
 from duo_workflow_service.agent_platform.experimental.components import (
     BaseComponent,
     RouterProtocol,
@@ -317,7 +318,7 @@ class TestFlowConfig:
     ):
         """Test that path traversal attempts are blocked."""
         with patch.object(FlowConfig, "DIRECTORY_PATH", Path(tmp_path)):
-            with pytest.raises(ValueError, match="Path traversal detected"):
+            with pytest.raises(ValueError, match="is not a bare name"):
                 FlowConfig.from_yaml_config(malicious_path)
 
     @pytest.mark.parametrize(
@@ -842,3 +843,44 @@ class TestListConfigs:
         # Verify JSON config is valid
         parsed_config = json.loads(result[0]["config"])
         assert parsed_config == minimal_config
+
+
+class TestRegistryIdentity:
+    """A flow is metadata-only by its registry id, which only a registry load can set."""
+
+    def test_bl_security_is_metadata_only(self):
+        assert "bl_security" in METADATA_ONLY_FLOWS
+
+    @pytest.mark.parametrize("flow_id", sorted(METADATA_ONLY_FLOWS))
+    def test_every_metadata_only_flow_is_a_registry_flow(self, flow_id):
+        # A misspelt id would silently leave the real flow exposing its text.
+        versions = sorted((FlowConfig.DIRECTORY_PATH / flow_id).glob("*.yml"))
+
+        assert versions
+        for path in versions:
+            config = FlowConfig.from_yaml_config(flow_id, path.stem)
+            assert config.config_id == flow_id, path.name
+            assert config.config_version == path.stem
+
+    def test_a_config_built_directly_has_no_registry_id(self):
+        config = FlowConfig(
+            flow={}, components=[], routers=[], environment="ambient", version="v1"
+        )
+
+        assert config.config_id is None
+        assert config.config_version is None
+
+    def test_input_cannot_set_the_registry_id(self):
+        config = FlowConfig(
+            flow={},
+            components=[],
+            routers=[],
+            environment="ambient",
+            version="experimental",
+            config_id="bl_security",
+            _config_id="bl_security",
+        )
+
+        assert config.config_id is None
+        assert "config_id" not in config.model_dump()
+        assert "_config_id" not in config.model_dump()

@@ -106,6 +106,7 @@ class TestFlowGraphBuilder:
         tools_registry.toolset.return_value = Mock(name="toolset")
         tools_registry.mcp_tool_names.return_value = ["mcp_tool"]
         tools_registry.ask_listed_tool_names.return_value = set()
+        tools_registry.pre_approvals_allowed_by_policy.side_effect = set
         return tools_registry
 
     @pytest.fixture(name="mock_prompt_registry")
@@ -206,6 +207,56 @@ class TestFlowGraphBuilder:
         attached_nodes = [call.args[0] for call in mock_graph.add_node.call_args_list]
         assert "terminate_flow" in attached_nodes
         assert "abort_flow" in attached_nodes
+
+    def test_terminal_component_params_carry_the_runs_identity(
+        self, builder, flow_type, user
+    ):
+        """A subclass seeding its own terminal reuses these instead of restating them."""
+        assert builder._terminal_component_params("end") == {
+            "name": "end",
+            "flow_id": "test-workflow-123",
+            "flow_type": flow_type,
+            "user": user,
+        }
+
+    def test_a_subclass_seeds_its_own_terminals_through_the_seam(
+        self,
+        mock_tools_registry,
+        mock_prompt_registry,
+        mock_schema_registry,
+        mock_internal_event_client,
+        flow_type,
+        user,
+        mock_graph,
+    ):
+        """``_seed_terminal_components`` is the one override a different boundary needs."""
+        terminal = _component_stub("end")
+
+        class _OneTerminalBuilder(FlowGraphBuilder):
+            @override
+            def _seed_terminal_components(
+                self, graph: StateGraph
+            ) -> dict[str, BaseComponent]:
+                terminal.attach(graph)
+                return {"end": terminal}
+
+        builder = _OneTerminalBuilder(
+            tools_registry=mock_tools_registry,
+            prompt_registry=mock_prompt_registry,
+            schema_registry=mock_schema_registry,
+            workflow_id="test-workflow-123",
+            workflow_type=flow_type,
+            user=user,
+            internal_event_client=mock_internal_event_client,
+            catalog_items=CatalogItems(),
+        )
+        agent = _component_stub("agent")
+
+        with _component_classes({"AgentComponent": _ComponentClassStub(agent)}):
+            components = builder._build_components(_config(), mock_graph)
+
+        assert components == {"end": terminal, "agent": agent}
+        terminal.attach.assert_called_once_with(mock_graph)
 
     @pytest.mark.usefixtures("mock_graph")
     def test_component_receives_the_builders_dependencies(
@@ -311,6 +362,40 @@ class TestFlowGraphBuilder:
         mock_tools_registry.ask_listed_tool_names.assert_called_once_with(
             ["read_file", "run_command"]
         )
+        assert comp_class.params["pre_approved_tools"] == expected
+
+    @pytest.mark.usefixtures("mock_graph")
+    @pytest.mark.parametrize(
+        "permitted,expected",
+        [
+            # Ceiling off: every entry is kept, in order, duplicates included.
+            (None, ["run_command", "read_file", "run_command"]),
+            # Ceiling on: entries outside the policy are dropped, order kept.
+            ({"read_file"}, ["read_file"]),
+        ],
+        ids=["ceiling_off", "ceiling_on"],
+    )
+    def test_pre_approved_tools_are_capped_by_the_ceiling_in_order(
+        self, builder, mock_tools_registry, permitted, expected
+    ):
+        if permitted is not None:
+            mock_tools_registry.pre_approvals_allowed_by_policy.side_effect = (
+                lambda names: set(names) & permitted
+            )
+
+        comp_class = _ComponentClassStub(_component_stub("agent"))
+        comp_config: dict[str, Any] = {
+            "name": "agent",
+            "type": "AgentComponent",
+            "pre_approved_tools": ["run_command", "read_file", "run_command"],
+        }
+
+        with (
+            _component_classes({"AgentComponent": comp_class}),
+            patch(f"{_MODULE}.Router"),
+        ):
+            builder.build(_config(components=[comp_config]))
+
         assert comp_class.params["pre_approved_tools"] == expected
 
     @pytest.mark.usefixtures("mock_graph")

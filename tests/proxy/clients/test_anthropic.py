@@ -3,11 +3,45 @@ from unittest.mock import patch
 
 import fastapi
 import pytest
+from anthropic.lib.credentials import WorkloadIdentityError
 from fastapi import status
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from pydantic import SecretStr
 
 from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.models.base import ANTHROPIC_FACILITATOR_KEY_HEADER
 from ai_gateway.proxy.clients import AnthropicProxyModelFactory, ProxyClient
-from ai_gateway.proxy.clients.anthropic import _resolve_api_key
+from ai_gateway.proxy.clients.anthropic import (
+    _build_headers_to_upstream,
+    _resolve_api_key,
+    _resolve_upstream_auth_headers,
+)
+
+
+class TestFacilitatorKeyHeader:
+    """The facilitator key rides alongside the upstream API key on the proxy path.
+
+    Both cases assert on the header dict only; no request is issued.
+    """
+
+    def test_sent_when_configured(self):
+        with patch("ai_gateway.models.base.config") as mock_config:
+            mock_config.anthropic_facilitator_key = SecretStr("fake-facilitator-key")
+
+            headers = _build_headers_to_upstream("fake-upstream-key")
+
+        assert headers == {
+            "x-api-key": "fake-upstream-key",
+            ANTHROPIC_FACILITATOR_KEY_HEADER: "fake-facilitator-key",
+        }
+
+    def test_omitted_when_unset(self):
+        with patch("ai_gateway.models.base.config") as mock_config:
+            mock_config.anthropic_facilitator_key = None
+
+            assert _build_headers_to_upstream("fake-upstream-key") == {
+                "x-api-key": "fake-upstream-key"
+            }
 
 
 @pytest.fixture(name="anthropic_factory")
@@ -112,6 +146,26 @@ async def test_invalid_proxy_requests(
 
     assert excinfo.value.status_code == expected_status
     assert excinfo.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+async def test_rejects_model_outside_the_allowlist(
+    anthropic_factory, request_factory, request_params, request_headers
+):
+    request = request_factory(
+        request_url="http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages",
+        request_body=json.dumps(request_params).encode("utf-8"),
+        request_headers=request_headers,
+    )
+    request.user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={"gitlab_allowed_model_refs": ["claude_fable_5"]}),
+    )
+
+    with pytest.raises(fastapi.HTTPException) as excinfo:
+        await anthropic_factory.factory(request)
+
+    assert excinfo.value.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio
@@ -376,3 +430,126 @@ class TestAnthropicApiKeyResolution:
 
         upstream_request = mock_proxy_async_client.send.call_args[0][0]
         assert upstream_request.headers["x-api-key"] == "fable-workspace-key"
+
+
+class TestAnthropicWorkloadIdentityResolution:
+    """Per-model workload identity federation on the proxy path."""
+
+    WIF_OVERRIDE = {
+        "claude_haiku_4_5_20251001": {
+            "workload_identity": {
+                "federation_rule_id": "fdrl_test",
+                "organization_id": "00000000-0000-0000-0000-000000000000",
+                "service_account_id": "svac_test",
+            }
+        }
+    }
+
+    @pytest.fixture(name="wif_config")
+    def wif_config_fixture(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        monkeypatch.setattr(ModelSelectionConfig, "_instance", None)
+        config = ModelSelectionConfig(
+            default_models_override={}, model_params_override=self.WIF_OVERRIDE
+        )
+        with patch.object(ModelSelectionConfig, "instance", return_value=config):
+            yield config
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("wif_config")
+    async def test_sends_bearer_token_and_oauth_beta(self):
+        """A model with workload_identity authenticates with a federated bearer token, not a key."""
+        with patch(
+            "ai_gateway.auth.anthropic_wif.access_token", return_value="sk-ant-oat01-x"
+        ) as mock_token:
+            headers = await _resolve_upstream_auth_headers(
+                "claude-haiku-4-5-20251001",
+                {"anthropic-beta": "interleaved-thinking-2025-05-14"},
+            )
+
+        params = mock_token.call_args.args[0]
+        assert params.federation_rule_id == "fdrl_test"
+        assert headers["Authorization"] == "Bearer sk-ant-oat01-x"
+        assert headers["anthropic-beta"] == (
+            "interleaved-thinking-2025-05-14,oauth-2025-04-20"
+        )
+        assert "x-api-key" not in headers
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("wif_config")
+    async def test_exchange_failure_is_a_bad_gateway(self):
+        """A failed token exchange must not fall back to the shared API key."""
+        with patch(
+            "ai_gateway.auth.anthropic_wif.access_token",
+            side_effect=WorkloadIdentityError("Token exchange failed (HTTP 401)"),
+        ):
+            with pytest.raises(fastapi.HTTPException) as excinfo:
+                await _resolve_upstream_auth_headers("claude-haiku-4-5-20251001", {})
+
+        assert excinfo.value.status_code == status.HTTP_502_BAD_GATEWAY
+        assert (
+            excinfo.value.detail == "Failed to authenticate with the upstream provider"
+        )
+
+    @pytest.mark.asyncio
+    async def test_models_without_workload_identity_keep_using_api_keys(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+        monkeypatch.setattr(ModelSelectionConfig, "_instance", None)
+        config = ModelSelectionConfig(default_models_override={})
+
+        with patch.object(ModelSelectionConfig, "instance", return_value=config):
+            with patch("ai_gateway.auth.anthropic_wif.access_token") as mock_token:
+                headers = await _resolve_upstream_auth_headers(
+                    "claude-haiku-4-5-20251001", {}
+                )
+
+        mock_token.assert_not_called()
+        assert headers["x-api-key"] == "env-key"
+        assert "Authorization" not in headers
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("wif_config")
+    async def test_unknown_model_keeps_using_api_key(self):
+        headers = await _resolve_upstream_auth_headers("not-a-configured-model", {})
+
+        assert headers["x-api-key"] == "env-key"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("wif_config")
+    async def test_factory_forwards_bearer_token_to_upstream(
+        self,
+        mock_proxy_async_client,
+        limits,
+        internal_event_client,
+        billing_event_service,
+        request_factory,
+        request_headers,
+    ):
+        request_params = {
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stream": True,
+        }
+        request = request_factory(
+            request_url="http://0.0.0.0:5052/v1/proxy/anthropic/v1/messages",
+            request_body=json.dumps(request_params).encode("utf-8"),
+            request_headers=request_headers,
+        )
+
+        with patch(
+            "ai_gateway.auth.anthropic_wif.access_token", return_value="sk-ant-oat01-x"
+        ):
+            factory = AnthropicProxyModelFactory()
+            proxy_client = ProxyClient(
+                limits, internal_event_client, billing_event_service
+            )
+            model = await factory.factory(request)
+            await proxy_client.proxy(request, model)
+
+        upstream_request = mock_proxy_async_client.send.call_args[0][0]
+        assert upstream_request.headers["authorization"] == "Bearer sk-ant-oat01-x"
+        assert "oauth-2025-04-20" in upstream_request.headers["anthropic-beta"]
+        assert "x-api-key" not in upstream_request.headers

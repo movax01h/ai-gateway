@@ -1,0 +1,12 @@
+---
+description: Tracks requests to the access_artifact_registry unit primitive
+internal_events: true
+action: request_access_artifact_registry
+product_group: container_registry
+product_categories:
+  - artifact_registry
+milestone: '19.5'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6798
+tiers:
+  - premium
+  - ultimate

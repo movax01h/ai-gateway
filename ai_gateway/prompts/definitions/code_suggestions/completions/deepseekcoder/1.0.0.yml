@@ -4,6 +4,7 @@ model:
   params:
     max_tokens: 128
 unit_primitive: complete_code
+tool_output_security: false
 prompt_template:
   user: <｜fim▁begin｜>{{prefix}}<｜fim▁hole｜>{{suffix}}<｜fim▁end｜>
 params:

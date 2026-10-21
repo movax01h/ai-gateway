@@ -43,13 +43,16 @@ def parse_deprecated_workflow_definition(value: str) -> tuple[str, str]:
     return api_version, flow_name
 
 
-def strip_ask_listed_pre_approvals(
+def filter_pre_approvals_by_policy(
     pre_approved_tools: list[str], tools_registry: ToolsRegistry
 ) -> list[str]:
-    """Remove tools an admin `ask` rule forces to prompt from a flow config's static pre-approval list.
+    """Keep only the flow config pre-approvals that admin policy permits.
 
-    The flow config cannot pre-approve past an admin `ask` rule; this list short-circuits the approval node before
-    any other check.
+    Drops tools outside the governance ceiling and tools an admin `ask` rule forces to prompt. This list
+    short-circuits the approval node before any other check, so the flow config cannot pre-approve past either.
     """
+    permitted = tools_registry.pre_approvals_allowed_by_policy(pre_approved_tools)
     forced = tools_registry.ask_listed_tool_names(pre_approved_tools)
-    return [name for name in pre_approved_tools if name not in forced]
+    return [
+        name for name in pre_approved_tools if name in permitted and name not in forced
+    ]

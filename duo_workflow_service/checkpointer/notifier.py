@@ -11,6 +11,7 @@ from contract import contract_pb2
 from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import UserOutputDisplayedEvent
+from duo_workflow_service.checkpointer.content_retention import reduce_ui_chat_log
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
 )
@@ -19,9 +20,7 @@ from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.server_tool_blocks import (
     AgentTextSegment,
-    build_anthropic_tool_ui_chat_log,
-    is_anthropic_server_tool_result_block,
-    is_anthropic_server_tool_use_block,
+    ServerToolResults,
     split_content_around_server_tools,
 )
 from duo_workflow_service.entities.state import (
@@ -30,7 +29,6 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
-    build_tool_info,
     get_current_model_max_context_token_limit,
 )
 from duo_workflow_service.executor.outbox import Outbox
@@ -128,9 +126,11 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         goal: str,
         workflow_id: str = "",
         node_event_log: Optional[NodeEventLog] = None,
+        metadata_only: bool = False,
     ):
         self.outbox = outbox
         self.goal = goal
+        self._metadata_only = metadata_only
         self._workflow_id = workflow_id
         self.ui_chat_log: list[UiChatLog] = []
         self.status = WorkflowStatusEnum.NOT_STARTED
@@ -291,11 +291,19 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
     # them and just send the most recent. This is done by keeping track of the
     # checkpoint_number so we remember the last one we sent.
     def most_recent_new_checkpoint(self):
-        recent_ui_chat_log_changes = self._pop_recent_ui_chat_log_changes()
+        recent_ui_chat_log_changes: list = self._pop_recent_ui_chat_log_changes()
+        steps = self.steps
+        goal = self.goal
+        if self._metadata_only:
+            # Same allowlist as the saved checkpoint. A plan step's description and
+            # the goal are model or user text, so only step ids and statuses remain.
+            recent_ui_chat_log_changes = reduce_ui_chat_log(recent_ui_chat_log_changes)
+            steps = [{"id": s.get("id"), "status": s.get("status")} for s in steps]
+            goal = ""
 
         channel_values: dict[str, Any] = {
             "ui_chat_log": recent_ui_chat_log_changes,
-            "plan": {"steps": self.steps},
+            "plan": {"steps": steps},
         }
         # Append-only node-lifecycle events for live flow visualization. Additive
         # and ignored by clients that don't consume it; omitted when there is
@@ -306,7 +314,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             channel_values["node_events"] = node_events
 
         checkpoint = contract_pb2.NewCheckpoint(
-            goal=self.goal,
+            goal=goal,
             status=WORKFLOW_STATUS_TO_CHECKPOINT_STATUS[self._reportable_status()],
             checkpoint=dumps({"channel_values": channel_values}, cls=CustomEncoder),
         )
@@ -451,22 +459,14 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
             return
 
         self._replace_langchain_id_with_open_ai_id(message)
-
-        content = message.content
-        if isinstance(content, list):
-            for block in content:
-                if is_anthropic_server_tool_use_block(block):
-                    self._handle_server_tool_use_block(block, component_name)
-                elif is_anthropic_server_tool_result_block(block):
-                    self._handle_server_tool_result_block(block)
-
-        self._accumulate_text_chunk(message, component_name)
+        self._accumulate_chunk(message, component_name)
         self._sync_streaming_tool_call_ui_chat_log(component_name)
 
-    def _accumulate_text_chunk(
+    def _accumulate_chunk(
         self, message: AIMessageChunk, component_name: Optional[str] = None
     ) -> None:
-        """Accumulate streamed text into per-segment AGENT entries, split at tool boundaries."""
+        """Rebuild this message's AGENT text segments and server-tool cards from the accumulated content, where OpenAI's
+        citations land after their search card."""
         if (
             self.latest_ai_message is not None
             and self.latest_ai_message.id == message.id
@@ -483,11 +483,12 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
                 self._upsert_agent_segment(message.id, content, component_name)
             return
 
-        # Tool cards are handled by _append_chunk_to_ui_chat_log; here we only
-        # (re)build the AGENT text entries between them.
+        results = ServerToolResults(content)
         for segment in split_content_around_server_tools(content, message.id):
             if isinstance(segment, AgentTextSegment):
                 self._upsert_agent_segment(segment.key, segment.text, component_name)
+            else:
+                self._upsert_server_tool_card(results, segment.block, component_name)
 
     def _upsert_agent_segment(
         self,
@@ -522,41 +523,29 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
         )
         self.ui_chat_log.append(entry)
 
-    def _handle_server_tool_use_block(
-        self, block: dict, component_name: Optional[str] = None
+    def _upsert_server_tool_card(
+        self,
+        results: ServerToolResults,
+        block: dict,
+        component_name: Optional[str] = None,
     ) -> None:
-        """Append a pending TOOL card for an Anthropic server-tool invocation (idempotent)."""
-        tool_use_id = block.get("id")
-        if not tool_use_id:
-            return
-        if (
-            self._find_ui_chat_log_entry(tool_use_id, message_type=MessageTypeEnum.TOOL)
-            is not None
-        ):
+        """Create the TOOL card for a server-tool call, or refresh its status and results."""
+        if not block.get("id"):
             return
 
-        entry = build_anthropic_tool_ui_chat_log(block, component_name=component_name)
-        self.ui_chat_log.append(entry)
-
-    def _handle_server_tool_result_block(self, block: dict) -> None:
-        """Flip a pending server-tool card to SUCCESS with its result."""
-        tool_use_id = block.get("tool_use_id")
-        entry = self._find_ui_chat_log_entry(
-            tool_use_id, message_type=MessageTypeEnum.TOOL
+        entry = results.build_ui_chat_log(block, component_name=component_name)
+        matching_chat_log_entry = self._find_ui_chat_log_entry(
+            block["id"], message_type=MessageTypeEnum.TOOL
         )
-        if entry is not None:
-            info = entry.get("tool_info") or ToolInfo(name="server_tool", args={})
-            entry["status"] = ToolStatus.SUCCESS
-            entry["tool_info"] = build_tool_info(
-                info["name"], info["args"], block.get("content")
-            )
-            return
-
-        log.warning(
-            "Received server tool result with no matching server_tool_use entry",
-            tool_use_id=tool_use_id,
-            block_type=block.get("type"),
-        )
+        if matching_chat_log_entry is None:
+            self.ui_chat_log.append(entry)
+        else:
+            # Every field derived from the block, which streams in piecemeal. The
+            # timestamp is the card's creation time and stays put.
+            matching_chat_log_entry["status"] = entry["status"]
+            matching_chat_log_entry["tool_info"] = entry["tool_info"]
+            matching_chat_log_entry["message_sub_type"] = entry["message_sub_type"]
+            matching_chat_log_entry["content"] = entry["content"]
 
     def _find_ui_chat_log_entry(
         self,

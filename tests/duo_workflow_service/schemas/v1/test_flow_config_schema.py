@@ -1,4 +1,7 @@
 import json
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
 
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     INPUT_JSONSCHEMA_VERSION,
@@ -6,9 +9,47 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
 )
 from duo_workflow_service.schemas.v1 import flow_config_schema
 from duo_workflow_service.schemas.v1.flow_config_schema import (
+    FlowConfigJsonSchemaGenerator,
     generate_flow_config_schema,
     write_flow_config_schema,
 )
+
+
+class TestFlowConfigJsonSchemaGenerator:
+    class _Inner(BaseModel):
+        value: int
+
+    class _Open(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        value: int
+
+    class _Outer(BaseModel):
+        inner: "TestFlowConfigJsonSchemaGenerator._Inner"
+        open: Optional["TestFlowConfigJsonSchemaGenerator._Open"] = None
+
+    def test_closes_root_and_nested_models(self):
+        schema = self._Outer.model_json_schema(
+            schema_generator=FlowConfigJsonSchemaGenerator
+        )
+
+        assert schema["additionalProperties"] is False
+        assert schema["$defs"]["_Inner"]["additionalProperties"] is False
+
+    def test_keeps_additional_properties_set_by_the_model(self):
+        schema = self._Outer.model_json_schema(
+            schema_generator=FlowConfigJsonSchemaGenerator
+        )
+
+        assert schema["$defs"]["_Open"]["additionalProperties"] is True
+
+    def test_declares_schema_version_first(self):
+        schema = self._Outer.model_json_schema(
+            schema_generator=FlowConfigJsonSchemaGenerator
+        )
+
+        assert next(iter(schema)) == "$schema"
+        assert schema["$schema"] == INPUT_JSONSCHEMA_VERSION
 
 
 class TestGenerateFlowConfigSchema:
@@ -18,16 +59,29 @@ class TestGenerateFlowConfigSchema:
         assert schema["$schema"] == INPUT_JSONSCHEMA_VERSION
 
     def test_matches_flow_config_model_json_schema(self):
-        """Everything but the injected ``$schema`` key must mirror the live Pydantic model.
+        """The schema must mirror the live Pydantic model, built with the custom generator.
 
         This is the invariant the CI lint job (``make check-duo-workflow-flow-schema``)
         relies on: if ``FlowConfig`` changes without regenerating the checked-in file,
         the two fall out of sync and the job fails.
         """
-        schema = generate_flow_config_schema()
-        schema_without_version = {k: v for k, v in schema.items() if k != "$schema"}
+        assert generate_flow_config_schema() == FlowConfig.model_json_schema(
+            schema_generator=FlowConfigJsonSchemaGenerator
+        )
 
-        assert schema_without_version == FlowConfig.model_json_schema()
+    def test_closes_every_model_object(self):
+        """Every model object rejects unknown keys, although ``FlowConfig`` ignores them at runtime."""
+        schema = generate_flow_config_schema()
+        model_schemas = [schema] + [
+            definition
+            for definition in schema["$defs"].values()
+            if definition.get("type") == "object" and "properties" in definition
+        ]
+
+        assert all(
+            model_schema["additionalProperties"] is False
+            for model_schema in model_schemas
+        )
 
     def test_describes_flow_config_shape(self):
         schema = generate_flow_config_schema()
@@ -48,24 +102,6 @@ class TestGenerateFlowConfigSchema:
         # Raises if the schema contains anything json.dumps can't handle (e.g. a
         # non-string dict key or a non-serializable value slipping in from Pydantic).
         json.dumps(schema)
-
-    def test_schema_version_overrides_any_key_from_flow_config_model_json_schema(
-        self, monkeypatch
-    ):
-        """INPUT_JSONSCHEMA_VERSION must win even if Pydantic starts emitting its own ``$schema`` key.
-
-        Regression test for the intended dict-merge order: ``FlowConfig.model_json_schema()``
-        is spread first and ``$schema`` is set after, so it always takes precedence.
-        """
-        monkeypatch.setattr(
-            FlowConfig,
-            "model_json_schema",
-            classmethod(lambda cls: {"$schema": "bogus"}),
-        )
-
-        schema = generate_flow_config_schema()
-
-        assert schema["$schema"] == INPUT_JSONSCHEMA_VERSION
 
     def test_checked_in_schema_is_up_to_date(self):
         """Guard against a stale checked-in schema file, independent of the CI job.

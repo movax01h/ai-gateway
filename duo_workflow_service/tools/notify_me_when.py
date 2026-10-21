@@ -26,7 +26,7 @@ _CONDITION_TYPE_TIMER = "timer"
 class NotifyWhen(BaseModel):
     """The condition that triggers delivery.
 
-    ``type`` is an open enum: new condition types arrive as new members with their
+    `type` is an open enum: new condition types arrive as new members with their
     own fields, at which point the default is dropped.
     """
 
@@ -129,4 +129,7 @@ class NotifyMeWhen(DuoBaseTool):
         args: NotifyMeWhenInput,
         _tool_response: Any = None,
     ) -> str:
-        return f"Schedule a notification in {args.when.delay_minutes} minute(s)"
+        return (
+            f"Schedule a notification in {args.when.delay_minutes} minute(s): "
+            f"{args.message}"
+        )

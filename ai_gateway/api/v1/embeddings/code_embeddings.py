@@ -1,5 +1,5 @@
 from json import JSONDecodeError
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory
@@ -35,6 +35,8 @@ router = APIRouter()
 
 CODE_EMBEDDINGS_PROMPT_ID = "embeddings_code"
 
+CodeEmbeddingsOperation = Literal["index", "search"]
+
 
 @router.post("/code_embeddings")
 @router.post("/code_embeddings/index")
@@ -50,6 +52,7 @@ async def code_embeddings_index(
         payload=payload,
         current_user=current_user,
         prompt_registry=prompt_registry,
+        embeddings_operation="index",
     )
 
 
@@ -66,6 +69,7 @@ async def code_embeddings_search(
         payload=payload,
         current_user=current_user,
         prompt_registry=prompt_registry,
+        embeddings_operation="search",
     )
 
 
@@ -74,6 +78,7 @@ async def _generate_code_embeddings(
     payload: EmbeddingsRequest,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
+    embeddings_operation: CodeEmbeddingsOperation,
 ):
     request_log.debug("embeddings input:", payload=payload)
 
@@ -85,6 +90,12 @@ async def _generate_code_embeddings(
             prompt_id=CODE_EMBEDDINGS_PROMPT_ID,
             model_metadata=model_metadata,
             internal_event_category=__name__,
+            # An embeddings model may bill by characters, not per token,
+            # so input_tokens alone cannot be used to cost embedding requests.
+            internal_event_extra={
+                "input_characters": _count_input_characters(payload.contents),
+                "embeddings_operation": embeddings_operation,
+            },
         )
     except ValueError as e:
         raise HTTPException(
@@ -129,8 +140,8 @@ async def _generate_code_embeddings(
     return EmbeddingsResponse(
         model=EmbeddingsResponse.Model(
             engine=prompt.model_provider,
-            name=prompt.model_name,
-            identifier=payload.model_metadata.identifier,
+            name=prompt.reported_model_name,
+            identifier=model_metadata.resolved_identifier,
         ),
         predictions=[
             EmbeddingsResponse.Prediction(
@@ -140,6 +151,10 @@ async def _generate_code_embeddings(
             for p in predictions
         ],
     )
+
+
+def _count_input_characters(contents: list[str]) -> int:
+    return sum(len("".join(content.split())) for content in contents)
 
 
 def _validate_and_get_model_metadata(

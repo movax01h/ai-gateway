@@ -30,15 +30,14 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
 from duo_workflow_service.entities.state import (
-    TOOL_RESPONSE_MAX_DISPLAY_MSG,
     MessageTypeEnum,
     ToolInfo,
     ToolStatus,
     UiChatLog,
     get_current_model_max_context_token_limit,
+    render_for_display,
 )
 from duo_workflow_service.monitoring import duo_workflow_metrics
-from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
 from lib.context import StarletteUser, is_gitlab_team_member
 from lib.context.model import get_model_metadata
 from lib.internal_events.client import InternalEventsClient
@@ -497,9 +496,8 @@ def build_compaction_tool_card(
     tool_info = ToolInfo(name="compaction", args=args)
     summary = result.summary if result is not None else None
     if summary is not None:
-        redacted = redact_secrets_for_ui(summary.text(), tool_name="compaction")
         tool_info["tool_response"] = ToolMessage(
-            content=redacted[:TOOL_RESPONSE_MAX_DISPLAY_MSG],
+            content=render_for_display(summary.text(), tool_name="compaction"),
             name="compaction",
             tool_call_id=tool_call_id,
             status="success",

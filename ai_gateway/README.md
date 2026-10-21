@@ -66,6 +66,9 @@ See [Application settings doc](../docs/application_settings.md)
    ANTHROPIC_API_KEY=<API_KEY>
    ```
 
+   `ANTHROPIC_FACILITATOR_KEY` is optional locally. Leaving it unset logs one
+   warning at startup and sends Anthropic requests without the facilitator header.
+
 1. You can enable hot reload by setting the `AIGW_FASTAPI__RELOAD` environment variable to `true` in the `.env` file.
 1. Ensure you're authenticated with the `gcloud` CLI by running `gcloud auth application-default login`.
 1. Start the model-gateway server locally: `poetry run ai_gateway`.
@@ -81,7 +84,7 @@ This can be useful for testing middleware, request/response interface contracts,
 uses cases that do not require an AI model to execute.
 
 Agentic Chat can be mocked by setting the environment variables `AIGW_USE_AGENTIC_MOCK=true` and `AIGW_MOCK_MODEL_RESPONSES=true`. You can specify a sequence of responses to simulate a multi-step flow.
-See the [documentation](docs/workflows/agentic_mock.md) for details.
+See the [documentation](../docs/workflows/agentic_mock.md) for details.
 
 ### Logging requests and responses during development
 

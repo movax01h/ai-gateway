@@ -20,11 +20,12 @@ class TestTheSharedVocabulary:
     def test_item_type_values(self):
         """Pinned as a set, so a kind cannot be added without saying so here.
 
-        There is no bare ``agent``: what a workspace holds is an agent *template*, which
-        its source builds into a component.
+        A workspace holds agent *templates*, which its source builds into components.
+        The AI Catalog holds finished ``agent`` items, addressed by id and version.
         """
         assert {item_type.value for item_type in CatalogItemType} == {
             "agent_template",
+            "agent",
             "flow",
         }
 

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Optional
 
 import structlog
@@ -6,8 +7,72 @@ import structlog
 from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.event_types import AuditEvent
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
 
 logger = structlog.stdlib.get_logger("audit_event_collector")
+
+# Derived from the transport limit so the two cannot drift. The 256 KiB
+# remainder covers the JSON envelope and the runHTTPRequest proto/HTTP framing.
+MAX_BUFFER_BYTES = MAX_MESSAGE_SIZE - (256 * 1024)
+
+# Bound the shutdown drain so a stuck send cannot hold close() past the Cloud Run
+# SIGKILL window (SIGTERM, then SIGKILL ~10s later).
+DRAIN_TIMEOUT_SECONDS = 3.0
+
+# An excerpted field keeps this much of its start and of its end.
+EXCERPT_BYTES = 8 * 1024
+
+# The fields an event keeps for a metadata-only flow. Any other field, including
+# one a future event type adds, is emptied: prompts, responses, tool arguments and
+# results, displayed output, the goal and error messages.
+# Keep in sync with the Rails copy in ee/lib/ai/duo_workflows/content_retention.rb.
+_METADATA_AUDIT_FIELDS = frozenset(
+    {
+        # Envelope
+        "id",
+        "event_type",
+        "timestamp",
+        "workflow_id",
+        "sequence",
+        "workflow_type",
+        # Outcome and timing
+        "status",
+        "duration_seconds",
+        "latency_ms",
+        "finish_reason",
+        "error_type",
+        "attempt_number",
+        "max_attempts",
+        # Model and usage
+        "model_name",
+        "provider",
+        "search_source",
+        "prompt_token_count",
+        "completion_token_count",
+        # Sizes of the emptied text
+        "content_length",
+        "response_length",
+        "prompt_content_bytes",
+        "prompt_content_truncated",
+        "response_content_bytes",
+        "response_content_truncated",
+        # Tools and steps
+        "tool_name",
+        "tools_bound",
+        "approval_source",
+        "policy_ref",
+        "input_type",
+        "output_type",
+    }
+)
+
+
+def strip_audit_event_content(event: AuditEvent) -> None:
+    """Empty every field of ``event`` outside _METADATA_AUDIT_FIELDS, in place."""
+    for name in type(event).model_fields:
+        if name not in _METADATA_AUDIT_FIELDS:
+            value = getattr(event, name)
+            setattr(event, name, "" if isinstance(value, str) else None)
 
 
 class AuditEventCollector:
@@ -17,14 +82,17 @@ class AuditEventCollector:
         workflow_id: str = "",
         buffer_size: int = 100,
         flush_interval_seconds: float = 10.0,
+        metadata_only: bool = False,
     ):
         self._client = client
         self._workflow_id = workflow_id
+        self._metadata_only = metadata_only
         self._buffer: list[AuditEvent] = []
+        self._buffer_bytes: int = 0
         self._buffer_size = buffer_size
         self._flush_interval_seconds = flush_interval_seconds
         self._flush_task: Optional[asyncio.Task] = None
-        self._lock = asyncio.Lock()
+        self._pending_sends: set[asyncio.Task] = set()
         self._sequence: int = 0
 
     @property
@@ -32,43 +100,61 @@ class AuditEventCollector:
         return self._workflow_id
 
     def capture(self, event: AuditEvent) -> None:
-        self._sequence += 1
-        event.sequence = self._sequence
+        # Every emitter goes through here, so this is the one place to strip text.
+        if self._metadata_only:
+            strip_audit_event_content(event)
+        # Measure with the tentative sequence so the size matches the wire;
+        # commit it only if the event is kept, so a drop consumes no sequence.
+        next_sequence = self._sequence + 1
+        event.sequence = next_sequence
+        event_bytes = self._event_bytes(event)
+        # Excerpt free text only when the event would otherwise be dropped.
+        if event_bytes > MAX_BUFFER_BYTES:
+            event_bytes = self._bound_content(event, event_bytes)
+
+        # An event still over the cap can never be sent under the 4MB gRPC
+        # limit; drop it rather than fail the send.
+        if event_bytes > MAX_BUFFER_BYTES:
+            largest_field, largest_field_bytes = self._largest_field(event)
+            logger.warning(
+                "Dropping audit event larger than the size cap",
+                workflow_id=self._workflow_id,
+                event_type=event.event_type.value,
+                event_bytes=event_bytes,
+                max_buffer_bytes=MAX_BUFFER_BYTES,
+                largest_field=largest_field,
+                largest_field_bytes=largest_field_bytes,
+            )
+            duo_workflow_metrics.count_audit_events_dropped(
+                reason="event_too_large",
+                event_type=event.event_type.value,
+                field=largest_field or "none",
+                amount=1,
+            )
+            return
+
+        self._sequence = next_sequence
+
+        # Flush the buffered batch before this event would push it over the cap.
+        if self._buffer and self._buffer_bytes + event_bytes > MAX_BUFFER_BYTES:
+            self._schedule_flush()
+
         self._buffer.append(event)
+        self._buffer_bytes += event_bytes
         duo_workflow_metrics.count_audit_events_captured(
             event_type=event.event_type.value
         )
+
         if len(self._buffer) >= self._buffer_size:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self.flush())
-            except RuntimeError:
-                logger.warning("No running event loop, skipping auto-flush")
-                duo_workflow_metrics.count_audit_events_auto_flush_skipped()
+            self._schedule_flush()
 
     async def flush(self, is_final: bool = False) -> None:
-        async with self._lock:
-            events_to_send = self._buffer.copy()
-            self._buffer.clear()
-
-        if not events_to_send and not is_final:
-            return
-
+        events_to_send = self._detach_buffer()
         total = self._sequence if is_final else None
-        await self._client.send_batch(
-            events_to_send, is_final=is_final, total_events_sent=total
-        )
+        await self._send(events_to_send, is_final=is_final, total_events_sent=total)
 
     async def start(self) -> None:
         self._flush_task = asyncio.create_task(self._flush_loop())
-
-    async def _flush_loop(self) -> None:
-        try:
-            while True:
-                await asyncio.sleep(self._flush_interval_seconds)
-                await self.flush()
-        except asyncio.CancelledError:
-            pass
 
     async def close(self) -> None:
         if self._flush_task and not self._flush_task.done():
@@ -79,6 +165,20 @@ class AuditEventCollector:
                 pass
         pending = len(self._buffer)
         try:
+            # Drain in-flight sends before the final flush, inside the try so a
+            # cancel here still records a dropped flush; bounded by the timeout.
+            if self._pending_sends:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*self._pending_sends, return_exceptions=True),
+                        timeout=DRAIN_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Audit send drain timed out; sending the final flush anyway",
+                        workflow_id=self._workflow_id,
+                    )
+            pending = len(self._buffer)
             await self.flush(is_final=self._sequence > 0)
         except asyncio.CancelledError:
             if pending:
@@ -89,3 +189,100 @@ class AuditEventCollector:
                 "Final audit event flush cancelled; events may be lost",
                 workflow_id=self._workflow_id,
             )
+
+    @staticmethod
+    def _event_bytes(event: AuditEvent) -> int:
+        return len(json.dumps(event.to_cloudevent()).encode("utf-8"))
+
+    def _bound_content(self, event: AuditEvent, event_bytes: int) -> int:
+        """Excerpt the event's free-text field once; return the new event size."""
+        field = event.excerpt_field
+        if field is None:
+            return event_bytes
+        # surrogatepass: a lone surrogate is valid in str but not in UTF-8.
+        encoded = getattr(event, field).encode("utf-8", "surrogatepass")
+        if len(encoded) <= 2 * EXCERPT_BYTES:
+            return event_bytes
+        head = encoded[:EXCERPT_BYTES].decode("utf-8", errors="ignore")
+        tail = encoded[-EXCERPT_BYTES:].decode("utf-8", errors="ignore")
+        omitted = len(encoded) - 2 * EXCERPT_BYTES
+        setattr(event, field, f"{head}\n...[{omitted} bytes omitted]...\n{tail}")
+        setattr(event, f"{field}_truncated", True)
+        setattr(event, f"{field}_bytes", len(encoded))
+        truncated_bytes = self._event_bytes(event)
+        logger.warning(
+            "Truncated audit event larger than the size cap",
+            workflow_id=self._workflow_id,
+            event_type=event.event_type.value,
+            field=field,
+            field_bytes=len(encoded),
+            event_bytes=event_bytes,
+            truncated_event_bytes=truncated_bytes,
+        )
+        duo_workflow_metrics.count_audit_events_truncated(
+            event_type=event.event_type.value, field=field
+        )
+        return truncated_bytes
+
+    @staticmethod
+    def _largest_field(event: AuditEvent) -> tuple[Optional[str], int]:
+        data = event.to_cloudevent().get("data") or {}
+        sizes = {
+            key: len(json.dumps(value).encode("utf-8")) for key, value in data.items()
+        }
+        if not sizes:
+            return None, 0
+        field = max(sizes, key=lambda key: sizes[key])
+        return field, sizes[field]
+
+    def _schedule_flush(self) -> None:
+        if not self._buffer:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("No running event loop, skipping auto-flush")
+            duo_workflow_metrics.count_audit_events_auto_flush_skipped()
+            return
+
+        batch = self._detach_buffer()
+        # Hold a strong reference until done: asyncio only weakly references
+        # tasks, so an un-kept one can be garbage-collected mid-send.
+        task = loop.create_task(self._send(batch))
+        self._pending_sends.add(task)
+        task.add_done_callback(self._on_send_done)
+
+    def _on_send_done(self, task: asyncio.Task) -> None:
+        self._pending_sends.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning(
+                "Audit event send task raised an exception",
+                workflow_id=self._workflow_id,
+                error=str(task.exception()),
+            )
+
+    def _detach_buffer(self) -> list[AuditEvent]:
+        batch = self._buffer
+        self._buffer = []
+        self._buffer_bytes = 0
+        return batch
+
+    async def _send(
+        self,
+        events: list[AuditEvent],
+        is_final: bool = False,
+        total_events_sent: Optional[int] = None,
+    ) -> None:
+        if not events and not is_final:
+            return
+        await self._client.send_batch(
+            events, is_final=is_final, total_events_sent=total_events_sent
+        )
+
+    async def _flush_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._flush_interval_seconds)
+                await self.flush()
+        except asyncio.CancelledError:
+            pass

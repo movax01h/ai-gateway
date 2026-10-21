@@ -6,6 +6,8 @@ GitLab, no matter which instance they are using: self-managed, dedicated or GitL
 1. The [AI Gateway](ai_gateway/README.md), which handles things such as prompts, model and provider selection, and custom models. This is the service named `gitlab-ai-gateway` in your GDK.
 1. The [Duo Workflow Service](duo_workflow_service/README.md) (DWS), also known as the Agent Platform, which handles Agentic functionality, and makes calls to LLMs via the AI Gateway service. This is the service named `duo-workflow-service` in your GDK.
 
+There is an [internal recording](https://youtu.be/SXfLOYm4zS4) for GitLab members that provides an overview of this project.
+
 ## How to become a project maintainer
 
 See [Maintainership](docs/maintainership.md).
@@ -18,24 +20,21 @@ See [test doc](docs/tests.md).
 
 This project uses the following linting tools:
 
-- [Ruff](https://docs.astral.sh/ruff/): Lints and formats code, replacing Black, isort, and flake8 (migration tracked in work item #2237).
-- [pylint](https://pylint.pycqa.org): Analyzes code for potential errors and style issues.
+- [Ruff](https://docs.astral.sh/ruff/): Lints and formats Python code.
+- [pylint](https://pylint.pycqa.org): Runs the project's custom checkers only. Ruff owns all general lint rules.
 - [mypy](https://mypy-lang.org): Performs static type checking.
 - [codespell](https://github.com/codespell-project/codespell): Checks for common misspellings.
 - [docformatter](https://github.com/PyCQA/docformatter): Formats docstrings.
+- [editorconfig-checker](https://github.com/editorconfig-checker/editorconfig-checker): Checks `.editorconfig` conformance.
+- [yamllint](https://github.com/adrienverge/yamllint): Lints YAML files.
+- [buf](https://buf.build): Lints protobuf contracts.
+- [Vale](https://vale.sh), [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2), and
+  [lychee](https://github.com/lycheeverse/lychee): Lint documentation.
 
-To lint the entire projects, you can use the following command:
+To lint the entire project, you can use the following command:
 
 ```shell
 make lint
-```
-
-We are incrementally rolling out `mypy` static type checker to the project
-([issue](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/246)).
-To show outstanding `mypy` warnings, you can use the following command:
-
-```shell
-make check-mypy TODO=true
 ```
 
 To fix linting errors, you can use the following command:
@@ -46,13 +45,12 @@ make format
 
 The `format` command only addresses `codespell`, `ruff` (lint autofixes and formatting), and `docformatter` issues.
 
-There is an [internal recording](https://youtu.be/SXfLOYm4zS4) for GitLab members that provides an overview of this project.
-
 ### Running lint on Git commit
 
 We use [Lefthook](https://github.com/evilmartians/lefthook) to lint code and doc
 prior to Git committing. This repository comes with a Lefthook configuration
-(`lefthook.yml`), but it must be installed.
+(`lefthook.yml`), but it must be installed. Lefthook itself is pinned in
+`.tool-versions`, so install it with `mise install`.
 
 1. Install Lefthook managed Git hooks:
 
@@ -144,7 +142,7 @@ to add internal events and test internal event collection with Snowplow locally.
 
 ## Release
 
-See [release doc](docs/release.md).
+See [release doc](docs/delivery/release.md).
 
 ## Rate limiting
 

@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DevConfig(BaseModel):
@@ -42,4 +42,4 @@ class DefaultModelEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     identifier: str
-    weight: Optional[float] = None
+    weight: Optional[float] = Field(default=None, ge=0)

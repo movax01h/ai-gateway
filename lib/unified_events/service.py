@@ -27,7 +27,7 @@ class UnifiedEventService:
     """Sends events with the unified event construct to the events sidecar."""
 
     AI_CONTEXT_SCHEMA = InternalEventsClient.AI_CONTEXT_SCHEMA
-    SIDECAR_URL = "http://localhost:8082"
+    DEFAULT_SIDECAR_URL = "http://localhost:8130"
     ENDPOINT_PATH = "/v1/events"
     REQUEST_TIMEOUT = (5.0, 10.0)  # requests' (connect, read) timeouts, in seconds
     MAX_SE_FIELD_LENGTH = 255
@@ -35,7 +35,11 @@ class UnifiedEventService:
         {"input_tokens", "output_tokens", "total_tokens"}
     )
 
-    def __init__(self) -> None:
+    def __init__(
+        self, sidecar_url: str = DEFAULT_SIDECAR_URL, enabled: bool = False
+    ) -> None:
+        self._sidecar_url = sidecar_url
+        self._enabled = enabled
         self._logger = structlog.stdlib.get_logger("unified_event_service")
         self._session = requests.Session()
         self._executor = ThreadPoolExecutor(
@@ -50,6 +54,9 @@ class UnifiedEventService:
         **kwargs: Any,
     ) -> None:
         """Track an event by POSTing it to the events sidecar."""
+        if not self._enabled:
+            return
+
         if additional_properties is None:
             additional_properties = InternalEventAdditionalProperties()
 
@@ -117,7 +124,7 @@ class UnifiedEventService:
         tracked_internal_events.get().add(event_name)
 
     def _post_event(self, event_name: str, body: Dict[str, Any]) -> None:
-        url = f"{self.SIDECAR_URL}{self.ENDPOINT_PATH}"
+        url = f"{self._sidecar_url}{self.ENDPOINT_PATH}"
         try:
             response = self._session.post(url, json=body, timeout=self.REQUEST_TIMEOUT)
         except requests.RequestException as e:

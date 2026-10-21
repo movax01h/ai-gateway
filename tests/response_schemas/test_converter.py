@@ -367,3 +367,42 @@ class TestConverter:
             with pytest.raises(ValueError) as exc_info:
                 json_schema_to_pydantic(schema)
             assert "exceeds maximum depth" in str(exc_info.value)
+
+    def test_float_length_and_items_constraints(self):
+        """Test that float-valued string/array length constraints are cast to int and enforced."""
+        schema = {
+            "title": "float_constraints_tool",
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "minLength": 2.0,
+                    "maxLength": 5.0,
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1.0,
+                    "maxItems": 3.0,
+                },
+            },
+            "required": ["summary", "tags"],
+        }
+
+        model = json_schema_to_pydantic(schema)
+
+        instance = model(summary="hello", tags=["a", "b", "c"])
+        assert instance.summary == "hello"
+        assert instance.tags == ["a", "b", "c"]
+
+        with pytest.raises(ValidationError):
+            model(summary="a", tags=["a"])
+
+        with pytest.raises(ValidationError):
+            model(summary="too_long", tags=["a"])
+
+        with pytest.raises(ValidationError):
+            model(summary="ok", tags=[])
+
+        with pytest.raises(ValidationError):
+            model(summary="ok", tags=["a", "b", "c", "d"])

@@ -80,12 +80,15 @@ def test_convert_mcp_tools_trusted_skips_warning():
 
     # Trusted tool should NOT have the warning
     assert result[0]["description"] == "GitLab search tool"
+    assert result[0]["trusted"] is True
 
     # Explicitly untrusted tool should have the warning
     assert result[1]["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nRandom tool"
+    assert result[1]["trusted"] is False
 
     # Default (trusted=False) should have the warning
     assert result[2]["description"] == f"{UNTRUSTED_MCP_WARNING}\n\nDefault tool"
+    assert result[2]["trusted"] is False
 
 
 @pytest.mark.asyncio
@@ -339,3 +342,23 @@ def test_sanitize_python_identifier(input_name, expected):
 def test_sanitize_python_identifier_invalid(input_name):
     with pytest.raises(ValueError):
         sanitize_python_identifier(input_name)
+
+
+def test_convert_mcp_tools_to_configs_carries_client_injected():
+    """Workhorse owns client_injected, so the config must mirror it verbatim."""
+    mcp_tools = [
+        contract_pb2.McpTool(
+            name="gitlab_get_issue", description="GitLab tool", inputSchema="{}"
+        ),
+        contract_pb2.McpTool(
+            name="salesforce_get_account",
+            description="Client tool",
+            inputSchema="{}",
+            client_injected=True,
+        ),
+    ]
+
+    configs = convert_mcp_tools_to_configs(mcp_tools)
+
+    assert configs[0]["client_injected"] is False
+    assert configs[1]["client_injected"] is True

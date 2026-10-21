@@ -4,8 +4,12 @@ import asyncio
 from typing import Any, Optional
 
 import structlog.stdlib
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT,
+    ToolBlockedByAdministratorError,
+)
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -35,6 +39,7 @@ from duo_workflow_service.tools import (
     UnknownToolError,
     format_tool_display_message,
 )
+from lib.context import record_approval_source
 from lib.internal_events.event_enum import EventEnum
 
 log = structlog.stdlib.get_logger(__name__)
@@ -101,6 +106,7 @@ class ToolApprovalRequestNode:
         session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
         tracker: ToolEventTracker | None = None,
         approval_requests_key: RuntimeIOKey | None = None,
+        halt_on_denied_tool: bool = True,
     ):
         self.name = name
         self._conversation_history_key = conversation_history_key
@@ -111,6 +117,14 @@ class ToolApprovalRequestNode:
         self._session_id_key = session_id_key
         self._tracker = tracker
         self._approval_requests_key = approval_requests_key
+        self._halt_on_denied_tool = halt_on_denied_tool
+
+    def _invalid_call_content(self, call: ToolCall, invalid_by_id: dict) -> str:
+        if call["id"] not in invalid_by_id:
+            return "Tool call cancelled because another call in this batch was invalid."
+        if call["name"] in self._toolset.denied_tools:
+            return TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT.format(tool_name=call["name"])
+        return str(invalid_by_id[call["id"]])
 
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Validate tool calls and request approval."""
@@ -144,24 +158,26 @@ class ToolApprovalRequestNode:
         if invalid_calls:
             # Denied tools are stripped from the toolset, so attempts to call
             # them surface here as invalid calls rather than in the tool node.
-            if self._tracker:
-                for error in invalid_calls:
-                    blocked_name = error.tool_call.get("name")
-                    if blocked_name in self._toolset.denied_tools:
+            blocked_names = [
+                error.tool_call.get("name")
+                for error in invalid_calls
+                if error.tool_call.get("name") in self._toolset.denied_tools
+            ]
+            if blocked_names:
+                if self._tracker:
+                    for blocked_name in blocked_names:
                         self._tracker.track_tool_governance_event(
                             event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
                             tool_name=blocked_name,
                         )
+                if self._halt_on_denied_tool:
+                    raise ToolBlockedByAdministratorError(blocked_names)
 
             invalid_by_id = {e.tool_call["id"]: e for e in invalid_calls}
             error_messages = [
                 ToolMessage(
                     tool_call_id=call["id"],
-                    content=(
-                        str(invalid_by_id[call["id"]])
-                        if call["id"] in invalid_by_id
-                        else "Tool call cancelled because another call in this batch was invalid."
-                    ),
+                    content=self._invalid_call_content(call, invalid_by_id),
                 )
                 for call in last_message.tool_calls
             ]
@@ -181,6 +197,7 @@ class ToolApprovalRequestNode:
             if source is None:
                 needs_approval.append(call)
             else:
+                record_approval_source(call.get("id"), source)
                 log.info(
                     "Skipping tool call approval",
                     tool_name=call["name"],

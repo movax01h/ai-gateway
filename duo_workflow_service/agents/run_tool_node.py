@@ -6,15 +6,17 @@ from uuid import uuid4
 
 import structlog
 from langchain.tools import BaseTool
+from langchain_core.messages import ToolMessage
 
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import ToolExecutionFailedEvent
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
-from duo_workflow_service.entities.state import ToolInfo, WorkflowState
+from duo_workflow_service.entities.state import ApprovalSource, ToolInfo, WorkflowState
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tracking.errors import log_exception
+from lib.context import record_approval_source
 from lib.events import GLReportingEventContext
 from lib.hidden_layer_log import set_hidden_layer_log_context
 
@@ -86,10 +88,33 @@ class RunToolNode(Generic[WorkflowStateT]):
             # tool's ainvoke inherits from the graph config; emitting them here double counts.
             collector = get_audit_collector()
 
+            # RunToolNode tools never pass through an approval node; attribute the
+            # call before invoking so the callback handler's ToolInvokedEvent carries
+            # the source.
+            tool_call_id = str(uuid4())
+            record_approval_source(tool_call_id, ApprovalSource.PREAPPROVED_CONFIG)
+
             with duo_workflow_metrics.time_tool_call(
                 tool_name=self._tool.name, flow_type=self._flow_type.value
             ):
-                if output := await self._tool.ainvoke(tool_params):
+                # Wrap as a ToolCall dict (not bare args) so tool_call_id threads through
+                # to on_tool_start for approval_source lookup; unwrap the resulting
+                # ToolMessage back to raw content for this node's str|list|dict output
+                # contract. Note: a dict/list-returning tool would come back
+                # JSON-stringified here instead of its raw shape; the current callers
+                # here only return strings.
+                tool_call_result = await self._tool.ainvoke(
+                    {
+                        "name": self._tool.name,
+                        "args": tool_params,
+                        "id": tool_call_id,
+                        "type": "tool_call",
+                    }
+                )
+                if isinstance(tool_call_result, ToolMessage):
+                    tool_call_result = tool_call_result.content
+
+                if output := tool_call_result:
                     set_hidden_layer_log_context(self._tool.name, tool_params)
                     try:
                         trust_level = getattr(self._tool, "trust_level", None)

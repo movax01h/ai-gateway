@@ -3,11 +3,13 @@
 The deep code review flow ends in pure code: the confidence gate, severity ordering, per-severity counts, the
 summary and the custom-instruction attribution are all decided here, never by a model. Posting to a merge request and
 returning the result to a local session are two terminal steps over this one module, so the operating point set by
-``min_confidence`` is the same wherever the review runs.
+`min_confidence` is the same wherever the review runs.
 """
 
+import json
+import re
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import structlog
 
@@ -26,6 +28,7 @@ __all__ = [
     "render_posted_finding",
     "render_previous_findings",
     "render_structured_finding",
+    "resolved_discussion_ids",
     "select_findings",
     "severity_counts",
 ]
@@ -34,6 +37,9 @@ __all__ = [
 SEVERITY_ORDER: tuple[str, ...] = ("critical", "major", "minor")
 
 _ANCHOR_KEYS = ("old_line", "suggestion", "end_line")
+
+# The reviewer sometimes double-escapes newlines in its JSON summary, which posts a literal `\n` between bullets.
+_ESCAPED_BULLET_BREAK = re.compile(r"(?:\\n)+(?=- )")
 
 
 def _severity_rank(severity: Any) -> int:
@@ -48,7 +54,7 @@ def select_findings(
 ) -> tuple[List[Dict[str, Any]], int]:
     """Choose and order the findings that will be published.
 
-    Drops a finding below ``min_confidence`` (only when it carries a score, so a schema slip degrades to publishing)
+    Drops a finding below `min_confidence` (only when it carries a score, so a schema slip degrades to publishing)
     and logs the drop. The survivors are ordered by severity, reviewer order within a severity, so the same input
     always publishes in the same order.
 
@@ -86,14 +92,22 @@ def severity_counts(findings: List[Dict[str, Any]]) -> Dict[str, int]:
     return {severity: counts[severity] for severity in SEVERITY_ORDER}
 
 
+def _clean_narrative(narrative: Optional[str]) -> str:
+    """Strip the reviewer's stray tool-call tags from the end, then repair escaped bullet breaks."""
+    text = (narrative or "").strip()
+    while text.endswith(("</summary>", "</invoke>")):
+        text = text[: text.rindex("</")].rstrip()
+    return _ESCAPED_BULLET_BREAK.sub(lambda m: m.group().replace("\\n", "\n"), text)
+
+
 def build_summary(findings: List[Dict[str, Any]], narrative: Optional[str]) -> str:
     """Compose the reader-facing overview: the reviewer's narrative, then computed counts.
 
-    The narrative is the reviewer's own judgment, carried verbatim. Every number and the per-severity breakdown are
-    computed here from the findings that will actually be posted, so the overview cannot contradict the comments it
-    sits above.
+    The narrative is the reviewer's own judgment, carried verbatim apart from stripping trailing tool-call markup and
+    repairing escaped bullet breaks. Every number and the per-severity breakdown are computed here from the findings
+    that will actually be posted, so the overview cannot contradict the comments it sits above.
     """
-    text = (narrative or "").strip()
+    text = _clean_narrative(narrative)
     if not findings:
         return text or "No issues were raised in this review."
 
@@ -137,6 +151,7 @@ PREVIOUS_FINDING_LABELS = {
     "still_outstanding": "Still outstanding",
 }
 NEEDS_ATTENTION = {"partially_fixed", "still_outstanding"}
+HIDDEN = {"disputed"}
 
 
 def _previous_finding_rank(status: Any) -> int:
@@ -146,13 +161,49 @@ def _previous_finding_rank(status: Any) -> int:
         return len(PREVIOUS_FINDING_ORDER)
 
 
-def render_previous_findings(items: List[Dict[str, Any]]) -> Optional[str]:
+def resolved_discussion_ids(existing_discussions: object) -> Set[str]:
+    """The IDs of resolved threads in the `list_mr_discussions` output the reviewer was given.
+
+    Accepts the tool's JSON string or an already-parsed list. Unreadable input yields no IDs, so every item stays listed
+    rather than the step failing a finished review.
+    """
+    discussions = existing_discussions
+    if isinstance(discussions, str):
+        try:
+            discussions = json.loads(discussions)
+        except ValueError:
+            logger.warning(
+                "Could not parse existing discussions; listing every previous finding"
+            )
+            return set()
+
+    if not isinstance(discussions, list):
+        return set()
+
+    return {
+        str(d["discussion_id"])
+        for d in discussions
+        if isinstance(d, dict) and d.get("resolved") and d.get("discussion_id")
+    }
+
+
+def render_previous_findings(
+    items: List[Dict[str, Any]], resolved_ids: Optional[Set[str]] = None
+) -> Optional[str]:
     """Render the reviewer's reconciliation of earlier threads as a status-first bullet list.
 
-    Returns ``None`` unless at least one thread still needs the author's attention: a list made only of fixed and
+    Returns `None` unless at least one thread still needs the author's attention: a list made only of fixed and
     verified items reads as if there were something left to do, so a re-review that closed everything is published as
     a clean review instead.
+
+    Items on threads in `resolved_ids` are left out: a resolved thread is one the author has settled, and repeating it
+    on every re-review buries what changed. A closing line counts them so the list is not read as complete.
     """
+    resolved_ids = resolved_ids or set()
+    visible = [item for item in items if item.get("status") not in HIDDEN]
+    items = [
+        item for item in visible if str(item.get("discussion_id")) not in resolved_ids
+    ]
     if not any(item.get("status") in NEEDS_ATTENTION for item in items):
         return None
 
@@ -162,6 +213,12 @@ def render_previous_findings(items: List[Dict[str, Any]]) -> Optional[str]:
         status = str(item.get("status"))
         label = PREVIOUS_FINDING_LABELS.get(status, status)
         lines.append(f"- **{label}:** `{item.get('file')}`: {item.get('note')}")
+
+    omitted = len(visible) - len(items)
+    if omitted == 1:
+        lines.append("\n1 resolved thread is not listed.")
+    elif omitted:
+        lines.append(f"\n{omitted} resolved threads are not listed.")
     return "\n".join(lines)
 
 
@@ -232,6 +289,7 @@ def render_posted_finding(finding: Dict[str, Any]) -> Dict[str, Any]:
         "message": render_message(finding),
         "target_code": finding.get("target_code", ""),
         "severity": finding.get("severity"),
+        "category": finding.get("category"),
         "confidence": finding.get("confidence"),
         **anchor_fields(finding),
     }
@@ -257,8 +315,8 @@ def build_review_payload(
     """Shape the selected findings into the JSON document the review endpoint parses.
 
     Only the fields the endpoint anchors, renders or counts with are sent. The message is rendered here so the severity
-    header and custom-instruction attribution are decided in one place; code travels verbatim. Severity travels as a
-    field so the endpoint can count posted comments by severity.
+    header and custom-instruction attribution are decided in one place; code travels verbatim. Severity and category
+    travel as fields so the endpoint can use them without parsing the message.
 
     A rendered previous-findings list joins the summary when there are comments to post. With none, it travels on its
     own so the endpoint can introduce it as the outcome of a re-review rather than as a clean first review.

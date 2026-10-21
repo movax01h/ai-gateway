@@ -1,4 +1,5 @@
 # from ai_gateway.gitlab_features import GitLabFeatureCategory, GitLabUnitPrimitive
+import functools
 from enum import StrEnum
 from unittest import mock
 from unittest.mock import Mock, patch
@@ -6,13 +7,15 @@ from unittest.mock import Mock, patch
 import pytest
 from fastapi import HTTPException, Request
 from gitlab_cloud_connector import GitLabFeatureCategory, GitLabUnitPrimitive
-from starlette_context import context, request_cycle_context
+from starlette_context import request_cycle_context
 
 from ai_gateway.api.feature_category import (
     current_feature_category,
     feature_categories,
     feature_category,
-    track_metadata,
+    get_catalog,
+    get_feature_categories,
+    set_feature_category_for_unit_primitive,
 )
 
 
@@ -151,46 +154,95 @@ async def test_feature_categories(
             )
 
 
-@pytest.mark.asyncio
+def _passthrough_decorator(func):
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        return await func(*args, **kwargs)
+
+    return wrapper
+
+
 @pytest.mark.parametrize(
-    (
-        "path_params",
-        "path_param",
-        "path_param_unit_primitive_map",
-        "expected_context",
-    ),
+    ("decorators", "expected"),
     [
+        ([], frozenset()),
         (
-            {"chat_invokable": "troubleshoot_job"},
-            "chat_invokable",
-            {"troubleshoot_job": GitLabUnitPrimitive.TROUBLESHOOT_JOB},
-            {
-                "meta.feature_category": GitLabFeatureCategory.CONTINUOUS_INTEGRATION.value,
-                "meta.unit_primitive": GitLabUnitPrimitive.TROUBLESHOOT_JOB.value,
-            },
+            [feature_category(GitLabFeatureCategory.DUO_CHAT)],
+            frozenset({GitLabFeatureCategory.DUO_CHAT}),
         ),
         (
-            {"chat_invokable": "explain_vulnerability"},
-            "chat_invokable",
-            {"troubleshoot_job": GitLabUnitPrimitive.TROUBLESHOOT_JOB},
-            {},
+            [
+                feature_categories(
+                    {
+                        GitLabUnitPrimitive.EXPLAIN_VULNERABILITY: GitLabFeatureCategory.VULNERABILITY_MANAGEMENT,
+                        GitLabUnitPrimitive.GENERATE_COMMIT_MESSAGE: GitLabFeatureCategory.CODE_REVIEW_WORKFLOW,
+                    }
+                )
+            ],
+            frozenset(
+                {
+                    GitLabFeatureCategory.VULNERABILITY_MANAGEMENT,
+                    GitLabFeatureCategory.CODE_REVIEW_WORKFLOW,
+                }
+            ),
+        ),
+        # Categories stay visible under other decorators, as on the proxy endpoints
+        (
+            [
+                _passthrough_decorator,
+                feature_category(GitLabFeatureCategory.DUO_CHAT),
+            ],
+            frozenset({GitLabFeatureCategory.DUO_CHAT}),
         ),
     ],
 )
-async def test_track_metadata(
-    path_params: dict,
-    path_param: str,
-    path_param_unit_primitive_map: dict,
-    expected_context: dict,
-):
-    @track_metadata(path_param, path_param_unit_primitive_map)
-    async def to_be_decorated(_request: Request):
+def test_get_feature_categories(decorators, expected):
+    async def endpoint():
         pass
 
-    request = Mock(spec=Request)
-    request.path_params = path_params
+    # Apply bottom-up, matching how stacked decorators are applied
+    for decorator in reversed(decorators):
+        endpoint = decorator(endpoint)
 
-    with request_cycle_context({}):
-        await to_be_decorated(request)
+    assert get_feature_categories(endpoint) == expected
 
-        assert dict(context) == expected_context
+
+@pytest.mark.parametrize(
+    ("unit_primitive", "expected_category"),
+    [
+        (GitLabUnitPrimitive.COMPLETE_CODE, "code_suggestions"),
+        (GitLabUnitPrimitive.EXPLAIN_VULNERABILITY, "vulnerability_management"),
+        # Not a GitLabFeatureCategory member, so it's recorded as the catalog's string
+        (GitLabUnitPrimitive.DUO_AGENT_PLATFORM, "duo_workflow"),
+    ],
+)
+def test_set_feature_category_for_unit_primitive(unit_primitive, expected_category):
+    with request_cycle_context({"meta.feature_category": "ai_abstraction_layer"}):
+        set_feature_category_for_unit_primitive(unit_primitive)
+
+        assert current_feature_category() == expected_category
+
+
+def test_set_feature_category_for_unit_primitive_not_in_catalog():
+    with (
+        patch(
+            "ai_gateway.api.feature_category.get_catalog",
+            return_value=Mock(unit_primitives=[]),
+        ),
+        request_cycle_context({"meta.feature_category": "ai_abstraction_layer"}),
+    ):
+        set_feature_category_for_unit_primitive(GitLabUnitPrimitive.COMPLETE_CODE)
+
+        assert current_feature_category() == "ai_abstraction_layer"
+
+
+def test_catalog_is_loaded_once():
+    with (
+        patch("ai_gateway.api.feature_category.load_catalog") as mock_load_catalog,
+        request_cycle_context({}),
+    ):
+        set_feature_category_for_unit_primitive(GitLabUnitPrimitive.COMPLETE_CODE)
+        set_feature_category_for_unit_primitive(GitLabUnitPrimitive.DUO_CHAT)
+
+    mock_load_catalog.assert_not_called()
+    assert get_catalog() is get_catalog()

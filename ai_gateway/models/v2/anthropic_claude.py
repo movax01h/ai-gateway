@@ -1,4 +1,5 @@
 from collections.abc import Callable, Sequence
+from functools import lru_cache
 from typing import Any, List, Mapping, Optional, Self, override
 
 from anthropic import AsyncAnthropic
@@ -12,7 +13,13 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from pydantic import model_validator
 
-from ai_gateway.models.base import validate_custom_endpoint
+from ai_gateway.auth import anthropic_wif
+from ai_gateway.model_selection.models import AnthropicWorkloadIdentityParams
+from ai_gateway.models.base import (
+    anthropic_facilitator_headers,
+    init_anthropic_client,
+    validate_custom_endpoint,
+)
 from ai_gateway.models.v2._model_compat import (
     remove_trailing_assistant_message,
     supports_assistant_prefill,
@@ -20,9 +27,19 @@ from ai_gateway.models.v2._model_compat import (
 
 __all__ = ["ChatAnthropic"]
 
+_ANTHROPIC_API_URL = "https://api.anthropic.com"
+
+_WEB_SEARCH_MAX_USES = 5
+"""Cap on `web_search` invocations per request.
+
+Anthropic has no default, so without it a single request can search without bound. Past it, Anthropic returns a `max_uses_exceeded` result and the model
+answers from what it already found.
+"""
+
 _WEB_SEARCH_TOOL: dict[str, Any] = {
     "type": "web_search_20250305",
     "name": "web_search",
+    "max_uses": _WEB_SEARCH_MAX_USES,
 }
 
 _WEB_FETCH_MAX_USES = 5
@@ -39,6 +56,20 @@ _WEB_FETCH_TOOL: dict[str, Any] = {
     "name": "web_fetch",
     "max_uses": _WEB_FETCH_MAX_USES,
 }
+
+
+@lru_cache(maxsize=None)
+def _workload_identity_client(
+    params: AnthropicWorkloadIdentityParams,
+) -> AsyncAnthropic:
+    """One long-lived client per workload identity definition.
+
+    The shared `AsyncAnthropic` singleton carries `ANTHROPIC_API_KEY`, and a static key shadows a
+    credentials provider inside the SDK, so a federated model needs its own client. Caching it
+    matters: the client owns the token cache, and `with_options()` copies share it, so one token
+    exchange serves every request for the model instead of one per request.
+    """
+    return init_anthropic_client(credentials=anthropic_wif.credentials(params))
 
 
 class ChatAnthropic(_LChatAnthropic):
@@ -64,6 +95,9 @@ class ChatAnthropic(_LChatAnthropic):
     custom_models_enabled: bool = False
     """Whether custom model endpoints are allowed."""
 
+    workload_identity: Optional[AnthropicWorkloadIdentityParams] = None
+    """Authenticate with an Anthropic WIF token minted from Google ADC instead of an API key."""
+
     def _get_combined_headers(self) -> Optional[dict[str, str]]:
         """Get combined headers including default headers and beta features.
 
@@ -79,14 +113,22 @@ class ChatAnthropic(_LChatAnthropic):
         if self.betas:
             headers["anthropic-beta"] = ",".join(self.betas)
 
+        # An override points somewhere other than Anthropic, e.g. the Duo Workflow caching proxy.
+        api_url = self.anthropic_api_url or _ANTHROPIC_API_URL
+        if api_url.rstrip("/") == _ANTHROPIC_API_URL:
+            headers.update(anthropic_facilitator_headers())
+
         return headers or None
 
     @model_validator(mode="after")
     def post_init(self) -> Self:
-        client_options: dict[str, Any] = {
-            "api_key": self.anthropic_api_key.get_secret_value(),
-            "base_url": self.anthropic_api_url,
-        }
+        client_options: dict[str, Any] = {"base_url": self.anthropic_api_url}
+
+        if self.workload_identity:
+            async_client = _workload_identity_client(self.workload_identity)
+        else:
+            async_client = self.async_client
+            client_options["api_key"] = self.anthropic_api_key.get_secret_value()
 
         headers = self._get_combined_headers()
         if headers:
@@ -104,7 +146,6 @@ class ChatAnthropic(_LChatAnthropic):
         if self.default_request_timeout is None or self.default_request_timeout > 0:
             client_options["timeout"] = self.default_request_timeout
 
-        async_client: AsyncAnthropic = self.async_client
         self._async_client = async_client.with_options(**client_options)
 
         # hack: we don't use sync methods in the AIGW,

@@ -13,7 +13,7 @@ You can use an Code Suggestions access token to authenticate with the API by pas
 
 ```shell
 curl --header "Authorization: Bearer <access_token>" --header "X-Gitlab-Authentication-Type: oidc" \
-  "http://localhost:5052/v2/code/completions"
+  "http://localhost:5052/v4/code/suggestions"
 ```
 
 ## Working with self-hosted models
@@ -31,19 +31,22 @@ For more information, see:
 
 #### Code Generation
 
-| Version | Endpoint            | Status                          | Notes                                                            |
-|---------|---------------------|---------------------------------|------------------------------------------------------------------|
-| v4      | `/code/suggestions` | Current                         | Used when client supports SSE Streaming                          |
-| v3      | `/code/completions` | Current                         | Used when client doesn't support SSE Streaming                   |
-| v2      | `/code/generations` | Kept for backward compatibility | Appears to be used by older versions of GitLab (v17.5 and older) |
+| Version | Endpoint            | Status                                      | Notes                                     |
+|---------|---------------------|---------------------------------------------|-------------------------------------------|
+| v4      | `/code/suggestions` | Current                                     | Used by GitLab for all generations since GitLab 19.1 |
+| v3      | `/code/completions` | Deprecated, removal planned for GitLab 21.0 | GitLab 17.5 to 19.0                                  |
+| v2      | `/code/generations` | Deprecated, removal planned for GitLab 21.0 | GitLab versions before 17.5                          |
 
 #### Code Completion
 
-| Version | Endpoint                  | Status         | Notes                                                                                                                             |
-|---------|---------------------------|----------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| v1      | `/code/user_access_token` | Current        | Called from Rails API Endpoint `code_suggestions/direct_access` to provide a token for the user to directly access the AI Gateway |
-| v2      | `/completions`            | Current        | Called directly from VSCode GitLab language server                                                                                |
-| v2      | `/code/completions`       | Current        | Called from Rails side, less frequently                                                                                           |
+| Version | Endpoint                  | Status                                      | Notes                                                                                                                             |
+|---------|---------------------------|---------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| v4      | `/code/suggestions`       | Current                                     | Used by GitLab when `code_completion_v4_endpoint` is enabled (on for GitLab.com), and by the language server direct connection from [GitLab Language Server MR 4169](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/merge_requests/4169) |
+| v1      | `/code/user_access_token` | Current                                     | Called from Rails API Endpoint `code_suggestions/direct_access` to provide a token for the user to directly access the AI Gateway |
+| v2      | `/completions`            | Deprecated, removal planned for GitLab 21.0 | Language server direct connection before [GitLab Language Server MR 4169](https://gitlab.com/gitlab-org/editor-extensions/gitlab-lsp/-/merge_requests/4169) |
+| v2      | `/code/completions`       | Deprecated, removal planned for GitLab 21.0 | GitLab instances with `code_completion_v4_endpoint` disabled (the default on self-managed)                                          |
+
+The v2 and v3 endpoints are deprecated. Removal is planned for GitLab 21.0. See the [tracking issue](https://gitlab.com/gitlab-org/gitlab/-/issues/605661).
 
 To see the active endpoints on Kibana (internal link), check out [the logs here](https://log.gprd.gitlab.net/app/r/s/Jh53x).
 The logs are available in the data view `pubsub-mlops-inf-gprd-*`.
@@ -55,6 +58,19 @@ We have updated the endpoint name from `completions` to `suggestions` to avoid c
 ```plaintext
 POST /v4/code/suggestions
 ```
+
+#### Migrating from v2 and v3
+
+v3 callers keep the same `prompt_components` body. Only the URL and the streaming format change, and `code_context` content may be up to 500,000 characters instead of 100,000.
+
+The v4 endpoint takes a `prompt_components` list (1 to 100 items). Move your v2 request fields as follows:
+
+- The keys of `current_file` (`file_name`, `content_above_cursor`, `content_below_cursor`, `language_identifier`) become top-level keys of the `payload` of the `code_editor_completion` or `code_editor_generation` component.
+- In v2 the endpoint chose the task: `/v2/completions` and `/v2/code/completions` for completion, `/v2/code/generations` for generation. In v4 the component type does: `code_editor_completion` or `code_editor_generation`.
+- `context` items become extra `code_context` components with `type`, `name`, and `content`.
+- For self-hosted models, `model_provider`, `model_name`, `model_endpoint`, `model_api_key`, `model_identifier`, and `model_iam_role` move into the top-level `model_metadata` as `provider`, `name`, `endpoint`, `api_key`, `identifier`, and `iam_role`.
+- `prompt_version` has no meaning for completions. Generations may still pass `prompt_id` and `prompt_version` in the component payload.
+- Completion responses return `tokens_consumption_metadata` inside `model` and `metadata.model`, as v2 did inside `model`.
 
 #### Streaming responses in SSE format
 
@@ -99,6 +115,8 @@ data: null
 <!-- codespell:ignore-end -->
 
 ### V3
+
+Deprecated. Use [`/v4/code/suggestions`](#v4). Removal is planned for GitLab 21.0 ([tracking issue](https://gitlab.com/gitlab-org/gitlab/-/issues/605661)).
 
 The v3 endpoint is aligned to the [architectural blueprint](https://docs.gitlab.com/ee/architecture/blueprints/ai_gateway/index.html#example-feature-code-suggestions).
 
@@ -197,7 +215,14 @@ Example response:
     "model": {
       "engine": "vertex-ai",
       "name": "codestral-2508",
-      "lang": "go"
+      "lang": "go",
+      "tokens_consumption_metadata": {
+        "input_tokens": 1289,
+        "output_tokens": 9,
+        "max_output_tokens_used": false,
+        "context_tokens_sent": 0,
+        "context_tokens_used": 0
+      }
     },
     "timestamp": 1702389046
   }
@@ -352,6 +377,8 @@ This will compile and execute the program, printing "Hello World" to the console
 
 ### V2
 
+Deprecated. Use [`/v4/code/suggestions`](#v4). Removal is planned for GitLab 21.0 ([tracking issue](https://gitlab.com/gitlab-org/gitlab/-/issues/605661)).
+
 #### Completions
 
 Given a prompt, the service will return one suggestion. This endpoint supports
@@ -381,6 +408,7 @@ third-party model provider.
 | `model_endpoint`                     | string | no       | The endpoint for the model. | `https://api.example.com/v3` |
 | `model_api_key`                     | string | no       | The API key for the model. | `x3iJ-this-Is-key34EXam!pl3` |
 | `model_identifier`                     | string | no       | The identifier for the model. | `36381667` |
+| `model_iam_role`                     | string | no       | The ARN of an AWS IAM role to assume for Amazon Bedrock. Used only for the `litellm` and `codestral` providers when custom models are enabled. See [Amazon Bedrock assume role](bedrock_assume_role.md). | `arn:aws:iam::123456789012:role/my-bedrock-role` |
 | `current_file`                      | hash   | yes      | The data of the current file.                                                                                    |                           |
 | `current_file.file_name`            | string | yes      | The name of the current file (max_len: **255**).                                                                 | `README.md`               |
 | `current_file.language_identifier`  | string | no       | The language identifier defined from editor (max_len: **255**). This overrides language detected from file name. | `python`                  |
@@ -467,6 +495,7 @@ This accepts a pre-built `prompt` and forwards it directly to third-party provid
 | `model_endpoint`                     | string | no       | The endpoint for the model. | `https://api.example.com/v3` |
 | `model_api_key`                     | string | no       | The API key for the model. | `x3iJ-this-Is-key34EXam!pl3` |
 | `model_identifier`                     | string | no       | The identifier for the model. | `36381667` |
+| `model_iam_role`                     | string | no       | The ARN of an AWS IAM role to assume for Amazon Bedrock. Used only for the `litellm` and `codestral` providers when custom models are enabled. See [Amazon Bedrock assume role](bedrock_assume_role.md). | `arn:aws:iam::123456789012:role/my-bedrock-role` |
 | `current_file`                      | hash   | yes      | The data of the current file                                                   |                                      |
 | `current_file.file_name`            | string | yes      | The name of the current file (max_len: **255**)                                | `README.md`                          |
 | `current_file.content_above_cursor` | string | yes      | The content above cursor (max_len: **100,000**)                                | `import numpy as np`                 |
@@ -574,6 +603,7 @@ This accepts a pre-built `prompt` and forwards it directly to a third-party prov
 | `model_endpoint`                     | string | no       | The endpoint for the model. | `https://api.example.com/v3` |
 | `model_api_key`                     | string | no       | The API key for the model. | `x3iJ-this-Is-key34EXam!pl3` |
 | `model_identifier`                     | string | no       | The identifier for the model. | `36381667` |
+| `model_iam_role`                     | string | no       | The ARN of an AWS IAM role to assume for Amazon Bedrock. Used only for the `litellm` and `codestral` providers when custom models are enabled. See [Amazon Bedrock assume role](bedrock_assume_role.md). | `arn:aws:iam::123456789012:role/my-bedrock-role` |
 | `current_file`                      | hash   | yes      | The data of the current file                                                   |                                      |
 | `current_file.file_name`            | string | yes      | The name of the current file (max_len: **255**)                                | `README.md`                          |
 | `current_file.content_above_cursor` | string | yes      | The content above cursor (max_len: **100,000**)                                | `import numpy as np`                 |
@@ -851,77 +881,6 @@ Example response:
 ```
 
 ##### Responses
-
-- `200: OK` if the service returns some completions.
-- `422: Unprocessable Entity` if the required attributes are missing.
-- `401: Unauthorized` if the service fails to authenticate using the access token.
-
-## Chat
-
-### Agent
-
-Given a prompt, the service will return response received from an AI provider as is.
-
-```plaintext
-POST /v1/agent/chat
-```
-
-| Attribute                                      | Type   | Required | Description                                                                                                                                     | Example                                               |
-| ---------------------------------------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `prompt_components`                            | array  | yes      | The list of prompt components compliant with <https://docs.gitlab.com/ee/architecture/blueprints/ai_gateway/index.html#protocol> (max_len: **1**). |                                                       |
-| `prompt_components.type`                       | string | yes      | The type of the prompt component (max_len: **255**).                                                                                            | `prompt`                                              |
-| `prompt_components.payload`                    | hash   | yes      | The data of the current prompt component.                                                                                                       |                                                       |
-| `prompt_components.payload.content`            | [string, array]  | yes      | The complete AI prompt (max_len: **400 000**). See [Claude Message API](https://docs.anthropic.com/en/api/messages) for conversation roles payload.models in `claude-3` family. | `content: "hi how are you"`       |
-| `prompt_components.payload.provider`           | string | yes      | The AI provider for which the prompt is designed for. Valid value is: `anthropic`.                                                              | `anthropic`                                           |
-| `prompt_components.payload.model`              | string | yes      | The AI model for which the prompt is designed for. Valid values are: `claude-sonnet-4-6`,`claude-haiku-4-5-20251001`, `claude-opus-4-7`,                 | `claude-sonnet-4-6`                                    |
-| `prompt_components.prompt_components.metadata` | hash   | no       | The metadata of the prompt component. Only string - string key value pairs are accepted.                                                        |                                                       |
-| `prompt_components.metadata.source`            | string | yes      | The source of the prompt component (max_len: **100**).                                                                                          | `GitLab EE`                                           |
-| `prompt_components.metadata.version`           | string | yes      | The version of the source (max_len: **100**).                                                                                                   | `16.7.0`                                              |
-
-```shell
-curl --request POST \
-  --url "http://localhost:5052/v1/chat/agent" \
-  --header 'Authorization: Bearer <access_token>' \
-  --header 'X-Gitlab-Authentication-Type: oidc' \
-  --header 'Content-Type: application/json' \
-  --data-raw '{
-  "prompt_components": [
-    {
-      "type":"prompt",
-      "payload": {
-        "content": [
-          {
-            "role": "user",
-            "content": "Hi, how are you?"
-          }
-        ],
-        "provider": "anthropic",
-        "model": "claude-sonnet-4-6"
-      },
-      "metadata": {
-        "source": "GitLab EE",
-        "version": "17.2.0"
-      }
-    }
- ]
-}'
-```
-
-Example response:
-
-```json
-{
-  "response": "Hi there! As an AI language model, I don't have feelings or emotions, \
-               but I'm operating properly and ready to assist you with any questions or tasks you may have. How can I help you today?.",
-  "metadata": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-6",
-    "timestamp": 1702292323
-  }
-}
-```
-
-#### Responses
 
 - `200: OK` if the service returns some completions.
 - `422: Unprocessable Entity` if the required attributes are missing.

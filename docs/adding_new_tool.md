@@ -77,7 +77,7 @@ implementation details, and best practices.
            return f"Performing action with {args.param1}"
    ```
 
-### 2. ⚠️ Tool Response Truncation
+### 2. Tool Response Truncation
 
 **All tools have automatic response truncation applied.**
 
@@ -92,10 +92,9 @@ implementation details, and best practices.
 - ❌ Bad: Return logs/metadata first, then important results at the end
 - ❌ Bad: Return one massive output that gets truncated
 
-**Note:** The current limit is large enough for most use cases. If your tool response is being truncated:
+The current limit is large enough for most use cases. If your tool response is being truncated:
 
 1. **First**, review and optimize your tool's output format (summarize, paginate, or restructure)
-
 1. **Only** raise a discussion about increasing the limit if no other implementation approach is feasible
 
 Adjusting your tool implementation is preferred over increasing the global limit.
@@ -355,6 +354,7 @@ CONTEXT_BUILDER_TOOLS = [
    - Use descriptive names for your tool and input classes
    - Use snake_case for tool names (e.g., `get_file_content`, `update_issue`)
    - Use PascalCase for classes (e.g., `GetFileContent`, `UpdateIssue`)
+   - **Note**: if you need to re-name a tool view the dedicated guide: [Renaming a tool](../docs/renaming_a_tool.md)
 
 1. **Write Clear Documentation**:
    - Documentation is read by the LLM to determine when and how to call a tool
@@ -378,7 +378,7 @@ CONTEXT_BUILDER_TOOLS = [
    - Use async properly to avoid blocking operations
 
 1. **Error Handling - Tools Should Not Swallow Exceptions**:
-   - Tool `_execute()` methods **must not** catch exceptions without re-raising them.
+   - Tool `_execute()` methods must not catch exceptions without re-raising them.
      When exceptions are swallowed, `ToolNodeWithErrorCorrection` cannot detect the
      failure and the agent loses its ability to self-correct.
    - **Don't** return `json.dumps({"error": ...})` as an error signal — raise a

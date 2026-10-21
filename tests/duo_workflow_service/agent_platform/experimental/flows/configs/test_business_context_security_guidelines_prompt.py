@@ -36,7 +36,7 @@ def _field_line(system_prompt: str, field: str) -> str:
 
 
 class TestStructuredFields:
-    """The three enrichment fields must describe their structured types.
+    """The enrichment fields must describe their structured types.
 
     These assert on contract keywords rather than exact wording so the prompt can be reworded without breaking the test.
     """
@@ -51,6 +51,24 @@ class TestStructuredFields:
         line = _field_line(system_prompt, "authorization_model")
         assert "elevated" in line
         assert "standard" in line
+
+    @pytest.mark.parametrize(
+        "boundary",
+        [
+            "network_access",
+            "user_input",
+            "partner_boundary",
+            "trusted_service",
+            "internal_only",
+            "isolated",
+        ],
+    )
+    def test_security_boundary_is_an_array_of_the_six_enum_values(
+        self, system_prompt, boundary
+    ):
+        line = _field_line(system_prompt, "security_boundary")
+        assert "array" in line
+        assert boundary in line
 
 
 class TestRemovedContent:

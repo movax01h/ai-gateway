@@ -1,10 +1,10 @@
 # pylint: disable=import-outside-toplevel
 import json
-from unittest.mock import ANY, patch
+from unittest.mock import patch
 
 import fastapi
 import pytest
-from starlette.datastructures import URL
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
 from ai_gateway.proxy.clients import ProxyClient, VertexAIProxyModelFactory
 from ai_gateway.proxy.clients.vertex_ai import PathParams
@@ -58,11 +58,13 @@ async def test_valid_proxy_request_text_embedding(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("request_url", "expected_upstream_path", "expected_error"),
+    ("request_url", "expected_upstream_path", "expected_wire_url", "expected_error"),
     [
         (
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
             "locations/LOCATION/publishers/google/models/text-embedding-005:predict",
+            "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
+            "google/models/text-embedding-005:predict",
             "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
             "google/models/text-embedding-005:predict",
             None,
@@ -72,6 +74,8 @@ async def test_valid_proxy_request_text_embedding(
             "locations/LOCATION/publishers/google/models/text-embedding-005:predict?alt=sse",
             "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
             "google/models/text-embedding-005:predict?alt=sse",
+            "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
+            "google/models/text-embedding-005:predict?alt=sse",
             None,
         ),
         (
@@ -79,11 +83,17 @@ async def test_valid_proxy_request_text_embedding(
             "locations/LOCATION/publishers/google/models/text-embedding-005:predict?alt=unknown",
             "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
             "google/models/text-embedding-005:predict",
+            # The factory drops the unrecognised `alt` from the proxy target,
+            # but litellm forwards the incoming query params, so it still
+            # reaches the upstream. See the note on the assertion below.
+            "https://my-location-aiplatform.googleapis.com/v1/projects/my-project/locations/my-location/publishers/"
+            "google/models/text-embedding-005:predict?alt=unknown",
             None,
         ),
         (
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
             "locations/LOCATION/publishers/google/models/unknown:predict",
+            "",
             "",
             "400: Unsupported model",
         ),
@@ -91,11 +101,13 @@ async def test_valid_proxy_request_text_embedding(
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
             "locations/LOCATION/publishers/google/models/text-embedding-005:unknown",
             "",
+            "",
             "404: Not found",
         ),
         (
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/unknown/PROJECT/"
             "locations/LOCATION/publishers/google/models/text-embedding-005:predict",
+            "",
             "",
             "404: Not found",
         ),
@@ -103,11 +115,13 @@ async def test_valid_proxy_request_text_embedding(
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
             "unknown/LOCATION/publishers/google/models/text-embedding-005:predict",
             "",
+            "",
             "404: Not found",
         ),
         (
             "http://0.0.0.0:5052/v1/proxy/vertex-ai/corrupted-path/"
             "text-embedding-005:predict",
+            "",
             "",
             "404: Not found",
         ),
@@ -120,6 +134,7 @@ async def test_request_url(
     request_factory,
     request_url,
     expected_upstream_path,
+    expected_wire_url,
     expected_error,
 ):
 
@@ -139,13 +154,20 @@ async def test_request_url(
 
         assert response.status_code == 200
 
-        mock_proxy_async_client.request.assert_called_once_with(
-            method="POST",
-            url=URL(expected_upstream_path),
-            headers=ANY,
-            params=ANY,
-            json=ANY,
-        )
+        # litellm builds the upstream request and hands it to `send()` instead
+        # of calling `request()` with the target URL, so the URL that goes out
+        # is read off the request object.
+        mock_proxy_async_client.send.assert_called_once()
+        upstream_request = mock_proxy_async_client.send.call_args[0][0]
+
+        assert upstream_request.method == "POST"
+        assert f"{model.base_url}{model.upstream_path}" == expected_upstream_path
+
+        # litellm rebuilds the query string from the incoming request's
+        # `query_params` rather than keeping the target's, so the wire URL can
+        # differ from the proxy target: an unrecognised `alt` the factory
+        # dropped is still forwarded. This asserts what the upstream receives.
+        assert str(upstream_request.url) == expected_wire_url
 
 
 def test_allowed_upstream_models_includes_anthropic():
@@ -163,6 +185,11 @@ def test_allowed_upstream_models_includes_anthropic():
 
     assert "text-embedding-005" in allowed_models
     assert "claude-sonnet-4-5@20250929" in allowed_models
+
+    # Newer Vertex model IDs carry neither an @version nor a -vertex suffix,
+    # which the previous name-shape heuristic silently excluded.
+    assert "claude-opus-4-8" in allowed_models
+    assert "claude-sonnet-4-6" in allowed_models
 
 
 class TestPathParams:
@@ -304,18 +331,6 @@ class TestStreamFlagDetection:
                 {"instances": [{"content": "test"}]},
                 True,
             ),
-            (
-                "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
-                "locations/LOCATION/publishers/google/models/gemini-2.5-flash:streamGenerateContent",
-                {"contents": [{"role": "user", "parts": [{"text": "test"}]}]},
-                True,
-            ),
-            (
-                "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
-                "locations/LOCATION/publishers/google/models/gemini-2.5-flash:generateContent",
-                {"contents": [{"role": "user", "parts": [{"text": "test"}]}]},
-                False,
-            ),
             # Anthropic models - stream based on request body
             (
                 "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
@@ -376,8 +391,8 @@ class TestUpstreamPathGeneration:
             ),
             (
                 "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
-                "locations/LOCATION/publishers/google/models/gemini-2.5-flash:streamGenerateContent",
-                "/publishers/google/models/gemini-2.5-flash:streamGenerateContent",
+                "locations/LOCATION/publishers/google/models/codestral-2501:streamRawPredict",
+                "/publishers/google/models/codestral-2501:streamRawPredict",
             ),
             # Anthropic models
             (
@@ -414,3 +429,31 @@ class TestUpstreamPathGeneration:
             assert model.upstream_path.startswith(
                 "/v1/projects/my-project/locations/my-location"
             )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refs,allowed",
+    [(["claude_sonnet_4_5_20250929"], True), (["claude_fable_5"], False)],
+)
+async def test_model_allowlist(vertex_factory, request_factory, refs, allowed):
+    request = request_factory(
+        request_url="http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
+        "locations/LOCATION/publishers/anthropic/models/claude-sonnet-4-5@20250929:streamRawPredict",
+        request_body=b'{"messages": []}',
+    )
+    request.user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(extra={"gitlab_allowed_model_refs": refs}),
+    )
+
+    if allowed:
+        with patch("ai_gateway.proxy.clients.vertex_ai.access_token"):
+            model = await vertex_factory.factory(request)
+
+        assert model.model_name == "claude-sonnet-4-5@20250929"
+    else:
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await vertex_factory.factory(request)
+
+        assert excinfo.value.status_code == 403

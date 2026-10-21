@@ -140,15 +140,17 @@
       "type": "string"
     },
     "CatalogItemType": {
-      "description": "What kind of item is included.\n\nThere is no bare ``agent``: what a customer authors in their workspace is an agent *template*, which its source\nbuilds into a component.",
+      "description": "What kind of item is included.\n\nWhat a customer authors in their workspace is an agent *template*, which its source builds into a component. An\nagent published to the AI Catalog is an ``agent``: a finished item, addressed by id and version.",
       "enum": [
         "agent_template",
+        "agent",
         "flow"
       ],
       "title": "CatalogItemType",
       "type": "string"
     },
     "FlowConfigInput": {
+      "additionalProperties": false,
       "properties": {
         "category": {
           "title": "Category",
@@ -182,6 +184,7 @@
       "type": "object"
     },
     "FlowConfigInputSchema": {
+      "additionalProperties": false,
       "properties": {
         "type": {
           "title": "Type",
@@ -231,6 +234,7 @@
       "type": "object"
     },
     "FlowConfigMetadata": {
+      "additionalProperties": false,
       "properties": {
         "entry_point": {
           "anyOf": [
@@ -396,6 +400,11 @@
           ],
           "title": "Operation Type",
           "type": "string"
+        },
+        "tool_output_security": {
+          "default": true,
+          "title": "Tool Output Security",
+          "type": "boolean"
         }
       },
       "required": [
@@ -433,6 +442,26 @@
         "definition"
       ],
       "title": "InlineResponseSchemaConfig",
+      "type": "object"
+    },
+    "LiteLLMProviderParams": {
+      "additionalProperties": false,
+      "description": "LiteLLM-only params, declared once so the models.yml layer (ChatLiteLLMParams) and the prompt layer\n(PromptProviderParams.litellm) cannot drift apart.",
+      "properties": {
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Effort"
+        }
+      },
+      "title": "LiteLLMProviderParams",
       "type": "object"
     },
     "ModelConfig": {
@@ -589,6 +618,18 @@
           "default": null,
           "title": "Cache Control Injection Points"
         },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        },
         "context_management": {
           "anyOf": [
             {
@@ -602,17 +643,31 @@
           "default": null,
           "title": "Context Management"
         },
-        "model_id": {
+        "thinking": {
           "anyOf": [
             {
-              "type": "string"
+              "additionalProperties": true,
+              "type": "object"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Model Id"
+          "title": "Thinking"
+        },
+        "output_config": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Config"
         }
       },
       "title": "PromptParams",
@@ -632,12 +687,24 @@
             }
           ],
           "default": null
+        },
+        "litellm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiteLLMProviderParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "PromptProviderParams",
       "type": "object"
     }
   },
+  "additionalProperties": false,
   "properties": {
     "flow": {
       "$ref": "#/$defs/FlowConfigMetadata"

@@ -7,7 +7,7 @@ support `tool_choice`, function calling, vision, etc.). It consults that
 registry to decide which parameters can be forwarded to the upstream
 provider.
 
-When a customer uses a self-hosted or third-party model that is **not** in
+When a customer uses a self-hosted or third-party model that is not in
 LiteLLM's built-in registry (for example, a custom Fireworks AI deployment),
 LiteLLM may strip or reject parameters such as `tool_choice`, causing
 requests to fail even though the underlying provider supports them.
@@ -75,8 +75,8 @@ capability flags.
 | `mode` | Usually `chat` for chat completion models. |
 | `max_input_tokens` | Maximum context window in tokens. |
 | `max_output_tokens` | Maximum tokens the model may emit. |
-| `input_cost_per_token` | Cost per input token (optional, for cost tracking). |
-| `output_cost_per_token` | Cost per output token (optional, for cost tracking). |
+| `input_cost_per_token` | Optional. Accepted, but the AI Gateway does not read it. |
+| `output_cost_per_token` | Optional. Accepted, but the AI Gateway does not read it. |
 | `supports_function_calling` | Set to `true` if the model supports tool/function calling. |
 | `supports_tool_choice` | Set to `true` to ensure LiteLLM forwards the `tool_choice` parameter. |
 | `supports_response_schema` | Set to `true` if the model supports structured output / response schemas. |
@@ -100,6 +100,12 @@ Use this feature when:
 
 If your model **is** in LiteLLM's bundled registry, you usually do not
 need this file: LiteLLM already knows the model's capabilities.
+
+The self-hosted AI Gateway images set `LITELLM_LOCAL_MODEL_COST_MAP=True`,
+so LiteLLM uses this bundled registry and does not download the latest
+one from `raw.githubusercontent.com` at startup. Where the deployment
+can reach that host, setting `LITELLM_LOCAL_MODEL_COST_MAP=""` restores
+the download.
 
 ## Troubleshooting
 

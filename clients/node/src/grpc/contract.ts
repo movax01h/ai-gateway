@@ -350,6 +350,8 @@ export interface TrackLlmCallForSelfHosted {
   featureQualifiedName: string;
   /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
+  /** sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown. */
+  sourceType: string;
 }
 
 /** RunShellCommand requests execution of a raw shell command string. */
@@ -441,7 +443,19 @@ export interface GenerateTokenRequest {
     | string
     | undefined;
   /** flow_config is the authoritative inline catalog flow configuration to bind to the issued token. */
-  flow_config?: { [key: string]: any } | undefined;
+  flow_config?:
+    | { [key: string]: any }
+    | undefined;
+  /** workflowID identifies the workflow run this token is issued for. */
+  workflowID?:
+    | string
+    | undefined;
+  /** flow_version is the foundational flow version authorized for this token. */
+  flow_version?:
+    | string
+    | undefined;
+  /** flow_config_schema_version is the foundational flow schema version authorized for this token. */
+  flow_config_schema_version?: string | undefined;
 }
 
 /** GenerateTokenResponse returns the generated token and its expiry information. */
@@ -608,7 +622,11 @@ export interface McpTool {
     | ToolAnnotations
     | undefined;
   /** trusted indicates whether the tool is considered trusted and may be invoked without user confirmation. */
-  trusted?: boolean | undefined;
+  trusted?:
+    | boolean
+    | undefined;
+  /** client_injected marks a tool the client supplied; Workhorse owns the field and overwrites whatever the client sent. */
+  client_injected?: boolean | undefined;
 }
 
 /** Icons is a container for a list of Icon images. */
@@ -857,6 +875,8 @@ export interface TrackSelfHostedClientEvent {
   featureQualifiedName: string;
   /** featureAiCatalogItem indicates whether this feature is registered in the AI catalog. */
   featureAiCatalogItem: boolean;
+  /** sourceType is the workflow's entry point (for example merge_request_code_conflict). Empty when unknown. */
+  sourceType: string;
 }
 
 /** TrackSelfHostedAction is the server response acknowledging a self-hosted tracking event. */
@@ -2745,7 +2765,7 @@ export const ScheduleNotification: MessageFns<ScheduleNotification> = {
 };
 
 function createBaseTrackLlmCallForSelfHosted(): TrackLlmCallForSelfHosted {
-  return { workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false };
+  return { workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false, sourceType: "" };
 }
 
 export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = {
@@ -2758,6 +2778,9 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
     }
     if (message.featureAiCatalogItem !== false) {
       writer.uint32(24).bool(message.featureAiCatalogItem);
+    }
+    if (message.sourceType !== "") {
+      writer.uint32(34).string(message.sourceType);
     }
     return writer;
   },
@@ -2793,6 +2816,14 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
           message.featureAiCatalogItem = reader.bool();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.sourceType = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2809,6 +2840,7 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
       featureAiCatalogItem: isSet(object.featureAiCatalogItem)
         ? globalThis.Boolean(object.featureAiCatalogItem)
         : false,
+      sourceType: isSet(object.sourceType) ? globalThis.String(object.sourceType) : "",
     };
   },
 
@@ -2823,6 +2855,9 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
     if (message.featureAiCatalogItem !== false) {
       obj.featureAiCatalogItem = message.featureAiCatalogItem;
     }
+    if (message.sourceType !== "") {
+      obj.sourceType = message.sourceType;
+    }
     return obj;
   },
 
@@ -2834,6 +2869,7 @@ export const TrackLlmCallForSelfHosted: MessageFns<TrackLlmCallForSelfHosted> = 
     message.workflowID = object.workflowID ?? "";
     message.featureQualifiedName = object.featureQualifiedName ?? "";
     message.featureAiCatalogItem = object.featureAiCatalogItem ?? false;
+    message.sourceType = object.sourceType ?? "";
     return message;
   },
 };
@@ -3531,7 +3567,14 @@ export const RunGitCommand: MessageFns<RunGitCommand> = {
 };
 
 function createBaseGenerateTokenRequest(): GenerateTokenRequest {
-  return { workflowDefinition: undefined, flow_config_id: undefined, flow_config: undefined };
+  return {
+    workflowDefinition: undefined,
+    flow_config_id: undefined,
+    flow_config: undefined,
+    workflowID: undefined,
+    flow_version: undefined,
+    flow_config_schema_version: undefined,
+  };
 }
 
 export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
@@ -3544,6 +3587,15 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     }
     if (message.flow_config !== undefined) {
       Struct.encode(Struct.wrap(message.flow_config), writer.uint32(26).fork()).join();
+    }
+    if (message.workflowID !== undefined) {
+      writer.uint32(34).string(message.workflowID);
+    }
+    if (message.flow_version !== undefined) {
+      writer.uint32(42).string(message.flow_version);
+    }
+    if (message.flow_config_schema_version !== undefined) {
+      writer.uint32(50).string(message.flow_config_schema_version);
     }
     return writer;
   },
@@ -3579,6 +3631,30 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
           message.flow_config = Struct.unwrap(Struct.decode(reader, reader.uint32()));
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.workflowID = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.flow_version = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.flow_config_schema_version = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3593,6 +3669,11 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
       workflowDefinition: isSet(object.workflowDefinition) ? globalThis.String(object.workflowDefinition) : undefined,
       flow_config_id: isSet(object.flow_config_id) ? globalThis.String(object.flow_config_id) : undefined,
       flow_config: isObject(object.flow_config) ? object.flow_config : undefined,
+      workflowID: isSet(object.workflowID) ? globalThis.String(object.workflowID) : undefined,
+      flow_version: isSet(object.flow_version) ? globalThis.String(object.flow_version) : undefined,
+      flow_config_schema_version: isSet(object.flow_config_schema_version)
+        ? globalThis.String(object.flow_config_schema_version)
+        : undefined,
     };
   },
 
@@ -3607,6 +3688,15 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     if (message.flow_config !== undefined) {
       obj.flow_config = message.flow_config;
     }
+    if (message.workflowID !== undefined) {
+      obj.workflowID = message.workflowID;
+    }
+    if (message.flow_version !== undefined) {
+      obj.flow_version = message.flow_version;
+    }
+    if (message.flow_config_schema_version !== undefined) {
+      obj.flow_config_schema_version = message.flow_config_schema_version;
+    }
     return obj;
   },
 
@@ -3618,6 +3708,9 @@ export const GenerateTokenRequest: MessageFns<GenerateTokenRequest> = {
     message.workflowDefinition = object.workflowDefinition ?? undefined;
     message.flow_config_id = object.flow_config_id ?? undefined;
     message.flow_config = object.flow_config ?? undefined;
+    message.workflowID = object.workflowID ?? undefined;
+    message.flow_version = object.flow_version ?? undefined;
+    message.flow_config_schema_version = object.flow_config_schema_version ?? undefined;
     return message;
   },
 };
@@ -4980,7 +5073,15 @@ export const ToolAnnotations: MessageFns<ToolAnnotations> = {
 };
 
 function createBaseMcpTool(): McpTool {
-  return { name: "", description: "", inputSchema: "", icons: undefined, annotations: undefined, trusted: undefined };
+  return {
+    name: "",
+    description: "",
+    inputSchema: "",
+    icons: undefined,
+    annotations: undefined,
+    trusted: undefined,
+    client_injected: undefined,
+  };
 }
 
 export const McpTool: MessageFns<McpTool> = {
@@ -5002,6 +5103,9 @@ export const McpTool: MessageFns<McpTool> = {
     }
     if (message.trusted !== undefined) {
       writer.uint32(48).bool(message.trusted);
+    }
+    if (message.client_injected !== undefined) {
+      writer.uint32(56).bool(message.client_injected);
     }
     return writer;
   },
@@ -5061,6 +5165,14 @@ export const McpTool: MessageFns<McpTool> = {
           message.trusted = reader.bool();
           continue;
         }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.client_injected = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -5078,6 +5190,7 @@ export const McpTool: MessageFns<McpTool> = {
       icons: isSet(object.icons) ? Icons.fromJSON(object.icons) : undefined,
       annotations: isSet(object.annotations) ? ToolAnnotations.fromJSON(object.annotations) : undefined,
       trusted: isSet(object.trusted) ? globalThis.Boolean(object.trusted) : undefined,
+      client_injected: isSet(object.client_injected) ? globalThis.Boolean(object.client_injected) : undefined,
     };
   },
 
@@ -5101,6 +5214,9 @@ export const McpTool: MessageFns<McpTool> = {
     if (message.trusted !== undefined) {
       obj.trusted = message.trusted;
     }
+    if (message.client_injected !== undefined) {
+      obj.client_injected = message.client_injected;
+    }
     return obj;
   },
 
@@ -5117,6 +5233,7 @@ export const McpTool: MessageFns<McpTool> = {
       ? ToolAnnotations.fromPartial(object.annotations)
       : undefined;
     message.trusted = object.trusted ?? undefined;
+    message.client_injected = object.client_injected ?? undefined;
     return message;
   },
 };
@@ -6025,7 +6142,7 @@ export const ShellInformationContext: MessageFns<ShellInformationContext> = {
 };
 
 function createBaseTrackSelfHostedClientEvent(): TrackSelfHostedClientEvent {
-  return { requestID: "", workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false };
+  return { requestID: "", workflowID: "", featureQualifiedName: "", featureAiCatalogItem: false, sourceType: "" };
 }
 
 export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> = {
@@ -6041,6 +6158,9 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
     }
     if (message.featureAiCatalogItem !== false) {
       writer.uint32(32).bool(message.featureAiCatalogItem);
+    }
+    if (message.sourceType !== "") {
+      writer.uint32(42).string(message.sourceType);
     }
     return writer;
   },
@@ -6084,6 +6204,14 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
           message.featureAiCatalogItem = reader.bool();
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.sourceType = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -6101,6 +6229,7 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
       featureAiCatalogItem: isSet(object.featureAiCatalogItem)
         ? globalThis.Boolean(object.featureAiCatalogItem)
         : false,
+      sourceType: isSet(object.sourceType) ? globalThis.String(object.sourceType) : "",
     };
   },
 
@@ -6118,6 +6247,9 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
     if (message.featureAiCatalogItem !== false) {
       obj.featureAiCatalogItem = message.featureAiCatalogItem;
     }
+    if (message.sourceType !== "") {
+      obj.sourceType = message.sourceType;
+    }
     return obj;
   },
 
@@ -6130,6 +6262,7 @@ export const TrackSelfHostedClientEvent: MessageFns<TrackSelfHostedClientEvent> 
     message.workflowID = object.workflowID ?? "";
     message.featureQualifiedName = object.featureQualifiedName ?? "";
     message.featureAiCatalogItem = object.featureAiCatalogItem ?? false;
+    message.sourceType = object.sourceType ?? "";
     return message;
   },
 };

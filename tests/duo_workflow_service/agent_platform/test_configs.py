@@ -8,6 +8,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from ai_gateway.prompts.feature_roots import discover_feature_prompts
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig as ExperimentalFlowConfig,
@@ -26,17 +27,18 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     MCP_AUTO_INJECT_ENVIRONMENTS,
     FlowConfig,
     FlowConfigMetadata,
-    _default_features_dir,
 )
 from duo_workflow_service.agent_platform.v1.flows.validation import (
     DryRunFlowValidator,
     _make_validation_tools_registry,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
+from lib.feature_roots import default_features_dir
+from lib.internal_events.client import InternalEventsClient
 
 # Legacy root plus moved features' config/ dirs, so a moved flow keeps validation.
 # Reuse the loader's own root derivation so this sweep cannot silently diverge.
-_FEATURES_DIR = _default_features_dir()
+_FEATURES_DIR = default_features_dir()
 V1_CONFIGS = sorted(FlowConfig.DIRECTORY_PATH.glob("**/*.yml")) + sorted(
     _FEATURES_DIR.glob("*/*/config/*.yml")
 )
@@ -155,7 +157,7 @@ def _deterministic_step_commands(config: dict) -> list[tuple[str, str]]:
     return commands
 
 
-MCP_TOOL_NAME_PREFIXES = ("orbit_",)
+MCP_TOOL_NAME_PREFIXES = ("orbit_", "slack_")
 
 # Read off the model rather than restated here, so adding a flow environment automatically
 # extends the tests below instead of leaving the new value silently uncovered.
@@ -166,6 +168,12 @@ NON_MCP_ENVIRONMENTS: frozenset[str] = FLOW_ENVIRONMENTS - MCP_AUTO_INJECT_ENVIR
 
 
 def _make_local_prompt_registry() -> LocalPromptRegistry:
+    # Register moved features so Jinja {% include %} in a feature's flow config
+    # resolves against ai/features/<domain>/<feature>/prompts/ (mirrors
+    # LocalPromptRegistry.from_local_yaml and the server bootstrap). Without this
+    # a feature flow whose inline prompts include feature-local .jinja bodies
+    # fails to compile during the V1_CONFIGS sweep.
+    discover_feature_prompts()
     return LocalPromptRegistry(
         prompt_template_factories={},
         model_factories={},
@@ -191,7 +199,7 @@ def _iter_entry_names(entries: Any) -> Iterator[str]:
     """Yield each tool name in a ``toolset`` or ``pre_approved_tools`` list.
 
     An entry is either a plain string or a single-key ``{"tool_name": {options}}`` mapping
-    (``FlowGraphBuilder._parse_toolset``, ``strip_ask_listed_pre_approvals``).
+    (``FlowGraphBuilder._parse_toolset``, ``filter_pre_approvals_by_policy``).
     """
     for entry in entries or []:
         if isinstance(entry, dict):
@@ -210,7 +218,7 @@ def _iter_declared_tool_names(config: FlowConfig) -> Iterator[tuple[str, str]]:
 
     * ``toolset`` — entries are plain strings or single-key ``{"tool_name": {options}}``
       mappings (``FlowGraphBuilder._parse_toolset``);
-    * ``pre_approved_tools`` — same entry forms (``strip_ask_listed_pre_approvals``);
+    * ``pre_approved_tools`` — same entry forms (``filter_pre_approvals_by_policy``);
     * ``tool_name`` — the scalar tool of a ``DeterministicStepComponent``.
 
     Collecting only ``toolset`` would leave the other two paths unchecked.
@@ -426,7 +434,9 @@ class TestValidateFlowConfigs:
         DryRunFlowValidator(
             config=config,
             prompt_registry=_make_local_prompt_registry(),
-            internal_event_client=Mock(),
+            # Spec'd: a bare Mock fails Router's pydantic field, so a config with
+            # a conditional router could not reach compilation at all.
+            internal_event_client=Mock(spec=InternalEventsClient),
             catalog_items=items,
         ).validate()
 

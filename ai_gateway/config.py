@@ -37,11 +37,11 @@ __all__ = [
     "ConfigModelLimits",
     "ConfigModelSelection",
     "ConfigMtls",
-    "ConfigProcessLevelFeatureFlags",
     "ConfigProxyEndpoints",
     "ConfigSnowplow",
     "ConfigTLS",
     "ConfigVertexTextModel",
+    "FeatureAllowlistMode",
     "ModelReleaseFeatureAttachment",
     "ModelReleasesPayload",
     "get_config",
@@ -165,10 +165,6 @@ class ConfigAuth(BaseModel):
     bypass_jwt_signature: bool = False
 
 
-class ConfigProcessLevelFeatureFlags(BaseModel):
-    duo_classic_chat_duo_core_cutoff: bool = False
-
-
 class ConfigGoogleCloudProfiler(BaseModel):
     enabled: bool = False
     verbose: int = 2
@@ -185,8 +181,17 @@ class ConfigInternalEvent(BaseModel):
     app_id: str = "gitlab_ai_gateway"
     namespace: str = "gl"
     endpoint: Optional[str] = None
+    api_key: Optional[SecretStr] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
+    sidecar_enabled: bool = Field(
+        default=False,
+        description="Send unified events to the events sidecar.",
+    )
+    sidecar_url: str = Field(
+        default="http://localhost:8130",
+        description="Base URL of the events sidecar.",
+    )
 
 
 class ConfigBillingEvent(BaseModel):
@@ -194,6 +199,7 @@ class ConfigBillingEvent(BaseModel):
     app_id: str = "gitlab_ai_gateway-billing"
     namespace: str = "gl"
     endpoint: Optional[str] = None
+    api_key: Optional[SecretStr] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
 
@@ -210,6 +216,7 @@ class ConfigAuditEvent(BaseModel):
 class ConfigSnowplow(ConfigInternalEvent):
     enabled: bool = False
     endpoint: Optional[str] = None
+    api_key: Optional[SecretStr] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
 
@@ -426,7 +433,7 @@ class ConfigBedrockGuardrail(BaseModel):
         Annotated[
             str,
             Field(
-                pattern=r"^(|([1-9][0-9]{0,7})|(DRAFT))$",
+                pattern=r"^(([1-9][0-9]{0,7})|(DRAFT))$",
                 description="The guardrail version ('DRAFT' or a numeric string).",
             ),
         ]
@@ -461,6 +468,9 @@ class ModelReleasesPayload(BaseModel):
         default_factory=dict,
         description="Feature_setting name to the env-injected model lists attached to it.",
     )
+
+
+FeatureAllowlistMode = Literal["off", "log", "fallback", "enforce"]
 
 
 class ConfigModelSelection(BaseModel):
@@ -500,6 +510,17 @@ class ConfigModelSelection(BaseModel):
             '"beta_models": [...], "default_models": [...]}}}. '
             "Env-defined models take precedence over models.yml entries with the same "
             "gitlab_identifier when the ai_model_release feature flag is enabled."
+        ),
+    )
+    feature_allowlist_mode: FeatureAllowlistMode = Field(
+        default="log",
+        description=(
+            "How client-supplied model metadata that names a GitLab-managed model is checked "
+            "against the feature's allowlist (default, selectable, beta, dev and tag models). "
+            "'off': no check. 'log': log mismatches only. 'fallback': serve the feature's "
+            "default model instead, and rebuild a managed model whose raw identifier would "
+            "rewrite it. 'enforce': reject a model that is not allowed (HTTP 403, gRPC "
+            "PERMISSION_DENIED), and rebuild an identifier override as in 'fallback'."
         ),
     )
 
@@ -633,11 +654,21 @@ class Config(BaseSettings):
         ),
     )
     use_agentic_mock: bool = False
+    anthropic_facilitator_key: Optional[SecretStr] = Field(
+        default=None,
+        # Read unprefixed so it matches the Runway/Vault secret name directly. AI Gateway and
+        # Duo Workflow Service each hold their own value under this name.
+        validation_alias="ANTHROPIC_FACILITATOR_KEY",
+        description=(
+            "Sent as the `anthropic-facilitator-key` header on requests to the "
+            "Anthropic API. The header is omitted when this is unset."
+        ),
+    )
     bedrock_guardrail_config: Optional[Json[ConfigBedrockGuardrail]] = Field(
         default=None,
         description=(
             "Bedrock guardrail configuration as a JSON string. "
-            "Set via AIGW_BEDROCK_GUARDRAIL_CONFIG_JSON. "
+            "Set via AIGW_BEDROCK_GUARDRAIL_CONFIG. "
             'Example: \'{"guardrailIdentifier": "abc123", "guardrailVersion": "1", "trace": "disabled"}\''
         ),
     )
@@ -648,10 +679,6 @@ class Config(BaseSettings):
     ]
     fastapi: Annotated[ConfigFastApi, Field(default_factory=ConfigFastApi)]
     auth: Annotated[ConfigAuth, Field(default_factory=ConfigAuth)]
-    process_level_feature_flags: Annotated[
-        ConfigProcessLevelFeatureFlags,
-        Field(default_factory=ConfigProcessLevelFeatureFlags),
-    ]
     google_cloud_profiler: Annotated[
         ConfigGoogleCloudProfiler, Field(default_factory=ConfigGoogleCloudProfiler)
     ]

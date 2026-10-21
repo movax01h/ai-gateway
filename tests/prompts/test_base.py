@@ -19,22 +19,30 @@ from anthropic import (
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic._exceptions import OverloadedError as AnthropicOverloadedError
 from gitlab_cloud_connector import GitLabUnitPrimitive, WrongUnitPrimitives
-from jinja2.exceptions import SecurityError
+from jinja2.exceptions import SecurityError, TemplateRuntimeError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
+from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import MidStreamFallbackError, Timeout
+from openai import APIConnectionError as OpenAIAPIConnectionError
+from openai import APIError as OpenAIAPIError
+from openai import BadRequestError as OpenAIBadRequestError
+from openai import InternalServerError as OpenAIInternalServerError
 from pydantic import AnyUrl, SecretStr, ValidationError
 from pyfakefs.fake_filesystem import FakeFilesystem
 from structlog.testing import capture_logs
 from tenacity import RetryCallState
 
 from ai_gateway.config import ConfigModelLimits
-from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from ai_gateway.instrumentators.model_requests import (
+    INFERENCE_COUNTER,
+    ModelRequestInstrumentator,
+)
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     FireworksModelMetadata,
@@ -66,6 +74,7 @@ from ai_gateway.prompts import (
 )
 from ai_gateway.prompts.base import (
     _PARSE_JSON_MAX_INPUT_LENGTH,
+    _RETRYABLE_OPENAI_STREAM_ERROR_TYPES,
     TemplateNotFoundError,
     _attempt_failure_log_fields,
     _is_timeout_error,
@@ -119,13 +128,21 @@ class TestPrompt:  # pylint: disable=too-many-public-methods
 models:
   - name: Mistral
     gitlab_identifier: mistral
+    model_class_provider: litellm
+    max_context_tokens: 1000
     params:
         model: mistral
   - name: Amazon Q
     gitlab_identifier: amazon_q
+    model_class_provider: amazon_q
+    max_context_tokens: 1000
     params:
         model: amazon_q
 """,
+        )
+        fs.create_file(
+            model_selection_dir / "model_restrictions.yml",
+            contents="restricted_models: []\n",
         )
         fs.create_file(
             model_selection_dir / "unit_primitives.yml",
@@ -310,6 +327,39 @@ configurable_unit_primitives:
             template_format="jinja2",
         )
 
+    @pytest.mark.parametrize("tool_output_security", [False])
+    def test_build_prompt_template_skips_security_when_opted_out(
+        self, prompt_config: PromptConfig
+    ):
+        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config)
+
+        assert prompt_template == ChatPromptTemplate.from_messages(
+            [
+                ("system", "{% include 'system.jinja' %}"),
+                ("user", "{{content}}"),
+                MessagesPlaceholder("history", optional=True),
+            ],
+            template_format="jinja2",
+        )
+
+    @pytest.mark.parametrize("tool_output_security", [False])
+    def test_build_prompt_template_keeps_security_when_tools_are_bound(
+        self, prompt_config: PromptConfig, tools: list[BaseTool]
+    ):
+        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config, tools)
+
+        assert prompt_template == ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    render_security_block() + "{% include 'system.jinja' %}",
+                ),
+                ("user", "{{content}}"),
+                MessagesPlaceholder("history", optional=True),
+            ],
+            template_format="jinja2",
+        )
+
     @pytest.mark.parametrize(
         ("template", "kwargs", "should_raise"),
         [
@@ -331,6 +381,24 @@ configurable_unit_primitives:
             ),
             ("{{ json_str|parse_json }}", {"json_str": "x" * 1_000_001}, True),
             ("{{ json_str|parse_json }}", {"json_str": b"abc"}, True),
+            ("{{ items|reverse|list }}", {"items": [1, 2, 3]}, True),
+            ("{{ mapping|reverse|list }}", {"mapping": {"a": 1}}, True),
+            ("{{ items|map('reverse')|list }}", {"items": [{"a": 1}]}, True),
+            ("{{ items|last }}", {"items": [1, 2, 3]}, False),
+            ("{{ mapping|last }}", {"mapping": {"a": 1}}, True),
+            ("{{ text|indent }}", {"text": "a\nb"}, False),
+            ("{{ items|indent }}", {"items": [1, 2, 3]}, True),
+            ("{{ text|wordwrap(5) }}", {"text": "hello world"}, False),
+            ("{{ items|wordwrap(5) }}", {"items": [1, 2, 3]}, True),
+            ("{{ text|safe }}", {"text": "<b>hi</b>"}, False),
+            ("{{ items|safe }}", {"items": [1, 2, 3]}, True),
+            ("{{ text|urlize }}", {"text": "hi"}, True),
+            ("{{ text|escape }}", {"text": "<b>hi</b>"}, True),
+            ("{{ text|e }}", {"text": "<b>hi</b>"}, True),
+            ("{{ text|forceescape }}", {"text": "<b>hi</b>"}, True),
+            ("{{ text|striptags }}", {"text": "<b>hi</b>"}, True),
+            ("{{ mapping|dictsort }}", {"mapping": {"a": 1}}, True),
+            ("{{ mapping|xmlattr }}", {"mapping": {"a": 1}}, True),
         ],
     )
     def test_jinja2_formatter_security_constraints(
@@ -350,6 +418,223 @@ configurable_unit_primitives:
                 jinja2_formatter(template, **kwargs)
         else:
             jinja2_formatter(template, **kwargs)
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "{%- set obj.injected | default(true, true) %}{% endset -%}",
+            "{%- set obj.injected %}payload{% endset -%}",
+            "{%- set _junk, obj.injected %}xy{% endset -%}",
+            "{%- set obj.x, obj.y %}ab{% endset -%}",
+        ],
+    )
+    def test_jinja2_formatter_blocks_assign_block_nsref_on_non_namespace(
+        self, template: str
+    ):
+        """The block-set form must check its target is a Namespace too, like the plain form does."""
+        target: dict[str, Any] = {}
+
+        with pytest.raises(TemplateRuntimeError):
+            jinja2_formatter(template, obj=target)
+
+        assert target == {}
+
+    def test_jinja2_formatter_allows_assign_block_nsref_on_namespace(self):
+        # Sanity check: legitimate namespace() block-set usage still parses.
+        # (namespace() calls are blocked in this sandbox by is_safe_callable,
+        # so we exercise the compiler path directly via a real Namespace.)
+        from jinja2.utils import Namespace
+
+        from ai_gateway.prompts.base import jinja_env
+
+        ns = Namespace(count=0)
+        template = jinja_env.from_string(
+            "{%- set ns.count %}5{% endset -%}{{ ns.count }}"
+        )
+        assert template.render(ns=ns) == "5"
+
+    def test_jinja2_formatter_allows_assign_block_nsref_tuple_on_namespaces(self):
+        # Sanity check: a tuple target where every NSRef is a real namespace still works.
+        from jinja2.utils import Namespace
+
+        from ai_gateway.prompts.base import jinja_env
+
+        ns_a = Namespace()
+        ns_b = Namespace()
+        template = jinja_env.from_string(
+            "{%- set ns_a.x, ns_b.y %}56{% endset -%}{{ ns_a.x }}|{{ ns_b.y }}"
+        )
+        assert template.render(ns_a=ns_a, ns_b=ns_b) == "5|6"
+
+        # Same namespace referenced twice in the tuple -- the check must be
+        # deduped (not re-emitted), not skipped.
+        ns = Namespace()
+        template = jinja_env.from_string(
+            "{%- set ns.a, ns.b %}12{% endset -%}{{ ns.a }}|{{ ns.b }}"
+        )
+        assert template.render(ns=ns) == "1|2"
+
+    def test_jinja2_formatter_allows_nested_assign_block_with_local_namespace(self):
+        """A nested block-set with a locally-scoped namespace must not crash the outer check.
+
+        (Can't use ``namespace()`` directly -- it's blocked by
+        ``is_safe_callable`` -- so the local name comes from aliasing an
+        existing one instead. Either way it's a name the outer frame's
+        symbol table never analysed.)
+        """
+        from jinja2.utils import Namespace
+
+        from ai_gateway.prompts.base import jinja_env
+
+        ns = Namespace()
+        ns_src = Namespace()
+        template = jinja_env.from_string(
+            "{%- set ns.a %}"
+            "{%- set ns2 = ns_src -%}"
+            "{%- set ns2.b %}5{% endset -%}"
+            "{{- ns2.b -}}"
+            "{% endset -%}"
+            "{{ ns.a }}"
+        )
+        assert template.render(ns=ns, ns_src=ns_src) == "5"
+
+    def test_jinja2_formatter_blocks_filter_table_injection_chain(self):
+        """Two-step chain: leak `environment.filters` via `reverse`/`last`, then
+        install a callable into it via the NSRef write bypass. Both steps
+        must be blocked independently.
+        """
+        marker = "injected_filter"
+        assert marker not in jinja_env.filters
+
+        def harmless_stand_in(*_args, **_kwargs):
+            return "INJECTED"
+
+        # Step 1: the leak primitive itself.
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ d | reverse | list }}").render(d={"a": 1})
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ d | last }}").render(d={"a": 1})
+
+        # Step 2: writing into a (here, directly passed-in) leaked dict.
+        template = (
+            "{%- set f = the_filters -%}"
+            "{%- set e = the_callable -%}"
+            f"{{%- set f.{marker} | default(e, true) %}}{{% endset -%}}"
+        )
+        with pytest.raises(TemplateRuntimeError):
+            jinja_env.from_string(template).render(
+                the_filters=jinja_env.filters, the_callable=harmless_stand_in
+            )
+
+        assert marker not in jinja_env.filters
+
+    def test_jinja2_formatter_blocks_tuple_target_nsref_injection_chain(self):
+        """Same chain as the test above, but step 2 uses a tuple target (``{% set junk, f.NAME %}``) instead of a bare
+        NSRef target."""
+        marker = "injected_filter_via_tuple"
+        assert marker not in jinja_env.filters
+
+        def harmless_stand_in(*_args, **_kwargs):
+            return "INJECTED"
+
+        # Tuple target unpacks the filtered result: junk gets payload[0],
+        # f.marker gets payload[1].
+        payload = ["_", harmless_stand_in]
+        template = (
+            "{%- set f = the_filters -%}"
+            "{%- set p = the_payload -%}"
+            f"{{%- set junk, f.{marker} | default(p, true) %}}{{% endset -%}}"
+        )
+        with pytest.raises(TemplateRuntimeError):
+            jinja_env.from_string(template).render(
+                the_filters=jinja_env.filters, the_payload=payload
+            )
+
+        assert marker not in jinja_env.filters
+
+    def test_jinja2_formatter_blocks_indent_live_list_mutation(self):
+        """`do_indent`'s `s += newline` mutates a live list in place before `.splitlines()` raises; must be blocked
+        before that happens."""
+        history = [{"role": "user", "content": "hi"}]
+
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ seed_history|indent }}").render(
+                seed_history=history
+            )
+
+        assert history == [{"role": "user", "content": "hi"}]
+
+    def test_jinja2_formatter_allows_indent_on_string(self):
+        # Sanity check: the legitimate string use still works.
+        result = jinja_env.from_string("{{ text|indent(2) }}").render(text="a\nb")
+        assert result == "a\n  b"
+
+    def test_jinja2_formatter_wordwrap_does_not_invoke_attacker_controlled_join(self):
+        """`do_wordwrap` calls `wrapstring.join(...)` on the raw separator; must be coerced to `str` first, not called
+        on directly."""
+        msg = AIMessage(content="hello")
+
+        def harmless_stand_in(_lines):
+            return "INJECTED"
+
+        msg.model_extra["join"] = harmless_stand_in
+
+        result = jinja_env.from_string(
+            "{{ text | wordwrap(2, true, carrier) }}"
+        ).render(text="hello world", carrier=msg)
+
+        assert "INJECTED" not in result
+
+    def test_jinja2_formatter_blocks_wordwrap_on_non_string_splitlines_hijack(self):
+        """Same shape as the test above, but on `s` (the text) via `.splitlines()`."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["splitlines"] = lambda: "INJECTED"
+
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ obj | wordwrap(5) }}").render(obj=msg)
+
+    def test_jinja2_formatter_blocks_escape_family_html_hijack(self):
+        """`markupsafe.escape()` calls `s.__html__()` if present, invocable via an object's `__getattr__` fallback (e.g.
+        Pydantic's `model_extra`)."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["__html__"] = lambda: "INJECTED"
+
+        for name in ("escape", "e", "forceescape", "striptags"):
+            with pytest.raises(SecurityError):
+                jinja_env.from_string("{{ obj | " + name + " }}").render(obj=msg)
+
+    def test_jinja2_formatter_blocks_safe_html_hijack(self):
+        """`safe` triggers the same `__html__` gadget as the blocked escape family."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["__html__"] = lambda: "INJECTED"
+
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ obj | safe }}").render(obj=msg)
+
+    def test_jinja2_formatter_blocks_urlize_hijack(self):
+        """`urlize` triggers the same `__html__` gadget on its subject, and calls `.split()` directly on its raw `rel`
+        argument."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["__html__"] = lambda: "INJECTED"
+
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ obj | urlize }}").render(obj=msg)
+
+        msg.model_extra["split"] = lambda: ["INJECTED"]
+        with pytest.raises(SecurityError):
+            jinja_env.from_string("{{ url | urlize(rel=obj) }}").render(
+                url="http://x.com", obj=msg
+            )
+
+    def test_jinja2_formatter_blocks_dictsort_and_xmlattr_items_hijack(self):
+        """`dictsort`/`xmlattr` call `.items()` on the raw argument with no `isinstance` check, invocable via
+        `__getattr__` fallback."""
+        msg = AIMessage(content="hello")
+        msg.model_extra["items"] = lambda: [("INJECTED", "1")]
+
+        for name in ("dictsort", "xmlattr"):
+            with pytest.raises(SecurityError):
+                jinja_env.from_string("{{ obj | " + name + " }}").render(obj=msg)
 
     @pytest.mark.parametrize(
         "prompt_template", [{"with_messages_placeholder": True}], indirect=True
@@ -1000,6 +1285,160 @@ configurable_unit_primitives:
         assert call_count == 3
 
     @pytest.mark.asyncio
+    async def test_ainvoke_retries_on_openai_api_connection_error(self, prompt: Prompt):
+        """Test that ainvoke retries on openai.APIConnectionError."""
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise OpenAIAPIConnectionError(request=request)
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body",
+        # Every member of the set gets a case, so a type added to it cannot go
+        # untested. `server_error` is pinned separately below: it is the type behind
+        # the production failures, so removing it from the set has to fail a test
+        # rather than quietly shrink this list.
+        [
+            pytest.param(
+                {"type": error_type, "message": "An error occurred"}, id=error_type
+            )
+            for error_type in sorted(_RETRYABLE_OPENAI_STREAM_ERROR_TYPES)
+        ]
+        + [
+            pytest.param(
+                {"type": "server_error", "message": "An error occurred"},
+                id="server_error_seen_in_production",
+            ),
+            pytest.param(
+                {"message": "An error occurred"}, id="body_without_error_type"
+            ),
+            pytest.param(None, id="no_body"),
+        ],
+    )
+    async def test_ainvoke_retries_on_openai_mid_stream_api_error(
+        self, prompt: Prompt, body
+    ):
+        """Test that ainvoke retries the bare openai.APIError raised for stream errors.
+
+        OpenAI answers with HTTP 200 and then emits an `error` event in the SSE stream.
+        The SDK raises the bare `APIError` for that (openai/_streaming.py), carrying the
+        stream's error payload as `body` and no status code at all -- so it matches
+        neither `_RETRYABLE_NETWORK_ERRORS` nor any status-code check. A body that does
+        not classify itself is retried too, since the generic server error is the shape
+        that arrives that way.
+        """
+        success_response = AIMessage(content="Hello!")
+        call_count = 0
+        request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        mid_stream_error = OpenAIAPIError(
+            "An error occurred while processing your request.",
+            request=request,
+            body=body,
+        )
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise mid_stream_error
+            return success_response
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                result = await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert result == success_response
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param(
+                {
+                    "type": "invalid_request_error",
+                    "message": "This content was flagged",
+                },
+                id="content_policy_rejection",
+            ),
+            pytest.param(
+                {"type": "invalid_prompt", "message": "Bad prompt"},
+                id="invalid_prompt",
+            ),
+        ],
+    )
+    async def test_ainvoke_does_not_retry_non_transient_openai_mid_stream_error(
+        self, prompt: Prompt, body
+    ):
+        """Test that a mid-stream error the provider has classified is not retried.
+
+        The SDK raises the same bare `APIError` for every `error` event in the stream,
+        including rejections that will fail identically on a second attempt, so the
+        body's error type decides. Retrying those would only delay the failure the
+        caller is going to see.
+        """
+        call_count = 0
+        request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        rejection = OpenAIAPIError(
+            "This content was flagged", request=request, body=body
+        )
+
+        async def always_fails(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise rejection
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=always_fails):
+            with mock.patch("asyncio.sleep"):
+                with pytest.raises(OpenAIAPIError):
+                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_does_not_double_retry_litellm_api_connection_error(
+        self, prompt: Prompt
+    ):
+        """litellm.exceptions.APIConnectionError subclasses openai.APIConnectionError, so it must not also be retried by
+        this module's own retry wrapper — litellm's client already retries it internally.
+
+        Double-retrying here would multiply attempts instead of adding a bounded outer retry.
+        """
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        call_count = 0
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise LiteLLMAPIConnectionError(
+                message="connection error",
+                llm_provider="openai",
+                model="gpt-6-astra",
+                request=request,
+            )
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                with pytest.raises(LiteLLMAPIConnectionError):
+                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert call_count == 1
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "error",
         [
@@ -1039,6 +1478,19 @@ configurable_unit_primitives:
                     llm_provider="vertex_ai",
                 ),
                 id="litellm_internal_server_error",
+            ),
+            pytest.param(
+                OpenAIInternalServerError(
+                    "Internal server error",
+                    response=httpx.Response(
+                        500,
+                        request=httpx.Request(
+                            "POST", "https://api.openai.com/v1/chat/completions"
+                        ),
+                    ),
+                    body=None,
+                ),
+                id="openai_internal_server_error",
             ),
         ],
     )
@@ -1163,6 +1615,33 @@ configurable_unit_primitives:
         self, prompt: Prompt, error: Exception
     ):
         """Test that ainvoke does not retry on non-retryable Anthropic errors."""
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=error):
+            with pytest.raises(type(error)):
+                await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                OpenAIBadRequestError(
+                    "Bad request",
+                    response=httpx.Response(
+                        400,
+                        request=httpx.Request(
+                            "POST", "https://api.openai.com/v1/chat/completions"
+                        ),
+                    ),
+                    body=None,
+                ),
+                id="openai_bad_request_error",
+            ),
+        ],
+    )
+    async def test_ainvoke_does_not_retry_on_openai_non_retryable_status(
+        self, prompt: Prompt, error: Exception
+    ):
+        """Test that ainvoke does not retry on non-retryable OpenAI errors."""
         with mock.patch.object(FakeModel, "ainvoke", side_effect=error):
             with pytest.raises(type(error)):
                 await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
@@ -1337,13 +1816,22 @@ configurable_unit_primitives:
             f"Expected model_id '{model_provider}:claude-3-haiku', got '{actual_model_id}'"
         )
 
+    _ANTHROPIC_ONLY_KWARGS_VALUES = {
+        "context_management": {
+            "edits": [
+                {
+                    "type": "clear_tool_uses_20250919",
+                    "trigger": {"type": "input_tokens", "value": 1000},
+                    "keep": {"type": "tool_uses", "value": 1},
+                }
+            ]
+        },
+        "thinking": {"type": "enabled", "budget_tokens": 1024},
+        "output_config": {"effort": "low"},
+    }
+
     @pytest.mark.parametrize(
-        (
-            "model_provider",
-            "model_params",
-            "prompt_params",
-            "expect_context_management",
-        ),
+        ("model_provider", "model_params", "expect_kwarg"),
         [
             (
                 ModelClassProvider.LITE_LLM,
@@ -1351,33 +1839,11 @@ configurable_unit_primitives:
                     model="claude-sonnet-4-5-20250929",
                     custom_llm_provider="anthropic",
                 ),
-                PromptParams(
-                    context_management={
-                        "edits": [
-                            {
-                                "type": "clear_tool_uses_20250919",
-                                "trigger": {"type": "input_tokens", "value": 1000},
-                                "keep": {"type": "tool_uses", "value": 1},
-                            }
-                        ]
-                    }
-                ),
                 True,
             ),
             (
                 ModelClassProvider.ANTHROPIC,
                 ChatAnthropicParams(),
-                PromptParams(
-                    context_management={
-                        "edits": [
-                            {
-                                "type": "clear_tool_uses_20250919",
-                                "trigger": {"type": "input_tokens", "value": 1000},
-                                "keep": {"type": "tool_uses", "value": 1},
-                            }
-                        ]
-                    }
-                ),
                 True,
             ),
             (
@@ -1386,17 +1852,6 @@ configurable_unit_primitives:
                     model="gpt-4",
                     custom_llm_provider="openai",
                 ),
-                PromptParams(
-                    context_management={
-                        "edits": [
-                            {
-                                "type": "clear_tool_uses_20250919",
-                                "trigger": {"type": "input_tokens", "value": 1000},
-                                "keep": {"type": "tool_uses", "value": 1},
-                            }
-                        ]
-                    }
-                ),
                 False,
             ),
             (
@@ -1404,30 +1859,40 @@ configurable_unit_primitives:
                 ChatLiteLLMParams(
                     model="some-model",
                 ),
-                PromptParams(
-                    context_management={
-                        "edits": [
-                            {
-                                "type": "clear_tool_uses_20250919",
-                                "trigger": {"type": "input_tokens", "value": 1000},
-                                "keep": {"type": "tool_uses", "value": 1},
-                            }
-                        ]
-                    }
-                ),
                 False,
             ),
         ],
     )
-    def test_context_management_filtered_by_provider(
+    @pytest.mark.parametrize(
+        "anthropic_only_kwarg", ["context_management", "thinking", "output_config"]
+    )
+    def test_anthropic_only_kwargs_filtered_by_provider(
         self,
         model_provider: ModelClassProvider,
-        prompt_config: PromptConfig,
+        model_config: ModelConfig,
+        prompt_name: str,
+        unit_primitive: GitLabUnitPrimitive,
+        prompt_template: dict[str, str | list[str]],
         model_metadata: TypeModelMetadata,
         model_factory: TypeModelFactory,
         model: FakeModel,
-        expect_context_management: bool,
+        anthropic_only_kwarg: str,
+        expect_kwarg: bool,
     ):
+        prompt_config = PromptConfig(
+            name=prompt_name,
+            model=model_config,
+            unit_primitive=unit_primitive,
+            prompt_template=prompt_template,
+            params=PromptParams.model_validate(
+                {
+                    anthropic_only_kwarg: self._ANTHROPIC_ONLY_KWARGS_VALUES[
+                        anthropic_only_kwarg
+                    ]
+                }
+            ),
+        )
+
         with mock.patch.object(FakeModel, "bind") as mock_bind:
             mock_bind.return_value = model
 
@@ -1439,10 +1904,128 @@ configurable_unit_primitives:
             )
 
         bind_kwargs = mock_bind.call_args.kwargs
-        if expect_context_management:
-            assert "context_management" in bind_kwargs
+        if expect_kwarg:
+            assert anthropic_only_kwarg in bind_kwargs
         else:
-            assert "context_management" not in bind_kwargs
+            assert anthropic_only_kwarg not in bind_kwargs
+
+
+def _requests_for(model_name: str) -> float:
+    return sum(
+        sample.value
+        for metric in INFERENCE_COUNTER.collect()
+        for sample in metric.samples
+        if sample.name == "model_inferences_total"
+        and sample.labels["model_name"] == model_name
+    )
+
+
+class TestPromptRequestedModel:
+    @pytest.fixture(name="is_custom_model")
+    def is_custom_model_fixture(self):
+        return True
+
+    @pytest.fixture(name="identifier")
+    def identifier_fixture(self):
+        return "custom_openai/requested-model"
+
+    @pytest.fixture(name="model_metadata")
+    def model_metadata_fixture(
+        self,
+        llm_definition: ChatLiteLLMDefinition,
+        is_custom_model: bool,
+        identifier: Optional[str],
+    ):
+        return ModelMetadata(
+            provider="openai",
+            name="mistral",
+            llm_definition=llm_definition,
+            identifier=identifier,
+            is_custom_model=is_custom_model,
+        )
+
+    @pytest.mark.parametrize(
+        ("is_custom_model", "identifier", "expected_model_name"),
+        [
+            (True, "custom_openai/requested-model", "requested-model"),
+            (True, None, "fake-model"),
+            (False, "custom_openai/requested-model", "fake-model"),
+        ],
+    )
+    def test_instrumentator_names_the_requested_model(
+        self, prompt: Prompt, expected_model_name: str
+    ):
+        assert prompt.instrumentator.labels["model_name"] == expected_model_name
+        assert prompt.model_name == "fake-model"
+
+    @pytest.mark.parametrize("model_metadata", [None])
+    def test_instrumentator_without_model_metadata_names_the_model(
+        self, prompt: Prompt
+    ):
+        assert prompt.instrumentator.labels["model_name"] == "fake-model"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_request_log_and_metrics_name_the_requested_model(
+        self, prompt: Prompt, stream: bool
+    ):
+        before = _requests_for("requested-model")
+
+        with capture_logs() as logs:
+            if stream:
+                async for _ in prompt.astream({"name": "Duo", "content": "Hi"}):
+                    pass
+            else:
+                await prompt.ainvoke({"name": "Duo", "content": "Hi"})
+
+        [entry] = [log for log in logs if log["event"] == "Request to LLM complete"]
+        assert entry["model_name"] == "requested-model"
+        assert _requests_for("requested-model") == before + 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model_error", [ValueError("model failed")])
+    async def test_error_log_names_the_requested_model(self, prompt: Prompt):
+        with capture_logs() as logs, pytest.raises(ValueError):
+            async for _ in prompt.astream({"name": "Duo", "content": "Hi"}):
+                pass
+
+        [entry] = [log for log in logs if log["event"] == "model failed"]
+        assert entry["extra"]["model_name"] == "requested-model"
+
+
+class _FakeLiteLLMModel(FakeModel):
+    custom_llm_provider: Optional[str] = None
+
+
+class TestPromptModelVendor:
+    @pytest.fixture(name="custom_llm_provider")
+    def custom_llm_provider_fixture(self):
+        return None
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self, custom_llm_provider: Optional[str]):
+        model = _FakeLiteLLMModel(
+            model_engine="litellm",
+            model_name="fake-model",
+            responses=["Hi"],
+            custom_llm_provider=custom_llm_provider,
+        )
+        return lambda *args, **kwargs: model
+
+    @pytest.mark.parametrize(
+        ("model_provider", "custom_llm_provider", "expected_vendor"),
+        [
+            (ModelClassProvider.LITE_LLM, "fireworks_ai", "fireworks_ai"),
+            (ModelClassProvider.LITE_LLM_COMPLETION, "fireworks_ai", "fireworks_ai"),
+            (ModelClassProvider.LITE_LLM, None, "litellm"),
+            (ModelClassProvider.ANTHROPIC, None, "anthropic"),
+        ],
+    )
+    def test_instrumentator_reports_model_vendor(
+        self, prompt: Prompt, expected_vendor: str
+    ):
+        assert prompt.model_vendor == expected_vendor
+        assert prompt.instrumentator.model_vendor == expected_vendor
 
 
 @pytest.mark.skipif(
@@ -1868,6 +2451,24 @@ class TestBaseRegistry:
         internal_event_client.track_event.assert_has_calls(expected_internal_events)
 
     @pytest.mark.parametrize(
+        ("unit_primitive", "scopes"),
+        [(GitLabUnitPrimitive.COMPLETE_CODE, ["complete_code"])],
+    )
+    def test_get_on_behalf_without_tracking(
+        self,
+        internal_event_client: Mock,
+        registry: BasePromptRegistry,
+        user: StarletteUser,
+        prompt: Prompt,
+    ):
+        assert (
+            registry.get_on_behalf(user=user, prompt_id="test", track_event=False)
+            == prompt
+        )
+
+        internal_event_client.track_event.assert_not_called()
+
+    @pytest.mark.parametrize(
         ("model_metadata", "unit_primitive", "scopes"),
         [
             (
@@ -2223,6 +2824,10 @@ models:
     prompt_params:
       vertex_location: global
 """,
+        )
+        fs.create_file(
+            model_selection_dir / "model_restrictions.yml",
+            contents="restricted_models: []\n",
         )
         fs.create_file(
             model_selection_dir / "unit_primitives.yml",

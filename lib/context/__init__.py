@@ -1,5 +1,13 @@
 # Context variables shared between ai_gateway and duo_workflow_service
 
+from lib.context.approval_sources import (
+    approval_sources,
+    get_approval_policy_ref,
+    get_approval_source,
+    init_approval_sources,
+    record_approval_policy_ref,
+    record_approval_source,
+)
 from lib.context.auth import (
     StarletteUser,
     cloud_connector_token_context_var,
@@ -84,6 +92,13 @@ __all__ = [  # noqa: RUF022  # grouped by category, not alphabetical
     "init_tool_executions",
     "get_tool_executions",
     "ToolExecutions",
+    # approval_sources
+    "approval_sources",
+    "init_approval_sources",
+    "record_approval_source",
+    "record_approval_policy_ref",
+    "get_approval_source",
+    "get_approval_policy_ref",
     # auth
     "cloud_connector_token_context_var",
     "StarletteUser",

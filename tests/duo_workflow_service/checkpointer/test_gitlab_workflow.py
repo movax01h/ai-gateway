@@ -19,19 +19,27 @@ from langgraph.checkpoint.base import (
 )
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
+from structlog.testing import capture_logs
 
 from duo_workflow_service.audit_events.event_types import SessionEndedEvent
 from duo_workflow_service.checkpointer.gitlab_workflow import (
+    MAX_NESTED_INCREMENTAL_BASELINES,
+    TOP_LEVEL_CHECKPOINT_NS,
     GitLabWorkflow,
     WorkflowStatusEventEnum,
     _dict_of_list_delta,
+    _FlushPoint,
     _get_orbit_tool_calls,
     _serialize_all_channels_full,
     _serialize_channel_blobs,
 )
-from duo_workflow_service.checkpointer.gitlab_workflow_utils import compress_checkpoint
+from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    compress_checkpoint,
+    uncompress_checkpoint,
+)
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import (
+    CheckpointAccessDeniedError,
     CheckpointFetchError,
     CheckpointSaveError,
     InvalidRequestException,
@@ -71,13 +79,22 @@ from lib.context.tool_loop import (
     record_tool_calls,
     tool_loop_stats,
 )
-from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 
 
 class CustomRunnableConfig(TypedDict):
     configurable: Optional[dict]
+
+
+# A nested subgraph invocation (e.g. a delegated subagent) keeps its own checkpoint
+# lineage under this namespace; the blank string is the top-level graph.
+_NESTED_CHECKPOINT_NS = "delegation:task-1"
+
+# Deferred-status dict entries in the (flush_point, checkpoint_id) shape used across
+# the aput/completion tests.
+_DEFERRED_FINISH = (_FlushPoint.ON_COMPLETION, "checkpoint-id")
+_DEFERRED_TOOL_APPROVAL = (_FlushPoint.ON_NEXT_CHECKPOINT, "checkpoint-id")
 
 
 @pytest.fixture(name="http_client_for_retry")
@@ -274,9 +291,9 @@ def checkpoint_metadata_fixture():
     return metadata
 
 
-def _incremental_state(gitlab_workflow):
-    """The checkpointer's incremental-checkpoint delta state."""
-    return gitlab_workflow._incremental_state
+def _incremental_state(gitlab_workflow, checkpoint_ns=TOP_LEVEL_CHECKPOINT_NS):
+    """Incremental-checkpoint delta state for one LangGraph checkpoint namespace."""
+    return gitlab_workflow._incremental_state_for(checkpoint_ns)
 
 
 @pytest.mark.asyncio
@@ -1116,6 +1133,74 @@ async def test_infra_stop_leaves_rails_status_untouched(
 
 
 @pytest.mark.asyncio
+async def test_infra_stop_still_emits_billing_event(
+    http_client,
+    workflow_id,
+    workflow_type,
+    internal_event_client: Mock,
+    billing_event_service,
+    billing_event_client,
+    mock_user,
+    mock_llm_operations,
+):
+    """Tokens consumed before an infrastructure-initiated stop are still billable.
+
+    The client's reconnect re-enters the checkpointer and resets the per-session LLM operation counters, so the billing
+    event must be emitted on the way out even though the Rails workflow status is deliberately left untouched.
+    """
+    current_user.set(mock_user)
+    workflow_config = {
+        "first_checkpoint": {"checkpoint": "{}"},
+        "workflow_status": "running",
+        "agent_privileges_names": [],
+        "pre_approved_agent_privileges_names": [],
+        "mcp_enabled": False,
+        "allow_agent_to_request_user": False,
+        "archived": False,
+        "stalled": False,
+    }
+
+    gitlab_workflow = GitLabWorkflow(
+        http_client,
+        workflow_id,
+        workflow_type,
+        workflow_config,  # type: ignore[arg-type]
+    )
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._billing_event_service = billing_event_service
+    status_handler_mock = AsyncMock()
+    gitlab_workflow._status_handler = status_handler_mock
+
+    with pytest.raises(asyncio.CancelledError):
+        async with gitlab_workflow:
+            llm_operations.set(mock_llm_operations)
+            raise asyncio.CancelledError(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST)
+
+    status_calls = [
+        c.args[1] for c in status_handler_mock.update_workflow_status.call_args_list
+    ]
+    assert WorkflowStatusEventEnum.STOP not in status_calls
+    assert WorkflowStatusEventEnum.DROP not in status_calls
+
+    billing_event_client.track_billing_event.assert_called_once_with(
+        mock_user,
+        BillingEvent.DAP_FLOW_ON_COMPLETION,
+        "GitLabWorkflow",
+        unit_of_measure="request",
+        quantity=1,
+        metadata={
+            "workflow_id": workflow_id,
+            "feature_qualified_name": workflow_type.feature_qualified_name,
+            "feature_ai_catalog_item": workflow_type.feature_ai_catalog_item,
+            "execution_environment": ExecutionEnvironment.DAP.value,
+            "llm_operations": mock_llm_operations,
+            "tool_names": [],
+            "orbit_called": False,
+        },
+    )
+
+
+@pytest.mark.asyncio
 async def test_user_stop_still_persists_stopped_status(
     http_client,
     workflow_id,
@@ -1502,7 +1587,7 @@ async def test_aget_tuple(
 
 
 @pytest.mark.asyncio
-async def test_aget_tuple_uses_by_thread_ts_when_flag_and_column_enabled(
+async def test_aget_tuple_uses_by_thread_ts_when_column_enabled(
     incremental_enabled,
     gitlab_workflow,
     http_client,
@@ -1511,12 +1596,6 @@ async def test_aget_tuple_uses_by_thread_ts_when_flag_and_column_enabled(
     checkpoint_data,
     compressed_checkpoint_data,
 ):
-    current_feature_flag_context.set(
-        {
-            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
-            FeatureFlag.DW_READ_BLOBS_API.value,
-        }
-    )
     http_client.aget.return_value = GitLabHttpResponse(
         status_code=200,
         body=compressed_checkpoint_data[0],
@@ -1547,12 +1626,6 @@ async def test_aget_tuple_returns_none_on_404_when_reading_incremental(
     http_client,
     config,
 ):
-    current_feature_flag_context.set(
-        {
-            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
-            FeatureFlag.DW_READ_BLOBS_API.value,
-        }
-    )
     http_client.aget.return_value = GitLabHttpResponse(status_code=404, body={})
 
     result = await gitlab_workflow.aget_tuple(config)
@@ -1569,12 +1642,6 @@ async def test_aget_tuple_raises_on_non_404_when_reading_incremental(
     http_client,
     config,
 ):
-    current_feature_flag_context.set(
-        {
-            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
-            FeatureFlag.DW_READ_BLOBS_API.value,
-        }
-    )
     http_client.aget.return_value = GitLabHttpResponse(
         status_code=500, body={"error": "server error"}
     )
@@ -1593,12 +1660,6 @@ async def test_aget_tuple_returns_none_on_empty_body_when_reading_incremental(
     http_client,
     config,
 ):
-    current_feature_flag_context.set(
-        {
-            FeatureFlag.DUO_WORKFLOW_READ_INCREMENTAL_CHECKPOINTS.value,
-            FeatureFlag.DW_READ_BLOBS_API.value,
-        }
-    )
     http_client.aget.return_value = GitLabHttpResponse(status_code=200, body={})
 
     result = await gitlab_workflow.aget_tuple(config)
@@ -1617,56 +1678,6 @@ async def test_aget_tuple_uses_list_when_column_disabled(
     compressed_checkpoint_data,
 ):
     # incremental_checkpoints_enabled defaults to False in workflow_config.
-    current_feature_flag_context.set({FeatureFlag.DW_READ_BLOBS_API.value})
-    http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200,
-        body=compressed_checkpoint_data,
-    )
-
-    result = await gitlab_workflow.aget_tuple(config)
-
-    assert result is not None
-    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
-
-    http_client.aget.assert_called_once()
-    assert "by_thread_ts" not in http_client.aget.call_args[1]["path"]
-
-
-@pytest.mark.asyncio
-async def test_aget_tuple_uses_list_when_flag_disabled(
-    incremental_enabled,
-    gitlab_workflow,
-    http_client,
-    config,
-    checkpoint_data,
-    compressed_checkpoint_data,
-):
-    http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200,
-        body=compressed_checkpoint_data,
-    )
-
-    result = await gitlab_workflow.aget_tuple(config)
-
-    assert result is not None
-    assert result.checkpoint == checkpoint_data[0]["checkpoint"]
-
-    http_client.aget.assert_called_once()
-    assert "by_thread_ts" not in http_client.aget.call_args[1]["path"]
-
-
-@pytest.mark.asyncio
-async def test_aget_tuple_uses_list_when_kill_switch_disabled(
-    incremental_enabled,
-    gitlab_workflow,
-    http_client,
-    config,
-    checkpoint_data,
-    compressed_checkpoint_data,
-):
-    # dw_read_blobs_api and the column are on, but the kill switch is off, so the
-    # blob read is disabled and aget_tuple falls back to the list read.
-    current_feature_flag_context.set({FeatureFlag.DW_READ_BLOBS_API.value})
     http_client.aget.return_value = GitLabHttpResponse(
         status_code=200,
         body=compressed_checkpoint_data,
@@ -1683,12 +1694,11 @@ async def test_aget_tuple_uses_list_when_kill_switch_disabled(
 
 @pytest.mark.asyncio
 async def test_aget_tuple_logs_error_when_list_scan_returns_non_success(
-    incremental_enabled,
     gitlab_workflow,
     http_client,
     config,
 ):
-    # Flag disabled, so aget_tuple takes the paginated list-and-scan path.
+    # Column disabled, so aget_tuple takes the paginated list-and-scan path.
     # A failed page fetch must raise, not be reported as "checkpoint absent".
     gitlab_workflow._logger = Mock()
     http_client.aget.return_value = GitLabHttpResponse(
@@ -1706,7 +1716,7 @@ async def test_aget_tuple_logs_error_when_list_scan_returns_non_success(
         "Failed to fetch checkpoint page",
         workflow_id=gitlab_workflow._workflow_id,
         status_code=500,
-        page="1",
+        page=1,
     )
 
 
@@ -1888,10 +1898,37 @@ async def test_aput(
     assert post_call_body["thread_ts"] == checkpoint["id"]
     assert post_call_body["parent_ts"] == "parent-checkpoint"
     assert "channel_blobs" not in post_call_body
+    # Omitted for the flow's own top-level lineage.
+    assert "checkpoint_ns" not in post_call_body
 
     assert result == {
-        "configurable": {"thread_id": workflow_id, "checkpoint_id": checkpoint["id"]}
+        "configurable": {
+            "thread_id": workflow_id,
+            "checkpoint_id": checkpoint["id"],
+            "checkpoint_ns": TOP_LEVEL_CHECKPOINT_NS,
+        }
     }
+
+
+@pytest.mark.asyncio
+async def test_aput_drops_nul_characters(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    # PostgreSQL `jsonb` cannot store NUL, so GitLab would reject the checkpoint.
+    config = {"configurable": {"checkpoint_id": "parent-checkpoint"}}
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    checkpoint["channel_values"]["command_output"] = "Exit code: 0\n\x1b]633;C\x07\x00"
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    await gitlab_workflow.aput(
+        config, checkpoint, checkpoint_metadata, ChannelVersions()
+    )
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+    saved = uncompress_checkpoint(post_call_body["compressed_checkpoint"])
+
+    assert saved["channel_values"]["command_output"] == "Exit code: 0\n\x1b]633;C\x07"
 
 
 def _checkpoint_saved_kwargs(logger):
@@ -2204,20 +2241,13 @@ def test_aput_with_no_status_update_and_human_input(
 @pytest.mark.parametrize(
     "status,expected_event",
     [
-        # COMPLETED -> FINISH is deferred (see test_aput_writes_defers_finish),
-        # so it is intentionally excluded from this immediate-PATCH case.
+        # Every status event is deferred to its flush point: the checkpoint (which
+        # carries this same status channel) must be durable before Rails is told.
+        # FINISH waits for the terminal checkpoint; everything else fires on the
+        # next checkpoint save. See test_aput_writes_defers_status_until_checkpoint_saved.
         (WorkflowStatusEnum.ERROR, WorkflowStatusEventEnum.DROP),
         (WorkflowStatusEnum.CANCELLED, WorkflowStatusEventEnum.STOP),
         (WorkflowStatusEnum.PAUSED, WorkflowStatusEventEnum.PAUSE),
-        (
-            WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
-            WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
-        ),
-        (WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEventEnum.REQUIRE_INPUT),
-        (
-            WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
-            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
-        ),
     ],
 )
 async def test_workflow_status_events(
@@ -2236,12 +2266,12 @@ async def test_workflow_status_events(
 
     await gitlab_workflow.aput_writes(config, writes, "task_id")
 
-    http_client.apatch.assert_called_once_with(
-        path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}",
-        body=json.dumps({"status_event": expected_event.value}),
-        parse_json=True,
+    # Not PATCHed from aput_writes; parked for the post-checkpoint flush.
+    http_client.apatch.assert_not_called()
+    assert gitlab_workflow._deferred_statuses.get(expected_event) == (
+        _FlushPoint.ON_NEXT_CHECKPOINT,
+        "test-id",
     )
-    http_client.apatch.reset_mock()
 
 
 @pytest.mark.asyncio
@@ -2311,71 +2341,332 @@ async def test_aput_writes_with_interrupt(gitlab_workflow, http_client):
 
 
 @pytest.mark.asyncio
-async def test_aput_writes_defers_finish(gitlab_workflow, workflow_id):
-    """FINISH must not PATCH inside aput_writes; it is deferred until the terminal checkpoint is persisted (see gitlab-
-    org/gitlab#605913)."""
+@pytest.mark.parametrize(
+    "checkpoint_status,expected_event,expected_flush_point",
+    [
+        # FINISH waits for the terminal (final-answer) checkpoint, so it flushes
+        # only at completion (see gitlab-org/gitlab#605913).
+        (
+            WorkflowStatusEnum.COMPLETED,
+            WorkflowStatusEventEnum.FINISH,
+            _FlushPoint.ON_COMPLETION,
+        ),
+        # The awaiting statuses back their Rails transition with the current
+        # super-step's checkpoint, so they flush on the next checkpoint save.
+        (
+            WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+        ),
+        (
+            WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+        ),
+        (
+            WorkflowStatusEnum.INPUT_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+        ),
+    ],
+)
+async def test_aput_writes_defers_status_until_checkpoint_saved(
+    gitlab_workflow,
+    workflow_id,
+    checkpoint_status,
+    expected_event,
+    expected_flush_point,
+):
+    """Statuses whose Rails transition reads the pending request/answer from the checkpoint are not PATCHed inside
+    aput_writes — that checkpoint is not saved yet.
+
+    Each is parked until its flush point.
+    """
     gitlab_workflow._status_handler = AsyncMock()
     config: RunnableConfig = {
         "configurable": {"checkpoint_id": "test-id", "thread_id": workflow_id}
     }
-    writes: Sequence[tuple[str, Any]] = [("status", WorkflowStatusEnum.COMPLETED)]
+    writes: Sequence[tuple[str, Any]] = [("status", checkpoint_status)]
 
     await gitlab_workflow.aput_writes(config, writes, "task_id")
 
     gitlab_workflow._status_handler.update_workflow_status.assert_not_called()
-    assert gitlab_workflow._pending_finish is True
+    assert gitlab_workflow._deferred_statuses == {
+        expected_event: (expected_flush_point, "test-id")
+    }
 
 
 @pytest.mark.asyncio
-async def test_handle_online_mode_completion_fires_deferred_finish(
+@pytest.mark.parametrize(
+    "awaiting_event",
+    [
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+        WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+        WorkflowStatusEventEnum.REQUIRE_INPUT,
+    ],
+    ids=["tool_call_approval", "plan_approval", "input_required"],
+)
+@pytest.mark.parametrize(
+    "parked_checkpoint_id,aput_checkpoint_id,expected_fires",
+    [
+        # The aput whose checkpoint builds on the id the deferring aput_writes saw
+        # carries the payload, so it releases the status...
+        ("checkpoint-a", "checkpoint-a", True),
+        # ...but a save with any other parent id does not: it is a previous
+        # super-step still in flight, or another lineage's checkpoint.
+        ("checkpoint-a", "checkpoint-b", False),
+    ],
+    ids=["matching_checkpoint_releases", "other_checkpoint_does_not_release"],
+)
+async def test_aput_releases_only_the_deferred_status_for_its_own_checkpoint(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    workflow_id,
+    awaiting_event,
+    parked_checkpoint_id,
+    aput_checkpoint_id,
+    expected_fires,
+):
+    """A checkpoint save releases exactly the awaiting statuses parked against the checkpoint id it builds on."""
+    status_handler = AsyncMock()
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        awaiting_event: (_FlushPoint.ON_NEXT_CHECKPOINT, parked_checkpoint_id)
+    }
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    config = {"configurable": {"checkpoint_id": aput_checkpoint_id}}
+
+    await gitlab_workflow.aput(
+        config, checkpoint_data[0]["checkpoint"], checkpoint_metadata, ChannelVersions()
+    )
+
+    http_client.apost.assert_called_once()
+    if expected_fires:
+        status_handler.update_workflow_status.assert_awaited_once_with(
+            workflow_id, awaiting_event
+        )
+        assert gitlab_workflow._deferred_statuses == {}
+    else:
+        status_handler.update_workflow_status.assert_not_called()
+        assert gitlab_workflow._deferred_statuses == {
+            awaiting_event: (_FlushPoint.ON_NEXT_CHECKPOINT, parked_checkpoint_id)
+        }
+
+
+@pytest.mark.asyncio
+async def test_aput_keeps_deferred_awaiting_status_when_save_fails(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    """A failed checkpoint save must not flip Rails to an awaiting status the checkpoint cannot back."""
+    status_handler = AsyncMock()
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+    http_client.apost.return_value = GitLabHttpResponse(status_code=500, body={})
+    config = {"configurable": {"checkpoint_id": "checkpoint-id"}}
+
+    with pytest.raises(CheckpointSaveError):
+        await gitlab_workflow.aput(
+            config,
+            checkpoint_data[0]["checkpoint"],
+            checkpoint_metadata,
+            ChannelVersions(),
+        )
+
+    status_handler.update_workflow_status.assert_not_called()
+    assert gitlab_workflow._deferred_statuses == {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+
+
+@pytest.mark.asyncio
+async def test_aput_propagates_status_patch_failure_and_keeps_the_status_parked(
+    gitlab_workflow, http_client, checkpoint_data, checkpoint_metadata
+):
+    """The checkpoint saved but the status PATCH failed: the error propagates (the flush is not guarded), and the
+    status stays parked so the completion backstop can retry it."""
+    status_handler = AsyncMock()
+    status_handler.update_workflow_status.side_effect = RuntimeError("rails down")
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    config = {"configurable": {"checkpoint_id": "checkpoint-id"}}
+
+    with pytest.raises(RuntimeError, match="rails down"):
+        await gitlab_workflow.aput(
+            config,
+            checkpoint_data[0]["checkpoint"],
+            checkpoint_metadata,
+            ChannelVersions(),
+        )
+
+    http_client.apost.assert_called_once()
+    assert gitlab_workflow._deferred_statuses == {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_completion_fires_deferred_awaiting_status(
     gitlab_workflow, workflow_id
 ):
+    """Backstop: an awaiting status still pending at completion reaches Rails."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "tool_call_approval_required"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+    }
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        await gitlab_workflow._handle_completion()
+
+    status_handler.update_workflow_status.assert_awaited_once_with(
+        workflow_id, WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL
+    )
+    assert gitlab_workflow._deferred_statuses == {}
+
+
+@pytest.mark.asyncio
+async def test_handle_completion_fires_deferred_finish(gitlab_workflow, workflow_id):
     """A deferred FINISH is fired on completion, after the graph loop (and its terminal checkpoint) has drained."""
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     # Patch _track_workflow_completion to isolate the deferred-FINISH behaviour
     # from the billing/internal-event path (which swallows exceptions).
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
-        await gitlab_workflow._handle_online_mode_completion()
+        await gitlab_workflow._handle_completion()
 
     status_handler.update_workflow_status.assert_awaited_once_with(
         workflow_id, WorkflowStatusEventEnum.FINISH
     )
-    assert gitlab_workflow._pending_finish is False
+    assert gitlab_workflow._deferred_statuses == {}
 
 
 @pytest.mark.asyncio
-async def test_handle_online_mode_completion_without_deferred_finish(
-    gitlab_workflow, workflow_id
-):
+async def test_handle_completion_without_deferred_finish(gitlab_workflow, workflow_id):
     """No spurious FINISH when the workflow did not complete (e.g. interrupt)."""
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "input_required"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = False
+    gitlab_workflow._deferred_statuses = {}
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
-        await gitlab_workflow._handle_online_mode_completion()
+        await gitlab_workflow._handle_completion()
 
     status_handler.update_workflow_status.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_handle_online_mode_completion_finish_error_propagates(
+async def test_handle_completion_finish_error_propagates(
     gitlab_workflow,
 ):
     """If the deferred FINISH PATCH raises, the error propagates (not swallowed)."""
     status_handler = AsyncMock()
     status_handler.update_workflow_status.side_effect = RuntimeError("boom")
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         with pytest.raises(RuntimeError, match="boom"):
-            await gitlab_workflow._handle_online_mode_completion()
+            await gitlab_workflow._handle_completion()
+
+
+@pytest.mark.asyncio
+async def test_handle_completion_finish_error_swallowed_when_not_reraising(
+    gitlab_workflow, workflow_id
+):
+    """With reraise_errors=False the completion error is logged and swallowed."""
+    status_handler = AsyncMock()
+    status_handler.update_workflow_status.side_effect = RuntimeError("boom")
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
+
+    with (
+        patch.object(gitlab_workflow, "_track_workflow_completion"),
+        patch(
+            "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
+        ) as mock_log_exception,
+    ):
+        await gitlab_workflow._handle_completion(reraise_errors=False)
+
+    mock_log_exception.assert_called_once()
+    assert isinstance(mock_log_exception.call_args[0][0], RuntimeError)
+    assert mock_log_exception.call_args[1]["extra"]["workflow_id"] == workflow_id
+
+
+@pytest.mark.asyncio
+async def test_aexit_clean_exit_propagates_completion_error(gitlab_workflow):
+    """On a clean exit there is no original exception to preserve, so a completion failure must surface rather than
+    silently leaving Rails out of sync."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.side_effect = RuntimeError("status fetch failed")
+    gitlab_workflow._status_handler = status_handler
+
+    with pytest.raises(RuntimeError, match="status fetch failed"):
+        await gitlab_workflow.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_aexit_exception_exit_swallows_completion_error(gitlab_workflow):
+    """On a failure exit the completion error must not replace the original teardown exception: __aexit__ returns
+    without raising (so the original propagates) after the DROP transition."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.side_effect = RuntimeError("status fetch failed")
+    gitlab_workflow._status_handler = status_handler
+
+    with patch(
+        "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
+    ) as mock_log_exception:
+        suppressed = await gitlab_workflow.__aexit__(
+            ValueError, ValueError("graph blew up"), None
+        )
+
+    assert not suppressed
+    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
+    assert WorkflowStatusEventEnum.DROP in calls
+    logged = [c[0][0] for c in mock_log_exception.call_args_list]
+    assert any(
+        isinstance(e, RuntimeError) and str(e) == "status fetch failed" for e in logged
+    )
+
+
+@pytest.mark.asyncio
+async def test_aexit_teardown_error_branch_swallows_completion_error(gitlab_workflow):
+    """A completed workflow whose deferred FINISH also fails still suppresses the benign teardown error instead of
+    surfacing the FINISH failure in its place."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    status_handler.update_workflow_status.side_effect = RuntimeError("PATCH failed")
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
+
+    with patch(
+        "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
+    ) as mock_log_exception:
+        suppressed = await gitlab_workflow.__aexit__(
+            RuntimeError, RuntimeError("stream closed"), None
+        )
+
+    assert suppressed is True
+    logged = [c[0][0] for c in mock_log_exception.call_args_list]
+    assert any(isinstance(e, RuntimeError) and str(e) == "PATCH failed" for e in logged)
 
 
 @pytest.mark.asyncio
@@ -2385,16 +2676,43 @@ async def test_aexit_clean_success_fires_deferred_finish(gitlab_workflow, workfl
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
-        result = await gitlab_workflow.__aexit__(None, None, None)
+        await gitlab_workflow.__aexit__(None, None, None)
 
-    assert result is True
     status_handler.update_workflow_status.assert_awaited_once_with(
         workflow_id, WorkflowStatusEventEnum.FINISH
     )
-    assert gitlab_workflow._pending_finish is False
+    assert WorkflowStatusEventEnum.FINISH not in gitlab_workflow._deferred_statuses
+
+
+@pytest.mark.asyncio
+async def test_aexit_with_checkpoint_error_does_not_fire_deferred_finish(
+    gitlab_workflow, workflow_id
+):
+    """A completion with checkpoint error does not fires the deferred FINISH."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion"):
+        await gitlab_workflow.__aexit__(
+            CheckpointSaveError, CheckpointSaveError("Failed to save checkpoint"), None
+        )
+
+    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
+    assert WorkflowStatusEventEnum.DROP in calls
+    assert WorkflowStatusEventEnum.FINISH not in calls
+    assert (
+        gitlab_workflow._deferred_statuses.get(WorkflowStatusEventEnum.FINISH)
+        == _DEFERRED_FINISH
+    )
 
 
 @pytest.mark.asyncio
@@ -2406,7 +2724,9 @@ async def test_aexit_finishes_completed_workflow_despite_teardown_error(
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         suppressed = await gitlab_workflow.__aexit__(
@@ -2427,16 +2747,19 @@ async def test_aexit_pending_finish_oversized_save_fails_loudly(
     dropped, no FINISH fires, no completion is tracked, and the exception propagates (see !6528)."""
     status_handler = AsyncMock()
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
     error = OutgoingMessageTooLargeError(OUTGOING_MESSAGE_TOO_LARGE)
 
     with (
         patch.object(gitlab_workflow, "_track_workflow_completion") as mock_completion,
         patch.object(gitlab_workflow, "_handle_workflow_exception") as mock_exception,
+        patch.object(gitlab_workflow, "_handle_completion"),
     ):
         suppressed = await gitlab_workflow.__aexit__(type(error), error, None)
 
-    assert suppressed is False
+    assert not suppressed
     mock_completion.assert_not_called()
     mock_exception.assert_awaited_once()
     calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
@@ -2453,7 +2776,9 @@ async def test_aexit_teardown_error_path_survives_finish_patch_failure(
     status_handler = AsyncMock()
     status_handler.update_workflow_status.side_effect = RuntimeError("rails down")
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         result = await gitlab_workflow.__aexit__(
@@ -2472,7 +2797,9 @@ async def test_aexit_completed_workflow_reraises_cancellation(
     status_handler = AsyncMock()
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     with patch.object(gitlab_workflow, "_track_workflow_completion"):
         suppressed = await gitlab_workflow.__aexit__(
@@ -2495,12 +2822,15 @@ async def test_aexit_drops_when_answer_checkpoint_save_failed(
     status_handler = AsyncMock()
     gitlab_workflow._status_handler = status_handler
     gitlab_workflow._internal_event_client = internal_event_client
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     error = CheckpointSaveError("Failed to save checkpoint")
-    suppressed = await gitlab_workflow.__aexit__(CheckpointSaveError, error, None)
+    with patch.object(gitlab_workflow, "_handle_completion"):
+        suppressed = await gitlab_workflow.__aexit__(CheckpointSaveError, error, None)
 
-    assert suppressed is False
+    assert not suppressed
     calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
     assert WorkflowStatusEventEnum.DROP in calls
     assert WorkflowStatusEventEnum.FINISH not in calls
@@ -2637,6 +2967,38 @@ async def test_track_workflow_completion_with_non_billable_status(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_llm_operations")
+@pytest.mark.parametrize(
+    ("tracked", "expected_success_logs"),
+    [(True, 1), (False, 0)],
+)
+async def test_track_workflow_completion_logs_success_only_when_tracked(
+    gitlab_workflow,
+    billing_event_service,
+    billing_event_client,
+    mock_user,
+    tracked,
+    expected_success_logs,
+):
+    """Test that the success log is only emitted when the billing event was actually tracked, e.g. not when billing
+    events are disabled."""
+    current_user.set(mock_user)
+    gitlab_workflow._billing_event_service = billing_event_service
+    billing_event_client.track_billing_event.return_value = tracked
+
+    with capture_logs() as cap_logs:
+        await gitlab_workflow._track_workflow_completion(WorkflowStatusEnum.FINISHED)
+
+    billing_event_client.track_billing_event.assert_called_once()
+    success_logs = [
+        log
+        for log in cap_logs
+        if log["event"].startswith("Successfully sent billing event for workflow")
+    ]
+    assert len(success_logs) == expected_success_logs
+
+
+@pytest.mark.asyncio
 async def test_track_workflow_completion_with_orbit_called(
     gitlab_workflow,
     workflow_id,
@@ -2683,6 +3045,37 @@ async def test_track_workflow_completion_with_orbit_called(
             "orbit_called": True,
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_track_workflow_completion_with_source_type(
+    gitlab_workflow,
+    workflow_config,
+    billing_event_service,
+    billing_event_client,
+    mock_user,
+):
+    """Test that the workflow source_type is passed to billing metadata as source."""
+    current_user.set(mock_user)
+    gitlab_workflow._billing_event_service = billing_event_service
+    workflow_config["source_type"] = "merge_request_code_conflict"
+    llm_operations.set(
+        [
+            {
+                "token_count": 100,
+                "model_id": "claude-3-sonnet",
+                "model_engine": "anthropic",
+                "model_provider": "anthropic",
+                "prompt_tokens": 80,
+                "completion_tokens": 20,
+            },
+        ]
+    )
+
+    await gitlab_workflow._track_workflow_completion(WorkflowStatusEnum.FINISHED)
+
+    metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+    assert metadata["source"] == "merge_request_code_conflict"
 
 
 class TestGetOrbitToolCalls:
@@ -3375,46 +3768,114 @@ async def test_track_workflow_completion_skips_tool_loop_summary(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("exc_type", "exc_value", "expected_ending"),
+    "status",
+    [
+        pytest.param("failed", id="failed"),
+        # A non-resumable exception can leave Rails on a status that is not itself
+        # terminal (the DROP PATCH can race or fail); the exception is what makes
+        # the session over, so it must still be summarised.
+        pytest.param("running", id="running"),
+        pytest.param(WorkflowStatusEnum.INPUT_REQUIRED, id="input-required"),
+    ],
+)
+async def test_track_workflow_completion_fires_summaries_when_exception_ended_session(
+    gitlab_workflow,
+    internal_event_client,
+    workflow_id,
+    status,
+):
+    """`exc_type` opens the summary gate on its own: a non-resumable exception ends the session no matter which status
+    Rails is left on, and only these paths can report a tool loop that died of recursion or a stuck agent."""
+    from lib.context.orbit import orbit_tool_call_count, total_tool_call_count
+
+    gitlab_workflow._internal_event_client = internal_event_client
+
+    orbit_tool_call_count.set(2)
+    total_tool_call_count.set(5)
+    init_tool_loop_counters()
+    record_tool_calls([("run_command", {"cmd": "git fetch"}, "fatal")] * 2)
+
+    await gitlab_workflow._track_workflow_completion(
+        status, GraphRecursionError, GraphRecursionError("recursion limit exceeded")
+    )
+
+    summary_calls = {
+        c[1]["event_name"]: c[1]["additional_properties"]
+        for c in internal_event_client.track_event.call_args_list
+        if c[1]["event_name"]
+        in (
+            EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value,
+            EventEnum.ORBIT_DAP_SESSION_SUMMARY.value,
+        )
+    }
+    assert set(summary_calls) == {
+        EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value,
+        EventEnum.ORBIT_DAP_SESSION_SUMMARY.value,
+    }
+
+    tool_loop_props = summary_calls[EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value]
+    assert tool_loop_props.value == workflow_id
+    assert tool_loop_props.extra["total_tool_calls"] == 2
+    assert tool_loop_props.extra["session_ending"] == "failure"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc_type", "exc_value", "rails_status", "expected_ending"),
     [
         pytest.param(
             GraphRecursionError,
             GraphRecursionError("recursion limit of 600 exceeded"),
+            "failed",
             "failure",
             id="recursion-limit",
         ),
         pytest.param(
-            RuntimeError, RuntimeError("agent stuck"), "failure", id="generic-failure"
+            RuntimeError,
+            RuntimeError("agent stuck"),
+            "failed",
+            "failure",
+            id="generic-failure",
         ),
+        # A user stop persists STOP to Rails, so the status the summary is gated
+        # on comes back terminal *and* an exception is in flight -- the case that
+        # used to emit the summary twice.
         pytest.param(
             asyncio.CancelledError,
             asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+            "stopped",
             "stopped",
             id="user-stop",
         ),
         pytest.param(
             asyncio.CancelledError,
             asyncio.CancelledError(),
+            "failed",
             "aborted",
             id="task-abort",
         ),
     ],
 )
-async def test_aexit_fires_tool_loop_summary_on_terminal_failures(
+async def test_aexit_fires_tool_loop_summary_once_on_terminal_failures(
     gitlab_workflow,
     internal_event_client,
     workflow_id,
     exc_type,
     exc_value,
+    rails_status,
     expected_ending,
 ):
-    """The endings a tool loop actually produces never reach _track_workflow_completion.
+    """The endings a tool loop actually produces must be reported exactly once.
 
-    A recursion-limit death or a stuck agent returns from the exc_type branch in __aexit__, so gating the summary on the
-    Rails status alone made the sessions this metric exists to measure the only ones it could not see.
+    A recursion-limit death or a stuck agent lands on a non-terminal Rails status, so gating the summary on that status
+    alone made the sessions this metric exists to measure the only ones it could not see. The exception info is instead
+    threaded into `_track_workflow_completion`, which both widens the gate and keeps the emission single: the earlier
+    `__aexit__`-side call doubled up whenever the status was terminal too (user stop).
     """
     gitlab_workflow._internal_event_client = internal_event_client
-    gitlab_workflow._status_handler = AsyncMock()
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = rails_status
+    gitlab_workflow._status_handler = status_handler
 
     init_tool_loop_counters()
     record_tool_calls([("run_command", {"cmd": "git fetch"}, "fatal")] * 3)
@@ -3514,7 +3975,9 @@ async def test_aexit_fires_tool_loop_summary_once_despite_teardown_error(
     status_handler.get_workflow_status.return_value = "finished"
     gitlab_workflow._status_handler = status_handler
     gitlab_workflow._internal_event_client = internal_event_client
-    gitlab_workflow._pending_finish = True
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
 
     init_tool_loop_counters()
     record_tool_calls([("grep", {"q": "x"}, "hit")])
@@ -3527,6 +3990,118 @@ async def test_aexit_fires_tool_loop_summary_once_despite_teardown_error(
         if c[1]["event_name"] == EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value
     ]
     assert len(summary_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# _handle_completion called after every workflow exit (including exceptions)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc_type", "exc_value"),
+    [
+        pytest.param(
+            RuntimeError,
+            RuntimeError("something went wrong"),
+            id="generic-failure",
+        ),
+        pytest.param(
+            asyncio.CancelledError,
+            asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+            id="user-stop",
+        ),
+        pytest.param(
+            asyncio.CancelledError,
+            asyncio.CancelledError("task aborted"),
+            id="task-abort",
+        ),
+    ],
+)
+async def test_aexit_calls_handle_completion_after_terminal_exception(
+    gitlab_workflow,
+    exc_type,
+    exc_value,
+):
+    """_handle_completion must be called even when __aexit__ receives a terminal exception (DROP or STOP path), so that
+    billing and tracking always fire on workflow exit regardless of how the session ended."""
+    gitlab_workflow._status_handler = AsyncMock()
+
+    with patch.object(
+        gitlab_workflow,
+        "_handle_completion",
+        new_callable=AsyncMock,
+    ) as mock_completion:
+        await gitlab_workflow.__aexit__(exc_type, exc_value, None)
+
+    mock_completion.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_aexit_does_not_call_handle_completion_for_infra_stop(
+    gitlab_workflow,
+):
+    """Infrastructure-initiated stops return early before reaching _handle_completion — the session stays running for
+    reconnect."""
+    gitlab_workflow._status_handler = AsyncMock()
+
+    with patch.object(
+        gitlab_workflow,
+        "_handle_completion",
+        new_callable=AsyncMock,
+    ) as mock_completion:
+        await gitlab_workflow.__aexit__(
+            asyncio.CancelledError,
+            asyncio.CancelledError(AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST),
+            None,
+        )
+
+    mock_completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_aexit_does_not_call_handle_completion_for_invalid_request(
+    gitlab_workflow,
+):
+    """InvalidRequestException returns early (session stays resumable) so _handle_completion must not be called."""
+    gitlab_workflow._status_handler = AsyncMock()
+
+    with (
+        patch.object(gitlab_workflow, "_reconcile_session_status", AsyncMock()),
+        patch.object(
+            gitlab_workflow,
+            "_handle_completion",
+            new_callable=AsyncMock,
+        ) as mock_completion,
+    ):
+        await gitlab_workflow.__aexit__(
+            InvalidRequestException,
+            InvalidRequestException("empty goal"),
+            None,
+        )
+
+    mock_completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_aexit_does_not_call_track_workflow_completion_in_offline_mode(
+    gitlab_workflow,
+):
+    """In offline mode (USE_MEMSAVER set) _track_workflow_completion must never be called, even when an exception
+    occurred."""
+    gitlab_workflow._offline_mode = True
+    gitlab_workflow._status_handler = AsyncMock()
+
+    with patch.object(
+        gitlab_workflow,
+        "_track_workflow_completion",
+        new_callable=AsyncMock,
+    ) as mock_completion:
+        await gitlab_workflow.__aexit__(
+            RuntimeError, RuntimeError("offline failure"), None
+        )
+
+    mock_completion.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -4387,6 +4962,84 @@ async def test_aput_raises_on_failed_post(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,body,expected_level",
+    [
+        (401, {"error": "invalid_token"}, "warning"),
+        (403, {"message": "403 Forbidden - Your account has been blocked."}, "warning"),
+        (404, {"message": "404 Not found"}, "warning"),
+        (400, {"message": "400 Bad request - PG::UntranslatableCharacter"}, "error"),
+        (413, {"message": "Payload too large"}, "error"),
+        (500, {}, "error"),
+    ],
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_failed_post_log_level(
+    _mock_duo_workflow_metrics,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    status_code,
+    body,
+    expected_level,
+):
+    """Failures caused by the user's or session's state are warnings; failures that point at our payload or at GitLab
+    stay errors."""
+    http_client.apost.return_value = GitLabHttpResponse(
+        status_code=status_code, body=body
+    )
+
+    with capture_logs() as cap_logs:
+        with pytest.raises(CheckpointSaveError):
+            await gitlab_workflow.aput(
+                {"configurable": {"checkpoint_id": None}},
+                checkpoint_data[0]["checkpoint"],
+                checkpoint_metadata,
+                ChannelVersions(),
+            )
+
+    failure_logs = [
+        log for log in cap_logs if log["event"] == "Failed to save checkpoint"
+    ]
+    assert len(failure_logs) == 1
+    assert failure_logs[0]["log_level"] == expected_level
+    assert failure_logs[0]["status_code"] == status_code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_code,access_denied",
+    [(401, True), (403, True), (404, False), (429, False), (500, False), (503, False)],
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_failed_post_access_denied_only_on_401_and_403(
+    _mock_duo_workflow_metrics,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    status_code,
+    access_denied,
+):
+    """Only a lost-access refusal raises CheckpointAccessDeniedError, which ends a fan-out; anything else may be
+    transient and stays a plain CheckpointSaveError."""
+    http_client.apost.return_value = GitLabHttpResponse(
+        status_code=status_code, body={"message": f"{status_code}"}
+    )
+
+    with pytest.raises(CheckpointSaveError) as raised:
+        await gitlab_workflow.aput(
+            {"configurable": {"checkpoint_id": None}},
+            checkpoint_data[0]["checkpoint"],
+            checkpoint_metadata,
+            ChannelVersions(),
+        )
+
+    assert isinstance(raised.value, CheckpointAccessDeniedError) is access_denied
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
 async def test_aput_failed_post_does_not_advance_delta_baseline(
     _mock_duo_workflow_metrics,
@@ -4566,7 +5219,7 @@ async def test_aget_tuple_hydrates_current_thread_from_response(
     """On resume, current_thread must be restored from the server so subsequent aput emits the same thread."""
     compressed_checkpoint_data[0]["current_thread"] = 3
     http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200, body=compressed_checkpoint_data
+        status_code=200, body=compressed_checkpoint_data[0]
     )
 
     config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
@@ -4640,7 +5293,7 @@ async def test_aget_tuple_hydration_tolerates_missing_current_thread(
     """Older Rails versions don't return current_thread; hydration must still seed prev_* without raising."""
     assert "current_thread" not in compressed_checkpoint_data[0]
     http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200, body=compressed_checkpoint_data
+        status_code=200, body=compressed_checkpoint_data[0]
     )
 
     config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
@@ -4662,7 +5315,7 @@ async def test_aget_tuple_hydration_tolerates_malformed_current_thread(
     """Malformed current_thread values must not raise; default is kept and hydration of other fields continues."""
     compressed_checkpoint_data[0]["current_thread"] = "not-a-number"
     http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200, body=compressed_checkpoint_data
+        status_code=200, body=compressed_checkpoint_data[0]
     )
 
     config = {"configurable": {"thread_id": "1234", "checkpoint_id": "5678"}}
@@ -4707,7 +5360,7 @@ async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
 
     compressed_checkpoint_data[0]["current_thread"] = 2
     http_client.aget.return_value = GitLabHttpResponse(
-        status_code=200, body=compressed_checkpoint_data
+        status_code=200, body=compressed_checkpoint_data[0]
     )
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
 
@@ -4899,6 +5552,7 @@ async def test_iter_checkpoint_pages_follows_next_page_header(
     assert [params["page"] for params in requested_params] == ["1", "2"]
     assert all(params["per_page"] == "2" for params in requested_params)
     assert all(params["accept_compressed"] == "true" for params in requested_params)
+    assert all("channels[]" not in params for params in requested_params)
 
 
 @pytest.mark.asyncio
@@ -4963,6 +5617,63 @@ async def test_checkpoints_reversed_stops_after_first_match_no_extra_requests(
     assert len(requested_params) == 1, (
         "no HTTP requests may be issued beyond the page containing the match"
     )
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_reversed_requests_only_the_given_channels(
+    gitlab_workflow, http_client, paginated_checkpoint_pages
+):
+    mock_aget, requested_params = _paginated_checkpoints_aget(
+        paginated_checkpoint_pages
+    )
+    http_client.aget = mock_aget
+
+    results = [
+        checkpoint_tuple
+        async for checkpoint_tuple in gitlab_workflow.checkpoints_reversed(
+            channels=["status"]
+        )
+    ]
+
+    assert len(results) == 4
+    assert [params["channels[]"] for params in requested_params] == [
+        "status",
+        "status",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_checkpoint_reads_by_thread_ts_without_touching_write_cache(
+    incremental_enabled, gitlab_workflow, http_client, workflow_id
+):
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=_make_gl_checkpoint("cp-1", WorkflowStatusEnum.INPUT_REQUIRED),
+    )
+
+    result = await gitlab_workflow.fetch_checkpoint("cp-1")
+
+    assert result is not None
+    assert result.config["configurable"] == {
+        "thread_id": workflow_id,
+        "checkpoint_id": "cp-1",
+        "checkpoint_ns": TOP_LEVEL_CHECKPOINT_NS,
+    }
+    assert result.checkpoint["channel_values"] == {
+        "status": WorkflowStatusEnum.INPUT_REQUIRED
+    }
+    assert "by_thread_ts?thread_ts=cp-1" in http_client.aget.call_args[1]["path"]
+    assert _incremental_state(gitlab_workflow).prev_checkpoint_id is None
+    assert _incremental_state(gitlab_workflow).prev_channel_values == {}
+
+
+@pytest.mark.asyncio
+async def test_fetch_checkpoint_returns_none_on_404(
+    incremental_enabled, gitlab_workflow, http_client
+):
+    http_client.aget.return_value = GitLabHttpResponse(status_code=404, body={})
+
+    assert await gitlab_workflow.fetch_checkpoint("cp-1") is None
 
 
 @pytest.mark.asyncio
@@ -5156,6 +5867,55 @@ async def test_iter_checkpoint_pages_shrinks_per_page_on_size_limit_error(
         "2",
         "1",
     ], "per_page must halve on each size-limit failure until the request succeeds"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "per_page,checkpoint_count,expected_requests",
+    [
+        (4, 6, [("1", "4"), ("2", "4"), ("3", "2")]),
+        # 5 halves to 2, so the retried page starts one checkpoint before the ones not yet yielded.
+        (5, 8, [("1", "5"), ("2", "5"), ("3", "2"), ("4", "2")]),
+    ],
+    ids=["aligned_offset", "unaligned_offset"],
+)
+async def test_iter_checkpoint_pages_does_not_repeat_checkpoints_after_shrink(
+    gitlab_workflow, http_client, per_page, checkpoint_count, expected_requests
+):
+    """A shrink after the first page must resume after the checkpoints already yielded: retrying the same page number
+    at a smaller page size would start earlier in the list and yield some checkpoints twice."""
+    checkpoints = [
+        _make_gl_checkpoint(f"cp-{index}", WorkflowStatusEnum.EXECUTION)
+        for index in reversed(range(checkpoint_count))
+    ]
+    requests: list[tuple[str, str]] = []
+
+    async def mock_aget(path, **_kwargs):
+        query = {k: v[0] for k, v in parse_qs(urlparse(path).query).items()}
+        requests.append((query["page"], query["per_page"]))
+        page, size = int(query["page"]), int(query["per_page"])
+        if page > 1 and size > 2:
+            raise ToolException(
+                "HTTP action error: response body exceeded size limit (4190208 bytes)"
+            )
+        start = (page - 1) * size
+        headers = (
+            {"X-Next-Page": str(page + 1)} if start + size < checkpoint_count else {}
+        )
+        return GitLabHttpResponse(
+            status_code=200, body=checkpoints[start : start + size], headers=headers
+        )
+
+    http_client.aget = mock_aget
+
+    collected = [
+        cp["thread_ts"]
+        async for page in gitlab_workflow._iter_checkpoint_pages(per_page=per_page)
+        for cp in page
+    ]
+
+    assert collected == [cp["thread_ts"] for cp in checkpoints]
+    assert requests == expected_requests
 
 
 @pytest.mark.asyncio
@@ -5498,3 +6258,588 @@ async def test_aget_tuple_returns_none_for_an_absent_pin(
     }
 
     assert await gitlab_workflow.aget_tuple(config) is None
+
+
+# (see _NESTED_CHECKPOINT_NS at the top of the file) `GitLabWorkflow` serves both
+# the top-level lineage and every nested one.
+def _in_lineage(gl_checkpoints, checkpoint_ns):
+    """Stamp fetched rows with the lineage a `checkpoint_ns`-aware GitLab reports.
+
+    `_fetch_most_recent_checkpoint` verifies the lineage of what came back, so a nested lookup is only satisfied by rows
+    that say which lineage they belong to.
+    """
+    return [
+        {**gl_checkpoint, "checkpoint_ns": checkpoint_ns}
+        for gl_checkpoint in gl_checkpoints
+    ]
+
+
+def _query_params(path: str) -> dict[str, str]:
+    return {
+        k: v[0]
+        for k, v in parse_qs(urlparse(path).query, keep_blank_values=True).items()
+    }
+
+
+@pytest.fixture(name="resumable_workflow_config")
+def resumable_workflow_config_fixture(workflow_config):
+    """A workflow that already has checkpoints, so aget_tuple reaches the REST fetch path."""
+    workflow_config["first_checkpoint"] = {}
+    workflow_config["incremental_checkpoints_enabled"] = True
+    return workflow_config
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "checkpoint_ns,expected_param",
+    [
+        (None, TOP_LEVEL_CHECKPOINT_NS),
+        (TOP_LEVEL_CHECKPOINT_NS, TOP_LEVEL_CHECKPOINT_NS),
+        (_NESTED_CHECKPOINT_NS, _NESTED_CHECKPOINT_NS),
+    ],
+    ids=["absent", "top_level", "nested"],
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_scopes_rest_fetch_to_checkpoint_ns(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+    checkpoint_ns,
+    expected_param,
+):
+    """The lookup must always name the lineage it wants, blank included: omitting the parameter asks for the newest
+    checkpoint across *every* lineage."""
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=_in_lineage(compressed_checkpoint_data, expected_param)
+    )
+    configurable: dict[str, Any] = {"thread_id": "1234"}
+    if checkpoint_ns is not None:
+        configurable["checkpoint_ns"] = checkpoint_ns
+
+    result = await gitlab_workflow.aget_tuple({"configurable": configurable})
+
+    assert result is not None
+    params = _query_params(http_client.aget.call_args[1]["path"])
+    assert params["checkpoint_ns"] == expected_param
+    assert params["per_page"] == "1"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_for_nested_ns_bypasses_cached_top_level_checkpoint(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """The session-start `latest_checkpoint` cache only describes the top-level lineage; serving it to a nested lookup
+    would seed the subagent's run with the parent's state."""
+    resumable_workflow_config["latest_checkpoint"] = dict(_GQL_LATEST_CHECKPOINT)
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=_in_lineage(compressed_checkpoint_data, _NESTED_CHECKPOINT_NS),
+    )
+
+    result = await gitlab_workflow.aget_tuple(
+        {"configurable": {"thread_id": "1234", "checkpoint_ns": _NESTED_CHECKPOINT_NS}}
+    )
+
+    assert result is not None
+    assert result.checkpoint["id"] == "5678", (
+        "must not be the cached top-level checkpoint"
+    )
+    params = _query_params(http_client.aget.call_args[1]["path"])
+    assert params["checkpoint_ns"] == _NESTED_CHECKPOINT_NS
+
+
+@pytest.mark.asyncio
+async def test_aget_tuple_for_nested_ns_skips_fetch_when_flow_has_no_checkpoints(
+    gitlab_workflow, http_client
+):
+    """Nested lineages only ever branch off an already-checkpointed flow, so an empty flow needs no request for them
+    either."""
+    result = await gitlab_workflow.aget_tuple(
+        {"configurable": {"thread_id": "1234", "checkpoint_ns": _NESTED_CHECKPOINT_NS}}
+    )
+
+    assert result is None
+    http_client.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_reports_checkpoint_ns_on_returned_tuple(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """Both configs carry the namespace the tuple was resolved for — a parent checkpoint always belongs to the same
+    lineage as its child, and LangGraph's ``patch_checkpoint_map`` requires the field for any checkpoint with
+    parents."""
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=_in_lineage(compressed_checkpoint_data, _NESTED_CHECKPOINT_NS),
+    )
+
+    result = await gitlab_workflow.aget_tuple(
+        {"configurable": {"thread_id": "1234", "checkpoint_ns": _NESTED_CHECKPOINT_NS}}
+    )
+
+    assert result is not None
+    assert result.config["configurable"]["checkpoint_ns"] == _NESTED_CHECKPOINT_NS
+    assert result.parent_config is not None
+    assert (
+        result.parent_config["configurable"]["checkpoint_ns"] == _NESTED_CHECKPOINT_NS
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_hydrates_the_requested_lineage_not_the_rows_own(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """The lineage hydrated is the one that was *requested*, never the one the row reports.
+
+    ``aput`` looks the baseline up by the config's ``checkpoint_ns``, so it has to be filed under the same key as the
+    tuple returned here. The two only differ on GitLab < 19.3, which omits the field from its rows, as mocked here.
+    Naming a ``thread_ts`` needs no lineage check of its own either way: it identifies one checkpoint in the whole
+    flow, so unlike "the most recent one" it cannot be answered by the wrong lineage.
+    """
+    assert "checkpoint_ns" not in compressed_checkpoint_data[0]
+    named_checkpoint = {**compressed_checkpoint_data[0], "current_thread": 3}
+
+    async def mock_aget(path, **_kwargs):
+        # Stubbed per endpoint rather than as "whatever call this path makes today":
+        # which read serves a named checkpoint is gated on the instance's capabilities
+        # (`by_thread_ts` when it stores blobs, a paged list walk otherwise), and the
+        # lineage this hydrates is the same question either way.
+        if "by_thread_ts" in path:
+            return GitLabHttpResponse(status_code=200, body=named_checkpoint)
+        return GitLabHttpResponse(status_code=200, body=[named_checkpoint])
+
+    http_client.aget = mock_aget
+
+    await gitlab_workflow.aget_tuple(
+        {
+            "configurable": {
+                "thread_id": "1234",
+                "checkpoint_id": "5678",
+                "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+            }
+        }
+    )
+
+    nested = _incremental_state(gitlab_workflow, _NESTED_CHECKPOINT_NS)
+    assert nested.prev_checkpoint_id == "5678"
+    assert nested.current_thread == 3
+    assert "conversation_history" in nested.prev_channel_values
+
+    top_level = _incremental_state(gitlab_workflow)
+    assert top_level.prev_checkpoint_id is None
+    assert top_level.current_thread == 0
+    assert top_level.prev_channel_values == {}
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aget_tuple_discards_a_most_recent_checkpoint_from_another_lineage(
+    _mock_duo_workflow_metrics,
+    resumable_workflow_config,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    compressed_checkpoint_data,
+):
+    """GitLab < 19.3 ignores the ``checkpoint_ns`` filter, so "newest in this lineage" can come back as another
+    lineage's checkpoint.
+
+    Resuming a nested subgraph from the parent's state is the bleed this scoping prevents, so the row is refused and
+    neither baseline is hydrated from it.
+    """
+    assert "checkpoint_ns" not in compressed_checkpoint_data[0]
+    compressed_checkpoint_data[0]["current_thread"] = 3
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=compressed_checkpoint_data
+    )
+
+    result = await gitlab_workflow.aget_tuple(
+        {"configurable": {"thread_id": "1234", "checkpoint_ns": _NESTED_CHECKPOINT_NS}}
+    )
+
+    assert result is None
+    for state in (
+        _incremental_state(gitlab_workflow, _NESTED_CHECKPOINT_NS),
+        _incremental_state(gitlab_workflow),
+    ):
+        assert state.prev_checkpoint_id is None
+        assert state.current_thread == 0
+        assert state.prev_channel_values == {}
+
+
+def test_nested_delta_baselines_are_trimmed_but_the_top_level_one_is_not(
+    gitlab_workflow,
+):
+    """Nested baselines each hold a copy of their lineage's channel values, so they cannot accumulate for the life of
+    the session.
+
+    Only the cache is dropped: ``current_thread`` survives and advances, so the next write opens a new group rather
+    than reopening the one the dropped values belonged to.
+    """
+    top_level = _incremental_state(gitlab_workflow)
+    top_level.prev_checkpoint_id = "top-level"
+    top_level.prev_channel_values = {"conversation_history": ["kept"]}
+
+    oldest = _incremental_state(gitlab_workflow, "delegation:oldest")
+    oldest.prev_checkpoint_id = "oldest"
+    oldest.prev_channel_values = {"conversation_history": ["dropped"]}
+    oldest.current_thread = 3
+
+    for index in range(MAX_NESTED_INCREMENTAL_BASELINES):
+        state = _incremental_state(gitlab_workflow, f"delegation:{index}")
+        state.prev_checkpoint_id = f"checkpoint-{index}"
+        state.prev_channel_values = {"conversation_history": [index]}
+
+    assert oldest.prev_channel_values == {}
+    assert oldest.prev_checkpoint_id is None
+    assert oldest.current_thread == 4, "a trimmed lineage must not reopen its old group"
+
+    assert top_level.prev_checkpoint_id == "top-level"
+    assert top_level.prev_channel_values == {"conversation_history": ["kept"]}
+
+    newest = _incremental_state(
+        gitlab_workflow, f"delegation:{MAX_NESTED_INCREMENTAL_BASELINES - 1}"
+    )
+    assert newest.prev_checkpoint_id == (
+        f"checkpoint-{MAX_NESTED_INCREMENTAL_BASELINES - 1}"
+    )
+
+
+def test_trimming_an_already_trimmed_baseline_is_a_no_op(gitlab_workflow):
+    """A baseline with nothing cached is skipped, so passing over it again neither logs nor advances its group.
+
+    Without the skip, every later insert would re-trim the same tombstones: `current_thread` would drift upwards for
+    lineages that never wrote anything, and each pass would log a trim that reclaimed nothing.
+    """
+    oldest = _incremental_state(gitlab_workflow, "delegation:oldest")
+    oldest.prev_checkpoint_id = "oldest"
+    oldest.prev_channel_values = {"conversation_history": ["dropped"]}
+    oldest.current_thread = 3
+
+    # Fills the bound, so `delegation:oldest` is trimmed once.
+    for index in range(MAX_NESTED_INCREMENTAL_BASELINES):
+        _incremental_state(
+            gitlab_workflow, f"delegation:{index}"
+        ).prev_checkpoint_id = f"checkpoint-{index}"
+    assert oldest.current_thread == 4
+
+    # One more insert puts the now-empty `delegation:oldest` in the overflow window again.
+    with patch.object(gitlab_workflow._logger, "info") as mock_info:
+        _incremental_state(gitlab_workflow, "delegation:new")
+
+    assert oldest.current_thread == 4, "a tombstoned baseline must not be trimmed twice"
+    trimmed = [
+        call.kwargs["checkpoint_ns"]
+        for call in mock_info.call_args_list
+        if call.args and call.args[0].startswith("Trimming")
+    ]
+    assert trimmed == ["delegation:0"]
+
+
+def test_using_a_nested_baseline_keeps_it_from_being_trimmed_first(gitlab_workflow):
+    """Trimming is least-recently-*used*: a lineage still being written to outlives one that has gone quiet."""
+    for index in range(MAX_NESTED_INCREMENTAL_BASELINES):
+        _incremental_state(
+            gitlab_workflow, f"delegation:{index}"
+        ).prev_checkpoint_id = f"checkpoint-{index}"
+
+    revisited = _incremental_state(gitlab_workflow, "delegation:0")
+    _incremental_state(gitlab_workflow, "delegation:new")
+
+    assert revisited.prev_checkpoint_id == "checkpoint-0"
+    assert (
+        _incremental_state(gitlab_workflow, "delegation:1").prev_checkpoint_id is None
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "checkpoint_ns,expected_payload_ns",
+    [
+        (None, None),
+        (TOP_LEVEL_CHECKPOINT_NS, None),
+        (_NESTED_CHECKPOINT_NS, _NESTED_CHECKPOINT_NS),
+    ],
+    ids=["absent", "top_level_omitted", "nested_sent"],
+)
+async def test_aput_sends_checkpoint_ns_only_for_nested_lineages(
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    checkpoint_ns,
+    expected_payload_ns,
+):
+    """Rails treats a blank checkpoint_ns as the top-level lineage, so omitting it keeps the common path's payload
+    identical to what pre-checkpoint_ns instances accept."""
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    configurable: dict[str, Any] = {"checkpoint_id": "parent-checkpoint"}
+    if checkpoint_ns is not None:
+        configurable["checkpoint_ns"] = checkpoint_ns
+
+    result = await gitlab_workflow.aput(
+        {"configurable": configurable},
+        checkpoint_data[0]["checkpoint"],
+        checkpoint_metadata,
+        ChannelVersions(),
+    )
+
+    post_call_body = json.loads(http_client.apost.call_args[1]["body"])
+    assert post_call_body.get("checkpoint_ns") == expected_payload_ns
+    assert result["configurable"]["checkpoint_ns"] == (
+        checkpoint_ns or TOP_LEVEL_CHECKPOINT_NS
+    )
+
+
+@pytest.mark.asyncio
+async def test_aput_keeps_delta_cache_separate_per_checkpoint_ns(
+    incremental_enabled,  # pylint: disable=unused-argument  # configures gitlab_workflow
+    gitlab_workflow,
+    http_client,
+    checkpoint_metadata,
+):
+    """Interleaved writes from two lineages each delta against their own previous checkpoint; deltaing against each
+    other would look like a stale cache and force a full rewrite on every switch."""
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    async def put(checkpoint_id, parent_id, checkpoint_ns, messages):
+        await gitlab_workflow.aput(
+            {
+                "configurable": {
+                    "checkpoint_id": parent_id,
+                    "checkpoint_ns": checkpoint_ns,
+                }
+            },
+            {"id": checkpoint_id, "channel_values": {"messages": messages}},
+            checkpoint_metadata,
+            ChannelVersions({"messages": "1.0"}),
+        )
+        return json.loads(http_client.apost.call_args[1]["body"])
+
+    await put("top-1", None, TOP_LEVEL_CHECKPOINT_NS, ["a"])
+    await put("nested-1", None, _NESTED_CHECKPOINT_NS, ["x"])
+    with patch.object(gitlab_workflow._logger, "warning") as mock_warning:
+        top_2 = await put("top-2", "top-1", TOP_LEVEL_CHECKPOINT_NS, ["a", "b"])
+        nested_2 = await put("nested-2", "nested-1", _NESTED_CHECKPOINT_NS, ["x", "y"])
+
+    mock_warning.assert_not_called()
+    # Both stay on their own lineage's first thread: no stale-cache-driven bump.
+    assert top_2["current_thread"] == 0
+    assert nested_2["current_thread"] == 0
+    assert _incremental_state(gitlab_workflow).prev_channel_values == {
+        "messages": ["a", "b"]
+    }
+    assert _incremental_state(
+        gitlab_workflow, _NESTED_CHECKPOINT_NS
+    ).prev_channel_values == {"messages": ["x", "y"]}
+
+
+@pytest.mark.asyncio
+async def test_alist_reports_each_checkpoints_own_checkpoint_ns(
+    gitlab_workflow, http_client
+):
+    """`alist` is deliberately unfiltered — every lineage mixed together — so each tuple reports its own namespace."""
+    checkpoints = [
+        {
+            **_make_gl_checkpoint("cp-nested", WorkflowStatusEnum.EXECUTION),
+            "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+        },
+        # Rails stores the top-level lineage as NULL, and instances that predate
+        # checkpoint_ns omit the field entirely.
+        {
+            **_make_gl_checkpoint("cp-null", WorkflowStatusEnum.EXECUTION),
+            "checkpoint_ns": None,
+        },
+        _make_gl_checkpoint("cp-absent", WorkflowStatusEnum.EXECUTION),
+    ]
+    http_client.aget.return_value = GitLabHttpResponse(
+        status_code=200, body=checkpoints
+    )
+
+    results = [checkpoint async for checkpoint in gitlab_workflow.alist(None)]
+
+    assert [tuple_.config["configurable"]["checkpoint_ns"] for tuple_ in results] == [
+        _NESTED_CHECKPOINT_NS,
+        TOP_LEVEL_CHECKPOINT_NS,
+        TOP_LEVEL_CHECKPOINT_NS,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_reversed_reports_each_checkpoints_own_checkpoint_ns(
+    gitlab_workflow, http_client
+):
+    nested = {
+        **_make_gl_checkpoint("cp-nested", WorkflowStatusEnum.EXECUTION),
+        "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+    }
+    top_level = _make_gl_checkpoint("cp-top", WorkflowStatusEnum.EXECUTION)
+    mock_aget, _ = _paginated_checkpoints_aget([[nested, top_level]])
+    http_client.aget = mock_aget
+
+    results = [tuple_ async for tuple_ in gitlab_workflow.checkpoints_reversed()]
+
+    assert [tuple_.config["configurable"]["checkpoint_ns"] for tuple_ in results] == [
+        _NESTED_CHECKPOINT_NS,
+        TOP_LEVEL_CHECKPOINT_NS,
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [
+        WorkflowStatusEnum.COMPLETED,
+        WorkflowStatusEnum.ERROR,
+        WorkflowStatusEnum.CANCELLED,
+    ],
+    ids=["completed", "error", "cancelled"],
+)
+async def test_aput_writes_ignores_session_ending_status_from_a_nested_lineage(
+    gitlab_workflow, http_client, workflow_id, status
+):
+    """A nested run writes the same top-level `status` channel as the flow, so its terminal node would otherwise end the
+    session the user is still in — with subagents delegated in parallel, the first one to finish would."""
+    config: RunnableConfig = {
+        "configurable": {
+            "checkpoint_id": "test-id",
+            "thread_id": workflow_id,
+            "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+        }
+    }
+    writes: Sequence[tuple[str, Any]] = [("status", status)]
+
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
+
+    http_client.apatch.assert_not_called()
+    assert WorkflowStatusEventEnum.FINISH not in gitlab_workflow._deferred_statuses
+
+
+@pytest.mark.asyncio
+async def test_aput_writes_reports_a_blocked_session_from_a_nested_lineage(
+    gitlab_workflow, http_client, workflow_id
+):
+    """Being blocked awaiting the user is a fact about the whole session, whichever lineage discovered it: suppressing
+    it would hang the flow instead of prompting.
+
+    Like every status it is deferred until the backing checkpoint saves.
+    """
+    http_client.apatch.return_value = GitLabHttpResponse(status_code=200, body={})
+    config: RunnableConfig = {
+        "configurable": {
+            "checkpoint_id": "test-id",
+            "thread_id": workflow_id,
+            "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+        }
+    }
+    writes: Sequence[tuple[str, Any]] = [("status", WorkflowStatusEnum.PAUSED)]
+
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
+
+    http_client.apatch.assert_not_called()
+    assert gitlab_workflow._deferred_statuses.get(WorkflowStatusEventEnum.PAUSE) == (
+        _FlushPoint.ON_NEXT_CHECKPOINT,
+        "test-id",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,expected_event",
+    [
+        (WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEventEnum.REQUIRE_INPUT),
+        (
+            WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+        ),
+        (
+            WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+            WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+        ),
+    ],
+    ids=["input_required", "tool_call_approval", "plan_approval"],
+)
+async def test_aput_writes_defers_an_awaiting_status_from_a_nested_lineage(
+    gitlab_workflow, http_client, workflow_id, status, expected_event
+):
+    """A nested lineage's awaiting status is not suppressed, but like the top level it waits for the checkpoint carrying
+    the request to be saved."""
+    config: RunnableConfig = {
+        "configurable": {
+            "checkpoint_id": "test-id",
+            "thread_id": workflow_id,
+            "checkpoint_ns": _NESTED_CHECKPOINT_NS,
+        }
+    }
+    writes: Sequence[tuple[str, Any]] = [("status", status)]
+
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
+
+    http_client.apatch.assert_not_called()
+    assert gitlab_workflow._deferred_statuses.get(expected_event) == (
+        _FlushPoint.ON_NEXT_CHECKPOINT,
+        "test-id",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "configurable_ns",
+    [{}, {"checkpoint_ns": TOP_LEVEL_CHECKPOINT_NS}],
+    ids=["absent", "blank"],
+)
+async def test_aput_writes_ends_the_session_for_the_top_level_lineage(
+    gitlab_workflow, workflow_id, configurable_ns
+):
+    """The flow's own lineage is the blank namespace, and older callers omit it entirely; both still end the session."""
+    config: RunnableConfig = {
+        "configurable": {
+            "checkpoint_id": "test-id",
+            "thread_id": workflow_id,
+            **configurable_ns,
+        }
+    }
+    writes: Sequence[tuple[str, Any]] = [("status", WorkflowStatusEnum.COMPLETED)]
+
+    await gitlab_workflow.aput_writes(config, writes, "task_id")
+
+    assert gitlab_workflow._deferred_statuses.get(WorkflowStatusEventEnum.FINISH) == (
+        _FlushPoint.ON_COMPLETION,
+        "test-id",
+    )
+
+
+@pytest.mark.asyncio
+async def test_latest_checkpoint_status_ignores_nested_lineages(gitlab_workflow):
+    """Reconciliation asks about the flow's status, so only the top-level lineage's cached `status` may answer it.
+
+    Guards against a later refactor reading "any entry" and reconciling Rails to a subagent's status.
+    """
+    _incremental_state(gitlab_workflow, _NESTED_CHECKPOINT_NS).prev_channel_values = {
+        "status": WorkflowStatusEnum.COMPLETED
+    }
+
+    with patch.object(
+        gitlab_workflow, "_fetch_most_recent_checkpoint", AsyncMock(return_value=None)
+    ) as mock_fetch:
+        assert await gitlab_workflow._get_latest_checkpoint_status() is None
+
+    # Falls through to the API rather than answering from the nested entry.
+    mock_fetch.assert_awaited_once_with()

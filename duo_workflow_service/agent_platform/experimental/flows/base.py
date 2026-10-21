@@ -21,6 +21,10 @@ from duo_workflow_service.agent_platform.experimental.components.base import (
     BaseComponent,
     EndComponent,
 )
+from duo_workflow_service.agent_platform.experimental.components.for_each import (
+    ForEachComponent,
+    ForEachConfig,
+)
 from duo_workflow_service.agent_platform.experimental.components.supervisor.component import (
     extract_subagent_names,
 )
@@ -38,7 +42,7 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
 from duo_workflow_service.agent_platform.utils.flow import (
-    strip_ask_listed_pre_approvals,
+    filter_pre_approvals_by_policy,
 )
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent as V1BaseComponent,
@@ -56,14 +60,16 @@ from duo_workflow_service.entities.state import (
     ToolStatus,
     UiChatLog,
     WorkflowStatusEnum,
+    resolve_approval_attribution,
 )
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
-from duo_workflow_service.tracking.errors import log_exception
+from duo_workflow_service.tracking.errors import log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.client import InternalEventsClient
 
 __all__ = ["Flow"]
@@ -79,6 +85,18 @@ _EXECUTOR_CONTEXT = [
 class UserDecision(StrEnum):
     APPROVE = "approval"
     REJECT = "rejection"
+
+
+def _for_each_enabled() -> bool:
+    """Whether a component's ``for_each`` block is acted on.
+
+    A feature flag rather than a flow-config field: declaring ``for_each`` is
+    how a flow author asks for a fan-out, while this is how the platform decides
+    whether it is ready to run one, per instance or group and without shipping a
+    new flow config revision. With the flag off the attribute is ignored and the
+    component runs once, so a flow that declares it still loads and still works.
+    """
+    return is_feature_enabled(FeatureFlag.DAP_FOR_EACH)
 
 
 @support_self_hosted_billing(class_schema="flow/experimental")
@@ -140,6 +158,10 @@ class Flow(AbstractWorkflow):
                 )
 
     # pylint: enable=dangerous-default-value
+
+    @override
+    def _registry_flow_id(self) -> Optional[str]:
+        return self._config.config_id
 
     @override
     def get_workflow_state(self, goal: str) -> FlowState:  # type: ignore[override]
@@ -232,6 +254,12 @@ class Flow(AbstractWorkflow):
         match self._approval.WhichOneof("user_decision"):
             case UserDecision.APPROVE:
                 event = FlowEvent(event_type=FlowEventType.APPROVE)
+                source, policy_ref = resolve_approval_attribution(
+                    self._approval.approval
+                )
+                event["approval_source"] = source
+                if policy_ref is not None:
+                    event["policy_ref"] = policy_ref
             case UserDecision.REJECT:
                 if message := self._approval.rejection.message:
                     # Rejection with feedback. The user's message is written to
@@ -323,7 +351,7 @@ class Flow(AbstractWorkflow):
         )
 
         if "pre_approved_tools" in comp_params:
-            comp_params["pre_approved_tools"] = strip_ask_listed_pre_approvals(
+            comp_params["pre_approved_tools"] = filter_pre_approvals_by_policy(
                 comp_params["pre_approved_tools"], tools_registry
             )
 
@@ -381,6 +409,12 @@ class Flow(AbstractWorkflow):
         comp_type = comp_config["type"]
         comp_class = load_component_class(comp_type)
 
+        # Fan-out is a wrapper around a finished component, so its config is
+        # taken out of the parameters the component is built from: no concrete
+        # component type declares a ``for_each`` field, and every one of them
+        # rejects a parameter it does not declare.
+        for_each = comp_params.pop("for_each", None)
+
         if comp_name in components:
             raise ValueError(
                 f"Duplicate component name: '{comp_name}'. Component names must be unique."
@@ -402,6 +436,31 @@ class Flow(AbstractWorkflow):
         if hasattr(component, "subagent_components"):
             for consumed_name in component.subagent_components:
                 components.pop(consumed_name, None)
+
+        if for_each is not None:
+            components[comp_name] = self._wrap_in_for_each(component, for_each)
+
+    def _wrap_in_for_each(
+        self, component: BaseComponent, for_each: dict
+    ) -> BaseComponent:
+        """Wrap a component so that its body runs once per item of a list.
+
+        Wrapping happens once the component is fully built and ``Flow`` has
+        claimed the subagents it consumed: the wrapper delegates the component
+        protocol rather than every attribute, so ``subagent_components`` is
+        readable on the component itself and not through the wrapper.
+        """
+        if not _for_each_enabled():
+            self.log.warning(
+                "Ignoring for_each: the feature flag is off, so the component runs once",
+                component=component.name,
+                feature_flag=FeatureFlag.DAP_FOR_EACH.value,
+            )
+            return component
+
+        return ForEachComponent.wrapping(
+            component, ForEachConfig.model_validate(for_each)
+        )
 
     def _build_routers(
         self, components: dict[str, BaseComponent], graph: StateGraph
@@ -529,7 +588,7 @@ class Flow(AbstractWorkflow):
         if isinstance(error, NotifiableAgentException) and error.internal_detail:
             log_extra["internal_detail"] = error.internal_detail
 
-        log_exception(error, extra=log_extra)
+        log_workflow_failure(error, extra=log_extra)
 
         if compiled_graph is not None:
             existing_logs = (

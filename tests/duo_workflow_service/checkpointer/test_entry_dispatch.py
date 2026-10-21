@@ -14,6 +14,7 @@ from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import WorkflowAlreadyFinishedException
 from duo_workflow_service.gitlab.gitlab_api import WorkflowConfig
 from duo_workflow_service.status_updater.gitlab_status_updater import (
+    CreatedWorkflowHasCheckpoints,
     UnsupportedStatusEvent,
 )
 from lib.internal_events.event_enum import EventPropertyEnum
@@ -108,10 +109,17 @@ async def test_rails_status_dispatch(ctx, expected_event, expected_property):
 async def test_created_with_existing_checkpoint_is_rejected():
     ctx = _context(WorkflowStatusEnum.CREATED, first_checkpoint=_CHECKPOINT)
 
-    with pytest.raises(UnsupportedStatusEvent) as exc_info:
+    with pytest.raises(CreatedWorkflowHasCheckpoints) as exc_info:
         await rails_status_dispatch(ctx)
 
-    assert "should not have existing checkpoints" in str(exc_info.value)
+    # Still an UnsupportedStatusEvent, so the checkpointer keeps rejecting the run.
+    assert isinstance(exc_info.value, UnsupportedStatusEvent)
+    assert exc_info.value.checkpoint == _CHECKPOINT
+    # The full message keeps the checkpoint for logs.
+    assert str(exc_info.value) == (
+        "Workflow with status 'created' should not have existing checkpoints. "
+        f"Found checkpoint: {_CHECKPOINT}"
+    )
 
 
 @pytest.mark.asyncio

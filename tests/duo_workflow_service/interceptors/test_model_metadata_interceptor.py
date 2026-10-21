@@ -5,6 +5,9 @@ import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
+from duo_workflow_service.entities.state import (
+    get_current_model_max_context_token_limit,
+)
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
@@ -248,7 +251,9 @@ async def test_gitlab_provider_with_feature_setting_uses_build_default(mock_user
             fireworks_api_base_url="https://fw",
         )
         mock_by_size_cls.assert_called_once_with(
-            default=fake_default, by_tag=fake_by_tag
+            default=fake_default,
+            by_tag=fake_by_tag,
+            feature_setting="duo_agent_platform_agentic_chat",
         )
         mock_context.set.assert_called_once_with(fake_default)
         mock_size_context.set.assert_called_once_with(fake_by_size)
@@ -363,3 +368,57 @@ async def test_stickiness_replay_of_fireworks_model_still_gets_a_working_key(moc
         )
         continuation.assert_called_once_with(handler_call_details)
         assert result == "ok"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("identifier", "expected_limit"),
+    [
+        ("bedrock/eu.anthropic.claude-sonnet-4-6", 1_000_000),
+        ("vertex_ai/claude-sonnet-4-6@default", 1_000_000),
+        ("anthropic/claude-sonnet-4-6", 1_000_000),
+        # No match: the `claude_3` family limit applies
+        (
+            "bedrock/converse/arn:aws:bedrock:eu-west-1:123:application-inference-profile/x",
+            200_000,
+        ),
+        ("custom_openai/claude-sonnet-4-6", 200_000),
+    ],
+)
+async def test_self_hosted_identifier_sets_matched_context_limit(
+    mock_user, identifier, expected_limit
+):
+    """A self-hosted request gets the context window of the matched models.yml entry.
+
+    Uses the real ModelSelectionConfig and context vars, from the header to the limit that DWS reads.
+    """
+    current_user.set(mock_user)
+    interceptor = ModelMetadataInterceptor()
+
+    handler_call_details = MagicMock()
+    handler_call_details.invocation_metadata = [
+        (
+            "x-gitlab-agent-platform-model-metadata",
+            json.dumps(
+                {
+                    "provider": "openai",
+                    "name": "claude_3",
+                    "endpoint": "https://example.com",
+                    "api_key": "key",
+                    "identifier": identifier,
+                }
+            ),
+        ),
+    ]
+
+    fake_config = MagicMock()
+    fake_config.model_keys.model_dump.return_value = {}
+    fake_config.fireworks_api_base_url = ""
+
+    with patch(
+        "duo_workflow_service.interceptors.model_metadata_interceptor.get_config",
+        return_value=fake_config,
+    ):
+        await interceptor.intercept_service(AsyncMock(), handler_call_details)
+
+    assert get_current_model_max_context_token_limit() == expected_limit

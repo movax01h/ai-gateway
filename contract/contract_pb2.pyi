@@ -202,14 +202,16 @@ class ScheduleNotification(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., condition: _Optional[str] = ..., message: _Optional[str] = ...) -> None: ...
 
 class TrackLlmCallForSelfHosted(_message.Message):
-    __slots__ = ("workflowID", "featureQualifiedName", "featureAiCatalogItem")
+    __slots__ = ("workflowID", "featureQualifiedName", "featureAiCatalogItem", "sourceType")
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     FEATUREQUALIFIEDNAME_FIELD_NUMBER: _ClassVar[int]
     FEATUREAICATALOGITEM_FIELD_NUMBER: _ClassVar[int]
+    SOURCETYPE_FIELD_NUMBER: _ClassVar[int]
     workflowID: str
     featureQualifiedName: str
     featureAiCatalogItem: bool
-    def __init__(self, workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ...) -> None: ...
+    sourceType: str
+    def __init__(self, workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ..., sourceType: _Optional[str] = ...) -> None: ...
 
 class RunShellCommand(_message.Message):
     __slots__ = ("command", "timeout")
@@ -286,14 +288,20 @@ class RunGitCommand(_message.Message):
     def __init__(self, command: _Optional[str] = ..., arguments: _Optional[str] = ..., repository_url: _Optional[str] = ...) -> None: ...
 
 class GenerateTokenRequest(_message.Message):
-    __slots__ = ("workflowDefinition", "flow_config_id", "flow_config")
+    __slots__ = ("workflowDefinition", "flow_config_id", "flow_config", "workflowID", "flow_version", "flow_config_schema_version")
     WORKFLOWDEFINITION_FIELD_NUMBER: _ClassVar[int]
     FLOW_CONFIG_ID_FIELD_NUMBER: _ClassVar[int]
     FLOW_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
+    FLOW_VERSION_FIELD_NUMBER: _ClassVar[int]
+    FLOW_CONFIG_SCHEMA_VERSION_FIELD_NUMBER: _ClassVar[int]
     workflowDefinition: str
     flow_config_id: str
     flow_config: _struct_pb2.Struct
-    def __init__(self, workflowDefinition: _Optional[str] = ..., flow_config_id: _Optional[str] = ..., flow_config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+    workflowID: str
+    flow_version: str
+    flow_config_schema_version: str
+    def __init__(self, workflowDefinition: _Optional[str] = ..., flow_config_id: _Optional[str] = ..., flow_config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., workflowID: _Optional[str] = ..., flow_version: _Optional[str] = ..., flow_config_schema_version: _Optional[str] = ...) -> None: ...
 
 class GenerateTokenResponse(_message.Message):
     __slots__ = ("token", "expiresAt", "server_capabilities")
@@ -435,20 +443,22 @@ class ToolAnnotations(_message.Message):
     def __init__(self, title: _Optional[str] = ..., read_only_hint: bool = ..., destructive_hint: bool = ..., idempotent_hint: bool = ..., open_world_hint: bool = ...) -> None: ...
 
 class McpTool(_message.Message):
-    __slots__ = ("name", "description", "inputSchema", "icons", "annotations", "trusted")
+    __slots__ = ("name", "description", "inputSchema", "icons", "annotations", "trusted", "client_injected")
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     INPUTSCHEMA_FIELD_NUMBER: _ClassVar[int]
     ICONS_FIELD_NUMBER: _ClassVar[int]
     ANNOTATIONS_FIELD_NUMBER: _ClassVar[int]
     TRUSTED_FIELD_NUMBER: _ClassVar[int]
+    CLIENT_INJECTED_FIELD_NUMBER: _ClassVar[int]
     name: str
     description: str
     inputSchema: str
     icons: Icons
     annotations: ToolAnnotations
     trusted: bool
-    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., inputSchema: _Optional[str] = ..., icons: _Optional[_Union[Icons, _Mapping]] = ..., annotations: _Optional[_Union[ToolAnnotations, _Mapping]] = ..., trusted: bool = ...) -> None: ...
+    client_injected: bool
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., inputSchema: _Optional[str] = ..., icons: _Optional[_Union[Icons, _Mapping]] = ..., annotations: _Optional[_Union[ToolAnnotations, _Mapping]] = ..., trusted: bool = ..., client_injected: bool = ...) -> None: ...
 
 class Icons(_message.Message):
     __slots__ = ("items",)
@@ -558,16 +568,18 @@ class ShellInformationContext(_message.Message):
     def __init__(self, shell_name: _Optional[str] = ..., shell_type: _Optional[str] = ..., shell_variant: _Optional[str] = ..., shell_environment: _Optional[str] = ..., ssh_session: bool = ..., cwd: _Optional[str] = ...) -> None: ...
 
 class TrackSelfHostedClientEvent(_message.Message):
-    __slots__ = ("requestID", "workflowID", "featureQualifiedName", "featureAiCatalogItem")
+    __slots__ = ("requestID", "workflowID", "featureQualifiedName", "featureAiCatalogItem", "sourceType")
     REQUESTID_FIELD_NUMBER: _ClassVar[int]
     WORKFLOWID_FIELD_NUMBER: _ClassVar[int]
     FEATUREQUALIFIEDNAME_FIELD_NUMBER: _ClassVar[int]
     FEATUREAICATALOGITEM_FIELD_NUMBER: _ClassVar[int]
+    SOURCETYPE_FIELD_NUMBER: _ClassVar[int]
     requestID: str
     workflowID: str
     featureQualifiedName: str
     featureAiCatalogItem: bool
-    def __init__(self, requestID: _Optional[str] = ..., workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ...) -> None: ...
+    sourceType: str
+    def __init__(self, requestID: _Optional[str] = ..., workflowID: _Optional[str] = ..., featureQualifiedName: _Optional[str] = ..., featureAiCatalogItem: bool = ..., sourceType: _Optional[str] = ...) -> None: ...
 
 class TrackSelfHostedAction(_message.Message):
     __slots__ = ("requestID",)

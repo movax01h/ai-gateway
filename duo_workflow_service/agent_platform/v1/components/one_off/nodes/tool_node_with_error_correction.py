@@ -1,12 +1,15 @@
 import json
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 import structlog
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, ToolException
-from pydantic_core import ValidationError
+from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    ToolBlockedByAdministratorError,
+)
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -20,10 +23,12 @@ from duo_workflow_service.agent_platform.v1.state import (
     merge_nested_dict,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.entities.state import ApprovalSource
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
 from duo_workflow_service.tools.toolset import Toolset
+from lib.context import record_approval_source
 from lib.hidden_layer_log import set_hidden_layer_log_context
 from lib.internal_events.event_enum import EventEnum
 
@@ -340,6 +345,14 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
 
         return result
 
+    def _halt_on_denied_tools(self, tool_names: list[str]) -> NoReturn:
+        for tool_name in tool_names:
+            self._tracker.track_tool_governance_event(
+                event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
+                tool_name=tool_name,
+            )
+        raise ToolBlockedByAdministratorError(tool_names)
+
     async def run(self, state: FlowState) -> dict[str, Any]:
         """Execute tools with error correction tracking."""
         result: dict[str, Any] = {}
@@ -350,6 +363,8 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
         )
 
         if len(self._toolset) == 0:
+            if self._toolset.denied_tools:
+                self._halt_on_denied_tools(sorted(self._toolset.denied_tools))
             return self._handle_empty_toolset(conversation_history)
 
         # Get current context for error tracking
@@ -368,6 +383,15 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
             return self._handle_no_tool_calls(
                 conversation_history, context, context_dict, attempts
             )
+
+        blocked_names = [
+            tool_call["name"]
+            for tool_call in tool_calls
+            if tool_call["name"] not in self._toolset
+            and tool_call["name"] in self._toolset.denied_tools
+        ]
+        if blocked_names:
+            self._halt_on_denied_tools(blocked_names)
 
         # Execute all tool calls
         tool_responses, result = await self._execute_all_tool_calls(
@@ -405,10 +429,30 @@ class ToolNodeWithErrorCorrection:  # pylint: disable=too-many-instance-attribut
             tuple[str, ToolExecutionStatus]: (response_content, status)
         """
         try:
+            # The one-off component never routes tool calls through an approval node;
+            # attribute this config-authorized call before invoking, so the
+            # ToolInvokedEvent the callback handler emits carries the source. A falsy
+            # tool_call_id no-ops here, so no branch is needed.
+            record_approval_source(tool_call_id, ApprovalSource.PREAPPROVED_CONFIG)
+
             with duo_workflow_metrics.time_tool_call(
                 tool_name=tool.name, flow_type=self._tracker._flow_type.value
             ):
-                tool_call_result = await tool.ainvoke(tool_call_args)
+                # Wrap as a ToolCall dict (not bare args) so tool_call_id threads through
+                # to on_tool_start for approval_source lookup; unwrap the resulting
+                # ToolMessage back to raw content to preserve this method's str return
+                # contract. Note: a dict/list-returning tool would come back
+                # JSON-stringified here instead of its raw shape; none does today.
+                tool_call_result = await tool.ainvoke(
+                    {
+                        "name": tool.name,
+                        "args": tool_call_args,
+                        "id": tool_call_id,
+                        "type": "tool_call",
+                    }
+                )
+                if isinstance(tool_call_result, ToolMessage):
+                    tool_call_result = tool_call_result.content
 
             self._tracker.track_internal_event(
                 event_name=EventEnum.WORKFLOW_TOOL_SUCCESS,

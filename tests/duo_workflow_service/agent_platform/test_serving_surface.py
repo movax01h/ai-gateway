@@ -6,7 +6,6 @@ from unittest import mock
 
 import pytest
 
-from duo_workflow_service.agent_platform import serving_surface
 from duo_workflow_service.agent_platform.serving_surface import (
     ServingSurface,
     collect_serving_surfaces,
@@ -39,18 +38,6 @@ class TestCollectServingSurfaces:
         assert surfaces == {
             "demo_flow": [ServingSurface(transport="grpc", deployable="dws")]
         }
-
-    def test_features_dir_falls_back_without_marker(self, monkeypatch, tmp_path):
-        # No marker (wheel install, faked filesystem): fall back to the
-        # fixed-depth derivation instead of failing the caller.
-        orphan = tmp_path / "a" / "b" / "c" / "serving_surface.py"
-        orphan.parent.mkdir(parents=True)
-        monkeypatch.setattr(serving_surface, "__file__", str(orphan))
-
-        assert (
-            serving_surface._features_dir()
-            == (tmp_path / "a" / "ai" / "features").resolve()
-        )
 
     def test_missing_tree_is_silent(self, tmp_path: Path):
         assert collect_serving_surfaces(tmp_path / "nope") == {}

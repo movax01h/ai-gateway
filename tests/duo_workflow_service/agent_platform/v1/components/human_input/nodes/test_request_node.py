@@ -91,6 +91,27 @@ class TestRequestNode:
             assert ui_log_entry["message_type"] == MessageTypeEnum.REQUEST
 
     @pytest.mark.asyncio
+    async def test_external_request_type_reaches_message_sub_type(self, sample_state):
+        """The external request type must reach message_sub_type unchanged."""
+        request_node = RequestNode(
+            name="test_component#request",
+            component_name="test_component",
+            message_template="Formatted prompt content with {{test_key}}",
+            inputs=[IOKey(target="context", subkeys=["test_key"])],
+            ui_history=UIHistory(
+                events=[UILogEventsHumanInput.ON_USER_INPUT_PROMPT],
+                writer_class=agent_log_writer_class(component_name="test_component"),
+            ),
+            request_type="external",
+            status_key=IOKey(target="status"),
+        )
+
+        result = await request_node.run(sample_state)
+
+        ui_log_entry = result[FlowStateKeys.UI_CHAT_LOG][0]
+        assert ui_log_entry["message_sub_type"] == "external"
+
+    @pytest.mark.asyncio
     async def test_message_template_processed_when_present(self, sample_state):
         """Test that message template is processed and formatted correctly."""
         # Create RequestNode with ui_history and message_template

@@ -4,8 +4,12 @@ import unittest
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+from prometheus_client import CollectorRegistry
+
 from ai_gateway.code_suggestions import LanguageServerVersion
+from duo_workflow_service.audit_events.collector import MAX_BUFFER_BYTES
 from duo_workflow_service.tracking.duo_workflow_metrics import (
+    AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS,
     DuoWorkflowMetrics,
     SessionTypeEnum,
 )
@@ -40,9 +44,11 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "audit_events_captured_counter",
             "audit_events_sent_counter",
             "audit_events_dropped_counter",
+            "audit_events_truncated_counter",
             "audit_events_batch_size",
             "audit_events_payload_bytes",
             "audit_events_auto_flush_skipped_counter",
+            "tool_governance_counter",
         ]:
             mock_histogram = MagicMock()
             setattr(self.metrics, metric_name, mock_histogram)
@@ -485,6 +491,53 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         args, _ = observe_mock.call_args
         self.assertGreaterEqual(args[0], 0)
 
+    def test_count_tool_governance_event(self):
+        self._assert_counter_called(
+            "tool_governance_counter",
+            "count_tool_governance_event",
+            {
+                "flow_type": "chat",
+                "event": "block_denied_duo_workflow_tool",
+                "outcome": "none",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+                "gitlab_realm": "unknown",
+                "is_gitlab_team_member": "unknown",
+            },
+            flow_type="chat",
+            event="block_denied_duo_workflow_tool",
+            outcome="none",
+        )
+
+    def test_count_tool_governance_event_against_a_real_registry(self):
+        """Exercises prometheus_client itself, not a mock.
+
+        The counter is incremented inside a best-effort `try`, so a label mismatch would be
+        swallowed and the metric would simply never appear. Only a real registry catches that.
+        """
+        registry = CollectorRegistry()
+        metrics = DuoWorkflowMetrics(registry=registry)
+
+        metrics.count_tool_governance_event(
+            flow_type="chat", event="block_denied_duo_workflow_tool"
+        )
+
+        value = registry.get_sample_value(
+            "duo_workflow_tool_governance_total",
+            {
+                "flow_type": "chat",
+                "event": "block_denied_duo_workflow_tool",
+                "outcome": "none",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+                "gitlab_realm": "unknown",
+                "is_gitlab_team_member": "unknown",
+            },
+        )
+        self.assertEqual(value, 1.0)
+
     def test_count_audit_events_captured(self):
         self._assert_counter_called(
             "audit_events_captured_counter",
@@ -513,10 +566,18 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 labels_result_mock.inc.assert_called_once_with(amount)
 
     def test_count_audit_events_dropped_per_event(self):
-        for reason, amount in [
-            ("retries_exhausted", 4),
-            ("version_unsupported", 7),
-            ("http_error", 2),
+        # Batch-level reasons leave event_type/field at their defaults; event_too_large
+        # carries the identified event's type and oversized field.
+        for reason, kwargs, expected_labels, amount in [
+            ("retries_exhausted", {}, {"event_type": "unknown", "field": "none"}, 4),
+            ("version_unsupported", {}, {"event_type": "unknown", "field": "none"}, 7),
+            ("http_error", {}, {"event_type": "unknown", "field": "none"}, 2),
+            (
+                "event_too_large",
+                {"event_type": "ai_llm_input_sent", "field": "prompt_content"},
+                {"event_type": "ai_llm_input_sent", "field": "prompt_content"},
+                1,
+            ),
         ]:
             with self.subTest(reason=reason):
                 labels_mock = cast(
@@ -526,9 +587,11 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
                 labels_result_mock = MagicMock()
                 labels_mock.return_value = labels_result_mock
 
-                self.metrics.count_audit_events_dropped(reason=reason, amount=amount)
+                self.metrics.count_audit_events_dropped(
+                    reason=reason, amount=amount, **kwargs
+                )
 
-                labels_mock.assert_called_once_with(reason=reason)
+                labels_mock.assert_called_once_with(reason=reason, **expected_labels)
                 labels_result_mock.inc.assert_called_once_with(amount)
 
     def test_count_audit_events_auto_flush_skipped(self):
@@ -556,6 +619,25 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
         self.metrics.observe_audit_events_payload_bytes(1024)
 
         observe_mock.assert_called_once_with(1024)
+
+    def test_count_audit_events_truncated(self):
+        labels_mock = cast(
+            MagicMock, self.metrics.audit_events_truncated_counter.labels
+        )
+
+        self.metrics.count_audit_events_truncated(
+            event_type="ai_llm_input_sent", field="prompt_content"
+        )
+
+        labels_mock.assert_called_once_with(
+            event_type="ai_llm_input_sent", field="prompt_content"
+        )
+        labels_mock.return_value.inc.assert_called_once_with()
+
+    def test_payload_bytes_buckets_reach_the_batch_cap(self):
+        # The top bucket can fill; the next doubling would duplicate +Inf.
+        top = AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS[-1]
+        assert top < MAX_BUFFER_BYTES < 2 * AUDIT_EVENTS_PAYLOAD_BYTES_BUCKETS[-2]
 
     def test_count_oversized_outgoing_action(self):
         self.metrics.duo_workflow_oversized_outgoing_action_total = MagicMock()

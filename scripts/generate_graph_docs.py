@@ -14,7 +14,7 @@ from ai_gateway.config import Config
 from ai_gateway.container import ContainerApplication
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
-from lib.internal_events.event_enum import CategoryEnum
+from lib.events import GLReportingEventContext
 
 HEADER_TEXT = """
 # Duo Workflow Service Graphs
@@ -35,10 +35,42 @@ graph TD;
     __end__(__end__):::last;
 """
 
+# Legacy (non Flow Registry) workflows, documented in this order.
+LEGACY_WORKFLOWS = [
+    "software_development",
+    "convert_to_gitlab_ci",
+    "chat",
+    "issue_to_merge_request",
+]
+
 FLOW_REGISTRY_CONFIG_DIRS = [
     "duo_workflow_service/agent_platform/experimental/flows/configs/",
     "duo_workflow_service/agent_platform/v1/flows/configs/",
 ]
+
+# Moved features keep their flow configs under ai/features/<domain>/<feature>/config/.
+FEATURE_CONFIG_GLOB = "ai/features/*/*/config/*.yml"
+
+
+def flow_registry_entries() -> list[tuple[str, Path]]:
+    """Collect the flow configs to document, one entry per (flow, version).
+
+    Returns:
+        Alphabetically sorted ``(flow_name, config_path)`` pairs. A legacy-root
+        copy wins a (flow, version) collision, matching runtime precedence.
+    """
+    entries: list[tuple[str, Path]] = []
+    seen_versions = set()
+    for flow_registry_dir in FLOW_REGISTRY_CONFIG_DIRS:
+        for config_file in sorted(Path(flow_registry_dir).glob("*/*.yml")):
+            seen_versions.add((config_file.parent.name, config_file.stem))
+            entries.append((config_file.parent.name, config_file))
+    for config_file in sorted(Path(".").glob(FEATURE_CONFIG_GLOB)):
+        flow_name = config_file.parent.parent.name
+        if (flow_name, config_file.stem) in seen_versions:
+            continue
+        entries.append((flow_name, config_file))
+    return sorted(entries, key=lambda entry: (entry[0], entry[1].stem))
 
 
 def main():
@@ -59,131 +91,120 @@ def main():
     output_file_path = sys.argv[1]
     with open(output_file_path, "w") as output_file:
         output_file.write(HEADER_TEXT)
-        for graph_name in CategoryEnum:
-            if graph_name in [
-                "software_development",
-                "chat",
-                "convert_to_gitlab_ci",
-                "issue_to_merge_request",
-            ]:
-                # Dynamically import Workflow class. Equivalent to import statements in this format:
-                #     from duo_workflow_service.workflows.chat import Workflow
-                workflow_module = importlib.import_module(
-                    f"duo_workflow_service.workflows.{graph_name}"
-                )
-                Workflow = getattr(  # pylint: disable=invalid-name
-                    workflow_module, "Workflow"
-                )
+        for graph_name in LEGACY_WORKFLOWS:
+            # Dynamically import Workflow class. Equivalent to import statements in this format:
+            #     from duo_workflow_service.workflows.chat import Workflow
+            workflow_module = importlib.import_module(
+                f"duo_workflow_service.workflows.{graph_name}"
+            )
+            Workflow = getattr(  # pylint: disable=invalid-name
+                workflow_module, "Workflow"
+            )
 
-                tools_reg = MagicMock(spec=ToolsRegistry)
-                wrk = Workflow(
-                    "",
-                    {"git_branch": "test-branch"},
-                    workflow_type=graph_name,
-                    user=CloudConnectorUser(True, is_debug=True),
-                )
-                wrk._project = {
-                    "id": "",
-                    "name": "",
-                    "http_url_to_repo": "",
-                    "web_url": "http://gitlab.com/project_name",
-                    "default_branch": "main",
-                }
-                goal = ""
-                if graph_name == "issue_to_merge_request":
-                    goal = "http://gitlab.com/project_name/-/issues/1"
-                graph = wrk._compile(goal, tools_reg, MemorySaver())
+            tools_reg = MagicMock(spec=ToolsRegistry)
+            wrk = Workflow(
+                "",
+                {"git_branch": "test-branch"},
+                workflow_type=GLReportingEventContext.from_workflow_definition(
+                    graph_name
+                ),
+                user=CloudConnectorUser(True, is_debug=True),
+            )
+            wrk._project = {
+                "id": "",
+                "name": "",
+                "http_url_to_repo": "",
+                "web_url": "http://gitlab.com/project_name",
+                "default_branch": "main",
+            }
+            goal = ""
+            if graph_name == "issue_to_merge_request":
+                goal = "http://gitlab.com/project_name/-/issues/1"
+            graph = wrk._compile(goal, tools_reg, MemorySaver())
 
-                diagram = graph.get_graph().draw_mermaid()
-                diagram = diagram.replace("\t", "    ")
+            diagram = graph.get_graph().draw_mermaid()
+            diagram = diagram.replace("\t", "    ")
 
-                output_file.write(f"\n## Graph: `{graph_name}`\n\n")
-                output_file.write("```mermaid\n" + diagram + "```\n")
+            output_file.write(f"\n## Graph: `{graph_name}`\n\n")
+            output_file.write("```mermaid\n" + diagram + "```\n")
 
-        for flow_registry_dir in FLOW_REGISTRY_CONFIG_DIRS:
-            config_files = sorted(Path(flow_registry_dir).glob("*/*.yml"))
-            for config_file in config_files:
-                with open(config_file) as yml_contents:
-                    data = yaml.safe_load(yml_contents)
-                    api_version = data["version"]  # e.g. "experimental" or "v1"
-                    flow_version = config_file.stem  # e.g. "1.0.0" or "2.0.0"
-                    flow_name = config_file.parent.name
-                    display_name = f"{flow_name} {flow_version} ({api_version})"
-                output_file.write(f"\n## Graph: `{display_name}` (Flow Registry)\n\n")
+        for flow_name, config_file in flow_registry_entries():
+            with open(config_file) as yml_contents:
+                data = yaml.safe_load(yml_contents)
+                api_version = data["version"]  # e.g. "experimental" or "v1"
+                flow_version = config_file.stem  # e.g. "1.0.0" or "2.0.0"
+                display_name = f"{flow_name} {flow_version} ({api_version})"
+            output_file.write(f"\n## Graph: `{display_name}` (Flow Registry)\n\n")
 
-                diagram = GRAPH_CONFIG
-                routers = data["routers"]
-                components = data["components"]
-                start_node = data["flow"]["entry_point"]
+            diagram = GRAPH_CONFIG
+            routers = data["routers"]
+            components = data["components"]
+            start_node = data["flow"]["entry_point"]
 
-                # Statically named subagents (``subagents: [{name: ...}]``) are folded
-                # into their supervisor at runtime; style them apart and show the delegation.
-                subagents = {
-                    component["name"]: [
-                        entry["name"]
-                        for entry in component.get("subagents") or []
-                        if isinstance(entry, dict) and "name" in entry
-                    ]
-                    for component in components
-                }
-                subagent_names = {
-                    name for names in subagents.values() for name in names
-                }
+            # Statically named subagents (``subagents: [{name: ...}]``) are folded
+            # into their supervisor at runtime; style them apart and show the delegation.
+            subagents = {
+                component["name"]: [
+                    entry["name"]
+                    for entry in component.get("subagents") or []
+                    if isinstance(entry, dict) and "name" in entry
+                ]
+                for component in components
+            }
+            subagent_names = {name for names in subagents.values() for name in names}
 
-                diagram += f"    __start__ --> {start_node};\n"
-                for component in components:
-                    label = f"{component['name']}<br>#91;{component['type']}#93;"
-                    # ``max_delegations`` caps ``delegate_task`` calls across all of a
-                    # supervisor's subagents, so it belongs on the supervisor, not an edge.
-                    if (
-                        subagents[component["name"]]
-                        and component.get("max_delegations") is not None
-                    ):
-                        label += f"<br>max_delegations: {component['max_delegations']}"
-                    style = ":::subagent" if component["name"] in subagent_names else ""
-                    diagram += f"    {component['name']}({label}){style};\n"
+            diagram += f"    __start__ --> {start_node};\n"
+            for component in components:
+                label = f"{component['name']}<br>#91;{component['type']}#93;"
+                # ``max_delegations`` caps ``delegate_task`` calls across all of a
+                # supervisor's subagents, so it belongs on the supervisor, not an edge.
+                if (
+                    subagents[component["name"]]
+                    and component.get("max_delegations") is not None
+                ):
+                    label += f"<br>max_delegations: {component['max_delegations']}"
+                style = ":::subagent" if component["name"] in subagent_names else ""
+                diagram += f"    {component['name']}({label}){style};\n"
 
-                # A subagent that is only named under ``subagents:`` and never declared
-                # as a component would otherwise become an implicit, unstyled mermaid node.
-                declared = {component["name"] for component in components}
-                for name in sorted(subagent_names - declared):
-                    diagram += f"    {name}({name}<br>#91;undeclared#93;):::subagent;\n"
+            # A subagent that is only named under ``subagents:`` and never declared
+            # as a component would otherwise become an implicit, unstyled mermaid node.
+            declared = {component["name"] for component in components}
+            for name in sorted(subagent_names - declared):
+                diagram += f"    {name}({name}<br>#91;undeclared#93;):::subagent;\n"
 
-                # Bidirectional: the supervisor delegates a task and the subagent hands
-                # its result back to the supervisor.
-                for supervisor, names in subagents.items():
-                    for name in names:
-                        diagram += f'    {supervisor} <-.->|"subagent"| {name};\n'
+            # Bidirectional: the supervisor delegates a task and the subagent hands
+            # its result back to the supervisor.
+            for supervisor, names in subagents.items():
+                for name in names:
+                    diagram += f'    {supervisor} <-.->|"subagent"| {name};\n'
 
-                for edge in routers:
-                    if "to" in edge.keys():
-                        diagram += f"    {edge['from']} --> {clean_name(edge['to'])};\n"
-                    else:
-                        edge_from = edge["from"]
-                        edge_condition = edge["condition"]
-                        for condition_output, edge_to in edge_condition[
-                            "routes"
-                        ].items():
-                            # A route key can carry a newline (the executor's
-                            # "Exit code: N\n<output>" envelope); mermaid edge labels
-                            # cannot, so show it escaped. Quoting the label keeps
-                            # mermaid parsing keys that hold parentheses.
-                            label = (
-                                str(condition_output).replace("\n", "\\n")
-                                if condition_output != ""
-                                else "(empty)"
-                            )
-                            diagram += f'    {edge_from} -.->|"{label}"| {clean_name(edge_to)};\n'
+            for edge in routers:
+                if "to" in edge.keys():
+                    diagram += f"    {edge['from']} --> {clean_name(edge['to'])};\n"
+                else:
+                    edge_from = edge["from"]
+                    edge_condition = edge["condition"]
+                    for condition_output, edge_to in edge_condition["routes"].items():
+                        # A route key can carry a newline (the executor's
+                        # "Exit code: N\n<output>" envelope); mermaid edge labels
+                        # cannot, so show it escaped. Quoting the label keeps
+                        # mermaid parsing keys that hold parentheses.
+                        label = (
+                            str(condition_output).replace("\n", "\\n")
+                            if condition_output != ""
+                            else "(empty)"
+                        )
+                        diagram += (
+                            f'    {edge_from} -.->|"{label}"| {clean_name(edge_to)};\n'
+                        )
 
-                diagram += "    classDef default fill:#f2f0ff,line-height:1.2;\n"
-                diagram += "    classDef first fill-opacity:0;\n"
-                diagram += "    classDef last fill:#bfb6fc;\n"
-                if subagent_names:
-                    diagram += (
-                        "    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;\n"
-                    )
+            diagram += "    classDef default fill:#f2f0ff,line-height:1.2;\n"
+            diagram += "    classDef first fill-opacity:0;\n"
+            diagram += "    classDef last fill:#bfb6fc;\n"
+            if subagent_names:
+                diagram += "    classDef subagent fill:#e0f2f1,stroke-dasharray:5 5;\n"
 
-                output_file.write("```mermaid\n" + diagram + "```\n")
+            output_file.write("```mermaid\n" + diagram + "```\n")
 
 
 def clean_name(name):

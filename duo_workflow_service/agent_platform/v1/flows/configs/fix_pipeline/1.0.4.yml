@@ -178,12 +178,29 @@ components:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
+  - name: "git_fetch_unshallow"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: "git"
+        as: "program"
+        literal: true
+      - from: "fetch --unshallow"
+        as: "args"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
   - name: "fix_pipeline_create_branch"
     type: AgentComponent
     prompt_id: "fix_pipeline_create_branch"
-    prompt_version: "^1.0.0"
+    prompt_version: "^2.0.0"
     response_schema_id: "create_repository_branch"
     response_schema_version: "^1.0.0"
+    max_cycles:
+      threshold: 20
+      iteration_warning_offset: 3
     toolset:
       - "run_command"
     inputs:
@@ -204,6 +221,7 @@ components:
         as: "workspace_agent_skills"
         optional: true
     ui_log_events:
+      - "on_agent_final_answer"
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
@@ -269,53 +287,6 @@ components:
     ui_log_events:
       - "on_agent_reasoning"
       - "on_agent_final_answer"
-      - "on_tool_execution_success"
-      - "on_tool_execution_failed"
-
-  - name: "fix_pipeline_git_commit"
-    type: AgentComponent
-    prompt_id: "commit_changes"
-    prompt_version: "^1.0.0"
-    inputs:
-      - from: "context:project_http_url_to_repo"
-        as: "repository_url"
-      - from: "context:inputs.user_rule"
-        as: "agents_dot_md"
-        optional: true
-      - from: "context:inputs.workspace_agent_skills"
-        as: "workspace_agent_skills"
-        optional: true
-    toolset:
-      - "run_command"
-    ui_log_events:
-      - "on_tool_execution_success"
-      - "on_tool_execution_failed"
-
-  - name: "git_fetch_unshallow"
-    type: DeterministicStepComponent
-    tool_name: "run_command"
-    inputs:
-      - from: "git"
-        as: "program"
-        literal: true
-      - from: "fetch --unshallow"
-        as: "args"
-        literal: true
-    ui_log_events:
-      - "on_tool_execution_success"
-      - "on_tool_execution_failed"
-
-  - name: "git_push_branch"
-    type: DeterministicStepComponent
-    tool_name: "run_command"
-    inputs:
-      - from: "git"
-        as: "program"
-        literal: true
-      - from: "push origin HEAD --no-verify"
-        as: "args"
-        literal: true
-    ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
 
@@ -437,23 +408,15 @@ routers:
   - from: "fix_pipeline_code_suggestions"
     to: "end"
   - from: "git_fetch_for_branch"
+    to: "git_fetch_unshallow"
+  - from: "git_fetch_unshallow"
     to: "fix_pipeline_create_branch"
   - from: "fix_pipeline_create_branch"
     condition:
       input: "context:fix_pipeline_create_branch.final_answer.status"
       routes:
-        "success": "fix_pipeline_git_commit"
+        "success": "fix_pipeline_create_new_mr"
         "default_route": "end"
-  - from: "fix_pipeline_git_commit"
-    to: "git_fetch_unshallow"
-  - from: "git_fetch_unshallow"
-    to: "git_push_branch"
-  - from: "git_push_branch"
-    condition:
-      input: "context:git_push_branch.execution_result"
-      routes:
-        "failed": "end"
-        "default_route": "fix_pipeline_create_new_mr"
   - from: "fix_pipeline_create_new_mr"
     to: "fix_pipeline_new_mr_comment"
   - from: "fix_pipeline_new_mr_comment"

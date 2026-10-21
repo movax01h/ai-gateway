@@ -1,5 +1,5 @@
 ---
-description: Tracks resolution of a pending Duo Workflow tool approval. Outcomes are approval, rejection, and modification (rejected with feedback for the agent). Agent Platform surfaces emit one event per tool call that required approval; chat emits one event per user decision and trusts the client's resume message, so a stale or replayed decision still counts. Delivery is best-effort at-least-once, and legacy pre-v1 flows do not emit this event
+description: Tracks resolution of a pending Duo Workflow tool approval. Outcomes are approval, rejection, modification (rejected with feedback for the agent), and message (a message sent instead of a decision, which rejects the calls and goes to the agent as feedback). Agent Platform surfaces emit one event per tool call that required approval; chat emits one event per user decision, none for a message, and trusts the client's resume message, so a stale or replayed decision still counts. Delivery is best-effort at-least-once, and legacy pre-v1 flows do not emit this event
 internal_events: true
 action: resolve_duo_workflow_tool_approval
 product_group: compliance
@@ -9,7 +9,7 @@ additional_properties:
   label:
     description: Flow type (e.g. chat, software_development)
   property:
-    description: "Approval outcome: approval, rejection, or modification (rejected with feedback)"
+    description: "Approval outcome: approval, rejection, modification (rejected with feedback), or message (a message sent instead of a decision)"
   value:
     description: Workflow Id that can be used to connect this event to others that happen during the same workflow.
   tool_name:

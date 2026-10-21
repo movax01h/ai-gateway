@@ -15,7 +15,7 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:goal"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
       # The reviewer reads files on demand; preloaded contents were ~68% of the
       # payload, re-billed every cycle, with no recall gain.
@@ -46,7 +46,7 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:goal"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
       - from: "context:inputs.code_review_context.duo_code_review_bot_name"
         as: "only_from_author"
@@ -69,7 +69,7 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:goal"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
       - from: "context:fetch_mr_data.tool_responses"
         as: "mr_data"
@@ -82,19 +82,41 @@ components:
       - from: "context:inputs.code_review_context.last_reviewed_head_sha"
         as: "last_reviewed_head_sha"
         optional: true
+      # The publish step reuses this anchor, so the summary rule and the gate share one threshold.
+      - from: &min_confidence "4"
+        as: "min_confidence"
+        literal: true
     toolset:
-      - "gitlab_blob_search"
+      # The workload checks the repository out at this merge request's head, so
+      # these read local disk instead of a round trip per file.
+      - "grep"
+      - "read_file"
+      - "read_files"
+      - "find_files"
+      - "list_dir"
+      # The checkout holds one revision, so other refs and history stay on the API.
       - "get_repository_file"
-      - "get_repository_files"
-      - "list_repository_tree"
       - "list_commits"
       - "get_commit_diff"
+      # Cross-repo reach: the checkout is this project only, and this covers what isn't.
+      - "gitlab_api_get"
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
       - "on_agent_final_answer"
 
-  # Step 4: Publish in pure code from the reviewer's schema-validated answer.
+  # Step 4: Detect in code whether the review context was truncated. No UI log,
+  # so the large context stays out of the chat log; only the small result
+  # reaches publish_review.
+  - name: "check_truncation"
+    type: DeterministicStepComponent
+    tool_name: "detect_review_context_truncation"
+    inputs:
+      - from: "context:fetch_mr_data.tool_responses"
+        as: "review_context"
+        optional: true
+
+  # Step 5: Publish in pure code from the reviewer's schema-validated answer.
   # `findings` is required so a missing answer fails the flow instead of posting
   # a clean review. min_confidence 4 comes from the benchmark sweep (gitlab#618672).
   - name: "publish_review"
@@ -103,7 +125,7 @@ components:
     inputs:
       - from: "context:project_id"
         as: "project_id"
-      - from: "context:goal"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
       - from: "context:review.final_answer.findings"
         as: "findings"
@@ -113,9 +135,15 @@ components:
       - from: "context:review.final_answer.previous_findings"
         as: "previous_findings"
         optional: true
-      - from: "4"
+      - from: "context:fetch_existing_discussions.tool_responses"
+        as: "existing_discussions"
+        optional: true
+      - from: *min_confidence
         as: "min_confidence"
         literal: true
+      - from: "context:check_truncation.tool_responses"
+        as: "review_truncation"
+        optional: true
     ui_log_events:
       - "on_tool_execution_success"
       - "on_tool_execution_failed"
@@ -134,6 +162,8 @@ routers:
   - from: "fetch_existing_discussions"
     to: "review"
   - from: "review"
+    to: "check_truncation"
+  - from: "check_truncation"
     to: "publish_review"
   - from: "publish_review"
     to: "end"
@@ -153,3 +183,10 @@ flow:
           type: string
           description: Head commit SHA of the merge request at the previous review
           optional: true
+    # Built by Rails from the merge request the session is linked to.
+    - category: agent_platform_resource_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        merge_request_id:
+          type: string
+          description: IID of the merge request under review.
