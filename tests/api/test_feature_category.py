@@ -13,7 +13,9 @@ from ai_gateway.api.feature_category import (
     current_feature_category,
     feature_categories,
     feature_category,
+    get_catalog,
     get_feature_categories,
+    set_feature_category_for_unit_primitive,
 )
 
 
@@ -203,3 +205,44 @@ def test_get_feature_categories(decorators, expected):
         endpoint = decorator(endpoint)
 
     assert get_feature_categories(endpoint) == expected
+
+
+@pytest.mark.parametrize(
+    ("unit_primitive", "expected_category"),
+    [
+        (GitLabUnitPrimitive.COMPLETE_CODE, "code_suggestions"),
+        (GitLabUnitPrimitive.EXPLAIN_VULNERABILITY, "vulnerability_management"),
+        # Not a GitLabFeatureCategory member, so it's recorded as the catalog's string
+        (GitLabUnitPrimitive.DUO_AGENT_PLATFORM, "duo_workflow"),
+    ],
+)
+def test_set_feature_category_for_unit_primitive(unit_primitive, expected_category):
+    with request_cycle_context({"meta.feature_category": "ai_abstraction_layer"}):
+        set_feature_category_for_unit_primitive(unit_primitive)
+
+        assert current_feature_category() == expected_category
+
+
+def test_set_feature_category_for_unit_primitive_not_in_catalog():
+    with (
+        patch(
+            "ai_gateway.api.feature_category.get_catalog",
+            return_value=Mock(unit_primitives=[]),
+        ),
+        request_cycle_context({"meta.feature_category": "ai_abstraction_layer"}),
+    ):
+        set_feature_category_for_unit_primitive(GitLabUnitPrimitive.COMPLETE_CODE)
+
+        assert current_feature_category() == "ai_abstraction_layer"
+
+
+def test_catalog_is_loaded_once():
+    with (
+        patch("ai_gateway.api.feature_category.load_catalog") as mock_load_catalog,
+        request_cycle_context({}),
+    ):
+        set_feature_category_for_unit_primitive(GitLabUnitPrimitive.COMPLETE_CODE)
+        set_feature_category_for_unit_primitive(GitLabUnitPrimitive.DUO_CHAT)
+
+    mock_load_catalog.assert_not_called()
+    assert get_catalog() is get_catalog()

@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain_core.messages.ai import AIMessage, AIMessageChunk
 from pydantic import AnyUrl
+from structlog.testing import capture_logs
 
 from ai_gateway.api.v1 import api_router
 from ai_gateway.model_metadata import (
@@ -245,6 +246,60 @@ class TestPrompt:
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
 
 
+def _post_prompt(mock_client, stream: bool = False):
+    return mock_client.post(
+        "/prompts/test",
+        headers={
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+        },
+        json={"inputs": {"name": "John", "age": 20}, "stream": stream},
+    )
+
+
+def _logged_feature_category(cap_logs) -> Optional[str]:
+    [access_log] = [log for log in cap_logs if log.get("method") == "POST"]
+    return access_log.get("meta.feature_category")
+
+
+@pytest.mark.usefixtures("frozen_datetime_now", "mock_registry_get")
+class TestPromptFeatureCategory:
+    @pytest.mark.parametrize("stream", [False, True])
+    @pytest.mark.parametrize(
+        ("unit_primitive", "expected_category"),
+        [
+            (GitLabUnitPrimitive.COMPLETE_CODE, "code_suggestions"),
+            (GitLabUnitPrimitive.EXPLAIN_VULNERABILITY, "vulnerability_management"),
+            # Not a GitLabFeatureCategory member, so it's recorded as the catalog's string
+            (GitLabUnitPrimitive.DUO_AGENT_PLATFORM, "duo_workflow"),
+        ],
+    )
+    def test_category_of_prompt_unit_primitive(
+        self, mock_client, stream: bool, expected_category: str
+    ):
+        with capture_logs() as cap_logs:
+            response = _post_prompt(mock_client, stream=stream)
+
+        assert response.status_code == 200
+        assert _logged_feature_category(cap_logs) == expected_category
+
+    @pytest.mark.parametrize(
+        ("compatible_versions", "expected_status"),
+        [
+            (None, 404),  # prompt not found
+            ([], 400),  # no version matches the constraint
+        ],
+    )
+    def test_default_category_when_prompt_is_not_resolved(
+        self, mock_client, expected_status: int
+    ):
+        with capture_logs() as cap_logs:
+            response = _post_prompt(mock_client)
+
+        assert response.status_code == expected_status
+        assert _logged_feature_category(cap_logs) == "ai_abstraction_layer"
+
+
 class TestUnauthorizedScopes:
     @pytest.fixture(name="auth_user")
     def auth_user_fixture(self):
@@ -266,6 +321,14 @@ class TestUnauthorizedScopes:
 
         assert response.status_code == 403
         assert response.json() == {"detail": "Unauthorized to access 'test'"}
+
+    @pytest.mark.usefixtures("mock_ai_gateway_container", "mock_registry_get")
+    def test_failed_authorization_keeps_default_category(self, mock_client):
+        with capture_logs() as cap_logs:
+            response = _post_prompt(mock_client)
+
+        assert response.status_code == 403
+        assert _logged_feature_category(cap_logs) == "ai_abstraction_layer"
 
 
 class TestMisdirectedRequest:
