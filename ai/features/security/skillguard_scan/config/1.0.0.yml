@@ -1,0 +1,466 @@
+version: "v1"
+environment: ambient
+
+components:
+  # Step 0: Install skillguard + ast-grep binaries via ORAS
+  - name: "setup_tools"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: |
+          # POSIX sh compatible: `set -eu` only (no bashism like `pipefail`),
+          # so this runs under dash/busybox sh as well as bash. Pipe failures
+          # are handled explicitly below (download to a file, then extract)
+          # rather than relying on `pipefail`.
+          set -eu
+
+          # Default to the major-version alias (e.g. "1"), which skillguard CI
+          # re-points to the latest release in that major series. A new major
+          # (breaking) release requires an explicit bump here. Override with the
+          # SKILLGUARD_VERSION env var to pin an exact version (e.g. "1.2.0").
+          SKILLGUARD_VERSION="${SKILLGUARD_VERSION:-1}"
+          ORAS_VERSION="1.2.2"
+
+          # Detect architecture.
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64)
+              SG_BINARY="skillguard-linux-amd64"
+              AST_BINARY="ast-grep-linux-amd64"
+              ORAS_ARCH="linux_amd64"
+              ;;
+            aarch64)
+              SG_BINARY="skillguard-linux-arm64"
+              AST_BINARY="ast-grep-linux-arm64"
+              ORAS_ARCH="linux_arm64"
+              ;;
+            *)
+              echo "Unsupported architecture: $ARCH" >&2; exit 1
+              ;;
+          esac
+
+          # Install to /tmp/bin (sandbox allows writes to /tmp but not /usr/local/bin).
+          mkdir -p /tmp/bin
+          export PATH="/tmp/bin:$PATH"
+
+          # Install oras CLI. Download to a file first, then extract — this
+          # avoids `curl | tar`, whose failure (a dead mirror, a 404) would be
+          # masked by tar's exit status without `set -o pipefail` (a bashism).
+          ORAS_TGZ=$(mktemp)
+          curl -fsSL \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_${ORAS_ARCH}.tar.gz" \
+            -o "$ORAS_TGZ"
+          tar xz -C /tmp/bin -f "$ORAS_TGZ" oras
+          rm -f "$ORAS_TGZ"
+
+          # Pull skillguard + ast-grep from public registry.
+          DIST=$(mktemp -d)
+          /tmp/bin/oras pull -o "$DIST" \
+            "registry.gitlab.com/security-products/skillguard:${SKILLGUARD_VERSION}"
+
+          install -m 755 "$DIST/$SG_BINARY"  /tmp/bin/skillguard
+          install -m 755 "$DIST/$AST_BINARY" /tmp/bin/ast-grep
+          rm -rf "$DIST"
+
+          # Verify.
+          export SKILLGUARD_SG_PATH=/tmp/bin/ast-grep
+          skillguard --version
+          ast-grep --version
+          echo "Tools installed (skillguard ${SKILLGUARD_VERSION}, arch ${ARCH})"
+        as: "command"
+        literal: true
+      # Pulls ~70 MB of binaries (ORAS CLI from GitHub + skillguard/ast-grep
+      # from the container registry) over the network; override the default
+      # 120 s timeout to tolerate slow registries / GitHub rate limiting.
+      - from: "300"
+        as: "timeout"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 1: Discover all skills + run deterministic analysis
+  - name: "discover_and_deterministic"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: "PATH=/tmp/bin:$PATH SKILLGUARD_SG_PATH=/tmp/bin/ast-grep skillguard --step deterministic-all --project-dir . --manifest .skillguard/manifest.json --tmp-dir .skillguard"
+        as: "command"
+        literal: true
+      # Static scan time scales with the number of skills in the repo;
+      # override the default 120 s timeout to avoid premature failures on
+      # large monorepos.
+      - from: "300"
+        as: "timeout"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 2: Fact-check supervisor — one subagent per skill (haiku)
+  - name: "fact_check_supervisor"
+    type: AgentComponent
+    prompt_id: "skillguard_fact_check_supervisor"
+    inputs:
+      - from: "fact_check_agent"
+        as: "agent_name"
+        literal: true
+      - from: "fact-checking"
+        as: "task_description"
+        literal: true
+    subagents:
+      - name: "fact_check_agent"
+    toolset:
+      - "read_file"
+    # LIMITATION: hard cap on delegations per supervisor. Counts delegation
+    # calls (resumes included), so this bounds the flow to ~100 skills per
+    # stage at best, fewer if any skill is re-delegated. Skills beyond the
+    # cap are silently dropped. TODO: derive this from the manifest skill
+    # count (or chunk/paginate) so large repos are handled correctly.
+    max_delegations: 100
+    ui_log_events:
+      - "on_delegation"
+      - "on_delegation_returns"
+      - "on_agent_final_answer"
+
+  - name: "fact_check_agent"
+    type: AgentComponent
+    description: >-
+      Fact-checks a single skill. Reads the tmp file, validates extracted
+      facts against the actual skill content, writes .factcheck.json sidecar.
+    prompt_id: "skillguard_fact_check"
+    model_tags: "small"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+    toolset:
+      - "read_file"
+      - "create_file_with_contents"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+
+  # Step 3: Companion scan using corrected paths from fact-check
+  - name: "companion_scan"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: "PATH=/tmp/bin:$PATH SKILLGUARD_SG_PATH=/tmp/bin/ast-grep skillguard --step companion-all --manifest .skillguard/manifest.json"
+        as: "command"
+        literal: true
+      # companion-all loops over every tmp file, so scan time scales with the
+      # number of skills; override the default 120 s timeout to match
+      # discover_and_deterministic and avoid a timeout aborting the run after
+      # fact-check has already spent its LLM calls.
+      - from: "300"
+        as: "timeout"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 4: Purpose classification supervisor — one subagent per skill (haiku)
+  - name: "purpose_supervisor"
+    type: AgentComponent
+    prompt_id: "skillguard_purpose_supervisor"
+    inputs:
+      - from: "purpose_agent"
+        as: "agent_name"
+        literal: true
+      - from: "purpose classification"
+        as: "task_description"
+        literal: true
+    subagents:
+      - name: "purpose_agent"
+    toolset:
+      - "read_file"
+    # LIMITATION: see fact_check_supervisor — same ~100-skill delegation cap.
+    max_delegations: 100
+    ui_log_events:
+      - "on_delegation"
+      - "on_delegation_returns"
+      - "on_agent_final_answer"
+
+  - name: "purpose_agent"
+    type: AgentComponent
+    description: >-
+      Classifies the purpose of a single skill. Reads the tmp file and
+      fact-check sidecar, determines what the skill does and its type,
+      writes .purpose.json sidecar.
+    prompt_id: "skillguard_purpose"
+    model_tags: "small"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+    toolset:
+      - "read_file"
+      - "create_file_with_contents"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+
+  # Step 5: Security audit supervisor — one subagent per skill (sonnet)
+  - name: "audit_supervisor"
+    type: AgentComponent
+    prompt_id: "skillguard_audit_supervisor"
+    inputs:
+      - from: "audit_agent"
+        as: "agent_name"
+        literal: true
+      - from: "security audit"
+        as: "task_description"
+        literal: true
+    subagents:
+      - name: "audit_agent"
+    toolset:
+      - "read_file"
+    # LIMITATION: see fact_check_supervisor — same ~100-skill delegation cap.
+    max_delegations: 100
+    ui_log_events:
+      - "on_delegation"
+      - "on_delegation_returns"
+      - "on_agent_final_answer"
+
+  # Step 5 subagent: security audit for a single skill (sonnet)
+  - name: "audit_agent"
+    type: AgentComponent
+    description: >-
+      Performs security audit on a single skill. Reads the tmp file,
+      fact-check sidecar, purpose sidecar, and companion findings.
+      Evaluates against OWASP AG01-AG10, writes .audit.json sidecar.
+    prompt_id: "skillguard_audit"
+    model_tags: "large"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+    toolset:
+      - "read_file"
+      - "create_file_with_contents"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+
+  # Step 6: Judge calibration supervisor — one subagent per skill (sonnet)
+  - name: "judge_supervisor"
+    type: AgentComponent
+    prompt_id: "skillguard_judge_supervisor"
+    inputs:
+      - from: "judge_agent"
+        as: "agent_name"
+        literal: true
+      - from: "judge calibration"
+        as: "task_description"
+        literal: true
+    subagents:
+      - name: "judge_agent"
+    toolset:
+      - "read_file"
+    # LIMITATION: see fact_check_supervisor — same ~100-skill delegation cap.
+    max_delegations: 100
+    ui_log_events:
+      - "on_delegation"
+      - "on_delegation_returns"
+      - "on_agent_final_answer"
+
+  # Step 6 subagent: judge calibration for a single skill (sonnet)
+  - name: "judge_agent"
+    type: AgentComponent
+    description: >-
+      Calibrates the final verdict for a single skill. Reads the audit
+      sidecar, applies the surprise test (would a developer installing
+      this skill be surprised by each finding?), removes false positives,
+      writes .verdict.json sidecar with final verdict and confidence.
+    prompt_id: "skillguard_judge"
+    model_tags: "large"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+    toolset:
+      - "read_file"
+      - "create_file_with_contents"
+    ui_log_events:
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+
+  # Step 7: Generate SAST report from all tmp files + sidecars
+  - name: "generate_report"
+    type: DeterministicStepComponent
+    tool_name: "run_command"
+    inputs:
+      - from: "PATH=/tmp/bin:$PATH skillguard --step report --manifest .skillguard/manifest.json"
+        as: "command"
+        literal: true
+      # Report generation reads every tmp file + sidecar, so it scales with the
+      # number of skills; override the default 120 s timeout for large repos.
+      - from: "300"
+        as: "timeout"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+# Locally defined prompts (resolved because the referencing components omit
+# prompt_version). Each body lives as a .jinja file in this feature's prompts/
+# dir and is pulled in with {% include %}; the supervisor bodies and the shared
+# security_invariant partial are reused across stages.
+prompts:
+  - prompt_id: "skillguard_fact_check_supervisor"
+    name: "SkillGuard Fact-Check Supervisor"
+    model:
+      params:
+        max_tokens: 4096
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'skillguard_scan/supervisor_system/1.0.0.jinja' %}
+      user: |
+        {% include 'skillguard_scan/supervisor_user/1.0.0.jinja' %}
+    params:
+      timeout: 60
+
+  - prompt_id: "skillguard_fact_check"
+    name: "SkillGuard Fact-Check Agent"
+    model:
+      params:
+        max_tokens: 16384
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'skillguard_scan/fact_check_system/1.0.0.jinja' %}
+      user: |
+        {% include 'skillguard_scan/fact_check_user/1.0.0.jinja' %}
+    params:
+      timeout: 120
+
+  - prompt_id: "skillguard_purpose_supervisor"
+    name: "SkillGuard Purpose Supervisor"
+    model:
+      params:
+        max_tokens: 4096
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'skillguard_scan/supervisor_system/1.0.0.jinja' %}
+      user: |
+        {% include 'skillguard_scan/supervisor_user/1.0.0.jinja' %}
+    params:
+      timeout: 60
+
+  - prompt_id: "skillguard_purpose"
+    name: "SkillGuard Purpose Agent"
+    model:
+      params:
+        max_tokens: 4096
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'skillguard_scan/purpose_system/1.0.0.jinja' %}
+      user: |
+        {% include 'skillguard_scan/purpose_user/1.0.0.jinja' %}
+    params:
+      timeout: 60
+
+  - prompt_id: "skillguard_audit_supervisor"
+    name: "SkillGuard Audit Supervisor"
+    model:
+      params:
+        max_tokens: 4096
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'skillguard_scan/supervisor_system/1.0.0.jinja' %}
+      user: |
+        {% include 'skillguard_scan/supervisor_user/1.0.0.jinja' %}
+    params:
+      timeout: 120
+
+  - prompt_id: "skillguard_audit"
+    name: "SkillGuard Audit Agent"
+    model:
+      params:
+        max_tokens: 16384
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'skillguard_scan/audit_system/1.0.0.jinja' %}
+      user: |
+        {% include 'skillguard_scan/audit_user/1.0.0.jinja' %}
+    params:
+      timeout: 180
+
+  - prompt_id: "skillguard_judge_supervisor"
+    name: "SkillGuard Judge Supervisor"
+    model:
+      params:
+        max_tokens: 4096
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'skillguard_scan/supervisor_system/1.0.0.jinja' %}
+      user: |
+        {% include 'skillguard_scan/supervisor_user/1.0.0.jinja' %}
+    params:
+      timeout: 120
+
+  - prompt_id: "skillguard_judge"
+    name: "SkillGuard Judge Agent"
+    model:
+      params:
+        max_tokens: 16384
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'skillguard_scan/judge_system/1.0.0.jinja' %}
+      user: |
+        {% include 'skillguard_scan/judge_user/1.0.0.jinja' %}
+    params:
+      timeout: 180
+
+routers:
+  # DeterministicStepComponent records execution_result="failed" and returns
+  # normally; route any deterministic-step failure to abort so a broken scan
+  # never finishes as COMPLETED. (LLM-stage gaps — e.g. a skill with no verdict
+  # sidecar — are not caught here.) Mirrors code_review/1.0.0.yml.
+  - from: "setup_tools"
+    condition:
+      input: "context:setup_tools.execution_result"
+      routes:
+        "success": "discover_and_deterministic"
+        "default_route": "abort"
+  - from: "discover_and_deterministic"
+    condition:
+      input: "context:discover_and_deterministic.execution_result"
+      routes:
+        "success": "fact_check_supervisor"
+        "default_route": "abort"
+  - from: "fact_check_supervisor"
+    to: "companion_scan"
+  - from: "companion_scan"
+    condition:
+      input: "context:companion_scan.execution_result"
+      routes:
+        "success": "purpose_supervisor"
+        "default_route": "abort"
+  - from: "purpose_supervisor"
+    to: "audit_supervisor"
+  - from: "audit_supervisor"
+    to: "judge_supervisor"
+  - from: "judge_supervisor"
+    to: "generate_report"
+  - from: "generate_report"
+    condition:
+      input: "context:generate_report.execution_result"
+      routes:
+        "success": "end"
+        "default_route": "abort"
+
+flow:
+  entry_point: "setup_tools"
