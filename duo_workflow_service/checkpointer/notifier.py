@@ -12,9 +12,6 @@ from duo_workflow_service.agent_platform.node_naming import component_name_from_
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import UserOutputDisplayedEvent
 from duo_workflow_service.checkpointer.content_retention import reduce_ui_chat_log
-from duo_workflow_service.checkpointer.gitlab_workflow import (
-    WORKFLOW_STATUS_TO_CHECKPOINT_STATUS,
-)
 from duo_workflow_service.checkpointer.node_lifecycle import NodeEventLog
 from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.conversation.token_estimator import TokenEstimator
@@ -34,6 +31,7 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
 from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
+from duo_workflow_service.status_projection import client_checkpoint_status
 from duo_workflow_service.workflows.type_definitions import MAX_MESSAGE_SIZE
 
 log = structlog.stdlib.get_logger("notifier")
@@ -315,7 +313,7 @@ class UserInterface:  # pylint: disable=too-many-instance-attributes
 
         checkpoint = contract_pb2.NewCheckpoint(
             goal=goal,
-            status=WORKFLOW_STATUS_TO_CHECKPOINT_STATUS[self._reportable_status()],
+            status=client_checkpoint_status(self._reportable_status()),
             checkpoint=dumps({"channel_values": channel_values}, cls=CustomEncoder),
         )
 

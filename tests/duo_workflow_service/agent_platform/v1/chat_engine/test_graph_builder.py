@@ -105,7 +105,7 @@ def builder_fixture(user) -> ChatGraphBuilder:
     return ChatGraphBuilder(**_builder_params(user))
 
 
-def test_end_writes_input_required_and_abort_is_unchanged(builder):
+def test_end_writes_idle_and_abort_is_unchanged(builder):
     with _node_components(), patch(f"{_PARENT_MODULE}.StateGraph") as graph_class:
         builder.build(_config())
 
@@ -115,7 +115,7 @@ def test_end_writes_input_required_and_abort_is_unchanged(builder):
         if hasattr(call.args[1], "__self__")
     }
     assert isinstance(seeded["terminate_flow"], EndComponent)
-    assert seeded["terminate_flow"].status is WorkflowStatusEnum.INPUT_REQUIRED
+    assert seeded["terminate_flow"].status is WorkflowStatusEnum.IDLE
     assert isinstance(seeded["abort_flow"], AbortComponent)
 
 
@@ -251,7 +251,7 @@ def test_the_router_pass_needs_an_entry_point(builder):
 
 
 @pytest.mark.asyncio
-async def test_a_turn_ends_at_the_boundary_with_input_required(builder):
+async def test_a_turn_ends_at_the_boundary_with_idle(builder):
     """The graph LangGraph actually runs: entry component, declared hop, terminal write."""
     with _node_components():
         graph = builder.build(_config())
@@ -267,7 +267,7 @@ async def test_a_turn_ends_at_the_boundary_with_input_required(builder):
         )
     )
 
-    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED.value
+    assert result["status"] == WorkflowStatusEnum.IDLE.value
 
 
 @pytest.mark.asyncio
@@ -291,4 +291,4 @@ async def test_a_completed_chat_partial_config_builds_and_ends_its_turn(builder)
         )
     )
 
-    assert result["status"] == WorkflowStatusEnum.INPUT_REQUIRED.value
+    assert result["status"] == WorkflowStatusEnum.IDLE.value

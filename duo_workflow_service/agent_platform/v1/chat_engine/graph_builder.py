@@ -19,10 +19,11 @@ _TERMINAL_COMPONENT_NAMES = frozenset({"end", "abort"})
 class ChatGraphBuilder(FlowGraphBuilder):
     """``FlowGraphBuilder`` with the chat engine's boundary: where a turn ends.
 
-    ``end`` is seeded to write ``INPUT_REQUIRED``, so reaching it parks the
-    session at the boundary instead of completing it. Declared routers attach
-    exactly as they do in ambient and the builder adds none, so every turn has
-    to be able to reach ``end`` through the routes the config declares.
+    ``end`` is seeded to write ``IDLE``, so reaching it parks the session at
+    the boundary instead of completing it: done for now, taking a next message.
+    Declared routers attach exactly as they do in ambient and the builder adds
+    none, so every turn has to be able to reach ``end`` through the routes the
+    config declares.
 
     See ``docs/flow_registry/chat_engine.md``, "Where a turn ends".
     """
@@ -32,7 +33,7 @@ class ChatGraphBuilder(FlowGraphBuilder):
         # ``abort`` is restated because the parent attaches both terminals in
         # one method and LangGraph does not allow replacing an attached node.
         end_component = EndComponent(
-            status=WorkflowStatusEnum.INPUT_REQUIRED,
+            status=WorkflowStatusEnum.IDLE,
             **self._terminal_component_params("end"),
         )
         end_component.attach(graph)

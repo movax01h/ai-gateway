@@ -59,6 +59,11 @@ def _context(
             EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN_AFTER_INPUT,
         ),
         (
+            _context(WorkflowStatusEnum.IDLE, latest_checkpoint=_CHECKPOINT),
+            WorkflowStatusEventEnum.RESUME,
+            EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN_AFTER_INPUT,
+        ),
+        (
             _context(
                 WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
                 latest_checkpoint=_CHECKPOINT,
@@ -94,6 +99,7 @@ def _context(
     ids=[
         "created-starts",
         "input-required-resumes",
+        "idle-resumes",
         "plan-approval-resumes",
         "tool-call-approval-resumes-with-fallback-property",
         "first-checkpoint-backfill",
@@ -131,9 +137,12 @@ async def test_finished_session_is_rejected_without_a_status_event():
 
 
 @pytest.mark.asyncio
-async def test_continuous_status_without_checkpoints_logs_integrity_error():
+@pytest.mark.parametrize(
+    "status", [WorkflowStatusEnum.INPUT_REQUIRED, WorkflowStatusEnum.IDLE]
+)
+async def test_continuous_status_without_checkpoints_logs_integrity_error(status):
     logger = MagicMock()
-    ctx = _context(WorkflowStatusEnum.INPUT_REQUIRED, logger=logger)
+    ctx = _context(status, logger=logger)
 
     event, _ = await rails_status_dispatch(ctx)
 
