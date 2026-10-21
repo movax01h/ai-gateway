@@ -1896,7 +1896,16 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 # A group must be self-contained (issue 605653): re-seed EVERY channel
                 # as a full snapshot so this group reconstructs without a prior group or
                 # the checkpoint header. Otherwise keep the per-channel deltas above.
+                step_blobs = channel_blobs
                 channel_blobs = _serialize_all_channels_full(checkpoint)
+                # Also keep the step's ui_chat_log delta, which has the snapshot's version.
+                # Rails reads it instead of the snapshot to rebuild the message history.
+                channel_blobs.extend(
+                    blob
+                    for blob in step_blobs
+                    if blob["channel"] == "ui_chat_log"
+                    and blob["step_action"] == "conversation"
+                )
             next_current_thread = state.current_thread + (
                 1 if stale_cache or is_compaction else 0
             )

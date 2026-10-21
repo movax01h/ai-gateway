@@ -162,7 +162,7 @@ This shape is tagged with the query parameter `checkpoint_strategy=incremental_o
 
 The per-step deltas above describe only the channels that changed. That's enough while Rails overlays deltas on the full-checkpoint header, but the end state drops the header (see [Gating](#gating)), and then a channel that hasn't changed since a previous `current_thread` group would have no base to fold onto — its history lived in the old group.
 
-To make each group reconstruct on its own, the **start of every group** re-seeds _all_ channels as full `compaction` snapshots via `_serialize_all_channels_full`, replacing the per-channel deltas for that one step. A group starts on:
+To make each group reconstruct on its own, the **start of every group** re-seeds _all_ channels as full `compaction` snapshots via `_serialize_all_channels_full`, replacing the per-channel deltas for that one step. The exception is the step's `ui_chat_log` `conversation` delta, which is kept after its snapshot with the same `thread_ts` and version. Readers keep one blob per `(thread_ts, version)`, so the two are never both applied. A group starts on:
 
 - the lineage's first checkpoint (`state.prev_checkpoint_id is None`),
 
