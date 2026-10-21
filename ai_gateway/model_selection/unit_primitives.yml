@@ -246,7 +246,6 @@ configurable_unit_primitives:
       - "claude_fable_5_1_vertex"
       - "claude_fable_5_1_bedrock"
       - "gemini_3_5_flash_vertex"
-      - "gemini_3_6_flash_vertex"
       - "gemini_3_7_flash_vertex"
       - "gemini_3_7_flash_medium_vertex"
       - "gemini_3_7_flash_low_vertex"
@@ -331,7 +330,6 @@ configurable_unit_primitives:
       - "claude_fable_5_1_vertex"
       - "claude_fable_5_1_bedrock"
       - "gemini_3_5_flash_vertex"
-      - "gemini_3_6_flash_vertex"
       - "gemini_3_7_flash_vertex"
       - "gemini_3_7_flash_medium_vertex"
       - "gemini_3_7_flash_low_vertex"
@@ -436,7 +434,6 @@ configurable_unit_primitives:
       - "claude_fable_5_1_vertex"
       - "claude_fable_5_1_bedrock"
       - "gemini_3_5_flash_vertex"
-      - "gemini_3_6_flash_vertex"
       - "gemini_3_7_flash_vertex"
       - "gemini_3_8_flash_vertex"
       - "gemini_4_argon_vertex"
@@ -516,9 +513,9 @@ configurable_unit_primitives:
     unit_primitives:
       - "feature_discovery_search"
     default_models:
-      - identifier: "gemini_3_6_flash_vertex"
+      - identifier: "gemini_3_7_flash_vertex"
     selectable_models:
-      - "gemini_3_6_flash_vertex"
+      - "gemini_3_7_flash_vertex"
   - feature_setting: "recommend_reviewers_post"
     unit_primitives:
       - "duo_agent_platform"
