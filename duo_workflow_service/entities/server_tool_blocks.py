@@ -20,20 +20,34 @@ from duo_workflow_service.entities.state import (
 log = structlog.stdlib.get_logger("server_tool_blocks")
 
 WEB_SEARCH_TOOL_NAME = "web_search"
+WEB_FETCH_TOOL_NAME = "web_fetch"
+FIND_IN_PAGE_TOOL_NAME = "find_in_page"
 
 
-def is_web_search_call(call_block: Any) -> bool:
-    """Whether a content block is a server-side web search, on either provider's shape.
+def native_web_call(call_block: Any) -> Optional[str]:
+    """The web tool the provider ran itself, on either provider's shape.
 
     The fallback tool answers to the same name, so only the block type tells them apart.
     """
     if openai_web_search.is_call_block(call_block):
-        return openai_web_search.is_web_search_action(call_block)
+        return openai_web_search.tool_name(call_block)
 
-    return (
-        _is_anthropic_server_tool_use_block(call_block)
-        and call_block.get("name") == WEB_SEARCH_TOOL_NAME
-    )
+    if _is_anthropic_server_tool_use_block(call_block) and call_block.get("name") in (
+        WEB_SEARCH_TOOL_NAME,
+        WEB_FETCH_TOOL_NAME,
+    ):
+        return call_block["name"]
+    return None
+
+
+def fetched_url(call_block: dict) -> Optional[str]:
+    """The URL a fetch call read, when the block carries one as a string."""
+    if openai_web_search.is_call_block(call_block):
+        url = openai_web_search.fetched_url(call_block)
+    else:
+        tool_input = call_block.get("input") or _streamed_input(call_block)
+        url = tool_input.get("url") if isinstance(tool_input, dict) else None
+    return url if isinstance(url, str) else None
 
 
 def _is_anthropic_server_tool_use_block(block: Any) -> TypeGuard[dict]:

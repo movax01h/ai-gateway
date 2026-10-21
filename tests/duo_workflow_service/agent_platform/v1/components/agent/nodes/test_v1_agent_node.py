@@ -1017,9 +1017,41 @@ class TestAgentNodeWebSearchAudit:
         }
 
     @pytest.mark.asyncio
-    async def test_run_audits_the_search(
+    @pytest.mark.parametrize(
+        ("block", "event_type", "field", "value"),
+        [
+            pytest.param(
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_search",
+                    "input": {"query": "urllib3 CVE"},
+                },
+                AuditEventType.AI_WEB_SEARCH_INVOKED,
+                "search_source",
+                "native",
+                id="search",
+            ),
+            pytest.param(
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtu_1",
+                    "name": "web_fetch",
+                    "input": {"url": "https://x"},
+                },
+                AuditEventType.AI_WEB_FETCH_INVOKED,
+                "url",
+                "https://x",
+                id="fetch",
+            ),
+        ],
+    )
+    async def test_run_audits_the_web_call(
         self,
-        search_block,
+        block,
+        event_type,
+        field,
+        value,
         mock_ai_message,
         mock_prompt,
         agent_node,
@@ -1027,7 +1059,7 @@ class TestAgentNodeWebSearchAudit:
         _mock_predefined_runtime_variables,
     ):
         completion = copy.copy(mock_ai_message)
-        completion.content = [search_block]
+        completion.content = [block]
         completion.response_metadata = {"model_name": "claude-haiku-4-5"}
         completion.tool_calls = []
         mock_prompt.ainvoke = AsyncMock(return_value=completion)
@@ -1039,10 +1071,10 @@ class TestAgentNodeWebSearchAudit:
         finally:
             audit_collector_context.reset(token)
 
-        events = collector._buffer  # pylint: disable=protected-access
-        assert len(events) == 1
-        assert events[0].event_type == AuditEventType.AI_WEB_SEARCH_INVOKED
-        assert events[0].model_name == "claude-haiku-4-5"
+        [event] = collector._buffer  # pylint: disable=protected-access
+        assert event.event_type == event_type
+        assert event.model_name == "claude-haiku-4-5"
+        assert getattr(event, field) == value
 
     @pytest.mark.asyncio
     async def test_truncation_retry_audits_the_search_once(

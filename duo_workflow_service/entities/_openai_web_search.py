@@ -11,10 +11,11 @@ from duo_workflow_service.entities.state import ToolStatus
 
 __all__ = [
     "card_fields",
+    "fetched_url",
     "is_call_block",
     "is_known_action",
-    "is_web_search_action",
     "results_by_call_id",
+    "tool_name",
 ]
 
 _STATUSES: dict[str, ToolStatus] = {
@@ -173,6 +174,10 @@ def card_fields(call_block: dict) -> tuple[str, dict, ToolStatus]:
     )
 
 
-def is_web_search_action(call_block: dict) -> bool:
-    """Whether the call searched the web, rather than reading a page it already had."""
-    return _tool_name(_action(call_block)) == "web_search"
+def tool_name(call_block: dict) -> str:
+    """The card name for one call block."""
+    return _tool_name(_action(call_block))
+
+
+def fetched_url(call_block: dict) -> Optional[str]:
+    return _action(call_block).get("url")
