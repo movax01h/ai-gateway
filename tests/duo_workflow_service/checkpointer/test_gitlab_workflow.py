@@ -1,5 +1,6 @@
 # pylint: disable=comparison-with-callable,import-outside-toplevel,line-too-long,no-else-raise,no-else-return,too-many-lines
 import asyncio
+import base64
 import json
 import zlib
 from asyncio import CancelledError
@@ -14,6 +15,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import ToolException
 from langgraph.checkpoint.base import (
     ChannelVersions,
+    Checkpoint,
     CheckpointMetadata,
     CheckpointTuple,
 )
@@ -95,6 +97,10 @@ _NESTED_CHECKPOINT_NS = "delegation:task-1"
 # the aput/completion tests.
 _DEFERRED_FINISH = (_FlushPoint.ON_COMPLETION, "checkpoint-id")
 _DEFERRED_TOOL_APPROVAL = (_FlushPoint.ON_NEXT_CHECKPOINT, "checkpoint-id")
+
+
+def _decode_blob(blob: dict[str, Any]) -> Any:
+    return json.loads(zlib.decompress(base64.b64decode(blob["data"])))
 
 
 @pytest.fixture(name="http_client_for_retry")
@@ -4171,8 +4177,6 @@ def test_dict_of_list_delta_dropped_key_stores_full_for_dict_of_lists():
 
 
 def test_serialize_channel_blobs_only_changed_channels():
-    import base64
-
     checkpoint = {
         "id": "ckpt1",
         "channel_values": {
@@ -4197,7 +4201,6 @@ def test_serialize_channel_blobs_includes_scalar_channels():
     Under write-incremental-only there is no full checkpoint row, so a dropped scalar is lost on reconstruction. This
     matters most for `branch:to:*`, LangGraph's run queue, whose absence makes a resumed graph see zero armed tasks.
     """
-    import base64
 
     checkpoint = {
         "id": "ckpt1",
@@ -4231,20 +4234,8 @@ def test_serialize_channel_blobs_includes_scalar_channels():
     for blob in blobs:
         assert blob["write_type"] == "json"
 
-    assert (
-        json.loads(
-            zlib.decompress(base64.b64decode(by_channel["goal"]["data"])),
-        )
-        == "fix the bug"
-    )
-    assert (
-        json.loads(
-            zlib.decompress(
-                base64.b64decode(by_channel["branch:to:build_context"]["data"])
-            ),
-        )
-        is None
-    )
+    assert _decode_blob(by_channel["goal"]) == "fix the bug"
+    assert _decode_blob(by_channel["branch:to:build_context"]) is None
 
 
 def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
@@ -4277,8 +4268,6 @@ def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
 
 
 def test_serialize_channel_blobs_list_delta():
-    import base64
-
     checkpoint = {
         "id": "ckpt2",
         "channel_values": {"messages": ["a", "b", "c"]},
@@ -4289,7 +4278,7 @@ def test_serialize_channel_blobs_list_delta():
     blobs, _ = _serialize_channel_blobs(checkpoint, new_versions, prev_channel_values)
 
     assert len(blobs) == 1
-    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    val = _decode_blob(blobs[0])
     assert val == ["c"]
 
 
@@ -4319,8 +4308,6 @@ def test_serialize_channel_blobs_list_unchanged_skips():
 
 
 def test_serialize_channel_blobs_list_shrink_stores_full():
-    import base64
-
     checkpoint = {
         "id": "ckpt5",
         "channel_values": {"messages": ["a"]},
@@ -4334,13 +4321,11 @@ def test_serialize_channel_blobs_list_shrink_stores_full():
 
     assert is_compaction
     assert len(blobs) == 1
-    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    val = _decode_blob(blobs[0])
     assert val == ["a"]
 
 
 def test_serialize_channel_blobs_dict_channel_delta():
-    import base64
-
     checkpoint = {
         "id": "ckpt4",
         "channel_values": {
@@ -4362,7 +4347,7 @@ def test_serialize_channel_blobs_dict_channel_delta():
 
     assert len(blobs) == 1
     assert blobs[0]["channel"] == "conversation_history"
-    delta = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    delta = _decode_blob(blobs[0])
     assert delta == {"planner": ["msg3"]}
 
 
@@ -4377,8 +4362,6 @@ def test_serialize_channel_blobs_dict_unchanged_skips_blob():
 
 
 def test_serialize_channel_blobs_compaction_stores_full_value():
-    import base64
-
     prev_channel_values = {
         "conversation_history": {"planner": ["msg1", "msg2", "msg3", "msg4", "msg5"]}
     }
@@ -4395,7 +4378,7 @@ def test_serialize_channel_blobs_compaction_stores_full_value():
     assert is_compaction
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
-    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    val = _decode_blob(blobs[0])
     assert val == {"planner": ["summary", "msg5"]}
 
 
@@ -4424,7 +4407,6 @@ def test_serialize_channel_blobs_dict_channel_dropped_key_stores_full():
     `last_human_input` holds an events-API payload, so consecutive events can carry different keys. A per-key delta
     cannot say "this key is gone", so the reader would keep the stale key.
     """
-    import base64
 
     prev_channel_values = {
         "last_human_input": {"id": "1", "message": "go", "correlation_id": "abc"}
@@ -4442,15 +4424,13 @@ def test_serialize_channel_blobs_dict_channel_dropped_key_stores_full():
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
     assert is_compaction
-    assert json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"]))) == {
+    assert _decode_blob(blobs[0]) == {
         "id": "2",
         "message": "go",
     }
 
 
 def test_serialize_channel_blobs_force_rewrite_bypasses_delta():
-    import base64
-
     checkpoint = {
         "id": "ckpt_force",
         "channel_values": {"messages": ["a", "b", "c"]},
@@ -4468,13 +4448,11 @@ def test_serialize_channel_blobs_force_rewrite_bypasses_delta():
     assert not is_compaction
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
-    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    val = _decode_blob(blobs[0])
     assert val == ["a", "b", "c"]
 
 
 def test_serialize_channel_blobs_conversation_sends_delta():
-    import base64
-
     checkpoint = {
         "id": "ckpt8",
         "channel_values": {"messages": ["a", "b", "c"]},
@@ -4488,14 +4466,13 @@ def test_serialize_channel_blobs_conversation_sends_delta():
     assert not is_compaction
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "conversation"
-    val = json.loads(zlib.decompress(base64.b64decode(blobs[0]["data"])))
+    val = _decode_blob(blobs[0])
     assert val == ["c"]
 
 
 def test_serialize_all_channels_full_reseeds_every_channel():
     """Group-start snapshot: every channel is re-seeded as a full 'compaction' blob, scalars included, with versions
     taken from the checkpoint."""
-    import base64
 
     checkpoint = {
         "channel_values": {
@@ -4526,13 +4503,8 @@ def test_serialize_all_channels_full_reseeds_every_channel():
     }
     assert all(b["step_action"] == "compaction" for b in blobs)
     assert by_channel["messages"]["version"] == "2"
-    assert json.loads(
-        zlib.decompress(base64.b64decode(by_channel["messages"]["data"]))
-    ) == ["a", "b"]
-    assert (
-        json.loads(zlib.decompress(base64.b64decode(by_channel["plan_step"]["data"])))
-        == 3
-    )
+    assert _decode_blob(by_channel["messages"]) == ["a", "b"]
+    assert _decode_blob(by_channel["plan_step"]) == 3
 
 
 def test_serialize_all_channels_full_version_defaults_to_empty_when_absent():
@@ -4753,7 +4725,6 @@ async def test_aput_accumulates_list_deltas_across_calls(
 ):
     """Aput tracks previous channel values between calls so each blob contains only the items appended since the
     previous checkpoint."""
-    import base64
 
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
 
@@ -4770,7 +4741,7 @@ async def test_aput_accumulates_list_deltas_across_calls(
     # First checkpoint starts a self-contained group, so messages is a full snapshot.
     body1 = json.loads(http_client.apost.call_args[1]["body"])
     messages1 = next(b for b in body1["channel_blobs"] if b["channel"] == "messages")
-    val1 = json.loads(zlib.decompress(base64.b64decode(messages1["data"])))
+    val1 = _decode_blob(messages1)
     assert val1 == ["a", "b"]
 
     checkpoint["id"] = "ckpt-2"
@@ -4784,7 +4755,7 @@ async def test_aput_accumulates_list_deltas_across_calls(
     # Not a new group: only the appended tail is sent.
     body2 = json.loads(http_client.apost.call_args[1]["body"])
     messages2 = next(b for b in body2["channel_blobs"] if b["channel"] == "messages")
-    val2 = json.loads(zlib.decompress(base64.b64decode(messages2["data"])))
+    val2 = _decode_blob(messages2)
     assert val2 == ["c", "d"]
 
 
@@ -4850,7 +4821,6 @@ async def test_aput_compaction_reseeds_all_channels_as_full_snapshot(
     'compaction' snapshot, even a channel that did not change in the compacting step, so
     the new group reconstructs without the previous group or the checkpoint header
     (issue 605653)."""
-    import base64
 
     checkpoint = checkpoint_data[0]["checkpoint"]
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
@@ -4881,14 +4851,125 @@ async def test_aput_compaction_reseeds_all_channels_as_full_snapshot(
     # Both channels re-seeded, not just the one that compacted.
     assert set(by_channel) == {"messages", "conversation_history"}
     assert all(b["step_action"] == "compaction" for b in body["channel_blobs"])
-    assert json.loads(
-        zlib.decompress(base64.b64decode(by_channel["messages"]["data"]))
-    ) == ["summary"]
+    assert _decode_blob(by_channel["messages"]) == ["summary"]
     # The unchanged channel carries its full value, not an empty delta.
-    ch_val = json.loads(
-        zlib.decompress(base64.b64decode(by_channel["conversation_history"]["data"]))
-    )
+    ch_val = _decode_blob(by_channel["conversation_history"])
     assert len(ch_val["planner"]) == 3
+
+
+_CHAT_LOG_E1 = {"message_id": "e1"}
+_CHAT_LOG_E2 = {"message_id": "e2"}
+_CHAT_LOG_SUMMARY = {"message_id": "summary"}
+
+
+async def _chat_log_blobs_at_group_start(
+    gitlab_workflow: GitLabWorkflow,
+    http_client: AsyncMock,
+    checkpoint: Checkpoint,
+    checkpoint_metadata: CheckpointMetadata,
+    parent_id: str,
+    chat_log: list[dict[str, str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Save a first checkpoint, then a group start where ``messages`` compacts.
+
+    Returns the ui_chat_log blobs of each save, in payload order.
+    """
+
+    def chat_log_blobs() -> list[dict[str, Any]]:
+        body = json.loads(http_client.apost.call_args[1]["body"])
+        return [b for b in body["channel_blobs"] if b["channel"] == "ui_chat_log"]
+
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    checkpoint["channel_values"]["ui_chat_log"] = [_CHAT_LOG_E1]
+    checkpoint["channel_versions"] = {"messages": "1.0", "ui_chat_log": "1.0"}
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "1.0", "ui_chat_log": "1.0"}),
+    )
+    first_blobs = chat_log_blobs()
+
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"]["messages"] = ["summary"]
+    checkpoint["channel_values"]["ui_chat_log"] = chat_log
+    checkpoint["channel_versions"] = {"messages": "2.0", "ui_chat_log": "2.0"}
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": parent_id}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"messages": "2.0", "ui_chat_log": "2.0"}),
+    )
+    return first_blobs, chat_log_blobs()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_group_start_keeps_chat_log_delta(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """When another channel compacts, the group start also sends the ui_chat_log entries its step appended, as a
+    conversation blob after the snapshot with the snapshot's version."""
+    first_blobs, blobs = await _chat_log_blobs_at_group_start(
+        gitlab_workflow,
+        http_client,
+        checkpoint_data[0]["checkpoint"],
+        checkpoint_metadata,
+        parent_id="ckpt-1",
+        chat_log=[_CHAT_LOG_E1, _CHAT_LOG_E2],
+    )
+
+    # The first checkpoint has no previous log to diff against.
+    assert [b["step_action"] for b in first_blobs] == ["compaction"]
+    # The delta comes after the snapshot, so readers of the newest blob decode it.
+    assert [b["step_action"] for b in blobs] == ["compaction", "conversation"]
+    snapshot, delta = blobs
+    assert _decode_blob(snapshot) == [_CHAT_LOG_E1, _CHAT_LOG_E2]
+    assert _decode_blob(delta) == [_CHAT_LOG_E2]
+    assert snapshot["version"] == "2.0"
+    assert delta["version"] == "2.0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("parent_id", "chat_log"),
+    [
+        pytest.param("ckpt-1", [_CHAT_LOG_SUMMARY], id="chat_log_compacts"),
+        pytest.param("ckpt-unknown", [_CHAT_LOG_E1, _CHAT_LOG_E2], id="stale_cache"),
+    ],
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_group_start_without_chat_log_delta(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    parent_id,
+    chat_log,
+):
+    """A group start sends no ui_chat_log delta when the chat log itself compacted or the cached baseline is stale."""
+    _, blobs = await _chat_log_blobs_at_group_start(
+        gitlab_workflow,
+        http_client,
+        checkpoint_data[0]["checkpoint"],
+        checkpoint_metadata,
+        parent_id=parent_id,
+        chat_log=chat_log,
+    )
+
+    assert [b["step_action"] for b in blobs] == ["compaction"]
+    assert _decode_blob(blobs[0]) == chat_log
+    assert blobs[0]["version"] == "2.0"
 
 
 @pytest.mark.asyncio
@@ -4902,7 +4983,6 @@ async def test_aput_resets_cache_on_stale_checkpoint_id(
     checkpoint_metadata,
 ):
     """When parent checkpoint_id doesn't match the cached id, cache is reset and a warning is logged."""
-    import base64
 
     checkpoint = checkpoint_data[0]["checkpoint"]
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
@@ -4931,7 +5011,7 @@ async def test_aput_resets_cache_on_stale_checkpoint_id(
     # messages (no delta), not just ["c"].
     body = json.loads(http_client.apost.call_args[1]["body"])
     messages = next(b for b in body["channel_blobs"] if b["channel"] == "messages")
-    val = json.loads(zlib.decompress(base64.b64decode(messages["data"])))
+    val = _decode_blob(messages)
     assert val == ["a", "b", "c"]
     assert messages["step_action"] == "compaction"
     # Thread must be bumped so Rails starts reconstruction from this checkpoint
@@ -5137,7 +5217,6 @@ async def test_aput_after_failed_post_reanchors_via_stale_cache_guard(
 ):
     """A write parented on an unsaved checkpoint mismatches the un-advanced baseline, trips the stale-cache guard, and
     re-anchors the chain as a full-rewrite group."""
-    import base64
 
     checkpoint = checkpoint_data[0]["checkpoint"]
 
@@ -5178,7 +5257,7 @@ async def test_aput_after_failed_post_reanchors_via_stale_cache_guard(
     assert body["current_thread"] == 1
     messages = next(b for b in body["channel_blobs"] if b["channel"] == "messages")
     assert messages["step_action"] == "compaction"
-    val = json.loads(zlib.decompress(base64.b64decode(messages["data"])))
+    val = _decode_blob(messages)
     assert val == ["a", "b", "c", "d"]
 
 
@@ -5356,7 +5435,6 @@ async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
     checkpoint_metadata,
 ):
     """End-to-end: simulate a restart by hydrating then writing — must reuse server thread, no current_thread bump."""
-    import base64
 
     compressed_checkpoint_data[0]["current_thread"] = 2
     http_client.aget.return_value = GitLabHttpResponse(
@@ -5387,7 +5465,7 @@ async def test_aput_after_hydration_chains_delta_without_stale_cache_reset(
     blob = body["channel_blobs"][0]
     assert blob["channel"] == "messages"
     assert blob["step_action"] == "compaction"
-    val = json.loads(zlib.decompress(base64.b64decode(blob["data"])))
+    val = _decode_blob(blob)
     assert val == ["new"]
 
 
