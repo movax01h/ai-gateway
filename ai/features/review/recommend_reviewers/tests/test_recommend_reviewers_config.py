@@ -1,9 +1,21 @@
 # pylint: disable=file-naming-for-tests
 """Guards for the recommend_reviewers 3.1.0-dev config behind the Rails feature flag."""
 
+from unittest.mock import patch
+
 import pytest
 
+from duo_workflow_service.agent_platform.v1.flows import flow_config
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+
+
+@pytest.fixture(name="discover_flow_configs", autouse=True)
+def discover_flow_configs_fixture():
+    # The flow lives under ai/features/, which the service registers at startup.
+    # Restore the registry so tests that list flow configs never see these roots.
+    with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
+        flow_config.discover_feature_flow_configs()
+        yield
 
 
 @pytest.mark.parametrize(

@@ -322,12 +322,6 @@ ai_gateway/prompts/definitions/project_activity_summarize_project_activity/user
 ai_gateway/prompts/definitions/push_to_remote/base
 ai_gateway/prompts/definitions/push_to_remote/system
 ai_gateway/prompts/definitions/push_to_remote/user
-ai_gateway/prompts/definitions/recommend_reviewers_assign/base
-ai_gateway/prompts/definitions/recommend_reviewers_assign/system
-ai_gateway/prompts/definitions/recommend_reviewers_assign/user
-ai_gateway/prompts/definitions/recommend_reviewers_post/base
-ai_gateway/prompts/definitions/recommend_reviewers_post/system
-ai_gateway/prompts/definitions/recommend_reviewers_post/user
 ai_gateway/prompts/definitions/resolve_dep_bump_pipeline_fix/base
 ai_gateway/prompts/definitions/resolve_dep_bump_pipeline_fix/system
 ai_gateway/prompts/definitions/resolve_dep_bump_pipeline_fix/user
@@ -442,7 +436,6 @@ duo_workflow_service/agent_platform/v1/flows/configs/gitlab_duo_mention_assistan
 duo_workflow_service/agent_platform/v1/flows/configs/orbit_agent
 duo_workflow_service/agent_platform/v1/flows/configs/project_activity
 duo_workflow_service/agent_platform/v1/flows/configs/readiness_score
-duo_workflow_service/agent_platform/v1/flows/configs/recommend_reviewers
 duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump
 duo_workflow_service/agent_platform/v1/flows/configs/resolve_sast_vulnerability
 duo_workflow_service/agent_platform/v1/flows/configs/risk_classification
