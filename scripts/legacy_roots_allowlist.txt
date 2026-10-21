@@ -235,9 +235,6 @@ ai_gateway/prompts/definitions/create_repository_branch/user
 ai_gateway/prompts/definitions/deep_code_review_reviewer/base
 ai_gateway/prompts/definitions/deep_code_review_reviewer/system
 ai_gateway/prompts/definitions/deep_code_review_reviewer/user
-ai_gateway/prompts/definitions/developer_agent_prompt/base
-ai_gateway/prompts/definitions/developer_agent_prompt/system
-ai_gateway/prompts/definitions/developer_agent_prompt/user
 ai_gateway/prompts/definitions/ensure_clean_git_state/base
 ai_gateway/prompts/definitions/ensure_clean_git_state/system
 ai_gateway/prompts/definitions/ensure_clean_git_state/user
@@ -285,9 +282,6 @@ ai_gateway/prompts/definitions/gitlab_duo_mention_agent_prompt/user
 ai_gateway/prompts/definitions/list_available_tools/base
 ai_gateway/prompts/definitions/list_available_tools/system
 ai_gateway/prompts/definitions/list_available_tools/user
-ai_gateway/prompts/definitions/local_code_review/base
-ai_gateway/prompts/definitions/local_code_review/system
-ai_gateway/prompts/definitions/local_code_review/user
 ai_gateway/prompts/definitions/model_configuration/check/base
 ai_gateway/prompts/definitions/model_configuration/check/system
 ai_gateway/prompts/definitions/model_configuration/check/user
