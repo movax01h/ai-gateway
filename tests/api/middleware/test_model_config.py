@@ -42,6 +42,15 @@ def middleware_test_client_fixture(model_metadata_context):
             else None
         )
 
+    @app.post("/v1/embeddings/code_embeddings/{operation}")
+    async def code_embeddings(request: Request, operation: str):
+        await request.body()
+        model_metadata = model_metadata_context.get()
+        return {
+            "operation": operation,
+            "name": model_metadata.name if model_metadata else None,
+        }
+
     @app.post("/iam-role")
     async def iam_role(request: Request):
         await request.body()
@@ -477,3 +486,61 @@ class TestFeatureAllowlist:
 
         assert response.status_code == 403
         assert response.json() == {"detail": detail}
+
+    class TestCodeEmbeddingsRoutes:
+        """GitLab Rails sends code embeddings requests without a `feature_setting`."""
+
+        RAILS_REQUEST = {
+            "provider": "gitlab",
+            "identifier": "text_embedding_005_vertex",
+        }
+        OPERATIONS = ["index", "search"]
+
+        @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
+        @pytest.mark.parametrize("operation", OPERATIONS)
+        def test_log_mode_logs_no_mismatch(self, middleware_test_client, operation):
+            with capture_logs() as logs:
+                response = middleware_test_client.post(
+                    f"/v1/embeddings/code_embeddings/{operation}",
+                    json={"model_metadata": self.RAILS_REQUEST},
+                )
+
+            assert response.json()["name"] == "text_embedding_005_vertex"
+            assert [
+                entry for entry in logs if entry["event"] == "Model allowlist mismatch"
+            ] == []
+
+        @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+        @pytest.mark.parametrize("operation", OPERATIONS)
+        def test_enforce_mode_serves_the_embeddings_model(
+            self, middleware_test_client, operation
+        ):
+            response = middleware_test_client.post(
+                f"/v1/embeddings/code_embeddings/{operation}",
+                json={"model_metadata": self.RAILS_REQUEST},
+            )
+
+            assert response.status_code == 200
+            assert response.json() == {
+                "operation": operation,
+                "name": "text_embedding_005_vertex",
+            }
+
+        @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+        def test_enforce_mode_rejects_a_model_of_another_feature(
+            self, middleware_test_client
+        ):
+            response = middleware_test_client.post(
+                "/v1/embeddings/code_embeddings/index",
+                json={
+                    "model_metadata": {
+                        "provider": "gitlab",
+                        "identifier": "claude_sonnet_4_6_vertex",
+                    }
+                },
+            )
+
+            assert response.status_code == 403
+            assert response.json() == {
+                "detail": "Model 'claude_sonnet_4_6_vertex' is not available for 'embeddings_code'"
+            }

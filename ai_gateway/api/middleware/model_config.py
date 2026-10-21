@@ -9,6 +9,13 @@ from ai_gateway.model_metadata import IamRoleNotAllowedError, create_model_metad
 from ai_gateway.model_selection import ModelSelectionError
 from lib.context import StarletteUser, current_model_metadata_context
 
+# Routes that serve one feature. The allowlist check uses this feature, so the client's
+# `feature_setting` does not select the allowlist on these routes. GitLab Rails sends code
+# embeddings requests without a `feature_setting`.
+_ROUTE_FEATURE_SETTINGS = {
+    "/v1/embeddings/code_embeddings": "embeddings_code",
+}
+
 
 class ModelConfigMiddleware:
     def __init__(self, app: ASGIApp):
@@ -68,6 +75,7 @@ class ModelConfigMiddleware:
                         request,
                         create_model_metadata(raw_metadata),
                         surface="http",
+                        feature_setting=_route_feature_setting(scope.get("path", "")),
                         user=_authenticated_user(scope),
                         log_context={"path": scope.get("path")},
                     )
@@ -102,3 +110,11 @@ def _authenticated_user(scope: Scope) -> Optional[StarletteUser]:
     """Return the user that the authentication middleware set, or None for an unauthenticated request."""
     user = scope.get("user")
     return user if isinstance(user, StarletteUser) else None
+
+
+def _route_feature_setting(path: str) -> Optional[str]:
+    """Return the feature that the route at ``path`` serves, or None when the route serves more than one feature."""
+    for route, feature_setting in _ROUTE_FEATURE_SETTINGS.items():
+        if path == route or path.startswith(f"{route}/"):
+            return feature_setting
+    return None
