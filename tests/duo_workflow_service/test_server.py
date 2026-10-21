@@ -6361,6 +6361,16 @@ async def test_execute_workflow_base_exception_logging(
             assert not isinstance(c[0][0], RuntimeError)
 
 
+@pytest.fixture(name="flow_enabled")
+def flow_enabled_fixture():
+    """For restricted-model tests whose callers are neither GitLab.com nor on the flow allowlist."""
+    with (
+        patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENFORCE_FLOW_ENABLEMENT": "true"}),
+        patch("duo_workflow_service.server.is_flow_enabled", return_value=True),
+    ):
+        yield
+
+
 GITLAB_COM_INSTANCE_UID = "gitlab-com-instance-uid"
 RESTRICTED_MODEL_ENV = {
     "CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service",
@@ -6432,6 +6442,7 @@ async def test_generate_token_does_not_verify_unrestricted_flow_with_saas_header
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled")
 @pytest.mark.usefixtures("fake_restricted_model")
 @pytest.mark.parametrize(
     ("caller", "env"),
@@ -6700,6 +6711,7 @@ async def _execute_registry_flow(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled")
 @pytest.mark.usefixtures("restricted_model_metadata")
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
@@ -6718,6 +6730,7 @@ async def test_execute_workflow_allows_restricted_model_for_authorized_flow(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled")
 @pytest.mark.usefixtures("restricted_model_metadata")
 @pytest.mark.parametrize(
     ("user", "flow_config_id"),
@@ -6814,6 +6827,7 @@ async def test_execute_workflow_denies_replayed_restricted_model_header(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled")
 @patch("duo_workflow_service.server.resolve_flow")
 @patch.dict(os.environ, RESTRICTED_MODEL_ENV)
 async def test_execute_workflow_denies_checkpoint_resume_on_restricted_model(
@@ -6929,6 +6943,7 @@ async def _mint_flow_token(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled")
 @pytest.mark.usefixtures("restricted_model_metadata")
 @pytest.mark.parametrize(
     ("incoming_issuer", "incoming_realm", "allowed"),
@@ -7009,6 +7024,7 @@ def _gitlab_model(name: str, llm_definition: LLMDefinition) -> ModelMetadata:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled")
 @UNVERIFIED_CALLERS
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
@@ -7080,6 +7096,7 @@ async def test_unverified_restricted_flow_token_runs_only_unrestricted_models(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled")
 @UNVERIFIED_CALLERS
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
@@ -7263,6 +7280,7 @@ async def test_execute_workflow_allows_restricted_model_for_instance_token_flow_
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled")
 @pytest.mark.usefixtures("restricted_model_metadata")
 @pytest.mark.parametrize(
     "user",
@@ -7363,3 +7381,410 @@ async def test_execute_workflow_restricted_tag_model_is_denied_at_start(
         grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
     )
     mock_resolve_flow.assert_not_called()
+
+
+ALLOWED_INSTANCE_UID = "11111111-1111-4111-8111-111111111111"
+OTHER_INSTANCE_UID = "22222222-2222-4222-8222-222222222222"
+FLOW_ENABLEMENT_ENV = {
+    "CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service",
+    "DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL": "https://gitlab.com",
+    "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL": "https://customers.gitlab.com",
+    "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS": "",
+    "DUO_WORKFLOW_AUTH__ENABLED_FLOW_INSTANCE_UIDS": json.dumps(
+        {"bl_security": [ALLOWED_INSTANCE_UID]}
+    ),
+    "DUO_WORKFLOW_AUTH__ENFORCE_FLOW_ENABLEMENT": "true",
+}
+NOT_ENABLED = "Flow 'bl_security' is not enabled for this instance"
+
+
+def _customers_dot_user(
+    instance_uid: str = OTHER_INSTANCE_UID,
+    realm: str = "self-managed",
+    subject: str = "",
+    issuer: str = "https://customers.gitlab.com/",
+) -> CloudConnectorUser:
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=["duo_agent_platform"],
+            issuer=issuer,
+            subject=subject,
+            gitlab_realm=realm,
+            gitlab_instance_uid=instance_uid,
+            extra={},
+        ),
+    )
+
+
+def _dws_token_user(claims: dict) -> CloudConnectorUser:
+    """A token this service minted, split into claims as the auth provider does."""
+    extra = dict(claims)
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            scopes=["duo_agent_platform"],
+            issuer="gitlab-duo-workflow-service",
+            gitlab_realm="saas",
+            gitlab_instance_uid=extra.pop("gitlab_instance_uid", "") or "",
+            extra=extra,
+        ),
+    )
+
+
+async def _start(mock_context, mock_resolve_flow, **start_request_fields) -> None:
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    workflow = MagicMock(is_done=True, run=AsyncMock(), cleanup=AsyncMock())
+    workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(
+        factory=MagicMock(return_value=workflow)
+    )
+
+    async def request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123", goal="test goal", **start_request_fields
+            )
+        )
+
+    result = DuoWorkflowService().ExecuteWorkflow(
+        request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+    with pytest.raises(StopAsyncIteration):
+        await anext(result)
+
+
+_INLINE_FLOW_CONFIG = struct_pb2.Struct()
+_INLINE_FLOW_CONFIG.update({"version": "v1"})
+_REGISTRY_BL_SECURITY = {
+    "flowConfigId": "bl_security",
+    "flowConfigSchemaVersion": "v1",
+    "flowVersion": "1.0.0",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start_fields",
+    [
+        pytest.param(_REGISTRY_BL_SECURITY, id="flow-config-id"),
+        pytest.param({"workflowDefinition": "bl_security/v1"}, id="legacy"),
+    ],
+)
+@pytest.mark.parametrize(
+    "user",
+    [
+        pytest.param(_customers_dot_user(), id="customers-dot"),
+        pytest.param(_customers_dot_user(realm="saas"), id="customers-dot-saas"),
+        pytest.param(
+            _customers_dot_user("", subject=ALLOWED_INSTANCE_UID),
+            id="customers-dot-allowlisted-subject",
+        ),
+        pytest.param(
+            _customers_dot_user(
+                "",
+                subject=ALLOWED_INSTANCE_UID,
+                issuer="https://customers.gitlab.com",
+            ),
+            id="customers-dot-allowlisted-subject-no-slash",
+        ),
+        pytest.param(_instance_user(realm="self-managed"), id="gitlab-com-signer"),
+        pytest.param(
+            _dws_token_user({"gitlab_instance_uid": OTHER_INSTANCE_UID}),
+            id="dws-token-saas-header",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, FLOW_ENABLEMENT_ENV)
+async def test_execute_workflow_refuses_flow_not_enabled_for_instance(
+    mock_resolve_flow, mock_context, user, start_fields
+):
+    current_user.set(user)
+
+    with pytest.raises(grpc.RpcError):
+        await _start(mock_context, mock_resolve_flow, **start_fields)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, NOT_ENABLED
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("user", "start_fields"),
+    [
+        pytest.param(
+            _customers_dot_user(ALLOWED_INSTANCE_UID),
+            _REGISTRY_BL_SECURITY,
+            id="allowlisted",
+        ),
+        pytest.param(_instance_user(), _REGISTRY_BL_SECURITY, id="gitlab-com"),
+        pytest.param(
+            _instance_user(), {"workflowDefinition": "bl_security/v1"}, id="legacy"
+        ),
+        pytest.param(
+            _dws_token_user({"gitlab_com_verified": True}),
+            _REGISTRY_BL_SECURITY,
+            id="dws-token-for-gitlab-com",
+        ),
+        pytest.param(
+            _customers_dot_user(),
+            {**_REGISTRY_BL_SECURITY, "flowConfigId": "developer"},
+            id="other-flow",
+        ),
+        pytest.param(
+            _customers_dot_user(),
+            {
+                "flowConfig": _INLINE_FLOW_CONFIG,
+                "flowConfigSchemaVersion": "v1",
+                "workflowDefinition": "bl_security/v1",
+            },
+            id="inline-flow",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, FLOW_ENABLEMENT_ENV)
+async def test_execute_workflow_runs_enabled_flows(
+    mock_resolve_flow, mock_context, user, start_fields
+):
+    current_user.set(user)
+
+    await _start(mock_context, mock_resolve_flow, **start_fields)
+
+    mock_context.abort.assert_not_called()
+    mock_resolve_flow.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "caller",
+    [
+        pytest.param(_customers_dot_user(), id="customers-dot"),
+        pytest.param(
+            _customers_dot_user("", subject=ALLOWED_INSTANCE_UID),
+            id="customers-dot-allowlisted-subject",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, FLOW_ENABLEMENT_ENV)
+async def test_generate_token_refuses_flow_not_enabled_for_instance(
+    mock_token_authority, mock_context, caller
+):
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    current_user.set(caller)
+
+    with pytest.raises(grpc.RpcError):
+        await DuoWorkflowService().GenerateToken(
+            contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"),
+            mock_context,
+        )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, NOT_ENABLED
+    )
+    mock_token_authority.return_value.encode.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("caller", "gitlab_com"),
+    [
+        pytest.param(_instance_user(), True, id="gitlab-com"),
+        pytest.param(
+            _customers_dot_user(ALLOWED_INSTANCE_UID), False, id="allowlisted"
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, FLOW_ENABLEMENT_ENV)
+async def test_flow_enablement_through_minted_token(
+    mock_token_authority, mock_resolve_flow, mock_context, caller, gitlab_com
+):
+    """The minted token carries what ExecuteWorkflow needs, with no instance UID env for GitLab.com."""
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(caller)
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"), mock_context
+    )
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert ("gitlab_com_verified" in extra_claims) is gitlab_com
+
+    current_user.set(_dws_token_user(extra_claims))
+    await _start(mock_context, mock_resolve_flow, **_REGISTRY_BL_SECURITY)
+
+    mock_context.abort.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.resolve_flow")
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, FLOW_ENABLEMENT_ENV)
+async def test_customers_dot_subject_does_not_enable_flow_through_minted_token(
+    mock_token_authority, mock_resolve_flow, mock_context
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_customers_dot_user("", subject=ALLOWED_INSTANCE_UID))
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(), mock_context
+    )
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["gitlab_instance_uid"] is None
+
+    current_user.set(_dws_token_user(extra_claims))
+    with pytest.raises(grpc.RpcError):
+        await _start(mock_context, mock_resolve_flow, **_REGISTRY_BL_SECURITY)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, NOT_ENABLED
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+FLOW_ENABLEMENT_OFF_ENV = {
+    **FLOW_ENABLEMENT_ENV,
+    "DUO_WORKFLOW_AUTH__ENFORCE_FLOW_ENABLEMENT": "",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "caller",
+    [
+        pytest.param(_customers_dot_user(realm="saas"), id="dedicated"),
+        pytest.param(
+            _customers_dot_user(ALLOWED_INSTANCE_UID, realm="saas"),
+            id="dedicated-allowlisted",
+        ),
+        pytest.param(_instance_user(realm="self-managed"), id="gitlab-com-signer"),
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, FLOW_ENABLEMENT_OFF_ENV)
+async def test_generate_token_without_enforcement_refuses_off_gitlab_com(
+    mock_token_authority, mock_context, caller
+):
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+    current_user.set(caller)
+
+    with pytest.raises(grpc.RpcError):
+        await DuoWorkflowService().GenerateToken(
+            contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"),
+            mock_context,
+        )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Flow 'bl_security' is only available on GitLab.com",
+    )
+    mock_token_authority.return_value.encode.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, FLOW_ENABLEMENT_OFF_ENV)
+async def test_generate_token_without_enforcement_allows_gitlab_com(
+    mock_token_authority, mock_context
+):
+    """GitLab.com is recognised without the restricted-flow instance UID env."""
+    os.environ.pop("DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS", None)
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(_instance_user())
+
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"), mock_context
+    )
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert extra_claims["gitlab_com_verified"] is True
+    mock_context.abort.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch.dict(os.environ, FLOW_ENABLEMENT_OFF_ENV)
+async def test_generate_token_without_enforcement_allows_debug_user(
+    mock_token_authority, mock_context
+):
+    mock_token_authority.return_value.encode.return_value = ("token", 0)
+    current_user.set(CloudConnectorUser(authenticated=True, is_debug=True))
+
+    await DuoWorkflowService().GenerateToken(
+        contract_pb2.GenerateTokenRequest(flow_config_id="bl_security"), mock_context
+    )
+
+    mock_context.abort.assert_not_called()
+    mock_token_authority.return_value.encode.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start_fields",
+    [
+        pytest.param(_REGISTRY_BL_SECURITY, id="flow-config-id"),
+        pytest.param({"workflowDefinition": "bl_security/v1"}, id="legacy"),
+    ],
+)
+@pytest.mark.parametrize(
+    "caller",
+    [
+        pytest.param(_customers_dot_user(), id="dedicated"),
+        pytest.param(
+            _customers_dot_user(ALLOWED_INSTANCE_UID), id="dedicated-allowlisted"
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, FLOW_ENABLEMENT_OFF_ENV)
+async def test_execute_workflow_without_enforcement_refuses_own_token_off_gitlab_com(
+    mock_resolve_flow, mock_context, caller, start_fields
+):
+    current_user.set(caller)
+
+    with pytest.raises(grpc.RpcError):
+        await _start(mock_context, mock_resolve_flow, **start_fields)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Flow 'bl_security' is only available on GitLab.com",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "caller",
+    [
+        pytest.param(_instance_user(), id="gitlab-com"),
+        pytest.param(
+            _dws_token_user({"gitlab_instance_uid": OTHER_INSTANCE_UID}),
+            id="dws-minted-without-claim",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, FLOW_ENABLEMENT_OFF_ENV)
+async def test_execute_workflow_without_enforcement_runs_gitlab_com_and_minted_tokens(
+    mock_resolve_flow, mock_context, caller
+):
+    os.environ.pop("DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS", None)
+    current_user.set(caller)
+
+    await _start(mock_context, mock_resolve_flow, **_REGISTRY_BL_SECURITY)
+
+    mock_context.abort.assert_not_called()
+    mock_resolve_flow.assert_called_once()

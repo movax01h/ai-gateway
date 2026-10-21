@@ -159,6 +159,18 @@ from lib.context.model import (
     restricted_access_ctx,
 )
 from lib.events import GLReportingEventContext
+from lib.flow_enablement import (
+    FLOW_GITLAB_COM_ONLY_MESSAGE,
+    FLOW_NOT_ENABLED_MESSAGE,
+    GATED_FLOWS,
+    GITLAB_COM_VERIFIED_CLAIM,
+    SAAS_REALM,
+    flow_enablement_enforced,
+    is_flow_enabled,
+    is_gitlab_com_caller,
+    is_gitlab_com_signed,
+    refused_while_not_enforced,
+)
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
     InternalEventAdditionalProperties,
@@ -181,7 +193,6 @@ FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
 WORKFLOW_ID_CLAIM = "workflow_id"
 # Rails sets this on every token it self-signs for DWS, so with no workflow_id the token is unbound.
 BINDS_WORKFLOW_CLAIM = "binds_workflow"
-SAAS_REALM = "saas"
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
 # these get workflow tokens that unlock the restricted models of the flow they are
 # minted for, and ExecuteWorkflow accepts their instance token's flow claim for
@@ -526,8 +537,9 @@ def _find_restricted_model_access_error(
 def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
     """Whether the caller token is GitLab.com's own instance token.
 
-    Requires the token to be signed by the configured GitLab OIDC issuer, to carry the SaaS realm claim, and its subject
-    to be an allowlisted instance UUID. An empty allowlist matches nothing.
+    Requires the token to pass is_gitlab_com_signed for the configured GitLab OIDC issuer, and its subject to be an
+    allowlisted instance UUID. The instance UUID list is an explicit opt-in for restricted models; an empty list matches
+    nothing.
     """
     claims = user.claims
     if user.is_debug or not claims:
@@ -538,10 +550,7 @@ def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
         if uid.strip()
     }
     return (
-        bool(claims.issuer)
-        and claims.issuer.rstrip("/") == oidc_gitlab_url().rstrip("/")
-        and claims.gitlab_realm == SAAS_REALM
-        and claims.subject in allowlist
+        is_gitlab_com_signed(claims, oidc_gitlab_url()) and claims.subject in allowlist
     )
 
 
@@ -611,6 +620,26 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             catalog_items = normalize_catalog_items(start_req, flow_request)
         except ValueError as e:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+
+        # Checked on the requested flow, not a token claim. With enforcement off, only
+        # callers using their own token are checked: tokens this service minted and
+        # debug users are exempt.
+        if isinstance(flow_request, RegistryFlowRequest):
+            if flow_enablement_enforced():
+                if not is_flow_enabled(
+                    user, flow_request.config_id, gitlab_issuer=oidc_gitlab_url()
+                ):
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        FLOW_NOT_ENABLED_MESSAGE.format(flow=flow_request.config_id),
+                    )
+            elif refused_while_not_enforced(
+                user, flow_request.config_id, gitlab_issuer=oidc_gitlab_url()
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    FLOW_GITLAB_COM_ONLY_MESSAGE.format(flow=flow_request.config_id),
+                )
 
         claims_extra = user.claims.extra if user.claims else None
         if not user.is_debug and claims_extra is not None:
@@ -1334,6 +1363,24 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     grpc.StatusCode.PERMISSION_DENIED, "Unauthorized to generate token"
                 )
 
+        if request.flow_config_id and flow_enablement_enforced():
+            if not is_flow_enabled(
+                user, request.flow_config_id, gitlab_issuer=oidc_gitlab_url()
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    FLOW_NOT_ENABLED_MESSAGE.format(flow=request.flow_config_id),
+                )
+        elif (
+            request.flow_config_id in GATED_FLOWS
+            and not user.is_debug
+            and not is_gitlab_com_caller(user.claims, oidc_gitlab_url())
+        ):
+            await context.abort(
+                grpc.StatusCode.PERMISSION_DENIED,
+                FLOW_GITLAB_COM_ONLY_MESSAGE.format(flow=request.flow_config_id),
+            )
+
         metadata = dict(context.invocation_metadata())
         global_user_id = metadata.get("x-gitlab-global-user-id")
         gitlab_realm = metadata.get("x-gitlab-realm")
@@ -1373,6 +1420,10 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 gitlab_realm = SAAS_REALM
                 extra_claims[RESTRICTED_FLOW_VERIFIED_CLAIM] = True
             extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
+
+        # Lets ExecuteWorkflow recognise GitLab.com on this token, whose realm claim is unsigned.
+        if is_gitlab_com_caller(user.claims, oidc_gitlab_url()):
+            extra_claims[GITLAB_COM_VERIFIED_CLAIM] = True
 
         if request.flow_version:
             extra_claims[FLOW_VERSION_CLAIM] = request.flow_version
