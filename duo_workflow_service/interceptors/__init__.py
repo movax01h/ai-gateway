@@ -1,3 +1,6 @@
+import grpc
+from grpc.aio import ServicerContext
+
 X_GITLAB_REALM_HEADER = "x-gitlab-realm"
 X_GITLAB_INSTANCE_ID_HEADER = "x-gitlab-instance-id"
 X_GITLAB_GLOBAL_USER_ID_HEADER = "x-gitlab-global-user-id"
@@ -24,3 +27,15 @@ GRPC_HEALTH_METHODS = (
     "/grpc.health.v1.Health/Check",
     "/grpc.health.v1.Health/Watch",
 )
+
+
+def abort_handler(code: grpc.StatusCode, details: str) -> grpc.RpcMethodHandler:
+    """Return a handler that rejects the call with ``code``, for an interceptor to return."""
+
+    # grpc calls the handler with a fixed (request, context) signature, and only the context is used.
+    # pylint: disable=unused-argument
+    async def handler(request: object, context: ServicerContext) -> object:
+        await context.abort(code, details)
+        return None
+
+    return grpc.unary_unary_rpc_method_handler(handler)

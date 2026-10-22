@@ -583,8 +583,8 @@ serves one feature, the middleware passes that feature: the `/v1/embeddings/code
 `embeddings_code`. For other routes it passes no feature, so the client's `feature_setting` selects the allowlist. In
 `enforce` mode the middleware answers HTTP 403 with `{"detail": "<reason>"}` before the route runs. The code
 embeddings routes serve the model that the check returns, so `fallback` mode serves the `embeddings_code` default
-there. They build the model from the request body only to answer HTTP 422 for metadata that is not valid. The Duo
-Workflow Service header and the route payloads do not call the check yet.
+there. They build the model from the request body only to answer HTTP 422 for metadata that is not valid. The route
+payloads do not call the check yet.
 
 The `/v1/prompts/<prompt_id>` and `/v2/prompts/<prompt_id>` routes do not pass the prompt's feature yet, because the
 feature that `feature_setting_for_prompt_id` derives from a prompt ID does not always match the `feature_setting` that
@@ -593,6 +593,13 @@ allowlist of the prompt's feature: `prompt_feature_unknown` when the derived fea
 `prompt_feature_model_not_allowed` when its allowlist does not have the model. The note has the `prompt_id`, and its
 `feature_setting` is the prompt's feature. It changes nothing in any mode, and a request whose `feature_setting` is the
 prompt's feature gets no note.
+
+On the Duo Workflow Service, `ModelMetadataInterceptor` runs the check on the default model that it resolves from the
+`x-gitlab-agent-platform-model-metadata` header. It passes no feature, so the client's `feature_setting` selects the
+allowlist. The tag models come from the same `feature_setting`, so they are in its allowlist already. In `fallback`
+mode the interceptor serves the feature's default model instead. For a `feature_setting` that does not exist, it
+leaves the call on the prompt's own default model, as a call without the header. In `enforce` mode it rejects the call
+with gRPC `PERMISSION_DENIED` before the call runs. The log events have the gRPC `method`.
 
 A gateway without custom models serves GitLab-managed models only, so it accepts a fixed set of providers. Over HTTP
 it accepts `gitlab` and `amazon_q`, which GitLab Rails sends, and `anthropic`, `vertex-ai` and `fireworks_ai`, which

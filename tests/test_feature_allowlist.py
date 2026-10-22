@@ -191,7 +191,10 @@ def model_selection():
 
 
 def _dws_metadata(raw: dict) -> Optional[TypeModelMetadata]:
-    """Resolve the gRPC header with the real Duo Workflow Service interceptor."""
+    """Resolve the gRPC header with the real Duo Workflow Service interceptor.
+
+    The interceptor runs with the check off, so the test checks the metadata the interceptor resolved.
+    """
     resolved = {}
 
     async def continuation(_):
@@ -207,7 +210,12 @@ def _dws_metadata(raw: dict) -> Optional[TypeModelMetadata]:
     )
     token = current_user.set(USER.cloud_connector_user)
     try:
-        asyncio.run(ModelMetadataInterceptor().intercept_service(continuation, details))
+        with patch.object(
+            get_config().model_selection, "feature_allowlist_mode", "off"
+        ):
+            asyncio.run(
+                ModelMetadataInterceptor().intercept_service(continuation, details)
+            )
     finally:
         current_user.reset(token)
     return resolved["metadata"]
