@@ -5,6 +5,9 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from langchain_core.tools import ToolException
 
+from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
+    select_validated_tool,
+)
 from duo_workflow_service.tools.work_item import GetWorkItemNotes, GetWorkItemNotesInput
 from duo_workflow_service.tools.work_items.base_tool import (
     ResolvedParent,
@@ -431,6 +434,142 @@ async def test_get_work_item_notes_pagination_subsequent_page(
     query_variables = call_args[0][1]
     assert query_variables["first"] == 2
     assert query_variables["after"] == "cursor_abc123"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sort_kwargs", [{}, {"sort": "asc"}, {"sort": None}])
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_get_work_item_notes_sort_asc_paginates_forwards(
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+    work_item_notes,
+    version_variables,
+    sort_kwargs,
+):
+    """Test that asc (the default) returns the oldest notes first."""
+    mock_get_query_variables.return_value = version_variables
+    page_info = {
+        "hasNextPage": True,
+        "hasPreviousPage": False,
+        "startCursor": "cursor_start",
+        "endCursor": "cursor_end",
+    }
+    graphql_response = make_graphql_response("project", work_item_notes, page_info)
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
+
+    response = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        page_size=2,
+        pagination_cursor="cursor_abc123",
+        **sort_kwargs,
+    )
+
+    response_json = json.loads(response)
+    assert response_json["notes"] == work_item_notes
+    assert response_json["page_info"] == {
+        "hasNextPage": True,
+        "endCursor": "cursor_end",
+    }
+
+    query_variables = gitlab_client_mock.graphql.call_args[0][1]
+    assert query_variables["first"] == 2
+    assert query_variables["after"] == "cursor_abc123"
+    assert "last" not in query_variables
+    assert "before" not in query_variables
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "pagination_cursor,graphql_page_info,expected_page_info",
+    [
+        (
+            None,
+            {
+                "hasNextPage": False,
+                "hasPreviousPage": True,
+                "startCursor": "cursor_start",
+                "endCursor": "cursor_end",
+            },
+            {"hasNextPage": True, "endCursor": "cursor_start"},
+        ),
+        (
+            "cursor_start",
+            {
+                "hasNextPage": True,
+                "hasPreviousPage": False,
+                "startCursor": "cursor_first",
+                "endCursor": "cursor_second",
+            },
+            {"hasNextPage": False, "endCursor": "cursor_first"},
+        ),
+    ],
+)
+@patch("duo_workflow_service.tools.work_item.get_query_variables_for_version")
+async def test_get_work_item_notes_sort_desc_paginates_backwards(
+    mock_get_query_variables,
+    gitlab_client_mock,
+    metadata,
+    work_item_notes,
+    version_variables,
+    pagination_cursor,
+    graphql_page_info,
+    expected_page_info,
+):
+    """Test that desc returns the newest notes first and pages towards older notes."""
+    mock_get_query_variables.return_value = version_variables
+    graphql_response = make_graphql_response(
+        "namespace", work_item_notes, graphql_page_info
+    )
+    gitlab_client_mock.graphql = AsyncMock(return_value=graphql_response)
+
+    tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
+
+    response = await tool._arun(
+        url="https://gitlab.com/groups/namespace/group/-/work_items/42",
+        sort="desc",
+        page_size=2,
+        pagination_cursor=pagination_cursor,
+    )
+
+    response_json = json.loads(response)
+    assert response_json["notes"] == list(reversed(work_item_notes))
+    assert response_json["page_info"] == expected_page_info
+
+    query_variables = gitlab_client_mock.graphql.call_args[0][1]
+    assert query_variables["last"] == 2
+    assert query_variables["before"] == pagination_cursor
+    assert "first" not in query_variables
+    assert "after" not in query_variables
+
+
+def test_get_work_item_notes_input_rejects_invalid_sort():
+    """Test that sort only accepts asc or desc."""
+    with pytest.raises(ValueError):
+        GetWorkItemNotesInput(
+            project_id="namespace/project", work_item_iid=42, sort="newest"
+        )
+
+
+def test_get_work_item_notes_input_accepts_null_sort():
+    """Test that sort accepts None, as passed for a missing optional flow input."""
+    args = GetWorkItemNotesInput(
+        project_id="namespace/project", work_item_iid=42, sort=None
+    )
+
+    assert args.sort is None
+
+
+def test_deterministic_step_config_with_order_by_still_validates(metadata):
+    """Test that flows which still set the ignored order_by argument keep building."""
+    tool = GetWorkItemNotes(description="get work item notes", metadata=metadata)
+
+    assert (
+        select_validated_tool(tool, "get_work_item_notes", {"url", "order_by"}) is tool
+    )
 
 
 @pytest.mark.asyncio
