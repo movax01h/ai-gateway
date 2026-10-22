@@ -408,13 +408,17 @@ class GetWorkItemNotesInput(WorkItemResourceInput):
             "excludes user comments."
         ),
     )
-    sort: Optional[str] = Field(
-        default=None,
-        description="Return work item notes sorted in asc or desc order. Default is desc.",
+    sort: Optional[Literal["asc", "desc"]] = Field(
+        default="asc",
+        description=(
+            "Order of notes by creation time. asc (default) returns the oldest notes first; "
+            "desc returns the newest notes first, so use desc with a small page_size "
+            "to read the latest comments."
+        ),
     )
     order_by: Optional[str] = Field(
         default=None,
-        description="Return work item notes ordered by created_at or updated_at fields. Default is created_at",
+        description="Ignored. Notes are always ordered by creation time.",
     )
     page_size: int = Field(
         default=20,
@@ -424,13 +428,17 @@ class GetWorkItemNotesInput(WorkItemResourceInput):
     )
     pagination_cursor: Optional[str] = Field(
         default=None,
-        description="Cursor for pagination. Use `endCursor` from a previous response to fetch the next page.",
+        description=(
+            "Cursor for pagination. Use `endCursor` from a previous response, "
+            "with the same sort, to fetch the next page."
+        ),
     )
 
 
 class GetWorkItemNotes(WorkItemBaseTool):
     name: str = "get_work_item_notes"
     description: str = f"""Get comments (notes) for a work item.
+    Notes are returned oldest first by default; pass sort='desc' to get the newest first.
     Supports pagination via 'page_size' and 'pagination_cursor'.
 
     {WORK_ITEM_IDENTIFICATION_DESCRIPTION}
@@ -455,6 +463,7 @@ class GetWorkItemNotes(WorkItemBaseTool):
         notes_filter = kwargs.pop("notes_filter", "ALL_NOTES")
         page_size = kwargs.pop("page_size", 20)
         pagination_cursor = kwargs.pop("pagination_cursor", None)
+        newest_first = kwargs.pop("sort", "asc") == "desc"
 
         resolved = await self._validate_work_item_url(
             url, group_id, project_id, work_item_iid
@@ -462,12 +471,18 @@ class GetWorkItemNotes(WorkItemBaseTool):
 
         query, root_key = self._GET_WORK_ITEM_NOTES_QUERIES[resolved.parent.type]
 
+        # The notes connection is always ordered oldest first, so newest first
+        # means paginating backwards from the end of the connection.
+        if newest_first:
+            pagination_variables = {"last": page_size, "before": pagination_cursor}
+        else:
+            pagination_variables = {"first": page_size, "after": pagination_cursor}
+
         query_variables = {
             "fullPath": resolved.parent.full_path,
             "workItemIid": str(resolved.work_item_iid),
             "filter": notes_filter,
-            "first": page_size,
-            "after": pagination_cursor,
+            **pagination_variables,
             **get_query_variables_for_version(
                 "includeNoteResolvedAndResolvableFields", "includeDiscussionIdField"
             ),
@@ -483,11 +498,25 @@ class GetWorkItemNotes(WorkItemBaseTool):
         for widget in widgets:
             if "notes" in widget:
                 notes_data = widget.get("notes", {})
+                notes = notes_data.get("nodes", [])
+                page_info = notes_data.get("pageInfo", {})
+
+                if newest_first:
+                    # Present the backward page as a forward page so callers
+                    # always continue with `endCursor` while `hasNextPage` is true.
+                    notes = notes[::-1]
+                    page_info = {
+                        "hasNextPage": page_info.get("hasPreviousPage", False),
+                        "endCursor": page_info.get("startCursor"),
+                    }
+                else:
+                    page_info = {
+                        "hasNextPage": page_info.get("hasNextPage", False),
+                        "endCursor": page_info.get("endCursor"),
+                    }
+
                 return json.dumps(
-                    {
-                        "notes": notes_data.get("nodes", []),
-                        "page_info": notes_data.get("pageInfo", {}),
-                    },
+                    {"notes": notes, "page_info": page_info},
                     indent=2,
                 )
 
