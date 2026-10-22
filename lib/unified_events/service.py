@@ -172,7 +172,8 @@ class UnifiedEventService:
                 is_gitlab_team_member=context.is_gitlab_team_member,
                 deployment_type=cast(Optional[DeploymentType], context.deployment_type),
                 realm=cast(Optional[Realm], context.realm),
-                unique_instance_id=context.unique_instance_id,
+                unique_instance_id=context.unique_instance_id
+                or (context.instance_id if context.realm == "saas" else None),
                 host_name=context.host_name,
                 instance_version=context.instance_version,
                 organization_id=context.organization_id,
