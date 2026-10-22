@@ -4,16 +4,20 @@ import grpc
 import structlog
 
 from ai_gateway.config import get_config
+from ai_gateway.feature_allowlist import ClientModelRequest, check_client_model_metadata
 from ai_gateway.model_metadata import (
     ModelMetadataByTag,
     build_default_feature_setting_metadata,
     build_model_metadata_by_tag,
     create_model_metadata_by_tag,
 )
+from ai_gateway.model_selection import ModelSelectionError
+from duo_workflow_service.interceptors import abort_handler
 from duo_workflow_service.interceptors.authentication_interceptor import (
     current_user as current_user_context_var,
 )
 from lib.context import (
+    StarletteUser,
     current_model_metadata_context,
     current_model_metadata_with_size_context,
 )
@@ -32,6 +36,8 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
         raw_metadata = metadata.get(self.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA, "")
         try:
             data = json.loads(raw_metadata)
+            # Read the request first: the builders below change the mapping they get.
+            request = ClientModelRequest.from_raw(data)
 
             config = get_config()
             model_keys = (
@@ -89,9 +95,24 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
 
                 model_metadata_by_tag = create_model_metadata_by_tag(data)
 
-            model_metadata_by_tag.add_user(current_user_context_var.get())
-            current_model_metadata_context.set(model_metadata_by_tag.default)
-            current_model_metadata_with_size_context.set(model_metadata_by_tag)
+            user = current_user_context_var.get()
+            # The tag models come from the same client `feature_setting` as the allowlist,
+            # so only the default model needs the check.
+            checked_default = check_client_model_metadata(
+                request,
+                model_metadata_by_tag.default,
+                surface="dws",
+                user=StarletteUser(user) if user else None,
+                log_context={"method": handler_call_details.method},
+            )
+            # None leaves the request on the prompt's own default model, as without the header.
+            if checked_default is not None:
+                model_metadata_by_tag.default = checked_default
+                model_metadata_by_tag.add_user(user)
+                current_model_metadata_context.set(model_metadata_by_tag.default)
+                current_model_metadata_with_size_context.set(model_metadata_by_tag)
+        except ModelSelectionError as error:
+            return abort_handler(grpc.StatusCode.PERMISSION_DENIED, str(error))
         except ValueError as error:
             # Never log raw_metadata itself — it carries provider API keys.
             # header_present separates an absent header from a malformed one.

@@ -16,9 +16,8 @@ from gitlab_cloud_connector import (
     cloud_connector_ready,
 )
 from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
-from grpc.aio import ServicerContext
 
-from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS
+from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS, abort_handler
 from lib.context import cloud_connector_token_context_var
 from lib.jwt import (
     GITLAB_ROOT_NAMESPACE_ID_CLAIM,
@@ -87,7 +86,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
         )
 
         if cloud_connector_error:
-            return self._abort_handler(
+            return abort_handler(
                 grpc.StatusCode.UNAUTHENTICATED, cloud_connector_error.error_message
             )
 
@@ -114,16 +113,6 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
             return True
 
         return root_namespace_id_from_claims_extra(claims.extra) is not None
-
-    def _abort_handler(
-        self, code: grpc.StatusCode, details: str
-    ) -> grpc.RpcMethodHandler:
-        # pylint: disable=unused-argument
-        async def handler(request: object, context: ServicerContext) -> object:
-            await context.abort(code, details)
-            return None
-
-        return grpc.unary_unary_rpc_method_handler(handler)
 
     def _init_oidc_auth_provider(self) -> AuthProvider:
         gitlab_url: str = oidc_gitlab_url()
