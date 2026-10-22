@@ -107,6 +107,10 @@ async def get_internal_event_client():
     return get_container_application().internal_event.client()
 
 
+async def get_unified_event_service():
+    return get_container_application().internal_event.unified_event_service()
+
+
 async def get_billing_event_client():
     return get_container_application().billing_event.client()
 

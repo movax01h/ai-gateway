@@ -1014,6 +1014,7 @@ class TestReActAgentStream:
         expected_error: str,
         expected_internal_events,
         mock_track_internal_event: Mock,
+        mock_track_unified_event: Mock,
         model_metadata,
         feature_enablement_type: str,
     ):
@@ -1041,8 +1042,15 @@ class TestReActAgentStream:
 
         if expected_error:
             assert response.text == expected_error
+            mock_track_unified_event.assert_not_called()
         else:
             mock_track_internal_event.assert_has_calls(expected_internal_events)
+            mock_track_unified_event.assert_has_calls(
+                [
+                    call(f"sidecar_test_{c.args[0]}", **c.kwargs)
+                    for c in expected_internal_events
+                ]
+            )
 
 
 class TestChatAgent:
@@ -1103,6 +1111,7 @@ class TestChatAgent:
         self,
         mock_client: TestClient,
         mock_track_internal_event,
+        mock_track_unified_event,
         messages: list[Message],
         expected_actions: list[TypeAgentEvent],
     ):
@@ -1127,6 +1136,10 @@ class TestChatAgent:
 
         mock_track_internal_event.assert_called_once_with(
             "request_duo_classic_chat",
+            category="ai_gateway.api.v2.chat.agent",
+        )
+        mock_track_unified_event.assert_called_once_with(
+            "sidecar_test_request_duo_classic_chat",
             category="ai_gateway.api.v2.chat.agent",
         )
 

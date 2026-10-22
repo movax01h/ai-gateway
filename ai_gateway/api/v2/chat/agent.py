@@ -17,6 +17,7 @@ from ai_gateway.async_dependency_resolver import (
     get_container_application,
     get_internal_event_client,
     get_prompt_registry,
+    get_unified_event_service,
 )
 from ai_gateway.chat.agents import (
     AgentStep,
@@ -41,6 +42,7 @@ from lib.context import (
     token_usage,
 )
 from lib.internal_events import InternalEventsClient
+from lib.unified_events import UnifiedEventService
 
 __all__ = [
     "create_event_stream",
@@ -114,6 +116,7 @@ def get_agent(
     current_user: StarletteUser,
     prompt_registry: BasePromptRegistry,
     agent_request: AgentRequest,
+    unified_event_service: UnifiedEventService,
 ) -> ReActAgent:
     try:
         prompt = prompt_registry.get_on_behalf(
@@ -121,6 +124,7 @@ def get_agent(
             "chat/react",
             internal_event_category=__name__,
         )
+        authorized_unit_primitive = prompt.unit_primitive
     except WrongUnitPrimitives:
         # chat/react authorizes against duo_classic_chat. Users entitled to neither chat
         # primitive are simply unauthorized.
@@ -145,6 +149,11 @@ def get_agent(
             internal_event_category=__name__,
             unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
         )
+        authorized_unit_primitive = GitLabUnitPrimitive.DUO_CHAT
+
+    unified_event_service.track(
+        f"sidecar_test_request_{authorized_unit_primitive}", category=__name__
+    )
 
     strip_reasoning = _should_strip_reasoning(current_model_metadata_context.get())
     parser_config = ReActParserConfig(strip_reasoning=strip_reasoning)
@@ -226,8 +235,13 @@ async def chat(
     internal_event_client: Annotated[
         InternalEventsClient, Depends(get_internal_event_client)
     ],
+    unified_event_service: Annotated[
+        UnifiedEventService, Depends(get_unified_event_service)
+    ],
 ):
-    agent = get_agent(current_user, prompt_registry, agent_request)
+    agent = get_agent(
+        current_user, prompt_registry, agent_request, unified_event_service
+    )
 
     authorize_additional_context(current_user, agent_request, internal_event_client)
 

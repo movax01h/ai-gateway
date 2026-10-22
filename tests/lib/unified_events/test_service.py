@@ -285,6 +285,36 @@ class TestUnifiedEventServiceTrack:
             "workflow_id": "wf-1",
         }
 
+    @pytest.mark.parametrize(
+        ("realm", "unique_instance_id", "expected"),
+        [
+            ("saas", None, "gitlab-com-uuid"),
+            ("saas", "instance-uid", "instance-uid"),
+            ("self-managed", None, None),
+        ],
+    )
+    def test_unique_instance_id_falls_back_to_instance_id_on_saas(
+        self,
+        service,
+        posted_body,
+        tracked_events,
+        realm,
+        unique_instance_id,
+        expected,
+    ):
+        context = EventContext(
+            realm=realm,
+            instance_id="gitlab-com-uuid",
+            unique_instance_id=unique_instance_id,
+        )
+        token = current_event_context.set(context)
+        try:
+            service.track("request_duo_chat")
+        finally:
+            current_event_context.reset(token)
+
+        assert posted_body().get("unique_instance_id") == expected
+
     def test_records_tracked_event_name(self, service, event_context, tracked_events):
         service.track("request_duo_chat")
 
