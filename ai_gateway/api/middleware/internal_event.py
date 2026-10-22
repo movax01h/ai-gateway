@@ -39,6 +39,7 @@ from lib.internal_events import (
     validate_event_context,
 )
 from lib.jwt import (
+    resolve_feature_enablement_type,
     root_namespace_id_from_claims_extra,
     root_namespace_id_from_header,
 )
@@ -78,6 +79,11 @@ class InternalEventMiddleware:
             realm = claims.gitlab_realm
         else:
             realm = request.headers.get(X_GITLAB_REALM_HEADER)
+
+        feature_enablement_type = resolve_feature_enablement_type(
+            claims.extra if claims else None,
+            request.headers.get(X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER),
+        )
 
         project_id_str = request.headers.get(X_GITLAB_PROJECT_ID)
         project_id = (
@@ -145,9 +151,7 @@ class InternalEventMiddleware:
             interface=request.headers.get(X_GITLAB_INTERFACE),
             project_id=project_id,
             feature_enabled_by_namespace_ids=feature_enabled_by_namespace_ids,
-            feature_enablement_type=request.headers.get(
-                X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
-            ),
+            feature_enablement_type=feature_enablement_type,
             context_generated_at=datetime.now().isoformat(),
             correlation_id=correlation_id.get(),
             namespace_id=namespace_id,
