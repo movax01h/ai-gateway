@@ -51,6 +51,16 @@ def middleware_test_client_fixture(model_metadata_context):
             "name": model_metadata.name if model_metadata else None,
         }
 
+    @app.post("/v1/prompts/{prompt_id:path}")
+    @app.post("/v2/prompts/{prompt_id:path}")
+    async def prompts(request: Request, prompt_id: str):
+        await request.body()
+        model_metadata = model_metadata_context.get()
+        return {
+            "prompt_id": prompt_id,
+            "name": model_metadata.name if model_metadata else None,
+        }
+
     @app.post("/iam-role")
     async def iam_role(request: Request):
         await request.body()
@@ -544,3 +554,78 @@ class TestFeatureAllowlist:
             assert response.json() == {
                 "detail": "Model 'claude_sonnet_4_6_vertex' is not available for 'embeddings_code'"
             }
+
+    class TestPromptRoutes:
+        """The prompt routes note when the prompt's own feature would not allow the model."""
+
+        PATHS = ["/v1/prompts/chat/explain_code", "/v2/prompts/chat/explain_code"]
+        CODE_COMPLETIONS_MODEL = {
+            "provider": "gitlab",
+            "identifier": "codestral_2508_fireworks",
+            "feature_setting": "code_completions",
+        }
+
+        @staticmethod
+        def _notes(logs):
+            return [
+                (
+                    entry["reason"],
+                    entry["feature_setting"],
+                    entry["prompt_id"],
+                    entry["path"],
+                )
+                for entry in logs
+                if entry["event"] == "Model allowlist note"
+            ]
+
+        @pytest.mark.parametrize(
+            "feature_allowlist_mode", ["log", "fallback", "enforce"], indirect=True
+        )
+        @pytest.mark.parametrize("path", PATHS)
+        def test_notes_the_model_and_serves_it(self, middleware_test_client, path):
+            assert (
+                "codestral_2508_fireworks"
+                not in _feature(CHAT).allowed_model_identifiers
+            )
+
+            with capture_logs() as logs:
+                response = middleware_test_client.post(
+                    path, json={"model_metadata": self.CODE_COMPLETIONS_MODEL}
+                )
+
+            assert response.status_code == 200
+            assert response.json() == {
+                "prompt_id": "chat/explain_code",
+                "name": "codestral_2508_fireworks",
+            }
+            assert self._notes(logs) == [
+                (
+                    "prompt_feature_model_not_allowed",
+                    CHAT,
+                    "chat/explain_code",
+                    path,
+                )
+            ]
+
+        @pytest.mark.parametrize(
+            ("path", "model_metadata"),
+            [
+                pytest.param(
+                    PATHS[0],
+                    {
+                        "provider": "gitlab",
+                        "identifier": "claude_sonnet_4_6_vertex",
+                        "feature_setting": "duo_chat_explain_code",
+                    },
+                    id="allowed-by-the-prompt-feature",
+                ),
+                pytest.param("/test", CODE_COMPLETIONS_MODEL, id="not-a-prompt-route"),
+            ],
+        )
+        def test_notes_nothing(self, middleware_test_client, path, model_metadata):
+            with capture_logs() as logs:
+                middleware_test_client.post(
+                    path, json={"model_metadata": model_metadata}
+                )
+
+            assert self._notes(logs) == []

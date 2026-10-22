@@ -584,6 +584,14 @@ serves one feature, the middleware passes that feature: the `/v1/embeddings/code
 `enforce` mode the middleware answers HTTP 403 with `{"detail": "<reason>"}` before the route runs. The Duo Workflow
 Service header and the route payloads do not call the check yet.
 
+The `/v1/prompts/<prompt_id>` and `/v2/prompts/<prompt_id>` routes do not pass the prompt's feature yet, because the
+feature that `feature_setting_for_prompt_id` derives from a prompt ID does not always match the `feature_setting` that
+GitLab Rails sends. For these routes the middleware logs a `Model allowlist note` when a named model would not pass the
+allowlist of the prompt's feature: `prompt_feature_unknown` when the derived feature does not exist, and
+`prompt_feature_model_not_allowed` when its allowlist does not have the model. The note has the `prompt_id`, and its
+`feature_setting` is the prompt's feature. It changes nothing in any mode, and a request whose `feature_setting` is the
+prompt's feature gets no note.
+
 A gateway without custom models serves GitLab-managed models only, so it accepts a fixed set of providers. Over HTTP
 it accepts `gitlab` and `amazon_q`, which GitLab Rails sends, and `anthropic`, `vertex-ai` and `fireworks_ai`, which
 the legacy code completions fields send. On the Duo Workflow Service it accepts `gitlab` and `amazon_q`, and the
@@ -633,7 +641,8 @@ the client's), the `client_feature_setting` as the client sent it, the `requeste
 the client sent them, the `served_identifier` and the caller's context such as the request `path`. Endpoint and key
 values are never logged. One request can log more than one mismatch, so count by `reason` or by correlation ID
 rather than by event. Informational cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
-`deprecated_model`) are logged as `Model allowlist note`.
+`deprecated_model`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
+`Model allowlist note`.
 
 To roll back a stricter mode, set `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE=log`.
 

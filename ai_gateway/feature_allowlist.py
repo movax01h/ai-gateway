@@ -9,7 +9,8 @@ header, and the routes that build metadata from their own payload, such as the l
 The allowlist is the one of the feature that the call site serves. A call site that passes no feature
 uses the client's ``feature_setting``, so the client can name the feature whose allowlist suits it.
 That fallback stays until the call sites derive the feature themselves: from the prompt on HTTP, and
-from the flow on the Duo Workflow Service.
+from the flow on the Duo Workflow Service. Until then, ``note_prompt_feature`` logs where the feature of
+an HTTP prompt route would not allow the requested model.
 
 A gateway without custom models serves GitLab-managed models only. Over HTTP it accepts ``gitlab``
 and ``amazon_q``, which GitLab Rails sends, and ``anthropic``, ``vertex-ai`` and ``fireworks_ai``,
@@ -63,6 +64,7 @@ __all__ = [
     "SERVED_PROVIDERS",
     "ClientModelRequest",
     "check_client_model_metadata",
+    "note_prompt_feature",
 ]
 
 log = structlog.stdlib.get_logger("feature_allowlist")
@@ -186,6 +188,28 @@ class _AllowlistCheck:
             return self._unknown_feature(metadata, self.feature)
 
         return self._check_allowlist(metadata, unit_primitive_config)
+
+    def note_prompt_feature(self, metadata: TypeModelMetadata) -> None:
+        """Log a note when a named model would not pass the allowlist of this check's feature.
+
+        It changes nothing, in any mode. A request whose ``feature_setting`` is this feature
+        already met the same allowlist in ``apply``, so it gets no note.
+        """
+        if (
+            not self.request.pinned
+            or self.feature is None
+            or self.feature == self.request.feature_setting
+        ):
+            return
+
+        unit_primitive_config = self._unit_primitive_config(self.feature)
+        if unit_primitive_config is None:
+            self._note("prompt_feature_unknown", metadata)
+        elif (
+            metadata.llm_definition.gitlab_identifier
+            not in unit_primitive_config.allowed_model_identifiers
+        ):
+            self._note("prompt_feature_model_not_allowed", metadata)
 
     def _feature_default(self, metadata: TypeModelMetadata) -> TypeModelMetadata:
         """Serve the default of the feature the call site names, not of the one the client named.
@@ -407,6 +431,59 @@ def check_client_model_metadata(
     Raises:
         ModelSelectionError: In ``enforce`` mode, when the request is not allowed.
     """
+    check = _new_check(
+        request,
+        metadata,
+        surface=surface,
+        feature=feature_setting or request.feature_setting,
+        user=user,
+        log_context=log_context,
+    )
+    return metadata if check is None else check.apply(metadata)
+
+
+def note_prompt_feature(
+    request: ClientModelRequest,
+    metadata: TypeModelMetadata,
+    *,
+    prompt_feature_setting: str,
+    log_context: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Log a note when a named model would not pass the allowlist of an HTTP prompt's own feature.
+
+    The prompt routes do not pass a feature to ``check_client_model_metadata`` yet: the feature
+    derived from a prompt ID does not always match the ``feature_setting`` that GitLab Rails sends.
+    The note shows where the two differ, so the mapping can be fixed before the routes use it. It
+    changes nothing, in any mode.
+
+    Args:
+        request: What the client asked for, read with ``ClientModelRequest.from_raw`` before the
+            metadata was built.
+        metadata: The metadata resolved from the same raw value, before the check.
+        prompt_feature_setting: The feature derived from the prompt ID of the route.
+        log_context: Extra fields for the log event, such as ``path`` and ``prompt_id``.
+    """
+    check = _new_check(
+        request,
+        metadata,
+        surface="http",
+        feature=prompt_feature_setting,
+        log_context=log_context,
+    )
+    if check is not None:
+        check.note_prompt_feature(metadata)
+
+
+def _new_check(
+    request: ClientModelRequest,
+    metadata: TypeModelMetadata,
+    *,
+    surface: Surface,
+    feature: Optional[str],
+    user: Optional[StarletteUser] = None,
+    log_context: Optional[Mapping[str, Any]] = None,
+) -> Optional[_AllowlistCheck]:
+    """Return the check for a request, or None when this gateway does not check it."""
     config = get_config()
     mode = config.model_selection.feature_allowlist_mode
     if (
@@ -414,17 +491,17 @@ def check_client_model_metadata(
         or config.custom_models.enabled
         or isinstance(metadata, AmazonQModelMetadata)
     ):
-        return metadata
+        return None
 
     return _AllowlistCheck(
         mode=mode,
         surface=surface,
         request=request,
-        feature=feature_setting or request.feature_setting,
+        feature=feature,
         user=user,
         using_cache=getattr(metadata, "using_cache", None),
         log_context=log_context or {},
         fireworks_api_base_url=config.fireworks_api_base_url,
         mock_model_responses=config.mock_model_responses,
         provider_keys=config.model_keys.model_dump(),
-    ).apply(metadata)
+    )
