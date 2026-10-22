@@ -1,4 +1,7 @@
+import os
 import re
+import shutil
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast, get_args
@@ -726,12 +729,14 @@ class TestCredentialPatterns:
         'git remote set-url origin "${repo_url}"'
     )
 
-    # The replacement: credential-free remote plus a host-scoped helper.
+    # The replacement: a user-only remote plus a host-scoped helper behind an empty-value reset.
     POST_FIX_COMMAND = (
         'base="${DUO_WORKFLOW_GIT_HTTP_BASE_URL:?DUO_WORKFLOW_GIT_HTTP_BASE_URL is not set}"; '
-        'base="${base%/}"; '
-        'git remote set-url origin "${base}/${GITLAB_PROJECT_PATH:?GITLAB_PROJECT_PATH is not set}.git"; '
-        'git config "credential.${base}.helper" '
+        'base="${base%/}"; proto="${base%%://*}"; rest="${base#*://}"; host="${rest%%/*}"; '
+        'git remote set-url origin "${proto}://oauth@${rest}/${GITLAB_PROJECT_PATH:?GITLAB_PROJECT_PATH is not set}.git"; '
+        'git config "http.${proto}://${host}.proactiveAuth" basic; '
+        'git config --replace-all "credential.${proto}://${host}.helper" ""; '
+        'git config --add "credential.${proto}://${host}.helper" '
         '\'!f() { [ "$1" = get ] || exit 0; '
         '[ -n "${DUO_WORKFLOW_GIT_HTTP_PASSWORD}" ] || exit 1; '
         'echo username=oauth; echo "password=${DUO_WORKFLOW_GIT_HTTP_PASSWORD}"; }; f\''
@@ -769,6 +774,137 @@ class TestCredentialPatterns:
         assert not CREDENTIAL_IN_URL_PATTERN.search(
             'git clone "https://gitlab.com/${GITLAB_PROJECT_PATH}.git"'
         )
+
+    def test_user_only_url_is_not_flagged(self):
+        """A username without a password is not a credential, and ``git_setup`` relies on one."""
+        assert not CREDENTIAL_IN_URL_PATTERN.search(
+            'git remote set-url origin "https://oauth@gitlab.com/${GITLAB_PROJECT_PATH}.git"'
+        )
+
+
+GIT_SETUP_CONFIGS = [
+    config_path
+    for config_path in ALL_CONFIGS
+    if any(
+        name == "git_setup"
+        for name, _ in _deterministic_step_commands(
+            yaml.safe_load(config_path.read_text()) or {}
+        )
+    )
+]
+
+JOB_TOKEN = "JOB-TOKEN"
+OAUTH_TOKEN = "OAUTH-TOKEN"
+PROJECT_PATH = "group/proj"
+
+# The CI_JOB_TOKEN helper the runner writes when FF_GIT_URLS_WITHOUT_TOKENS is on
+# (gitlab-runner shells/abstract.go, SetupGitCredHelper).
+RUNNER_JOB_TOKEN_HELPER = (
+    '!f(){ if [ "$1" = "get" ] ; then echo "password=${CI_JOB_TOKEN}" ; fi ; } ; f'
+)
+
+
+def _git(repo: Path, *args: str, stdin: str | None = None) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        input=stdin,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _install_runner_git_config(repo: Path, base: str, runner: str) -> None:
+    """Reproduce the git config the runner leaves in the build directory before the flow starts."""
+    proto, rest = base.split("://", 1)
+    plain_url = f"{base}/{PROJECT_PATH}.git"
+    job_token_base = f"{proto}://gitlab-ci-token:{JOB_TOKEN}@{rest}"
+    ext_conf = str(repo.parent / ".gitlab-runner.ext.conf")
+
+    if runner == "pre-18.6":
+        _git(repo, "remote", "add", "origin", f"{job_token_base}/{PROJECT_PATH}.git")
+        return
+
+    def ext(*args: str) -> None:
+        _git(repo, "config", "-f", ext_conf, *args)
+
+    if runner == "18.6+":
+        # FF_GIT_URLS_WITHOUT_TOKENS off, the default: a host-wide insteadOf puts the job token
+        # back into any credential-free URL for the host (setupExternalGitConfig).
+        ext("--add", f"url.{job_token_base}/{PROJECT_PATH}.git.insteadOf", plain_url)
+        ext("--add", f"url.{job_token_base}.insteadOf", base)
+    else:
+        # FF_GIT_URLS_WITHOUT_TOKENS on: a reset, then the job-token helper, at the host scope.
+        ext("--add", f"credential.{base}.helper", "")
+        ext("--add", f"credential.{base}.helper", RUNNER_JOB_TOKEN_HELPER)
+        ext(f"credential.{base}.username", "gitlab-ci-token")
+
+    _git(repo, "config", "include.path", ext_conf)
+    _git(repo, "remote", "add", "origin", plain_url)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs a real git")
+class TestGitSetupAgainstRunnerConfig:
+    """``git_setup`` must authenticate as the DWS OAuth token under every runner git setup.
+
+    The runner configures git before the flow runs, and that config outranks anything a flow
+    step appends to ``.git/config``. On runner 18.6+ a credential-free ``origin`` is rewritten
+    back to ``CI_JOB_TOKEN``, and with FF_GIT_URLS_WITHOUT_TOKENS the runner's job-token helper
+    answers first. The job token cannot push, so either one breaks the flow.
+    """
+
+    @pytest.mark.parametrize(
+        "base", ["https://gitlab.test", "https://gitlab.test/gitlab/"]
+    )
+    @pytest.mark.parametrize(
+        "runner", ["pre-18.6", "18.6+", "ff-git-urls-without-tokens"]
+    )
+    @pytest.mark.parametrize("config_path", GIT_SETUP_CONFIGS, ids=_qualified_config_id)
+    def test_pushes_with_the_oauth_token(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        config_path: Path,
+        runner: str,
+        base: str,
+    ):
+        command = dict(
+            _deterministic_step_commands(yaml.safe_load(config_path.read_text()))
+        )["git_setup"]
+        for name in (
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in {
+            "HOME": str(tmp_path),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_TERMINAL_PROMPT": "0",
+            "CI_JOB_TOKEN": JOB_TOKEN,
+            "DUO_WORKFLOW_GIT_HTTP_BASE_URL": base,
+            "GITLAB_PROJECT_PATH": PROJECT_PATH,
+            "DUO_WORKFLOW_GIT_HTTP_PASSWORD": OAUTH_TOKEN,
+        }.items():
+            monkeypatch.setenv(name, value)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _git(repo, "init", "-q")
+        _install_runner_git_config(repo, base.rstrip("/"), runner)
+
+        subprocess.run(["sh", "-c", command], cwd=repo, check=True)
+
+        # get-url applies insteadOf rewrites, so this is the URL git actually talks to.
+        push_url = _git(repo, "remote", "get-url", "--push", "origin").strip()
+        credential = _git(repo, "credential", "fill", stdin=f"url={push_url}\n\n")
+
+        assert JOB_TOKEN not in push_url and OAUTH_TOKEN not in push_url, push_url
+        assert "username=oauth\n" in credential, credential
+        assert f"password={OAUTH_TOKEN}\n" in credential, credential
+        assert OAUTH_TOKEN not in (repo / ".git" / "config").read_text()
 
 
 def _component(config: FlowConfig, name: str) -> dict:
