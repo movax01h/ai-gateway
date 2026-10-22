@@ -21,6 +21,7 @@ from ai_gateway.models.v2.embedding_litellm import (
 )
 from ai_gateway.prompts.base import BasePromptRegistry
 from ai_gateway.structured_logging import get_request_logger
+from lib.context import current_model_metadata_context
 from lib.context.auth import StarletteUser, get_current_user
 
 __all__ = [
@@ -83,6 +84,9 @@ async def _generate_code_embeddings(
     request_log.debug("embeddings input:", payload=payload)
 
     model_metadata = _validate_and_get_model_metadata(payload.model_metadata)
+    # ModelConfigMiddleware checks the same model against the `embeddings_code` allowlist. In
+    # `fallback` mode it serves the feature's default model instead of a model that is not allowed.
+    model_metadata = current_model_metadata_context.get() or model_metadata
 
     try:
         prompt = prompt_registry.get_on_behalf(

@@ -5,16 +5,22 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import litellm
 import pytest
+from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
 from ai_gateway.api.v1 import api_router
+from ai_gateway.config import get_config
 from ai_gateway.prompts.base import Prompt
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
 def fast_api_router_fixture():
-    return api_router
+    # Mount the routes under `/v1`, as the server does, so ModelConfigMiddleware matches the
+    # route's feature (`embeddings_code`).
+    router = APIRouter()
+    router.include_router(api_router, prefix="/v1")
+    return router
 
 
 @pytest.fixture(name="unit_primitive")
@@ -434,6 +440,28 @@ class BaseTestCodeEmbeddings:
         assert call_kwargs["custom_llm_provider"] == "vertex_ai"
         assert call_kwargs.get("vertex_ai_location") == expected_location
 
+    @pytest.mark.usefixtures(
+        "config_values_custom_models_disabled", "feature_allowlist_mode"
+    )
+    @pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+    def test_fallback_mode_serves_the_feature_default(
+        self,
+        mock_client: TestClient,
+        mock_litellm_aembedding: AsyncMock,
+        monkeypatch,
+    ):
+        # The fixture configures the app container; the allowlist check reads the global config.
+        monkeypatch.setattr(get_config().custom_models, "enabled", False)
+        params = self._build_params(
+            model_provider="gitlab", model_identifier="claude_sonnet_4_6_vertex"
+        )
+
+        response = self._post_request(mock_client=mock_client, params=params)
+
+        assert response.status_code == 200
+        assert response.json()["model"]["identifier"] == "text_embedding_005_vertex"
+        assert mock_litellm_aembedding.call_args[1]["model"] == "text-embedding-005"
+
     def test_unsupported_provider(
         self,
         mock_client: TestClient,
@@ -670,7 +698,7 @@ class BaseTestCodeEmbeddings:
 
 class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
     def _route(self):
-        return "/embeddings/code_embeddings/index"
+        return "/v1/embeddings/code_embeddings/index"
 
     def _expected_embeddings_operation(self):
         return "index"
@@ -686,7 +714,9 @@ class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
             model_provider="gitlab", model_identifier="text_embedding_005_vertex"
         )
         response = self._post_request(
-            mock_client=mock_client, params=params, route="/embeddings/code_embeddings"
+            mock_client=mock_client,
+            params=params,
+            route="/v1/embeddings/code_embeddings",
         )
 
         assert response.status_code == 200
@@ -694,7 +724,7 @@ class TestCodeEmbeddingsIndex(BaseTestCodeEmbeddings):
 
 class TestCodeEmbeddingsSearch(BaseTestCodeEmbeddings):
     def _route(self):
-        return "/embeddings/code_embeddings/search"
+        return "/v1/embeddings/code_embeddings/search"
 
     def _expected_embeddings_operation(self):
         return "search"

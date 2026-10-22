@@ -581,8 +581,10 @@ derive the feature themselves: from the prompt on HTTP, and from the flow on the
 On HTTP, `ModelConfigMiddleware` runs the check on the `model_metadata` field of each request body. For a route that
 serves one feature, the middleware passes that feature: the `/v1/embeddings/code_embeddings` routes use
 `embeddings_code`. For other routes it passes no feature, so the client's `feature_setting` selects the allowlist. In
-`enforce` mode the middleware answers HTTP 403 with `{"detail": "<reason>"}` before the route runs. The Duo Workflow
-Service header and the route payloads do not call the check yet.
+`enforce` mode the middleware answers HTTP 403 with `{"detail": "<reason>"}` before the route runs. The code
+embeddings routes serve the model that the check returns, so `fallback` mode serves the `embeddings_code` default
+there. They build the model from the request body only to answer HTTP 422 for metadata that is not valid. The Duo
+Workflow Service header and the route payloads do not call the check yet.
 
 A gateway without custom models serves GitLab-managed models only, so it accepts a fixed set of providers. Over HTTP
 it accepts `gitlab` and `amazon_q`, which GitLab Rails sends, and `anthropic`, `vertex-ai` and `fireworks_ai`, which
