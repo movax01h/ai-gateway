@@ -3390,6 +3390,12 @@ def test_ceiling_exempt_tool_names_snapshot():
     assert sorted(ceiling_exempt_tool_names(set())) == _EXPECTED_CEILING_EXEMPT
 
 
+def test_ceiling_exempt_tool_names_keeps_only_start_flows_when_rails_resolved_nothing():
+    exempt = ceiling_exempt_tool_names(set(), keep_read_only=False)
+
+    assert exempt == {"start_flow"}
+
+
 @pytest.mark.parametrize(
     "ruled,keeps_read_only",
     [

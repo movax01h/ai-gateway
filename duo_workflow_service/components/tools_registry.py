@@ -437,26 +437,29 @@ def _privilege_tool_names(*privileges: str) -> set[str]:
     return names
 
 
-def ceiling_exempt_tool_names(ruled: Iterable[str]) -> set[str]:
+def ceiling_exempt_tool_names(
+    ruled: Iterable[str], *, keep_read_only: bool = True
+) -> set[str]:
     """Tools the governance ceiling keeps pre-approved although Rails cannot put them in allow.
 
     `ruled` is the claim's raw ask and deny lists. Rails always pre-approves start_flows, and its read-only groups
     default to allow on every surface, so DWS tools Rails cannot name there would otherwise prompt. A rule on any
     non-write tool may have demoted a read-only group in Rails, so it turns the read-only part off: at worst an
-    extra prompt, never an extra pre-approval.
+    extra prompt, never an extra pre-approval. Pass `keep_read_only=False` when the claim's allow list is empty:
+    had a read-only group resolved to allow in Rails, its tools would be there.
     """
     ruled = set(ruled)
-    read_only = _privilege_tool_names("read_only_gitlab", "read_only_files")
+    read_only_names = _privilege_tool_names("read_only_gitlab", "read_only_files")
     # The write groups also hold the read tools, so only the names beyond those count as write.
     write_only = (
         _privilege_tool_names(
             "read_write_gitlab", "read_write_files", "run_commands", "use_git"
         )
-        - read_only
+        - read_only_names
     )
     exempt = _privilege_tool_names("start_flows") - ruled
-    if not ruled - write_only:
-        exempt |= read_only - ruled
+    if keep_read_only and not ruled - write_only:
+        exempt |= read_only_names - ruled
     return exempt
 
 
