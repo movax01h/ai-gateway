@@ -8,9 +8,10 @@ header, and the routes that build metadata from their own payload, such as the l
 
 The allowlist is the one of the feature that the call site serves. A call site that passes no feature
 uses the client's ``feature_setting``, so the client can name the feature whose allowlist suits it.
-That fallback stays until the call sites derive the feature themselves: from the prompt on HTTP, and
-from the flow on the Duo Workflow Service. Until then, ``note_prompt_feature`` logs where the feature of
-an HTTP prompt route would not allow the requested model.
+The HTTP prompt routes pass the feature of a prompt with an entry in ``PROMPT_ID_TO_FEATURE_SETTING``.
+The fallback stays for any other prompt, and on the Duo Workflow Service until it derives the feature
+from the flow. For a prompt without an entry, ``note_prompt_feature`` logs where the feature derived
+from the prompt ID would not allow the requested model.
 
 A gateway without custom models serves GitLab-managed models only. Over HTTP it accepts ``gitlab``
 and ``amazon_q``, which GitLab Rails sends, and ``anthropic``, ``vertex-ai`` and ``fireworks_ai``,
@@ -451,10 +452,11 @@ def note_prompt_feature(
 ) -> None:
     """Log a note when a named model would not pass the allowlist of an HTTP prompt's own feature.
 
-    The prompt routes do not pass a feature to ``check_client_model_metadata`` yet: the feature
-    derived from a prompt ID does not always match the ``feature_setting`` that GitLab Rails sends.
-    The note shows where the two differ, so the mapping can be fixed before the routes use it. It
-    changes nothing, in any mode.
+    The prompt routes call it for a prompt without an entry in ``PROMPT_ID_TO_FEATURE_SETTING``. For
+    such a prompt, ``check_client_model_metadata`` still uses the client's ``feature_setting``,
+    because the feature derived from a prompt ID does not always match the one that GitLab Rails
+    sends. The note shows where the two differ, so the prompt can get an entry. It changes nothing,
+    in any mode.
 
     Args:
         request: What the client asked for, read with ``ClientModelRequest.from_raw`` before the

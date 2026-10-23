@@ -11,7 +11,10 @@ from ai_gateway.feature_allowlist import (
 )
 from ai_gateway.model_metadata import IamRoleNotAllowedError, create_model_metadata
 from ai_gateway.model_selection import ModelSelectionError
-from ai_gateway.prompts.registry import feature_setting_for_prompt_id
+from ai_gateway.prompts.registry import (
+    feature_setting_for_prompt_id,
+    mapped_feature_setting_for_prompt_id,
+)
 from lib.context import StarletteUser, current_model_metadata_context
 
 # Routes that serve one feature. The allowlist check uses this feature, so the client's
@@ -21,8 +24,9 @@ _ROUTE_FEATURE_SETTINGS = {
     "/v1/embeddings/code_embeddings": "embeddings_code",
 }
 
-# Routes whose path ends with a prompt ID. The middleware logs a note when the feature of the
-# prompt would not allow the requested model, but the check still uses the client's feature.
+# Routes whose path ends with a prompt ID. The allowlist check uses the feature setting of the
+# prompt from `PROMPT_ID_TO_FEATURE_SETTING`, so the client's `feature_setting` does not select the
+# allowlist for these prompts.
 _PROMPT_ROUTES = ("/v1/prompts/", "/v2/prompts/")
 
 
@@ -82,22 +86,30 @@ class ModelConfigMiddleware:
                     request = ClientModelRequest.from_raw(raw_metadata)
                     client_model_metadata = create_model_metadata(raw_metadata)
                     path = scope.get("path", "")
-                    if prompt_id := _route_prompt_id(path):
+                    prompt_id = _route_prompt_id(path)
+                    prompt_feature_setting = _prompt_feature_setting(prompt_id)
+                    log_context = {"path": path}
+                    if prompt_id:
+                        log_context["prompt_id"] = prompt_id
+                    # A prompt without an entry logs a note when its derived feature would not
+                    # allow the model, but the check still uses the client's feature for it.
+                    if prompt_id and prompt_feature_setting is None:
                         note_prompt_feature(
                             request,
                             client_model_metadata,
                             prompt_feature_setting=feature_setting_for_prompt_id(
                                 prompt_id
                             ),
-                            log_context={"path": path, "prompt_id": prompt_id},
+                            log_context=log_context,
                         )
                     model_metadata = check_client_model_metadata(
                         request,
                         client_model_metadata,
                         surface="http",
-                        feature_setting=_route_feature_setting(path),
+                        feature_setting=prompt_feature_setting
+                        or _route_feature_setting(path),
                         user=_authenticated_user(scope),
-                        log_context={"path": path},
+                        log_context=log_context,
                     )
                     # None leaves the request on the prompt's own default model.
                     current_model_metadata_context.set(model_metadata)
@@ -146,3 +158,8 @@ def _route_prompt_id(path: str) -> Optional[str]:
         if path.startswith(prefix) and (prompt_id := path.removeprefix(prefix)):
             return prompt_id
     return None
+
+
+def _prompt_feature_setting(prompt_id: Optional[str]) -> Optional[str]:
+    """Return the feature setting of ``prompt_id`` from the prompt registry, or None for a prompt without an entry."""
+    return mapped_feature_setting_for_prompt_id(prompt_id) if prompt_id else None

@@ -17,6 +17,7 @@ from lib.feature_roots import default_features_dir
 
 __all__ = [
     "discover_feature_prompts",
+    "feature_prompt_aliases",
     "feature_prompt_root",
     "register_prompt_root",
 ]
@@ -51,6 +52,22 @@ def register_prompt_root(feature_id: str, prompts_dir: Path) -> None:
 def feature_prompt_root(feature_id: str) -> Path | None:
     """Return the registered ``prompts/`` dir for a prompt id, or ``None``."""
     return _FEATURE_PROMPT_ROOTS.get(feature_id)
+
+
+def feature_prompt_aliases(feature_id: str) -> list[str]:
+    """Return every prompt id registered to the ``prompts/`` dir of ``feature_id``.
+
+    A feature under ``ai/features/`` registers as ``<feature>`` and as ``<domain>/<feature>``, so
+    both ids load the same prompts. The list is empty for an id that is not registered.
+    """
+    prompts_dir = _FEATURE_PROMPT_ROOTS.get(feature_id)
+    if prompts_dir is None:
+        return []
+    return [
+        prompt_id
+        for prompt_id, registered_dir in _FEATURE_PROMPT_ROOTS.items()
+        if registered_dir == prompts_dir
+    ]
 
 
 def discover_feature_prompts(features_dir: Path | None = None) -> None:
