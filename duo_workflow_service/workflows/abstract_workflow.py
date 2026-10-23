@@ -171,8 +171,11 @@ class ToolAccessPolicies(BaseModel):
     allow: list[str] = []
     ask: list[str] = []
     deny: list[str] = []
-    # Set by Rails when the governance ceiling is enabled. It is inside the signed claim,
-    # so a client cannot drop it. Older GitLab omits it and the ceiling stays off.
+    # Set by Rails when the governance ceiling is enabled, only on a policy it resolved. It is
+    # inside the signed claim, so a client cannot drop it. Older GitLab omits it and the
+    # ceiling stays off. With it, empty lists mean governance ran and allowed nothing, so only
+    # the registry baseline and start_flows stay pre-approved, not the read-only exemption.
+    # The same holds whenever allow is empty.
     ceiling: bool = False
 
 
@@ -289,6 +292,7 @@ class AbstractWorkflow(ABC):
         self._governance_allowed_tools: list[str] = []
         # `None` means the ceiling is off; an empty set means it is on and permits nothing.
         self._admin_allowed_preapprovals: Optional[set[str]] = None
+        self._ceiling_claim_unparsable = False
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
         self._first_response_metric_recorded = False
@@ -458,7 +462,11 @@ class AbstractWorkflow(ABC):
         )
         if _token_issued_by_dws(self._user):
             return False
-        if self._admin_allowed_preapprovals is not None and not _request_origin_known():
+        # An unparsable ceiling claim has lost its ask and deny lists, so treat it like an
+        # unknown origin.
+        if self._admin_allowed_preapprovals is not None and (
+            self._ceiling_claim_unparsable or not _request_origin_known()
+        ):
             return False
         return allowed
 
@@ -498,6 +506,7 @@ class AbstractWorkflow(ABC):
                     self._preapproved_tools = []
                     if _claim_requests_ceiling(raw):
                         self._admin_allowed_preapprovals = set()
+                        self._ceiling_claim_unparsable = True
                     return
                 can_ask_user = self._workflow_config.get(
                     "allow_agent_to_request_user", False
@@ -509,8 +518,13 @@ class AbstractWorkflow(ABC):
                 # cannot widen it, else a custom container bypasses Ask/Deny governance.
                 # `ask` counts as active so an "ask everything" policy (empty allow and
                 # deny) still enforces the ceiling.
+                # A ceiling claim is active even when empty: Rails resolved the policy and it
+                # allowed nothing.
                 governance_active = (
-                    bool(policies.allow) or bool(deny) or bool(self._ask_tools)
+                    policies.ceiling
+                    or bool(policies.allow)
+                    or bool(deny)
+                    or bool(self._ask_tools)
                 )
                 if governance_active:
                     # deny > ask > allow, matching Rails' resolution order, so a tool
@@ -519,13 +533,13 @@ class AbstractWorkflow(ABC):
                     self._governance_allowed_tools = list(self._preapproved_tools)
                 # Uses the raw ask list: `_ask_tools` is emptied for sessions that cannot ask,
                 # and an ask rule must still keep a tool out of pre-approval there.
-                if policies.ceiling and (
-                    policies.allow or policies.deny or policies.ask
-                ):
+                if policies.ceiling:
+                    # An empty allow means Rails' read-only groups did not resolve to allow.
                     self._admin_allowed_preapprovals = (
                         set(policies.allow) - set(policies.ask)
                     ) | ceiling_exempt_tool_names(
-                        set(policies.ask) | set(policies.deny)
+                        set(policies.ask) | set(policies.deny),
+                        keep_read_only=bool(policies.allow),
                     )
                 if deny:
                     self._denied_tools = list(set(self._denied_tools) | deny)

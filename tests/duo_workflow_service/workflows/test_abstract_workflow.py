@@ -3119,8 +3119,11 @@ async def _configure_kwargs_for(claim, workflow_config, can_ask=True, issuer=Non
         ('{"allow": [], "ask": ["grep"], "deny": [], "ceiling": true}', False, set()),
         # A deny-only claim turns it on too.
         ('{"allow": [], "ask": [], "deny": ["grep"], "ceiling": true}', True, set()),
-        # An empty claim is an ungoverned session: no ceiling even if asked for.
-        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True, None),
+        # Rails only sets the ceiling on a resolved policy, so an empty one permits nothing
+        # beyond the tools the ceiling always keeps.
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True, set()),
+        # Without the ceiling, an empty claim is still an ungoverned session.
+        ('{"allow": [], "ask": [], "deny": []}', True, None),
         # Unparsable: fails closed only when the claim still asks for the ceiling.
         ('{"allow": 5, "ceiling": true}', True, set()),
         ('{"allow": 5}', True, None),
@@ -3147,8 +3150,9 @@ def _with_exemptions(claim, expected):
         return expected
     if not isinstance(data.get("allow", []), list):
         return expected
+    ruled = set(data.get("ask", [])) | set(data.get("deny", []))
     return expected | ceiling_exempt_tool_names(
-        set(data.get("ask", [])) | set(data.get("deny", []))
+        ruled, keep_read_only=bool(data.get("allow"))
     )
 
 
@@ -3193,6 +3197,28 @@ async def test_client_injected_exemption_is_off_on_a_dws_issued_token(
     )
 
     kwargs = await _configure_kwargs_for(claim, workflow_config, issuer=issuer)
+
+    assert kwargs["allow_client_injected_mcp_tools"] is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+@pytest.mark.parametrize(
+    "claim,expected",
+    [
+        # The claim asks for the ceiling but cannot be read, so its ask and deny lists are lost.
+        ('{"allow": "not-a-list", "ask": [], "deny": [], "ceiling": true}', False),
+        # Without the ceiling an unparsable claim keeps the exemption, as before.
+        ('{"allow": "not-a-list", "ask": [], "deny": []}', True),
+    ],
+)
+async def test_client_injected_exemption_fails_closed_on_an_unparsable_ceiling_claim(
+    workflow_config, claim, expected
+):
+    kwargs = await _configure_kwargs_for(
+        claim, workflow_config, issuer="https://gitlab.com"
+    )
 
     assert kwargs["allow_client_injected_mcp_tools"] is expected
 
@@ -3263,3 +3289,106 @@ async def test_ceiling_drops_client_preapprovals_it_does_not_permit(workflow_con
         await workflow._compile_and_run_graph("Test goal")
 
     assert workflow._preapproved_tools == ["read_file"]
+
+
+async def _run_with_client_preapprovals(workflow_config, claim, can_ask):
+    """Run the graph with client pre-approvals `read_file` and `start_flow`; return the workflow and kwargs."""
+    workflow_config["allow_agent_to_request_user"] = can_ask
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(gitlab_realm="saas", extra={"tool_access_policies": claim}),
+    )
+    with (
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs"
+        ),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow"
+        ) as mock_gitlab_workflow,
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure"
+        ) as mock_configure,
+    ):
+        registry = MagicMock()
+        registry.pre_approvals_allowed_by_policy.side_effect = lambda names: (
+            set(names) & mock_configure.call_args.kwargs["admin_allowed_preapprovals"]
+        )
+        mock_configure.return_value = registry
+        mock_checkpointer = AsyncMock()
+        mock_checkpointer.initial_status_event = "START"
+        mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+        workflow = MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("software_development"),
+            user,
+        )
+        workflow._preapproved_tools = ["read_file", "start_flow"]
+        await workflow._compile_and_run_graph("Test goal")
+
+    return workflow, mock_configure.call_args.kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    "claim,can_ask,expected_preapproved",
+    [
+        # Governance ran and allowed nothing, so the client list is dropped.
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True, []),
+        # Same for a session that cannot ask.
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', False, []),
+        # With an allow list, the client list is replaced by it (unchanged from main).
+        ('{"allow": ["grep"], "ask": [], "deny": [], "ceiling": true}', True, ["grep"]),
+    ],
+)
+async def test_compile_and_run_graph_treats_an_empty_ceiling_claim_as_governed(
+    workflow_config, claim, can_ask, expected_preapproved
+):
+    workflow, kwargs = await _run_with_client_preapprovals(
+        workflow_config, claim, can_ask
+    )
+
+    assert sorted(workflow._preapproved_tools) == expected_preapproved
+    # The registry gets the same answer: the allow list plus the tools always kept.
+    assert kwargs["allowed_tools"] == expected_preapproved
+    assert kwargs["admin_allowed_preapprovals"] == _with_exemptions(
+        claim, set(expected_preapproved)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    "claim,can_ask",
+    [
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True),
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', False),
+        # A write-only rule leaves allow empty too, so the read-only exemption stays off.
+        ('{"allow": [], "ask": [], "deny": ["run_command"], "ceiling": true}', True),
+    ],
+)
+async def test_ceiling_with_an_empty_allow_keeps_only_start_flow(
+    workflow_config, claim, can_ask
+):
+    workflow, kwargs = await _run_with_client_preapprovals(
+        workflow_config, claim, can_ask
+    )
+
+    assert workflow._preapproved_tools == []
+    assert kwargs["admin_allowed_preapprovals"] == {"start_flow"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_compile_and_run_graph_keeps_an_empty_claim_without_ceiling_ungoverned(
+    workflow_config,
+):
+    """Without `ceiling`, empty lists still mean governance did not run, as on main."""
+    workflow, kwargs = await _run_with_client_preapprovals(
+        workflow_config, '{"allow": [], "ask": [], "deny": []}', can_ask=True
+    )
+
+    assert workflow._preapproved_tools == ["read_file", "start_flow"]
+    assert kwargs["allowed_tools"] == []
+    assert kwargs["admin_allowed_preapprovals"] is None
