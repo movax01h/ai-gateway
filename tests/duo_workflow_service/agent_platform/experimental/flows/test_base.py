@@ -1265,7 +1265,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     ):
         """Test _build_routers always passes instrumentation params for conditional routers."""
         config = FlowConfig(
-            version="v1",
+            version="experimental",
             environment="ambient",
             components=[{"name": "agent", "type": "AgentComponent"}],
             routers=[

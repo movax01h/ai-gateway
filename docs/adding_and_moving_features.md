@@ -159,6 +159,30 @@ lint rejects it, so move the feature first.
      -g "Your goal description here"
    ```
 
+### Experimental-tier flows
+
+A flow on the **experimental** schema tier lives in a `config/experimental/`
+subfolder of the same feature. The folder picks the tier: `config/<version>.yml`
+is v1, `config/experimental/<version>.yml` is experimental.
+
+```plaintext
+ai/features/<domain>/<flow>/
+  prompts/                    # shared by both tiers
+  config/
+    1.0.0.yml                 # version: v1
+    experimental/
+      1.0.0.yml               # version: experimental
+```
+
+- The `version:` field must match the folder (`v1` in `config/`, `experimental`
+  in `config/experimental/`); the tier's `FlowConfig` validates it.
+- The two tiers keep independent version spaces, so the same `<version>.yml` name
+  can exist in both without clashing.
+- Promote a flow from experimental to v1 with `git mv config/experimental/X.yml
+  config/X.yml` and flip its `version:` to `v1`.
+- The machinery is `BaseFlowConfig.FEATURE_CONFIG_SUBDIR` (`""` for v1,
+  `"experimental"` for experimental); the config listers are tier-agnostic.
+
 ## Move a legacy feature
 
 Before you start, check where the feature goes:
