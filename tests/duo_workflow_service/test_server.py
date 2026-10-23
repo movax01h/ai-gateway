@@ -2523,11 +2523,7 @@ async def test_grpc_server(
             "duo_workflow_service.server.reflection.enable_server_reflection"
         ) as mock_enable_reflection,
         patch("duo_workflow_service.server.MonitoringInterceptor"),
-        patch("duo_workflow_service.server.connection_pool") as mock_connection_pool,
     ):
-        mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
-        mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
-
         mock_config = create_mock_default_config()
         await serve(mock_config, 50052)
 
@@ -2569,11 +2565,7 @@ async def test_grpc_server_litellm_client_close_failure_does_not_propagate(
             return_value=mock_server,
         ),
         patch("duo_workflow_service.server.MonitoringInterceptor"),
-        patch("duo_workflow_service.server.connection_pool") as mock_connection_pool,
     ):
-        mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
-        mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
-
         mock_config = create_mock_default_config()
         await serve(mock_config, 50052)
 
@@ -2612,15 +2604,11 @@ async def test_grpc_server_sets_health_status_serving(mock_cloud_connector_ready
             "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
         ),
         patch("duo_workflow_service.server.MonitoringInterceptor"),
-        patch("duo_workflow_service.server.connection_pool") as mock_connection_pool,
         patch(
             "duo_workflow_service.server.health.aio.HealthServicer",
             side_effect=capture_health_servicer,
         ),
     ):
-        mock_connection_pool.__aenter__ = AsyncMock(return_value=mock_connection_pool)
-        mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
-
         mock_config = create_mock_default_config()
         await serve(mock_config, 50052)
 
@@ -2958,15 +2946,7 @@ class TestServeTLS:
                 "duo_workflow_service.server.contract_pb2_grpc.add_DuoWorkflowServicer_to_server"
             ),
             patch("duo_workflow_service.server.MonitoringInterceptor"),
-            patch(
-                "duo_workflow_service.server.connection_pool"
-            ) as mock_connection_pool,
         ):
-            mock_connection_pool.__aenter__ = AsyncMock(
-                return_value=mock_connection_pool
-            )
-            mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
-
             await serve(mock_config, 50052)
 
         mock_server.add_insecure_port.assert_called_once_with("[::]:50052")
@@ -3015,15 +2995,7 @@ class TestServeTLS:
                 return_value=mock_credentials,
             ),
             patch("duo_workflow_service.server.MonitoringInterceptor"),
-            patch(
-                "duo_workflow_service.server.connection_pool"
-            ) as mock_connection_pool,
         ):
-            mock_connection_pool.__aenter__ = AsyncMock(
-                return_value=mock_connection_pool
-            )
-            mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
-
             await serve(mock_config, 50052)
 
         mock_server.add_secure_port.assert_called_once_with(
@@ -3079,15 +3051,7 @@ class TestServeTLS:
                 side_effect=capture_credentials,
             ),
             patch("duo_workflow_service.server.MonitoringInterceptor"),
-            patch(
-                "duo_workflow_service.server.connection_pool"
-            ) as mock_connection_pool,
         ):
-            mock_connection_pool.__aenter__ = AsyncMock(
-                return_value=mock_connection_pool
-            )
-            mock_connection_pool.__aexit__ = AsyncMock(return_value=None)
-
             await serve(mock_config, 50052)
 
         mock_setup_signal_handlers.assert_called_once()

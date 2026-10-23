@@ -11,7 +11,6 @@ import signal
 from itertools import chain
 from typing import Any, AsyncIterable, AsyncIterator, Optional, cast, override
 
-import aiohttp
 import grpc
 import litellm
 import structlog
@@ -74,7 +73,6 @@ from duo_workflow_service.flow_request import (
     normalize_catalog_items,
     normalize_flow_request,
 )
-from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.gitlab.gitlab_api import extract_id_from_global_id
 from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
@@ -210,8 +208,6 @@ _PROPAGATED_EXTRA_CLAIMS = {
 # Defines the limit for metadata/headers sent by the client:
 # https://github.com/grpc/grpc/blob/06f6f5d376a8c7abf067d060a28bf12afb664a7e/include/grpc/impl/channel_arg_names.h#L216C37-L216C59
 # Default is 8KB, we increase it to 24KB
-# Also used to increase the max header size of the HTTP client:
-# https://docs.aiohttp.org/en/stable/client_reference.html
 MAX_METADATA_SIZE = 24 * 1024
 
 WORKFLOW_TASK_NAME_PREFIX = "workflow:"
@@ -1625,98 +1621,89 @@ async def serve(config: Config, port: int) -> None:
     # instrumentation patches the event loop, which is only running by now.
     setup_async_error_tracking()
 
-    connection_pool.set_options(
-        pool_size=100,
-        timeout=aiohttp.ClientTimeout(total=30),
-        max_line_size=MAX_METADATA_SIZE,  # For entire header lines
-        max_field_size=MAX_METADATA_SIZE,  # For individual header values
+    server_options = [
+        ("grpc.keepalive_time_ms", 20 * 1000),
+        ("grpc.http2.min_ping_interval_without_data_ms", 10 * 1000),
+        ("grpc.keepalive_permit_without_calls", 1),
+        ("grpc.so_reuseport", 0),
+        (
+            "grpc.max_receive_message_length",
+            MAX_MESSAGE_SIZE,
+        ),
+        (
+            "grpc.max_send_message_length",
+            MAX_MESSAGE_SIZE,
+        ),
+        (
+            "grpc.max_metadata_size",
+            MAX_METADATA_SIZE,
+        ),
+    ]
+
+    reflection_enabled = (
+        os.environ.get("DUO_WORKFLOW_GRPC_REFLECTION_ENABLED", "false").lower()
+        == "true"
     )
-    async with connection_pool:
-        server_options = [
-            ("grpc.keepalive_time_ms", 20 * 1000),
-            ("grpc.http2.min_ping_interval_without_data_ms", 10 * 1000),
-            ("grpc.keepalive_permit_without_calls", 1),
-            ("grpc.so_reuseport", 0),
-            (
-                "grpc.max_receive_message_length",
-                MAX_MESSAGE_SIZE,
-            ),
-            (
-                "grpc.max_send_message_length",
-                MAX_MESSAGE_SIZE,
-            ),
-            (
-                "grpc.max_metadata_size",
-                MAX_METADATA_SIZE,
-            ),
-        ]
+    server = grpc.aio.server(
+        interceptors=[
+            MetadataContextInterceptor(config),
+            CorrelationIdInterceptor(),
+            RequestMetadataLogInterceptor(),
+            AuthenticationInterceptor(reflection_enabled=reflection_enabled),
+            FeatureFlagInterceptor(),
+            InternalEventsInterceptor(),
+            ModelMetadataInterceptor(),
+            MonitoringInterceptor(),
+        ],
+        options=server_options,
+    )
+    contract_pb2_grpc.add_DuoWorkflowServicer_to_server(DuoWorkflowService(), server)
+    health_servicer = health.aio.HealthServicer()
+    await set_health_status(health_servicer, health_pb2.HealthCheckResponse.SERVING)
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
-        reflection_enabled = (
-            os.environ.get("DUO_WORKFLOW_GRPC_REFLECTION_ENABLED", "false").lower()
-            == "true"
+    duo_workflow_config = config.duo_workflow
+    if duo_workflow_config.tls.enabled:
+        cert_file = duo_workflow_config.tls.cert_file or ""
+        key_file = duo_workflow_config.tls.key_file or ""
+        with open(cert_file, "rb") as f:
+            certificate_chain = f.read()
+        with open(key_file, "rb") as f:
+            private_key = f.read()
+        server_credentials = grpc.ssl_server_credentials(
+            [(private_key, certificate_chain)]
         )
-        server = grpc.aio.server(
-            interceptors=[
-                MetadataContextInterceptor(config),
-                CorrelationIdInterceptor(),
-                RequestMetadataLogInterceptor(),
-                AuthenticationInterceptor(reflection_enabled=reflection_enabled),
-                FeatureFlagInterceptor(),
-                InternalEventsInterceptor(),
-                ModelMetadataInterceptor(),
-                MonitoringInterceptor(),
-            ],
-            options=server_options,
+        server.add_secure_port(f"[::]:{port}", server_credentials)
+        log.info("TLS enabled: gRPC server will use secure port (gRPCS)")
+    else:
+        server.add_insecure_port(f"[::]:{port}")
+    if reflection_enabled:
+        service_names = (
+            contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
+            health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
+            reflection.SERVICE_NAME,
         )
-        contract_pb2_grpc.add_DuoWorkflowServicer_to_server(
-            DuoWorkflowService(), server
-        )
-        health_servicer = health.aio.HealthServicer()
-        await set_health_status(health_servicer, health_pb2.HealthCheckResponse.SERVING)
-        health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+        reflection.enable_server_reflection(service_names, server)
+    log.info("Starting gRPC server on port %d", port)
+    await server.start()
+    log.info("Started server")
 
-        duo_workflow_config = config.duo_workflow
-        if duo_workflow_config.tls.enabled:
-            cert_file = duo_workflow_config.tls.cert_file or ""
-            key_file = duo_workflow_config.tls.key_file or ""
-            with open(cert_file, "rb") as f:
-                certificate_chain = f.read()
-            with open(key_file, "rb") as f:
-                private_key = f.read()
-            server_credentials = grpc.ssl_server_credentials(
-                [(private_key, certificate_chain)]
-            )
-            server.add_secure_port(f"[::]:{port}", server_credentials)
-            log.info("TLS enabled: gRPC server will use secure port (gRPCS)")
-        else:
-            server.add_insecure_port(f"[::]:{port}")
-        if reflection_enabled:
-            service_names = (
-                contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
-                health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
-                reflection.SERVICE_NAME,
-            )
-            reflection.enable_server_reflection(service_names, server)
-        log.info("Starting gRPC server on port %d", port)
-        await server.start()
-        log.info("Started server")
+    # Set up graceful shutdown
+    loop = asyncio.get_running_loop()
+    setup_signal_handlers(server, loop, health_servicer)
 
-        # Set up graceful shutdown
-        loop = asyncio.get_running_loop()
-        setup_signal_handlers(server, loop, health_servicer)
+    await server.wait_for_termination()
+    log.info("Server shutdown complete")
 
-        await server.wait_for_termination()
-        log.info("Server shutdown complete")
-
-        # litellm's exit hook only closes clients in its own cache, not the one
-        # ContainerModels installs. Left open, it is collected at interpreter
-        # teardown, where logging its "Unclosed client session" warning fails.
-        # Best-effort: a failure here must not replace one shutdown traceback
-        # with another.
-        try:
-            await litellm.module_level_aclient.close()
-        except Exception:
-            log.exception("Failed to close litellm module-level client")
+    # litellm's exit hook only closes clients in its own cache, not the one
+    # ContainerModels installs. Left open, it is collected at interpreter
+    # teardown, where logging its "Unclosed client session" warning fails.
+    # Best-effort: a failure here must not replace one shutdown traceback
+    # with another.
+    try:
+        await litellm.module_level_aclient.close()
+    except Exception:
+        log.exception("Failed to close litellm module-level client")
 
 
 def _running_workflow_tasks() -> list[asyncio.Task]:
