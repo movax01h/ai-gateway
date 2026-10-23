@@ -30,7 +30,10 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
-from duo_workflow_service.components.tools_registry import ceiling_exempt_tool_names
+from duo_workflow_service.components.tools_registry import (
+    ToolsRegistry,
+    ceiling_exempt_tool_names,
+)
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -50,7 +53,7 @@ from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     GraphInvocation,
     TraceableException,
-    _nothing_stamped_the_request,
+    _token_issued_by_dws,
 )
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
@@ -2901,7 +2904,6 @@ async def test_compile_and_run_graph_starts_fresh_at_a_pre_run_input_checkpoint(
 @pytest.mark.parametrize(
     ("issuer", "expected"),
     [
-        # Only GenerateToken mints this issuer, and only direct access calls it.
         ("gitlab-duo-workflow-service", True),
         # Rails signs with the instance OIDC issuer; see CloudConnector::Tokens.
         ("https://gitlab.com", False),
@@ -2910,23 +2912,21 @@ async def test_compile_and_run_graph_starts_fresh_at_a_pre_run_input_checkpoint(
     ],
 )
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-def test_nothing_stamped_the_request_keys_on_the_token_issuer(issuer, expected):
+def test_token_issued_by_dws_keys_on_the_token_issuer(issuer, expected):
     user = CloudConnectorUser(
         authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
     )
 
-    assert _nothing_stamped_the_request(user) is expected
+    assert _token_issued_by_dws(user) is expected
 
 
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-def test_nothing_stamped_the_request_is_false_without_claims():
-    assert (
-        _nothing_stamped_the_request(CloudConnectorUser(authenticated=False)) is False
-    )
+def test_token_issued_by_dws_is_false_without_claims():
+    assert _token_issued_by_dws(CloudConnectorUser(authenticated=False)) is False
 
 
 @patch.dict(os.environ, {}, clear=False)
-def test_nothing_stamped_the_request_is_false_when_no_service_name_is_configured():
+def test_token_issued_by_dws_is_false_when_no_service_name_is_configured():
     """Unknown origin must fall back to the field rather than widening the carve-out."""
     user = CloudConnectorUser(
         authenticated=True,
@@ -2941,7 +2941,7 @@ def test_nothing_stamped_the_request_is_false_when_no_service_name_is_configured
             side_effect=NoServiceNameError("not configured")
         )
 
-        assert _nothing_stamped_the_request(user) is False
+        assert _token_issued_by_dws(user) is False
 
 
 def test_self_signed_token_carries_the_service_name_as_issuer():
@@ -2973,8 +2973,7 @@ def test_self_signed_token_carries_the_service_name_as_issuer():
     [("gitlab-duo-workflow-service", True), ("https://gitlab.com", False)],
 )
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-def test_client_injected_is_stamped_when_nothing_else_stamped_it(issuer, expected):
-    """A direct caller controls the field, so the service decides instead of reading it."""
+def test_client_injected_is_forced_on_a_dws_issued_token(issuer, expected):
     workflow = MockWorkflow(
         "id",
         {},
@@ -2992,7 +2991,61 @@ def test_client_injected_is_stamped_when_nothing_else_stamped_it(issuer, expecte
         ],
     )
 
-    assert workflow._mcp_tools[0]["client_injected"] is expected
+    assert workflow._mcp_tools[0]["client_injected"] is expected, (
+        "Workhorse never stamps a request carrying a DWS-issued token, "
+        "so the caller must not be able to claim GitLab origin"
+    )
+
+
+@pytest.mark.parametrize(
+    ("issuer", "expected"),
+    [
+        ("gitlab-duo-workflow-service", set()),
+        ("https://gitlab.com", {"salesforce_get_account"}),
+    ],
+)
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_only_stamped_client_tools_are_preapproved_with_the_flag_on(
+    tool_metadata, issuer, expected
+):
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
+        ),
+        mcp_tools=[
+            contract_pb2.McpTool(
+                name="gitlab_get_issue", description="GitLab tool", inputSchema="{}"
+            ),
+            contract_pb2.McpTool(
+                name="salesforce_get_account",
+                description="Client tool",
+                inputSchema="{}",
+                client_injected=True,
+            ),
+        ],
+    )
+    workflow._workflow_config["allow_client_injected_mcp_tools"] = True
+
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        allow_client_injected_mcp_tools=workflow._allow_client_injected_mcp_tools(),
+        mcp_tools=workflow._mcp_tools,
+    )
+
+    preapproved = {
+        name
+        for name in ("gitlab_get_issue", "salesforce_get_account")
+        if registry.is_preapproved(name)
+    }
+    assert preapproved == expected, (
+        "With the flag on, only client tools Workhorse stamped may skip approval. "
+        "A DWS-issued token is never stamped, so nothing skips it there"
+    )
 
 
 async def _configure_kwargs_for(claim, workflow_config, can_ask=True, issuer=None):
@@ -3120,19 +3173,23 @@ async def test_ceiling_ignores_a_feature_flag_header_without_the_claim(workflow_
 @pytest.mark.parametrize(
     "ceiling,issuer,expected",
     [
-        # Ceiling on and nothing stamped the request: no client-injected exemption.
         (True, "gitlab-duo-workflow-service", False),
-        # Ceiling on and Workhorse stamped the request: the exemption stays.
+        (False, "gitlab-duo-workflow-service", False),
+        (None, "gitlab-duo-workflow-service", False),
         (True, "https://gitlab.com", True),
-        # Ceiling off: unchanged, whatever stamped the request.
-        (False, "gitlab-duo-workflow-service", True),
+        (False, "https://gitlab.com", True),
+        (None, "https://gitlab.com", True),
     ],
 )
-async def test_client_injected_exemption_needs_a_stamped_request_when_the_ceiling_is_on(
+async def test_client_injected_exemption_is_off_on_a_dws_issued_token(
     workflow_config, ceiling, issuer, expected
 ):
-    claim = json.dumps(
-        {"allow": ["read_file"], "ask": [], "deny": [], "ceiling": ceiling}
+    claim = (
+        None
+        if ceiling is None
+        else json.dumps(
+            {"allow": ["read_file"], "ask": [], "deny": [], "ceiling": ceiling}
+        )
     )
 
     kwargs = await _configure_kwargs_for(claim, workflow_config, issuer=issuer)
