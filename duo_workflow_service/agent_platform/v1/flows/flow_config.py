@@ -137,16 +137,18 @@ class FlowConfigMetadata(BaseModel):
 class BaseFlowConfig(BaseModel):
     DIRECTORY_PATH: ClassVar[Path]
 
+    # Feature ``config/`` subdir for this tier: ``None`` = none, ``""`` = v1.
+    FEATURE_CONFIG_SUBDIR: ClassVar[Optional[str]] = None
+
     @classmethod
     def feature_config_roots(cls) -> dict[str, Path]:
-        """Map a flow id to its moved ``config/`` dir.
-
-        Empty unless overridden.
-
-        Returns:
-            A dict mapping each registered flow id to its ``config/`` directory.
-        """
-        return {}
+        subdir = cls.FEATURE_CONFIG_SUBDIR
+        if subdir is None:
+            return {}
+        return {
+            flow_id: config_dir / subdir
+            for flow_id, config_dir in _FEATURE_FLOW_ROOTS.items()
+        }
 
     flow: FlowConfigMetadata
     components: list[dict]
@@ -409,6 +411,7 @@ def list_flow_configs(flow_config_cls: type[BaseFlowConfig]) -> List[dict[str, s
 
 class FlowConfig(BaseFlowConfig):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
+    FEATURE_CONFIG_SUBDIR: ClassVar[Optional[str]] = ""
     environment: Literal["ambient", "chat", "chat-partial"]
     version: Literal["v1"]
     prompts: Optional[list[InMemoryPromptConfig]] = None
@@ -416,10 +419,6 @@ class FlowConfig(BaseFlowConfig):
     # What this flow can pull in from outside. A component claims an entry by
     # repeating it in its `subagents` list; both sides resolve in `bind_catalog_items`.
     include: Optional[list[CatalogItemRef]] = None
-
-    @classmethod
-    def feature_config_roots(cls) -> dict[str, Path]:
-        return dict(_FEATURE_FLOW_ROOTS)
 
     def to_config(self) -> "FlowConfig":
         """Return the complete config the graph builder reads, which a full config already is."""
