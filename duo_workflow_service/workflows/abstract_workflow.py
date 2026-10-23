@@ -151,13 +151,7 @@ def _request_origin_known() -> bool:
     return True
 
 
-def _nothing_stamped_the_request(user: CloudConnectorUser) -> bool:
-    """Whether the caller reached this service with no Workhorse in between.
-
-    Only GenerateToken mints a token this service signs itself, and only the direct-access flow calls it, so that issuer
-    means the start request was never stamped and its client_injected fields cannot be trusted. Workhorse-mediated
-    tokens are issued by the GitLab instance and carry its issuer.
-    """
+def _token_issued_by_dws(user: CloudConnectorUser) -> bool:
     claims = getattr(user, "claims", None)
     if not claims:
         return False
@@ -258,7 +252,7 @@ class AbstractWorkflow(ABC):
         self._additional_context = additional_context
         self._mcp_tools = convert_mcp_tools_to_configs(
             mcp_tools=mcp_tools,
-            force_client_injected=_nothing_stamped_the_request(user),
+            force_client_injected=_token_issued_by_dws(user),
         )
         self._approval = approval
         if approval is not None and approval.HasField("approval"):
@@ -462,11 +456,9 @@ class AbstractWorkflow(ABC):
         allowed = bool(
             self._workflow_config.get("allow_client_injected_mcp_tools", False)
         )
-        # Without a Workhorse stamp every MCP tool counts as client-injected, so with the
-        # ceiling on none of them may skip it. An unknown origin is treated the same way.
-        if self._admin_allowed_preapprovals is not None and (
-            not _request_origin_known() or _nothing_stamped_the_request(self._user)
-        ):
+        if _token_issued_by_dws(self._user):
+            return False
+        if self._admin_allowed_preapprovals is not None and not _request_origin_known():
             return False
         return allowed
 
