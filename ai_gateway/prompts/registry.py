@@ -1,4 +1,5 @@
 import importlib
+import posixpath
 from functools import cache
 from pathlib import Path
 from typing import Any, List, NamedTuple, Optional, Type, cast, override
@@ -20,6 +21,7 @@ from ai_gateway.prompts.config import ModelClassProvider, ModelConfig, PromptCon
 from ai_gateway.prompts.embedding import embedding_prompt_template_factory
 from ai_gateway.prompts.feature_roots import (
     discover_feature_prompts,
+    feature_prompt_aliases,
     feature_prompt_root,
 )
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
@@ -179,17 +181,46 @@ LEGACY_MODEL_MAPPING = {
 }
 
 
+# The feature setting of each prompt that GitLab Rails calls on the prompt routes, and of a few
+# prompts whose ID doesn't name their feature. For a prompt that Rails calls, it is the feature
+# that Rails sends: Rails takes it from the unit primitive of the call, not from the prompt ID, so
+# the chat tools have their own feature settings and `categorize_question` runs on the chat model.
+#
+# - The registry picks the default model of a request without model metadata from this feature.
+#   Without an entry, a prompt whose ID doesn't start with a feature setting fails with "Invalid
+#   feature setting" when model metadata is absent, for example on a self-managed instance with a
+#   configured ai_gateway_url.
+# - ModelConfigMiddleware checks client model metadata on the prompt routes against this feature.
 PROMPT_ID_TO_FEATURE_SETTING: dict[str, str] = {
     "code_suggestions/completions": "code_completions",
     "code_suggestions/generations": "code_generations",
-    # These prompts are called directly via HTTP from Rails (not as DAP graph nodes).
-    # Without this mapping, AIGW cannot resolve a feature setting when model_metadata
-    # is absent, causing "Invalid feature setting" errors on self-managed instances
-    # with a configured ai_gateway_url.
+    "categorize_question": "duo_chat",
+    "chat/build_reader": "duo_chat",
+    "chat/commit_reader": "duo_chat",
+    "chat/documentation_search": "duo_chat",
+    "chat/epic_reader": "duo_chat",
+    "chat/issue_reader": "duo_chat",
+    "chat/merge_request_reader": "duo_chat",
+    "chat/work_item_reader": "duo_chat",
+    "chat/explain_code": "duo_chat_explain_code",
+    "chat/explain_vulnerability": "duo_chat_explain_vulnerability",
+    "chat/fix_code": "duo_chat_fix_code",
+    "chat/refactor_code": "duo_chat_refactor_code",
+    "chat/summarize_comments": "duo_chat_summarize_comments",
+    "chat/troubleshoot_job": "duo_chat_troubleshoot_job",
+    "chat/write_tests": "duo_chat_write_tests",
     "classify_code_review_mention_intent": "duo_agent_platform",
     "generate_session_title": "duo_agent_platform",
     "summarize_duo_workflow": "duo_agent_platform",
+    # The Duo Workflow Service calls this one in-process, not over the prompt routes.
     "classify_goal_tier": "duo_agent_platform",
+    "feature_discovery_search": "feature_discovery_search",
+    "generate_commit_message": "generate_commit_message",
+    "glab_ask_git_command": "glab_ask_git_command",
+    "resolve_vulnerability": "resolve_vulnerability",
+    "review_merge_request": "review_merge_request",
+    "summarize_new_merge_request": "summarize_new_merge_request",
+    "summarize_review": "summarize_review",
 }
 
 
@@ -201,6 +232,20 @@ def feature_setting_for_prompt_id(prompt_id: str) -> str:
 
     # the folder for chat in the definitions doesn't match the feature_setting name
     return "duo_chat" if feature_setting == "chat" else feature_setting
+
+
+def mapped_feature_setting_for_prompt_id(prompt_id: str) -> Optional[str]:
+    """Return the ``PROMPT_ID_TO_FEATURE_SETTING`` entry of the prompt that ``prompt_id`` loads, or None.
+
+    The registry loads one prompt for more than one spelling of its ID. Extra slashes and dot segments
+    collapse in the definitions path, and a prompt under ``ai/features/`` registers as ``<feature>`` and as
+    ``<domain>/<feature>``. The lookup finds the entry for each of these spellings.
+    """
+    normalized = posixpath.normpath(prompt_id)
+    for spelling in (normalized, *feature_prompt_aliases(normalized)):
+        if spelling in PROMPT_ID_TO_FEATURE_SETTING:
+            return PROMPT_ID_TO_FEATURE_SETTING[spelling]
+    return None
 
 
 class PromptRegistered(NamedTuple):
