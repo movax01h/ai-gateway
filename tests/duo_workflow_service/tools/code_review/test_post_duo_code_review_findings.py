@@ -110,7 +110,6 @@ async def test_post_duo_code_review_findings_renders_the_comment_body(
             "new_line": 42,
             "target_code": "  return true",
             "message": (
-                "**[Critical] fail-open**\n\n"
                 "According to custom instructions in 'No fail-open guards': "
                 "Fails open when the check errors."
             ),
