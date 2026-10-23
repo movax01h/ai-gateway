@@ -273,6 +273,20 @@ models:
       model: "claude-fable-5-1"
       max_tokens: 128_000
 
+  - name: "Claude Mythos 5.1"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_mythos_5_1"
+    description: "Claude Mythos 5.1. Restricted to the business logic security flow (model_restrictions.yml)."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    model_class_provider: anthropic
+    requires_paid_credits: true
+    family:
+      - claude
+    params:
+      model: "claude-mythos-5-1"
+      max_tokens: 128_000
+
   - name: "Claude Fable 5.1"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_fable_5_1_vertex"
