@@ -12,6 +12,7 @@ from duo_workflow_service.interceptors.authentication_interceptor import current
 from duo_workflow_service.server import DuoWorkflowService
 from duo_workflow_service.tracking import current_monitoring_context
 from lib.context import gitlab_version
+from lib.feature_flags import FeatureFlag, current_feature_flag_context
 from lib.internal_events.context import EventContext, current_event_context
 from lib.usage_quota import (
     InsufficientEntitlements,
@@ -318,6 +319,45 @@ async def test_usage_quota_event_types_are_correct() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_execute_workflow_runs_quota_check_for_skip_claim_user_with_flag(
+    mock_usage_quota_service,
+    mock_user_with_skip_usage_cutoff,
+    duo_service,
+    mock_context,
+) -> None:
+    """The internal_ai_usage flag turns the skip claim off for ExecuteWorkflow."""
+    from duo_workflow_service.interceptors.route.usage_quota import (
+        has_sufficient_usage_quota,
+    )
+
+    current_user.set(mock_user_with_skip_usage_cutoff)
+    current_feature_flag_context.set({FeatureFlag.INTERNAL_AI_USAGE.value})
+
+    async def inner_impl(*_args, **_kwargs):
+        yield "ok"
+
+    inner_impl.__name__ = "ExecuteWorkflow"
+    inner_impl.__qualname__ = "DuoWorkflowServicer.ExecuteWorkflow"
+
+    decorated = has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)(
+        inner_impl
+    )
+
+    results = [
+        item
+        async for item in decorated(
+            duo_service,
+            mock_request_generator(),
+            mock_context,
+            service=mock_usage_quota_service,
+        )
+    ]
+
+    assert results == ["ok"]
+    mock_usage_quota_service.execute.assert_awaited_once()
+
+
 class TestGenerateTokenVersionBasedQuotaCheck:
     """Tests for version-based usage quota check in GenerateToken."""
 
@@ -502,6 +542,41 @@ class TestGenerateTokenVersionBasedQuotaCheck:
             await decorated(None, generate_token_request, mock_context, service=service)
 
             service.execute.assert_not_called()
+            inner.assert_called_once()
+        finally:
+            current_event_context.reset(event_token)
+            gitlab_version.reset(version_token)
+
+    @pytest.mark.parametrize(
+        "realm,version,expect_quota_check",
+        [
+            ("self-managed", "18.7.0", True),
+            ("saas", "18.7.0", False),  # the version gate still wins
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_skip_user_with_internal_ai_usage_flag(
+        self,
+        mock_context,
+        generate_token_request,
+        decorated_func,
+        mock_user_with_skip_usage_cutoff,
+        realm,
+        version,
+        expect_quota_check,
+    ):
+        """The flag turns the skip claim off, but the realm and version gate still applies."""
+        decorated, inner, service = decorated_func
+        current_user.set(mock_user_with_skip_usage_cutoff)
+        current_feature_flag_context.set({FeatureFlag.INTERNAL_AI_USAGE.value})
+
+        event_token = current_event_context.set(EventContext(realm=realm))
+        version_token = gitlab_version.set(version)
+
+        try:
+            await decorated(None, generate_token_request, mock_context, service=service)
+
+            assert service.execute.called is expect_quota_check
             inner.assert_called_once()
         finally:
             current_event_context.reset(event_token)

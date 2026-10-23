@@ -7,6 +7,7 @@ from duo_workflow_service.interceptors.feature_flag_interceptor import (
     FeatureFlagInterceptor,
     current_feature_flag_context,
 )
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 
 @pytest.fixture(name="reset_context")
@@ -160,3 +161,20 @@ class TestFeatureFlagInterceptor:
         # Assert
         mock_continuation.assert_called_once_with(mock_handler_call_details)
         assert current_feature_flag_context.get() == {"flag1", "flag2"}
+
+    @pytest.mark.asyncio
+    async def test_intercept_service_enables_internal_ai_usage_flag(
+        self, interceptor, mock_handler_call_details
+    ):
+        """The internal_ai_usage metadata value is visible to is_feature_enabled."""
+        mock_handler_call_details.invocation_metadata = [
+            ("x-gitlab-enabled-feature-flags", "internal_ai_usage"),
+        ]
+        seen = []
+
+        async def continuation(_details):
+            seen.append(is_feature_enabled(FeatureFlag.INTERNAL_AI_USAGE))
+
+        await interceptor.intercept_service(continuation, mock_handler_call_details)
+
+        assert seen == [True]

@@ -17,6 +17,7 @@ from ai_gateway.instrumentators.usage_quota import (
 )
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.context import StarletteUser
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import current_event_context
 from lib.usage_quota.errors import (
     UsageQuotaConnectionError,
@@ -63,19 +64,27 @@ class LoggingCachePlugin(BasePlugin):
 def should_skip_usage_quota_for_user(
     user: CloudConnectorUser | StarletteUser | None,
 ) -> bool:
-    skip_usage_quota = (
+    """Return whether the user skips the usage quota.
+
+    The signed `skip_usage_cutoff` claim turns the skip on. The `internal_ai_usage`
+    feature flag can only turn it off, so the unsigned flag header never grants a skip.
+    """
+    has_skip_claim = (
         user
         and user.claims
         and user.claims.extra
         # Returns the value of SKIP_USAGE_CUTOFF_CLAIM or False if it's omitted
         and user.claims.extra.get(SKIP_USAGE_CUTOFF_CLAIM, False)
     )
+    internal_ai_usage = is_feature_enabled(FeatureFlag.INTERNAL_AI_USAGE)
+    skip_usage_quota = bool(has_skip_claim) and not internal_ai_usage
     log.info(
         "Usage quota skip check",
-        skip_usage_quota=bool(skip_usage_quota),
+        skip_usage_quota=skip_usage_quota,
+        internal_ai_usage=internal_ai_usage,
         global_user_id=(getattr(user, "global_user_id", None) if user else None),
     )
-    return bool(skip_usage_quota)
+    return skip_usage_quota
 
 
 def _parse_max_age(headers: httpx.Headers) -> int | None:

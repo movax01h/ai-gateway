@@ -8,6 +8,7 @@ from pydantic import SecretStr
 from snowplow_tracker import SelfDescribingJson, Snowplow
 
 from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.feature_flags import FeatureFlag, current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import (
     EventContext,
@@ -369,6 +370,40 @@ class TestBillingEventsClient:
         assert context.data["metadata"] == expected_metadata
 
         # The same enriched metadata is forwarded to the internal event client
+        client.internal_event_client.track_event.assert_called_once_with(
+            event_name="usage_billing_event",
+            category=__name__,
+            additional_properties=InternalEventAdditionalProperties(
+                property=BillingEvent.AIGW_PROXY_USE.value,
+                label="12345678-1234-5678-9012-123456789012",
+                metadata=expected_metadata,
+            ),
+        )
+
+    def test_track_billing_event_team_member_false_with_internal_ai_usage_flag(
+        self, client, mock_dependencies
+    ):
+        """The internal_ai_usage flag turns the skip claim off in billing metadata."""
+        current_event_context.set(EventContext())
+        current_feature_flag_context.set({FeatureFlag.INTERNAL_AI_USAGE.value})
+
+        client.track_billing_event(
+            user=CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}),
+            ),
+            event=BillingEvent.AIGW_PROXY_USE,
+            category=__name__,
+            unit_of_measure="tokens",
+            quantity=100.0,
+            metadata={"model": "claude-3"},
+        )
+
+        expected_metadata = {"model": "claude-3", "is_gitlab_team_member": False}
+        event_init_args = mock_dependencies["structured_event_init"].call_args[1]
+        context = event_init_args["context"][0]
+        assert context.data["metadata"] == expected_metadata
+
         client.internal_event_client.track_event.assert_called_once_with(
             event_name="usage_billing_event",
             category=__name__,

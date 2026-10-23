@@ -8,6 +8,7 @@ from starlette.responses import JSONResponse
 
 from ai_gateway.api.middleware.route.usage_quota import has_sufficient_usage_quota
 from lib.events import FeatureQualifiedNameStatic
+from lib.feature_flags import FeatureFlag, current_feature_flag_context
 from lib.usage_quota import (
     InsufficientCredits,
     InsufficientEntitlements,
@@ -508,3 +509,41 @@ class TestModelNameParameter:
         call_args = mock_usage_quota_service.execute.call_args
         model_metadata = call_args[1]["model_metadata"]
         assert model_metadata is None
+
+
+class TestInternalAiUsageFlag:
+    """Tests that the `internal_ai_usage` flag turns the skip claim off."""
+
+    @pytest.fixture(name="decorated")
+    def decorated_fixture(self, mock_request, mock_user_with_skip_usage_cutoff):
+        mock_request.user = mock_user_with_skip_usage_cutoff
+        current_feature_flag_context.set({FeatureFlag.INTERNAL_AI_USAGE.value})
+
+        async def test_handler(_request, *_args, **_kwargs):
+            return JSONResponse({"status": "ok"})
+
+        return has_sufficient_usage_quota(
+            feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
+            event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+        )(test_handler)
+
+    @pytest.mark.asyncio
+    async def test_decorator_runs_quota_check_for_skip_claim_user_with_flag(
+        self, decorated, mock_request, mock_usage_quota_service
+    ):
+        response = await decorated(mock_request)
+
+        mock_usage_quota_service.execute.assert_awaited_once()
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_decorator_returns_402_for_skip_claim_user_with_flag(
+        self, decorated, mock_request, mock_usage_quota_service
+    ):
+        mock_usage_quota_service.execute = AsyncMock(
+            side_effect=InsufficientCredits("Insufficient credits")
+        )
+
+        response = await decorated(mock_request)
+
+        assert response.status_code == 402
