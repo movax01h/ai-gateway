@@ -44,12 +44,12 @@
                     "category": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "Short kebab-case slug for the issue TYPE, e.g. `sql-injection`, `layer-violation`, `missing-test`, `fail-open`. Rendered into the comment header and the summary breakdown, so prefer an established slug over inventing a near-synonym of one."
+                        "description": "Short kebab-case slug for the issue TYPE, e.g. `sql-injection`, `layer-violation`, `missing-test`, `fail-open`. Shown on the comment and in the summary breakdown, so prefer an established slug over inventing a near-synonym of one."
                     },
                     "message": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "The finding as one short markdown paragraph. Open with what breaks and when, then explain why. Use short sentences in plain words, and backticks only for code the reader would search for or copy. When something is still open, end with one direct question to the author. Leave out the severity and category: they render into the comment header automatically."
+                        "description": "The finding as one short markdown paragraph. Open with what breaks and when, then explain why. Use short sentences in plain words, and backticks only for code the reader would search for or copy. When something is still open, end with one direct question to the author. Leave out the severity and category: they are shown with the comment automatically."
                     },
                     "suggestion": {
                         "type": "string",

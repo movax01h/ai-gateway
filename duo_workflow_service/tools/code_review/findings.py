@@ -24,7 +24,6 @@ __all__ = [
     "attribute_message",
     "build_review_payload",
     "build_summary",
-    "render_message",
     "render_posted_finding",
     "render_previous_findings",
     "render_structured_finding",
@@ -268,25 +267,15 @@ def anchor_fields(finding: Dict[str, Any]) -> Dict[str, Any]:
     return anchors
 
 
-def render_message(finding: Dict[str, Any]) -> str:
-    """Render one finding's merge request comment body: a severity header, then the attributed message."""
-    severity = finding.get("severity") or ""
-    category = finding.get("category") or ""
-    lines = []
-    if severity or category:
-        header = f"[{severity.capitalize()}] {category}" if severity else category
-        lines.append(f"**{header.strip()}**")
-        lines.append("")
-    lines.append(attribute_message(finding))
-    return "\n".join(lines)
-
-
 def render_posted_finding(finding: Dict[str, Any]) -> Dict[str, Any]:
-    """Shape one finding for the review endpoint: only what it anchors, renders or counts with."""
+    """Shape one finding for the review endpoint: only what it anchors, renders or counts with.
+
+    The message carries no severity header: the monolith stores severity and category and shows them on the comment.
+    """
     return {
         "file": finding.get("file", ""),
         "new_line": finding.get("new_line"),
-        "message": render_message(finding),
+        "message": attribute_message(finding),
         "target_code": finding.get("target_code", ""),
         "severity": finding.get("severity"),
         "category": finding.get("category"),
@@ -298,8 +287,8 @@ def render_posted_finding(finding: Dict[str, Any]) -> Dict[str, Any]:
 def render_structured_finding(finding: Dict[str, Any]) -> Dict[str, Any]:
     """Shape one finding for a client that renders it: every schema field, the message attributed.
 
-    Severity and category stay structured fields rather than a rendered header, so a client groups and labels without
-    parsing prose. The anchor rules are the posting path's, so the two payloads agree on where a finding points.
+    Severity and category stay structured fields, so a client groups and labels without parsing prose. The anchor
+    rules are the posting path's, so the two payloads agree on where a finding points.
     """
     rendered = {k: v for k, v in finding.items() if k not in _ANCHOR_KEYS}
     rendered["message"] = attribute_message(finding)
@@ -314,9 +303,9 @@ def build_review_payload(
 ) -> Dict[str, Any]:
     """Shape the selected findings into the JSON document the review endpoint parses.
 
-    Only the fields the endpoint anchors, renders or counts with are sent. The message is rendered here so the severity
-    header and custom-instruction attribution are decided in one place; code travels verbatim. Severity and category
-    travel as fields so the endpoint can use them without parsing the message.
+    Only the fields the endpoint anchors, renders or counts with are sent. Custom-instruction attribution is decided
+    here, where the message is rendered, so it lives in one place; code travels verbatim. Severity and category travel
+    as fields so the endpoint can use them without parsing the message.
 
     A rendered previous-findings list joins the summary when there are comments to post. With none, it travels on its
     own so the endpoint can introduce it as the outcome of a re-review rather than as a clean first review.
