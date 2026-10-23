@@ -12,4 +12,6 @@
 #   restricted_models:
 #     - identifier: <gitlab_identifier>
 #       feature_settings: [<feature setting>, ...]
-restricted_models: []
+restricted_models:
+  - identifier: claude_mythos_5_1
+    feature_settings: [bl_security]
