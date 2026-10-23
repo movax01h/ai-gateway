@@ -7,9 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from structlog.testing import capture_logs
 
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.context import StarletteUser
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.usage_quota.client import (
     JITTER_FACTOR,
     SKIP_USAGE_CUTOFF_CLAIM,
@@ -122,6 +124,66 @@ def test_should_skip_usage_quota_for_user(user, expected):
         assert result is True
     else:
         assert not result
+
+
+_TEAM_MEMBER = CloudConnectorUser(
+    authenticated=True,
+    claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: True}),
+)
+
+
+@pytest.mark.parametrize(
+    "user,enabled_flags,expected",
+    [
+        # truthy claim, pilot flag on - quota applies
+        (_TEAM_MEMBER, {FeatureFlag.INTERNAL_AI_USAGE}, False),
+        # truthy claim, pilot flag off - bypass as before
+        (_TEAM_MEMBER, set(), True),
+        # falsy claim, pilot flag off - quota applies
+        (
+            CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(extra={SKIP_USAGE_CUTOFF_CLAIM: False}),
+            ),
+            set(),
+            False,
+        ),
+        # no claim, pilot flag on - the flag never grants a bypass
+        (
+            CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(extra={"other_claim": "value"}),
+            ),
+            {FeatureFlag.INTERNAL_AI_USAGE},
+            False,
+        ),
+        (StarletteUser(_TEAM_MEMBER), {FeatureFlag.INTERNAL_AI_USAGE}, False),
+        (None, {FeatureFlag.INTERNAL_AI_USAGE}, False),
+        # Unrelated flags do not affect the bypass
+        (
+            _TEAM_MEMBER,
+            {FeatureFlag.EXPANDED_AI_LOGGING, FeatureFlag.DAP_TOOL_IMAGE_INPUT},
+            True,
+        ),
+    ],
+)
+def test_should_skip_usage_quota_for_user_internal_ai_usage(
+    user, enabled_flags, expected
+):
+    current_feature_flag_context.set({str(flag) for flag in enabled_flags})
+
+    assert should_skip_usage_quota_for_user(user) is expected
+
+
+def test_should_skip_usage_quota_for_user_logs_internal_ai_usage():
+    current_feature_flag_context.set({FeatureFlag.INTERNAL_AI_USAGE.value})
+
+    with capture_logs() as logs:
+        should_skip_usage_quota_for_user(_TEAM_MEMBER)
+
+    entry = next(log for log in logs if log["event"] == "Usage quota skip check")
+    assert entry["internal_ai_usage"] is True
+    assert entry["skip_usage_quota"] is False
 
 
 class TestCheckQuotaAvailable:
