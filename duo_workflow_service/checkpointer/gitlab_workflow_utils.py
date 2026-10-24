@@ -148,6 +148,24 @@ TERMINAL_WORKFLOW_STATUS_EVENTS = frozenset(
     ]
 )
 
+# Maps each billable status event, as sent to Rails, to the Rails workflow
+# status it transitions the session to. `GitLabWorkflow._handle_completion` uses
+# it to trust the locally cached last status event instead of re-reading the
+# status from Rails, which may not reflect the transition yet (read-after-write
+# race). The lookup key is the Rails-translated event
+# (`status_projection.rails_status_event`), not the raw cached one, so IDLE only
+# maps to IDLE on an instance that accepts the `idle` status event.
+BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS: dict[
+    WorkflowStatusEventEnum, WorkflowStatusEnum
+] = {
+    WorkflowStatusEventEnum.FINISH: WorkflowStatusEnum.FINISHED,
+    WorkflowStatusEventEnum.STOP: WorkflowStatusEnum.STOPPED,
+    WorkflowStatusEventEnum.REQUIRE_INPUT: WorkflowStatusEnum.INPUT_REQUIRED,
+    WorkflowStatusEventEnum.IDLE: WorkflowStatusEnum.IDLE,
+    WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+    WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL: WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+}
+
 # Maps WorkflowStatus(status key in LangGraph's WorkflowState) to checkpoint status.
 # Checkpoint status represents status human-readable workflow status (displayed in the UI)
 WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
