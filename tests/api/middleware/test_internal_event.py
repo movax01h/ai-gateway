@@ -35,35 +35,13 @@ from lib.internal_events import EventContext
 @pytest.fixture(name="internal_event_middleware")
 def internal_event_middleware_fixture(mock_app):
     return InternalEventMiddleware(
-        mock_app, skip_endpoints=["/health"], enabled=True, environment="test"
+        mock_app, skip_endpoints=["/health"], environment="test"
     )
 
 
 @pytest.mark.asyncio
 async def test_middleware_non_http_request(internal_event_middleware):
     scope = {"type": "websocket"}
-    receive = AsyncMock()
-    send = AsyncMock()
-
-    with (
-        request_cycle_context({}),
-        patch(
-            "ai_gateway.api.middleware.internal_event.current_event_context"
-        ) as mock_event_context,
-    ):
-        await internal_event_middleware(scope, receive, send)
-        mock_event_context.set.assert_not_called()
-
-    internal_event_middleware.app.assert_called_once_with(scope, receive, send)
-
-
-@pytest.mark.asyncio
-async def test_middleware_disabled(mock_app):
-    internal_event_middleware = InternalEventMiddleware(
-        mock_app, skip_endpoints=[], enabled=False, environment="test"
-    )
-    request = Request({"type": "http"})
-    scope = request.scope
     receive = AsyncMock()
     send = AsyncMock()
 

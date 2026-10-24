@@ -287,14 +287,18 @@ def test_middleware_log_request(fastapi_server_app: FastAPI):
 
 
 @pytest.mark.usefixtures("fastapi_server_app")
+# The context must be built even when events are off: the proxy reads
+# it on every request (#3222). internal_event.enabled only gates
+# sending, in track_event.
+@pytest.mark.parametrize("internal_events_enabled", [True, False])
 @pytest.mark.parametrize(
     "test_path,expected", [("/v2/chat/agent", True), ("/monitoring/healthz", False)]
 )
-def test_middleware_internal_event(test_path, expected):
+def test_middleware_internal_event(test_path, expected, internal_events_enabled):
     config = Config(
         _env_file=None,
         auth=ConfigAuth(bypass_external=True),
-        internal_event=ConfigInternalEvent(enabled=True),
+        internal_event=ConfigInternalEvent(enabled=internal_events_enabled),
     )
     app = create_fast_api_server(config)
     client = TestClient(app)

@@ -46,14 +46,13 @@ from lib.jwt import (
 
 
 class InternalEventMiddleware:
-    def __init__(self, app, skip_endpoints, enabled, environment):
+    def __init__(self, app, skip_endpoints, environment):
         self.app = app
-        self.enabled = enabled
         self.environment = environment
         self.path_resolver = _PathResolver.from_optional_list(skip_endpoints)
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not self.enabled:
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 

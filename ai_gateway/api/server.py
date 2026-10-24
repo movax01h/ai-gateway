@@ -185,7 +185,6 @@ def create_fast_api_server(config: Config):
             Middleware(
                 InternalEventMiddleware,
                 skip_endpoints=_SKIP_ENDPOINTS,
-                enabled=config.internal_event.enabled,
                 environment=config.environment,
             ),
             Middleware(ModelConfigMiddleware),

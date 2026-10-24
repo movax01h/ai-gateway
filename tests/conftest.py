@@ -98,9 +98,7 @@ def test_client_fixture(fast_api_router, stub_auth_provider):
         Middleware(RawContextMiddleware),
         Middleware(AccessLogMiddleware, skip_endpoints=[]),
         MiddlewareAuthentication(stub_auth_provider, False, None),
-        Middleware(
-            InternalEventMiddleware, skip_endpoints=[], enabled=True, environment="test"
-        ),
+        Middleware(InternalEventMiddleware, skip_endpoints=[], environment="test"),
         Middleware(ModelConfigMiddleware),
     ]
     app = FastAPI(middleware=middlewares)
