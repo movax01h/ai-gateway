@@ -2980,10 +2980,10 @@ class TestAgentComponentMaxWrapUpRetries:
 class TestAgentComponentIdenticalToolCallLimit:
     """Test suite for AgentComponentBase identical_tool_call_limit field and validator."""
 
-    def test_identical_tool_call_limit_default_is_zero(self, make_agent_component):
-        """identical_tool_call_limit defaults to 0, which disables the loop guard."""
+    def test_identical_tool_call_limit_default_is_three(self, make_agent_component):
+        """identical_tool_call_limit defaults to 3, enabling the loop guard by default."""
         component = make_agent_component()
-        assert component.identical_tool_call_limit == 0
+        assert component.identical_tool_call_limit == 3
 
     @pytest.mark.parametrize("identical_tool_call_limit", [0, 3, 10])
     def test_identical_tool_call_limit_valid_values(
