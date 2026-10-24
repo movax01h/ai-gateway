@@ -36,6 +36,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     _serialize_channel_blobs,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS,
     compress_checkpoint,
     uncompress_checkpoint,
 )
@@ -55,6 +56,7 @@ from duo_workflow_service.gitlab.http_client import (
 )
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.json_encoder.encoder import CustomEncoder
+from duo_workflow_service.status_projection import IDLE_STATUS_EVENT_CAPABILITY
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     UnsupportedStatusEvent,
 )
@@ -2620,6 +2622,293 @@ async def test_handle_completion_finish_error_swallowed_when_not_reraising(
     assert mock_log_exception.call_args[1]["extra"]["workflow_id"] == workflow_id
 
 
+@pytest.fixture(name="declare_capabilities")
+def declare_capabilities_fixture():
+    """Patch ``status_projection.is_client_capable`` so only the given capability names are declared."""
+    with patch(
+        "duo_workflow_service.status_projection.is_client_capable"
+    ) as is_client_capable:
+
+        def _declare(*names: str):
+            is_client_capable.side_effect = lambda capability: capability in names
+
+        _declare()
+        yield _declare
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terminal_event,capabilities,expected_status",
+    [
+        pytest.param(WorkflowStatusEventEnum.FINISH, (), "finished", id="finish"),
+        pytest.param(WorkflowStatusEventEnum.STOP, (), "stopped", id="stop"),
+        pytest.param(
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            (),
+            "input_required",
+            id="require_input",
+        ),
+        pytest.param(
+            WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+            (),
+            "plan_approval_required",
+            id="require_plan_approval",
+        ),
+        pytest.param(
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+            (),
+            "tool_call_approval_required",
+            id="require_tool_call_approval",
+        ),
+        # IDLE reaches Rails as IDLE only on an instance that accepts it ...
+        pytest.param(
+            WorkflowStatusEventEnum.IDLE,
+            (IDLE_STATUS_EVENT_CAPABILITY,),
+            "idle",
+            id="idle_on_instance_accepting_idle",
+        ),
+        # ... and as REQUIRE_INPUT otherwise, so Rails records input_required.
+        pytest.param(
+            WorkflowStatusEventEnum.IDLE,
+            (),
+            "input_required",
+            id="idle_on_older_instance",
+        ),
+    ],
+)
+async def test_handle_completion_prefers_cached_terminal_status(
+    gitlab_workflow, declare_capabilities, terminal_event, capabilities, expected_status
+):
+    """When _last_status_event ends or pauses the session in a billable Rails status, _handle_completion uses the
+    workflow status it maps to instead of the remote Rails status for _track_workflow_completion.
+
+    This avoids a race where Rails has not yet reflected the transition that this instance already sent (or attempted to
+    send). The cached event is translated to the event Rails received first, so the status matches what Rails recorded.
+    """
+    declare_capabilities(*capabilities)
+    status_handler = AsyncMock()
+    # Rails returns a stale non-terminal status
+    status_handler.get_workflow_status.return_value = "running"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = False
+    gitlab_workflow._last_status_event = terminal_event
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion") as mock_track:
+        await gitlab_workflow._handle_completion()
+
+    # The mapped terminal workflow status must be used and the remote lookup skipped
+    status_handler.get_workflow_status.assert_not_called()
+    mock_track.assert_awaited_once_with(expected_status, None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "non_billable_event",
+    [
+        WorkflowStatusEventEnum.START,
+        WorkflowStatusEventEnum.RESUME,
+        WorkflowStatusEventEnum.PAUSE,
+        WorkflowStatusEventEnum.RETRY,
+        WorkflowStatusEventEnum.STOP_RECOVERY,
+        # DROP is terminal (in TERMINAL_WORKFLOW_STATUS_EVENTS) but deliberately
+        # not billable, so it must not be trusted from the cache either.
+        WorkflowStatusEventEnum.DROP,
+    ],
+    ids=["start", "resume", "pause", "retry", "stop_recovery", "drop"],
+)
+async def test_handle_completion_uses_remote_status_for_non_billable_cached_event(
+    gitlab_workflow, declare_capabilities, non_billable_event
+):
+    """When _last_status_event does not map to a billable Rails status (including the terminal DROP event),
+    _handle_completion falls through to the remote Rails status returned by get_workflow_status."""
+    assert non_billable_event not in BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS
+    # The IDLE capability does not change the translation of any of these events
+    # (STOP_RECOVERY is still sent as RETRY), so they stay non-billable.
+    declare_capabilities(IDLE_STATUS_EVENT_CAPABILITY)
+
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "input_required"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = False
+    gitlab_workflow._last_status_event = non_billable_event
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion") as mock_track:
+        await gitlab_workflow._handle_completion()
+
+    # The remote status must be used, not the cached non-billable event
+    status_handler.get_workflow_status.assert_awaited_once_with(
+        workflow_id=gitlab_workflow._workflow_id
+    )
+    mock_track.assert_awaited_once_with("input_required", None, None)
+
+
+@pytest.mark.asyncio
+async def test_handle_completion_uses_remote_status_when_no_cached_event(
+    gitlab_workflow,
+):
+    """When _last_status_event is None (no status update attempted yet), _handle_completion uses the remote Rails
+    status."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = "finished"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = False
+    gitlab_workflow._last_status_event = None
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion") as mock_track:
+        await gitlab_workflow._handle_completion()
+
+    status_handler.get_workflow_status.assert_awaited_once_with(
+        workflow_id=gitlab_workflow._workflow_id
+    )
+    mock_track.assert_awaited_once_with("finished", None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_llm_operations")
+@pytest.mark.parametrize(
+    "terminal_event,capabilities,expected_event,expected_property,expect_session_summary",
+    [
+        pytest.param(
+            WorkflowStatusEventEnum.FINISH,
+            (),
+            EventEnum.WORKFLOW_FINISH_SUCCESS,
+            EventPropertyEnum.WORKFLOW_COMPLETED,
+            True,
+            id="finish",
+        ),
+        pytest.param(
+            WorkflowStatusEventEnum.STOP,
+            (),
+            EventEnum.WORKFLOW_FINISH_SUCCESS,
+            EventPropertyEnum.CANCELLED_BY_USER,
+            True,
+            id="stop",
+        ),
+        pytest.param(
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            (),
+            EventEnum.WORKFLOW_PAUSE,
+            EventPropertyEnum.WORKFLOW_PAUSE_BY_PLAN_AWAIT_INPUT,
+            False,
+            id="require_input",
+        ),
+        pytest.param(
+            WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
+            (),
+            EventEnum.WORKFLOW_PAUSE,
+            EventPropertyEnum.WORKFLOW_PAUSE_BY_PLAN_AWAIT_APPROVAL,
+            False,
+            id="require_plan_approval",
+        ),
+        pytest.param(
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+            (),
+            None,
+            None,
+            False,
+            id="require_tool_call_approval",
+        ),
+        # IDLE is at rest (pause event) but ends a whole turn, so the session
+        # summary fires too.
+        pytest.param(
+            WorkflowStatusEventEnum.IDLE,
+            (IDLE_STATUS_EVENT_CAPABILITY,),
+            EventEnum.WORKFLOW_PAUSE,
+            EventPropertyEnum.WORKFLOW_PAUSE_BY_PLAN_AWAIT_INPUT,
+            True,
+            id="idle_on_instance_accepting_idle",
+        ),
+        # An older instance records input_required for IDLE: a pause, so no
+        # session summary, matching what the Rails status lookup would give.
+        pytest.param(
+            WorkflowStatusEventEnum.IDLE,
+            (),
+            EventEnum.WORKFLOW_PAUSE,
+            EventPropertyEnum.WORKFLOW_PAUSE_BY_PLAN_AWAIT_INPUT,
+            False,
+            id="idle_on_older_instance",
+        ),
+    ],
+)
+async def test_handle_completion_cached_terminal_status_end_to_end(
+    gitlab_workflow,
+    internal_event_client: Mock,
+    billing_event_service,
+    billing_event_client,
+    mock_user,
+    declare_capabilities,
+    terminal_event,
+    capabilities,
+    expected_event,
+    expected_property,
+    expect_session_summary,
+):
+    """Runs the real _track_workflow_completion on the status mapped from the cached terminal event.
+
+    Unlike the mocked variants above, this exercises the comparisons inside _track_workflow_completion
+    (BILLABLE_STATUSES membership, the session-summary gate, the finished/stopped checks and the pause-status checks),
+    so a mapped value of the wrong type or value fails here instead of silently skipping billing or the completion
+    event.
+    """
+    declare_capabilities(*capabilities)
+    current_user.set(mock_user)
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._billing_event_service = billing_event_service
+    status_handler = AsyncMock()
+    # Rails returns a stale non-terminal status, which would bill nothing
+    status_handler.get_workflow_status.return_value = "running"
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._pending_finish = False
+    gitlab_workflow._last_status_event = terminal_event
+    # A tool call gives the tool-loop session summary something to report.
+    init_tool_loop_counters()
+    record_tool_calls([("read_file", {"path": "a.py"}, "body")])
+
+    with capture_logs() as cap_logs:
+        await gitlab_workflow._handle_completion()
+
+    status_handler.get_workflow_status.assert_not_called()
+
+    # Every cached event in this table is billable.
+    billing_event_client.track_billing_event.assert_called_once()
+    assert (
+        billing_event_client.track_billing_event.call_args.args[1]
+        == BillingEvent.DAP_FLOW_ON_COMPLETION
+    )
+
+    tracked_event_names = [
+        c.kwargs["event_name"] for c in internal_event_client.track_event.call_args_list
+    ]
+    assert tracked_event_names.count(
+        EventEnum.WORKFLOW_TOOL_LOOP_SESSION_SUMMARY.value
+    ) == (1 if expect_session_summary else 0)
+
+    completion_events = [
+        c.kwargs
+        for c in internal_event_client.track_event.call_args_list
+        if c.kwargs["event_name"]
+        in (EventEnum.WORKFLOW_FINISH_SUCCESS.value, EventEnum.WORKFLOW_PAUSE.value)
+    ]
+    if expected_event is None:
+        assert completion_events == []
+    else:
+        assert len(completion_events) == 1
+        assert completion_events[0]["event_name"] == expected_event.value
+        assert (
+            completion_events[0]["additional_properties"].property
+            == expected_property.value
+        )
+
+    stopped_warnings = [
+        log
+        for log in cap_logs
+        if log["event"] == "Marking session successful because it's stopped"
+    ]
+    assert len(stopped_warnings) == (
+        1 if terminal_event == WorkflowStatusEventEnum.STOP else 0
+    )
+
+
 @pytest.mark.asyncio
 async def test_aexit_clean_exit_propagates_completion_error(gitlab_workflow):
     """On a clean exit there is no original exception to preserve, so a completion failure must surface rather than
@@ -2640,16 +2929,35 @@ async def test_aexit_exception_exit_swallows_completion_error(gitlab_workflow):
     status_handler.get_workflow_status.side_effect = RuntimeError("status fetch failed")
     gitlab_workflow._status_handler = status_handler
 
-    with patch(
-        "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
-    ) as mock_log_exception:
+    with (
+        patch(
+            "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
+        ) as mock_log_exception,
+        # The mock replaces _update_workflow_status_safely entirely, so
+        # _update_workflow_status never runs and _last_status_event stays
+        # None.  That None reflects this test double, not the real failure
+        # path: production _update_workflow_status caches the event before
+        # the Rails call, so a failed DROP update still leaves DROP cached
+        # (DROP is not billable, so completion still looks up Rails).  The
+        # completion path therefore falls through to the remote status
+        # lookup, which also fails.  The mock returns False like the real
+        # method always does.
+        patch.object(
+            gitlab_workflow,
+            "_update_workflow_status_safely",
+            return_value=False,
+        ) as mock_update_safely,
+    ):
         suppressed = await gitlab_workflow.__aexit__(
             ValueError, ValueError("graph blew up"), None
         )
 
     assert not suppressed
-    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
-    assert WorkflowStatusEventEnum.DROP in calls
+    mock_update_safely.assert_awaited_once_with(WorkflowStatusEventEnum.DROP)
+    assert gitlab_workflow._last_status_event is None
+    status_handler.get_workflow_status.assert_awaited_once_with(
+        workflow_id=gitlab_workflow._workflow_id
+    )
     logged = [c[0][0] for c in mock_log_exception.call_args_list]
     assert any(
         isinstance(e, RuntimeError) and str(e) == "status fetch failed" for e in logged
@@ -6182,6 +6490,48 @@ async def test_update_workflow_status_translates_stop_recovery_to_retry(
     gitlab_workflow._status_handler.update_workflow_status.assert_called_once_with(
         workflow_id, expected_rails_event
     )
+
+
+def test_last_status_event_defaults_to_none(gitlab_workflow):
+    assert gitlab_workflow._last_status_event is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status_event",
+    [
+        WorkflowStatusEventEnum.START,
+        WorkflowStatusEventEnum.RESUME,
+        WorkflowStatusEventEnum.FINISH,
+        WorkflowStatusEventEnum.DROP,
+        WorkflowStatusEventEnum.STOP,
+        WorkflowStatusEventEnum.STOP_RECOVERY,
+    ],
+    ids=["start", "resume", "finish", "drop", "stop", "stop_recovery"],
+)
+async def test_update_workflow_status_caches_last_status_event(
+    gitlab_workflow, status_event
+):
+    gitlab_workflow._status_handler = AsyncMock()
+
+    await gitlab_workflow._update_workflow_status(status_event)
+
+    # The internal status event is cached untranslated (e.g. STOP_RECOVERY, not
+    # the RETRY it is translated to for Rails).
+    assert gitlab_workflow._last_status_event == status_event
+
+
+@pytest.mark.asyncio
+async def test_update_workflow_status_caches_status_in_offline_mode(
+    gitlab_workflow,
+):
+    gitlab_workflow._offline_mode = True
+    gitlab_workflow._status_handler = AsyncMock()
+
+    await gitlab_workflow._update_workflow_status(WorkflowStatusEventEnum.PAUSE)
+
+    gitlab_workflow._status_handler.update_workflow_status.assert_not_called()
+    assert gitlab_workflow._last_status_event == WorkflowStatusEventEnum.PAUSE
 
 
 @pytest.mark.asyncio

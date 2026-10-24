@@ -53,6 +53,7 @@ from duo_workflow_service.checkpointer.entry_dispatch import (
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     AT_REST_STATUSES,
+    BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS,
     BILLABLE_STATUSES,
     CHECKPOINT_STATUS_TO_STATUS_EVENT,
     NOOP_WORKFLOW_STATUSES,
@@ -471,6 +472,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._deferred_statuses: dict[
             WorkflowStatusEventEnum, tuple[_FlushPoint, str | None]
         ] = {}
+        # The last status event passed to `_update_workflow_status`, cached
+        # untranslated: `rails_status_event` maps it to what Rails receives.
+        self._last_status_event: Optional[WorkflowStatusEventEnum] = None
         self.serde = CheckpointSerializer()
         # Delta state per checkpoint namespace, in least-recently-used order: one
         # checkpointer serves the top-level graph and every nested run it dispatches.
@@ -519,6 +523,8 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         return
 
     async def _update_workflow_status(self, status: WorkflowStatusEventEnum) -> None:
+        self._last_status_event = status
+
         if self._offline_mode:
             return
 
@@ -1033,9 +1039,24 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 await self._flush_deferred_statuses(_FlushPoint.ON_COMPLETION)
                 await self._flush_deferred_statuses(_FlushPoint.ON_NEXT_CHECKPOINT)
 
-            status = await self._status_handler.get_workflow_status(
-                workflow_id=self._workflow_id
-            )
+            # Prefer the locally cached last status event whenever it ends or
+            # pauses the session in a billable Rails status, translated to the
+            # workflow status it transitions the session to, over a remote Rails
+            # status that may not reflect the transition yet. The cached event is
+            # first translated to the event Rails actually received (e.g. IDLE is
+            # sent as REQUIRE_INPUT to an instance that does not accept IDLE), so
+            # the completion status matches what Rails recorded.
+            status: str | None = None
+            if self._last_status_event is not None:
+                status = BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS.get(
+                    rails_status_event(self._last_status_event)
+                )
+
+            if status is None:
+                status = await self._status_handler.get_workflow_status(
+                    workflow_id=self._workflow_id
+                )
+
             await self._track_workflow_completion(status, exc_type, exc_value)
         except Exception as finish_error:
             if reraise_errors:
