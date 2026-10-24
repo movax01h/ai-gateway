@@ -819,7 +819,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     ) -> Optional[list]:
         """Return a history to retry with, or let the error handler wait or raise."""
         message = str(error)
-        status_code = error.response.status_code
+        status_code = error.status_code
         recovered = self._without_rejected_images(
             history, status_code, message, image_limit_retries
         )

@@ -390,6 +390,16 @@ class TestAgentNode:
                 "litellm.ServiceUnavailableError: Service temporarily unavailable",
                 id="litellm_service_unavailable",
             ),
+            pytest.param(
+                lambda: litellm.UnsupportedParamsError(
+                    message="Unsupported parameter",
+                    llm_provider="fireworks_ai",
+                    model="test-model",
+                ),
+                400,
+                "litellm.UnsupportedParamsError: Unsupported parameter",
+                id="litellm_unsupported_params_error",
+            ),
         ],
     )
     @pytest.mark.asyncio
