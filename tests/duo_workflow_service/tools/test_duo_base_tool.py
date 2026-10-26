@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from structlog.testing import capture_logs
 
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
+from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError
 from duo_workflow_service.tools.duo_base_tool import (
     DuoBaseTool,
     format_tool_display_message,
@@ -918,3 +919,139 @@ async def test_paginate_get_non_list_response_raises(
         match=r"Unexpected response format from /api/v4/projects/1/notes: expected list, got dict",
     ):
         await tool_with_client._paginate_get("/api/v4/projects/1/notes")
+
+
+@pytest.mark.parametrize(
+    "project_id,expected",
+    [
+        (None, None),
+        (13, 13),
+        ("13", "13"),
+        ("13#", "13%23"),
+        ("my project", "my%20project"),
+        (" namespace/project ", "namespace%2Fproject"),
+        ("namespace%2Fproject", "namespace%2Fproject"),
+        ("namespace%2fproject", "namespace%2Fproject"),
+        ("namespace/project", "namespace%2Fproject"),
+        ("group/subgroup/project", "group%2Fsubgroup%2Fproject"),
+        ("/namespace/project/", "namespace%2Fproject"),
+        ("/namespace%2Fproject%2F", "namespace%2Fproject"),
+        ("group%2Fsubgroup/project", "group%2Fsubgroup%2Fproject"),
+        ("https://gitlab.com/namespace/project", "namespace%2Fproject"),
+        ("https://gitlab.com/namespace/project/", "namespace%2Fproject"),
+        (
+            "https://gitlab.com/namespace/project/-/merge_requests/3",
+            "namespace%2Fproject",
+        ),
+        ("https://gitlab.com/namespace/project/-/tree/main", "namespace%2Fproject"),
+    ],
+)
+def test_normalize_project_id(project_id, expected):
+    tool = DummyTool(metadata={"gitlab_host": "gitlab.com"})
+
+    assert tool._normalize_project_id(project_id) == expected
+
+
+def test_normalize_project_id_self_managed_host():
+    tool = DummyTool(metadata={"gitlab_host": "gitlab.example.com"})
+
+    assert (
+        tool._normalize_project_id("https://gitlab.example.com/namespace/project")
+        == "namespace%2Fproject"
+    )
+
+
+@pytest.mark.parametrize(
+    "project_id,error",
+    [
+        (
+            "https://gitlab.com/namespace/project",
+            "URL netloc 'gitlab.com' does not match gitlab_host 'gitlab.example.com'",
+        ),
+        ("https://gitlab.example.com/", "Could not extract project path from URL"),
+    ],
+)
+def test_normalize_project_id_rejects_invalid_url(project_id, error):
+    tool = DummyTool(metadata={"gitlab_host": "gitlab.example.com"})
+
+    with pytest.raises(GitLabUrlParseError, match=error):
+        tool._normalize_project_id(project_id)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [None, "https://gitlab.example.com/namespace/project"],
+)
+def test_validate_project_url_rejects_foreign_project_id_url(url):
+    tool = DummyTool(metadata={"gitlab_host": "gitlab.example.com"})
+
+    result = tool._validate_project_url(url, "https://gitlab.com/namespace/project")
+
+    assert result == (
+        None,
+        [
+            "Failed to parse 'project_id': URL netloc 'gitlab.com' does not match "
+            "gitlab_host 'gitlab.example.com'"
+        ],
+    )
+
+
+def test_validate_merge_request_url_rejects_foreign_project_id_url():
+    tool = DummyTool(metadata={"gitlab_host": "gitlab.example.com"})
+
+    result = tool._validate_merge_request_url(
+        None, "https://gitlab.com/namespace/project", 42
+    )
+
+    assert result == (
+        None,
+        42,
+        [
+            "Failed to parse 'project_id': URL netloc 'gitlab.com' does not match "
+            "gitlab_host 'gitlab.example.com'"
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "url,project_id",
+    [
+        (None, "namespace/project"),
+        (None, "https://gitlab.com/namespace/project/"),
+        ("https://gitlab.com/namespace/project", "namespace/project"),
+        ("https://gitlab.com/namespace/project", "namespace%2Fproject"),
+    ],
+)
+def test_validate_project_url_normalizes_project_id(url, project_id):
+    tool = DummyTool(metadata={"gitlab_host": "gitlab.com"})
+
+    result = tool._validate_project_url(url, project_id)
+
+    assert result == ("namespace%2Fproject", [])
+
+
+@pytest.mark.parametrize(
+    "url,project_id,merge_request_iid",
+    [
+        (None, "namespace/project", 42),
+        (None, "https://gitlab.com/namespace/project/", 42),
+        (
+            "https://gitlab.com/namespace/project/-/merge_requests/42",
+            "namespace/project",
+            None,
+        ),
+        (
+            "https://gitlab.com/namespace/project/-/merge_requests/42",
+            "namespace%2Fproject",
+            None,
+        ),
+    ],
+)
+def test_validate_merge_request_url_normalizes_project_id(
+    url, project_id, merge_request_iid
+):
+    tool = DummyTool(metadata={"gitlab_host": "gitlab.com"})
+
+    result = tool._validate_merge_request_url(url, project_id, merge_request_iid)
+
+    assert result == ("namespace%2Fproject", 42, [])
