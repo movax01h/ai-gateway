@@ -36,6 +36,7 @@ prompts:
     model:
       params:
         max_tokens: 8192
+        temperature: 0
     unit_primitives:
       - duo_agent_platform
     prompt_template:
@@ -79,6 +80,7 @@ prompts:
         - Do NOT create a component per file or per route.
         - Do NOT register tests, data, models, or tooling directories.
         - Only register directories that exist in the repo.
+        - After registering all other components, also register `.` for the whole project, unless `.` is already a component. `.` is in addition to the other components, never instead of one.
 
         **Exploration methodology (follow this sequence):**
 
