@@ -111,6 +111,7 @@ class ContainerModels(containers.DeclarativeContainer):
                 "context-1m-2025-08-07",
             ],
             custom_models_enabled=config.custom_models.enabled,
+            default_request_timeout=config.duo_chat.model_request_timeout,
         ),
         mocked=providers.Factory(mock.FakeModel),
         agentic=providers.Factory(
@@ -124,6 +125,7 @@ class ContainerModels(containers.DeclarativeContainer):
         ChatOpenAI,
         output_version="responses/v1",
         custom_models_enabled=config.custom_models.enabled,
+        request_timeout=config.duo_chat.model_request_timeout,
     )
 
     google_chat_gen_vertex_ai_global_fn = providers.Factory(
@@ -134,6 +136,7 @@ class ContainerModels(containers.DeclarativeContainer):
             google_gen_vertex_ai_http_client,
         ),
         custom_models_enabled=config.custom_models.enabled,
+        timeout=config.duo_chat.model_request_timeout,
     )
 
     lite_llm_chat_fn = providers.Selector(
