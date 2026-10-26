@@ -61,15 +61,15 @@ Where `<agent_ids>` is a comma-separated list of `file_name:catalog_id` pairs, f
 poetry run fetch-foundational-agents \
   http://gdk.test:3000 \
   $TOKEN \
-  developer:348,code_review:349 \
+  my_flow:348,my_other_flow:349 \
   --flow-registry-version v1
 ```
 
 This writes:
 
 ```plaintext
-ai/features/foundational_agents/developer/config/1.0.0.yml
-ai/features/foundational_agents/code_review/config/1.0.0.yml
+ai/features/foundational_agents/my_flow/config/1.0.0.yml
+ai/features/foundational_agents/my_other_flow/config/1.0.0.yml
 ```
 
 The `experimental` registry has no feature roots; the script writes those configs to

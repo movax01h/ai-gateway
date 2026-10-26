@@ -142,7 +142,7 @@ prompts:
       - duo_agent_platform
     prompt_template:
       system: |
-        {% extends 'common/developer/system/1.0.0.jinja' %}
+        {% extends 'developer/common/system/1.0.0.jinja' %}
         {% block operating_mode_instructions -%}
         You operate autonomously — you receive a task, execute it, and persist your results to GitLab. If you hit a blocker or need input, ask the user, but prefer making reasonable assumptions and proceeding over asking questions.
 

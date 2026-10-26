@@ -126,13 +126,14 @@ instructions:
   - name: Duo Developer design principles
     fileFilters:
       - "duo_workflow_service/agent_platform/*/flows/configs/developer/**/*"
-      - "ai_gateway/prompts/definitions/common/developer/**/*"
-      - "ai_gateway/prompts/definitions/developer_*/**/*"
+      - "ai/features/code/developer/**/*"
+      - "ai/features/code/developer_agent_prompt/**/*"
+      - "ai/features/code/local_code_review/**/*"
     instructions: |
       These files define Duo Developer, a shared general-purpose coding agent used by
       many surfaces (mentions, assignments, CLI, Slack). Changes have platform-wide
       blast radius. Before reviewing, read
-      duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md
+      ai/features/code/developer/config/PRINCIPLES.md
       in the checked-out repository and review against it. In particular, flag:
       1. Use-case-specific content added to the shared system prompt or flow config —
         that belongs in the client's goal, not in the shared building block.
