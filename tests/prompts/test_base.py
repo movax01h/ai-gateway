@@ -3000,7 +3000,7 @@ configurable_unit_primitives:
                 [
                     mock.call(
                         "model_configuration/check",
-                        registry._DEFAULT_VERSION,
+                        None,
                         model_metadata=ModelMetadata(
                             provider="gitlab",
                             name="model_a",
@@ -3014,7 +3014,7 @@ configurable_unit_primitives:
                     ),
                     mock.call(
                         "model_configuration/check",
-                        registry._DEFAULT_VERSION,
+                        None,
                         model_metadata=ModelMetadata(
                             provider="gitlab",
                             name="model_b",
@@ -3028,7 +3028,7 @@ configurable_unit_primitives:
                     ),
                     mock.call(
                         "model_configuration/check",
-                        registry._DEFAULT_VERSION,
+                        None,
                         model_metadata=FireworksModelMetadata(
                             provider="fireworks_ai",
                             name="model_fireworks",

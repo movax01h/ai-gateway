@@ -60,9 +60,6 @@ class PromptRegistrySelfHostedBillingSupport(BasePromptRegistry):
     ):
         super().__init__(instance.internal_event_client, instance.model_limits)
         self.instance = instance
-        self._DEFAULT_VERSION = (  # pylint: disable=invalid-name  # inherited name from BasePromptRegistry
-            instance._DEFAULT_VERSION
-        )
         self.callback = SelfHostedBillingPromptCallbackHandler(
             workflow_id, gl_feat_context, outbox, source_type
         )

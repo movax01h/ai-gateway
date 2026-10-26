@@ -1175,6 +1175,12 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
         assert isinstance(prompt.model, expected_model_class)
 
     @pytest.mark.usefixtures("mock_fs")
+    def test_get_without_prompt_version(self, registry: LocalPromptRegistry):
+        prompt = registry.get("test", None)
+
+        assert prompt.name == registry.get("test", "^1.0.0").name
+
+    @pytest.mark.usefixtures("mock_fs")
     def test_get_prompt_directory_without_yaml_files(
         self,
         fs: FakeFilesystem,
