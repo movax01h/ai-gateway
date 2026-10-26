@@ -217,7 +217,7 @@ check-pylint: install-lint-deps
 .PHONY: check-mypy
 check-mypy: install-lint-deps
 	@echo "Running mypy check..."
-	@poetry run mypy ${LINT_WORKING_DIR} --exclude "scripts/vendor/*"
+	@poetry run mypy -n auto ${LINT_WORKING_DIR} --exclude "scripts/vendor/*"
 
 .PHONY: check-codespell
 check-codespell: install-lint-deps
