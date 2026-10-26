@@ -1,6 +1,6 @@
 import json
 from typing import Any, List, NamedTuple, Optional, Type
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 import structlog
 from langchain_core.tools import ToolException
@@ -94,6 +94,12 @@ class GetLogsFromJob(DuoBaseTool):
                 - A list of error messages (empty if validation succeeded)
         """
         errors = []
+        try:
+            project_id = self._normalize_project_id(project_id)
+        except GitLabUrlParseError as e:
+            return JobURLValidationResult(
+                None, job_id, [f"Failed to parse 'project_id': {e!s}"]
+            )
 
         if not url:
             if not project_id:
@@ -101,7 +107,7 @@ class GetLogsFromJob(DuoBaseTool):
             if not job_id:
                 errors.append("'job_id' must be provided when 'url' is not")
             return JobURLValidationResult(
-                None if project_id is None else quote(str(project_id), safe=""),
+                None if project_id is None else str(project_id),
                 job_id,
                 errors,
             )

@@ -74,6 +74,12 @@ class CommitBaseTool(DuoBaseTool):
                 - A list of error messages (empty if validation succeeded)
         """
         errors = []
+        try:
+            project_id = self._normalize_project_id(project_id)
+        except GitLabUrlParseError as e:
+            return CommitURLValidationResult(
+                None, commit_sha, [f"Failed to parse 'project_id': {e!s}"]
+            )
 
         if not url:
             if not project_id:
