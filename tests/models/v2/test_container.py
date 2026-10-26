@@ -90,9 +90,23 @@ def test_duo_workflow_caching_proxy_url_via_container(duo_workflow_dict, expecte
     assert container._duo_workflow().caching_proxy_url() == expected_url
 
 
-def test_lite_llm_chat_uses_configured_request_timeout():
-    """The DWS ChatLiteLLM factory must set request_timeout from duo_chat config so litellm enforces a real deadline
-    instead of falling back to its default (~600s) timeout."""
+@pytest.mark.parametrize(
+    ("factory_name", "timeout_attr"),
+    [
+        ("lite_llm_chat_fn", "request_timeout"),
+        ("anthropic_claude_chat_fn", "default_request_timeout"),
+        ("openai_chat_fn", "request_timeout"),
+        ("google_chat_gen_vertex_ai_global_fn", "timeout"),
+    ],
+)
+def test_chat_factory_uses_configured_request_timeout(
+    factory_name, timeout_attr, monkeypatch
+):
+    """Every chat factory must set its timeout attribute from duo_chat config so each model class enforces a real
+    deadline on a single request instead of falling back to its own (or no) default."""
+    # `openai_chat_fn` passes no api_key; langchain_openai requires one (or the env var) at construction time.
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
     container = ContainerModels()
     container.config.from_dict(
         {
@@ -100,14 +114,20 @@ def test_lite_llm_chat_uses_configured_request_timeout():
             "bedrock_guardrail_config": None,
             "fireworks_api_base_url": "",
             "duo_chat": {"model_request_timeout": 45.0},
+            "duo_workflow": {"use_caching_proxy": False},
+            "google_cloud_platform": {"project": "test-project"},
             "mock_model_responses": False,
             "use_agentic_mock": False,
         }
     )
 
-    model = container.lite_llm_chat_fn(model="claude-sonnet-4-5")
+    with patch(
+        "ai_gateway.models.v2.container.connect_google_gen_vertex_ai",
+        side_effect=lambda *_args, **_kwargs: MagicMock(spec=Client),
+    ):
+        model = getattr(container, factory_name)(model="claude-sonnet-4-5")
 
-    assert model.request_timeout == 45.0
+    assert getattr(model, timeout_attr) == 45.0
 
 
 @pytest.mark.parametrize(
@@ -172,6 +192,7 @@ async def test_google_chat_gen_vertex_ai_client_not_shared_across_resolutions():
     container.config.from_dict(
         {
             "custom_models": {"enabled": False},
+            "duo_chat": {"model_request_timeout": 45.0},
             "google_cloud_platform": {"project": "test-project"},
             "mock_model_responses": False,
             "use_agentic_mock": False,
@@ -200,6 +221,7 @@ async def test_google_chat_gen_vertex_ai_http_client_shared_across_resolutions()
     container.config.from_dict(
         {
             "custom_models": {"enabled": False},
+            "duo_chat": {"model_request_timeout": 45.0},
             "google_cloud_platform": {"project": "test-project"},
             "mock_model_responses": False,
             "use_agentic_mock": False,
