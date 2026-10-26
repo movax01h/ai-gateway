@@ -135,31 +135,26 @@ class TestBuildSummary:
     def test_states_plainly_when_there_are_no_findings(self):
         assert build_summary([], None) == "No issues were raised in this review."
 
-    def test_breaks_findings_down_by_severity(self):
+    def test_counts_without_a_narrative_are_one_sentence(self):
         summary = build_summary(
             [
-                finding(new_line=1, severity="critical", category="fail-open"),
-                finding(new_line=2, severity="minor", category="missing-test"),
+                finding(new_line=1, severity="critical"),
+                finding(file="b.rb", new_line=2, severity="minor"),
             ],
             None,
         )
 
-        assert summary.index("**Critical**") < summary.index("**Minor**")
-        assert f"- fail-open: `{FINDING['file']}:1`" in summary
-        assert f"- missing-test: `{FINDING['file']}:2`" in summary
-        assert "**Major**" not in summary
+        assert summary == "2 findings (1 critical, 1 minor) across 2 files."
 
-    def test_unknown_severity_gets_its_own_bucket(self):
+    def test_unknown_severity_is_counted_without_a_breakdown(self):
         summary = build_summary([finding(severity="odd", category="x")], None)
 
-        assert "**Other**" in summary
-        assert f"- x: `{FINDING['file']}:42`" in summary
+        assert summary == "1 finding across 1 file."
 
-    def test_reviewer_narrative_leads_and_counts_stay_computed(self):
+    def test_reviewer_narrative_is_the_whole_summary_with_findings(self):
         summary = build_summary([finding()], "I focused on the auth changes.")
 
-        assert summary.startswith("I focused on the auth changes.")
-        assert "1 finding (1 critical) across 1 file:" in summary
+        assert summary == "I focused on the auth changes."
 
     def test_reviewer_narrative_is_the_whole_summary_when_clean(self):
         summary = build_summary([], "- Well tested\n- Follows conventions")
@@ -208,10 +203,10 @@ class TestBuildSummary:
     def test_stray_tool_call_markup_is_stripped(self, narrative, expected):
         assert build_summary([], narrative) == expected
 
-    def test_stray_tool_call_markup_is_stripped_before_the_counts(self):
+    def test_stray_tool_call_markup_is_stripped_with_findings(self):
         summary = build_summary([finding()], "Worth tightening.</summary>\n")
 
-        assert summary.startswith("Worth tightening.\n\n1 finding (1 critical)")
+        assert summary == "Worth tightening."
 
     def test_blank_narrative_falls_back_to_the_default(self):
         assert build_summary([], "   ") == "No issues were raised in this review."
