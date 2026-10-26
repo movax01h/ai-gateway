@@ -69,17 +69,16 @@ prompts:
         <phase1_business_components>
         ## Phase 1: Business Component Discovery
 
-        **Mission**: Identify and register distinct user-facing or integration-facing subsystems.
-        A component is NOT just any directory — it is a cohesive subsystem with a clear purpose.
+        **Mission**: Identify and register the deployable parts of this project.
+        A component is code that is built and run on its own: it has its own entry point (a main file, server start, or CLI command) or its own entry in a Dockerfile, docker-compose file, or deploy config.
 
-        **What qualifies as a component:**
-        - Web application frontends (UI, admin panels, dashboards)
-        - REST API / GraphQL API services
-        - CLI tools and command-line interfaces
-        - Background job processors / worker queues
-        - Authentication or authorization services
-        - Third-party integration handlers (webhooks, OAuth flows)
-        - Significant standalone libraries with external consumers
+        **Rules:**
+        - If the project has only one deployable part, split it into its main internal packages instead (for example `internal/auth` and `internal/storage`, or `api`, `web`, and `core`). Only split packages that each have their own responsibility.
+        - Helper directories that only support the entry point (for example `utils/` or `helpers/`) belong to that component. A project whose code is mostly one entry file plus helpers is one component.
+        - If the project has several deployable parts, register only those parts. Code they share (for example `lib/` or `utils/`) and their internal services (for example `services/`) are not separate components.
+        - Do NOT create a component per file or per route.
+        - Do NOT register tests, data, models, or tooling directories.
+        - Only register directories that exist in the repo.
 
         **Exploration methodology (follow this sequence):**
 
