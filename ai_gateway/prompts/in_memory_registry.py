@@ -34,8 +34,6 @@ class InMemoryPromptRegistry(BasePromptRegistry):
                 user: "Task: {{goal}}"
     """
 
-    _DEFAULT_VERSION = None
-
     def __init__(self, shared_registry: BasePromptRegistry):
         if not isinstance(shared_registry, LocalPromptRegistry):
             raise TypeError("only LocalPromptRegistry is supported at this moment")

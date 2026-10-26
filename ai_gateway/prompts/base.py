@@ -1249,7 +1249,6 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
 class BasePromptRegistry(ABC):
     internal_event_client: InternalEventsClient
     model_limits: ConfigModelLimits
-    _DEFAULT_VERSION: str | None = "^1.0.0"
     validations: set[str] | None = None
 
     def __init__(
@@ -1323,7 +1322,7 @@ class BasePromptRegistry(ABC):
 
         prompt = self.get(
             prompt_id,
-            prompt_version or self._DEFAULT_VERSION,
+            prompt_version,
             model_metadata,
             tools,
             is_graph_node=is_graph_node,
@@ -1401,7 +1400,7 @@ class BasePromptRegistry(ABC):
 
         prompt = self.get(
             "model_configuration/check",
-            self._DEFAULT_VERSION,
+            None,
             model_metadata=model_metadata,
         )
 

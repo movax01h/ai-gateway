@@ -37,10 +37,6 @@ async def get_search_factory_provider():
     yield get_container_application().searches.search_provider
 
 
-async def get_code_suggestions_completions_litellm_factory_provider():
-    yield get_container_application().code_suggestions.completions.litellm_factory
-
-
 async def get_code_suggestions_completions_amazon_q_factory_provider():
     yield get_container_application().code_suggestions.completions.amazon_q_factory
 

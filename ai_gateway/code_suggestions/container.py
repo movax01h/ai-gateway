@@ -101,36 +101,6 @@ class ContainerCodeCompletions(containers.DeclarativeContainer):
         billing_event_service=billing_event_service,
     )
 
-    litellm_factory = providers.Factory(
-        CodeCompletions,
-        model=providers.Factory(litellm),
-        tokenization_strategy=providers.Factory(
-            TokenizerTokenStrategy, tokenizer=tokenizer
-        ),
-        billing_event_service=billing_event_service,
-    )
-
-    fireworks_factory = providers.Factory(
-        CodeCompletions,
-        model=providers.Factory(
-            litellm,
-            provider=KindModelProvider.FIREWORKS,
-        ),
-        tokenization_strategy=providers.Factory(
-            TokenizerTokenStrategy, tokenizer=tokenizer
-        ),
-        post_processor=providers.Factory(
-            PostProcessorCompletions,
-            exclude=config.excl_post_process,
-            extras=[
-                PostProcessorOperation.FILTER_SCORE,
-                PostProcessorOperation.FIX_TRUNCATION,
-            ],
-            score_threshold=config.fireworks_score_threshold,
-        ).provider,
-        billing_event_service=billing_event_service,
-    )
-
     litellm_vertex_codestral_factory = providers.Factory(
         CodeCompletions,
         model=providers.Factory(
