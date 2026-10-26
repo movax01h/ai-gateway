@@ -1,24 +1,10 @@
 version: "v1"
-environment: chat
-
-# Interactive variant of the developer flow, tailored for synchronous,
-# interactive communication environments such as the Duo CLI. It uses the
-# shared `developer_agent_prompt` (see
-# ai/features/code/developer_agent_prompt/prompts/system/1.0.0.jinja),
-# which extends `common/developer/system` and overrides the operating-mode and
-# git-push blocks for interactive use. This flow:
-#   * runs in the `chat` environment and loops through a HumanInputComponent so
-#     the user can steer the agent turn by turn,
-#   * requires tool approval, and
-#   * leaves committing/pushing under the user's control.
-# No git_setup/git_unshallow steps: the user already has a full local checkout.
+environment: ambient
 
 components:
   - name: "developer_agent"
     type: AgentComponent
     prompt_id: "developer_agent_prompt"
-    prompt_version: "^1.0.0"
-    require_tool_approval: true
     inputs:
       - from: "context:goal"
         as: "goal"
@@ -42,15 +28,8 @@ components:
       - from: "context:inputs.agent_platform_standard_context.primary_branch"
         as: "primary_branch"
         optional: true
-      - from: "context:inputs.plan_context.plan_enabled"
-        as: "plan_enabled"
-        optional: true
-      - from: "context:inputs.cancelled_turn"
-        as: "cancelled_turn"
-        optional: true
     toolset:
       - "read_file"
-      - "read_files"
       - "find_files"
       - "list_dir"
       - "grep"
@@ -59,15 +38,9 @@ components:
       - "mkdir"
       - "todo_write"
       - "run_command"
-      - "gitlab_api_get"
-      - "create_issue"
-      - "update_issue"
-      - "create_issue_note"
-      - "create_merge_request_note"
-      - "create_work_item_note"
-      - "create_merge_request"
-      - "update_merge_request"
-      - "notify_me_when"
+
+    identical_tool_call_limit: 3
+
     ui_log_events:
       - "on_agent_reasoning"
       - "on_tool_execution_success"
@@ -79,14 +52,6 @@ components:
         item_type: agent_template
         item_id: "*"
 
-  - name: "user_input"
-    type: HumanInputComponent
-    sends_response_to: "developer_agent"
-    interaction_type: "input"
-    message_template: ""
-    ui_log_events:
-      - on_user_response
-
 include:
   - source: workspace
     item_type: agent_template
@@ -94,9 +59,7 @@ include:
 
 routers:
   - from: "developer_agent"
-    to: "user_input"
-  - from: "user_input"
-    to: "developer_agent"
+    to: "end"
 
 flow:
   entry_point: "developer_agent"
@@ -117,8 +80,18 @@ flow:
           type: string
           description: Name of the service account that runs the flow
           optional: true
-    - category: plan_context
-      input_schema:
-        plan_enabled:
-          type: boolean
-          description: When true, the agent operates in read-only plan mode
+prompts:
+  - name: "developer_agent_prompt"
+    prompt_id: "developer_agent_prompt"
+    params:
+      timeout: 120
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% extends 'developer/common/system/1.0.0.jinja' %}
+        {% block tool_instructions %}
+        - Use `glab` for GitLab operations (it's authenticated for this instance).
+        {%- endblock %}
+      user: |
+        {{ goal }}

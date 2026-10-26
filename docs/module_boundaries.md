@@ -254,7 +254,7 @@ that feature. The platform registries always include `ai/shared/` as a scan root
 A shared definition uses the feature layout without the domain level:
 `ai/shared/<name>/prompts/` registers the prompt ID `<name>`. Include-only
 directories work the same way, so `ai/shared/common/prompts/` serves includes
-such as `common/branch_naming/1.0.0.jinja`. A shared name must not match a
+such as `common/tool_output_security/1.0.0.jinja`. A shared name must not match a
 feature name. Response schemas are not read from `ai/shared/` yet.
 
 ## Model selection

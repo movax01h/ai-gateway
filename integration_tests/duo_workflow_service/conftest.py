@@ -20,8 +20,9 @@ GraphQL document.
 
 import asyncio
 import json
+from collections.abc import Iterator
 from typing import Any, NamedTuple
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import grpc
 import pytest
@@ -29,6 +30,7 @@ from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Struct
 
 from contract import contract_pb2, contract_pb2_grpc
+from duo_workflow_service.agent_platform.v1.flows import flow_config
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.feature_flag_interceptor import (
     FeatureFlagInterceptor,
@@ -307,10 +309,15 @@ def scopes_fixture() -> list[str]:
 
 
 @pytest.fixture(name="servicer")
-def servicer_fixture(auth_user) -> DuoWorkflowService:
+def servicer_fixture(auth_user) -> Iterator[DuoWorkflowService]:
     current_user.set(auth_user)
 
-    return DuoWorkflowService()
+    # Mirror server.run(): register the config/ dirs of flows moved under ai/features/,
+    # so registry flows such as developer/v1 resolve. The registry is a module global,
+    # so restore it afterwards to keep other tests on the same worker isolated.
+    with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
+        flow_config.discover_feature_flow_configs()
+        yield DuoWorkflowService()
 
 
 @pytest.fixture(name="executor")

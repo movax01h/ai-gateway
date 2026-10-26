@@ -162,7 +162,7 @@ def save_workflow_to_file(
     script.
 
     Args:
-        agent_id: The flow name used as the subdirectory name (e.g. ``"developer"``).
+        agent_id: The flow name used as the subdirectory name (e.g. ``"my_flow"``).
             This is the ``file_name`` portion of the ``file_name:catalog_id`` pair
             passed on the command line.
         flow_def: Raw YAML string fetched from the AI Catalog.  It is validated
@@ -182,15 +182,15 @@ def save_workflow_to_file(
 
     Example::
 
-        # Fetch and save the "developer" flow from catalog item 348 using the
+        # Fetch and save the "my_flow" flow from catalog item 348 using the
         # v1 flow registry schema:
         #
         #   python fetch_foundational_agents.py \\
-        #       http://gdk.test:3000 $TOKEN developer:348 \\
+        #       http://gdk.test:3000 $TOKEN my_flow:348 \\
         #       --flow-registry-version v1
         #
         # This writes:
-        #   ai/features/foundational_agents/developer/config/1.0.0.yml
+        #   ai/features/foundational_agents/my_flow/config/1.0.0.yml
     """
     # This always saves as the default version (1.0.0). Bundling multiple
     # major versions side by side for self-hosted instances is not yet

@@ -1,5 +1,7 @@
 """Fixtures shared by v1 flow tests."""
 
+from unittest.mock import patch
+
 import pytest
 
 from ai_gateway.prompts import feature_roots
@@ -12,8 +14,6 @@ def feature_roots_registered_fixture():
     Restore the process-global registry after each test module so discovery does not leak into tests that exercise
     prompt-root isolation.
     """
-    registered_roots = dict(feature_roots._FEATURE_PROMPT_ROOTS)
-    feature_roots.discover_feature_prompts()
-    yield
-    feature_roots._FEATURE_PROMPT_ROOTS.clear()
-    feature_roots._FEATURE_PROMPT_ROOTS.update(registered_roots)
+    with patch.dict(feature_roots._FEATURE_PROMPT_ROOTS):
+        feature_roots.discover_feature_prompts()
+        yield

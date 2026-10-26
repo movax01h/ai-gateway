@@ -53,7 +53,7 @@ specifics elsewhere; the direction is to move them into goals, not to add more.
 ## 3. The system prompt states principles, not procedures
 
 The shared system prompt
-([`ai_gateway/prompts/definitions/common/developer/`](/ai_gateway/prompts/definitions/common/developer/))
+([`ai/features/code/developer/prompts/common/`](/ai/features/code/developer/prompts/common/))
 describes what the agent is, what good looks like, and what it must never do. It is not
 a runbook: no step-by-step scripts, no enumerated edge cases, no instructions added in
 reaction to one bad session.
@@ -186,9 +186,9 @@ the gain.
 ## Ownership and questions
 
 The Agent Developer team co-owns the Duo Developer surface (see `CODEOWNERS`): the flow
-configs in this directory, `ai_gateway/prompts/definitions/common/developer/`, and
-`ai_gateway/prompts/definitions/developer_*/`. Expect a review from the team on changes
-to these paths.
+configs in this directory, `ai/features/code/developer/prompts/common/`,
+`ai/features/code/developer_agent_prompt/`, and `ai/features/code/local_code_review/`.
+Expect a review from the team on changes to these paths.
 
 Questions: see the
 [team page](https://handbook.gitlab.com/handbook/engineering/ai/agent-foundations/agent-developer/)
