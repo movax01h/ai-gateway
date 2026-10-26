@@ -4,7 +4,7 @@ components:
   - name: "suggest_reviewers"
     type: OneOffComponent
     prompt_id: "recommend_reviewers_assign"
-    prompt_version: "2.1.0-dev"
+    prompt_version: "^2.1.0"
     inputs:
       - from: "context:inputs.agent_platform_resource_context.merge_request_id"
         as: "merge_request_iid"
@@ -12,7 +12,6 @@ components:
         as: "project_id"
       - from: "context:inputs.agent_platform_recommend_reviewers_context"
         as: "reviewer_data"
-        optional: true
     toolset:
       - "post_suggested_reviewers"
     max_correction_attempts: 3
