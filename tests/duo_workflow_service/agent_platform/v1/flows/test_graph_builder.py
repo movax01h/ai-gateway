@@ -140,6 +140,7 @@ class TestFlowGraphBuilder:
             user=user,
             internal_event_client=mock_internal_event_client,
             catalog_items=CatalogItems(),
+            allow_agent_to_request_user=True,
         )
 
     @pytest.fixture(name="mock_state_graph_class")
@@ -281,6 +282,7 @@ class TestFlowGraphBuilder:
         assert agent_class.params["flow_type"] == flow_type
         assert agent_class.params["user"] is user
         assert agent_class.params["environment"] == "ambient"
+        assert agent_class.params["allow_agent_to_request_user"] is True
         # ``type`` selects the class; it is not a constructor param.
         assert "type" not in agent_class.params
         assert agent_class.params["name"] == "agent"

@@ -41,10 +41,14 @@ class HumanApprovalComponent(ABC):
         workflow_id: str,
         approved_agent_name: str,
         approved_agent_state: str,
+        allow_agent_to_request_user: bool = True,
     ):
         self._workflow_id = workflow_id
         self._approved_agent_name = approved_agent_name
         self._approved_agent_state = approved_agent_state
+        # When false the session cannot prompt a human, so a tool needing approval
+        # halts instead of parking on the executor's interrupt() forever.
+        self._allow_agent_to_request_user = allow_agent_to_request_user
 
     @abstractmethod
     def _build_approval_request(

@@ -21,6 +21,9 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.errors.typing import (
+    ToolApprovalUnavailableError,
+)
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.toolset import MalformedToolCallError
 
@@ -102,6 +105,45 @@ class TestToolsApprovalComponent:
             approved_agent_state=WorkflowStatusEnum.PLANNING,
             toolset=mock_toolset,
         )
+
+    def test_request_approval_halts_when_session_cannot_prompt(
+        self, graph_config, mock_toolset
+    ):
+        """A session that cannot prompt halts with ToolApprovalUnavailableError instead of setting the approval-required
+        status that parks on the executor's interrupt()."""
+        component = ToolsApprovalComponent(
+            workflow_id=graph_config["configurable"]["thread_id"],
+            approved_agent_name="test-agent",
+            approved_agent_state=WorkflowStatusEnum.PLANNING,
+            toolset=mock_toolset,
+            allow_agent_to_request_user=False,
+        )
+        # Stand in for "these tools need approval" without exercising display formatting.
+        component._build_approval_request = MagicMock(
+            return_value=[{"tool_info": {"name": "run_command"}}]
+        )
+        state = {
+            "conversation_history": {
+                "test-agent": [
+                    AIMessage(
+                        content="needs a tool",
+                        tool_calls=[
+                            {
+                                "name": "run_command",
+                                "args": {},
+                                "id": "call_1",
+                                "type": "tool_call",
+                            }
+                        ],
+                    )
+                ]
+            }
+        }
+
+        with pytest.raises(ToolApprovalUnavailableError) as exc_info:
+            component._request_approval(state)
+
+        assert exc_info.value.tool_names == ["run_command"]
 
     @pytest.mark.asyncio
     async def test_tools_approval_with_no_tools(

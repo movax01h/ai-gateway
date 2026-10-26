@@ -654,6 +654,14 @@ class AgentComponentBase(BaseComponent):
             self._tool_approval_decision_key
         )
 
+        # The two halts answer different questions, so they use different signals.
+        # Denied-tool: is a human present to see a "blocked, continuing" result?
+        # That tracks the environment. Approval: can this session actually answer a
+        # prompt? That is `allow_agent_to_request_user`, not the environment -- a
+        # chat session told it cannot ask the user would otherwise look interactive
+        # and park on an approval nobody can give.
+        non_interactive = self.environment not in INTERACTIVE_ENVIRONMENTS
+
         node_tool_approval_request = ToolApprovalRequestNode(
             name=f"{self.name}{NODE_ROLE_SEPARATOR}tool_approval_request",
             conversation_history_key=conversation_history_key,
@@ -677,7 +685,8 @@ class AgentComponentBase(BaseComponent):
             session_id_key=session_id_key,
             tracker=tracker,
             approval_requests_key=approval_requests_key,
-            halt_on_denied_tool=self.environment not in INTERACTIVE_ENVIRONMENTS,
+            halt_on_denied_tool=non_interactive,
+            halt_on_unanswerable_approval=not self.allow_agent_to_request_user,
         )
 
         node_tool_approval_fetch = ToolApprovalFetchNode(
