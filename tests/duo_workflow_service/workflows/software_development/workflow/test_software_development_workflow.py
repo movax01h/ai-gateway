@@ -22,6 +22,7 @@ from duo_workflow_service.components.tools_registry import (
     ToolsRegistry,
 )
 from duo_workflow_service.entities import Plan, WorkflowStatusEnum
+from duo_workflow_service.errors.typing import ToolApprovalUnavailableError
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.workflows.software_development.workflow import (
@@ -546,6 +547,41 @@ def test_context_builder_tools(tools_registry, workflow):
     assert_tools_in_tools_registry(tools_registry, agent_components["toolset"])
 
 
+@pytest.mark.parametrize("allow_agent_to_request_user", [True, False])
+def test_setup_workflow_graph_wires_allow_agent_to_request_user_into_tool_approvals(
+    workflow,
+    tools_registry,
+    mock_planner_component,
+    mock_executor_component,
+    mock_tools_approval_component,
+    allow_agent_to_request_user,
+    monkeypatch,
+):
+    """Both ``ToolsApprovalComponent`` sites must receive the session's can-prompt signal.
+
+    The component defaults the kwarg to ``True``, so a dropped wiring line is invisible
+    whenever config is ``True``; asserting the ``False`` case too makes a drop fail here
+    rather than parking a prompt-less session on ``interrupt()`` forever.
+    """
+    monkeypatch.setattr(
+        workflow,
+        "_workflow_config",
+        {"allow_agent_to_request_user": allow_agent_to_request_user},
+    )
+
+    workflow._setup_workflow_graph(MagicMock(), tools_registry, "test_goal")
+
+    approval_flags = [
+        c.kwargs["allow_agent_to_request_user"]
+        for c in mock_tools_approval_component.call_args_list
+    ]
+    # context_builder approval, then executor approval -- both carry the same signal.
+    assert approval_flags == [
+        allow_agent_to_request_user,
+        allow_agent_to_request_user,
+    ]
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
 async def test_workflow_run_with_setup_error(
@@ -899,3 +935,18 @@ async def test_workflow_reject_slash_commands_notifies_client(
         WorkflowStatusEnum.INPUT_REQUIRED,
         WorkflowStatusEnum.ERROR,
     ]
+
+
+@pytest.mark.asyncio
+async def test_handle_workflow_failure_logs_notifiable_internal_detail(workflow):
+    """The server-side internal_detail (e.g. the unapproved tool names) must reach the logs on the legacy path too,
+    matching the v1 agent-platform failure handler."""
+    error = ToolApprovalUnavailableError(["run_command"])
+
+    with patch(
+        "duo_workflow_service.workflows.software_development.workflow.log_exception"
+    ) as mock_log_exception:
+        await workflow._handle_workflow_failure(error, None, None)
+
+    _, kwargs = mock_log_exception.call_args
+    assert kwargs["extra"]["internal_detail"] == error.internal_detail

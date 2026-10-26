@@ -1,5 +1,5 @@
 from functools import partial
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -52,3 +52,34 @@ def test_chat_flow_builds_its_graph_with_the_chat_graph_builder(user):
 
     assert isinstance(builder, ChatGraphBuilder)
     assert builder._workflow_id == "workflow-1"
+
+
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+@pytest.mark.parametrize(
+    "workflow_config,expected",
+    [
+        ({"allow_agent_to_request_user": True}, True),
+        ({"allow_agent_to_request_user": False}, False),
+        ({}, False),
+    ],
+)
+def test_chat_flow_wires_allow_agent_to_request_user_into_the_builder(
+    user, workflow_config, expected, monkeypatch
+):
+    """Guard the ``_graph_builder`` override against a dropped ``allow_agent_to_request_user``.
+
+    Dropping the kwarg defaults ``ChatGraphBuilder`` to ``False``, which flips every chat
+    approval to a halt with no one to answer it, so the wiring needs its own assertion
+    here rather than relying on the base ``Flow`` seam test.
+    """
+    flow, _ = _chat_flow(user)
+    monkeypatch.setattr(flow, "_workflow_config", workflow_config)
+
+    with patch(
+        "duo_workflow_service.agent_platform.v1.chat_engine.flow.ChatGraphBuilder"
+    ) as mock_builder_class:
+        flow._graph_builder(Mock(spec=ToolsRegistry))
+
+    assert (
+        mock_builder_class.call_args.kwargs["allow_agent_to_request_user"] is expected
+    )

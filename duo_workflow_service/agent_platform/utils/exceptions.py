@@ -2,6 +2,24 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
+# The user-facing agent errors live in the shared errors package so the legacy ``components``
+# tree can raise them without importing ``agent_platform``. Re-exported here for existing callers.
+from duo_workflow_service.errors.typing import (
+    TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT,
+    NotifiableAgentException,
+    ToolApprovalUnavailableError,
+    ToolBlockedByAdministratorError,
+)
+
+__all__ = [
+    "TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT",
+    "FlowValidationError",
+    "MissingAdditionalContextError",
+    "NotifiableAgentException",
+    "ToolApprovalUnavailableError",
+    "ToolBlockedByAdministratorError",
+]
+
 
 class FlowValidationError(ValueError):
     """Raised when flow config validation fails with one or more errors."""
@@ -25,27 +43,6 @@ class FlowValidationError(ValueError):
         return cls(errors)
 
 
-class NotifiableAgentException(Exception):
-    """Exception raised in the agent platform whose safe, user-facing message is surfaced in the UI.
-
-    Use this exception when you need to communicate a safe, human-readable error to the end user
-    while keeping sensitive debugging context (tokens, internal hostnames, stack traces, tool
-    outputs) strictly server-side.
-
-    Args:
-        ui_message: A static or templated string that is safe to display to end users.
-            Must **not** contain interpolated values from network responses, tool outputs,
-            secrets, or LLM responses.
-        internal_detail: Optional additional context logged server-side only.
-            This value is never sent to the UI.
-    """
-
-    def __init__(self, ui_message: str, internal_detail: str | None = None) -> None:
-        super().__init__(ui_message)
-        self.ui_message = ui_message
-        self.internal_detail = internal_detail
-
-
 class MissingAdditionalContextError(KeyError):
     """Raised when a required flow input reads an additional context category the caller did not supply.
 
@@ -62,30 +59,3 @@ class MissingAdditionalContextError(KeyError):
         super().__init__(message)
         self.message = message
         self.category = category
-
-
-TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT = (
-    "An administrator blocked the {tool_name} tool, so it cannot be used. "
-    "Tell the user it is blocked and continue without it."
-)
-
-
-class ToolBlockedByAdministratorError(NotifiableAgentException):
-    """Raised when the agent calls a tool that governance deny rules removed from its toolset.
-
-    Halts the flow with a static UI message. The denied tool names stay server-side.
-
-    Args:
-        tool_names: Names of the denied tools the agent called. Logged server-side only.
-    """
-
-    UI_MESSAGE = (
-        "This flow stopped because an administrator blocked a tool it tried to use."
-    )
-
-    def __init__(self, tool_names: list[str]) -> None:
-        super().__init__(
-            self.UI_MESSAGE,
-            internal_detail=f"Denied tools called: {', '.join(tool_names)}",
-        )
-        self.tool_names = tool_names

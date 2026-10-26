@@ -1210,6 +1210,9 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "user": user,
             "internal_event_client": flow._internal_event_client,
             "catalog_items": flow._catalog_items,
+            "allow_agent_to_request_user": flow._workflow_config.get(
+                "allow_agent_to_request_user", False
+            ),
         }
 
     def test_registry_flow_id_comes_from_the_registry_load(

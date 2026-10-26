@@ -57,6 +57,10 @@ class BaseComponent(BaseModel, ABC):
     flow_type: GLReportingEventContext
     user: CloudConnectorUser
     environment: str | None = None
+    # Whether this session can ask a human to answer a prompt (e.g. a tool-call
+    # approval). The authoritative "can prompt" signal, from the workflow config;
+    # components must prefer it over inferring from ``environment``.
+    allow_agent_to_request_user: bool = False
     model_tags: list[str] | str | None = None
     # Deprecated alias for model_tags, retained for backward compatibility with
     # Flow Registry v1 configs/clients that still set model_size_preference.

@@ -50,6 +50,7 @@ from duo_workflow_service.entities.agent_user_environment import (
     process_agents_dot_md,
     process_workspace_agent_skills,
 )
+from duo_workflow_service.errors.typing import NotifiableAgentException
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
@@ -214,9 +215,10 @@ class Workflow(AbstractWorkflow):
                 stream=self._stream,
             )
             return
-        log_exception(
-            error, extra={"workflow_id": self._workflow_id, "source": __name__}
-        )
+        extra = {"workflow_id": self._workflow_id, "source": __name__}
+        if isinstance(error, NotifiableAgentException) and error.internal_detail:
+            extra["internal_detail"] = error.internal_detail
+        log_exception(error, extra=extra)
 
     def _setup_workflow_graph(
         self,
@@ -284,6 +286,7 @@ class Workflow(AbstractWorkflow):
             approved_agent_name="executor",
             approved_agent_state=WorkflowStatusEnum.EXECUTION,
             toolset=tools_registry.toolset(EXECUTOR_TOOLS + mcp_tools),
+            allow_agent_to_request_user=allow_agent_to_request_user,
         )
 
         executor_component = ExecutorComponent(
@@ -426,6 +429,9 @@ class Workflow(AbstractWorkflow):
             approved_agent_name="context_builder",
             approved_agent_state=WorkflowStatusEnum.NOT_STARTED,
             toolset=context_builder_components["toolset"],
+            allow_agent_to_request_user=self._workflow_config.get(
+                "allow_agent_to_request_user", True
+            ),
         )
 
         context_builder_approval_entry_node = context_builder_approval_component.attach(

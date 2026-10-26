@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessa
 
 from duo_workflow_service.agent_platform.utils.exceptions import (
     TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT,
+    ToolApprovalUnavailableError,
     ToolBlockedByAdministratorError,
 )
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
@@ -73,7 +74,8 @@ class ToolApprovalRequestNode:
     3. Filters pre-approved and session-approved tool calls
     4. Generates UI chat log entries for approval
     5. Sets workflow status to TOOL_CALL_APPROVAL_REQUIRED (or EXECUTION
-        when nothing needs approval)
+        when nothing needs approval), or halts with ToolApprovalUnavailableError
+        when approval is needed but the session cannot prompt a human
 
     Entries must stay attributed: the notifier streams a PENDING card carrying
     ``component_name`` for each tool call, and ``_merge_ui_chat_log`` matches on
@@ -92,6 +94,12 @@ class ToolApprovalRequestNode:
         tracker: Optional tool event tracker for approval-request and blocked-tool events
         approval_requests_key: Optional RuntimeIOKey shared with
             ToolApprovalFetchNode; persists which tool calls required approval.
+        halt_on_denied_tool: Halt the flow when the agent calls a governance-denied tool,
+            rather than returning a "blocked, continue without it" result (set off for
+            interactive environments, where the user can keep going).
+        halt_on_unanswerable_approval: Halt the flow when a tool needs approval and the
+            session cannot prompt a human, rather than parking on the fetch node's
+            interrupt() forever (set off when the session may ask the user).
     """
 
     def __init__(
@@ -107,6 +115,7 @@ class ToolApprovalRequestNode:
         tracker: ToolEventTracker | None = None,
         approval_requests_key: RuntimeIOKey | None = None,
         halt_on_denied_tool: bool = True,
+        halt_on_unanswerable_approval: bool = False,
     ):
         self.name = name
         self._conversation_history_key = conversation_history_key
@@ -118,6 +127,7 @@ class ToolApprovalRequestNode:
         self._tracker = tracker
         self._approval_requests_key = approval_requests_key
         self._halt_on_denied_tool = halt_on_denied_tool
+        self._halt_on_unanswerable_approval = halt_on_unanswerable_approval
 
     def _invalid_call_content(self, call: ToolCall, invalid_by_id: dict) -> str:
         if call["id"] not in invalid_by_id:
@@ -211,6 +221,20 @@ class ToolApprovalRequestNode:
                 WorkflowStatusEnum.EXECUTION, state
             )
             return status_dict
+
+        # A session that cannot prompt has no one to answer, so halt with an
+        # explicit error instead of parking on the fetch node's interrupt() forever.
+        # Raised before the request cards are emitted so none are left pending.
+        if self._halt_on_unanswerable_approval:
+            if self._tracker:
+                for call in needs_approval:
+                    self._tracker.track_tool_governance_event(
+                        event_name=EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+                        tool_name=call["name"],
+                    )
+            raise ToolApprovalUnavailableError(
+                [call["name"] for call in needs_approval]
+            )
 
         self._emit_approval_requests(
             needs_approval, resolve_session_id(self._session_id_key, state)
