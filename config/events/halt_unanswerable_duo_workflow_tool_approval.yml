@@ -1,0 +1,21 @@
+---
+description: Tracks a tool call that needed human approval in a session that cannot prompt a user, which halts the flow with an explicit error instead of parking. Tool names may include customer-defined MCP tool names
+internal_events: true
+action: halt_unanswerable_duo_workflow_tool_approval
+product_group: compliance
+product_categories:
+  - duo_agent_platform
+additional_properties:
+  label:
+    description: Flow type (e.g. chat, software_development)
+  property:
+    description: Name of the tool that needed approval
+  value:
+    description: Workflow Id that can be used to connect this event to others that happen during the same workflow.
+  tool_name:
+    description: Name of the tool that needed approval
+milestone: '19.6'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/7514
+tiers:
+  - premium
+  - ultimate

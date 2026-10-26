@@ -1,0 +1,43 @@
+{#- A rule's candidates are its free approvers. Busy approvers are added only when a rule has fewer free approvers than it needs. The sandbox blocks macros, so the two loops repeat the still_needed and pool rules: change both together. -#}
+Recommend reviewers for merge request !{{ merge_request_iid }} in project {{ project_id }}.
+{%- set current_ids = reviewer_data.current_reviewers | map(attribute='id') | list %}
+{%- set rules = reviewer_data.approval_rules %}
+{%- set rule_rows %}
+{%- for r in rules %}
+{%- set still_needed = r.approvals_required - (r.eligible_approvers | selectattr('id', 'in', current_ids) | list | length) %}
+{%- set eligible = r.eligible_approvers | rejectattr('id', 'in', current_ids) | list %}
+{%- set free = eligible | rejectattr('busy') | list %}
+{%- set pool = free if free | length >= still_needed else free + (eligible | selectattr('busy') | list) %}
+{%- if still_needed > 0 %}
+{{ r.id }}|{{ r.type }}|{{ (r.section or '') | replace('|', '/') | replace('\n', ' ') }}|{{ r.name | replace('|', '/') | replace('\n', ' ') }}|{{ still_needed }}|{{ pool | map(attribute='id') | join(',') or 'none' }}
+{%- endif %}
+{%- endfor %}
+{%- endset %}
+{%- set candidate_ids %},
+{%- for r in rules %}
+{%- set still_needed = r.approvals_required - (r.eligible_approvers | selectattr('id', 'in', current_ids) | list | length) %}
+{%- set eligible = r.eligible_approvers | rejectattr('id', 'in', current_ids) | list %}
+{%- set free = eligible | rejectattr('busy') | list %}
+{%- set pool = free if free | length >= still_needed else free + (eligible | selectattr('busy') | list) %}
+{%- if still_needed > 0 %}
+{{- pool | map(attribute='id') | join(',') }},
+{%- endif %}
+{%- endfor %}
+{%- endset %}
+{%- set users = rules | map(attribute='eligible_approvers') | sum(start=[]) | unique(attribute='id') | sort(attribute='pending_reviews') %}
+{%- if not rule_rows %}
+
+No approval rules need reviewers. Every rule already has enough reviewers, so call post_suggested_reviewers with an empty suggestions list.
+{%- elif not (candidate_ids | replace(',', '')) %}
+
+Approval rules need reviewers, but no candidates are available. Call post_suggested_reviewers with an empty suggestions list.
+{%- else %}
+
+Candidates (id|pending_reviews|local_time|last_activity_on|status):
+{%- for u in users if (',' ~ u.id ~ ',') in candidate_ids %}
+{{ u.id }}|{{ u.pending_reviews }}|{{ u.local_time or '' }}|{{ u.last_activity_on or '' }}|{{ ['busy' if u.busy else '', u.status_emoji, u.status_message] | select | join(' ') | replace('|', '/') | replace('\n', ' ') | trim }}
+{%- endfor %}
+
+Approval rules that need reviewers (id|type|section|name|still_needed|candidate_ids):
+{{- rule_rows }}
+{%- endif %}

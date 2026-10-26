@@ -8,7 +8,6 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from ai_gateway.prompts.feature_roots import discover_feature_prompts
 from ai_gateway.prompts.registry import LocalPromptRegistry
 from duo_workflow_service.agent_platform.utils.validation import (
     ExtraInputVariablesError,
@@ -71,13 +70,11 @@ NON_MCP_ENVIRONMENTS: frozenset[str] = FLOW_ENVIRONMENTS - MCP_AUTO_INJECT_ENVIR
 
 
 def _make_local_prompt_registry() -> LocalPromptRegistry:
-    # Register moved features so Jinja {% include %} in a feature's flow config
-    # resolves against ai/features/<domain>/<feature>/prompts/ (mirrors
-    # LocalPromptRegistry.from_local_yaml and the server bootstrap). Without this
-    # a feature flow whose inline prompts include feature-local .jinja bodies
-    # fails to compile during the V1_CONFIGS sweep.
-    discover_feature_prompts()
-    return LocalPromptRegistry(
+    # Same path as the DI container: from_local_yaml registers the ai/features prompt
+    # roots (it calls discover_feature_prompts() internally), so includes of moved
+    # fragments (e.g. developer/common/...) and SkillGuard's feature-local .jinja
+    # bodies resolve without depending on another test having registered them first.
+    return LocalPromptRegistry.from_local_yaml(
         prompt_template_factories={},
         model_factories={},
         internal_event_client=Mock(),

@@ -1,7 +1,6 @@
-from typing import Any, Dict, Union
+from typing import Any
 
 import structlog
-from langgraph.types import StateSnapshot
 
 from duo_workflow_service.entities.state import TaskStatus, WorkflowState
 
@@ -15,22 +14,19 @@ class PlanTerminatorAgent:
         self._workflow_id = workflow_id
         self.log = structlog.stdlib.get_logger("workflow").bind(workflow_id=workflow_id)
 
-    async def run(self, state: Union[StateSnapshot, WorkflowState]) -> Dict[str, Any]:
-        state_dict = state.values if isinstance(state, StateSnapshot) else state
-
-        if state_dict.get("plan") is None or "steps" not in state_dict["plan"]:
+    async def run(self, state: WorkflowState) -> dict[str, Any]:
+        if state.get("plan") is None or "steps" not in state["plan"]:
             return {"plan": {"steps": []}}
 
         needs_updates = any(
-            step["status"] not in FINISHED_STATUSES
-            for step in state_dict["plan"]["steps"]
+            step["status"] not in FINISHED_STATUSES for step in state["plan"]["steps"]
         )
 
         if not needs_updates:
-            return {"plan": state_dict.get("plan", {})}
+            return {"plan": state.get("plan", {})}
 
         updated_steps = []
-        for step in state_dict["plan"]["steps"]:
+        for step in state["plan"]["steps"]:
             step_copy = step.copy()
             if step_copy["status"] not in FINISHED_STATUSES:
                 step_copy["status"] = TaskStatus.CANCELLED

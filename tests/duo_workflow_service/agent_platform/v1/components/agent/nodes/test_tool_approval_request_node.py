@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from duo_workflow_service.agent_platform.utils.exceptions import (
     TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT,
+    ToolApprovalUnavailableError,
     ToolBlockedByAdministratorError,
 )
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
@@ -1131,6 +1132,137 @@ class TestToolApprovalRequestNodeTracking:
 
         assert result["status"] == WorkflowStatusEnum.EXECUTION.value
         mock_tracker.track_tool_governance_event.assert_not_called()
+
+    @pytest.fixture(name="halting_node")
+    def halting_node_fixture(
+        self,
+        conversation_history_key,
+        status_key,
+        approval_requests_key,
+        mock_toolset,
+        ui_history,
+        mock_tracker,
+    ):
+        """A node that cannot prompt: halts instead of requesting approval."""
+        return ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=mock_toolset,
+            pre_approved_tools=[],
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=ui_history,
+            tracker=mock_tracker,
+            approval_requests_key=approval_requests_key,
+            halt_on_unanswerable_approval=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_unanswerable_approval_halts_and_tracks_one_event_per_tool(
+        self, halting_node, base_flow_state, component_name, mock_tracker
+    ):
+        """A tool needing approval in a session that cannot prompt halts, instead of parking forever."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [
+            {"id": "call_1", "name": "run_command", "args": {"cmd": "rm -rf"}},
+            {"id": "call_2", "name": "edit_file", "args": {"path": "x"}},
+        ]
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        with pytest.raises(ToolApprovalUnavailableError) as exc_info:
+            await halting_node.run(state)
+
+        assert exc_info.value.ui_message == ToolApprovalUnavailableError.UI_MESSAGE
+        assert exc_info.value.tool_names == ["run_command", "edit_file"]
+        # Arguments must never reach the tracked event or the logged detail.
+        assert "rm -rf" not in exc_info.value.internal_detail
+        tracked = [
+            c.kwargs["event_name"]
+            for c in mock_tracker.track_tool_governance_event.call_args_list
+        ]
+        assert tracked == [
+            EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+            EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+        ]
+        assert "rm -rf" not in str(
+            mock_tracker.track_tool_governance_event.call_args_list
+        )
+
+    @pytest.mark.asyncio
+    async def test_unanswerable_approval_does_not_request_approval(
+        self, halting_node, base_flow_state, component_name, mock_tracker
+    ):
+        """The halt happens before approval cards are emitted, so no request event fires."""
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [{"id": "call_1", "name": "run_command", "args": {}}]
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        with pytest.raises(ToolApprovalUnavailableError):
+            await halting_node.run(state)
+
+        requested = [
+            c
+            for c in mock_tracker.track_tool_governance_event.call_args_list
+            if c.kwargs["event_name"] == EventEnum.WORKFLOW_TOOL_APPROVAL_REQUESTED
+        ]
+        assert requested == []
+
+    @pytest.mark.asyncio
+    async def test_unanswerable_approval_does_not_halt_when_all_pre_approved(
+        self,
+        conversation_history_key,
+        status_key,
+        mock_toolset,
+        ui_history,
+        base_flow_state,
+        component_name,
+    ):
+        """With nothing needing approval there is nothing to halt on: the run proceeds."""
+        node = ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=mock_toolset,
+            pre_approved_tools=["run_command"],
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=ui_history,
+            halt_on_unanswerable_approval=True,
+        )
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [{"id": "call_1", "name": "run_command", "args": {}}]
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        result = await node.run(state)
+
+        assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+
+    @pytest.mark.asyncio
+    async def test_denied_tool_halts_before_unanswerable_approval(
+        self, halting_node, base_flow_state, component_name, mock_toolset, mock_tracker
+    ):
+        """A denied call is rejected as invalid before the needs-approval branch, so the deny error wins."""
+        denied_call = {"id": "call_1", "name": "denied_tool", "args": {}}
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [denied_call]
+        mock_toolset.denied_tools = {"denied_tool"}
+        mock_toolset.validate_tool_call.side_effect = MalformedToolCallError(
+            "Tool: 'denied_tool' not found", tool_call=denied_call
+        )
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        with pytest.raises(ToolBlockedByAdministratorError):
+            await halting_node.run(state)
+
+        mock_tracker.track_tool_governance_event.assert_called_once_with(
+            event_name=EventEnum.WORKFLOW_TOOL_BLOCKED,
+            tool_name="denied_tool",
+        )
 
 
 class TestApprovalRequestsKeyFor:

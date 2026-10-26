@@ -1939,7 +1939,6 @@ _PROMPTS_WITHOUT_AN_ENTRY: frozenset[str] = _GRAPH_NODE_PROMPT_IDS | frozenset(
         "recommend_reviewers_assign",
         "recommend_reviewers_post",
         "review_merge_request_dap",
-        "skillguard_scan",
         "workflow/context_builder",
         "workflow/convert_to_gitlab_ci",
         "workflow/create_branch",
@@ -1966,15 +1965,25 @@ class TestPromptFeatureSettings:
     _features_dir = _repo_root / "ai" / "features"
     _shared_dir = _repo_root / "ai" / "shared"
 
+    @staticmethod
+    def _defines_a_prompt(prompts_dir: Path) -> bool:
+        """Return whether ``prompts_dir`` has a ``<model family or base>/<version>.yml``.
+
+        A flow-only feature keeps only Jinja fragments in its `prompts/` dir. Its ID loads no prompt, so it needs no
+        entry.
+        """
+        return any(prompts_dir.glob("*/*.yml"))
+
     def _feature_prompt_dirs(self) -> dict[str, Path]:
-        """Return the `prompts/` dir of each prompt ID that `discover_feature_prompts` registers."""
+        """Return the `prompts/` dir of each prompt ID that `discover_feature_prompts` registers and that loads a
+        prompt."""
         dirs: dict[str, Path] = {}
         for feature_dir in self._features_dir.glob("*/*"):
-            if (prompts_dir := feature_dir / "prompts").is_dir():
+            if self._defines_a_prompt(prompts_dir := feature_dir / "prompts"):
                 dirs[feature_dir.name] = prompts_dir
                 dirs[f"{feature_dir.parent.name}/{feature_dir.name}"] = prompts_dir
         for shared_dir in self._shared_dir.glob("*"):
-            if (prompts_dir := shared_dir / "prompts").is_dir():
+            if self._defines_a_prompt(prompts_dir := shared_dir / "prompts"):
                 dirs[shared_dir.name] = prompts_dir
         return dirs
 

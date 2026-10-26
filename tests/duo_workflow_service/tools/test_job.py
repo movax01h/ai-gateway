@@ -391,3 +391,63 @@ async def test_get_job_logs_without_byte_params_skips_capability_check(
     gitlab_client_mock.aget.assert_called_once_with(
         path="/api/v4/projects/1/jobs/1/trace", parse_json=False
     )
+
+
+@pytest.mark.parametrize(
+    "url,project_id,job_id",
+    [
+        (None, "namespace/project", 123),
+        (None, "namespace%2Fproject", 123),
+        ("https://gitlab.com/namespace/project/-/jobs/123", "namespace/project", None),
+    ],
+)
+def test_validate_job_url_normalizes_project_id(metadata, url, project_id, job_id):
+    tool = GetLogsFromJob(metadata=metadata)
+
+    result = tool._validate_job_url(url, project_id, job_id)
+
+    assert result == ("namespace%2Fproject", 123, [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "project_id,expected_path",
+    [
+        ("13#", "/api/v4/projects/13%23/jobs/5/trace"),
+        (13, "/api/v4/projects/13/jobs/5/trace"),
+    ],
+)
+async def test_get_job_logs_encodes_project_id_without_slash(
+    gitlab_client_mock, metadata, project_id, expected_path
+):
+    gitlab_client_mock.aget = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=200, body="trace")
+    )
+
+    tool = GetLogsFromJob(metadata=metadata)
+
+    await tool._arun(project_id=project_id, job_id=5)
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path=expected_path, parse_json=False
+    )
+
+
+def test_validate_job_url_rejects_foreign_project_id_url(gitlab_client_mock):
+    tool = GetLogsFromJob(
+        metadata={
+            "gitlab_client": gitlab_client_mock,
+            "gitlab_host": "gitlab.example.com",
+        }
+    )
+
+    result = tool._validate_job_url(None, "https://gitlab.com/namespace/project", 5)
+
+    assert result == (
+        None,
+        5,
+        [
+            "Failed to parse 'project_id': URL netloc 'gitlab.com' does not match "
+            "gitlab_host 'gitlab.example.com'"
+        ],
+    )

@@ -178,7 +178,7 @@ async def test_validate_commit_url_no_url_no_commit_sha(metadata):
         url=None, project_id="namespace/project", commit_sha=None
     )
 
-    assert validation_result.project_id == "namespace/project"
+    assert validation_result.project_id == "namespace%2Fproject"
     assert validation_result.commit_sha is None
     assert len(validation_result.errors) == 1
     assert (
@@ -1859,3 +1859,47 @@ async def test_merge_duplicate_update_actions_invalid_action(
             actions=actions,
             ref_to_fetch="main",
         )
+
+
+@pytest.mark.parametrize(
+    "url,project_id,commit_sha",
+    [
+        (None, "namespace/project", "6104942438c14ec7bd21c6cd5bd995272b3faff6"),
+        (
+            "https://gitlab.com/namespace/project/-/commit/6104942438c14ec7bd21c6cd5bd995272b3faff6",
+            "namespace/project",
+            None,
+        ),
+    ],
+)
+def test_validate_commit_url_normalizes_project_id(
+    metadata, url, project_id, commit_sha
+):
+    tool = GetCommit(description="get commit description", metadata=metadata)
+
+    result = tool._validate_commit_url(url, project_id, commit_sha)
+
+    assert result == (
+        "namespace%2Fproject",
+        "6104942438c14ec7bd21c6cd5bd995272b3faff6",
+        [],
+    )
+
+
+def test_validate_commit_url_rejects_foreign_project_id_url(metadata):
+    tool = GetCommit(description="get commit description", metadata=metadata)
+
+    result = tool._validate_commit_url(
+        None,
+        "https://gitlab.example.com/namespace/project",
+        "6104942438c14ec7bd21c6cd5bd995272b3faff6",
+    )
+
+    assert result == (
+        None,
+        "6104942438c14ec7bd21c6cd5bd995272b3faff6",
+        [
+            "Failed to parse 'project_id': URL netloc 'gitlab.example.com' does not "
+            "match gitlab_host 'gitlab.com'"
+        ],
+    )

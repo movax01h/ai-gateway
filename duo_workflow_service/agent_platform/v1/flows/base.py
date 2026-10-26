@@ -698,6 +698,9 @@ class Flow(AbstractWorkflow):
             user=self._user,
             internal_event_client=self._internal_event_client,
             catalog_items=self._catalog_items,
+            allow_agent_to_request_user=self._workflow_config.get(
+                "allow_agent_to_request_user", False
+            ),
         )
 
     @override

@@ -5,7 +5,7 @@ environment: chat
 # interactive communication environments such as the Duo CLI. It uses the
 # shared `developer_agent_prompt` (see
 # ai/features/code/developer_agent_prompt/prompts/system/1.0.0.jinja),
-# which extends `common/developer/system` and overrides the operating-mode and
+# which extends `developer/common/system` and overrides the operating-mode and
 # git-push blocks for interactive use. This flow:
 #   * runs in the `chat` environment and loops through a HumanInputComponent so
 #     the user can steer the agent turn by turn,

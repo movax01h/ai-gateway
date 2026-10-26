@@ -43,9 +43,10 @@ LEGACY_WORKFLOWS = [
     "issue_to_merge_request",
 ]
 
+V1_FLOW_REGISTRY_CONFIG_DIR = "duo_workflow_service/agent_platform/v1/flows/configs/"
 FLOW_REGISTRY_CONFIG_DIRS = [
     "duo_workflow_service/agent_platform/experimental/flows/configs/",
-    "duo_workflow_service/agent_platform/v1/flows/configs/",
+    V1_FLOW_REGISTRY_CONFIG_DIR,
 ]
 
 # Moved features keep their flow configs under ai/features/<domain>/<feature>/config/.
@@ -56,14 +57,17 @@ def flow_registry_entries() -> list[tuple[str, Path]]:
     """Collect the flow configs to document, one entry per (flow, version).
 
     Returns:
-        Alphabetically sorted ``(flow_name, config_path)`` pairs. A legacy-root
-        copy wins a (flow, version) collision, matching runtime precedence.
+        Alphabetically sorted ``(flow_name, config_path)`` pairs. A v1 legacy-root
+        copy wins a (flow, version) collision, matching runtime precedence. Only
+        v1 feature configs (``config/*.yml``) are collected, so an experimental
+        config never shadows one.
     """
     entries: list[tuple[str, Path]] = []
     seen_versions = set()
     for flow_registry_dir in FLOW_REGISTRY_CONFIG_DIRS:
         for config_file in sorted(Path(flow_registry_dir).glob("*/*.yml")):
-            seen_versions.add((config_file.parent.name, config_file.stem))
+            if flow_registry_dir == V1_FLOW_REGISTRY_CONFIG_DIR:
+                seen_versions.add((config_file.parent.name, config_file.stem))
             entries.append((config_file.parent.name, config_file))
     for config_file in sorted(Path(".").glob(FEATURE_CONFIG_GLOB)):
         flow_name = config_file.parent.parent.name

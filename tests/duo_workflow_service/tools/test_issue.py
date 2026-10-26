@@ -1804,3 +1804,35 @@ async def test_get_issue_note_with_url_error(
         gitlab_client_mock=gitlab_client_mock,
         note_id=1,
     )
+
+
+@pytest.mark.parametrize(
+    "url,project_id,issue_iid",
+    [
+        (None, "namespace/project", 42),
+        ("https://gitlab.com/namespace/project/-/issues/42", "namespace/project", None),
+    ],
+)
+def test_validate_issue_url_normalizes_project_id(metadata, url, project_id, issue_iid):
+    tool = GetIssue(description="get issue description", metadata=metadata)
+
+    result = tool._validate_issue_url(url, project_id, issue_iid)
+
+    assert result == ("namespace%2Fproject", 42, [])
+
+
+def test_validate_issue_url_rejects_foreign_project_id_url(metadata):
+    tool = GetIssue(description="get issue description", metadata=metadata)
+
+    result = tool._validate_issue_url(
+        None, "https://gitlab.example.com/namespace/project", 42
+    )
+
+    assert result == (
+        None,
+        42,
+        [
+            "Failed to parse 'project_id': URL netloc 'gitlab.example.com' does not "
+            "match gitlab_host 'gitlab.com'"
+        ],
+    )

@@ -17,6 +17,6 @@ class ProjectResourceInput(GitLabResourceInput):
 
     project_id: Optional[Union[int, str]] = Field(
         default=None,
-        description="The ID or URL-encoded path of the project. Examples: 123, 'gitlab-org%2Fgitlab'. Required if URL "
-        "is not provided.",
+        description="The ID or full path of the project. Examples: 123, 'gitlab-org/gitlab', 'gitlab-org%2Fgitlab'. "
+        "Required if URL is not provided.",
     )

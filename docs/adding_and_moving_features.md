@@ -40,7 +40,7 @@ Follow these rules:
 
 A prompt that several features use goes to `ai/shared/<name>/prompts/` and registers as
 `<name>`. Include-only directories move the same way, and their include strings stay the
-same: `ai/shared/common/prompts/` serves `common/branch_naming/1.0.0.jinja`.
+same: `ai/shared/common/prompts/` serves `common/tool_output_security/1.0.0.jinja`.
 
 Keep `ai/shared/` small. A definition that only one feature uses belongs in that feature.
 
