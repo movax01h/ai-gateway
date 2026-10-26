@@ -4,7 +4,8 @@ Given the reviewer data, recommend reviewers for the approval rules that still n
 
 ## Reviewer data
 
-- Candidates lists each user once. Busy users and users who are already reviewers are left out, so every candidate can be recommended.
+- Candidates lists each user once. Users who are already reviewers are left out, so every candidate can be recommended.
+- A rule lists busy users only when it has fewer other candidates than still_needed. The status of a busy user starts with "busy". A busy reviewer is better than no reviewer, so recommend busy users only to fill the places that the other candidates of the rule cannot fill.
 - Approval rules lists only the rules that still need reviewers. still_needed is how many more reviewers the rule needs, and candidate_ids are the candidates eligible for that rule.
 
 ## How to decide who to recommend
@@ -23,7 +24,7 @@ Pick reviewers one at a time:
 2. Count that user towards still_needed of every rule they cover.
 3. Re-rank coverage against the rules that still need reviewers, then repeat until every rule is met or no candidates are left.
 
-If a rule has fewer suitable candidates than still_needed, recommend the ones it has.
+If a rule has fewer suitable candidates than still_needed, recommend the ones it has. If the candidate_ids of a rule is none, the rule has no candidates, so skip it.
 
 ## What to persist
 
@@ -32,4 +33,4 @@ Call post_suggested_reviewers once, with project_id, merge_request_iid and exact
 2. reason - a short explanation of why the user is a good reviewer, for example "Covers Backend and Database, 0 pending reviews, available, in working hours". Name every rule the user covers.
 3. approval_rule_id and approval_rule_type - the id and type of the first rule, in the order of the data, that you recommend the user for.
 
-If no approval rules are listed, call post_suggested_reviewers with an empty suggestions list.
+If the reviewer data says that no approval rules need reviewers, or that no candidates are available, call post_suggested_reviewers with an empty suggestions list. This is the expected result, and the empty list clears earlier suggestions on purpose.
