@@ -46,7 +46,7 @@ class ChatGoogleGenerativeAI(_LCChatGoogleGenerativeAI):
     custom_models_enabled: bool = False
     """Whether custom model endpoints are allowed."""
 
-    temperature: float | None = None  # type: ignore[assignment]
+    temperature: float | None = None
     """Omitted from the request when unset, letting Google apply its recommended default of 1.0 for Gemini 3+ models."""
 
     @model_validator(mode="after")
