@@ -49,6 +49,32 @@ class TierAccessDeniedException(ToolException):
         )
 
 
+class WorkflowTokenRejectedError(Exception):
+    """The token does not authorize the requested workflow, so the run is rejected before any work.
+
+    Raised as the ``__cause__`` of a ``NotifiableException`` so the user sees a safe message while the server maps
+    this class to ``PERMISSION_DENIED`` with ``details``. Unlike ``UnrecoverableWorkflowException`` the session is
+    dropped: Rails still holds it as runnable, and a silent exit is what made the rejection look like a normal end.
+
+    Attributes:
+        details: The gRPC status detail, fixed text written by the server.
+        drop_reason: The reason recorded on the Rails row when it is dropped.
+        user_message: The safe text shown to the user, raised as the ``NotifiableException`` message. A subclass for
+            a different rejection (e.g. a token carrying no workflow binding, which asks the user to update their
+            client) overrides it while reusing the same reject-and-drop path.
+    """
+
+    drop_reason = "token_rejected"
+    user_message = (
+        "This session was blocked because its token does not belong to it."
+        " Start a new session."
+    )
+
+    def __init__(self, details: str) -> None:
+        super().__init__(details)
+        self.details = details
+
+
 class InvalidWorkflowIdException(Exception):
     """Raised when a workflow ID is invalid or not found."""
 
