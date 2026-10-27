@@ -411,7 +411,6 @@ duo_workflow_service/agent_platform/v1/flows/configs/project_activity
 duo_workflow_service/agent_platform/v1/flows/configs/readiness_score
 duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump
 duo_workflow_service/agent_platform/v1/flows/configs/resolve_sast_vulnerability
-duo_workflow_service/agent_platform/v1/flows/configs/risk_classification
 duo_workflow_service/agent_platform/v1/flows/configs/sast_fp_detection
 duo_workflow_service/agent_platform/v1/flows/configs/secrets_fp_detection
 duo_workflow_service/agent_platform/v1/flows/configs/security_review
