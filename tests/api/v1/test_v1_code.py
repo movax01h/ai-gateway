@@ -1,4 +1,5 @@
 # pylint: disable=file-naming-for-tests
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -284,6 +285,64 @@ class TestUserAccessTokenSuccessSaas:
             "request_complete_code",
             category="ai_gateway.api.v1.code.user_access_token",
         )
+
+
+class TestReservedClaimsAreNotForwarded:
+    @pytest.fixture(name="auth_user")
+    def auth_user_fixture(self, request):
+        far_future = int((datetime.now(timezone.utc) + timedelta(days=3)).timestamp())
+        long_ago = int((datetime.now(timezone.utc) - timedelta(days=3)).timestamp())
+        claims = UserClaims(
+            scopes=["complete_code", "ai_gateway_model_provider_proxy"],
+            gitlab_realm=request.param,
+            gitlab_instance_id="1234",
+            extra={
+                "iss": "caller-issuer",
+                "sub": "caller-subject",
+                "aud": "caller-audience",
+                "exp": far_future,
+                "nbf": long_ago,
+                "iat": long_ago,
+                "jti": "caller-jti",
+                SKIP_USAGE_CUTOFF_CLAIM: "true",
+            },
+        )
+        return CloudConnectorUser(authenticated=True, claims=claims)
+
+    @pytest.mark.parametrize("auth_user", ["saas", "self-managed"], indirect=True)
+    def test_user_access_token_mints_fresh_registered_claims(
+        self, mock_client: TestClient, auth_user: CloudConnectorUser
+    ):
+        headers = {
+            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
+            "Authorization": "Bearer 12345",
+            "X-Gitlab-Authentication-Type": "oidc",
+            "X-Gitlab-Instance-Id": "1234",
+            "X-Gitlab-Realm": auth_user.claims.gitlab_realm,
+        }
+
+        response = mock_client.post("/code/user_access_token", headers=headers)
+
+        assert response.status_code == status.HTTP_200_OK
+
+        parsed_response = response.json()
+        decoded_token = jwt.decode(
+            parsed_response["token"],
+            TEST_PUBLIC_KEY,
+            audience="gitlab-ai-gateway",
+            algorithms=CompositeProvider.SUPPORTED_ALGORITHMS,
+        )
+        current_time_posix = int(datetime.now(timezone.utc).timestamp())
+
+        assert decoded_token["iss"] == "gitlab-ai-gateway"
+        assert decoded_token["sub"] == GLOBAL_USER_ID
+        assert decoded_token["aud"] == "gitlab-ai-gateway"
+        assert current_time_posix < decoded_token["exp"] <= current_time_posix + 3600
+        assert current_time_posix - 60 <= decoded_token["nbf"] <= current_time_posix
+        assert current_time_posix - 60 <= decoded_token["iat"] <= current_time_posix
+        assert str(uuid.UUID(decoded_token["jti"])) == decoded_token["jti"]
+        assert parsed_response["expires_at"] == decoded_token["exp"]
+        assert decoded_token[SKIP_USAGE_CUTOFF_CLAIM] == "true"
 
 
 class TestUnauthorizedIssuer:
