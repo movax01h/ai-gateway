@@ -2019,6 +2019,43 @@ class TestToolCallApprovals:
         assert call_args[0][1]["toolCallArgs"] == '{"command":"git checkout main"}'
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool_args", "expected_json"),
+        [
+            (
+                {"program": "git", "args": "diff -- .gitlab-ci.yml"},
+                '{"program":"git","args":"diff -- .gitlab-ci.yml"}',
+            ),
+            (
+                {"command": "echo 'año'", "timeout": 30},
+                '{"command":"echo \'año\'","timeout":30}',
+            ),
+        ],
+        ids=["model_key_order", "raw_utf8"],
+    )
+    async def test_tool_args_sent_to_rails_match_client_serialization(
+        self, tool_metadata, tool_args, expected_json
+    ):
+        """Rails compares this string with the hash of the client's JSON.stringify(toolArgs)."""
+        mock_client = AsyncMock()
+        mock_client.graphql.return_value = {
+            "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": True}]}
+        }
+
+        registry = ToolsRegistry(
+            enabled_tools=["run_commands"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            gl_http_client=mock_client,
+            workflow_id="456",
+        )
+
+        await registry.approval_required("run_command", tool_args)
+
+        call_args = mock_client.graphql.call_args
+        assert call_args[0][1]["toolCallArgs"] == expected_json
+
+    @pytest.mark.asyncio
     async def test_non_serializable_args_requires_approval(self, tool_metadata):
         """Non-JSON-serializable tool args should default to requiring approval."""
         mock_client = AsyncMock()
