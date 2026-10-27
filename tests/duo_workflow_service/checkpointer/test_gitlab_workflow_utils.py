@@ -4,6 +4,9 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS,
+    BILLABLE_STATUSES,
+    WorkflowStatusEventEnum,
     add_compression_param,
     compress_checkpoint,
     uncompress_checkpoint,
@@ -65,3 +68,14 @@ def test_uncompress_checkpoint_without_object_hook_keeps_dicts():
 
     assert message["type"] == "AIMessage"
     assert message["content"] == "hi"
+
+
+def test_billable_status_event_to_workflow_status_covers_billable_statuses():
+    """The map must cover every event whose Rails transition leaves the session in a billable status."""
+    assert all(
+        isinstance(event, WorkflowStatusEventEnum)
+        for event in BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS
+    )
+    assert set(BILLABLE_STATUSES) <= set(
+        BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS.values()
+    )
