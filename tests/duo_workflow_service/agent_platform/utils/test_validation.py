@@ -56,6 +56,19 @@ def validator_fixture() -> FlowValidator:
     )
 
 
+class TestToolsetOptional:
+    @pytest.mark.parametrize("environment", ["ambient", "chat-partial"])
+    def test_omitted_toolset_is_valid(self, validator: FlowValidator, environment: str):
+        yml_dict = yaml.safe_load(_build_yaml())
+        del yml_dict["components"][0]["toolset"]
+        yml_dict["environment"] = environment
+        if environment == "chat-partial":
+            del yml_dict["flow"]
+            del yml_dict["routers"]
+
+        validator.validate(yaml.dump(yml_dict))
+
+
 class TestFlowConfigStructure:
     def test_yaml_syntax_error(self, validator: FlowValidator):
         invalid_yaml = "key: [unclosed bracket"
