@@ -416,6 +416,29 @@ def test_registry_initialization(tool_metadata, config, expected_tools_set):
     assert set(registry._enabled_tools.keys()) == expected_tools_set
 
 
+def test_registry_initialization_leaves_module_tool_lists_unchanged(
+    tool_metadata, mcp_tools
+):
+    """ListTools caches its response per process, so per-workflow tools must not leak into these lists."""
+    agent_privileges = {
+        privilege: list(tool_classes)
+        for privilege, tool_classes in tools_registry._AGENT_PRIVILEGES.items()
+    }
+    default_tools = list(tools_registry._DEFAULT_TOOLS)
+    read_only_gitlab_tools = list(tools_registry._READ_ONLY_GITLAB_TOOLS)
+
+    ToolsRegistry(
+        enabled_tools=list(tools_registry._AGENT_PRIVILEGES),
+        preapproved_tools=list(tools_registry._AGENT_PRIVILEGES),
+        tool_metadata=tool_metadata,
+        mcp_tools=mcp_tools,
+    )
+
+    assert tools_registry._AGENT_PRIVILEGES == agent_privileges
+    assert tools_registry._DEFAULT_TOOLS == default_tools
+    assert tools_registry._READ_ONLY_GITLAB_TOOLS == read_only_gitlab_tools
+
+
 def test_registry_initialization_initialises_tools_with_correct_attributes(
     tool_metadata,
 ):

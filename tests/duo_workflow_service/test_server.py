@@ -64,6 +64,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.components import tools_registry
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.errors.typing import (
@@ -111,7 +112,10 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
     ForbiddenStatusEvent,
     UnsupportedStatusEvent,
 )
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    STABLE_VERSION_THRESHOLD,
+    DuoBaseTool,
+)
 from duo_workflow_service.tools.session_context import GetSessionContext
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.workflows.registry import ResolvedFlow
@@ -582,6 +586,13 @@ async def test_list_tools(
     )
     assert actual_sorted == expected_sorted
 
+    convert_calls = mock_convert_to_openai_tool.call_count
+    second_response = await servicer.ListTools(
+        contract_pb2.ListToolsRequest(), mock_context
+    )
+    assert mock_convert_to_openai_tool.call_count == convert_calls
+    assert second_response == response
+
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.tools_registry._DEFAULT_TOOLS")
@@ -694,6 +705,24 @@ async def test_list_tools_excludes_get_session_context(
 
 
 @pytest.mark.asyncio
+async def test_list_tools_includes_feature_tools(mock_context, servicer):
+    """Feature tools merge into the registry when tools_registry is imported, so the cached response includes them."""
+    feature_tool_names = {
+        tools_registry._tool_name(tool_cls)
+        for tool_classes in tools_registry.discover_feature_tools().values()
+        for tool_cls in tool_classes
+        if issubclass(tool_cls, DuoBaseTool)
+        and tool_cls.tool_version >= STABLE_VERSION_THRESHOLD
+    }
+    assert feature_tool_names
+
+    response = await servicer.ListTools(contract_pb2.ListToolsRequest(), mock_context)
+
+    tool_names = {MessageToDict(tool)["function"]["name"] for tool in response.tools}
+    assert feature_tool_names <= tool_names
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.server.flow_registry.list_configs")
 async def test_list_flows(mock_list_configs, mock_context, servicer):
     mock_list_configs.return_value = [
@@ -702,9 +731,13 @@ async def test_list_flows(mock_list_configs, mock_context, servicer):
     ]
 
     response = await servicer.ListFlows(contract_pb2.ListFlowsRequest(), mock_context)
+    second_response = await servicer.ListFlows(
+        contract_pb2.ListFlowsRequest(), mock_context
+    )
 
     assert isinstance(response, contract_pb2.ListFlowsResponse)
     assert len(response.configs) == 2
+    assert second_response == response
     mock_list_configs.assert_called_once()
 
     configs_dict = [MessageToDict(config) for config in response.configs]
