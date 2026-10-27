@@ -431,13 +431,13 @@ class TestFlowGraphBuilder:
                 None,
                 call(["create_file_with_contents"], tool_options={}),
             ),
-            (None, None, None),
+            (None, None, call([], tool_options={})),
         ],
         ids=[
             "tool_name_without_toolset",
             "toolset_wins_over_tool_name",
             "toolset_without_tool_name",
-            "neither_declared",
+            "neither_declared_is_an_empty_toolset",
         ],
     )
     def test_a_toolset_is_resolved_from_toolset_or_tool_name(
@@ -467,14 +467,71 @@ class TestFlowGraphBuilder:
         ):
             builder.build(_config(components=[comp_config]))
 
-        if expected_call is None:
-            mock_tools_registry.toolset.assert_not_called()
-            assert "toolset" not in comp_class.params
-        else:
-            assert mock_tools_registry.toolset.call_args_list == [expected_call]
-            assert (
-                comp_class.params["toolset"] is mock_tools_registry.toolset.return_value
+        assert mock_tools_registry.toolset.call_args_list == [expected_call]
+        assert comp_class.params["toolset"] is mock_tools_registry.toolset.return_value
+
+    @pytest.mark.usefixtures("mock_graph")
+    @pytest.mark.parametrize(
+        "environment,mcp_names,expected_names",
+        [
+            ("chat", ["mcp_a", "mcp_b"], ["mcp_a", "mcp_b"]),
+            ("chat-partial", ["mcp_a"], ["mcp_a"]),
+            ("ambient", ["mcp_a", "mcp_b"], []),
+        ],
+    )
+    def test_an_omitted_toolset_resolves_like_an_empty_one(
+        self,
+        builder,
+        mock_tools_registry,
+        environment,
+        mcp_names,
+        expected_names,
+    ):
+        """MCP tools join a declared toolset in chat, so an omitted one must too."""
+        mock_tools_registry.mcp_tool_names.return_value = mcp_names
+        resolved_calls = []
+
+        for declared in ({}, {"toolset": []}):
+            mock_tools_registry.toolset.reset_mock()
+            with (
+                _component_classes(
+                    {"AgentComponent": _ComponentClassStub(_component_stub("agent"))}
+                ),
+                patch(f"{_MODULE}.Router"),
+            ):
+                builder.build(
+                    _config(
+                        environment=environment,
+                        components=[
+                            {"name": "agent", "type": "AgentComponent", **declared}
+                        ],
+                    )
+                )
+            resolved_calls.append(mock_tools_registry.toolset.call_args_list)
+
+        assert resolved_calls[0] == resolved_calls[1]
+        assert resolved_calls[0] == [call(expected_names, tool_options={})]
+
+    @pytest.mark.usefixtures("mock_graph")
+    def test_only_an_agent_component_gets_a_default_toolset(
+        self, builder, mock_tools_registry
+    ):
+        comp_class = _ComponentClassStub(_component_stub("step"))
+
+        with (
+            _component_classes({"DeterministicStepComponent": comp_class}),
+            patch(f"{_MODULE}.Router"),
+        ):
+            builder.build(
+                _config(
+                    flow={"entry_point": "step"},
+                    components=[{"name": "step", "type": "DeterministicStepComponent"}],
+                    routers=[{"from": "step", "to": "end"}],
+                )
             )
+
+        mock_tools_registry.toolset.assert_not_called()
+        assert "toolset" not in comp_class.params
 
     @pytest.mark.usefixtures("mock_graph")
     @pytest.mark.parametrize(

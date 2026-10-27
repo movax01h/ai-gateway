@@ -89,11 +89,18 @@ class GitLabStatusUpdater:
         return response.body.get("status")
 
     async def _update_workflow_status_in_remote(
-        self, workflow_id: str, status_event: WorkflowStatusEventEnum
+        self,
+        workflow_id: str,
+        status_event: WorkflowStatusEventEnum,
+        drop_reason: str | None = None,
     ) -> None:
+        body: dict[str, str] = {"status_event": status_event.value}
+        if drop_reason is not None:
+            body["drop_reason"] = drop_reason
+
         result = await self._client.apatch(
             path=f"{self.workflow_api_path}/{workflow_id}",
-            body=json.dumps({"status_event": status_event.value}),
+            body=json.dumps(body),
             parse_json=True,
         )
 
@@ -118,19 +125,27 @@ class GitLabStatusUpdater:
             )
 
     async def update_workflow_status(
-        self, workflow_id: str, status_event: WorkflowStatusEventEnum
+        self,
+        workflow_id: str,
+        status_event: WorkflowStatusEventEnum,
+        drop_reason: str | None = None,
     ) -> None:
         """Update the status of a workflow in GitLab.
 
         Args:
             workflow_id (str): The ID of the workflow to update.
             status_event (WorkflowStatusEventEnum): The status event for the workflow. Can be start, finish or drop.
+            drop_reason (str | None): Why the session is dropped; meaningful only with ``drop``, Rails ignores it on
+                any other event. A Rails that does not know the value, or the field, records ``api_reported`` and
+                still drops the session.
 
         Raises:
             Exception: If the update request fails.
             ToolException: If HTTP connection fails.
         """
-        await self._update_workflow_status_in_remote(workflow_id, status_event)
+        await self._update_workflow_status_in_remote(
+            workflow_id, status_event, drop_reason
+        )
 
         if self.status_update_callback:
             self.status_update_callback(status_event)

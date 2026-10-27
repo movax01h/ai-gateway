@@ -64,6 +64,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
+from duo_workflow_service.components import tools_registry
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.errors.typing import (
@@ -72,6 +73,7 @@ from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     InvalidWorkflowIdException,
     WorkflowAlreadyFinishedException,
+    WorkflowTokenRejectedError,
 )
 from duo_workflow_service.executor.outbox import (
     OutboxSignal,
@@ -96,6 +98,7 @@ from duo_workflow_service.server import (
     _extract_error_message,
     _flow_config_digest,
     _restricted_access_flow,
+    _workflow_binding_matches,
     clean_start_request,
     drain_workflow_tasks,
     next_client_event,
@@ -111,7 +114,10 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
     ForbiddenStatusEvent,
     UnsupportedStatusEvent,
 )
-from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.duo_base_tool import (
+    STABLE_VERSION_THRESHOLD,
+    DuoBaseTool,
+)
 from duo_workflow_service.tools.session_context import GetSessionContext
 from duo_workflow_service.tracking import MonitoringContext, current_monitoring_context
 from duo_workflow_service.workflows.registry import ResolvedFlow
@@ -582,6 +588,13 @@ async def test_list_tools(
     )
     assert actual_sorted == expected_sorted
 
+    convert_calls = mock_convert_to_openai_tool.call_count
+    second_response = await servicer.ListTools(
+        contract_pb2.ListToolsRequest(), mock_context
+    )
+    assert mock_convert_to_openai_tool.call_count == convert_calls
+    assert second_response == response
+
 
 @pytest.mark.asyncio
 @patch("duo_workflow_service.server.tools_registry._DEFAULT_TOOLS")
@@ -694,6 +707,24 @@ async def test_list_tools_excludes_get_session_context(
 
 
 @pytest.mark.asyncio
+async def test_list_tools_includes_feature_tools(mock_context, servicer):
+    """Feature tools merge into the registry when tools_registry is imported, so the cached response includes them."""
+    feature_tool_names = {
+        tools_registry._tool_name(tool_cls)
+        for tool_classes in tools_registry.discover_feature_tools().values()
+        for tool_cls in tool_classes
+        if issubclass(tool_cls, DuoBaseTool)
+        and tool_cls.tool_version >= STABLE_VERSION_THRESHOLD
+    }
+    assert feature_tool_names
+
+    response = await servicer.ListTools(contract_pb2.ListToolsRequest(), mock_context)
+
+    tool_names = {MessageToDict(tool)["function"]["name"] for tool in response.tools}
+    assert feature_tool_names <= tool_names
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.server.flow_registry.list_configs")
 async def test_list_flows(mock_list_configs, mock_context, servicer):
     mock_list_configs.return_value = [
@@ -702,9 +733,13 @@ async def test_list_flows(mock_list_configs, mock_context, servicer):
     ]
 
     response = await servicer.ListFlows(contract_pb2.ListFlowsRequest(), mock_context)
+    second_response = await servicer.ListFlows(
+        contract_pb2.ListFlowsRequest(), mock_context
+    )
 
     assert isinstance(response, contract_pb2.ListFlowsResponse)
     assert len(response.configs) == 2
+    assert second_response == response
     mock_list_configs.assert_called_once()
 
     configs_dict = [MessageToDict(config) for config in response.configs]
@@ -1412,6 +1447,15 @@ def _cyclic_error() -> BaseException:
             grpc.StatusCode.INTERNAL,
             "workflow execution failure: RuntimeError",
         ),
+        (
+            WorkflowTokenRejectedError(
+                "Workflow token is not authorized for the requested workflow"
+            ),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            "Workflow token is not authorized for the requested workflow",
+        ),
     ],
 )
 @patch("duo_workflow_service.server.current_monitoring_context")
@@ -1843,8 +1887,9 @@ async def _execute_workflow_with_id(servicer, mock_context, workflow_id):
     """Drive ExecuteWorkflow far enough to pass (or trip) the binding guard.
 
     Downstream failures are irrelevant here; the assertions below look only at
-    whether the guard aborted. `abort` is replaced with an AsyncMock because the
-    handler awaits it and the shared fixture supplies a plain MagicMock.
+    whether the guard aborted or recorded a rejection on the workflow it built.
+    `abort` is replaced with an AsyncMock because the handler awaits it and the
+    shared fixture supplies a plain MagicMock.
     """
     mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
     start_request = contract_pb2.StartWorkflowRequest(
@@ -1874,6 +1919,25 @@ def _binding_guard_aborted(mock_context) -> bool:
     )
 
 
+def _recorded_token_rejection(mock_resolve_flow):
+    """Return what the handler set as `token_rejection` on the workflow it built."""
+    return mock_resolve_flow.return_value.factory.return_value.token_rejection
+
+
+@pytest.mark.parametrize(
+    "bound,requested,expected",
+    [
+        ("42", "42", True),
+        ("42", "gid://gitlab/Ai::DuoWorkflows::Workflow/42", True),
+        # Longer than Python's int-string digit limit: the matcher must say
+        # mismatch rather than raise.
+        ("42", "4" * 5000, False),
+    ],
+)
+def test_workflow_binding_matches(bound, requested, expected):
+    assert _workflow_binding_matches(bound, requested) is expected
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "claims_extra,workflow_id",
@@ -1881,17 +1945,7 @@ def _binding_guard_aborted(mock_context) -> bool:
         ({"workflow_id": "42"}, "99"),
         ({"workflow_id": "not-a-number"}, "42"),
         ({"workflow_id": ""}, "42"),
-        ({"workflow_id": ""}, "0"),
-        ({"workflow_id": "0"}, "#0"),
-        ({"workflow_id": "42"}, "99?gid://gitlab/Ai::DuoWorkflows::Workflow/42"),
-        ({"workflow_id": "42"}, "99#gid://x/42"),
-        ({"workflow_id": "42"}, "gid://gitlab/Project/42"),
-        ({"workflow_id": "42"}, " 42 "),
-        ({"workflow_id": "42"}, "\u0664\u0662"),
-        ({"workflow_id": "42"}, "042"),
-        ({"workflow_id": "42"}, "4" * 5000),
         ({"workflow_id": True}, "1"),
-        ({"workflow_id": 0}, "0"),
         ({"workflow_id": -5}, "5"),
         ({"workflow_id": None}, "42"),
     ],
@@ -1904,6 +1958,55 @@ async def test_execute_workflow_rejects_mismatched_workflow_binding(
     claims_extra,
     workflow_id,
 ):
+    """A mismatch for an id that names a session is carried into the run, not aborted.
+
+    The run drops the session and fails loudly; an abort here would reach the client as a normal close with no word to
+    Rails, so the handler builds the workflow and marks it instead.
+    """
+    await _execute_workflow_with_id(servicer, mock_context, workflow_id)
+
+    assert not _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_called_once()
+    rejection = _recorded_token_rejection(mock_resolve_flow)
+    assert isinstance(rejection, WorkflowTokenRejectedError)
+    assert rejection.details == WORKFLOW_BINDING_ABORT[1]
+    assert rejection.drop_reason == "token_rejected"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,workflow_id",
+    [
+        ({"workflow_id": ""}, "0"),
+        ({"workflow_id": "0"}, "#0"),
+        ({"workflow_id": "42"}, "99?gid://gitlab/Ai::DuoWorkflows::Workflow/42"),
+        ({"workflow_id": "42"}, "99#gid://x/42"),
+        ({"workflow_id": "42"}, "gid://gitlab/Project/42"),
+        ({"workflow_id": "42"}, " 42 "),
+        ({"workflow_id": "42"}, "\u0664\u0662"),
+        ({"workflow_id": "42"}, "042"),
+        ({"workflow_id": "42"}, "abc"),
+        ({"workflow_id": "42"}, "4" * 5000),
+        ({"workflow_id": 0}, "0"),
+        # A `#`/global-id form matches a binding but is not URL-safe: carried raw
+        # into the run its drop PATCH to /workflows/<id> would break, so a mismatch
+        # on one aborts up front rather than dropping an id Rails never receives.
+        ({"workflow_id": "7"}, "#42"),
+        ({"workflow_id": "7"}, "gid://gitlab/Ai::DuoWorkflows::Workflow/42"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_aborts_mismatch_for_an_id_it_cannot_drop(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    claims_extra,
+    workflow_id,
+):
+    """A mismatch aborts before any workflow setup when the requested id cannot be dropped as-is.
+
+    Either it names no session, or it is a `#`/global-id form whose raw drop PATCH would break at Workhorse.
+    """
     await _execute_workflow_with_id(servicer, mock_context, workflow_id)
 
     assert _binding_guard_aborted(mock_context)
@@ -1915,14 +2018,17 @@ async def test_execute_workflow_rejects_mismatched_workflow_binding(
 @patch("duo_workflow_service.server.log")
 @patch("duo_workflow_service.server.resolve_flow")
 async def test_execute_workflow_logs_mismatched_workflow_binding(
-    _mock_resolve_flow,
+    mock_resolve_flow,
     mock_log,
     mock_context,
     servicer,
 ):
     await _execute_workflow_with_id(servicer, mock_context, "9" * 100)
 
+    # 100 digits name no session, so this mismatch takes the abort path; the
+    # warning is logged on both paths and truncates the requested id.
     assert _binding_guard_aborted(mock_context)
+    mock_resolve_flow.assert_not_called()
     mock_log.warning.assert_any_call(
         "Workflow token bound to a different workflow",
         bound_workflow_id="42",
@@ -1954,6 +2060,7 @@ async def test_execute_workflow_allows_matching_workflow_token(
 
     assert not _binding_guard_aborted(mock_context)
     mock_resolve_flow.assert_called_once()
+    assert _recorded_token_rejection(mock_resolve_flow) is None
 
 
 @pytest.mark.asyncio
@@ -1970,6 +2077,7 @@ async def test_execute_workflow_logs_unbound_token_from_a_binding_instance(
 
     assert not _binding_guard_aborted(mock_context)
     mock_resolve_flow.assert_called_once()
+    assert _recorded_token_rejection(mock_resolve_flow) is None
     mock_log.info.assert_any_call(
         "Workflow token without a workflow binding",
         token_issuer=ANY,
@@ -2036,6 +2144,7 @@ async def test_execute_workflow_exempts_debug_user_from_workflow_binding(
 
     assert not _binding_guard_aborted(mock_context)
     mock_resolve_flow.assert_called_once()
+    assert _recorded_token_rejection(mock_resolve_flow) is None
 
 
 @pytest.mark.asyncio

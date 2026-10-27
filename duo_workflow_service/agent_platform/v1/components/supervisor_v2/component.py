@@ -191,6 +191,13 @@ class SupervisorAgentComponentV2(AgentComponentBase):
 
     max_delegations: Optional[int] = None
 
+    # Hard cap on delegate_task calls accepted per supervisor turn, enforced in
+    # DelegationPrepareNode. Bounds the per-turn fan-out so the subagent results
+    # collected back into the supervisor's conversation_history channel stay under
+    # the checkpoint blob size limit Rails enforces. None disables the cap. Set
+    # per flow config.
+    delegation_batch_size: Optional[int] = None
+
     ui_log_events: list[UILogEventsSupervisor] = Field(default_factory=list)
     ui_role_as: str = "agent"
 
@@ -225,6 +232,13 @@ class SupervisorAgentComponentV2(AgentComponentBase):
     def validate_max_delegations(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v < 1:
             raise ValueError("max_delegations must be at least 1.")
+        return v
+
+    @field_validator("delegation_batch_size")
+    @classmethod
+    def validate_delegation_batch_size(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
+            raise ValueError("delegation_batch_size must be at least 1.")
         return v
 
     @model_validator(mode="before")
@@ -555,6 +569,7 @@ class SupervisorAgentComponentV2(AgentComponentBase):
             name=f"{self.name}{NODE_ROLE_SEPARATOR}delegation_prepare",
             supervisor_name=self.name,
             max_delegations=self.max_delegations,
+            max_batch_size=self.delegation_batch_size,
             delegate_task_cls=self._delegate_task_cls,
             delegation_count_key=self._resolved_delegation_count_key,
             max_subsession_id_key=self._resolved_max_subsession_id_key,

@@ -192,7 +192,6 @@ ai_gateway/prompts/definitions/code_suggestions/generations/mixtral
 ai_gateway/prompts/definitions/commit_changes/base
 ai_gateway/prompts/definitions/commit_changes/system
 ai_gateway/prompts/definitions/commit_changes/user
-ai_gateway/prompts/definitions/common/api_assistant/system
 ai_gateway/prompts/definitions/common/code_review_previous_review
 ai_gateway/prompts/definitions/common/code_review_previous_review_rules
 ai_gateway/prompts/definitions/common/code_review_reconciliation
@@ -412,11 +411,9 @@ duo_workflow_service/agent_platform/v1/flows/configs/project_activity
 duo_workflow_service/agent_platform/v1/flows/configs/readiness_score
 duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump
 duo_workflow_service/agent_platform/v1/flows/configs/resolve_sast_vulnerability
-duo_workflow_service/agent_platform/v1/flows/configs/risk_classification
 duo_workflow_service/agent_platform/v1/flows/configs/sast_fp_detection
 duo_workflow_service/agent_platform/v1/flows/configs/secrets_fp_detection
 duo_workflow_service/agent_platform/v1/flows/configs/security_review
-duo_workflow_service/agent_platform/v1/flows/configs/slack_assistant
 duo_workflow_service/agent_platform/v1/flows/configs/software_development
 duo_workflow_service/agent_platform/v1/flows/configs/support_assistant
 duo_workflow_service/agent_platform/v1/flows/configs/workplan

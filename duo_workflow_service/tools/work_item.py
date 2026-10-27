@@ -5,9 +5,13 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Type, Union
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field, StringConstraints
 
+from duo_workflow_service.gitlab.executor_http_client import GitLabGraphQLError
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import (
     DESCRIPTION_CHARACTER_LIMIT,
+)
+from duo_workflow_service.tools.version_compatibility import (
+    supports_create_discussion_mutation,
 )
 from duo_workflow_service.tools.work_items.base_tool import (
     GROUP_ONLY_TYPES,
@@ -16,12 +20,14 @@ from duo_workflow_service.tools.work_items.base_tool import (
 )
 from duo_workflow_service.tools.work_items.queries.graphql_queries import GET_NOTE_QUERY
 from duo_workflow_service.tools.work_items.queries.work_items import (
+    CREATE_DISCUSSION_MUTATION,
     CREATE_NOTE_MUTATION,
     GET_WORK_ITEM_STATUSES_QUERY,
 )
 from duo_workflow_service.tools.work_items.version_compatibility import (
     get_query_variables_for_version,
 )
+from lib.context import gitlab_version
 
 # Built-in GitLab work item types (custom types are not filterable).
 ALL_TYPES = {
@@ -788,6 +794,10 @@ class UpdateWorkItem(WorkItemBaseTool):
         return f"Update work item #{args.work_item_iid} in project {args.project_id}"
 
 
+CREATE_NOTE_MUTATION_KEY = "createNote"
+CREATE_DISCUSSION_MUTATION_KEY = "createDiscussion"
+
+
 class CreateWorkItemNoteInput(WorkItemResourceInput):
     body: str = Field(
         description=f"The content of the note. Limited to {DESCRIPTION_CHARACTER_LIMIT} characters.",
@@ -801,6 +811,13 @@ class CreateWorkItemNoteInput(WorkItemResourceInput):
         description="ID of an existing note to reply to. "
         "The tool will automatically find the discussion containing this note. "
         "If not provided, creates a standalone comment.",
+    )
+    start_discussion: bool = Field(
+        default=False,
+        description="Start a discussion thread instead of a standalone comment. "
+        "A thread can be resolved, so use it for anything a human is expected to "
+        "answer and then close. Cannot be combined with note_id, which replies to "
+        "a thread that already exists.",
     )
 
 
@@ -822,6 +839,8 @@ class CreateWorkItemNote(WorkItemBaseTool):
 
     To create a standalone comment:
     - create_work_item_note(project_id='namespace/project', work_item_iid=42, body="This is a comment")
+    To start a discussion thread somebody can reply to and resolve:
+    - Use start_discussion: create_work_item_note(project_id='namespace/project', work_item_iid=42, body="Question?", start_discussion=True)
     To reply to a specific comment:
     - Use note_id: create_work_item_note(project_id='namespace/project', work_item_iid=42, note_id=1536, body="Reply text")
 
@@ -837,6 +856,27 @@ class CreateWorkItemNote(WorkItemBaseTool):
         work_item_iid = kwargs.pop("work_item_iid", None)
         internal = kwargs.pop("internal", None)
         note_id = kwargs.pop("note_id", None)
+        start_discussion = kwargs.pop("start_discussion", False)
+
+        if start_discussion and note_id is not None:
+            raise ToolException(
+                "start_discussion cannot be combined with note_id; "
+                "a reply cannot start a new discussion."
+            )
+
+        warnings: List[str] = []
+        if start_discussion and not supports_create_discussion_mutation():
+            start_discussion = False
+            # The reported string, not get_gitlab_version(): that substitutes a
+            # fallback for an instance that reported nothing, which would read
+            # as the instance naming a version it never sent.
+            reported = gitlab_version.get()
+            warnings.append(
+                "Posted as a plain comment rather than a discussion thread: threads "
+                "require GitLab 19.4 or later and this instance "
+                + (f"reports {reported}." if reported else "reports no version.")
+                + " It becomes a discussion once somebody replies to it."
+            )
 
         resolved = await self._validate_work_item_url(
             url, group_id, project_id, work_item_iid
@@ -857,11 +897,49 @@ class CreateWorkItemNote(WorkItemBaseTool):
         if discussion_id is not None:
             note_input["discussionId"] = discussion_id
 
-        note_response = await self.gitlab_client.graphql(
-            CREATE_NOTE_MUTATION, {"input": note_input}
+        note_response = None
+        mutation_key = CREATE_NOTE_MUTATION_KEY
+        if start_discussion:
+            note_response = await self._try_create_discussion(note_input, warnings)
+            if note_response is not None:
+                mutation_key = CREATE_DISCUSSION_MUTATION_KEY
+
+        if note_response is None:
+            note_response = await self.gitlab_client.graphql(
+                CREATE_NOTE_MUTATION, {"input": note_input}
+            )
+
+        return self._process_note_response(
+            note_response, mutation_key=mutation_key, warnings=warnings
         )
 
-        return self._process_note_response(note_response)
+    async def _try_create_discussion(
+        self, note_input: dict, warnings: List[str]
+    ) -> Optional[dict]:
+        """Run createDiscussion, or return None if GitLab rejected it before writing.
+
+        A 19.4+ instance can still reject the mutation, for example a patch release without gitlab!250861 or a token
+        missing the scope. Those are authorization failures raised before anything is written, so the caller can safely
+        post a plain note instead. Any other error is re-raised, as it may come from after the discussion was saved
+        (todos, usage counters, and so on) and posting again would duplicate it. The same goes for timeouts and HTTP
+        failures.
+        """
+        try:
+            response = await self.gitlab_client.graphql(
+                CREATE_DISCUSSION_MUTATION, {"input": note_input}
+            )
+        except GitLabGraphQLError as e:
+            if not e.is_resource_not_available():
+                raise
+        else:
+            return response
+
+        warnings.append(
+            "Posted as a plain comment rather than a discussion thread: GitLab "
+            "rejected createDiscussion. It becomes a discussion once somebody "
+            "replies to it."
+        )
+        return None
 
     async def _get_work_item_id(self, resolved: ResolvedWorkItem) -> dict:
         """Get work item ID from resolved work item."""
@@ -874,29 +952,42 @@ class CreateWorkItemNote(WorkItemBaseTool):
 
         return {"id": work_item["id"]}
 
-    def _process_note_response(self, note_response: dict) -> str:
+    def _process_note_response(
+        self,
+        note_response: dict,
+        mutation_key: str = CREATE_NOTE_MUTATION_KEY,
+        warnings: Optional[List[str]] = None,
+    ) -> str:
         """Process the GraphQL response from creating a note."""
+        noun = (
+            "discussion" if mutation_key == CREATE_DISCUSSION_MUTATION_KEY else "note"
+        )
+
         # Top-level GraphQL errors (e.g., auth, syntax, variables)
         if top_errors := note_response.get("errors"):
             raise ToolException(f"GraphQL errors: {json.dumps(top_errors)}")
 
-        create_note = note_response.get("createNote", {})
+        create_note = note_response.get(mutation_key, {})
         created_note = create_note.get("note", {})
         note_errors = create_note.get("errors", [])
 
         # Application-level errors (mutation ran but failed validation)
         if note_errors or not created_note.get("id"):
             raise ToolException(
-                f"Failed to create note. GraphQL errors: {top_errors}, Note errors: {note_errors}"
+                f"Failed to create {noun}. GraphQL errors: {top_errors}, "
+                f"{noun.capitalize()} errors: {note_errors}"
             )
 
-        return json.dumps(
-            {
-                "status": "success",
-                "message": "Note created successfully.",
-                "note": created_note,
-            }
-        )
+        result: Dict[str, Any] = {
+            "status": "success",
+            "message": f"{noun.capitalize()} created successfully.",
+            "note": created_note,
+        }
+
+        if warnings:
+            result["warnings"] = warnings
+
+        return json.dumps(result)
 
     def format_display_message(
         self, args: CreateWorkItemNoteInput, _tool_response: Any = None

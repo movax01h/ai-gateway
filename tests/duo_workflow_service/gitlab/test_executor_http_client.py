@@ -11,7 +11,9 @@ from langchain_core.tools import ToolException
 from contract import contract_pb2
 from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
 from duo_workflow_service.gitlab.executor_http_client import (
+    RESOURCE_NOT_AVAILABLE_MESSAGE,
     ExecutorGitLabHttpClient,
+    GitLabGraphQLError,
     _is_retryable_error,
     _RetryableStatusError,
     _RetryAfter,
@@ -388,11 +390,13 @@ async def test_graphql_with_errors(client, monkeypatch_execute_http_response):
     }
     """
 
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(GitLabGraphQLError) as excinfo:
         await client.graphql(query)
 
     assert "GraphQL errors" in str(excinfo.value)
     assert "Access denied" in str(excinfo.value)
+    assert excinfo.value.errors[0]["message"] == "Access denied"
+    assert not excinfo.value.is_resource_not_available()
 
 
 @pytest.mark.asyncio
@@ -1264,3 +1268,29 @@ async def test_call_oversized_payload_propagates_typed_error_without_retry(clien
 
     # Not classified as transient by _is_retryable_error: exactly one attempt.
     mock_execute.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "errors,expected",
+    [
+        ([{"message": RESOURCE_NOT_AVAILABLE_MESSAGE}], True),
+        (
+            [
+                {"message": RESOURCE_NOT_AVAILABLE_MESSAGE},
+                {"message": RESOURCE_NOT_AVAILABLE_MESSAGE},
+            ],
+            True,
+        ),
+        ([{"message": "Internal server error"}], False),
+        (
+            [
+                {"message": RESOURCE_NOT_AVAILABLE_MESSAGE},
+                {"message": "Internal server error"},
+            ],
+            False,
+        ),
+        ([], False),
+    ],
+)
+def test_graphql_error_is_resource_not_available(errors, expected):
+    assert GitLabGraphQLError(errors).is_resource_not_available() is expected

@@ -9,7 +9,7 @@ additional_properties:
   label:
     description: Name of the supervisor component that refused the call
   property:
-    description: "Coarse cause: limit_reached, mixed_tool_calls, parallel_call, invalid_args, or invalid_subsession"
+    description: "Coarse cause: limit_reached, mixed_tool_calls, parallel_call, invalid_args, invalid_subsession, or batch_size_exceeded"
   value:
     description: Workflow Id that can be used to connect this event to others that happen during the same workflow.
   subagent_name:

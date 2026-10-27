@@ -43,6 +43,7 @@ from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     NotifiableException,
     WorkflowAlreadyFinishedException,
+    WorkflowTokenRejectedError,
 )
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.tracking import (
@@ -62,7 +63,7 @@ from duo_workflow_service.workflows.type_definitions import (
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import EventEnum
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
 from lib.verbose_ai_logs import extended_logging_context
 
@@ -632,6 +633,55 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
 
     assert "read_file" in workflow._preapproved_tools
     assert "create_issue" in workflow._preapproved_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_orders_governance_tools_deterministically(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    # Set iteration order is randomized per process, so building these lists with
+    # list(set(...)) made an approval resume on another gateway process look like a
+    # reordered list, falsely triggering a full-snapshot compaction that dropped
+    # approved tool results on reload. The lists must come out in a stable order.
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": (
+                    '{"allow": ["read_file", "create_issue", "list_issues", "get_issue"], '
+                    '"deny": ["run_command", "create_merge_request"]}'
+                )
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._preapproved_tools == [
+        "create_issue",
+        "get_issue",
+        "list_issues",
+        "read_file",
+    ]
+    assert workflow._denied_tools == ["create_merge_request", "run_command"]
 
 
 @pytest.mark.asyncio
@@ -1497,6 +1547,206 @@ async def test_compile_and_run_graph_with_already_finished_session(
     # The server layer maps last_error to an OK gRPC status.
     assert isinstance(workflow.last_error, WorkflowAlreadyFinishedException)
     assert workflow.is_done
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.duo_workflow_metrics")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_with_token_rejection(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_user_interface,
+    mock_status_updater,
+    mock_metrics,
+    mock_fetch_workflow_and_container_data,
+    workflow,
+    internal_event_client,
+):
+    """A token the server rejected drops the session with a reason and fails before any work.
+
+    The stream used to abort before a workflow existed, which Workhorse turned into a normal close, so the row
+    stayed `created` and the client saw a finished run.
+    """
+    rejection = WorkflowTokenRejectedError(
+        "Workflow token is not authorized for the requested workflow"
+    )
+    workflow.token_rejection = rejection
+    workflow._internal_event_client = internal_event_client
+    mock_notifier = AsyncMock()
+    mock_user_interface.return_value = mock_notifier
+    mock_status_updater.return_value.update_workflow_status = AsyncMock()
+
+    with patch.object(
+        workflow, "_init_audit_events", new=AsyncMock()
+    ) as mock_init_audit_events:
+        with pytest.raises(TraceableException) as exc_info:
+            await workflow._compile_and_run_graph("Test goal")
+
+    # A rejected run opens no audit session, so it records no SessionStartedEvent.
+    mock_init_audit_events.assert_not_awaited()
+    mock_status_updater.return_value.update_workflow_status.assert_awaited_once_with(
+        workflow._workflow_id,
+        WorkflowStatusEventEnum.DROP,
+        drop_reason="token_rejected",
+    )
+    mock_fetch_workflow_and_container_data.assert_not_called()
+    mock_tools_registry.assert_not_called()
+    mock_gitlab_workflow.assert_not_called()
+    assert isinstance(exc_info.value.original_exception, NotifiableException)
+    assert exc_info.value.original_exception.__cause__ is rejection
+    # The server layer maps last_error to PERMISSION_DENIED with the details.
+    assert workflow.last_error is rejection
+    mock_notifier.send_event.assert_awaited_once()
+    sent_state = mock_notifier.send_event.await_args.kwargs["state"]
+    assert sent_state["status"] == WorkflowStatusEnum.ERROR
+    # The safe text comes from the exception, so a sibling rejection can reuse the path
+    # with its own message.
+    assert sent_state["ui_chat_log"][0]["content"] == rejection.user_message
+    assert rejection.user_message == (
+        "This session was blocked because its token does not belong to it."
+        " Start a new session."
+    )
+    mock_metrics.count_agent_platform_session_reject.assert_called_once_with(
+        flow_type=workflow._workflow_type.value
+    )
+    internal_event_client.track_event.assert_called_once()
+    tracked = internal_event_client.track_event.call_args.kwargs
+    assert tracked["event_name"] == EventEnum.WORKFLOW_REJECT.value
+    assert (
+        tracked["additional_properties"].label
+        == EventLabelEnum.WORKFLOW_REJECT_LABEL.value
+    )
+    assert workflow.is_done
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.TOKEN_REJECTION_DROP_TIMEOUT_S",
+    0.01,
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+async def test_compile_and_run_graph_token_rejection_survives_a_client_that_never_answers(
+    mock_gitlab_workflow,
+    mock_user_interface,
+    mock_status_updater,
+    mock_log_exception,
+    workflow,
+):
+    """A timeout bounds the drop, so an executor client that never answers its action stream cannot hold it back."""
+    rejection = WorkflowTokenRejectedError("details")
+    workflow.token_rejection = rejection
+    mock_user_interface.return_value = AsyncMock()
+
+    async def never_answers(*_args, **_kwargs):
+        await asyncio.sleep(5)
+
+    mock_status_updater.return_value.update_workflow_status = never_answers
+
+    with pytest.raises(TraceableException):
+        await workflow._compile_and_run_graph("Test goal")
+
+    logged_error = mock_log_exception.call_args_list[0].args[0]
+    assert isinstance(logged_error, asyncio.TimeoutError)
+    assert workflow.last_error is rejection
+    mock_gitlab_workflow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+async def test_compile_and_run_graph_token_rejection_survives_failed_drop(
+    mock_gitlab_workflow,
+    mock_user_interface,
+    mock_status_updater,
+    mock_log_exception,
+    workflow,
+):
+    """A Rails error on the drop is logged; the rejection still reaches the client and the server."""
+    rejection = WorkflowTokenRejectedError("details")
+    workflow.token_rejection = rejection
+    mock_user_interface.return_value = AsyncMock()
+    mock_status_updater.return_value.update_workflow_status = AsyncMock(
+        side_effect=Exception("rails is down")
+    )
+
+    with pytest.raises(TraceableException):
+        await workflow._compile_and_run_graph("Test goal")
+
+    logged_error = mock_log_exception.call_args_list[0].args[0]
+    assert str(logged_error) == "rails is down"
+    assert workflow.last_error is rejection
+    mock_gitlab_workflow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.duo_workflow_metrics")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+async def test_fail_if_token_rejected_counts_before_a_cancelled_drop(
+    mock_status_updater,
+    mock_metrics,
+    workflow,
+    internal_event_client,
+):
+    """A client disconnect cancels the drop await; the reject count and event are recorded first, so they survive.
+
+    ``CancelledError`` is a ``BaseException`` the drop's ``except Exception`` does not catch, so recording after the
+    drop would be skipped. This pins the count and event ahead of the drop.
+    """
+    rejection = WorkflowTokenRejectedError("details")
+    workflow.token_rejection = rejection
+    workflow._internal_event_client = internal_event_client
+    mock_status_updater.return_value.update_workflow_status = AsyncMock(
+        side_effect=asyncio.CancelledError()
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await workflow._fail_if_token_rejected()
+
+    mock_metrics.count_agent_platform_session_reject.assert_called_once_with(
+        flow_type=workflow._workflow_type.value
+    )
+    internal_event_client.track_event.assert_called_once()
+    assert (
+        internal_event_client.track_event.call_args.kwargs["event_name"]
+        == EventEnum.WORKFLOW_REJECT.value
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_without_token_rejection_runs(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_status_updater,
+    workflow,
+):
+    """With no rejection recorded the run proceeds, opens its audit session and sends no drop up front."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    with patch.object(
+        workflow, "_init_audit_events", new=AsyncMock(return_value=None)
+    ) as mock_init_audit_events:
+        await workflow._compile_and_run_graph("Test goal")
+
+    mock_init_audit_events.assert_awaited_once_with("Test goal")
+
+    mock_status_updater.assert_not_called()
+    mock_gitlab_workflow.assert_called_once()
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,9 @@ ignore: |
   # Generated, gitignored test output. The agent test suites cache the flow YAML
   # the model produced, which is not ours to format.
   .test-reports/
+  # Gitignored tool caches (mise, bundler, ...) that agent environments keep in the
+  # project directory; their third-party YAML is not ours to lint.
+  .cache/
 
 rules:
   # Prompt definitions and CI script blocks are long by nature.

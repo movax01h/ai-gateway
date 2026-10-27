@@ -348,6 +348,41 @@ def test_resolve_flow_with_chat_flow_config_extracts_agent_name():
         assert result.keywords == expected_kwargs
 
 
+@pytest.mark.parametrize(
+    "toolset_config",
+    [{}, {"toolset": []}],
+    ids=["omitted", "empty"],
+)
+def test_resolve_flow_with_chat_flow_config_treats_omitted_toolset_as_empty(
+    toolset_config,
+):
+    mocks = build_chat_flow_config(
+        components=[{"type": "AgentComponent", **toolset_config}]
+    )
+
+    with (
+        patch(
+            "duo_workflow_service.workflows.registry._FLOW_BY_VERSIONS",
+            {
+                "v1": (
+                    mocks["flow_config_cls"],
+                    mocks["partial_flow_config_cls"],
+                    mocks["flow_cls"],
+                )
+            },
+        ),
+        patch(
+            "duo_workflow_service.workflows.registry.MessageToDict",
+            return_value=mocks["expected_dict"],
+        ),
+    ):
+        result = resolve_flow(
+            InlineFlowRequest(config_struct=mocks["struct"], schema_version="v1")
+        ).factory
+
+    assert result.keywords["tools_override"] == []
+
+
 def test_resolve_flow_with_chat_flow_config_forwards_component_inputs():
     """Test that component inputs config is forwarded to chat.Workflow."""
     component_inputs = [

@@ -35,6 +35,7 @@ class DelegationRejectionReason(StrEnum):
     PARALLEL_CALL = "parallel_call"
     INVALID_ARGS = "invalid_args"
     INVALID_SUBSESSION = "invalid_subsession"
+    BATCH_SIZE_EXCEEDED = "batch_size_exceeded"
 
 
 def _flow_revision_extras() -> dict[str, str]:

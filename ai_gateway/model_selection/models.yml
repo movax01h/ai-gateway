@@ -975,6 +975,20 @@ models:
       model: gpt-6-sol
       max_tokens: 128_000
 
+  - name: "GPT-6.1 Terra"
+    provider: "OpenAI"
+    gitlab_identifier: "gpt_6_1_terra"
+    description: "OpenAI's fast and efficient model for everyday work."
+    cost_indicator: "$$"
+    max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-6.1-terra
+    proxy_provider: openai
+    model_class_provider: "openai"
+    family:
+      - gpt_5
+    params:
+      model: gpt-6.1-terra
+      max_tokens: 128_000
+
   - name: "GPT-6 Luna"
     provider: "OpenAI"
     gitlab_identifier: "gpt_6_luna"
@@ -1072,6 +1086,20 @@ models:
       - gpt_5
     params:
       model: bedrock_mantle/openai.gpt-5.6-luna
+      custom_llm_provider: bedrock_mantle
+      max_tokens: 128_000
+
+  - name: "GPT-6.1 Terra"
+    provider: "Bedrock"
+    gitlab_identifier: "gpt_6_1_terra_bedrock"
+    description: "OpenAI's fast and efficient model for everyday work."
+    cost_indicator: "$$"
+    max_context_tokens: 1050000  # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-terra.html
+    model_class_provider: litellm
+    family:
+      - gpt_5
+    params:
+      model: bedrock_mantle/openai.gpt-6.1-terra
       custom_llm_provider: bedrock_mantle
       max_tokens: 128_000
 

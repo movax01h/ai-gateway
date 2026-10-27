@@ -4,12 +4,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langchain_core.tools import ToolException
 
-from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.tools.risk_classification.submit_merge_request_risk_classification import (
+from ai.features.review.risk_classification.components.submit_merge_request_risk_classification import (
     RESULTS_PATH,
     SubmitMergeRequestRiskClassification,
     SubmitMergeRequestRiskClassificationInput,
 )
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 
 @pytest.fixture(name="gitlab_client_mock")

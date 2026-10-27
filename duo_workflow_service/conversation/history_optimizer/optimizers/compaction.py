@@ -20,6 +20,7 @@ from structlog import get_logger
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt
 from duo_workflow_service.conversation.history_optimizer.base import HistoryOptimizer
 from duo_workflow_service.conversation.history_optimizer.optimizers._compaction_utils import (
+    reset_total_tokens,
     slice_for_summarization,
     strip_tool_metadata,
 )
@@ -296,7 +297,16 @@ class CompactionOptimizer(HistoryOptimizer):
                 error=e,
             )
 
-        compacted_messages = slices.leading_context + [summary] + slices.recent_to_keep
+        # TokenEstimator takes the newest AIMessage.usage_metadata.total_tokens as the
+        # list size. Kept AIMessages carry the old prompt size, and the summary carries
+        # the summary call usage. Neither is the compacted size, so reset total_tokens
+        # on both. The estimator then counts each message and uses its output_tokens.
+        summary_message = reset_total_tokens(summary)
+        compacted_messages = (
+            slices.leading_context
+            + [summary_message]
+            + [reset_total_tokens(msg) for msg in slices.recent_to_keep]
+        )
 
         if not is_manual and isinstance(compacted_messages[-1], AIMessage):
             # Vertex AI / Gemini requires conversations to end with a user
@@ -371,7 +381,7 @@ class CompactionOptimizer(HistoryOptimizer):
             messages_summarized=len(slices.to_summarize),
             compaction_input_tokens=compaction_input_tokens,
             compaction_output_tokens=compaction_output_tokens,
-            summary=summary,
+            summary=summary_message,
         )
 
     async def _invoke_summarizer(
