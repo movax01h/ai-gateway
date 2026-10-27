@@ -226,3 +226,12 @@ def strip_tool_metadata(
         else:
             cleaned.append(msg)
     return cleaned
+
+
+def reset_total_tokens[M: BaseMessage](msg: M) -> M:
+    """Return a copy of an AIMessage with total_tokens set to 0, or the message itself."""
+    if isinstance(msg, AIMessage) and msg.usage_metadata:
+        return msg.model_copy(
+            update={"usage_metadata": {**msg.usage_metadata, "total_tokens": 0}}
+        )
+    return msg
