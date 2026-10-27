@@ -523,7 +523,9 @@ class AbstractWorkflow(ABC):
                 if governance_active:
                     # deny > ask > allow, matching Rails' resolution order, so a tool
                     # named in both allow and ask still reaches the user.
-                    self._preapproved_tools = list(set(policies.allow) - ask)
+                    # Sorted so the order is stable across processes. A reorder makes the
+                    # checkpointer treat the list as a full replacement (compaction).
+                    self._preapproved_tools = sorted(set(policies.allow) - ask)
                     self._governance_allowed_tools = list(self._preapproved_tools)
                 # Uses the raw ask list: `_ask_tools` is emptied for sessions that cannot ask,
                 # and an ask rule must still keep a tool out of pre-approval there.
@@ -536,7 +538,8 @@ class AbstractWorkflow(ABC):
                         set(policies.ask) | set(policies.deny)
                     )
                 if deny:
-                    self._denied_tools = list(set(self._denied_tools) | deny)
+                    # Sorted for the same stable-order reason as _preapproved_tools above.
+                    self._denied_tools = sorted(set(self._denied_tools) | deny)
 
     def _extract_trace_output(self, state: dict | None) -> str | None:
         """Extract the final response content from ui_chat_log for LangSmith tracing.
