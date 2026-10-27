@@ -21,6 +21,7 @@ import httpx
 import structlog
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import APIStatusError as AnthropicAPIStatusError
+from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic._exceptions import OverloadedError as AnthropicOverloadedError
 from gitlab_cloud_connector import (
@@ -61,8 +62,10 @@ from langsmith import tracing_context
 from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import ServiceUnavailableError as LiteLLMServiceUnavailableError
+from litellm.exceptions import Timeout as LiteLLMTimeout
 from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APIError as OpenAIAPIError
+from openai import APITimeoutError as OpenAIAPITimeoutError
 from openai import InternalServerError as OpenAIInternalServerError
 from tenacity import (
     RetryCallState,
@@ -192,14 +195,37 @@ def _is_retryable_openai_stream_error(exc: OpenAIAPIError) -> bool:
     return True
 
 
+# Timeout classes the model clients raise only after retrying the request
+# themselves, so the outer `_ainvoke_with_retry` loop must leave them alone —
+# retrying them there too would multiply upstream attempts (4 outer x inner).
+# They inherit from a connection error in `_RETRYABLE_NETWORK_ERRORS`
+# (`litellm.Timeout` subclasses `openai.APITimeoutError`, which subclasses
+# `openai.APIConnectionError`), so they need an explicit exclusion ahead of
+# that check. `LiteLLMTimeout` and `OpenAIAPITimeoutError` are listed
+# separately for clarity even though the latter alone would catch both.
+#
+# Raw `httpx.TimeoutException` stays retryable. The Anthropic and OpenAI SDKs
+# raise it unwrapped only when the stream stalls after the response headers
+# arrived, which their own retry loop doesn't cover, so the outer loop is the
+# only retry for it. google_genai raises it raw in both cases, so it can't be
+# excluded here without losing that mid-stream retry; google_genai's own
+# timeout retry stays off instead (`max_retries: 1` maps to `attempts=1`).
+_NON_RETRYABLE_TIMEOUT_ERRORS = (
+    LiteLLMTimeout,
+    AnthropicAPITimeoutError,
+    OpenAIAPITimeoutError,
+)
+
+
 def _is_retryable(exc: BaseException) -> bool:
-    if isinstance(exc, LiteLLMAPIConnectionError):
+    if isinstance(exc, (LiteLLMAPIConnectionError, *_NON_RETRYABLE_TIMEOUT_ERRORS)):
         # litellm.exceptions.APIConnectionError subclasses openai.APIConnectionError
         # (litellm's whole exception hierarchy mirrors openai's for compatibility),
         # so without this guard the OpenAIAPIConnectionError entry below would also
         # match litellm's own connection error, which litellm's client already
-        # retries internally (max_retries=3). Retrying it again here would
-        # multiply attempts (4 outer x 4 inner) instead of adding a bounded retry.
+        # retries internally (max_retries + 1 attempts, so 2 with the default
+        # max_retries: 1). Retrying it again here would multiply attempts
+        # (4 outer x 2 inner) instead of adding a bounded retry.
         return False
     if isinstance(exc, _RETRYABLE_NETWORK_ERRORS):
         return True
