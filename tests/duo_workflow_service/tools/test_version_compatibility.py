@@ -9,6 +9,7 @@ from duo_workflow_service.tools.version_compatibility import (
     AGENT_PLAN_READINESS_VERSION,
     AGENT_PLAN_WIDGET_VERSION,
     BASE_DISCUSSION_ID_FIELD_VERSION,
+    CREATE_DISCUSSION_AI_WORKFLOWS_SCOPE_VERSION,
     DEFAULT_FALLBACK_VERSION,
     DEVELOPMENT_WIDGET_VERSION,
     GLQL_SCHEMA_ENDPOINT_VERSION,
@@ -22,6 +23,7 @@ from duo_workflow_service.tools.version_compatibility import (
     supports_agent_plan_readiness,
     supports_agent_plan_widget,
     supports_ascp_security_boundary,
+    supports_create_discussion_mutation,
     supports_development_widget,
     supports_discussion_id_field,
     supports_glql_schema_endpoint,
@@ -280,6 +282,24 @@ class TestVersionCompatibilityFunctions:
         mock_gitlab_version.get.return_value = reported
         assert strips_client_mcp_trust() is expected
 
+    @pytest.mark.parametrize(
+        "reported,expected",
+        [
+            ("19.4.0", True),
+            ("19.4.0-pre-g1234abcd", True),
+            ("19.3.0", False),
+            # Unknown version fails closed here, unlike the other scope gates.
+            (None, False),
+            ("", False),
+        ],
+    )
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
+    def test_create_discussion_reads_raw_version_strings(
+        self, mock_gitlab_version, reported, expected
+    ):
+        mock_gitlab_version.get.return_value = reported
+        assert supports_create_discussion_mutation() is expected
+
 
 class TestVersionConstants:
     """Tests for version constants."""
@@ -347,3 +367,7 @@ class TestVersionConstants:
     def test_fallback_version_is_below_agent_plan_readiness_threshold(self):
         """An instance that reports no version must not be sent readiness fields."""
         assert DEFAULT_FALLBACK_VERSION < AGENT_PLAN_READINESS_VERSION
+
+    def test_create_discussion_ai_workflows_scope_version_constant(self):
+        """The scope landed in gitlab!250861, milestone 19.4."""
+        assert CREATE_DISCUSSION_AI_WORKFLOWS_SCOPE_VERSION == Version("19.4.0")

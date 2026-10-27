@@ -31,6 +31,7 @@ CLIENT_MCP_TRUST_STRIPPED_BACKPORT_VERSIONS: dict[tuple[int, ...], Version] = {
 }
 VULNERABILITY_TRACKED_REF_VERSION = Version("19.5.0")
 ASCP_SECURITY_BOUNDARY_VERSION = Version("19.5.0")
+CREATE_DISCUSSION_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
 
 # Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
 # parse, such as a GDK's `19.3.0-pre-g1234abcd`.
@@ -212,6 +213,17 @@ def supports_labels_by_name() -> bool:
 
     return _padded_release(get_gitlab_version()) >= _padded_release(
         LABELS_AI_WORKFLOWS_SCOPE_VERSION
+    )
+
+
+def supports_create_discussion_mutation() -> bool:
+    """Check if createDiscussion accepts an ai_workflows-scoped token (GitLab 19.4).
+
+    The mutation is much older, but only got the scope in gitlab!250861. Unlike the other ai_workflows-scope gates here
+    this one fails closed on an unknown version, because the caller falls back to createNote rather than failing.
+    """
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        CREATE_DISCUSSION_AI_WORKFLOWS_SCOPE_VERSION
     )
 
 
