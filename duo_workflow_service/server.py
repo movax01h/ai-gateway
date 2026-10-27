@@ -1212,11 +1212,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             ]
         )
 
-    @override
-    async def ListTools(
-        self, request: contract_pb2.ListToolsRequest, context: grpc.ServicerContext
-    ):
-        log.info("Listing all available tools")
+    @functools.cached_property
+    def _list_tools_response(self) -> contract_pb2.ListToolsResponse:
+        """Build the response once per process from the built-in tool classes.
+
+        These are the module-level lists in ``tools_registry``, which only change
+        when a new image is deployed. Tools that vary per workflow, such as MCP
+        tools from a StartRequest or the subset a subagent selects, live on that
+        workflow's ``ToolsRegistry`` instance and are never part of this response.
+        """
         tool_classes = set(
             (
                 tools_registry._DEFAULT_TOOLS
@@ -1245,6 +1249,18 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         return response
 
+    @functools.cached_property
+    def _flow_configs(self) -> list[dict[str, str]]:
+        """Bundled flow configs, loaded once per process."""
+        return flow_registry.list_configs()
+
+    @override
+    async def ListTools(
+        self, request: contract_pb2.ListToolsRequest, context: grpc.ServicerContext
+    ):
+        log.info("Listing all available tools")
+        return self._list_tools_response
+
     @override
     async def ListFlows(
         self, request: contract_pb2.ListFlowsRequest, context: grpc.ServicerContext
@@ -1252,7 +1268,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         log.info("Listing all available flows")
         response = contract_pb2.ListFlowsResponse()
 
-        configs = flow_registry.list_configs()
+        configs = self._flow_configs
 
         # Apply filters if provided
         if request.filters:
