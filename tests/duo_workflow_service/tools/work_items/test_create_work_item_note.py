@@ -5,10 +5,15 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langchain_core.tools import ToolException
 
+from duo_workflow_service.gitlab.executor_http_client import (
+    RESOURCE_NOT_AVAILABLE_MESSAGE,
+    GitLabGraphQLError,
+)
 from duo_workflow_service.tools.work_item import (
     CreateWorkItemNote,
     CreateWorkItemNoteInput,
 )
+from lib.context import gitlab_version
 
 
 @pytest.fixture(name="gitlab_client_mock")
@@ -51,6 +56,19 @@ def created_note_data_fixture_func():
         "createdAt": "2025-04-29T13:35:36.000+02:00",
         "author": {"username": "test_user", "name": "Test User"},
     }
+
+
+@pytest.fixture(name="report_gitlab_version")
+def report_gitlab_version_fixture():
+    """Set the version both the gate and the warning message read.
+
+    Defaults to one whose createDiscussion takes an ai_workflows token.
+    """
+    token = gitlab_version.set("19.4.0")
+
+    yield gitlab_version.set
+
+    gitlab_version.reset(token)
 
 
 @pytest.mark.parametrize(
@@ -251,6 +269,39 @@ async def test_create_work_item_note_reply_to_note(
             {"graphql_errors": None, "note_errors": ["Body cannot be blank"]},
             2,
         ),
+        # Create discussion error
+        (
+            {
+                "project_id": "namespace/project",
+                "work_item_iid": 42,
+                "body": "",
+                "start_discussion": True,
+            },
+            [
+                {
+                    "project": {
+                        "workItems": {
+                            "nodes": [
+                                {
+                                    "id": "gid://gitlab/WorkItem/123",
+                                    "iid": "42",
+                                    "title": "Test Work Item",
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "createDiscussion": {
+                        "note": None,
+                        "errors": ["Body cannot be blank"],
+                    }
+                },
+            ],
+            "Failed to create discussion",
+            {"graphql_errors": None, "note_errors": ["Body cannot be blank"]},
+            2,
+        ),
         # GraphQL error on create
         (
             {
@@ -388,6 +439,7 @@ async def test_create_work_item_note_reply_to_note(
     ],
 )
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("report_gitlab_version")
 async def test_create_work_item_note_errors(
     gitlab_client_mock,
     metadata,
@@ -422,6 +474,212 @@ async def test_create_work_item_note_errors(
                     assert error in exception_message
 
     assert gitlab_client_mock.graphql.call_count == expected_call_count
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("report_gitlab_version")
+async def test_create_work_item_note_start_discussion(
+    gitlab_client_mock, metadata, work_item_data, created_note_data_fixture
+):
+    """start_discussion=True calls createDiscussion instead of createNote."""
+    gitlab_client_mock.graphql = AsyncMock(
+        side_effect=[
+            {"project": {"workItems": {"nodes": [work_item_data]}}},
+            {"createDiscussion": {"note": created_note_data_fixture, "errors": []}},
+        ]
+    )
+
+    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
+
+    response = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        body="This is a question",
+        start_discussion=True,
+    )
+
+    response_json = json.loads(response)
+    assert response_json["status"] == "success"
+    assert response_json["message"] == "Discussion created successfully."
+    assert response_json["note"] == created_note_data_fixture
+    assert "warnings" not in response_json
+
+    assert gitlab_client_mock.graphql.call_count == 2
+    mutation, variables = gitlab_client_mock.graphql.call_args_list[1][0]
+    assert "createDiscussion" in mutation
+    assert "createNote" not in mutation
+    assert variables["input"]["body"] == "This is a question"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "version,expected_version_phrase",
+    [
+        ("19.3.0", "this instance reports 19.3.0."),
+        # An instance that reported nothing must not be quoted a version it
+        # never sent - get_gitlab_version() would substitute its 18.6.0 floor.
+        (None, "this instance reports no version."),
+    ],
+)
+async def test_create_work_item_note_start_discussion_falls_back_below_19_4(
+    gitlab_client_mock,
+    metadata,
+    work_item_data,
+    created_note_data_fixture,
+    report_gitlab_version,
+    version,
+    expected_version_phrase,
+):
+    """Below 19.4 the mutation rejects an ai_workflows token, so post a plain note."""
+    gitlab_client_mock.graphql = AsyncMock(
+        side_effect=[
+            {"project": {"workItems": {"nodes": [work_item_data]}}},
+            {"createNote": {"note": created_note_data_fixture, "errors": []}},
+        ]
+    )
+    report_gitlab_version(version)
+
+    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
+
+    response = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        body="This is a question",
+        start_discussion=True,
+    )
+
+    response_json = json.loads(response)
+    assert response_json["status"] == "success"
+    assert response_json["message"] == "Note created successfully."
+    warning = response_json["warnings"][0]
+    assert "GitLab 19.4 or later" in warning
+    assert expected_version_phrase in warning
+
+    mutation, _ = gitlab_client_mock.graphql.call_args_list[1][0]
+    assert "createNote" in mutation
+    assert "createDiscussion" not in mutation
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("report_gitlab_version")
+async def test_create_work_item_note_start_discussion_falls_back_when_rejected(
+    gitlab_client_mock,
+    metadata,
+    work_item_data,
+    created_note_data_fixture,
+):
+    """On 19.4+ a rejected createDiscussion still posts the comment via createNote."""
+    gitlab_client_mock.graphql = AsyncMock(
+        side_effect=[
+            {"project": {"workItems": {"nodes": [work_item_data]}}},
+            GitLabGraphQLError([{"message": RESOURCE_NOT_AVAILABLE_MESSAGE}]),
+            {"createNote": {"note": created_note_data_fixture, "errors": []}},
+        ]
+    )
+
+    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
+
+    response = await tool._arun(
+        project_id="namespace/project",
+        work_item_iid=42,
+        body="This is a question",
+        start_discussion=True,
+    )
+
+    response_json = json.loads(response)
+    assert response_json["status"] == "success"
+    assert response_json["message"] == "Note created successfully."
+    assert "rejected createDiscussion" in response_json["warnings"][0]
+
+    mutations = [call[0][0] for call in gitlab_client_mock.graphql.call_args_list]
+    assert "createDiscussion" in mutations[1]
+    assert "createNote" in mutations[2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("report_gitlab_version")
+@pytest.mark.parametrize(
+    "errors",
+    [
+        # Raised after the discussion was saved, so a createNote would duplicate it.
+        [{"message": "Internal server error"}],
+        [
+            {"message": RESOURCE_NOT_AVAILABLE_MESSAGE},
+            {"message": "Internal server error"},
+        ],
+        [],
+    ],
+)
+async def test_create_work_item_note_start_discussion_other_graphql_errors_do_not_fall_back(
+    gitlab_client_mock, metadata, work_item_data, errors
+):
+    """Only authorization rejections are safe to retry as a plain note."""
+    gitlab_client_mock.graphql = AsyncMock(
+        side_effect=[
+            {"project": {"workItems": {"nodes": [work_item_data]}}},
+            GitLabGraphQLError(errors),
+        ]
+    )
+
+    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
+
+    with pytest.raises(GitLabGraphQLError):
+        await tool._arun(
+            project_id="namespace/project",
+            work_item_iid=42,
+            body="This is a question",
+            start_discussion=True,
+        )
+
+    assert gitlab_client_mock.graphql.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("report_gitlab_version")
+async def test_create_work_item_note_start_discussion_timeout_does_not_fall_back(
+    gitlab_client_mock, metadata, work_item_data
+):
+    """A timeout may have created the discussion, so a createNote retry could post twice."""
+    gitlab_client_mock.graphql = AsyncMock(
+        side_effect=[
+            {"project": {"workItems": {"nodes": [work_item_data]}}},
+            Exception("GraphQL request timed out after 10.0 seconds"),
+        ]
+    )
+
+    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
+
+    with pytest.raises(Exception, match="timed out"):
+        await tool._arun(
+            project_id="namespace/project",
+            work_item_iid=42,
+            body="This is a question",
+            start_discussion=True,
+        )
+
+    assert gitlab_client_mock.graphql.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("report_gitlab_version")
+async def test_create_work_item_note_start_discussion_with_note_id_raises(
+    gitlab_client_mock, metadata
+):
+    """start_discussion cannot be combined with note_id, and costs no round-trip."""
+    gitlab_client_mock.graphql = AsyncMock()
+
+    tool = CreateWorkItemNote(description="create work item note", metadata=metadata)
+
+    with pytest.raises(ToolException, match="start_discussion cannot be combined"):
+        await tool._arun(
+            project_id="namespace/project",
+            work_item_iid=42,
+            body="This is a reply",
+            note_id=456,
+            start_discussion=True,
+        )
+
+    assert gitlab_client_mock.graphql.call_count == 0
 
 
 @pytest.mark.parametrize(
