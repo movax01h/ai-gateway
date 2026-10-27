@@ -33,6 +33,12 @@ from duo_workflow_service.entities.state import (
 
 DEFAULT_MAX_RECENT_MESSAGES = 10
 
+SUMMARY_CALL_USAGE = {
+    "input_tokens": 48_213,
+    "output_tokens": 612,
+    "total_tokens": 48_825,
+}
+
 
 def _token_count_side_effect(history_tokens: int, per_turn_tokens: int = 100):
     """Return a TokenEstimator.count side_effect that distinguishes call modes.
@@ -46,6 +52,24 @@ def _token_count_side_effect(history_tokens: int, per_turn_tokens: int = 100):
     return lambda *args, **kwargs: (
         history_tokens if kwargs.get("is_complete_history") else per_turn_tokens
     )
+
+
+def _history_with_usage():
+    """History whose AIMessages carry the prompt size from before the compaction."""
+    messages = [HumanMessage(content="Initial query")]
+    for i in range(15):
+        messages.append(
+            AIMessage(
+                content=f"R{i}",
+                usage_metadata={
+                    "input_tokens": 300_000,
+                    "output_tokens": 100,
+                    "total_tokens": 300_100,
+                },
+            )
+        )
+        messages.append(HumanMessage(content=f"M{i}"))
+    return messages
 
 
 @patch(
@@ -552,6 +576,52 @@ class TestCompactionOptimizerCompact:
         assert result.messages_summarized > 0
         assert result.compaction_input_tokens == 1000
         assert result.compaction_output_tokens == 200
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_compact_resets_total_tokens_on_summary_and_kept_ai_messages(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """Should reset total_tokens and keep output_tokens on the summary and the kept AIMessages."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+        mock_prompt.ainvoke.return_value = AIMessage(
+            content="Summary", usage_metadata=SUMMARY_CALL_USAGE
+        )
+
+        result = await compactor.compact(_history_with_usage())
+
+        assert result.was_compacted is True
+        summary, *kept = [m for m in result.messages if isinstance(m, AIMessage)]
+        assert summary.content == "Summary"
+        assert summary.usage_metadata == {**SUMMARY_CALL_USAGE, "total_tokens": 0}
+        assert kept
+        assert all(
+            m.usage_metadata
+            == {"input_tokens": 300_000, "output_tokens": 100, "total_tokens": 0}
+            for m in kept
+        )
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_compact_does_not_change_the_input_messages(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """Should not change the usage_metadata of the input AIMessages."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+        mock_prompt.ainvoke.return_value = AIMessage(
+            content="Summary", usage_metadata=SUMMARY_CALL_USAGE
+        )
+        messages = _history_with_usage()
+
+        result = await compactor.compact(messages)
+
+        assert result.was_compacted is True
+        input_ai_messages = [m for m in messages if isinstance(m, AIMessage)]
+        assert all(
+            m.usage_metadata["total_tokens"] == 300_100 for m in input_ai_messages
+        )
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
