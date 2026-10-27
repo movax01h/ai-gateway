@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6,6 +7,8 @@ from dependency_injector import providers
 from gitlab_cloud_connector import WrongUnitPrimitives
 from starlette_context import request_cycle_context
 
+from ai_gateway.api import client_disconnect
+from ai_gateway.api.client_disconnect import ClientDisconnectedError
 from ai_gateway.code_suggestions import handler as handler_module
 from ai_gateway.code_suggestions.handler import code_completion
 from ai_gateway.model_metadata import (
@@ -224,6 +227,90 @@ async def test_code_suggestions_dispatches_completion_without_event(
 
     snowplow_instrumentator.watch.assert_not_called()
     completion_mock.assert_awaited_once()
+
+
+@pytest.fixture(name="completion_request")
+def completion_request_fixture():
+    component = MagicMock()
+    component.type = handler_module.CodeEditorComponents.COMPLETION
+    payload = MagicMock()
+    payload.prompt_components = [component]
+
+    request = MagicMock()
+    request.headers = {}
+    request.url.path = "/v4/code/suggestions"
+    request.is_disconnected = AsyncMock(return_value=True)
+    current_user = MagicMock()
+    current_user.can.return_value = True
+
+    return SimpleNamespace(payload=payload, request=request, current_user=current_user)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_suggestions_stops_when_the_client_disconnects(completion_request):
+    cancelled = asyncio.Event()
+
+    async def hanging_completion(**_kwargs):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    with (
+        request_cycle_context({}),
+        patch.object(handler_module, "CloudConnectorConfig"),
+        patch.object(
+            handler_module,
+            "get_snowplow_code_suggestion_context",
+            return_value=MagicMock(),
+        ),
+        patch.object(handler_module, "code_completion", new=hanging_completion),
+        patch.object(client_disconnect, "_DISCONNECT_POLL_INTERVAL_SECONDS", 0.001),
+    ):
+        with pytest.raises(ClientDisconnectedError):
+            await handler_module.code_suggestions(
+                request=completion_request.request,
+                payload=completion_request.payload,
+                current_user=completion_request.current_user,
+                prompt_registry=MagicMock(),
+                config=MagicMock(),
+                stream_handler=AsyncMock(),
+            )
+
+    assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("snowplow_instrumentator")
+async def test_code_suggestions_ignores_disconnects_when_disabled(completion_request):
+    config = MagicMock()
+    config.feature_flags.cancel_on_client_disconnect.return_value = False
+
+    with (
+        request_cycle_context({}),
+        patch.object(handler_module, "CloudConnectorConfig"),
+        patch.object(
+            handler_module,
+            "get_snowplow_code_suggestion_context",
+            return_value=MagicMock(),
+        ),
+        patch.object(
+            handler_module, "code_completion", new=AsyncMock(return_value="response")
+        ),
+    ):
+        response = await handler_module.code_suggestions(
+            request=completion_request.request,
+            payload=completion_request.payload,
+            current_user=completion_request.current_user,
+            prompt_registry=MagicMock(),
+            config=config,
+            stream_handler=AsyncMock(),
+        )
+
+    assert response == "response"
+    completion_request.request.is_disconnected.assert_not_awaited()
 
 
 @pytest.mark.asyncio

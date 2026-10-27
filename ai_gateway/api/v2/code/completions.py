@@ -11,6 +11,7 @@ from gitlab_cloud_connector import (
     WrongUnitPrimitives,
 )
 
+from ai_gateway.api.client_disconnect import run_unless_disconnected
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.middleware.route import has_sufficient_usage_quota
@@ -192,11 +193,15 @@ async def completions(
         stream=payload.stream,
     )
 
-    suggestions = await _execute_code_completion(
-        payload=payload,
-        code_completions=code_completions,
-        current_user=current_user,
-        **kwargs,
+    suggestions = await run_unless_disconnected(
+        request,
+        _execute_code_completion(
+            payload=payload,
+            code_completions=code_completions,
+            current_user=current_user,
+            **kwargs,
+        ),
+        enabled=config.feature_flags.cancel_on_client_disconnect(),
     )
 
     if isinstance(suggestions[0], AsyncIterator):
