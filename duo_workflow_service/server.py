@@ -61,6 +61,7 @@ from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     InvalidWorkflowIdException,
     WorkflowAlreadyFinishedException,
+    WorkflowTokenRejectedError,
 )
 from duo_workflow_service.executor.outbox import (
     ACTION_TYPES_WITHOUT_RESPONSES,
@@ -191,6 +192,7 @@ FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
 WORKFLOW_ID_CLAIM = "workflow_id"
 # Rails sets this on every token it self-signs for DWS, so with no workflow_id the token is unbound.
 BINDS_WORKFLOW_CLAIM = "binds_workflow"
+WORKFLOW_BINDING_DETAILS = "Workflow token is not authorized for the requested workflow"
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
 # these get workflow tokens that unlock the restricted models of the flow they are
 # minted for, and ExecuteWorkflow accepts their instance token's flow claim for
@@ -223,6 +225,8 @@ _WORKFLOW_ID_FORMS = re.compile(
     r"(?:#|gid://gitlab/Ai::DuoWorkflows::Workflow/)?([1-9][0-9]{0,19})"
 )
 
+_PLAIN_WORKFLOW_ID = re.compile(r"[1-9][0-9]{0,19}")
+
 
 def _workflow_id_number(value: Any) -> Optional[int]:
     if isinstance(value, int) and not isinstance(value, bool):
@@ -230,6 +234,17 @@ def _workflow_id_number(value: Any) -> Optional[int]:
     if isinstance(value, str) and (match := _WORKFLOW_ID_FORMS.fullmatch(value)):
         return int(match.group(1))
     return None
+
+
+def _names_a_session(requested: str) -> bool:
+    """Whether the requested workflow id is one a dropped run can PATCH to Rails.
+
+    Only a plain positive decimal id is. A `#`-prefixed id or a global id matches a token binding (see
+    :func:`_workflow_binding_matches`) but is carried raw into the run, where the drop PATCHes
+    ``/workflows/<id>``; the `#` reads as a URL fragment at Workhorse, so the drop would miss the session.
+    Such a mismatch is aborted up front instead.
+    """
+    return _PLAIN_WORKFLOW_ID.fullmatch(requested) is not None
 
 
 def _workflow_binding_matches(bound: Any, requested: str) -> bool:
@@ -687,6 +702,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     "Workflow token is not authorized for the supplied flow config",
                 )
 
+        token_rejection: WorkflowTokenRejectedError | None = None
         if not user.is_debug and claims_extra is not None:
             if WORKFLOW_ID_CLAIM in claims_extra:
                 if not _workflow_binding_matches(
@@ -697,10 +713,18 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                         bound_workflow_id=str(claims_extra[WORKFLOW_ID_CLAIM]),
                         requested_workflow_id=start_req.workflowID[:64],
                     )
-                    await context.abort(
-                        grpc.StatusCode.PERMISSION_DENIED,
-                        "Workflow token is not authorized for the requested workflow",
-                    )
+                    # A mismatch on a real, droppable session is not aborted here:
+                    # with no workflow yet, an abort reads to the client as a normal
+                    # end, so the run drops the session and fails loudly instead. An
+                    # id not safe to drop (see _names_a_session) aborts up front.
+                    if _names_a_session(start_req.workflowID):
+                        token_rejection = WorkflowTokenRejectedError(
+                            WORKFLOW_BINDING_DETAILS
+                        )
+                    else:
+                        await context.abort(
+                            grpc.StatusCode.PERMISSION_DENIED, WORKFLOW_BINDING_DETAILS
+                        )
             elif claims_extra.get(BINDS_WORKFLOW_CLAIM) is True:
                 log.info(
                     "Workflow token without a workflow binding",
@@ -883,6 +907,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             or None,
             **catalog_kwargs,
         )
+        workflow.token_rejection = token_rejection
 
         workflow_task = asyncio.create_task(
             workflow.run(goal), name=f"{WORKFLOW_TASK_NAME_PREFIX}{workflow_id}"
@@ -1040,6 +1065,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # tells the caller its input was wrong.
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(workflow.last_error.message)
+            elif isinstance(workflow.last_error, WorkflowTokenRejectedError):
+                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                context.set_details(workflow.last_error.details)
             elif restricted_error := _find_restricted_model_access_error(
                 workflow.last_error
             ):
