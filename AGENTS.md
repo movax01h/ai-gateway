@@ -95,6 +95,10 @@ gcloud auth application-default login
 - `check-pylint` may print `Unable to create directory /root/.cache/pylint`;
   pylint cannot persist its cache in a read-only home — the lint result is
   unaffected.
+- In the Duo agent sandbox, commands run under `/bin/sh` (dash), not bash:
+  process substitution (`<(...)`) and other bashisms fail with
+  `Syntax error: "(" unexpected`. Write to temp files and `diff`/`comm` them
+  instead.
 
 ### Running Services
 
@@ -177,7 +181,8 @@ and `check-pylint` install required dependencies first via
 `--exclude` flag for `scripts/vendor/*` that a bare `mypy` invocation would
 silently skip, causing local results to disagree with CI.
 
-The `install-*-deps` steps run `poetry install`, which needs network
+The `install-*-deps` steps (and `duo-workflow-docs`/`duo-workflow-flow-schema`)
+run `poetry install`, which needs network
 access. In network-restricted environments (e.g. agent sandboxes) with a
 pre-installed `.venv`, prefix the make target with `CI=true` (e.g.
 `CI=true make check-mypy ...`) — the Makefile skips the install step when
@@ -219,6 +224,11 @@ lefthook run pre-commit
 # Disable temporarily
 LEFTHOOK=0 git commit ...
 ```
+
+Don't pipe `git commit` output (`| tail`): the pipeline reports `tail`'s exit
+status and hides a lefthook failure. If a commit's outcome is unclear, never
+`sleep` and retry blind: verify with `git log --oneline -1` (and
+`ls .git/MERGE_HEAD` during a merge) before retrying or pushing.
 
 ### Protocol Buffers
 
@@ -268,6 +278,13 @@ make duo-workflow-docs
 # Validate model selection config
 poetry run validate-model-selection-config
 ```
+
+`docs/duo_workflow_service_graphs.md` is generated from the flow configs and
+the legacy workflows in `duo_workflow_service/workflows/`, so never hand-edit
+it: run `make duo-workflow-docs` after changing either. To resolve merge
+conflicts in this doc, first resolve any conflicts in those sources, then run
+`make duo-workflow-docs`; either side of the conflicted doc works as a starting
+point, since regeneration overwrites it.
 
 ## Code Style
 
