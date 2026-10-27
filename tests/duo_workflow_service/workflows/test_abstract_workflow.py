@@ -639,6 +639,55 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_orders_governance_tools_deterministically(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    # Set iteration order is randomized per process, so building these lists with
+    # list(set(...)) made an approval resume on another gateway process look like a
+    # reordered list, falsely triggering a full-snapshot compaction that dropped
+    # approved tool results on reload. The lists must come out in a stable order.
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": (
+                    '{"allow": ["read_file", "create_issue", "list_issues", "get_issue"], '
+                    '"deny": ["run_command", "create_merge_request"]}'
+                )
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._preapproved_tools == [
+        "create_issue",
+        "get_issue",
+        "list_issues",
+        "read_file",
+    ]
+    assert workflow._denied_tools == ["create_merge_request", "run_command"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_skips_merge_when_no_jwt_pre_approved_tools(
     mock_tools_registry,
     mock_gitlab_workflow,
