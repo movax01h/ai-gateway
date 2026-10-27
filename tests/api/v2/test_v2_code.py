@@ -1,12 +1,13 @@
 # pylint: disable=condition-evals-to-constant,file-naming-for-tests,line-too-long,too-many-arguments,too-many-lines,too-many-positional-arguments
 
+import asyncio
 import time
 from typing import Any, Dict, List, Union
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
 from dependency_injector import containers
-from fastapi import status
+from fastapi import Request, status
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from langchain_core.messages import AIMessage
@@ -14,6 +15,7 @@ from snowplow_tracker import Snowplow
 from starlette.datastructures import CommaSeparatedStrings
 from structlog.testing import capture_logs
 
+from ai_gateway.api.client_disconnect import ClientDisconnectedError
 from ai_gateway.api.error_utils import capture_validation_errors
 from ai_gateway.api.v2 import api_router
 from ai_gateway.api.v2.code.completions import (
@@ -1741,6 +1743,40 @@ class TestCodeCompletions:
         ]
 
         assert (body["detail"]) == expected_error_message
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    def test_raises_client_disconnected_when_the_client_leaves(self, mock_client: Mock):
+        async def hanging_execute(*_args, **_kwargs):
+            await asyncio.sleep(10)
+
+        params = {
+            "prompt_version": 2,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+            "model_provider": "fireworks_ai",
+            "model_name": "codestral-2508",
+        }
+
+        with (
+            patch(
+                "ai_gateway.code_suggestions.CodeCompletions.execute",
+                side_effect=hanging_execute,
+            ) as execute_mock,
+            patch.object(Request, "is_disconnected", AsyncMock(return_value=True)),
+            patch(
+                "ai_gateway.api.client_disconnect._DISCONNECT_POLL_INTERVAL_SECONDS",
+                0.01,
+            ),
+        ):
+            with pytest.raises(ClientDisconnectedError):
+                self._send_code_completions_request(mock_client, params)
+
+        execute_mock.assert_called_once()
 
     def _send_code_completions_request(
         self, mock_client, params, enable_prompt_cache="false"

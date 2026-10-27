@@ -21,6 +21,10 @@ from starlette.responses import JSONResponse
 from starlette_context import context
 from starlette_context.middleware import RawContextMiddleware
 
+from ai_gateway.api.client_disconnect import (
+    ClientDisconnectedError,
+    client_disconnected_exception_handler,
+)
 from ai_gateway.api.middleware import (
     AccessLogMiddleware,
     DistributedTraceMiddleware,
@@ -299,6 +303,10 @@ def setup_custom_exception_handlers(app: FastAPI):
     app.add_exception_handler(
         RestrictedModelAccessError,
         cast(ExceptionHandler, restricted_model_access_exception_handler),
+    )
+    app.add_exception_handler(
+        ClientDisconnectedError,
+        cast(ExceptionHandler, client_disconnected_exception_handler),
     )
 
 

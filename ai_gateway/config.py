@@ -531,6 +531,7 @@ class ConfigFeatureFlags(BaseModel):
     disallowed_flags: dict[str, Set[str]] = {}
     excl_post_process: list[str] = []
     fireworks_score_threshold: dict[str, float] = {}
+    cancel_on_client_disconnect: bool = True
 
 
 class ConfigProxyEndpoints(BaseModel):

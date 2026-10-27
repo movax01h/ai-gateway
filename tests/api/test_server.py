@@ -14,6 +14,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from structlog.testing import capture_logs
 
 from ai_gateway.api import create_fast_api_server, server
+from ai_gateway.api.client_disconnect import (
+    ClientDisconnectedError,
+    client_disconnected_exception_handler,
+)
 from ai_gateway.api.feature_category import get_feature_categories
 from ai_gateway.api.server import (
     assume_role_exception_handler,
@@ -441,6 +445,7 @@ def test_setup_custom_exception_handlers(app, monkeypatch):
         mock.call(
             RestrictedModelAccessError, restricted_model_access_exception_handler
         ),
+        mock.call(ClientDisconnectedError, client_disconnected_exception_handler),
     ]
 
 
@@ -462,6 +467,19 @@ def test_custom_http_exception_handler(app):
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Test Exception"}
+
+
+def test_client_disconnected_exception_handler(app):
+    @app.get("/test")
+    def test_route():
+        raise ClientDisconnectedError()
+
+    setup_custom_exception_handlers(app)
+
+    response = TestClient(app).get("/test")
+
+    assert response.status_code == 499
+    assert response.content == b""
 
 
 def test_restricted_model_access_exception_handler(app):
