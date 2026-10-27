@@ -9,7 +9,7 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 log = structlog.stdlib.get_logger("workflow")
 
-RESULTS_PATH = "/api/v4/ai/duo_workflows/tools/risk_classification/results"
+RESULTS_PATH = "/api/v4/ai/duo_workflows/tools/risk_assessment/results"
 
 
 class RiskClassificationClaimInput(BaseModel):
