@@ -10,9 +10,22 @@ read from, rather than on ``FlowConfig`` machinery, which is covered in
 """
 
 from typing import get_args
+from unittest.mock import patch
+
+import pytest
 
 from ai_gateway.response_schemas import ResponseSchemaRegistry
+from duo_workflow_service.agent_platform.v1.flows import flow_config
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+
+
+@pytest.fixture(name="discover_flow_configs", autouse=True)
+def discover_flow_configs_fixture():
+    # The flow lives under ai/features/, which the service registers at startup.
+    # Restore the registry so tests that list flow configs never see these roots.
+    with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
+        flow_config.discover_feature_flow_configs()
+        yield
 
 
 class TestDeepCodeReviewConfig:
