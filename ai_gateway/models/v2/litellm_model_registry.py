@@ -119,6 +119,25 @@ _HAIKU_5_5_BEDROCK_METADATA: Dict[str, Any] = {
     "supports_computer_use": True,
 }
 
+# Mirrors LiteLLM's bundled bedrock_mantle/openai.gpt-5.6-terra entry.
+_GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA: Dict[str, Any] = {
+    "litellm_provider": "bedrock_mantle",
+    "mode": "responses",
+    "use_openai_responses_path": True,
+    "supported_endpoints": ["/v1/chat/completions", "/v1/responses"],
+    "supported_modalities": ["text", "image"],
+    "supported_output_modalities": ["text"],
+    "max_input_tokens": 1_050_000,
+    "max_output_tokens": 128_000,
+    "max_tokens": 128_000,
+    "supports_function_calling": True,
+    "supports_tool_choice": True,
+    "supports_response_schema": True,
+    "supports_prompt_caching": True,
+    "supports_vision": True,
+    "supports_reasoning": True,
+}
+
 BUILTIN_MODEL_METADATA: Dict[str, Dict[str, Any]] = {
     # Bedrock cross-region inference profiles for Claude Opus 4.8.
     "global.anthropic.claude-opus-4-8-v1:0": _OPUS_4_8_BEDROCK_METADATA,
@@ -135,6 +154,8 @@ BUILTIN_MODEL_METADATA: Dict[str, Dict[str, Any]] = {
     "us.anthropic.claude-haiku-5-5": _HAIKU_5_5_BEDROCK_METADATA,
     "eu.anthropic.claude-haiku-5-5": _HAIKU_5_5_BEDROCK_METADATA,
     "bedrock/global.anthropic.claude-haiku-5-5": _HAIKU_5_5_BEDROCK_METADATA,
+    # Bedrock Mantle in-region endpoint for GPT-6.1 Terra.
+    "bedrock_mantle/openai.gpt-6.1-terra": _GPT_6_1_TERRA_BEDROCK_MANTLE_METADATA,
 }
 
 
