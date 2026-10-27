@@ -168,11 +168,14 @@ Always run these `make` targets rather than invoking `pytest`, `mypy`,
 `.tool-versions` via mise, not npm, so `npx markdownlint-cli2` fails even
 though `make markdownlint` works. Exception: `make test` always runs the full
 suite and takes no path argument, so to run specific tests use
-`poetry run pytest <path>`. `make test`, `check-mypy`, `check-ruff`, and
-`check-pylint` install required dependencies first via `install-test-deps`/
-`install-lint-deps`, and `check-mypy` also passes an `--exclude` flag for
-`scripts/vendor/*` that a bare `mypy` invocation would silently skip, causing
-local results to disagree with CI.
+`poetry run pytest <path>`. When piping test or check output through tools
+such as `tail` or `grep`, enable `set -o pipefail` (or otherwise preserve the
+producer's exit status) so a failing command cannot appear successful because
+the final pipeline command succeeded. `make test`, `check-mypy`, `check-ruff`,
+and `check-pylint` install required dependencies first via
+`install-test-deps`/`install-lint-deps`, and `check-mypy` also passes an
+`--exclude` flag for `scripts/vendor/*` that a bare `mypy` invocation would
+silently skip, causing local results to disagree with CI.
 
 The `install-*-deps` steps run `poetry install`, which needs network
 access. In network-restricted environments (e.g. agent sandboxes) with a
