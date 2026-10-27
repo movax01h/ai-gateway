@@ -6,6 +6,7 @@ from google.genai.types import HttpOptions
 from langchain_core.language_models.chat_models import _ChatModelBinding
 from langchain_google_genai import ChatGoogleGenerativeAI as _LCChatGoogleGenerativeAI
 from langchain_google_genai._common import get_user_agent
+from langchain_google_genai.chat_models import _ClientCleanup, _is_gemini_3_or_later
 from pydantic import model_validator
 
 from ai_gateway.models.base import validate_custom_endpoint
@@ -46,13 +47,22 @@ class ChatGoogleGenerativeAI(_LCChatGoogleGenerativeAI):
     custom_models_enabled: bool = False
     """Whether custom model endpoints are allowed."""
 
-    temperature: float | None = None  # type: ignore[assignment]
-    """Omitted from the request when unset, letting Google apply its recommended default of 1.0 for Gemini 3+ models."""
-
     @model_validator(mode="after")
     @override
     def validate_environment(self) -> Self:
-        """Overwrite the LangChain model validator to set the client manually in DI."""
+        """Overwrite the LangChain model validator to set the client manually in DI.
+
+        LangChain's validator builds its own `google.genai.Client`, which would replace the Vertex
+        client DI injects, so we copy its other steps here instead. Missing one breaks every
+        request: 4.4.2 sets `_client_cleanup` in its validator and reads it in `async_client`:
+        https://github.com/langchain-ai/langchain-google/blob/69361c5365fc6c78d5948e3468bc7f415166219a/libs/genai/langchain_google_genai/chat_models.py#L3503-L3528
+        """
+
+        # Leaves temperature out of the request, so Google applies its recommended default.
+        if "temperature" not in self.model_fields_set and _is_gemini_3_or_later(
+            self.model
+        ):
+            self.temperature = None
 
         if self.temperature is not None and not 0 <= self.temperature <= 2.0:
             msg = "temperature must be in the range [0.0, 2.0]"
@@ -65,6 +75,10 @@ class ChatGoogleGenerativeAI(_LCChatGoogleGenerativeAI):
         if self.top_k is not None and self.top_k <= 0:
             msg = "top_k must be positive"
             raise ValueError(msg)
+
+        # `async_client` reads this since langchain-google-genai 4.4.2.
+        if self.client is not None:
+            self._client_cleanup = _ClientCleanup(self.client)
 
         return self
 
