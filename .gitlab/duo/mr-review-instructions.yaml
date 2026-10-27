@@ -125,7 +125,6 @@ instructions:
 
   - name: Duo Developer design principles
     fileFilters:
-      - "duo_workflow_service/agent_platform/*/flows/configs/developer/**/*"
       - "ai/features/code/developer/**/*"
       - "ai/features/code/developer_agent_prompt/**/*"
       - "ai/features/code/local_code_review/**/*"
