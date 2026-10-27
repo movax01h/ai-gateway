@@ -420,7 +420,7 @@ def flow_factory(
     agent_name = agent_component.get("name")
 
     args = {
-        "tools_override": agent_component["toolset"],
+        "tools_override": agent_component.get("toolset", []),
         "agent_name_override": agent_name,
         "component_inputs_config": agent_component.get("inputs"),
     }

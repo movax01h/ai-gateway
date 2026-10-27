@@ -159,6 +159,8 @@ class FlowGraphBuilder:
             comp_params["toolset"] = self._tools_registry.toolset(
                 [comp_params["tool_name"]]
             )
+        elif comp_config["type"] == "AgentComponent":
+            comp_params["toolset"] = self._parse_toolset([], flow_config)
 
         return comp_params
 
