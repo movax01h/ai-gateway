@@ -148,6 +148,24 @@ class TestSupervisorAgentComponentV2Init:
         supervisor = make_supervisor(max_delegations=None)
         assert supervisor.max_delegations is None
 
+    @pytest.mark.parametrize("batch_size", [0, -1])
+    def test_invalid_delegation_batch_size_raises(self, make_supervisor, batch_size):
+        """A batch size below 1 is rejected: it would make the per-turn cap
+        enforced in DelegationPrepareNode meaningless (no turn could delegate)."""
+        with pytest.raises(
+            ValueError, match="delegation_batch_size must be at least 1"
+        ):
+            make_supervisor(delegation_batch_size=batch_size)
+
+    def test_positive_delegation_batch_size_is_valid(self, make_supervisor):
+        supervisor = make_supervisor(delegation_batch_size=10)
+        assert supervisor.delegation_batch_size == 10
+
+    def test_none_delegation_batch_size_is_valid(self, make_supervisor):
+        """Omitting the batch size (None) disables the per-turn cap."""
+        supervisor = make_supervisor(delegation_batch_size=None)
+        assert supervisor.delegation_batch_size is None
+
     def test_builds_dynamic_delegate_task_cls(self, make_supervisor):
         supervisor = make_supervisor()
         assert supervisor._delegate_task_cls.tool_title == "delegate_task"
