@@ -100,17 +100,18 @@ def _clean_narrative(narrative: Optional[str]) -> str:
 
 
 def build_summary(findings: List[Dict[str, Any]], narrative: Optional[str]) -> str:
-    """Compose the reader-facing overview: the reviewer's narrative, then computed counts.
+    """Compose the reader-facing overview: the reviewer's narrative.
 
     The narrative is the reviewer's own judgment, carried verbatim apart from stripping trailing tool-call markup and
-    repairing escaped bullet breaks. Every number and the per-severity breakdown are computed here from the findings
-    that will actually be posted, so the overview cannot contradict the comments it sits above.
+    repairing escaped bullet breaks. The merge request page lists the findings from the posted comments, so the
+    overview leaves them out; computed counts stand in only when the reviewer wrote no narrative.
     """
     text = _clean_narrative(narrative)
+    if text:
+        return text
     if not findings:
-        return text or "No issues were raised in this review."
+        return "No issues were raised in this review."
 
-    sections: list[str] = [text] if text else []
     counts = Counter(f.get("severity") for f in findings)
     parts = [
         f"{counts[severity]} {severity}"
@@ -119,21 +120,11 @@ def build_summary(findings: List[Dict[str, Any]], narrative: Optional[str]) -> s
     ]
     total = len(findings)
     file_count = len({f.get("file") for f in findings})
-    sections.append(
-        f"{total} finding{'s' if total != 1 else ''} "
-        f"({', '.join(parts)}) across "
-        f"{file_count} file{'s' if file_count != 1 else ''}:"
+    breakdown = f" ({', '.join(parts)})" if parts else ""
+    return (
+        f"{total} finding{'s' if total != 1 else ''}{breakdown} across "
+        f"{file_count} file{'s' if file_count != 1 else ''}."
     )
-
-    for severity in SEVERITY_ORDER:
-        members = [f for f in findings if f.get("severity") == severity]
-        if members:
-            sections.append(_severity_section(severity.capitalize(), members))
-    others = [f for f in findings if f.get("severity") not in SEVERITY_ORDER]
-    if others:
-        sections.append(_severity_section("Other", others))
-
-    return "\n\n".join(sections)
 
 
 # Also the render order: what the author fixed first, what still needs them last.
@@ -218,15 +209,6 @@ def render_previous_findings(
         lines.append("\n1 resolved thread is not listed.")
     elif omitted:
         lines.append(f"\n{omitted} resolved threads are not listed.")
-    return "\n".join(lines)
-
-
-def _severity_section(title: str, members: List[Dict[str, Any]]) -> str:
-    lines = [f"**{title}**"]
-    lines.extend(
-        f"- {member.get('category')}: `{member.get('file')}:{member.get('new_line')}`"
-        for member in members
-    )
     return "\n".join(lines)
 
 

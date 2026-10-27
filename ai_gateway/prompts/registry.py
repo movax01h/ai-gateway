@@ -254,6 +254,7 @@ class PromptRegistered(NamedTuple):
 
 class LocalPromptRegistry(BasePromptRegistry):
     key_prompt_type_base: str = "base"
+    _DEFAULT_VERSION: str = "^1.0.0"
 
     def __init__(
         self,
@@ -385,8 +386,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             return "required"
         return tool_choice
 
-    # prompt_version is never None when called on LocalPromptRegistry
-    # but it must be set to str | None to match the abstract signature
+    # prompt_version falls back to _DEFAULT_VERSION when None
     @override
     def get(
         self,
@@ -398,11 +398,13 @@ class LocalPromptRegistry(BasePromptRegistry):
         is_graph_node: bool = False,
         **kwargs: Any,
     ) -> Prompt:
+        prompt_version = prompt_version or self._DEFAULT_VERSION
+
         try:
             if not model_metadata:
                 model_metadata = self._default_model_metadata(
                     prompt_id,
-                    prompt_version,  # type: ignore[arg-type]
+                    prompt_version,
                     is_graph_node,
                 )
 
@@ -417,7 +419,7 @@ class LocalPromptRegistry(BasePromptRegistry):
                 f"Failed to load prompt definition for '{prompt_id}': {e}"
             ) from e
 
-        config = self._get_prompt_config(prompt_registered.versions, prompt_version)  # type: ignore[arg-type]
+        config = self._get_prompt_config(prompt_registered.versions, prompt_version)
         model_class_provider = model_metadata.llm_definition.model_class_provider
         prompt_template_override = self.prompt_template_factories.get(prompt_id, None)
 

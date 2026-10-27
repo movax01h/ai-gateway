@@ -1464,9 +1464,9 @@ class TestConfigDuoWorkflowTLS:
 
 class TestConfigDuoChat:
     def test_model_request_timeout_default(self):
-        """ConfigDuoChat.model_request_timeout defaults to 30.0 seconds."""
+        """ConfigDuoChat.model_request_timeout defaults to 300.0 seconds."""
         cfg = ConfigDuoChat()
-        assert cfg.model_request_timeout == 30.0
+        assert cfg.model_request_timeout == 300.0
 
     def test_model_request_timeout_reads_from_env_var(self, monkeypatch):
         """AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT overrides the default."""

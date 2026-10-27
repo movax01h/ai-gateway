@@ -1,3 +1,4 @@
+import asyncio
 import functools
 from typing import Annotated, Any, Awaitable, Callable
 
@@ -5,16 +6,25 @@ from dependency_injector.providers import Configuration, Factory
 from fastapi import APIRouter, Depends, Request
 from fastapi_health import health
 from gitlab_cloud_connector import cloud_connector_ready
+from langsmith import tracing_context
 
 from ai_gateway.async_dependency_resolver import (
-    get_code_suggestions_completions_litellm_factory_provider,
+    get_code_suggestions_completions_agent_factory_provider,
     get_config,
     get_prompt_registry,
     get_search_factory_provider,
 )
 from ai_gateway.code_suggestions.completions import CodeCompletions
-from ai_gateway.models.base import KindModelProvider
-from ai_gateway.models.litellm import KindLiteLlmModel
+from ai_gateway.code_suggestions.processing.post.completions import (
+    create_post_processor_for_model_metadata,
+)
+from ai_gateway.code_suggestions.processing.typing import LanguageId
+from ai_gateway.code_suggestions.prompts.parsers.treesitter import CodeParser
+from ai_gateway.model_metadata import (
+    completion_context_max_percent_for_model_metadata,
+    resolve_provider_aware_metadata,
+)
+from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
 from ai_gateway.prompts.base import BasePromptRegistry
 from ai_gateway.searches import Searcher
 
@@ -31,11 +41,11 @@ router = APIRouter(
 # this is not threadsafe, but that should be fine, we aren't issuing multiple of
 # these calls in parallel. When the instance is marked as ready, we won't be modifying
 # the list anymore.
-validated: set[KindModelProvider] = set()
+validated: set[str] = set()
 
 
 def single_validation(
-    key: KindModelProvider,
+    key: str,
 ):
     def _decorator(
         func: Callable[[Any], Awaitable[bool]],
@@ -62,22 +72,100 @@ async def validate_default_models_available(
     return await prompt_registry.validate_default_models()
 
 
-@single_validation(KindModelProvider.FIREWORKS)
-async def validate_fireworks_available(
-    completions_litellm_factory: Annotated[
-        Factory[CodeCompletions],
-        Depends(get_code_suggestions_completions_litellm_factory_provider),
-    ],
-) -> bool:
-    code_completions = completions_litellm_factory(
-        model__name=KindLiteLlmModel.CODESTRAL_2501,
-        model__provider=KindModelProvider.FIREWORKS,
+_CONTENT_ABOVE_CURSOR = "def hello_world():"
+
+
+async def execute_default_code_completions(
+    prompt_registry: BasePromptRegistry,
+    completions_agent_factory: Factory[CodeCompletions],
+    config: Configuration,
+) -> None:
+    """Run a code completion with each default model, the way `/v4/code/suggestions` does when no model is picked.
+
+    Requests without a model get a weighted pick among the defaults, so each one is checked. Skips user authorization,
+    event tracking, billing and the rate limit fallback.
+    """
+    model_selection = ModelSelectionConfig.instance()
+    completions_config = model_selection.get_resolved_unit_primitive_config_map()[
+        "code_completions"
+    ]
+
+    with tracing_context(enabled=False):
+        await asyncio.gather(
+            *(
+                _execute_code_completion(
+                    model_selection.get_model(identifier),
+                    prompt_registry,
+                    completions_agent_factory,
+                    config,
+                )
+                for identifier in completions_config.default_model_identifiers
+            )
+        )
+
+    # Post-processing skips the parser when a model returns an empty completion, so run it directly
+    await CodeParser.from_language_id(_CONTENT_ABOVE_CURSOR, LanguageId.PYTHON)
+
+
+async def _execute_code_completion(
+    llm_definition: LLMDefinition,
+    prompt_registry: BasePromptRegistry,
+    completions_agent_factory: Factory[CodeCompletions],
+    config: Configuration,
+) -> None:
+    # Mirrors `code_completion` in ai_gateway/code_suggestions/handler.py, without the user authorization and tracking
+    model_metadata = resolve_provider_aware_metadata(
+        llm_definition,
+        provider_keys=config.model_keys(),
+        fireworks_api_base_url=config.fireworks_api_base_url(),
+        mock_model_responses=config.mock_model_responses(),
     )
+    prompt = prompt_registry.get(
+        "code_suggestions/completions", None, model_metadata=model_metadata
+    )
+    post_processor = create_post_processor_for_model_metadata(
+        model_metadata,
+        config.feature_flags.excl_post_process(),
+        config.feature_flags.fireworks_score_threshold(),
+    )
+    code_completions = completions_agent_factory(
+        model__prompt=prompt,
+        post_processor=post_processor,
+        model_metadata=model_metadata,
+    )
+
+    kwargs: dict[str, Any] = {}
+    context_max_percent = completion_context_max_percent_for_model_metadata(
+        model_metadata
+    )
+    if context_max_percent is not None:
+        kwargs["context_max_percent"] = context_max_percent
+
     await code_completions.execute(
-        prefix="def hello_world():",
+        prefix=_CONTENT_ABOVE_CURSOR,
         suffix="",
         file_name="monitoring.py",
         editor_lang="python",
+        **kwargs,
+    )
+
+
+@single_validation("default_code_completions")
+async def validate_default_code_completions_available(
+    prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
+    completions_agent_factory: Annotated[
+        Factory[CodeCompletions],
+        Depends(get_code_suggestions_completions_agent_factory_provider),
+    ],
+    config: Annotated[Configuration, Depends(get_config)],
+) -> bool:
+    """Exercise the code path of a `/v4/code/suggestions` completion that doesn't pick a model.
+
+    `validate_default_models_available` only checks the models through a generic prompt, so it doesn't catch failures
+    in the completions prompt, provider defaults or the tree-sitter parser used by post-processing.
+    """
+    await execute_default_code_completions(
+        prompt_registry, completions_agent_factory, config
     )
     return True
 
@@ -128,8 +216,8 @@ router.add_api_route(
     "/ready",
     health(
         [
-            validate_fireworks_available,
             validate_default_models_available,
+            validate_default_code_completions_available,
             validate_cloud_connector_ready,
             validate_doc_search_available,
         ]

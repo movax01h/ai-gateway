@@ -56,7 +56,7 @@ class TestPrompt:
                 None,
                 None,
                 None,
-                ("test", "^1.0.0", None, None),
+                ("test", None, None, None),
                 200,
                 {"content": "Hi John!"},
                 ["1.0.0"],
@@ -66,7 +66,7 @@ class TestPrompt:
                 None,
                 None,
                 {"model": {"input_tokens": 10, "output_tokens": 20}},
-                ("test", "^1.0.0", None, None),
+                ("test", None, None, None),
                 200,
                 {
                     "content": "Hi John!",
@@ -101,7 +101,7 @@ class TestPrompt:
                 None,
                 (
                     "test",
-                    "^1.0.0",
+                    None,
                     ModelMetadata(
                         name="mistral",
                         provider="litellm",
@@ -143,7 +143,7 @@ class TestPrompt:
                 None,
                 (
                     "test",
-                    "^1.0.0",
+                    None,
                     AmazonQModelMetadata(
                         name="amazon_q",
                         provider="amazon_q",
@@ -180,7 +180,7 @@ class TestPrompt:
                 None,
                 None,
                 None,
-                ("test", "^1.0.0", None, None),
+                ("test", None, None, None),
                 404,
                 {"detail": "Prompt 'test' not found"},
                 None,
@@ -190,7 +190,7 @@ class TestPrompt:
                 None,
                 None,
                 None,
-                ("test", "^1.0.0", None, None),
+                ("test", None, None, None),
                 422,
                 {
                     "detail": "\"Input to ChatPromptTemplate is missing variables {'age'}.  Expected: ['age', 'current_date', 'name'] Received: ['name', 'current_date']"
@@ -473,7 +473,7 @@ class TestMisdirectedRequest:
             },
         )
         mock_registry_get.assert_called_with(
-            "test", "^1.0.0", model_metadata, None, is_graph_node=False
+            "test", None, model_metadata, None, is_graph_node=False
         )
         assert response.status_code == 421
         assert response.json() == {"detail": "401: Unauthorized"}

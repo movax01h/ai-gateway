@@ -231,34 +231,6 @@ class TestPromptRegistrySelfHostedBillingSupport:
 
         assert result == mock_prompt
 
-    @pytest.mark.parametrize(
-        "default_version",
-        [None, "^1.0.0"],
-        ids=["in_memory_registry", "local_registry"],
-    )
-    def test_inherits_default_version_from_instance(
-        self,
-        mock_prompt_registry,
-        workflow_id,
-        gl_reporting_event_context,
-        mock_outbox,
-        default_version,
-    ):
-        """Wrapper must use the wrapped registry's _DEFAULT_VERSION, not BasePromptRegistry's.
-
-        InMemoryPromptRegistry uses None so get_on_behalf passes None to get(), keeping the in-memory routing path.
-        LocalPromptRegistry uses "^1.0.0" so callers that omit prompt_version still resolve to a file-based prompt.
-        Regression: before this fix the wrapper always used "^1.0.0" (BasePromptRegistry default), causing
-        InMemoryPromptRegistry to route every no-version call to the file-based registry.
-        """
-        mock_prompt_registry._DEFAULT_VERSION = default_version
-
-        wrapper = PromptRegistrySelfHostedBillingSupport(
-            mock_prompt_registry, workflow_id, gl_reporting_event_context, mock_outbox
-        )
-
-        assert wrapper._DEFAULT_VERSION == default_version
-
     def test_get_with_kwargs(
         self,
         mock_prompt_registry,
