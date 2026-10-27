@@ -167,6 +167,7 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
         supervisor_history_key: RuntimeIOKey,
         ui_history: UIHistory,
         tracker: SubagentDelegationTracker,
+        max_batch_size: Optional[int] = None,
         logger: Optional[Any] = None,
     ):
         self.name = name
@@ -178,6 +179,10 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
         self._supervisor_history_key = supervisor_history_key
         self._ui_history = ui_history
         self._tracker = tracker
+        # Hard cap on delegate_task calls accepted per turn. Bounds the per-turn
+        # fan-out so a drifting model cannot delegate far enough to overflow the
+        # checkpoint blob size limit. None disables the cap.
+        self._max_batch_size = max_batch_size
         self._logger = logger or log
 
     async def run(
@@ -345,6 +350,19 @@ class DelegationPrepareNode:  # pylint: disable=too-many-instance-attributes
                     f"reached. You must call final_response_tool to "
                     f"complete the workflow.",
                     DelegationRejectionReason.LIMIT_REACHED,
+                )
+                continue
+
+            if (
+                self._max_batch_size is not None
+                and len(dispatches) >= self._max_batch_size
+            ):
+                errors[call_id] = _Rejection(
+                    f"Per-turn delegation batch limit ({self._max_batch_size}) "
+                    f"reached. Wait for the delegations already issued this turn "
+                    f"to return, then delegate the remaining tasks in the next "
+                    f"turn.",
+                    DelegationRejectionReason.BATCH_SIZE_EXCEEDED,
                 )
                 continue
 
