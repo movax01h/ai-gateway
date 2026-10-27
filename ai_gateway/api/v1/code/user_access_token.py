@@ -37,6 +37,8 @@ log = structlog.stdlib.get_logger("user_access_token")
 
 router = APIRouter()
 
+_RESERVED_CLAIMS = frozenset({"iss", "sub", "aud", "exp", "nbf", "iat", "jti"})
+
 
 @router.post("/user_access_token")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
@@ -86,7 +88,11 @@ async def user_access_token(
 
     user_claims = current_user.claims or UserClaims()
 
-    extra_claims = user_claims.extra or {}
+    extra_claims = {
+        name: value
+        for name, value in (user_claims.extra or {}).items()
+        if name not in _RESERVED_CLAIMS
+    }
     # We can only trust the provided headers when the auth token is from SaaS
     # Otherwise, a user can perform a direct call to AIGW and specify arbitrary values
     if user_claims.gitlab_realm == "saas":
