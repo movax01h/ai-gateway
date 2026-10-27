@@ -820,7 +820,12 @@ class ToolsRegistry:
             return True
 
         try:
+            # Rails hashes this string verbatim and compares it with the hash of the
+            # client's `JSON.stringify(toolArgs)`, so keep the model's key order and raw UTF-8.
             tool_args_json = json.dumps(
+                tool_args, separators=(",", ":"), ensure_ascii=False
+            )
+            sorted_tool_args_json = json.dumps(
                 tool_args, sort_keys=True, separators=(",", ":")
             )
         except TypeError:
@@ -833,7 +838,7 @@ class ToolsRegistry:
             )
             return True
 
-        cache_key = (tool_name, tool_args_json)
+        cache_key = (tool_name, sorted_tool_args_json)
         if cache_key in self._approved_cache:
             log.debug(
                 "Tool call approved from cache",
