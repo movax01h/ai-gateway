@@ -423,10 +423,21 @@ class SupervisorAgentComponentV2(AgentComponentBase):
             optional=True,
         )
 
-    def _build_prompt(self, tools: list, tool_choice: str = "auto") -> Any:
+    def _build_prompt(
+        self,
+        tools: list,
+        tool_choice: str = "auto",
+        track_event: bool = True,
+        web_search: bool = True,
+    ) -> Any:
         """Build the supervisor prompt with the given tool list."""
         tool_choice = "any" if self._response_schema is not None else "auto"
-        return super()._build_prompt(tools=tools, tool_choice=tool_choice)
+        return super()._build_prompt(
+            tools=tools,
+            tool_choice=tool_choice,
+            track_event=track_event,
+            web_search=web_search,
+        )
 
     def attach(self, graph: StateGraph, router: RouterProtocol) -> None:
         """Attach the supervisor to the graph, wiring subagents as native dispatch targets.
