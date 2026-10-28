@@ -559,11 +559,17 @@ class AgentComponentBase(BaseComponent):
             "run_command": "run_command" in self.toolset,
         }
 
-    def _build_prompt(self, tools: list, tool_choice: str) -> Any:
+    def _build_prompt(
+        self,
+        tools: list,
+        tool_choice: str,
+        track_event: bool = True,
+        web_search: bool = True,
+    ) -> Any:
         """Build the agent prompt with the given tool list and tool choice."""
         model_metadata = get_model_metadata(self.model_tags)
         extra_params: dict[str, Any] = {}
-        if self._web_search_enabled():
+        if web_search and self._web_search_enabled():
             extra_params["bind_tools_params"] = {"web_search_options": {}}
         return self.prompt_registry.get_on_behalf(
             self.user,
@@ -573,6 +579,7 @@ class AgentComponentBase(BaseComponent):
             tools=tools,
             tool_choice=tool_choice,
             is_graph_node=True,
+            track_event=track_event,
             internal_event_extra={
                 "agent_name": self.name,
                 "workflow_id": self.flow_id,
@@ -1121,6 +1128,18 @@ class AgentComponent(AgentComponentBase):
         tool_choice: Literal["any", "auto"] = "auto"
 
         prompt = self._build_prompt(tools=tools, tool_choice=tool_choice)
+        # Past max_cycles only the schema tool stays bound, so the agent can't keep exploring.
+        # Not tracked: it stands in for `prompt`, which already recorded the request.
+        wrap_up_prompt = (
+            self._build_prompt(
+                tools=[self._response_schema],
+                tool_choice=tool_choice,
+                track_event=False,
+                web_search=False,
+            )
+            if self._response_schema is not None
+            else None
+        )
 
         node_agent = AgentNode(
             name=self.__entry_hook__(),
@@ -1144,6 +1163,7 @@ class AgentComponent(AgentComponentBase):
             response_schema_tool_choice=tool_choice,
             trim_ui_chat_log=self._trim_ui_chat_log,
             prompt_template_inputs={"tools_enabled": self._tools_enabled()},
+            wrap_up_prompt=wrap_up_prompt,
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,

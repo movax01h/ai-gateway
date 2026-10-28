@@ -910,6 +910,7 @@ class TestAgentComponentAttachNodes:
             tools=mock_toolset.bindable,
             tool_choice="auto",
             is_graph_node=True,
+            track_event=True,
             internal_event_extra={
                 "agent_name": component_name,
                 "workflow_id": flow_id,
@@ -1150,8 +1151,51 @@ class TestAgentComponentAttachEdges:
         """A response schema is bound with "auto" so the agent can still deliberate in text."""
         agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
 
-        _, kwargs = mock_prompt_registry.get_on_behalf.call_args
+        _, kwargs = mock_prompt_registry.get_on_behalf.call_args_list[0]
         assert kwargs["tool_choice"] == "auto"
+
+    @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
+    def test_schema_mode_binds_only_the_schema_tool_for_wrap_up(
+        self,
+        agent_component_with_custom_schema,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+        mock_schema_registry,
+    ):
+        """Past max_cycles the agent gets a prompt bound to the schema tool alone, so it cannot keep exploring."""
+        main_prompt, wrap_up_prompt = Mock(), Mock()
+        mock_prompt_registry.get_on_behalf.side_effect = [main_prompt, wrap_up_prompt]
+
+        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
+
+        main_kwargs, wrap_up_kwargs = (
+            call.kwargs for call in mock_prompt_registry.get_on_behalf.call_args_list
+        )
+        assert wrap_up_kwargs["tools"] == [mock_schema_registry.get.return_value]
+        assert wrap_up_kwargs["tool_choice"] == "auto"
+        # Only the main prompt records the request event.
+        assert main_kwargs["track_event"] is True
+        assert wrap_up_kwargs["track_event"] is False
+        agent_call_kwargs = mock_agent_node_cls.call_args[1]
+        assert agent_call_kwargs["prompt"] is main_prompt
+        assert agent_call_kwargs["wrap_up_prompt"] is wrap_up_prompt
+
+    @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
+    def test_text_mode_has_no_wrap_up_prompt(
+        self,
+        agent_component,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+    ):
+        """Without a schema there is no tool left to bind, so wrap-up turns keep the main prompt."""
+        agent_component.attach(mock_state_graph, mock_router)
+
+        mock_prompt_registry.get_on_behalf.assert_called_once()
+        assert mock_agent_node_cls.call_args[1]["wrap_up_prompt"] is None
 
     def test_routing_with_non_ai_message_raises_error(
         self,
@@ -3199,6 +3243,21 @@ class TestWebSearchBinding:
             mock_is_client_capable.assert_called_once_with("web_search")
         else:
             assert "bind_tools_params" not in call_kwargs
+
+    def test_web_search_is_not_bound_when_excluded(
+        self, make_agent_component, mock_prompt_registry
+    ):
+        """The wrap-up prompt opts out, so the schema tool stays the only one bound."""
+        component = make_agent_component(enable_web_search=True)
+
+        with (
+            patch(f"{self._MODULE}.is_feature_enabled", return_value=True),
+            patch(f"{self._MODULE}.is_client_capable", return_value=True),
+        ):
+            component._build_prompt(tools=[], tool_choice="auto", web_search=False)
+
+        call_kwargs = mock_prompt_registry.get_on_behalf.call_args.kwargs
+        assert "bind_tools_params" not in call_kwargs
 
     def test_web_search_is_off_by_default(
         self, make_agent_component, mock_prompt_registry

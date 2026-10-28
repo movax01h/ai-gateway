@@ -205,6 +205,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             the response schema with. Only ``"auto"`` can produce a text-only turn
             in schema mode, so it decides whether such a turn is a wrap-up retry or
             a routing error. Defaults to ``"any"``, today's behaviour.
+        wrap_up_prompt: Prompt used once ``max_cycles`` is reached, bound to the
+            response schema tool only so the agent cannot keep exploring. When
+            ``None``, wrap-up turns use ``prompt``.
     """
 
     name: str
@@ -225,6 +228,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _invoke_config: RunnableConfig
     _cycle_budget: CycleBudget
     _response_schema_tool_choice: Literal["any", "auto"]
+    _wrap_up_prompt: Prompt
 
     def __init__(
         self,
@@ -244,6 +248,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         prompt_template_inputs: Optional[dict[str, Any]] = None,
         response_schema_tool_choice: Literal["any", "auto"] = "any",
         trim_ui_chat_log: bool = True,
+        wrap_up_prompt: Optional[Prompt] = None,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -261,6 +266,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._cycle_budget = cycle_budget
         self._response_schema_tool_choice = response_schema_tool_choice
         self._trim_ui_chat_log = trim_ui_chat_log
+        self._wrap_up_prompt = wrap_up_prompt or prompt
         # Build-time template variables (e.g. which optional tools/capabilities are
         # active) that the prompt can branch on. Merged into every prompt invocation
         # alongside the runtime variables below.
@@ -279,8 +285,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _ITERATION_WARNING_MESSAGE = (
         "You are approaching the maximum number of iterations for this task "
         "({cycles_remaining} remaining). Once you reach that limit, you will "
-        "no longer be able to make any tool calls and must provide your final "
-        "answer immediately. Plan the rest of your work around the iterations you "
+        "{restriction}. Plan the rest of your work around the iterations you "
         "have left."
     )
 
@@ -461,8 +466,20 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         )
 
     def _iteration_warning_message(self, cycles_remaining: int) -> str:
-        """Return the approaching-soft-limit warning message."""
-        return self._ITERATION_WARNING_MESSAGE.format(cycles_remaining=cycles_remaining)
+        """Return the approaching-soft-limit warning message, tailored to the response schema if configured."""
+        if self._response_schema is not None:
+            restriction = (
+                f"only be able to call the {self._response_schema.tool_title} tool "
+                "to provide your final answer"
+            )
+        else:
+            restriction = (
+                "no longer be able to make any tool calls and must provide your "
+                "final answer immediately"
+            )
+        return self._ITERATION_WARNING_MESSAGE.format(
+            cycles_remaining=cycles_remaining, restriction=restriction
+        )
 
     async def _with_cycle_budget_message(
         self, history: list, cycle_count: int
@@ -603,6 +620,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         history, wrap_up_active = await self._with_cycle_budget_message(
             history, cycle_count
         )
+        prompt = self._wrap_up_prompt if wrap_up_active else self._prompt
 
         wrap_up_retries: int = 0
         truncation_retries: int = 0
@@ -616,7 +634,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 with mark_llm_call_retry(retrying_failed_call):
                     completion: AIMessage = cast(
                         AIMessage,
-                        await self._prompt.ainvoke(
+                        await prompt.ainvoke(
                             input={
                                 **self._prompt_template_inputs,
                                 **variables,

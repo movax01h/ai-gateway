@@ -2389,6 +2389,39 @@ class TestAgentNodeIterationWarning:
                 assert not human_messages
 
     @pytest.mark.asyncio
+    async def test_warning_names_the_schema_tool_when_schema_configured(
+        self,
+        mock_prompt,
+        make_agent_node,
+        base_flow_state,
+        component_name,
+        prompt_variables,
+        _mock_predefined_runtime_variables,
+    ):
+        """With a response schema the schema tool stays callable past the limit, so the warning says so."""
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node.get_vars_from_state"
+        ) as mock_get_vars:
+            mock_get_vars.return_value = prompt_variables
+
+            state = copy.deepcopy(base_flow_state)
+            state["context"].setdefault(component_name, {})["cycle_count"] = 1
+
+            await make_agent_node(
+                iteration_warning_offset=1, response_schema=AgentFinalOutput
+            ).run(state)
+
+            call_history = mock_prompt.ainvoke.call_args[1]["input"]["history"]
+            human_messages = [m for m in call_history if isinstance(m, HumanMessage)]
+            assert len(human_messages) == 1
+            assert "only be able to call the final_response_tool tool" in (
+                human_messages[0].content
+            )
+            assert "no longer be able to make any tool calls" not in (
+                human_messages[0].content
+            )
+
+    @pytest.mark.asyncio
     async def test_no_warning_when_offset_not_set(
         self,
         mock_prompt,
@@ -2688,6 +2721,62 @@ class TestAgentNodeWrapUpRetries:
             assert any("final_response_tool" in m.content for m in human_messages), (
                 "Wrap-up message should mention the schema tool name"
             )
+
+    @pytest.mark.asyncio
+    async def test_wrap_up_turns_use_the_wrap_up_prompt(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Past max_cycles, every call in the run goes through the wrap-up prompt, retries included."""
+        wrap_up_prompt = Mock(spec=Prompt)
+        tool_call_message = AIMessage(
+            content="",
+            tool_calls=[{"id": "tc1", "name": "read_file", "args": {}}],
+        )
+        tool_call_message.response_metadata = {}
+        final_message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "tc2",
+                    "name": "final_response_tool",
+                    "args": {"final_response": "Done"},
+                }
+            ],
+        )
+        final_message.response_metadata = {}
+        wrap_up_prompt.ainvoke = AsyncMock(
+            side_effect=[tool_call_message, final_message]
+        )
+
+        await make_agent_node(
+            response_schema=AgentFinalOutput, wrap_up_prompt=wrap_up_prompt
+        ).run(state_at_limit)
+
+        assert wrap_up_prompt.ainvoke.call_count == 2
+        mock_prompt.ainvoke.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_turns_below_max_cycles_use_the_main_prompt(
+        self,
+        mock_prompt,
+        make_agent_node,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """The wrap-up prompt is only used once max_cycles is reached."""
+        wrap_up_prompt = Mock(spec=Prompt)
+        wrap_up_prompt.ainvoke = AsyncMock()
+
+        await make_agent_node(wrap_up_prompt=wrap_up_prompt).run(base_flow_state)
+
+        mock_prompt.ainvoke.assert_called_once()
+        wrap_up_prompt.ainvoke.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_wrap_up_retry_when_below_max_cycles(
