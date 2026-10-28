@@ -328,6 +328,10 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
 }
 ```
 
+To limit a tool to some flows, set its `allowed_flows` class variable to the Flow Registry flow ids that can use it.
+`None`, the default, means any flow. The limit applies only to tools granted by an agent privilege, and ListTools never
+lists a tool that sets it.
+
 ### 7. Add the Tool to Workflows
 
 Add your tool to the appropriate workflow tool lists in:

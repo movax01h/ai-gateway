@@ -672,6 +672,53 @@ async def test_list_tools_excludes_experimental(
 @patch("duo_workflow_service.server.tools_registry._READ_ONLY_GITLAB_TOOLS")
 @patch("duo_workflow_service.server.tools_registry._AGENT_PRIVILEGES")
 @patch("duo_workflow_service.server.convert_to_openai_tool")
+async def test_list_tools_excludes_flow_restricted(
+    mock_convert_to_openai_tool,
+    mock_agent_privileges,
+    mock_readonly_tools,
+    mock_default_tools,
+    mock_context,
+    servicer,
+):
+    def create_mock_tool(name: str, flows: Optional[frozenset[str]]):
+        class MockTool(DuoBaseTool):
+            tool_version = Version("1.0.0")
+            allowed_flows = flows
+
+            def __init__(self):
+                super().__init__(name=name, description=f"{name} description")
+
+            async def _execute(self, *args, **kwargs):
+                pass
+
+        return MockTool
+
+    mock_default_tools.__add__.return_value = []
+    mock_readonly_tools.__add__.return_value = []
+    mock_agent_privileges.values.return_value = [
+        [
+            create_mock_tool("public_tool", None),
+            create_mock_tool("flow_tool", frozenset({"some_flow"})),
+        ]
+    ]
+    mock_convert_to_openai_tool.side_effect = lambda tool: {
+        "type": "function",
+        "function": {"name": tool.name, "description": tool.description},
+    }
+
+    response = await servicer.ListTools(contract_pb2.ListToolsRequest(), mock_context)
+
+    tool_names = [
+        MessageToDict(tool).get("function", {}).get("name") for tool in response.tools
+    ]
+    assert tool_names == ["public_tool"]
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.tools_registry._DEFAULT_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._READ_ONLY_GITLAB_TOOLS")
+@patch("duo_workflow_service.server.tools_registry._AGENT_PRIVILEGES")
+@patch("duo_workflow_service.server.convert_to_openai_tool")
 async def test_list_tools_excludes_get_session_context(
     mock_convert_to_openai_tool,
     mock_agent_privileges,

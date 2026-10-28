@@ -737,6 +737,7 @@ class AbstractWorkflow(ABC):
                     allow_client_injected_mcp_tools=self._allow_client_injected_mcp_tools(),
                     allowed_tools=self._governance_allowed_tools,
                     admin_allowed_preapprovals=self._admin_allowed_preapprovals,
+                    registry_flow_id=self._registry_flow_id(),
                 )
             )
 

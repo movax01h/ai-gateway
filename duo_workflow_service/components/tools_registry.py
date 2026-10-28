@@ -2,11 +2,13 @@ import copy
 import importlib.util
 import json
 import keyword
+from functools import cached_property
 from pathlib import Path
 from typing import (
     Any,
     Iterable,
     Literal,
+    NamedTuple,
     NotRequired,
     Optional,
     Sequence,
@@ -190,7 +192,9 @@ _READ_ONLY_GITLAB_TOOLS: list[Type[BaseTool]] = [
 _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
 
 # Why ``ToolsRegistry.toolset`` dropped a requested tool; see ``_unavailable_reason``.
-UnavailableReason = Literal["missing_privilege", "unsupported_client", "unknown"]
+UnavailableReason = Literal[
+    "flow_restricted", "missing_privilege", "unsupported_client", "unknown"
+]
 
 # Using Sequence instead of list because it's covariant, allowing subclasses
 ToolsOrConfigs = Union[Sequence[Type[BaseTool]], Sequence[McpToolConfig]]
@@ -349,6 +353,15 @@ def _tool_name(tool_cls: Union[Type[BaseTool], Type[BaseModel]]) -> str:
     return name
 
 
+def allowed_flows_for_tool(tool_name: str) -> Optional[frozenset[str]]:
+    """The ``allowed_flows`` of the privilege-granted tool named ``tool_name``; ``None`` when any flow may use it."""
+    for tool_classes in _AGENT_PRIVILEGES.values():
+        for tool_cls in tool_classes:
+            if _tool_name(tool_cls) == tool_name:
+                return getattr(tool_cls, "allowed_flows", None)
+    return None
+
+
 def agent_privileges_for_tool(tool_name: str) -> list[str]:
     """Names of the agent privileges that grant ``tool_name``; empty when no privilege does (e.g. MCP tools)."""
     return [
@@ -356,6 +369,25 @@ def agent_privileges_for_tool(tool_name: str) -> list[str]:
         for privilege, tool_classes in _AGENT_PRIVILEGES.items()
         if any(_tool_name(tool_cls) == tool_name for tool_cls in tool_classes)
     ]
+
+
+class _ToolGrant(NamedTuple):
+    privileges: set[str]
+    allowed_flows: Optional[frozenset[str]]
+
+
+def _index_tool_grants() -> dict[str, _ToolGrant]:
+    """Map each privilege-granted tool name to its granting privileges and ``allowed_flows``, in one pass."""
+    grants: dict[str, _ToolGrant] = {}
+    for privilege, tool_classes in _AGENT_PRIVILEGES.items():
+        for tool_cls in tool_classes:
+            name = _tool_name(tool_cls)
+            if name not in grants:
+                grants[name] = _ToolGrant(
+                    set(), getattr(tool_cls, "allowed_flows", None)
+                )
+            grants[name].privileges.add(privilege)
+    return grants
 
 
 def _merge_feature_tools(
@@ -543,6 +575,7 @@ class ToolsRegistry:
         allow_client_injected_mcp_tools: bool = False,
         allowed_tools: Optional[list[str]] = None,
         admin_allowed_preapprovals: Optional[set[str]] = None,
+        registry_flow_id: Optional[str] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -579,6 +612,7 @@ class ToolsRegistry:
             admin_allowed_preapprovals=admin_allowed_preapprovals,
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
+            registry_flow_id=registry_flow_id,
         )
 
     def __init__(
@@ -595,7 +629,12 @@ class ToolsRegistry:
         allow_client_injected_mcp_tools: bool = False,
         allowed_tools: Optional[list[str]] = None,
         admin_allowed_preapprovals: Optional[set[str]] = None,
+        registry_flow_id: Optional[str] = None,
     ):
+        """Build the tools a workflow can use.
+
+        ``registry_flow_id`` is the Flow Registry id of the config the workflow runs, ``None`` for any other config.
+        """
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
 
         # Always enable mcp tools until it's reliably passed by clients as an agent privilege
@@ -627,8 +666,12 @@ class ToolsRegistry:
         self._workflow_id = workflow_id
         self._approved_cache: set[tuple[str, str]] = set()
 
+        self._registry_flow_id = registry_flow_id
         for privilege in enabled_tools:
             for tool_cls_or_config in tools_for_agent_privileges.get(privilege, []):
+                allowed_flows = getattr(tool_cls_or_config, "allowed_flows", None)
+                if allowed_flows is not None and registry_flow_id not in allowed_flows:
+                    continue
                 # Handle both regular tool classes and MCP tool configs
                 if (
                     isinstance(tool_cls_or_config, dict)
@@ -968,20 +1011,35 @@ class ToolsRegistry:
     def _unavailable_reason(self, tool_name: str) -> UnavailableReason:
         """Why a requested tool is not enabled. Governance-denied tools never get here.
 
-        ``missing_privilege``: no privilege that grants the tool was enabled, typically a flow
-        asking for more than its privileges in gitlab-org/gitlab allow. ``unsupported_client``:
+        ``flow_restricted``: the tool's ``allowed_flows`` excludes this flow; no privilege unlocks
+        it here. ``missing_privilege``: no privilege that grants the tool was
+        enabled, typically a flow asking for more than its privileges in gitlab-org/gitlab allow.
+        ``unsupported_client``:
         the privilege was enabled (or none is needed), but the client cannot run the tool.
         ``unknown``: the registry does not know the name, typically a typo in a custom flow.
         """
-        granting = set(agent_privileges_for_tool(tool_name))
-        if granting and not granting & self._enabled_privileges:
-            return "missing_privilege"
-        if granting or any(
-            _tool_name(tool_cls) == tool_name
-            for tool_cls in _CAPABILITY_DEPENDENT_TOOLS
+        grant = self._tool_grants.get(tool_name)
+        if grant is None:
+            if tool_name in self._capability_dependent_tool_names:
+                return "unsupported_client"
+            return "unknown"
+        if (
+            grant.allowed_flows is not None
+            and self._registry_flow_id not in grant.allowed_flows
         ):
-            return "unsupported_client"
-        return "unknown"
+            return "flow_restricted"
+        if not grant.privileges & self._enabled_privileges:
+            return "missing_privilege"
+        return "unsupported_client"
+
+    # Built on the first unavailable tool, so a toolset that drops nothing pays nothing.
+    @cached_property
+    def _tool_grants(self) -> dict[str, _ToolGrant]:
+        return _index_tool_grants()
+
+    @cached_property
+    def _capability_dependent_tool_names(self) -> set[str]:
+        return {_tool_name(tool_cls) for tool_cls in _CAPABILITY_DEPENDENT_TOOLS}
 
 
 def _report_unavailable_tools(
@@ -999,8 +1057,8 @@ def _report_unavailable_tools(
 
     Info, not warning: dropping is also intended behaviour. Chat requests one tool list on every
     surface and lets the session's privileges trim it, so web chat drops the file and command
-    tools on each compile. Filter on ``missing_privilege_tools`` and ``unknown_tools`` to find
-    real flow/privilege mismatches.
+    tools on each compile. Filter on ``flow_restricted_tools``, ``missing_privilege_tools`` and
+    ``unknown_tools`` to find real flow/privilege mismatches.
     """
 
     def tools_with(reason: UnavailableReason) -> list[str]:
@@ -1008,6 +1066,7 @@ def _report_unavailable_tools(
 
     missing_privilege_tools = tools_with("missing_privilege")
     fields = {
+        "flow_restricted_tools": tools_with("flow_restricted"),
         "missing_privilege_tools": missing_privilege_tools,
         "unsupported_client_tools": tools_with("unsupported_client"),
         "unknown_tools": tools_with("unknown"),
@@ -1024,6 +1083,22 @@ def _report_unavailable_tools(
         **{key: value for key, value in fields.items() if value},
     )
 
+
+def _reject_unchecked_allowed_flows(
+    tool_classes: Iterable[Union[Type[BaseTool], Type[BaseModel]]],
+) -> None:
+    """Raise if a tool enabled outside the privilege map sets ``allowed_flows``, which would be silently ignored."""
+    for tool_cls in tool_classes:
+        if getattr(tool_cls, "allowed_flows", None) is not None:
+            raise RuntimeError(
+                f"Tool {tool_cls.__name__} sets 'allowed_flows', which is only "
+                "applied to tools granted by an agent privilege"
+            )
+
+
+_reject_unchecked_allowed_flows(
+    [*_DEFAULT_TOOLS, *NO_OP_TOOLS, *_CAPABILITY_DEPENDENT_TOOLS]
+)
 
 # Reserve every name the registry can enable outside the privilege map, so a
 # feature tool cannot shadow a default, no-op, or capability-dependent tool.

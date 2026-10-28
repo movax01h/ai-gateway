@@ -710,9 +710,9 @@ class BlWriteSastReport(DuoBaseTool):
         findings and write it to gl-sast-report.json in the workspace. No LLM."""
     )
     args_schema: Type[BaseModel] = BlWriteSastReportInput
-    # Below 1.0.0 so ListTools does not publish it: it only runs inside
-    # the BL security flow.
+    # Below 1.0.0: not a stable tool.
     tool_version: ClassVar[Version] = Version("0.1.0")
+    allowed_flows: ClassVar[Optional[frozenset[str]]] = frozenset({"bl_security"})
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
 
     _PINNED = "gl-sast-report.json"

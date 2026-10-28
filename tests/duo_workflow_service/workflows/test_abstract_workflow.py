@@ -595,6 +595,7 @@ async def test_compile_and_run_graph(
         ask_tools=[],
         allow_client_injected_mcp_tools=False,
         allowed_tools=[],
+        registry_flow_id=None,
         admin_allowed_preapprovals=None,
     )
 
