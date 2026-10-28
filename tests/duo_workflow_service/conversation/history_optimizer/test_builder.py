@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from duo_workflow_service.conversation.history_optimizer.builder import (
     FlowContext,
@@ -19,7 +19,10 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
     CompactionResult,
 )
-from duo_workflow_service.conversation.trimmer import TrimResult
+from duo_workflow_service.conversation.trimmer import (
+    TRIM_THRESHOLD,
+    TrimResult,
+)
 
 
 @pytest.fixture(name="flow_context")
@@ -309,3 +312,75 @@ class TestBuildHistoryOptimizerPipelineBehavioral:
             component_name="agent",
             max_context_tokens=400_000,
         )
+
+
+class TestBuildHistoryOptimizerPipelineCompactionThenTrim:
+    """Behavioral test with the real optimizers; only the summarizer LLM is a stub."""
+
+    @pytest.mark.asyncio
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "legacy_trim.get_current_model_max_context_token_limit",
+        return_value=120_000,
+    )
+    @patch(
+        "duo_workflow_service.conversation.history_optimizer.optimizers."
+        "compaction.get_current_model_max_context_token_limit",
+        return_value=120_000,
+    )
+    async def test_trim_keeps_the_compaction_summary(
+        self,
+        _mock_compaction_max_context,
+        _mock_trim_max_context,
+        flow_context,
+        mock_prompt_registry,
+        mock_internal_events_client,
+    ):
+        """The terminal trim keeps the compaction summary."""
+        threshold = max(CompactionConfig().trim_threshold, TRIM_THRESHOLD)
+        over_budget_tokens = int(threshold * 120_000) + 10_000
+        messages = []
+        for i in range(20):
+            messages.append(
+                AIMessage(
+                    content=f"step {i}",
+                    tool_calls=[{"id": f"call_{i}", "name": "run_command", "args": {}}],
+                    usage_metadata={
+                        "input_tokens": over_budget_tokens - 100,
+                        "output_tokens": 100,
+                        "total_tokens": over_budget_tokens,
+                    },
+                )
+            )
+            messages.append(ToolMessage(content="x" * 4_000, tool_call_id=f"call_{i}"))
+
+        summary = AIMessage(
+            content="Summary of the earlier steps.",
+            usage_metadata={
+                "input_tokens": over_budget_tokens,
+                "output_tokens": 500,
+                "total_tokens": over_budget_tokens + 500,
+            },
+        )
+        prompt = mock_prompt_registry.get_on_behalf.return_value
+        prompt.ainvoke = AsyncMock(return_value=summary)
+        prompt.prompt_tpl.format_messages.return_value = [
+            SystemMessage(content="system prompt"),
+            HumanMessage(content="user prompt"),
+        ]
+
+        pipeline = build_history_optimizer_pipeline(
+            compaction=True,
+            flow_context=flow_context,
+            agent_name="agent",
+            prompt_registry=mock_prompt_registry,
+            internal_events_client=mock_internal_events_client,
+        )
+
+        final_messages, (compaction_result, trim_result) = await pipeline.optimize(
+            messages
+        )
+
+        assert compaction_result.was_modified
+        assert summary.content in [m.content for m in final_messages]
+        assert not trim_result.was_modified

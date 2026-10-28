@@ -1,0 +1,179 @@
+version: "v1"
+environment: chat
+
+# Interactive variant of the developer flow, tailored for synchronous,
+# interactive communication environments such as the Duo CLI. It uses the
+# shared `developer_agent_prompt` (see
+# ai/features/code/developer_agent_prompt/prompts/system/1.0.0.jinja),
+# which extends `developer/common/system` and overrides the operating-mode and
+# git-push blocks for interactive use. This flow:
+#   * runs in the `chat` environment and loops through a HumanInputComponent so
+#     the user can steer the agent turn by turn,
+#   * requires tool approval, and
+#   * leaves committing/pushing under the user's control.
+# No git_setup/git_unshallow steps: the user already has a full local checkout.
+#
+# 2.1.0 adds the `review_agent` sub-agent; its `description` is the delegation contract.
+
+components:
+  - name: "developer_agent"
+    type: AgentComponent
+    prompt_id: "developer_agent_prompt"
+    prompt_version: "^1.0.0"
+    require_tool_approval: true
+    subagents:
+      - name: "review_agent"
+      - source: workspace
+        item_type: agent_template
+        item_id: "*"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: true
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: true
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: true
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: true
+      - from: "context:inputs.agent_user_environment"
+        as: "agent_user_environment"
+        optional: true
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "primary_branch"
+        optional: true
+      - from: "context:inputs.plan_context.plan_enabled"
+        as: "plan_enabled"
+        optional: true
+      - from: "context:inputs.cancelled_turn"
+        as: "cancelled_turn"
+        optional: true
+    toolset:
+      - "read_file"
+      - "read_files"
+      - "find_files"
+      - "list_dir"
+      - "grep"
+      - "create_file_with_contents"
+      - "edit_file"
+      - "mkdir"
+      - "todo_write"
+      - "run_command"
+      - "gitlab_api_get"
+      - "create_issue"
+      - "update_issue"
+      - "create_issue_note"
+      - "create_merge_request_note"
+      - "create_work_item_note"
+      - "create_merge_request"
+      - "update_merge_request"
+      - "notify_me_when"
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+      - "on_delegation"
+      - "on_delegation_returns"
+      - "on_delegation_error"
+
+  - name: "review_agent"
+    type: AgentComponent
+    description: >-
+      A specialist code reviewer. Delegate to it when the developer wants the
+      work reviewed — "review my changes", "review this branch/commit/MR" or
+      similar. It starts with no context beyond the prompt you send, so tell it
+      exactly what to review (the working tree, a branch, a commit, or a merge
+      request) and pass on the intent and any product context you already have.
+      It gathers the diff and reads the code itself and returns its findings.
+      It is read-only: it never edits files or posts to GitLab.
+      Resume the same subsession for follow-ups on a review it already did (a
+      clarifying question, or a re-check after you act on its feedback) so it
+      keeps its context; start a fresh subsession for a different change or when
+      you want an independent second opinion.
+    prompt_id: "local_code_review"
+    prompt_version: "^1.0.0"
+    require_tool_approval: true
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:project_id"
+        as: "project_id"
+        optional: true
+      - from: "context:project_http_url_to_repo"
+        as: "project_url"
+        optional: true
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: true
+      - from: "context:inputs.workspace_agent_skills"
+        as: "workspace_agent_skills"
+        optional: true
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.agent_platform_standard_context.primary_branch"
+        as: "primary_branch"
+        optional: true
+    toolset:
+      - "run_command"
+      - "read_file"
+      - "read_files"
+      - "grep"
+      - "find_files"
+      - "list_dir"
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+  - name: "user_input"
+    type: HumanInputComponent
+    sends_response_to: "developer_agent"
+    interaction_type: "input"
+    message_template: ""
+    ui_log_events:
+      - on_user_response
+
+include:
+  - source: workspace
+    item_type: agent_template
+    item_id: "*"
+
+routers:
+  - from: "developer_agent"
+    to: "user_input"
+  - from: "user_input"
+    to: "developer_agent"
+
+flow:
+  entry_point: "developer_agent"
+  inputs:
+    - category: agent_platform_standard_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        workload_branch:
+          type: string
+          description: The workload branch for the GitLab Merge Request
+        primary_branch:
+          type: string
+          description: Merge Request target branch
+        session_owner_id:
+          type: string
+          description: Human user's ID that initiated the flow
+        service_account_name:
+          type: string
+          description: Name of the service account that runs the flow
+          optional: true
+    - category: plan_context
+      input_schema:
+        plan_enabled:
+          type: boolean
+          description: When true, the agent operates in read-only plan mode

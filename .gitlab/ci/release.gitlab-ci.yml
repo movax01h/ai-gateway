@@ -1,9 +1,8 @@
 .docker-release:
   extends: .docker
   script:
-    - docker pull "${TARGET_IMAGE}"
-    - docker tag "${TARGET_IMAGE}" "${RELEASE_VERSION}"
-    - docker push "${RELEASE_VERSION}"
+    # Copy the whole manifest list; docker pull would keep only the runner's arch.
+    - docker buildx imagetools create --tag "${RELEASE_VERSION}" "${TARGET_IMAGE}"
     - if [ -n "${SIGN_RELEASE}" ]; then apk add --update cosign && cosign sign "${RELEASE_VERSION}"; fi
 
 .docker-hub-release:
@@ -90,11 +89,13 @@ release-gitlab-registry-self-hosted-fips-image:latest:
     RELEASE_VERSION: "${DOCKER_MODEL_GATEWAY}/self-hosted-fips:latest"
   script:
     # Only move latest for the highest release; backports skip.
+    # Use `sed -n '1p'` rather than `head -n 1`: head exits early, which can
+    # SIGPIPE grep and, with pipefail, fail the job with exit code 141.
     - |
       REMOTE_TAGS=$(git ls-remote --tags --refs --sort=-v:refname origin 'refs/tags/self-hosted-v*-ee') || { echo "git ls-remote failed"; exit 1; }
       HIGHEST=$(echo "${REMOTE_TAGS}" \
         | sed 's|.*refs/tags/||' \
-        | grep -E '^self-hosted-v[0-9]+\.[0-9]+\.[0-9]+-ee$' | head -n 1)
+        | grep -E '^self-hosted-v[0-9]+\.[0-9]+\.[0-9]+-ee$' | sed -n '1p')
       echo "Current tag: ${CI_COMMIT_TAG}, highest release tag: ${HIGHEST}"
       if [ -z "${HIGHEST}" ]; then
         echo "Could not determine highest release tag."

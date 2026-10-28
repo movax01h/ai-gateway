@@ -94,7 +94,7 @@ CREATE UNIQUE INDEX idx_duo_wf_checkpoint_blobs_dedup
     NULLS NOT DISTINCT;
 ```
 
-Reconstruction on read: start from the header, then fold the group's blobs — the group-start `compaction` snapshots plus its later `conversation` deltas (see [Self-contained groups](#self-contained-groups)). During the shadow-write transition both models are written; readers still use `p_duo_workflows_checkpoints`, and its rows age out via the 30-day TTL.
+Reconstruction on read: start from the header, then fold the group's blobs — the group-start `compaction` snapshots plus its later blobs (see [Self-contained groups](#self-contained-groups)). During the shadow-write transition both models are written; readers still use `p_duo_workflows_checkpoints`, and its rows age out via the 30-day TTL.
 
 ## Payload
 
@@ -103,7 +103,7 @@ When the property is enabled, the `aput` POST body gains three fields alongside 
 ```jsonc
 {
   "compressed_checkpoint": "...",       // unchanged — full state (shadow write)
-  "current_thread": 0,                  // group counter; bumped on compaction / stale-cache reset
+  "current_thread": 0,                  // group counter; bumped on a history rewrite / stale-cache reset
   "current_thread_started_at": "<ISO8601 timestamp>",       // ISO8601 start of this group; still sent but no longer read by Rails (see below)
   "channel_blobs": [
     {
@@ -156,21 +156,23 @@ This shape is tagged with the query parameter `checkpoint_strategy=incremental_o
 
   A **dropped key** also forces the full dict. Rails' `ChannelValuesReconstructor#append` writes only the keys the delta carries, so a per-key delta cannot say "this key is gone" and the reader would keep it forever. Agent-keyed channels only gain keys, but a wholesale-replaced payload like `last_human_input` can lose one between events.
 
-`step_action` is the authoritative append-vs-replace signal for Rails. `current_thread` is a grouping hint that increments on compaction so Rails restarts reconstruction from that checkpoint rather than replaying deltas across the boundary — it cannot be authoritative because it resets to `0` on gateway restart, whereas `step_action` is derived from the channel values and stays correct.
+`step_action` is the authoritative append-vs-replace signal for Rails. `current_thread` is a grouping hint that increments on a history-channel rewrite so Rails restarts reconstruction from that checkpoint rather than replaying deltas across the boundary — it cannot be authoritative because it resets to `0` on gateway restart, whereas `step_action` is derived from the channel values and stays correct.
 
 ## Self-contained groups
 
 The per-step deltas above describe only the channels that changed. That's enough while Rails overlays deltas on the full-checkpoint header, but the end state drops the header (see [Gating](#gating)), and then a channel that hasn't changed since a previous `current_thread` group would have no base to fold onto — its history lived in the old group.
 
-To make each group reconstruct on its own, the **start of every group** re-seeds _all_ channels as full `compaction` snapshots via `_serialize_all_channels_full`, replacing the per-channel deltas for that one step. A group starts on:
+To make each group reconstruct on its own, the **start of every group** re-seeds _all_ channels as full `compaction` snapshots via `_serialize_all_channels_full`, replacing the per-channel deltas for that one step. The exception is the step's `ui_chat_log` `conversation` delta, which is kept after its snapshot with the same `thread_ts` and version. Readers keep one blob per `(thread_ts, version)`, so the two are never both applied. A group starts on:
 
 - the lineage's first checkpoint (`state.prev_checkpoint_id is None`),
 
 - a stale-cache reset (`force_rewrite`), or
 
-- a compaction.
+- a compaction: a non-append change to a history channel (`ui_chat_log` or `conversation_history`, see `_GROUP_START_CHANNELS`).
 
-`_serialize_all_channels_full` mirrors `_serialize_channel_blobs`'s JSON encoding and also covers every channel, but takes versions from the checkpoint's `channel_versions` rather than `new_versions`, since unchanged channels must be re-seeded too. Reconstruction of a group is then: group-start full snapshots + the group's later `conversation` deltas.
+A non-append change to any other list or dict channel, such as `plan` or `tool_call_approval_requested`, does not start a group. It writes only that channel's `compaction` blob, as a scalar change does. Rails folds each channel from its own last `compaction` blob, so a mid-group replace is read correctly.
+
+`_serialize_all_channels_full` mirrors `_serialize_channel_blobs`'s JSON encoding and also covers every channel, but takes versions from the checkpoint's `channel_versions` rather than `new_versions`, since unchanged channels must be re-seeded too. Reconstruction of a group is then: group-start full snapshots + the group's later blobs, with each channel folded from its own last `compaction` blob.
 
 `ui_chat_log` is trimmed at each compaction group start, keeping only the step's new entries and, when compaction ran, the summary card. This keeps the group-start snapshot under the size cap on long sessions. The trim runs behind the `write_incremental_only()` gate in `write_mode.py`, so instances without incremental-only checkpoints are unaffected. Checkpoint state reconstruction stays group-bounded as described above; the Rails `duoMessages` history read is the one reader that folds the write-path deltas and trimmed snapshots across groups, deduplicating by `message_id`.
 
@@ -190,9 +192,9 @@ On each `aput`, against that call's own namespace's `state`:
 
 1. **Stale-cache detection** — if the incoming parent `checkpoint_id` doesn't match `state.prev_checkpoint_id`, a checkpoint was missed. Every changed channel is serialized as a full replacement (`force_rewrite`).
 
-1. At a group start (first checkpoint, stale-cache reset, or compaction), the per-channel blobs are replaced with a full re-seed of all channels (see [Self-contained groups](#self-contained-groups)).
+1. At a group start (first checkpoint, stale-cache reset, or history-channel rewrite), the per-channel blobs are replaced with a full re-seed of all channels (see [Self-contained groups](#self-contained-groups)).
 
-1. If the step was a compaction (or a stale-cache rewrite), `state.current_thread` is bumped.
+1. If the step rewrote a history channel (or was a stale-cache rewrite), `state.current_thread` is bumped.
 
 1. Once the server accepts the write, the cache is updated; `channel_blobs` and `current_thread` are attached to the payload. `checkpoint_ns` is attached too, but only for nested lineages — see [Checkpoint namespaces](#checkpoint-namespaces).
 

@@ -41,7 +41,7 @@ component.
 
 1. **A turn is one invocation.** Each user message enters through ingestion as graph input, runs to `END`, and the
    session is at rest between turns.
-1. **The terminal component commits the boundary.** The seeded terminal writes `INPUT_REQUIRED` as the last state
+1. **The terminal component commits the boundary.** The seeded terminal writes `IDLE` as the last state
    update of the turn. A turn that stops before the terminal runs leaves the tip mid-turn, and the next message
    rolls the session back to the last boundary (see [Recovery](#recovery)).
 1. **Mid-turn pauses are interrupts.** Tool approvals pause the turn with `interrupt()` and never end it.
@@ -59,7 +59,11 @@ engine and are tracked in
 ## Where a turn ends
 
 The builder seeds terminal components for every flow. Authors never declare them. `ChatFlow`'s builder seeds `end`
-as a terminal that writes `INPUT_REQUIRED` instead of `COMPLETED`. `abort` is unchanged.
+as a terminal that writes `IDLE` instead of `COMPLETED`: done for now, taking a next message. `abort` is unchanged.
+A deliberate ask inside a turn keeps `INPUT_REQUIRED`. Consumers that predate `IDLE` see `INPUT_REQUIRED`, decided in
+`duo_workflow_service/status_projection.py` from the `idle_status_event` server capability and the `idle_status`
+client capability. See
+[ADR-001](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/7419).
 
 A turn ends when it reaches `end`. Declared routers, including conditional ones, attach exactly as they do in ambient,
 and the builder adds none of its own. Every component reachable from the entry must be able to reach `end` through
@@ -79,7 +83,7 @@ flowchart LR
     agent --> tools
     tools --> agent
     agent --> final_response
-    final_response --> boundary["end (INPUT_REQUIRED)"]
+    final_response --> boundary["end (IDLE)"]
     boundary --> fin([END])
 ```
 
@@ -91,7 +95,7 @@ projection of the tip, reconciled toward it, and is never the source of classifi
 | Tip | Event | Mode | Mechanism |
 |-----|-------|------|-----------|
 | No checkpoints | message | START | New invocation, graph input through ingestion |
-| Boundary: `END` reached, `INPUT_REQUIRED`, nothing pending | message | TURN | New invocation from the tip, through ingestion |
+| Boundary: `END` reached, `IDLE`, nothing pending | message | TURN | New invocation from the tip, through ingestion |
 | Pending `__interrupt__` writes | approval or rejection | RESUME | `Command(resume=)` |
 | Stopped mid-turn | message | TURN | From the last boundary, once `Flow`'s stop recovery rolls the session back. See [Recovery](#recovery) |
 | Failed mid-turn | message | TURN or REJECT | TURN from the last boundary when the walk lands on one. When it lands on an answered gate, an error that asks the user to retry first. See [Recovery](#recovery) |
@@ -136,9 +140,9 @@ The stages, in order:
    command macros. Slash text that is not a directive reaches the model unchanged.
 1. Render the user message once. The rendered text is the `HumanMessage` content. Raw content and context ride in
    `additional_kwargs`. After a rollback the rendered text of plain input starts with the `cancelled_turn` transcript
-   (see [Recovery](#recovery)). A resume after a rollback only reaches a `HumanInputComponent`, because the walk stops
-   only at `INPUT_REQUIRED`, and its fetch node already prepends the transcript, so a resume leaves it out and the
-   model never reads it twice.
+   (see [Recovery](#recovery)). A resume after a rollback only reaches a `HumanInputComponent`, because the only wait
+   the walk stops at is a gate's `INPUT_REQUIRED`, and its fetch node already prepends the transcript, so a resume
+   leaves it out and the model never reads it twice.
 1. Refresh envelope inputs into `context.inputs`, which is flow-scoped, through `Flow._process_additional_context`, so
    schema and version validation run with the refresh. After a rollback the refresh carries the `cancelled_turn`
    envelope.
@@ -150,11 +154,11 @@ cutover. The directive invocation surface belongs to the commands track.
 ## Recovery
 
 A message after a stop rolls the session back. `ChatFlow` keeps `Flow`'s stop recovery unchanged: the walk finds the
-newest `INPUT_REQUIRED` checkpoint and pins the run there, discarding everything the stopped turn did. On the engine
-that is the stopped turn's input checkpoint, which LangGraph writes before the turn's first node and which still holds
-the last boundary's state, so the message enters from it as a TURN. A stop in the first turn has no boundary, and the
-walk starts the session again from its first checkpoint with the new message. `chat` and ambient flows recover through
-the same walk, so every v1 flow rolls back.
+newest `INPUT_REQUIRED` or `IDLE` checkpoint and pins the run there, discarding everything the stopped turn did. On
+the engine that is the stopped turn's input checkpoint, which LangGraph writes before the turn's first node and which
+still holds the last boundary's state, so the message enters from it as a TURN. A stop in the first turn has no
+boundary, and the walk starts the session again from its first checkpoint with the new message. `chat` and ambient
+flows recover through the same walk, so every v1 flow rolls back.
 
 The discarded turn's user and agent messages reach the model as the `cancelled_turn` envelope, the transcript delta
 `Flow` computes between the tip and the boundary. Tool entries are left out. Ingestion includes it by default: the
@@ -279,6 +283,3 @@ wrong key. Three layers prevent that, in order:
   [ai-assist#2998](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2998): the
   effects of tool calls a rollback discards, what `cancelled_turn` tells the model about them, and a stop that rolls
   back to an answered gate. Approached for chat and chat-partial together.
-- At-rest session status, distinct from `INPUT_REQUIRED` at the boundary:
-  [ai-assist#2878](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2878).
-  When it lands, the seeded terminal writes the new status and nothing else in the engine changes.

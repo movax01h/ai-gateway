@@ -249,6 +249,7 @@ def test_workflow_status_mapping():
         WorkflowStatusEnum.EXECUTION: "RUNNING",
         WorkflowStatusEnum.ERROR: "FAILED",
         WorkflowStatusEnum.INPUT_REQUIRED: "INPUT_REQUIRED",
+        WorkflowStatusEnum.IDLE: "IDLE",
         WorkflowStatusEnum.PLANNING: "RUNNING",
         WorkflowStatusEnum.PAUSED: "PAUSED",
         WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED: "PLAN_APPROVAL_REQUIRED",
@@ -2271,6 +2272,30 @@ async def test_flush_sends_a_pause_that_nothing_superseded(checkpoint_notifier, 
     assert outbox.put_action.call_count == 1
     assert checkpoint_notifier.most_recent_checkpoint_number() == 1
     assert checkpoint_notifier.most_recent_new_checkpoint().status == "INPUT_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    "extra_capabilities,expected_status",
+    [
+        ({"idle_status"}, "IDLE"),
+        (set(), "INPUT_REQUIRED"),
+        ({"idle_status_event"}, "INPUT_REQUIRED"),
+    ],
+    ids=["client_renders_idle", "older_client", "server_capability_only"],
+)
+@pytest.mark.asyncio
+async def test_idle_is_sent_only_to_a_client_that_renders_it(
+    checkpoint_notifier, outbox, extra_capabilities, expected_status
+):
+    """The chat engine's boundary is not a pre-interrupt pause, so it is sent at once, projected per client."""
+    client_capabilities.set(client_capabilities.get() | extra_capabilities)
+
+    await checkpoint_notifier.send_event(
+        "values", _values_state(WorkflowStatusEnum.IDLE.value), False, allow_defer=True
+    )
+
+    assert outbox.put_action.call_count == 1
+    assert checkpoint_notifier.most_recent_new_checkpoint().status == expected_status
 
 
 @pytest.mark.parametrize("let_trailing_task_start", [False, True])

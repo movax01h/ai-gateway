@@ -556,7 +556,7 @@ class TestListConfigs:
             ],
             "routers": [{"from": "test_agent", "to": "end"}],
             "environment": "test",
-            "version": "1.0",
+            "version": "experimental",
         }
 
     def test_list_configs_empty_directory(self, tmp_path):
@@ -581,11 +581,11 @@ class TestListConfigs:
 
         assert len(result) == 1
         assert result[0]["flow_identifier"] == "test_config"
-        assert result[0]["version"] == "1.0"
+        assert result[0]["version"] == "experimental"
         assert result[0]["environment"] == "test"
         assert "config" in result[0]
         config_data = json.loads(result[0]["config"])
-        assert config_data["version"] == "1.0"
+        assert config_data["version"] == "experimental"
         assert config_data["environment"] == "test"
 
     @pytest.mark.parametrize(
@@ -622,21 +622,21 @@ class TestListConfigs:
                 "components": [{"name": "agent1", "type": "AgentComponent"}],
                 "routers": [{"from": "agent1", "to": "end"}],
                 "environment": "dev",
-                "version": "1.0",
+                "version": "experimental",
             },
             {
                 "flow": {"entry_point": "agent2"},
                 "components": [{"name": "agent2", "type": "AgentComponent"}],
                 "routers": [{"from": "agent2", "to": "end"}],
                 "environment": "prod",
-                "version": "2.0",
+                "version": "experimental",
             },
             {
                 "flow": {"entry_point": "agent3"},
                 "components": [{"name": "agent3", "type": "AgentComponent"}],
                 "routers": [{"from": "agent3", "to": "end"}],
                 "environment": "staging",
-                "version": "1.5",
+                "version": "experimental",
             },
         ]
 
@@ -656,7 +656,7 @@ class TestListConfigs:
         assert names == {"config_0", "config_1", "config_2"}
 
         versions = {config["version"] for config in result}
-        assert versions == {"1.0", "2.0", "1.5"}
+        assert versions == {"experimental"}
 
         environments = {config["environment"] for config in result}
         assert environments == {"dev", "prod", "staging"}
@@ -785,7 +785,7 @@ class TestListConfigs:
                 }
             ],
             "environment": "test",
-            "version": "1.0",
+            "version": "experimental",
         }
 
         config_file = tmp_path / "complex_config" / "1.0.0.yml"
@@ -822,7 +822,7 @@ class TestListConfigs:
             "components": [{"name": "minimal_agent", "type": "AgentComponent"}],
             "routers": [{"from": "minimal_agent", "to": "end"}],
             "environment": "test",
-            "version": "1.0",
+            "version": "experimental",
         }
 
         config_file = tmp_path / "minimal_config" / "1.0.0.yml"
@@ -837,7 +837,7 @@ class TestListConfigs:
 
         assert len(result) == 1
         assert result[0]["flow_identifier"] == "minimal_config"
-        assert result[0]["version"] == "1.0"
+        assert result[0]["version"] == "experimental"
         assert result[0]["environment"] == "test"
 
         # Verify JSON config is valid
@@ -864,7 +864,11 @@ class TestRegistryIdentity:
 
     def test_a_config_built_directly_has_no_registry_id(self):
         config = FlowConfig(
-            flow={}, components=[], routers=[], environment="ambient", version="v1"
+            flow={},
+            components=[],
+            routers=[],
+            environment="ambient",
+            version="experimental",
         )
 
         assert config.config_id is None

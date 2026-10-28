@@ -20,6 +20,7 @@ from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
+    ToolApprovalUnavailableError,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponent,
@@ -2237,6 +2238,111 @@ class TestAgentComponentToolApprovalExecutionFlow:
         graph.set_entry_point(f"{component.name}#tool_approval_fetch")
         return graph.compile()
 
+    @pytest.mark.parametrize(
+        "environment,expect_halt",
+        [
+            ("chat", False),
+            ("chat-partial", False),
+            ("ambient", True),
+        ],
+    )
+    @pytest.mark.usefixtures("all_node_mocks")
+    def test_approval_node_halts_denied_tool_only_when_non_interactive(
+        self,
+        make_agent_component,
+        mock_router,
+        mock_tool_approval_request_node_cls,
+        environment,
+        expect_halt,
+    ):
+        """Denied-tool halt tracks the environment: a non-interactive session has no
+        human to see a "blocked, continuing" result, so it halts instead."""
+        component = make_agent_component(
+            require_tool_approval=True, environment=environment
+        )
+        component.attach(StateGraph(FlowState), mock_router)
+
+        kwargs = mock_tool_approval_request_node_cls.call_args.kwargs
+        assert kwargs["halt_on_denied_tool"] is expect_halt
+
+    @pytest.mark.parametrize(
+        "environment,allow_agent_to_request_user,expect_halt",
+        [
+            # The approval halt follows the "can prompt" flag, not the environment:
+            # a chat that cannot ask the user still halts, and an ambient session
+            # that can ask does not.
+            ("chat", True, False),
+            ("chat", False, True),
+            ("ambient", True, False),
+            ("ambient", False, True),
+        ],
+    )
+    @pytest.mark.usefixtures("all_node_mocks")
+    def test_approval_node_halts_unanswerable_by_can_prompt_flag(
+        self,
+        make_agent_component,
+        mock_router,
+        mock_tool_approval_request_node_cls,
+        environment,
+        allow_agent_to_request_user,
+        expect_halt,
+    ):
+        """Unanswerable-approval halt is driven by allow_agent_to_request_user, so a session that cannot prompt halts
+        rather than parking, whatever its environment."""
+        component = make_agent_component(
+            require_tool_approval=True,
+            environment=environment,
+            allow_agent_to_request_user=allow_agent_to_request_user,
+        )
+        component.attach(StateGraph(FlowState), mock_router)
+
+        kwargs = mock_tool_approval_request_node_cls.call_args.kwargs
+        assert kwargs["halt_on_unanswerable_approval"] is expect_halt
+
+    @pytest.mark.asyncio
+    async def test_integration_unanswerable_approval_halts_through_compiled_graph(
+        self,
+        make_agent_component,
+        mock_router,
+        mock_toolset,
+        base_flow_state,
+        component_name,
+    ):
+        """Integration: the REAL node, wired by the REAL component into a compiled graph.
+
+        A session that cannot prompt (allow_agent_to_request_user=False) halts with
+        ToolApprovalUnavailableError when a tool needs approval, rather than parking in
+        TOOL_CALL_APPROVAL_REQUIRED. Nothing is mocked but the model-free inputs (toolset,
+        router) -- the component wiring, the node decision, and the graph routing are real."""
+        # None = "human approval required" (no privilege/session pre-approval), so the
+        # call genuinely reaches the needs-approval branch.
+        mock_toolset.resolve_approval_source.return_value = None
+        component = make_agent_component(
+            require_tool_approval=True,
+            environment="chat",
+            allow_agent_to_request_user=False,
+            toolset=mock_toolset,
+            pre_approved_tools=[],
+        )
+        graph = StateGraph(FlowState)
+        component.attach(graph, mock_router)
+        graph.set_entry_point(f"{component_name}#tool_approval_request")
+        compiled = graph.compile()
+
+        ai_message = Mock(spec=AIMessage)
+        ai_message.tool_calls = [
+            {"id": "call_1", "name": "test_tool", "args": {"path": "x"}}
+        ]
+        state = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {component_name: [ai_message]},
+        }
+
+        with pytest.raises(ToolApprovalUnavailableError) as exc_info:
+            await compiled.ainvoke(state)
+
+        assert exc_info.value.tool_names == ["test_tool"]
+
     def _state_with_decision(self, base_flow_state, component_name, decision):
         """Return a copy of base_flow_state with the approval decision set in context."""
         return {
@@ -2980,10 +3086,10 @@ class TestAgentComponentMaxWrapUpRetries:
 class TestAgentComponentIdenticalToolCallLimit:
     """Test suite for AgentComponentBase identical_tool_call_limit field and validator."""
 
-    def test_identical_tool_call_limit_default_is_zero(self, make_agent_component):
-        """identical_tool_call_limit defaults to 0, which disables the loop guard."""
+    def test_identical_tool_call_limit_default_is_three(self, make_agent_component):
+        """identical_tool_call_limit defaults to 3, enabling the loop guard by default."""
         component = make_agent_component()
-        assert component.identical_tool_call_limit == 0
+        assert component.identical_tool_call_limit == 3
 
     @pytest.mark.parametrize("identical_tool_call_limit", [0, 3, 10])
     def test_identical_tool_call_limit_valid_values(

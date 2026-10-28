@@ -1,5 +1,5 @@
 ---
-description: Tracks session-level summary of Orbit tool usage in a DAP agent session
+description: Tracks session-level summary of Orbit tool usage in a DAP agent session. A session that stays open after each turn (ends a turn idle) sends one event per turn, so group by value to count sessions
 internal_events: true
 action: orbit_dap_session_summary
 identifiers:

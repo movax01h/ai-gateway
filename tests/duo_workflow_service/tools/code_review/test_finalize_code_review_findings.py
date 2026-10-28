@@ -107,10 +107,7 @@ async def test_applies_the_gate_and_orders_by_severity(tool):
     assert result["suppressed_below_threshold"] == 1
     assert result["min_confidence"] == 5
     assert result["counts"] == {"critical": 1, "major": 1, "minor": 1}
-    assert result["summary"].startswith("I focused on the auth changes.")
-    assert (
-        "3 findings (1 critical, 1 major, 1 minor) across 1 file:" in result["summary"]
-    )
+    assert result["summary"] == "I focused on the auth changes."
 
 
 @pytest.mark.asyncio
@@ -362,5 +359,4 @@ async def test_local_step_matches_the_posting_tool_on_the_same_answer(
         for key in ("old_line", "suggestion", "end_line"):
             assert posted_finding.get(key) == local_finding.get(key)
             assert (key in posted_finding) == (key in local_finding)
-        header = f"**[{local_finding['severity'].capitalize()}] {local_finding['category']}**"
-        assert posted_finding["message"] == f"{header}\n\n{local_finding['message']}"
+        assert posted_finding["message"] == local_finding["message"]

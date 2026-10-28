@@ -246,7 +246,6 @@ configurable_unit_primitives:
       - "claude_fable_5_1_vertex"
       - "claude_fable_5_1_bedrock"
       - "gemini_3_5_flash_vertex"
-      - "gemini_3_6_flash_vertex"
       - "gemini_3_7_flash_vertex"
       - "gemini_3_7_flash_medium_vertex"
       - "gemini_3_7_flash_low_vertex"
@@ -265,10 +264,12 @@ configurable_unit_primitives:
       - "gpt_5_6_sol"
       - "gpt_5_6_terra"
       - "gpt_6_1_sol"
+      - "gpt_6_1_terra"
       - "gpt_6_astra"
       - "gpt_5_6_sol_bedrock"
       - "gpt_5_6_terra_bedrock"
       - "gpt_5_6_luna_bedrock"
+      - "gpt_6_1_terra_bedrock"
       - "gpt_6_luna"
       - "gpt_6_sol"
       - "kimi_k3_fireworks"
@@ -331,7 +332,6 @@ configurable_unit_primitives:
       - "claude_fable_5_1_vertex"
       - "claude_fable_5_1_bedrock"
       - "gemini_3_5_flash_vertex"
-      - "gemini_3_6_flash_vertex"
       - "gemini_3_7_flash_vertex"
       - "gemini_3_7_flash_medium_vertex"
       - "gemini_3_7_flash_low_vertex"
@@ -350,10 +350,12 @@ configurable_unit_primitives:
       - "gpt_5_6_sol"
       - "gpt_5_6_terra"
       - "gpt_6_1_sol"
+      - "gpt_6_1_terra"
       - "gpt_6_astra"
       - "gpt_5_6_sol_bedrock"
       - "gpt_5_6_terra_bedrock"
       - "gpt_5_6_luna_bedrock"
+      - "gpt_6_1_terra_bedrock"
       - "gpt_6_luna"
       - "gpt_6_sol"
       - "kimi_k3_fireworks"
@@ -436,7 +438,6 @@ configurable_unit_primitives:
       - "claude_fable_5_1_vertex"
       - "claude_fable_5_1_bedrock"
       - "gemini_3_5_flash_vertex"
-      - "gemini_3_6_flash_vertex"
       - "gemini_3_7_flash_vertex"
       - "gemini_3_8_flash_vertex"
       - "gemini_4_argon_vertex"
@@ -453,10 +454,12 @@ configurable_unit_primitives:
       - "gpt_5_6_sol"
       - "gpt_5_6_terra"
       - "gpt_6_1_sol"
+      - "gpt_6_1_terra"
       - "gpt_6_astra"
       - "gpt_5_6_sol_bedrock"
       - "gpt_5_6_terra_bedrock"
       - "gpt_5_6_luna_bedrock"
+      - "gpt_6_1_terra_bedrock"
       - "gpt_6_luna"
       - "gpt_6_sol"
       - "kimi_k3_fireworks"
@@ -516,9 +519,9 @@ configurable_unit_primitives:
     unit_primitives:
       - "feature_discovery_search"
     default_models:
-      - identifier: "gemini_3_6_flash_vertex"
+      - identifier: "gemini_3_7_flash_vertex"
     selectable_models:
-      - "gemini_3_6_flash_vertex"
+      - "gemini_3_7_flash_vertex"
   - feature_setting: "recommend_reviewers_post"
     unit_primitives:
       - "duo_agent_platform"
@@ -576,16 +579,9 @@ configurable_unit_primitives:
   - feature_setting: "review_merge_request_dap_deep"
     unit_primitives: []
     default_models:
-      - identifier: "claude_sonnet_5_5_vertex"
+      - identifier: "claude_sonnet_5_vertex"
     selectable_models:
-      - "claude_sonnet_4_6"
-      - "claude_sonnet_4_6_vertex"
-      - "claude_sonnet_5"
       - "claude_sonnet_5_vertex"
-      - "claude_sonnet_5_5"
-      - "claude_sonnet_5_5_vertex"
-      - "gpt_5_2"
-      - "gpt_5_3_codex"
 
   - feature_setting: "sast_vulnerability_fp_detection"
     unit_primitives: []
@@ -633,6 +629,7 @@ configurable_unit_primitives:
     default_models:
       - "claude_sonnet_5_5_vertex"
     selectable_models:
+      - "claude_mythos_5_1"
       - "claude_opus_5_5"
       - "claude_opus_5_5_vertex"
       - "claude_sonnet_4_6"

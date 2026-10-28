@@ -15,6 +15,7 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.responses import StreamingResponse
 from starlette_context import context as starlette_context
 
+from ai_gateway.api.client_disconnect import run_unless_disconnected
 from ai_gateway.api.middleware import X_GITLAB_LANGUAGE_SERVER_VERSION
 from ai_gateway.api.snowplow_context import get_snowplow_code_suggestion_context
 from ai_gateway.code_suggestions import (
@@ -200,6 +201,8 @@ async def code_suggestions(
         ),
     )
 
+    cancel_on_disconnect = config.feature_flags.cancel_on_client_disconnect()
+
     if component.type == CodeEditorComponents.COMPLETION:
         if not current_user.can(GitLabUnitPrimitive.COMPLETE_CODE):
             raise HTTPException(
@@ -207,27 +210,35 @@ async def code_suggestions(
                 detail="Unauthorized to access code suggestions",
             )
 
-        return await code_completion(
-            payload=component.payload,
-            current_user=current_user,
-            prompt_registry=prompt_registry,
-            code_context=code_context,
-            stream_handler=stream_handler,
-            snowplow_event_context=snowplow_code_suggestion_context,
-            model_metadata=current_model_metadata_context.get(),
-            config=config,
-            using_cache=using_cache,
+        return await run_unless_disconnected(
+            request,
+            code_completion(
+                payload=component.payload,
+                current_user=current_user,
+                prompt_registry=prompt_registry,
+                code_context=code_context,
+                stream_handler=stream_handler,
+                snowplow_event_context=snowplow_code_suggestion_context,
+                model_metadata=current_model_metadata_context.get(),
+                config=config,
+                using_cache=using_cache,
+            ),
+            enabled=cancel_on_disconnect,
         )
     if component.type == CodeEditorComponents.GENERATION:
-        return await code_generation(
-            current_user=current_user,
-            payload=component.payload,
-            code_context=code_context,
-            prompt_registry=prompt_registry,
-            stream_handler=stream_handler,
-            snowplow_event_context=snowplow_code_suggestion_context,
-            model_metadata=current_model_metadata_context.get(),
-            config=config,
+        return await run_unless_disconnected(
+            request,
+            code_generation(
+                current_user=current_user,
+                payload=component.payload,
+                code_context=code_context,
+                prompt_registry=prompt_registry,
+                stream_handler=stream_handler,
+                snowplow_event_context=snowplow_code_suggestion_context,
+                model_metadata=current_model_metadata_context.get(),
+                config=config,
+            ),
+            enabled=cancel_on_disconnect,
         )
 
 

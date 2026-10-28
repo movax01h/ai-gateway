@@ -39,20 +39,20 @@ from lib.internal_events import (
     validate_event_context,
 )
 from lib.jwt import (
+    resolve_feature_enablement_type,
     root_namespace_id_from_claims_extra,
     root_namespace_id_from_header,
 )
 
 
 class InternalEventMiddleware:
-    def __init__(self, app, skip_endpoints, enabled, environment):
+    def __init__(self, app, skip_endpoints, environment):
         self.app = app
-        self.enabled = enabled
         self.environment = environment
         self.path_resolver = _PathResolver.from_optional_list(skip_endpoints)
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not self.enabled:
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
@@ -78,6 +78,11 @@ class InternalEventMiddleware:
             realm = claims.gitlab_realm
         else:
             realm = request.headers.get(X_GITLAB_REALM_HEADER)
+
+        feature_enablement_type = resolve_feature_enablement_type(
+            claims.extra if claims else None,
+            request.headers.get(X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER),
+        )
 
         project_id_str = request.headers.get(X_GITLAB_PROJECT_ID)
         project_id = (
@@ -145,9 +150,7 @@ class InternalEventMiddleware:
             interface=request.headers.get(X_GITLAB_INTERFACE),
             project_id=project_id,
             feature_enabled_by_namespace_ids=feature_enabled_by_namespace_ids,
-            feature_enablement_type=request.headers.get(
-                X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER
-            ),
+            feature_enablement_type=feature_enablement_type,
             context_generated_at=datetime.now().isoformat(),
             correlation_id=correlation_id.get(),
             namespace_id=namespace_id,

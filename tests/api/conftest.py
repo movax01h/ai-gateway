@@ -99,6 +99,12 @@ def mock_track_internal_event_fixture():
         yield mock
 
 
+@pytest.fixture(name="mock_track_unified_event")
+def mock_track_unified_event_fixture():
+    with patch("lib.unified_events.service.UnifiedEventService.track") as mock:
+        yield mock
+
+
 @pytest.fixture(name="mock_output_text")
 def mock_output_text_fixture():
     return "test completion"

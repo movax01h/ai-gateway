@@ -5,6 +5,7 @@ from starlette.requests import Request
 from starlette_context import context, request_cycle_context
 
 from ai_gateway.api.middleware import FeatureFlagMiddleware
+from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 
 @pytest.fixture(name="feature_flag_middleware")
@@ -60,3 +61,26 @@ async def test_middleware_feature_flag(
         assert set(context["enabled_feature_flags"].split(",")) == expected_flags
 
     feature_flag_middleware.app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disallowed_flags", [{}])
+async def test_middleware_enables_internal_ai_usage_flag(feature_flag_middleware):
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": [(b"x-gitlab-enabled-feature-flags", b"internal_ai_usage")],
+        }
+    )
+    seen = []
+
+    async def downstream(*_args):
+        seen.append(is_feature_enabled(FeatureFlag.INTERNAL_AI_USAGE))
+
+    feature_flag_middleware.app = downstream
+
+    with request_cycle_context({}):
+        await feature_flag_middleware(request.scope, AsyncMock(), AsyncMock())
+
+    assert seen == [True]

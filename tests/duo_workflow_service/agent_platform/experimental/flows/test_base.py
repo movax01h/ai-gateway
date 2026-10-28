@@ -42,6 +42,7 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
 )
 from duo_workflow_service.flow_request import RegistryFlowRequest
+from duo_workflow_service.workflows import abstract_workflow
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.registry import (
     _load_flow_from_inline_config,
@@ -977,6 +978,8 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         assert flow._registry_flow_id() == "bl_security"
         assert flow._is_metadata_only() is True
+        configure = abstract_workflow.ToolsRegistry.configure
+        assert configure.call_args.kwargs["registry_flow_id"] == "bl_security"
         assert flow._checkpoint_durability() == "sync"
         for cls in (user_interface, audit_collector):
             assert cls.call_args.kwargs["metadata_only"] is True
@@ -1014,6 +1017,8 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
         assert flow._registry_flow_id() is None
         assert flow._is_metadata_only() is False
+        configure = abstract_workflow.ToolsRegistry.configure
+        assert configure.call_args.kwargs["registry_flow_id"] is None
         assert flow._checkpoint_durability() is None
         for cls in (user_interface, audit_collector):
             assert cls.call_args.kwargs["metadata_only"] is False
@@ -1265,7 +1270,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
     ):
         """Test _build_routers always passes instrumentation params for conditional routers."""
         config = FlowConfig(
-            version="v1",
+            version="experimental",
             environment="ambient",
             components=[{"name": "agent", "type": "AgentComponent"}],
             routers=[

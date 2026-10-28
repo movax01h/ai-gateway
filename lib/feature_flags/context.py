@@ -44,6 +44,11 @@ class FeatureFlag(StrEnum):
     # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/gitlab_com_derisk/dap_openai_non_strict_tools.yml
     # Issue: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2766
     DAP_OPENAI_NON_STRICT_TOOLS = "dap_openai_non_strict_tools"
+    # Makes team members in the pilot group subject to the usage quota despite
+    # the skip_usage_cutoff claim, see lib/usage_quota/client.py. Definition:
+    # https://gitlab.com/gitlab-org/gitlab/-/blob/master/ee/config/feature_flags/gitlab_com_derisk/internal_ai_usage.yml
+    # Rollout: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2951
+    INTERNAL_AI_USAGE = "internal_ai_usage"
 
 
 def is_feature_enabled(feature_name: FeatureFlag | str) -> bool:

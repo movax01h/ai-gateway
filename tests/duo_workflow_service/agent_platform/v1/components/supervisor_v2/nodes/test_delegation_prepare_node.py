@@ -748,3 +748,150 @@ class TestDelegationPrepareNodeInternalEvents:
             for c in mock_internal_event_client.track_event.call_args_list
         ]
         assert reasons == ["mixed_tool_calls", "mixed_tool_calls"]
+
+
+class TestDelegationPrepareNodeBatchSizeCap:
+    """Tests for the per-turn delegate_task batch size hard cap."""
+
+    def _node_with_batch_cap(
+        self,
+        max_batch_size,
+        *,
+        supervisor_name,
+        delegate_task_cls,
+        delegation_count_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        ui_history,
+        delegation_tracker,
+    ):
+        return DelegationPrepareNode(
+            name=f"{supervisor_name}#delegation_prepare",
+            supervisor_name=supervisor_name,
+            max_delegations=None,
+            max_batch_size=max_batch_size,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_key=supervisor_history_runtime_key,
+            ui_history=ui_history,
+            tracker=delegation_tracker,
+        )
+
+    @pytest.mark.asyncio
+    async def test_calls_beyond_the_cap_are_rejected_not_dispatched(
+        self,
+        supervisor_name,
+        developer_name,
+        tester_name,
+        delegate_task_cls,
+        delegation_count_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        ui_history,
+        delegation_tracker,
+        supervisor_flow_state,
+    ):
+        """With cap=2, a 3-call turn dispatches the first two and rejects the third."""
+        node = self._node_with_batch_cap(
+            2,
+            supervisor_name=supervisor_name,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_runtime_key=supervisor_history_runtime_key,
+            ui_history=ui_history,
+            delegation_tracker=delegation_tracker,
+        )
+        state = _turn_with(
+            supervisor_flow_state,
+            supervisor_name,
+            _delegate_call("c1", developer_name, "One"),
+            _delegate_call("c2", tester_name, "Two"),
+            _delegate_call("c3", developer_name, "Three"),
+        )
+
+        update, sends = await _dispatch(node, state)
+
+        assert [send.arg["context"][SUBSESSION_ID_CONTEXT_KEY] for send in sends] == [
+            1,
+            2,
+        ]
+        answers = _answers(update, supervisor_name)
+        assert [m.tool_call_id for m in answers] == ["c3"]
+        assert "batch limit" in answers[0].content
+
+    @pytest.mark.asyncio
+    async def test_a_turn_within_the_cap_dispatches_every_call(
+        self,
+        supervisor_name,
+        developer_name,
+        tester_name,
+        delegate_task_cls,
+        delegation_count_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        ui_history,
+        delegation_tracker,
+        supervisor_flow_state,
+    ):
+        """A turn at exactly the cap dispatches all its calls and rejects none."""
+        node = self._node_with_batch_cap(
+            2,
+            supervisor_name=supervisor_name,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_runtime_key=supervisor_history_runtime_key,
+            ui_history=ui_history,
+            delegation_tracker=delegation_tracker,
+        )
+        state = _turn_with(
+            supervisor_flow_state,
+            supervisor_name,
+            _delegate_call("c1", developer_name, "One"),
+            _delegate_call("c2", tester_name, "Two"),
+        )
+
+        update, sends = await _dispatch(node, state)
+
+        assert len(sends) == 2
+        assert _answers(update, supervisor_name) == []
+
+    @pytest.mark.asyncio
+    async def test_cap_none_disables_enforcement(
+        self,
+        supervisor_name,
+        developer_name,
+        tester_name,
+        delegate_task_cls,
+        delegation_count_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        ui_history,
+        delegation_tracker,
+        supervisor_flow_state,
+    ):
+        """max_batch_size=None lets an arbitrarily large turn dispatch every call."""
+        node = self._node_with_batch_cap(
+            None,
+            supervisor_name=supervisor_name,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_runtime_key=supervisor_history_runtime_key,
+            ui_history=ui_history,
+            delegation_tracker=delegation_tracker,
+        )
+        state = _turn_with(
+            supervisor_flow_state,
+            supervisor_name,
+            _delegate_call("c1", developer_name, "One"),
+            _delegate_call("c2", tester_name, "Two"),
+            _delegate_call("c3", developer_name, "Three"),
+        )
+
+        update, sends = await _dispatch(node, state)
+
+        assert len(sends) == 3
+        assert _answers(update, supervisor_name) == []

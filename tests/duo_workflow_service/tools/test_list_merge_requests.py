@@ -12,6 +12,16 @@ from duo_workflow_service.tools.merge_request import (
     ListMergeRequestInput,
 )
 
+PROJECT_ID_PATH_CASES = [
+    pytest.param(13, "13", id="numeric"),
+    pytest.param("namespace%2Fproject", "namespace%2Fproject", id="encoded"),
+    pytest.param("namespace/project", "namespace%2Fproject", id="unencoded"),
+    pytest.param("namespace/project/", "namespace%2Fproject", id="trailing-slash"),
+    pytest.param(
+        "https://gitlab.com/namespace/project", "namespace%2Fproject", id="full-url"
+    ),
+]
+
 
 @pytest.fixture(name="gitlab_client_mock")
 def gitlab_client_mock_fixture():
@@ -216,3 +226,23 @@ def test_list_merge_request_format_display_message(input_data, expected_message)
     tool = ListMergeRequest(description="List merge requests")
     message = tool.format_display_message(input_data)
     assert message == expected_message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project_id,expected_project_path", PROJECT_ID_PATH_CASES)
+async def test_list_merge_request_normalizes_project_id(
+    gitlab_client_mock, metadata, project_id, expected_project_path
+):
+    gitlab_client_mock.aget = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=200, body=[])
+    )
+
+    tool = ListMergeRequest(metadata=metadata)
+
+    await tool._arun(project_id=project_id)
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path=f"/api/v4/projects/{expected_project_path}/merge_requests",
+        params={},
+        parse_json=False,
+    )

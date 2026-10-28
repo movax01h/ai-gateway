@@ -149,7 +149,7 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 - `name`: A human-readable name for the model, to be displayed in UI
 - `gitlab_identifier`: an identifier used to reference the model within GitLab configuration
 - `provider` (optional): The provider of the model, used for display in the UI (e.g "Vertex", "Anthropic")
-- `description`: **Required** for GitLab UI-selectable models. A brief description of the model (up to 90 characters) used for display in the UI e.g "Fast, cost-effective responses". When adding descriptions, tag `@tmccaslin` (Taylor McCaslin) for a vendor approval on the copy.
+- `description`: **Required** for GitLab UI-selectable models. A brief description of the model (up to 90 characters) used for display in the UI e.g "Fast, cost-effective responses". When adding descriptions, tag `@badesoji` (BJ Adesoji) for a vendor approval on the copy.
 - `cost_indicator`: **Required** for GitLab UI-selectable models. A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`, `$$$$`). See [Determining model cost indicators](#determining-model-cost-indicators).
 - `requires_paid_credits` (optional, defaults to `false`): Marks the model as available only to accounts that have purchased GitLab credits. Surfaced in the `/v1/models/definitions` response so clients can show a "Requires paid credits" indicator and block chat input.
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
@@ -581,8 +581,37 @@ derive the feature themselves: from the prompt on HTTP, and from the flow on the
 On HTTP, `ModelConfigMiddleware` runs the check on the `model_metadata` field of each request body. For a route that
 serves one feature, the middleware passes that feature: the `/v1/embeddings/code_embeddings` routes use
 `embeddings_code`. For other routes it passes no feature, so the client's `feature_setting` selects the allowlist. In
-`enforce` mode the middleware answers HTTP 403 with `{"detail": "<reason>"}` before the route runs. The Duo Workflow
-Service header and the route payloads do not call the check yet.
+`enforce` mode the middleware answers HTTP 403 with `{"detail": "<reason>"}` before the route runs. The code
+embeddings routes serve the model that the check returns, so `fallback` mode serves the `embeddings_code` default
+there. They build the model from the request body only to answer HTTP 422 for metadata that is not valid. The route
+payloads do not call the check yet.
+
+On the `/v1/prompts/<prompt_id>` and `/v2/prompts/<prompt_id>` routes, the middleware passes the feature setting of
+the prompt's entry in `PROMPT_ID_TO_FEATURE_SETTING` (`ai_gateway/prompts/registry.py`). For a prompt that GitLab Rails
+calls, the entry is the feature that Rails sends. Rails takes it from the unit primitive of the call, not from the prompt
+ID: for example, `chat/explain_code` uses `duo_chat_explain_code`, and `categorize_question` uses `duo_chat`. The
+registry also picks the default model of a request without model metadata from this entry. The middleware finds the
+entry for each spelling of the prompt ID that loads the same prompt, for example `chat/explain_code/` or
+`review/review_merge_request`.
+
+For a prompt without an entry, the check still uses the client's `feature_setting`, and the middleware logs a
+`Model allowlist note` when a named model would not pass the allowlist of the feature that `feature_setting_for_prompt_id`
+derives from the first part of the prompt ID: `prompt_feature_unknown` when the derived feature does not exist, and
+`prompt_feature_model_not_allowed` when its allowlist does not have the model. The note has the `prompt_id`, and its
+`feature_setting` is the derived feature. It changes nothing in any mode, and a request whose `feature_setting` is the
+derived feature gets no note.
+
+When you add a prompt that GitLab Rails or another client calls on the prompt routes, add it to
+`PROMPT_ID_TO_FEATURE_SETTING` with the feature setting that the client sends for it. Otherwise add it to
+`_GRAPH_NODE_PROMPT_IDS` or `_PROMPTS_WITHOUT_AN_ENTRY` in `tests/prompts/test_registry.py`.
+`test_every_prompt_has_an_entry_or_is_listed` fails until you do.
+
+On the Duo Workflow Service, `ModelMetadataInterceptor` runs the check on the default model that it resolves from the
+`x-gitlab-agent-platform-model-metadata` header. It passes no feature, so the client's `feature_setting` selects the
+allowlist. The tag models come from the same `feature_setting`, so they are in its allowlist already. In `fallback`
+mode the interceptor serves the feature's default model instead. For a `feature_setting` that does not exist, it
+leaves the call on the prompt's own default model, as a call without the header. In `enforce` mode it rejects the call
+with gRPC `PERMISSION_DENIED` before the call runs. The log events have the gRPC `method`.
 
 A gateway without custom models serves GitLab-managed models only, so it accepts a fixed set of providers. Over HTTP
 it accepts `gitlab` and `amazon_q`, which GitLab Rails sends, and `anthropic`, `vertex-ai` and `fireworks_ai`, which
@@ -633,7 +662,8 @@ the client's), the `client_feature_setting` as the client sent it, the `requeste
 the client sent them, the `served_identifier` and the caller's context such as the request `path`. Endpoint and key
 values are never logged. One request can log more than one mismatch, so count by `reason` or by correlation ID
 rather than by event. Informational cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
-`deprecated_model`) are logged as `Model allowlist note`.
+`deprecated_model`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
+`Model allowlist note`.
 
 To roll back a stricter mode, set `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE=log`.
 

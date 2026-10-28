@@ -68,6 +68,7 @@ class FlowGraphBuilder:
         user: CloudConnectorUser,
         internal_event_client: InternalEventsClient,
         catalog_items: CatalogItems,
+        allow_agent_to_request_user: bool = False,
     ):
         self._tools_registry = tools_registry
         self._flow_prompt_registry = prompt_registry
@@ -76,6 +77,7 @@ class FlowGraphBuilder:
         self._workflow_type = workflow_type
         self._user = user
         self._internal_event_client = internal_event_client
+        self._allow_agent_to_request_user = allow_agent_to_request_user
         # Per-run, like the tools registry: the items belong to the request, not the
         # config. `Flow.__init__` normalizes a request without items to `CatalogItems()`.
         self._catalog_items = catalog_items
@@ -143,6 +145,7 @@ class FlowGraphBuilder:
                 "flow_type": self._workflow_type,
                 "user": self._user,
                 "environment": flow_config.environment,
+                "allow_agent_to_request_user": self._allow_agent_to_request_user,
             }
         )
 
@@ -159,6 +162,8 @@ class FlowGraphBuilder:
             comp_params["toolset"] = self._tools_registry.toolset(
                 [comp_params["tool_name"]]
             )
+        elif comp_config["type"] == "AgentComponent":
+            comp_params["toolset"] = self._parse_toolset([], flow_config)
 
         return comp_params
 

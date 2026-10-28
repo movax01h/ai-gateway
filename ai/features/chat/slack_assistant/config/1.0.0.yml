@@ -1,0 +1,83 @@
+name: "Slack Assistant"
+description: |
+  API-only agent for Duo in Slack. Answers questions, searches and reads
+  GitLab data, and creates issues and comments. Delegates coding requests
+  to a specialist agent instead of handling them itself. Runs without a
+  repository, shell, or local files.
+product_group: agent_foundations
+version: "v1"
+environment: chat
+
+components:
+  - name: "slack_agent"
+    type: AgentComponent
+    prompt_id: "slack_agent_prompt"
+    require_tool_approval: true
+    pre_approved_tools:
+      - "slack_slack_search_public"
+      - "slack_slack_search_channels"
+      - "slack_slack_read_channel"
+      - "slack_slack_read_thread"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+      - from: "context:current_date"
+        as: "today"
+      - from: "context:inputs.user_rule"
+        as: "agents_dot_md"
+        optional: true
+      - from: "context:inputs.agent_platform_client_context.content"
+        as: "client_context"
+        optional: true
+    toolset:
+      - "gitlab_api_get"
+      - "gitlab_graphql"
+      - "create_work_item"
+      - "create_work_item_note"
+      - "create_merge_request_note"
+      - "update_work_item"
+      - "update_merge_request"
+      - "todo_write"
+      - "start_flow"
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+      - "on_agent_final_answer"
+
+routers:
+  - from: "slack_agent"
+    to: "end"
+
+flow:
+  entry_point: "slack_agent"
+  inputs:
+    - category: agent_platform_client_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        content:
+          type: string
+          description: Instructions and context written by the client that started the session, for example Slack reply style and mention rules
+
+prompts:
+  - name: "slack_agent_prompt"
+    prompt_id: "slack_agent_prompt"
+    params:
+      timeout: 120
+    unit_primitives:
+      - duo_agent_platform
+    prompt_template:
+      system: |
+        {% include 'slack_assistant/common/api_assistant/system/1.0.0.jinja' %}
+      user: |
+        {% if client_context -%}
+        <client_context>
+        {{ client_context }}
+        </client_context>
+
+        {% endif -%}
+        <runtime_context>
+        <current_date>{{ today }}</current_date>
+        </runtime_context>
+
+        {{ goal }}

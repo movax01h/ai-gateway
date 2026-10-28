@@ -68,6 +68,33 @@ _NETWORK_ERROR_KEYWORDS = (
 )
 
 
+# Message GitLab returns for any failed authorization check on a GraphQL resolver.
+RESOURCE_NOT_AVAILABLE_MESSAGE = (
+    "The resource that you are attempting to access does not exist or you "
+    "don't have permission to perform this action"
+)
+
+
+class GitLabGraphQLError(Exception):
+    """Raised when a GraphQL response carries top-level ``errors``."""
+
+    def __init__(self, errors: list[dict]):
+        super().__init__(f"GraphQL errors: {errors}")
+        self.errors = errors
+
+    def is_resource_not_available(self) -> bool:
+        """Whether every error is an authorization rejection.
+
+        GitLab raises these before a mutation writes anything, unlike other top-level errors, which can also come from
+        after the write.
+        """
+        return bool(self.errors) and all(
+            isinstance(error, dict)
+            and error.get("message") == RESOURCE_NOT_AVAILABLE_MESSAGE
+            for error in self.errors
+        )
+
+
 class _RetryableStatusError(Exception):
     """Raised internally to trigger a retry when the executor returns a retryable HTTP status code.
 
@@ -353,7 +380,7 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
             raise Exception(f"Invalid JSON response from GraphQL: {response}")
 
         if "errors" in data:
-            raise Exception(f"GraphQL errors: {data['errors']}")
+            raise GitLabGraphQLError(data["errors"])
 
         return data["data"]
 

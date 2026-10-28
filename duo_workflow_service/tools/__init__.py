@@ -35,7 +35,6 @@ from .project import *
 from .render_ui import *
 from .repository_files import *
 from .request_user_clarification import *
-from .risk_classification import *
 from .search import *
 from .search_system import *
 from .security import *
@@ -58,6 +57,9 @@ _MOVED_TOOLS = {
     "GetGlqlSchemaInput": "ai.features.insights.analytics_agent.components.get_glql_schema",
     "RunGLQLQuery": "ai.features.insights.analytics_agent.components.run_glql_query",
     "GLQLQueryInput": "ai.features.insights.analytics_agent.components.run_glql_query",
+    "RiskClassificationClaimInput": "ai.features.review.risk_classification.components",
+    "SubmitMergeRequestRiskClassification": "ai.features.review.risk_classification.components",
+    "SubmitMergeRequestRiskClassificationInput": "ai.features.review.risk_classification.components",
 }
 
 

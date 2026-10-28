@@ -36,6 +36,7 @@ from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    AT_REST_STATUSES,
     WorkflowStatusEventEnum,
 )
 from duo_workflow_service.components.tools_registry import ToolsRegistry
@@ -562,13 +563,13 @@ class Flow(AbstractWorkflow):
         """Walk the checkpoint chain backwards to the nearest stable boundary and resolve what kind of resume this stop-
         recovery actually is.
 
-        The walk looks for the newest ``interrupt()`` pause (INPUT_REQUIRED) and resolves to RESUME at that
-        checkpoint. When no pause exists anywhere in the chain, the boundary falls back to the **oldest**
-        checkpoint — the session start — and resolves to START: the stopped session's work is discarded and the
-        goal starts a fresh chain from there. Checkpoint statuses other than INPUT_REQUIRED are deliberately not
-        trusted as boundary markers: components do not consistently write EXECUTION while working, so every
-        checkpoint of a first turn still carries NOT_STARTED and a status-based match would stop at the newest
-        mid-turn checkpoint instead of the session start.
+        The walk looks for the newest ``interrupt()`` pause (INPUT_REQUIRED) or chat engine turn boundary (IDLE) and
+        resolves to RESUME at that checkpoint. When no pause exists anywhere in the chain, the boundary falls back to
+        the **oldest** checkpoint — the session start — and resolves to START: the stopped session's work is discarded
+        and the goal starts a fresh chain from there. Checkpoint statuses other than INPUT_REQUIRED and IDLE are
+        deliberately not trusted as boundary markers: components do not consistently write EXECUTION while working,
+        so every checkpoint of a first turn still carries NOT_STARTED and a status-based match would stop at the
+        newest mid-turn checkpoint instead of the session start.
 
         Returns the boundary CheckpointTuple (or None when the chain is empty) alongside the resolved
         WorkflowStatusEventEnum.
@@ -605,7 +606,7 @@ class Flow(AbstractWorkflow):
                 continue
 
             status = candidate.checkpoint.get("channel_values", {}).get("status")
-            if status == WorkflowStatusEnum.INPUT_REQUIRED:
+            if status in AT_REST_STATUSES:
                 boundary = candidate
                 break
             # Track the last checkpoint yielded: when the walk exhausts the
@@ -697,6 +698,9 @@ class Flow(AbstractWorkflow):
             user=self._user,
             internal_event_client=self._internal_event_client,
             catalog_items=self._catalog_items,
+            allow_agent_to_request_user=self._workflow_config.get(
+                "allow_agent_to_request_user", False
+            ),
         )
 
     @override

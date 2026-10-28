@@ -24,10 +24,6 @@ def test_container(mock_ai_gateway_container: containers.DeclarativeContainer):
         completions.anthropic(model__name=KindAnthropicModel.CLAUDE_SONNET_4_5),
         CodeCompletions,
     )
-    assert isinstance(
-        completions.litellm_factory(model__name=KindLiteLlmModel.CODEGEMMA),
-        CodeCompletions,
-    )
     assert isinstance(completions.litellm_vertex_codestral_factory(), CodeCompletions)
 
     assert isinstance(generations.vertex(), CodeGenerations)

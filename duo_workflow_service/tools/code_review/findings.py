@@ -24,7 +24,6 @@ __all__ = [
     "attribute_message",
     "build_review_payload",
     "build_summary",
-    "render_message",
     "render_posted_finding",
     "render_previous_findings",
     "render_structured_finding",
@@ -101,17 +100,18 @@ def _clean_narrative(narrative: Optional[str]) -> str:
 
 
 def build_summary(findings: List[Dict[str, Any]], narrative: Optional[str]) -> str:
-    """Compose the reader-facing overview: the reviewer's narrative, then computed counts.
+    """Compose the reader-facing overview: the reviewer's narrative.
 
     The narrative is the reviewer's own judgment, carried verbatim apart from stripping trailing tool-call markup and
-    repairing escaped bullet breaks. Every number and the per-severity breakdown are computed here from the findings
-    that will actually be posted, so the overview cannot contradict the comments it sits above.
+    repairing escaped bullet breaks. The merge request page lists the findings from the posted comments, so the
+    overview leaves them out; computed counts stand in only when the reviewer wrote no narrative.
     """
     text = _clean_narrative(narrative)
+    if text:
+        return text
     if not findings:
-        return text or "No issues were raised in this review."
+        return "No issues were raised in this review."
 
-    sections: list[str] = [text] if text else []
     counts = Counter(f.get("severity") for f in findings)
     parts = [
         f"{counts[severity]} {severity}"
@@ -120,21 +120,11 @@ def build_summary(findings: List[Dict[str, Any]], narrative: Optional[str]) -> s
     ]
     total = len(findings)
     file_count = len({f.get("file") for f in findings})
-    sections.append(
-        f"{total} finding{'s' if total != 1 else ''} "
-        f"({', '.join(parts)}) across "
-        f"{file_count} file{'s' if file_count != 1 else ''}:"
+    breakdown = f" ({', '.join(parts)})" if parts else ""
+    return (
+        f"{total} finding{'s' if total != 1 else ''}{breakdown} across "
+        f"{file_count} file{'s' if file_count != 1 else ''}."
     )
-
-    for severity in SEVERITY_ORDER:
-        members = [f for f in findings if f.get("severity") == severity]
-        if members:
-            sections.append(_severity_section(severity.capitalize(), members))
-    others = [f for f in findings if f.get("severity") not in SEVERITY_ORDER]
-    if others:
-        sections.append(_severity_section("Other", others))
-
-    return "\n\n".join(sections)
 
 
 # Also the render order: what the author fixed first, what still needs them last.
@@ -222,15 +212,6 @@ def render_previous_findings(
     return "\n".join(lines)
 
 
-def _severity_section(title: str, members: List[Dict[str, Any]]) -> str:
-    lines = [f"**{title}**"]
-    lines.extend(
-        f"- {member.get('category')}: `{member.get('file')}:{member.get('new_line')}`"
-        for member in members
-    )
-    return "\n".join(lines)
-
-
 def attribute_message(finding: Dict[str, Any]) -> str:
     """Prefix the message with its custom-instruction attribution, when the finding enforces one.
 
@@ -268,25 +249,15 @@ def anchor_fields(finding: Dict[str, Any]) -> Dict[str, Any]:
     return anchors
 
 
-def render_message(finding: Dict[str, Any]) -> str:
-    """Render one finding's merge request comment body: a severity header, then the attributed message."""
-    severity = finding.get("severity") or ""
-    category = finding.get("category") or ""
-    lines = []
-    if severity or category:
-        header = f"[{severity.capitalize()}] {category}" if severity else category
-        lines.append(f"**{header.strip()}**")
-        lines.append("")
-    lines.append(attribute_message(finding))
-    return "\n".join(lines)
-
-
 def render_posted_finding(finding: Dict[str, Any]) -> Dict[str, Any]:
-    """Shape one finding for the review endpoint: only what it anchors, renders or counts with."""
+    """Shape one finding for the review endpoint: only what it anchors, renders or counts with.
+
+    The message carries no severity header: the monolith stores severity and category and shows them on the comment.
+    """
     return {
         "file": finding.get("file", ""),
         "new_line": finding.get("new_line"),
-        "message": render_message(finding),
+        "message": attribute_message(finding),
         "target_code": finding.get("target_code", ""),
         "severity": finding.get("severity"),
         "category": finding.get("category"),
@@ -298,8 +269,8 @@ def render_posted_finding(finding: Dict[str, Any]) -> Dict[str, Any]:
 def render_structured_finding(finding: Dict[str, Any]) -> Dict[str, Any]:
     """Shape one finding for a client that renders it: every schema field, the message attributed.
 
-    Severity and category stay structured fields rather than a rendered header, so a client groups and labels without
-    parsing prose. The anchor rules are the posting path's, so the two payloads agree on where a finding points.
+    Severity and category stay structured fields, so a client groups and labels without parsing prose. The anchor
+    rules are the posting path's, so the two payloads agree on where a finding points.
     """
     rendered = {k: v for k, v in finding.items() if k not in _ANCHOR_KEYS}
     rendered["message"] = attribute_message(finding)
@@ -314,9 +285,9 @@ def build_review_payload(
 ) -> Dict[str, Any]:
     """Shape the selected findings into the JSON document the review endpoint parses.
 
-    Only the fields the endpoint anchors, renders or counts with are sent. The message is rendered here so the severity
-    header and custom-instruction attribution are decided in one place; code travels verbatim. Severity and category
-    travel as fields so the endpoint can use them without parsing the message.
+    Only the fields the endpoint anchors, renders or counts with are sent. Custom-instruction attribution is decided
+    here, where the message is rendered, so it lives in one place; code travels verbatim. Severity and category travel
+    as fields so the endpoint can use them without parsing the message.
 
     A rendered previous-findings list joins the summary when there are comments to post. With none, it travels on its
     own so the endpoint can introduce it as the outcome of a re-review rather than as a clean first review.

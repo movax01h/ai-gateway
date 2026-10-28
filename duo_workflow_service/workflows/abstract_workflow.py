@@ -46,8 +46,12 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.audit_events.callback_handler import AuditEventCallbackHandler
 from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.collector import AuditEventCollector
-from duo_workflow_service.audit_events.context import audit_collector_context
-from duo_workflow_service.audit_events.event_types import SessionStartedEvent
+from duo_workflow_service.audit_events.context import (
+    audit_collector_context,
+)
+from duo_workflow_service.audit_events.event_types import (
+    SessionStartedEvent,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
@@ -78,6 +82,7 @@ from duo_workflow_service.errors.typing import (
     NamespaceLevelWorkflowNotSupportedException,
     NotifiableException,
     WorkflowAlreadyFinishedException,
+    WorkflowTokenRejectedError,
 )
 from duo_workflow_service.executor.outbox import Outbox, OutboxSignal
 from duo_workflow_service.gitlab.events import get_event
@@ -97,6 +102,9 @@ from duo_workflow_service.model_routing import (
     track_routing_decision,
 )
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.status_updater.gitlab_status_updater import (
+    GitLabStatusUpdater,
+)
 from duo_workflow_service.tools.mcp_tools import (
     McpToolConfig,
     convert_mcp_tools_to_configs,
@@ -119,7 +127,7 @@ from lib.context.orbit import is_orbit_tool
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
-from lib.internal_events.event_enum import EventEnum
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from lib.langsmith_tracing import get_langsmith_trace_headers
 from lib.language_server import LanguageServerVersion
 from lib.verbose_ai_logs import is_extended_logging_enabled
@@ -130,6 +138,8 @@ STREAMING_QUEUE_MAX_SIZE = 10
 MAX_TOKENS_TO_SAMPLE = 8192
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
+# Same bound the executor HTTP client puts on a GraphQL round trip.
+TOKEN_REJECTION_DROP_TIMEOUT_S = 10.0
 
 
 def _claim_requests_ceiling(raw: Any) -> bool:
@@ -151,13 +161,7 @@ def _request_origin_known() -> bool:
     return True
 
 
-def _nothing_stamped_the_request(user: CloudConnectorUser) -> bool:
-    """Whether the caller reached this service with no Workhorse in between.
-
-    Only GenerateToken mints a token this service signs itself, and only the direct-access flow calls it, so that issuer
-    means the start request was never stamped and its client_injected fields cannot be trusted. Workhorse-mediated
-    tokens are issued by the GitLab instance and carry its issuer.
-    """
+def _token_issued_by_dws(user: CloudConnectorUser) -> bool:
     claims = getattr(user, "claims", None)
     if not claims:
         return False
@@ -177,8 +181,11 @@ class ToolAccessPolicies(BaseModel):
     allow: list[str] = []
     ask: list[str] = []
     deny: list[str] = []
-    # Set by Rails when the governance ceiling is enabled. It is inside the signed claim,
-    # so a client cannot drop it. Older GitLab omits it and the ceiling stays off.
+    # Set by Rails when the governance ceiling is enabled, only on a policy it resolved. It is
+    # inside the signed claim, so a client cannot drop it. Older GitLab omits it and the
+    # ceiling stays off. With it, empty lists mean governance ran and allowed nothing, so only
+    # the registry baseline and start_flows stay pre-approved, not the read-only exemption.
+    # The same holds whenever allow is empty.
     ceiling: bool = False
 
 
@@ -205,6 +212,9 @@ class AbstractWorkflow(ABC):
     _workflow_metadata: dict[str, Any]
     is_done: bool = False
     last_error: BaseException | None = None
+    # Set by the server when the token does not authorize this workflow; the run
+    # then fails loudly instead of the stream aborting before Rails hears of it.
+    token_rejection: WorkflowTokenRejectedError | None = None
     checkpoint_notifier: Optional[UserInterface] = None
     _workflow_type: GLReportingEventContext
     _stream: bool = False
@@ -258,7 +268,7 @@ class AbstractWorkflow(ABC):
         self._additional_context = additional_context
         self._mcp_tools = convert_mcp_tools_to_configs(
             mcp_tools=mcp_tools,
-            force_client_injected=_nothing_stamped_the_request(user),
+            force_client_injected=_token_issued_by_dws(user),
         )
         self._approval = approval
         if approval is not None and approval.HasField("approval"):
@@ -295,6 +305,7 @@ class AbstractWorkflow(ABC):
         self._governance_allowed_tools: list[str] = []
         # `None` means the ceiling is off; an empty set means it is on and permits nothing.
         self._admin_allowed_preapprovals: Optional[set[str]] = None
+        self._ceiling_claim_unparsable = False
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
         self._first_response_metric_recorded = False
@@ -462,10 +473,12 @@ class AbstractWorkflow(ABC):
         allowed = bool(
             self._workflow_config.get("allow_client_injected_mcp_tools", False)
         )
-        # Without a Workhorse stamp every MCP tool counts as client-injected, so with the
-        # ceiling on none of them may skip it. An unknown origin is treated the same way.
+        if _token_issued_by_dws(self._user):
+            return False
+        # An unparsable ceiling claim has lost its ask and deny lists, so treat it like an
+        # unknown origin.
         if self._admin_allowed_preapprovals is not None and (
-            not _request_origin_known() or _nothing_stamped_the_request(self._user)
+            self._ceiling_claim_unparsable or not _request_origin_known()
         ):
             return False
         return allowed
@@ -506,6 +519,7 @@ class AbstractWorkflow(ABC):
                     self._preapproved_tools = []
                     if _claim_requests_ceiling(raw):
                         self._admin_allowed_preapprovals = set()
+                        self._ceiling_claim_unparsable = True
                     return
                 can_ask_user = self._workflow_config.get(
                     "allow_agent_to_request_user", False
@@ -517,26 +531,34 @@ class AbstractWorkflow(ABC):
                 # cannot widen it, else a custom container bypasses Ask/Deny governance.
                 # `ask` counts as active so an "ask everything" policy (empty allow and
                 # deny) still enforces the ceiling.
+                # A ceiling claim is active even when empty: Rails resolved the policy and it
+                # allowed nothing.
                 governance_active = (
-                    bool(policies.allow) or bool(deny) or bool(self._ask_tools)
+                    policies.ceiling
+                    or bool(policies.allow)
+                    or bool(deny)
+                    or bool(self._ask_tools)
                 )
                 if governance_active:
                     # deny > ask > allow, matching Rails' resolution order, so a tool
                     # named in both allow and ask still reaches the user.
-                    self._preapproved_tools = list(set(policies.allow) - ask)
+                    # Sorted so the order is stable across processes. A reorder makes the
+                    # checkpointer treat the list as a full replacement (compaction).
+                    self._preapproved_tools = sorted(set(policies.allow) - ask)
                     self._governance_allowed_tools = list(self._preapproved_tools)
                 # Uses the raw ask list: `_ask_tools` is emptied for sessions that cannot ask,
                 # and an ask rule must still keep a tool out of pre-approval there.
-                if policies.ceiling and (
-                    policies.allow or policies.deny or policies.ask
-                ):
+                if policies.ceiling:
+                    # An empty allow means Rails' read-only groups did not resolve to allow.
                     self._admin_allowed_preapprovals = (
                         set(policies.allow) - set(policies.ask)
                     ) | ceiling_exempt_tool_names(
-                        set(policies.ask) | set(policies.deny)
+                        set(policies.ask) | set(policies.deny),
+                        keep_read_only=bool(policies.allow),
                     )
                 if deny:
-                    self._denied_tools = list(set(self._denied_tools) | deny)
+                    # Sorted for the same stable-order reason as _preapproved_tools above.
+                    self._denied_tools = sorted(set(self._denied_tools) | deny)
 
     def _extract_trace_output(self, state: dict | None) -> str | None:
         """Extract the final response content from ui_chat_log for LangSmith tracing.
@@ -595,31 +617,48 @@ class AbstractWorkflow(ABC):
                 type=event_type, state=state, stream=self._stream
             )
 
-    @traceable
-    async def _compile_and_run_graph(self, goal: str) -> str | None:
-        audit_collector = await self._init_audit_events(goal)
+    async def _build_run_config(
+        self, goal: str, node_event_log: NodeEventLog
+    ) -> tuple[Optional[AuditEventCollector], RunnableConfig]:
+        """Open the audit session and assemble the LangGraph run config.
 
-        # Append-only log of node-lifecycle events for live flow visualization.
-        # Fed by the callback handler below and drained by the checkpoint
-        # notifier when composing checkpoints.
-        node_event_log = NodeEventLog()
-        callbacks: list[BaseCallbackHandler] = (
-            [
-                AuditEventCallbackHandler(
-                    collector=audit_collector, workflow_id=self._workflow_id
-                )
-            ]
-            if audit_collector
-            else []
-        )
-        callbacks.append(NodeLifecycleCallbackHandler(node_event_log))
+        Called only after the token-rejection check, so a rejected run opens no audit session.
+
+        Args:
+            goal: The run goal, recorded on the audit session's start event.
+            node_event_log: The node-lifecycle log the returned callback drains into checkpoints.
+
+        Returns:
+            The audit collector (``None`` when audit events are disabled) and the run config.
+        """
+        audit_collector = await self._init_audit_events(goal)
+        callbacks: list[BaseCallbackHandler] = [
+            *(
+                [
+                    AuditEventCallbackHandler(
+                        collector=audit_collector, workflow_id=self._workflow_id
+                    )
+                ]
+                if audit_collector
+                else []
+            ),
+            NodeLifecycleCallbackHandler(node_event_log),
+        ]
         graph_config: RunnableConfig = {
             "recursion_limit": self._recursion_limit(),
             "configurable": {"thread_id": self._workflow_id},
             "callbacks": callbacks,
         }
-        last_state = None
-        compiled_graph = None
+        return audit_collector, graph_config
+
+    @traceable
+    async def _compile_and_run_graph(self, goal: str) -> str | None:
+        # Append-only log of node-lifecycle events for live flow visualization.
+        # Fed by the node-lifecycle callback handler and drained by the checkpoint
+        # notifier when composing checkpoints.
+        node_event_log = NodeEventLog()
+        # The notifier is the only channel back to a client that has no workflow
+        # yet, so it must exist before the token-rejection check can raise.
         self.checkpoint_notifier = UserInterface(
             outbox=self._outbox,
             goal=goal,
@@ -627,7 +666,19 @@ class AbstractWorkflow(ABC):
             metadata_only=self._is_metadata_only(),
         )
 
+        last_state = compiled_graph = None
+        audit_collector: Optional[AuditEventCollector] = None
+        graph_config: RunnableConfig = {}
+
         try:
+            # A rejected token drops the run before any audit session opens, so it
+            # records no SessionStartedEvent for a goal it never executes.
+            await self._fail_if_token_rejected()
+
+            audit_collector, graph_config = await self._build_run_config(
+                goal, node_event_log
+            )
+
             resume_checkpoint_ts = self._resolve_resume_checkpoint_ts()
             if resume_checkpoint_ts:
                 # Resume at the requested checkpoint instead of the latest one.
@@ -686,6 +737,7 @@ class AbstractWorkflow(ABC):
                     allow_client_injected_mcp_tools=self._allow_client_injected_mcp_tools(),
                     allowed_tools=self._governance_allowed_tools,
                     admin_allowed_preapprovals=self._admin_allowed_preapprovals,
+                    registry_flow_id=self._registry_flow_id(),
                 )
             )
 
@@ -1071,6 +1123,68 @@ class AbstractWorkflow(ABC):
                 },
             )
             raise
+
+    async def _fail_if_token_rejected(self) -> None:
+        """Fail the run before any work when the server recorded a token rejection.
+
+        Counts the rejection and records the reject event, then drops the Rails session with the rejection's reason
+        and raises for the client. The count and event come first so a client disconnect during the drop cannot skip
+        them. The drop goes straight to Rails instead of through ``GitLabWorkflow``, which has not been entered, so the
+        session never passes through ``running``. It runs before any audit session is opened, so a rejected run records
+        no audit session events. A failed or timed-out drop is logged and does not mask the rejection.
+
+        Returns:
+            None when no rejection is recorded, so the run proceeds.
+
+        Raises:
+            NotifiableException: When a rejection is recorded, with it as the cause so the server maps the run to
+                ``PERMISSION_DENIED`` while the client shows the safe message.
+        """
+        error = self.token_rejection
+        if error is None:
+            return None
+
+        # Count the rejection before the drop below: that await is cancelled if the
+        # client disconnects, and CancelledError is a BaseException the drop's
+        # `except Exception` does not catch, so a later count would be skipped.
+        duo_workflow_metrics.count_agent_platform_session_reject(
+            flow_type=self._workflow_type.value
+        )
+        self._track_internal_event(
+            event_name=EventEnum.WORKFLOW_REJECT,
+            additional_properties=InternalEventAdditionalProperties(
+                label=EventLabelEnum.WORKFLOW_REJECT_LABEL.value,
+                property=repr(error),
+                value=self._workflow_id,
+                error_type=type(error).__name__,
+            ),
+            category=self._workflow_type,
+        )
+
+        # The timeout bounds the drop against an executor (CI) client that never
+        # answers its action stream; a Workhorse session runs the HTTP action
+        # itself, so the drop there does not depend on the rejected client.
+        try:
+            await asyncio.wait_for(
+                GitLabStatusUpdater(self._http_client).update_workflow_status(
+                    self._workflow_id,
+                    WorkflowStatusEventEnum.DROP,
+                    drop_reason=error.drop_reason,
+                ),
+                timeout=TOKEN_REJECTION_DROP_TIMEOUT_S,
+            )
+        except Exception as status_error:
+            log_exception(
+                status_error,
+                extra={"workflow_id": self._workflow_id, "source": __name__},
+            )
+
+        # A client-disconnect cancel raises CancelledError (a BaseException) from the
+        # await above; it propagates past the except and skips this raise by design.
+        # The client is gone so the terminal status is moot, the reject count+event
+        # above already recorded the rejection, and catching the cancel would suppress
+        # cooperative cancellation.
+        raise NotifiableException(error.user_message) from error
 
     def _track_internal_event(
         self,

@@ -52,9 +52,10 @@ from duo_workflow_service.checkpointer.entry_dispatch import (
     rails_status_dispatch,
 )
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
+    AT_REST_STATUSES,
+    BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS,
     BILLABLE_STATUSES,
     CHECKPOINT_STATUS_TO_STATUS_EVENT,
-    INTERNAL_TO_RAILS_STATUS_EVENT,
     NOOP_WORKFLOW_STATUSES,
     STATUS_TO_EVENT_PROPERTY,
     TERMINAL_WORKFLOW_STATUS_EVENTS,
@@ -87,6 +88,7 @@ from duo_workflow_service.gitlab.http_client import (
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.json_encoder.encoder import dumps_checkpoint
 from duo_workflow_service.monitoring import duo_workflow_metrics
+from duo_workflow_service.status_projection import rails_status_event
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     ForbiddenStatusEvent,
     GitLabStatusUpdater,
@@ -160,6 +162,10 @@ TOP_LEVEL_CHECKPOINT_NS = ""
 # single supervisor turn delegating to more than 16 subagents at once. Past it, writes
 # stay correct but degrade to full snapshots — each trim is logged, so it is observable.
 MAX_NESTED_INCREMENTAL_BASELINES = 16
+
+# Only a rewrite of these channels starts a checkpoint group. A rewrite of any other
+# channel writes a single-channel compaction blob, as a scalar change does.
+_GROUP_START_CHANNELS = frozenset({"ui_chat_log", "conversation_history"})
 
 
 class _FlushPoint(StrEnum):
@@ -321,7 +327,7 @@ def _serialize_channel_blobs(
     prev_channel_values: Dict[str, Any],
     *,
     force_rewrite: bool = False,
-) -> Tuple[List[Dict[str, Any]], bool]:
+) -> Tuple[List[Dict[str, Any]], set[str]]:
     """Serialize only the channels that changed in this step as blobs.
 
     Uses new_versions to identify changed channels; every channel is blobbed regardless of type, so a reader that has
@@ -332,14 +338,15 @@ def _serialize_channel_blobs(
     regardless.
 
     When force_rewrite is True, delta computation is skipped and each blob is serialized as a full replacement with
-    step_action='compaction'. is_compaction in the return is then False — the caller asked for the rewrite and is
-    responsible for bumping current_thread itself.
+    step_action='compaction'. The returned set is then empty — the caller asked for the rewrite and is responsible for
+    bumping current_thread itself.
 
-    Returns (blobs, is_compaction) where is_compaction is True when delta analysis found a shrink or non-prefix change.
+    Returns (blobs, rewritten) where rewritten holds the list and dict channels in which delta analysis found a shrink
+    or non-prefix change.
     """
     channel_values = checkpoint.get("channel_values", {})
     blobs = []
-    is_compaction = False
+    rewritten: set[str] = set()
 
     for channel, version in new_versions.items():
         if channel not in channel_values:
@@ -364,7 +371,7 @@ def _serialize_channel_blobs(
                 val = new_val
                 step_action = "conversation"
             else:
-                is_compaction = True
+                rewritten.add(channel)
         elif isinstance(val, dict) and isinstance(prev, dict):
             dict_delta = _dict_of_list_delta(prev, val)
             if dict_delta is None:
@@ -374,7 +381,7 @@ def _serialize_channel_blobs(
                 val = new_val
                 step_action = "conversation"
             else:
-                is_compaction = True
+                rewritten.add(channel)
 
         # Encode with CustomEncoder JSON (not the langgraph msgpack serde) so blob
         # deltas match the header's channel_values representation, which Rails stores
@@ -392,7 +399,7 @@ def _serialize_channel_blobs(
             }
         )
 
-    return blobs, is_compaction
+    return blobs, rewritten
 
 
 def _serialize_all_channels_full(
@@ -470,6 +477,9 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         self._deferred_statuses: dict[
             WorkflowStatusEventEnum, tuple[_FlushPoint, str | None]
         ] = {}
+        # The last status event passed to `_update_workflow_status`, cached
+        # untranslated: `rails_status_event` maps it to what Rails receives.
+        self._last_status_event: Optional[WorkflowStatusEventEnum] = None
         self.serde = CheckpointSerializer()
         # Delta state per checkpoint namespace, in least-recently-used order: one
         # checkpointer serves the top-level graph and every nested run it dispatches.
@@ -518,10 +528,12 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         return
 
     async def _update_workflow_status(self, status: WorkflowStatusEventEnum) -> None:
+        self._last_status_event = status
+
         if self._offline_mode:
             return
 
-        rails_status = INTERNAL_TO_RAILS_STATUS_EVENT.get(status, status)
+        rails_status = rails_status_event(status)
         await self._status_handler.update_workflow_status(
             self._workflow_id, rails_status
         )
@@ -798,11 +810,14 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         ``status`` is the Rails status, passed on the clean path only. A user stop
         that the graph handles gracefully raises nothing, so it arrives here with
         no exception and is indistinguishable from a normal finish by exception
-        alone -- only the status tells the two apart.
+        alone -- only the status tells the two apart. ``idle`` marks a turn that
+        ended with the session still open, so it is not a session ending.
         """
         if not exc_type:
             if status == "stopped":
                 return "stopped"
+            if status == WorkflowStatusEnum.IDLE:
+                return "idle"
             return "success"
         if isinstance(exc_value, asyncio.exceptions.CancelledError):
             if str(exc_value) in (
@@ -1029,9 +1044,24 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                 await self._flush_deferred_statuses(_FlushPoint.ON_COMPLETION)
                 await self._flush_deferred_statuses(_FlushPoint.ON_NEXT_CHECKPOINT)
 
-            status = await self._status_handler.get_workflow_status(
-                workflow_id=self._workflow_id
-            )
+            # Prefer the locally cached last status event whenever it ends or
+            # pauses the session in a billable Rails status, translated to the
+            # workflow status it transitions the session to, over a remote Rails
+            # status that may not reflect the transition yet. The cached event is
+            # first translated to the event Rails actually received (e.g. IDLE is
+            # sent as REQUIRE_INPUT to an instance that does not accept IDLE), so
+            # the completion status matches what Rails recorded.
+            status: str | None = None
+            if self._last_status_event is not None:
+                status = BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS.get(
+                    rails_status_event(self._last_status_event)
+                )
+
+            if status is None:
+                status = await self._status_handler.get_workflow_status(
+                    workflow_id=self._workflow_id
+                )
+
             await self._track_workflow_completion(status, exc_type, exc_value)
         except Exception as finish_error:
             if reraise_errors:
@@ -1105,8 +1135,10 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         # Only fire session summaries on terminal statuses. Pause statuses
         # (INPUT_REQUIRED, PLAN_APPROVAL_REQUIRED) would produce partial summaries
         # because the counters are reset on each resume.
+        # IDLE is not a pause: the run that ends there is a whole turn, and a
+        # session that stays open would otherwise only report failed turns.
         # Non-resumable terminations (indicated by the presence of `exc_type`) also trigger a summary.
-        if status in ("finished", "stopped") or exc_type:
+        if status in ("finished", "stopped", WorkflowStatusEnum.IDLE) or exc_type:
             # label/property are intentionally omitted: they are validator-required
             # placeholders that will be dropped once the schema is published. See
             # orbit_dap_session_summary.yml and
@@ -1122,7 +1154,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
 
             self._track_tool_loop_session_summary(exc_type, exc_value, status=status)
 
-        if status == WorkflowStatusEnum.INPUT_REQUIRED:
+        if status in AT_REST_STATUSES:
             event = EventEnum.WORKFLOW_PAUSE
             label = EventLabelEnum.WORKFLOW_PAUSE_LABEL.value
             prop = EventPropertyEnum.WORKFLOW_PAUSE_BY_PLAN_AWAIT_INPUT.value
@@ -1881,24 +1913,34 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     checkpoint_ns=checkpoint_ns,
                 )
 
-            channel_blobs, is_compaction = _serialize_channel_blobs(
+            channel_blobs, rewritten = _serialize_channel_blobs(
                 checkpoint,
                 new_versions,
                 state.prev_channel_values,
                 force_rewrite=stale_cache,
             )
+            rewrote_history = not rewritten.isdisjoint(_GROUP_START_CHANNELS)
             # A genuine group boundary: the workflow's first checkpoint, a stale-cache
-            # reset, or a compaction.
+            # reset, or a history rewrite.
             is_group_start = (
-                state.prev_checkpoint_id is None or stale_cache or is_compaction
+                state.prev_checkpoint_id is None or stale_cache or rewrote_history
             )
             if is_group_start:
                 # A group must be self-contained (issue 605653): re-seed EVERY channel
                 # as a full snapshot so this group reconstructs without a prior group or
                 # the checkpoint header. Otherwise keep the per-channel deltas above.
+                step_blobs = channel_blobs
                 channel_blobs = _serialize_all_channels_full(checkpoint)
+                # Also keep the step's ui_chat_log delta, which has the snapshot's version.
+                # Rails reads it instead of the snapshot to rebuild the message history.
+                channel_blobs.extend(
+                    blob
+                    for blob in step_blobs
+                    if blob["channel"] == "ui_chat_log"
+                    and blob["step_action"] == "conversation"
+                )
             next_current_thread = state.current_thread + (
-                1 if stale_cache or is_compaction else 0
+                1 if stale_cache or rewrote_history else 0
             )
             payload["channel_blobs"] = channel_blobs
             payload["current_thread"] = next_current_thread

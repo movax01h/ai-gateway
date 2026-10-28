@@ -34,7 +34,9 @@ _CONNECTION_ERRORS: tuple[Type[BaseException], ...] = (
 _STOP_CONNECTION_ERRORS = stop_after_attempt(3)
 
 # 503s and rate limits fail in milliseconds, so a clock budget buys many cheap attempts.
-_STOP_STATUS_ERRORS = stop_after_delay(120)
+_STATUS_RETRY_BUDGET_SECONDS = 20
+_MAX_BACKOFF_SECONDS = 10
+_STOP_STATUS_ERRORS = stop_after_delay(_STATUS_RETRY_BUDGET_SECONDS)
 
 
 def _stop_by_error_class(retry_state: RetryCallState) -> bool:
@@ -48,16 +50,19 @@ def create_fireworks_retry_decorator(
     logger: logging.Logger,
     error_types: Iterable[Type[BaseException]] | None = None,
 ) -> Callable[[Callable], Callable]:
-    """Return a tenacity retry decorator with exponential backoff for Fireworks 503 errors.
+    """Return a tenacity retry decorator with exponential backoff for Fireworks errors.
 
-    Fireworks.ai instances may return 503 when becoming available. This decorator
-    implements exponential backoff to handle cold starts gracefully.
+    Fireworks answers 429 and 503 in short bursts, so a few quick attempts usually
+    succeed. The status-error budget is deliberately short: a code completion caller
+    stops waiting long before a minute has passed, and work past that point only
+    occupies the gateway.
 
     Configuration:
     - Initial wait: 1 second
-    - Max wait: 10 seconds
+    - Max wait: ``_MAX_BACKOFF_SECONDS``
     - Backoff: Exponential (multiplier: 1)
-    - Stop: 120 seconds total for status errors, 3 attempts for connection errors
+    - Stop (status errors): ``_STATUS_RETRY_BUDGET_SECONDS`` of wall clock
+    - Stop (connection errors): 3 attempts
 
     The stop condition depends on the error class. See ``_stop_by_error_class``.
     """
@@ -67,7 +72,7 @@ def create_fireworks_retry_decorator(
         return retry(
             reraise=True,
             stop=_stop_by_error_class,
-            wait=wait_exponential(multiplier=1, min=1, max=10),
+            wait=wait_exponential(multiplier=1, min=1, max=_MAX_BACKOFF_SECONDS),
             retry=retry_if_exception_type(errors),
             before_sleep=before_sleep_log(logger, logging.WARNING),
         )(func)

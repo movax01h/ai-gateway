@@ -11,7 +11,6 @@ import signal
 from itertools import chain
 from typing import Any, AsyncIterable, AsyncIterator, Optional, cast, override
 
-import aiohttp
 import grpc
 import litellm
 import structlog
@@ -62,6 +61,7 @@ from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     InvalidWorkflowIdException,
     WorkflowAlreadyFinishedException,
+    WorkflowTokenRejectedError,
 )
 from duo_workflow_service.executor.outbox import (
     ACTION_TYPES_WITHOUT_RESPONSES,
@@ -74,7 +74,6 @@ from duo_workflow_service.flow_request import (
     normalize_catalog_items,
     normalize_flow_request,
 )
-from duo_workflow_service.gitlab.connection_pool import connection_pool
 from duo_workflow_service.gitlab.gitlab_api import extract_id_from_global_id
 from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
@@ -159,13 +158,25 @@ from lib.context.model import (
     restricted_access_ctx,
 )
 from lib.events import GLReportingEventContext
+from lib.flow_enablement import (
+    FLOW_GITLAB_COM_ONLY_MESSAGE,
+    FLOW_NOT_ENABLED_MESSAGE,
+    GATED_FLOWS,
+    GITLAB_COM_VERIFIED_CLAIM,
+    SAAS_REALM,
+    flow_enablement_enforced,
+    is_flow_enabled,
+    is_gitlab_com_caller,
+    is_gitlab_com_signed,
+    refused_while_not_enforced,
+)
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
     InternalEventAdditionalProperties,
     merge_event_context_extra,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
-from lib.jwt import instance_uid_claim
+from lib.jwt import FEATURE_ENABLEMENT_TYPE_CLAIM, instance_uid_claim
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
@@ -181,7 +192,7 @@ FLOW_CONFIG_DIGEST_CLAIM = "flow_config_digest"
 WORKFLOW_ID_CLAIM = "workflow_id"
 # Rails sets this on every token it self-signs for DWS, so with no workflow_id the token is unbound.
 BINDS_WORKFLOW_CLAIM = "binds_workflow"
-SAAS_REALM = "saas"
+WORKFLOW_BINDING_DETAILS = "Workflow token is not authorized for the requested workflow"
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
 # these get workflow tokens that unlock the restricted models of the flow they are
 # minted for, and ExecuteWorkflow accepts their instance token's flow claim for
@@ -191,6 +202,7 @@ RESTRICTED_FLOW_INSTANCE_UIDS_ENV = "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
     BINDS_WORKFLOW_CLAIM,
+    FEATURE_ENABLEMENT_TYPE_CLAIM,
     "tool_access_policies",
     "gitlab_root_namespace_id",
 }
@@ -198,8 +210,6 @@ _PROPAGATED_EXTRA_CLAIMS = {
 # Defines the limit for metadata/headers sent by the client:
 # https://github.com/grpc/grpc/blob/06f6f5d376a8c7abf067d060a28bf12afb664a7e/include/grpc/impl/channel_arg_names.h#L216C37-L216C59
 # Default is 8KB, we increase it to 24KB
-# Also used to increase the max header size of the HTTP client:
-# https://docs.aiohttp.org/en/stable/client_reference.html
 MAX_METADATA_SIZE = 24 * 1024
 
 WORKFLOW_TASK_NAME_PREFIX = "workflow:"
@@ -215,6 +225,8 @@ _WORKFLOW_ID_FORMS = re.compile(
     r"(?:#|gid://gitlab/Ai::DuoWorkflows::Workflow/)?([1-9][0-9]{0,19})"
 )
 
+_PLAIN_WORKFLOW_ID = re.compile(r"[1-9][0-9]{0,19}")
+
 
 def _workflow_id_number(value: Any) -> Optional[int]:
     if isinstance(value, int) and not isinstance(value, bool):
@@ -222,6 +234,17 @@ def _workflow_id_number(value: Any) -> Optional[int]:
     if isinstance(value, str) and (match := _WORKFLOW_ID_FORMS.fullmatch(value)):
         return int(match.group(1))
     return None
+
+
+def _names_a_session(requested: str) -> bool:
+    """Whether the requested workflow id is one a dropped run can PATCH to Rails.
+
+    Only a plain positive decimal id is. A `#`-prefixed id or a global id matches a token binding (see
+    :func:`_workflow_binding_matches`) but is carried raw into the run, where the drop PATCHes
+    ``/workflows/<id>``; the `#` reads as a URL fragment at Workhorse, so the drop would miss the session.
+    Such a mismatch is aborted up front instead.
+    """
+    return _PLAIN_WORKFLOW_ID.fullmatch(requested) is not None
 
 
 def _workflow_binding_matches(bound: Any, requested: str) -> bool:
@@ -526,8 +549,9 @@ def _find_restricted_model_access_error(
 def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
     """Whether the caller token is GitLab.com's own instance token.
 
-    Requires the token to be signed by the configured GitLab OIDC issuer, to carry the SaaS realm claim, and its subject
-    to be an allowlisted instance UUID. An empty allowlist matches nothing.
+    Requires the token to pass is_gitlab_com_signed for the configured GitLab OIDC issuer, and its subject to be an
+    allowlisted instance UUID. The instance UUID list is an explicit opt-in for restricted models; an empty list matches
+    nothing.
     """
     claims = user.claims
     if user.is_debug or not claims:
@@ -538,10 +562,7 @@ def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
         if uid.strip()
     }
     return (
-        bool(claims.issuer)
-        and claims.issuer.rstrip("/") == oidc_gitlab_url().rstrip("/")
-        and claims.gitlab_realm == SAAS_REALM
-        and claims.subject in allowlist
+        is_gitlab_com_signed(claims, oidc_gitlab_url()) and claims.subject in allowlist
     )
 
 
@@ -612,6 +633,26 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         except ValueError as e:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
 
+        # Checked on the requested flow, not a token claim. With enforcement off, only
+        # callers using their own token are checked: tokens this service minted and
+        # debug users are exempt.
+        if isinstance(flow_request, RegistryFlowRequest):
+            if flow_enablement_enforced():
+                if not is_flow_enabled(
+                    user, flow_request.config_id, gitlab_issuer=oidc_gitlab_url()
+                ):
+                    await context.abort(
+                        grpc.StatusCode.PERMISSION_DENIED,
+                        FLOW_NOT_ENABLED_MESSAGE.format(flow=flow_request.config_id),
+                    )
+            elif refused_while_not_enforced(
+                user, flow_request.config_id, gitlab_issuer=oidc_gitlab_url()
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    FLOW_GITLAB_COM_ONLY_MESSAGE.format(flow=flow_request.config_id),
+                )
+
         claims_extra = user.claims.extra if user.claims else None
         if not user.is_debug and claims_extra is not None:
             registry = (
@@ -661,6 +702,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     "Workflow token is not authorized for the supplied flow config",
                 )
 
+        token_rejection: WorkflowTokenRejectedError | None = None
         if not user.is_debug and claims_extra is not None:
             if WORKFLOW_ID_CLAIM in claims_extra:
                 if not _workflow_binding_matches(
@@ -671,10 +713,18 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                         bound_workflow_id=str(claims_extra[WORKFLOW_ID_CLAIM]),
                         requested_workflow_id=start_req.workflowID[:64],
                     )
-                    await context.abort(
-                        grpc.StatusCode.PERMISSION_DENIED,
-                        "Workflow token is not authorized for the requested workflow",
-                    )
+                    # A mismatch on a real, droppable session is not aborted here:
+                    # with no workflow yet, an abort reads to the client as a normal
+                    # end, so the run drops the session and fails loudly instead. An
+                    # id not safe to drop (see _names_a_session) aborts up front.
+                    if _names_a_session(start_req.workflowID):
+                        token_rejection = WorkflowTokenRejectedError(
+                            WORKFLOW_BINDING_DETAILS
+                        )
+                    else:
+                        await context.abort(
+                            grpc.StatusCode.PERMISSION_DENIED, WORKFLOW_BINDING_DETAILS
+                        )
             elif claims_extra.get(BINDS_WORKFLOW_CLAIM) is True:
                 log.info(
                     "Workflow token without a workflow binding",
@@ -857,6 +907,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             or None,
             **catalog_kwargs,
         )
+        workflow.token_rejection = token_rejection
 
         workflow_task = asyncio.create_task(
             workflow.run(goal), name=f"{WORKFLOW_TASK_NAME_PREFIX}{workflow_id}"
@@ -1014,6 +1065,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # tells the caller its input was wrong.
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details(workflow.last_error.message)
+            elif isinstance(workflow.last_error, WorkflowTokenRejectedError):
+                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                context.set_details(workflow.last_error.details)
             elif restricted_error := _find_restricted_model_access_error(
                 workflow.last_error
             ):
@@ -1186,11 +1240,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             ]
         )
 
-    @override
-    async def ListTools(
-        self, request: contract_pb2.ListToolsRequest, context: grpc.ServicerContext
-    ):
-        log.info("Listing all available tools")
+    @functools.cached_property
+    def _list_tools_response(self) -> contract_pb2.ListToolsResponse:
+        """Build the response once per process from the built-in tool classes.
+
+        These are the module-level lists in ``tools_registry``, which only change
+        when a new image is deployed. Tools that vary per workflow, such as MCP
+        tools from a StartRequest or the subset a subagent selects, live on that
+        workflow's ``ToolsRegistry`` instance and are never part of this response.
+        """
         tool_classes = set(
             (
                 tools_registry._DEFAULT_TOOLS
@@ -1204,6 +1262,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             if (
                 not hasattr(duo_tool_cls, "tool_version")
                 or duo_tool_cls.tool_version < STABLE_VERSION_THRESHOLD
+                # A flow-restricted tool is not public, whatever its version.
+                or getattr(duo_tool_cls, "allowed_flows", None) is not None
             ):
                 continue
 
@@ -1219,6 +1279,18 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         return response
 
+    @functools.cached_property
+    def _flow_configs(self) -> list[dict[str, str]]:
+        """Bundled flow configs, loaded once per process."""
+        return flow_registry.list_configs()
+
+    @override
+    async def ListTools(
+        self, request: contract_pb2.ListToolsRequest, context: grpc.ServicerContext
+    ):
+        log.info("Listing all available tools")
+        return self._list_tools_response
+
     @override
     async def ListFlows(
         self, request: contract_pb2.ListFlowsRequest, context: grpc.ServicerContext
@@ -1226,7 +1298,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         log.info("Listing all available flows")
         response = contract_pb2.ListFlowsResponse()
 
-        configs = flow_registry.list_configs()
+        configs = self._flow_configs
 
         # Apply filters if provided
         if request.filters:
@@ -1334,6 +1406,24 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     grpc.StatusCode.PERMISSION_DENIED, "Unauthorized to generate token"
                 )
 
+        if request.flow_config_id and flow_enablement_enforced():
+            if not is_flow_enabled(
+                user, request.flow_config_id, gitlab_issuer=oidc_gitlab_url()
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    FLOW_NOT_ENABLED_MESSAGE.format(flow=request.flow_config_id),
+                )
+        elif (
+            request.flow_config_id in GATED_FLOWS
+            and not user.is_debug
+            and not is_gitlab_com_caller(user.claims, oidc_gitlab_url())
+        ):
+            await context.abort(
+                grpc.StatusCode.PERMISSION_DENIED,
+                FLOW_GITLAB_COM_ONLY_MESSAGE.format(flow=request.flow_config_id),
+            )
+
         metadata = dict(context.invocation_metadata())
         global_user_id = metadata.get("x-gitlab-global-user-id")
         gitlab_realm = metadata.get("x-gitlab-realm")
@@ -1373,6 +1463,10 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 gitlab_realm = SAAS_REALM
                 extra_claims[RESTRICTED_FLOW_VERIFIED_CLAIM] = True
             extra_claims[FLOW_CONFIG_ID_CLAIM] = request.flow_config_id
+
+        # Lets ExecuteWorkflow recognise GitLab.com on this token, whose realm claim is unsigned.
+        if is_gitlab_com_caller(user.claims, oidc_gitlab_url()):
+            extra_claims[GITLAB_COM_VERIFIED_CLAIM] = True
 
         if request.flow_version:
             extra_claims[FLOW_VERSION_CLAIM] = request.flow_version
@@ -1573,98 +1667,89 @@ async def serve(config: Config, port: int) -> None:
     # instrumentation patches the event loop, which is only running by now.
     setup_async_error_tracking()
 
-    connection_pool.set_options(
-        pool_size=100,
-        timeout=aiohttp.ClientTimeout(total=30),
-        max_line_size=MAX_METADATA_SIZE,  # For entire header lines
-        max_field_size=MAX_METADATA_SIZE,  # For individual header values
+    server_options = [
+        ("grpc.keepalive_time_ms", 20 * 1000),
+        ("grpc.http2.min_ping_interval_without_data_ms", 10 * 1000),
+        ("grpc.keepalive_permit_without_calls", 1),
+        ("grpc.so_reuseport", 0),
+        (
+            "grpc.max_receive_message_length",
+            MAX_MESSAGE_SIZE,
+        ),
+        (
+            "grpc.max_send_message_length",
+            MAX_MESSAGE_SIZE,
+        ),
+        (
+            "grpc.max_metadata_size",
+            MAX_METADATA_SIZE,
+        ),
+    ]
+
+    reflection_enabled = (
+        os.environ.get("DUO_WORKFLOW_GRPC_REFLECTION_ENABLED", "false").lower()
+        == "true"
     )
-    async with connection_pool:
-        server_options = [
-            ("grpc.keepalive_time_ms", 20 * 1000),
-            ("grpc.http2.min_ping_interval_without_data_ms", 10 * 1000),
-            ("grpc.keepalive_permit_without_calls", 1),
-            ("grpc.so_reuseport", 0),
-            (
-                "grpc.max_receive_message_length",
-                MAX_MESSAGE_SIZE,
-            ),
-            (
-                "grpc.max_send_message_length",
-                MAX_MESSAGE_SIZE,
-            ),
-            (
-                "grpc.max_metadata_size",
-                MAX_METADATA_SIZE,
-            ),
-        ]
+    server = grpc.aio.server(
+        interceptors=[
+            MetadataContextInterceptor(config),
+            CorrelationIdInterceptor(),
+            RequestMetadataLogInterceptor(),
+            AuthenticationInterceptor(reflection_enabled=reflection_enabled),
+            FeatureFlagInterceptor(),
+            InternalEventsInterceptor(),
+            ModelMetadataInterceptor(),
+            MonitoringInterceptor(),
+        ],
+        options=server_options,
+    )
+    contract_pb2_grpc.add_DuoWorkflowServicer_to_server(DuoWorkflowService(), server)
+    health_servicer = health.aio.HealthServicer()
+    await set_health_status(health_servicer, health_pb2.HealthCheckResponse.SERVING)
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
-        reflection_enabled = (
-            os.environ.get("DUO_WORKFLOW_GRPC_REFLECTION_ENABLED", "false").lower()
-            == "true"
+    duo_workflow_config = config.duo_workflow
+    if duo_workflow_config.tls.enabled:
+        cert_file = duo_workflow_config.tls.cert_file or ""
+        key_file = duo_workflow_config.tls.key_file or ""
+        with open(cert_file, "rb") as f:
+            certificate_chain = f.read()
+        with open(key_file, "rb") as f:
+            private_key = f.read()
+        server_credentials = grpc.ssl_server_credentials(
+            [(private_key, certificate_chain)]
         )
-        server = grpc.aio.server(
-            interceptors=[
-                MetadataContextInterceptor(config),
-                CorrelationIdInterceptor(),
-                RequestMetadataLogInterceptor(),
-                AuthenticationInterceptor(reflection_enabled=reflection_enabled),
-                FeatureFlagInterceptor(),
-                InternalEventsInterceptor(),
-                ModelMetadataInterceptor(),
-                MonitoringInterceptor(),
-            ],
-            options=server_options,
+        server.add_secure_port(f"[::]:{port}", server_credentials)
+        log.info("TLS enabled: gRPC server will use secure port (gRPCS)")
+    else:
+        server.add_insecure_port(f"[::]:{port}")
+    if reflection_enabled:
+        service_names = (
+            contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
+            health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
+            reflection.SERVICE_NAME,
         )
-        contract_pb2_grpc.add_DuoWorkflowServicer_to_server(
-            DuoWorkflowService(), server
-        )
-        health_servicer = health.aio.HealthServicer()
-        await set_health_status(health_servicer, health_pb2.HealthCheckResponse.SERVING)
-        health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+        reflection.enable_server_reflection(service_names, server)
+    log.info("Starting gRPC server on port %d", port)
+    await server.start()
+    log.info("Started server")
 
-        duo_workflow_config = config.duo_workflow
-        if duo_workflow_config.tls.enabled:
-            cert_file = duo_workflow_config.tls.cert_file or ""
-            key_file = duo_workflow_config.tls.key_file or ""
-            with open(cert_file, "rb") as f:
-                certificate_chain = f.read()
-            with open(key_file, "rb") as f:
-                private_key = f.read()
-            server_credentials = grpc.ssl_server_credentials(
-                [(private_key, certificate_chain)]
-            )
-            server.add_secure_port(f"[::]:{port}", server_credentials)
-            log.info("TLS enabled: gRPC server will use secure port (gRPCS)")
-        else:
-            server.add_insecure_port(f"[::]:{port}")
-        if reflection_enabled:
-            service_names = (
-                contract_pb2.DESCRIPTOR.services_by_name["DuoWorkflow"].full_name,
-                health_pb2.DESCRIPTOR.services_by_name["Health"].full_name,
-                reflection.SERVICE_NAME,
-            )
-            reflection.enable_server_reflection(service_names, server)
-        log.info("Starting gRPC server on port %d", port)
-        await server.start()
-        log.info("Started server")
+    # Set up graceful shutdown
+    loop = asyncio.get_running_loop()
+    setup_signal_handlers(server, loop, health_servicer)
 
-        # Set up graceful shutdown
-        loop = asyncio.get_running_loop()
-        setup_signal_handlers(server, loop, health_servicer)
+    await server.wait_for_termination()
+    log.info("Server shutdown complete")
 
-        await server.wait_for_termination()
-        log.info("Server shutdown complete")
-
-        # litellm's exit hook only closes clients in its own cache, not the one
-        # ContainerModels installs. Left open, it is collected at interpreter
-        # teardown, where logging its "Unclosed client session" warning fails.
-        # Best-effort: a failure here must not replace one shutdown traceback
-        # with another.
-        try:
-            await litellm.module_level_aclient.close()
-        except Exception:
-            log.exception("Failed to close litellm module-level client")
+    # litellm's exit hook only closes clients in its own cache, not the one
+    # ContainerModels installs. Left open, it is collected at interpreter
+    # teardown, where logging its "Unclosed client session" warning fails.
+    # Best-effort: a failure here must not replace one shutdown traceback
+    # with another.
+    try:
+        await litellm.module_level_aclient.close()
+    except Exception:
+        log.exception("Failed to close litellm module-level client")
 
 
 def _running_workflow_tasks() -> list[asyncio.Task]:

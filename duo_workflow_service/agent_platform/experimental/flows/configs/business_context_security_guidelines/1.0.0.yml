@@ -36,6 +36,7 @@ prompts:
     model:
       params:
         max_tokens: 8192
+        temperature: 0
     unit_primitives:
       - duo_agent_platform
     prompt_template:
@@ -69,17 +70,17 @@ prompts:
         <phase1_business_components>
         ## Phase 1: Business Component Discovery
 
-        **Mission**: Identify and register distinct user-facing or integration-facing subsystems.
-        A component is NOT just any directory — it is a cohesive subsystem with a clear purpose.
+        **Mission**: Identify and register the deployable parts of this project.
+        A component is code that is built and run on its own: it has its own entry point (a main file, server start, or CLI command) or its own entry in a Dockerfile, docker-compose file, or deploy config.
 
-        **What qualifies as a component:**
-        - Web application frontends (UI, admin panels, dashboards)
-        - REST API / GraphQL API services
-        - CLI tools and command-line interfaces
-        - Background job processors / worker queues
-        - Authentication or authorization services
-        - Third-party integration handlers (webhooks, OAuth flows)
-        - Significant standalone libraries with external consumers
+        **Rules:**
+        - If the project has only one deployable part, split it into its main internal packages instead (for example `internal/auth` and `internal/storage`, or `api`, `web`, and `core`). Only split packages that each have their own responsibility.
+        - Helper directories that only support the entry point (for example `utils/` or `helpers/`) belong to that component. A project whose code is mostly one entry file plus helpers is one component.
+        - If the project has several deployable parts, register only those parts. Code they share (for example `lib/` or `utils/`) and their internal services (for example `services/`) are not separate components.
+        - Do NOT create a component per file or per route.
+        - Do NOT register tests, data, models, or tooling directories.
+        - Only register directories that exist in the repo.
+        - After registering all other components, also register `.` for the whole project, unless `.` is already a component. `.` is in addition to the other components, never instead of one.
 
         **Exploration methodology (follow this sequence):**
 
@@ -132,14 +133,14 @@ prompts:
           - `scan_id`: the scan ID from setup
           - `summary`: 1-2 sentence security summary for this component
           - `authentication_model`: "true" or "false" — whether the component requires authentication
-          - `authorization_model`: "elevated" or "standard" — whether the component requires elevated privileges
+          - `authorization_model`: "elevated" or "standard". Use "elevated" only if the component can't be used without elevated privileges (for example, it must run as root or an administrator, or every entry point is admin-only). A component that only has some admin pages or permission checks is "standard".
           - `data_sensitivity`: "true" or "false" — whether the component handles sensitive data (PII, credentials, secrets, tokens)
           - `security_boundary`: array (e.g. ["NETWORK_ACCESS", "USER_INPUT"]), never a bare string — one or more of "NETWORK_ACCESS", "USER_INPUT", "PARTNER_BOUNDARY", "TRUSTED_SERVICE", "INTERNAL_ONLY", "ISOLATED" — the trust boundaries this component sits on. Never return a value outside this list.
-            Judge the component's entry points (API routes, UI fields, message queues, etc.) by what they are exposed to. Values are not exclusive; pick every one that applies:
+            Judge the component's entry points (API routes, UI fields, message queues, etc.) by what they are exposed to. Only inbound exposure counts: outbound calls the component makes (to an external API, a database, or another service) never add a value. Values are not exclusive; pick every one that applies:
             - NETWORK_ACCESS: directly reachable from a network (edge APIs, web apps, auth endpoints)
             - USER_INPUT: processes untrusted input from any user, internal or external (form handlers, upload processors, search)
-            - PARTNER_BOUNDARY: B2B or third-party integrations (incoming webhooks, partner APIs)
-            - TRUSTED_SERVICE: service-to-service calls inside the trust boundary (mTLS internal APIs)
+            - PARTNER_BOUNDARY: B2B or third-party systems call into this component (incoming webhooks, partner APIs). Calling a third-party API is not PARTNER_BOUNDARY.
+            - TRUSTED_SERVICE: reached only by other services inside the trust boundary (mTLS internal APIs). An API that is also reachable from outside is NETWORK_ACCESS, not TRUSTED_SERVICE.
             - INTERNAL_ONLY: reachable only by authenticated employees or admins (internal tools, admin panels)
             - ISOLATED: no network ingress (air-gapped systems, batch jobs, offline processors). Never combine with NETWORK_ACCESS, PARTNER_BOUNDARY, or TRUSTED_SERVICE, which all mean the component accepts inbound connections. Outbound calls the component makes (for example `git fetch` or calling an external API) are not ingress and do not count as NETWORK_ACCESS.
           - `guidelines`: array of 3-7 guidelines, each with:

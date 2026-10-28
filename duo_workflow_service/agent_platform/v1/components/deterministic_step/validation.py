@@ -5,18 +5,29 @@ from typing import Any, TypeGuard
 from langchain_core.tools import ArgsSchema, BaseTool
 from pydantic import BaseModel
 
-from duo_workflow_service.components.tools_registry import agent_privileges_for_tool
+from duo_workflow_service.components.tools_registry import (
+    agent_privileges_for_tool,
+    allowed_flows_for_tool,
+)
 
 
 def privilege_hint(tool_name: str) -> str:
     """Sentence naming the agent privileges that grant ``tool_name``, for appending to a missing-tool error.
 
-    Returns an empty string when no privilege grants the tool (e.g. MCP tools).
+    Returns an empty string when no privilege grants the tool (e.g. MCP tools). The caller does not know the flow, so a
+    tool limited to some flows names both conditions: one of those flows, and a privilege that grants it there.
     """
-    privileges = agent_privileges_for_tool(tool_name)
-    if not privileges:
-        return ""
-    return f" Grant one of these agent privileges: {', '.join(privileges)}."
+    privileges = ", ".join(agent_privileges_for_tool(tool_name))
+    allowed_flows = allowed_flows_for_tool(tool_name)
+    if allowed_flows is not None:
+        flows = sorted(allowed_flows)
+        where = (
+            f"the {flows[0]} flow"
+            if len(flows) == 1
+            else f"these flows: {', '.join(flows)}"
+        )
+        return f" Available only in {where}, with one of these agent privileges: {privileges}."
+    return f" Grant one of these agent privileges: {privileges}." if privileges else ""
 
 
 def extract_configured_params(inputs: list[Any]) -> set[str]:

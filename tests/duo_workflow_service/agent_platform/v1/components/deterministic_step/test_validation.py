@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
     extract_configured_params,
+    privilege_hint,
     select_validated_tool,
     validate_against_schema,
 )
@@ -267,3 +268,33 @@ class TestSelectValidatedTool:
 
         with pytest.raises(ValueError, match="mock_tool"):
             select_validated_tool(tool, "mock_tool", params)
+
+
+_VALIDATION_MODULE = (
+    "duo_workflow_service.agent_platform.v1.components.deterministic_step.validation"
+)
+
+
+@pytest.mark.parametrize(
+    ("allowed_flows", "expected"),
+    [
+        (None, " Grant one of these agent privileges: p1, p2."),
+        (
+            frozenset({"flow_a"}),
+            " Available only in the flow_a flow, with one of these agent privileges: p1, p2.",
+        ),
+        (
+            frozenset({"flow_b", "flow_a"}),
+            " Available only in these flows: flow_a, flow_b, with one of these agent privileges: p1, p2.",
+        ),
+    ],
+)
+def test_privilege_hint(monkeypatch, allowed_flows, expected):
+    monkeypatch.setattr(
+        f"{_VALIDATION_MODULE}.agent_privileges_for_tool", lambda _: ["p1", "p2"]
+    )
+    monkeypatch.setattr(
+        f"{_VALIDATION_MODULE}.allowed_flows_for_tool", lambda _: allowed_flows
+    )
+
+    assert privilege_hint("some_tool") == expected

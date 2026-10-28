@@ -44,12 +44,12 @@
                     "category": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "Short kebab-case slug for the issue TYPE, e.g. `sql-injection`, `layer-violation`, `missing-test`, `fail-open`. Rendered into the comment header and the summary breakdown, so prefer an established slug over inventing a near-synonym of one."
+                        "description": "Short kebab-case slug for the issue TYPE, e.g. `sql-injection`, `layer-violation`, `missing-test`, `fail-open`. Shown on the comment and in the summary breakdown, so prefer an established slug over inventing a near-synonym of one."
                     },
                     "message": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "The finding as one short markdown paragraph. Open with what breaks and when, then explain why. Use short sentences in plain words, and backticks only for code the reader would search for or copy. When something is still open, end with one direct question to the author. Leave out the severity and category: they render into the comment header automatically."
+                        "description": "The finding as one short markdown paragraph. Open with what breaks and when, then explain why. Use short sentences in plain words, and backticks only for code the reader would search for or copy. When something is still open, end with one direct question to the author. Leave out the severity and category: they are shown with the comment automatically."
                     },
                     "suggestion": {
                         "type": "string",
@@ -71,7 +71,7 @@
         },
         "summary": {
             "type": "string",
-            "description": "Your review summary, in the first person, written after every finding has its score. Findings below the publishing threshold in your instructions are never shown to the author: leave them out completely, as if you had not reported them, and never call anything low-confidence. Open with your verdict on the change in one sentence, then name the kinds of issues you raised and roughly how much work they take to fix. If there were existing discussions, say in one sentence what was fixed since your last review and what still stands. When `findings` is empty or no finding reaches the threshold, instead give 3-5 short bullets (each starting with `- `), each naming one thing you checked and what you found. Name what you checked, not how you checked it. Leave out finding counts and per-severity tallies: they are computed and rendered separately."
+            "description": "Your review summary, in the first person, written last. Never describe, list, or count findings in it, shown or hidden; the shown ones appear as comments beside it. Open with your verdict on the change in one sentence, then say in one more how much work the fixes take. If there were existing discussions, say in one sentence what was fixed since your last review and what still stands. When `findings` is empty or no finding reaches the publishing threshold, instead give exactly 3 bullets (each starting with `- `), each under 20 words, naming one thing you checked and why it holds, and nothing after them. Name what you checked, not how you checked it."
         },
         "previous_findings": {
             "type": "array",
@@ -105,5 +105,5 @@
             }
         }
     },
-    "required": ["findings"]
+    "required": ["findings", "summary"]
 }

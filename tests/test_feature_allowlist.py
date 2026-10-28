@@ -15,6 +15,7 @@ from ai_gateway.feature_allowlist import (
     Surface,
     _AllowlistCheck,
     check_client_model_metadata,
+    note_prompt_feature,
 )
 from ai_gateway.model_metadata import (
     FireworksModelMetadata,
@@ -190,7 +191,10 @@ def model_selection():
 
 
 def _dws_metadata(raw: dict) -> Optional[TypeModelMetadata]:
-    """Resolve the gRPC header with the real Duo Workflow Service interceptor."""
+    """Resolve the gRPC header with the real Duo Workflow Service interceptor.
+
+    The interceptor runs with the check off, so the test checks the metadata the interceptor resolved.
+    """
     resolved = {}
 
     async def continuation(_):
@@ -206,7 +210,12 @@ def _dws_metadata(raw: dict) -> Optional[TypeModelMetadata]:
     )
     token = current_user.set(USER.cloud_connector_user)
     try:
-        asyncio.run(ModelMetadataInterceptor().intercept_service(continuation, details))
+        with patch.object(
+            get_config().model_selection, "feature_allowlist_mode", "off"
+        ):
+            asyncio.run(
+                ModelMetadataInterceptor().intercept_service(continuation, details)
+            )
     finally:
         current_user.reset(token)
     return resolved["metadata"]
@@ -829,6 +838,99 @@ class TestCheckClientModelMetadata:
         assert result is metadata
         assert _reasons(logs) == []
         assert _reasons(logs, NOTE) == [reason]
+
+
+def _note_prompt_feature(raw: dict, prompt_feature_setting: str):
+    request = ClientModelRequest.from_raw(raw)
+    metadata = create_model_metadata(dict(raw))
+    with structlog.testing.capture_logs() as logs:
+        note_prompt_feature(
+            request,
+            metadata,
+            prompt_feature_setting=prompt_feature_setting,
+            log_context={"prompt_id": "test/prompt"},
+        )
+    return logs
+
+
+@pytest.mark.usefixtures("feature_allowlist_mode")
+class TestNotePromptFeature:
+    @pytest.mark.parametrize("feature_allowlist_mode", ALL_MODES, indirect=True)
+    def test_notes_a_model_that_the_prompt_feature_does_not_allow(self):
+        logs = _note_prompt_feature(
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": OTHER_FEATURE,
+            },
+            FEATURE,
+        )
+
+        assert [
+            (
+                entry["reason"],
+                entry["feature_setting"],
+                entry["client_feature_setting"],
+                entry["prompt_id"],
+            )
+            for entry in logs
+        ] == [
+            (
+                "prompt_feature_model_not_allowed",
+                FEATURE,
+                OTHER_FEATURE,
+                "test/prompt",
+            )
+        ]
+        assert _reasons(logs) == []
+
+    def test_notes_a_prompt_feature_that_does_not_exist(self):
+        logs = _note_prompt_feature(
+            {"provider": "gitlab", "identifier": "allowed_model"}, "no_such_feature"
+        )
+
+        assert _reasons(logs, NOTE) == ["prompt_feature_unknown"]
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param(
+                {
+                    "provider": "gitlab",
+                    "identifier": "allowed_model",
+                    "feature_setting": OTHER_FEATURE,
+                },
+                id="allowed-by-the-prompt-feature",
+            ),
+            pytest.param(
+                {
+                    "provider": "gitlab",
+                    "identifier": "other_model",
+                    "feature_setting": FEATURE,
+                },
+                id="client-sends-the-prompt-feature",
+            ),
+            pytest.param(
+                {"provider": "gitlab", "feature_setting": OTHER_FEATURE},
+                id="feature-default",
+            ),
+        ],
+    )
+    def test_notes_nothing(self, raw):
+        assert _note_prompt_feature(raw, FEATURE) == []
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["off"], indirect=True)
+    def test_off_mode_notes_nothing(self):
+        logs = _note_prompt_feature(
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": OTHER_FEATURE,
+            },
+            FEATURE,
+        )
+
+        assert logs == []
 
 
 def test_the_check_keeps_provider_keys_out_of_its_repr():

@@ -19,7 +19,8 @@ Request
   ▼
 has_sufficient_usage_quota (decorator)
   │
-  ├─► should_skip_usage_quota_for_user()   ──► skip_usage_cutoff JWT claim present?
+  ├─► should_skip_usage_quota_for_user()   ──► skip_usage_cutoff JWT claim present
+  │                                              and internal_ai_usage flag off?
   │                                              Yes → bypass check, proceed
   │
   ├─► UsageQuotaService.execute()
@@ -45,6 +46,23 @@ has_sufficient_usage_quota (decorator)
   │
   └─► Proceed to route handler
 ```
+
+## Internal usage bypass guard
+
+The `skip_usage_cutoff` JWT claim turns on the bypass for GitLab team members. The
+`internal_ai_usage` feature flag can turn the bypass off. When the flag is on, the
+request goes through the quota check.
+
+The flag only turns the bypass off. The signed `skip_usage_cutoff` claim stays the only
+way to turn the bypass on. The billing `is_gitlab_team_member` value follows the same
+result.
+
+The flag arrives in the unsigned `x-gitlab-enabled-feature-flags` header (HTTP) or in gRPC
+metadata. The guard stops the bypass only for clients that send the header unchanged.
+The guard does not replace the signed `skip_usage_cutoff: false` claim from Rails. For
+details, see
+[ai-assist work item 2951](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2951)
+and [GitLab work item 631119](https://gitlab.com/gitlab-org/gitlab/-/work_items/631119).
 
 ## Caching
 

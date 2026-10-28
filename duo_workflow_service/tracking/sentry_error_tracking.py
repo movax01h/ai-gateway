@@ -1,7 +1,7 @@
 # pylint: disable=direct-environment-variable-reference
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import sentry_sdk
 import structlog
@@ -157,7 +157,7 @@ def is_expected_error(event: Event, hint: Hint) -> bool:
     )
 
 
-def _class_names(cls: type) -> set[str]:
+def _class_names(cls: type[Any]) -> set[str]:
     """Names of `cls` and all its subclasses, including ones defined after this module was imported."""
     names = {cls.__name__}
     for subclass in cls.__subclasses__():

@@ -1,4 +1,5 @@
 from duo_workflow_service.tools.work_items.queries.graphql_queries import (
+    CREATE_DISCUSSION_MUTATION,
     CREATE_NOTE_MUTATION,
     CREATE_WORK_ITEM_MUTATION,
     GET_GROUP_LABELS_QUERY,
@@ -15,6 +16,7 @@ from duo_workflow_service.tools.work_items.queries.graphql_queries import (
 )
 
 __all__ = [
+    "CREATE_DISCUSSION_MUTATION",
     "CREATE_NOTE_MUTATION",
     "CREATE_WORK_ITEM_MUTATION",
     "GET_GROUP_LABELS_QUERY",

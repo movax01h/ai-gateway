@@ -95,6 +95,10 @@ gcloud auth application-default login
 - `check-pylint` may print `Unable to create directory /root/.cache/pylint`;
   pylint cannot persist its cache in a read-only home — the lint result is
   unaffected.
+- In the Duo agent sandbox, commands run under `/bin/sh` (dash), not bash:
+  process substitution (`<(...)`) and other bashisms fail with
+  `Syntax error: "(" unexpected`. Write to temp files and `diff`/`comm` them
+  instead.
 
 ### Running Services
 
@@ -168,13 +172,17 @@ Always run these `make` targets rather than invoking `pytest`, `mypy`,
 `.tool-versions` via mise, not npm, so `npx markdownlint-cli2` fails even
 though `make markdownlint` works. Exception: `make test` always runs the full
 suite and takes no path argument, so to run specific tests use
-`poetry run pytest <path>`. `make test`, `check-mypy`, `check-ruff`, and
-`check-pylint` install required dependencies first via `install-test-deps`/
-`install-lint-deps`, and `check-mypy` also passes an `--exclude` flag for
-`scripts/vendor/*` that a bare `mypy` invocation would silently skip, causing
-local results to disagree with CI.
+`poetry run pytest <path>`. When piping test or check output through tools
+such as `tail` or `grep`, enable `set -o pipefail` (or otherwise preserve the
+producer's exit status) so a failing command cannot appear successful because
+the final pipeline command succeeded. `make test`, `check-mypy`, `check-ruff`,
+and `check-pylint` install required dependencies first via
+`install-test-deps`/`install-lint-deps`, and `check-mypy` also passes an
+`--exclude` flag for `scripts/vendor/*` that a bare `mypy` invocation would
+silently skip, causing local results to disagree with CI.
 
-The `install-*-deps` steps run `poetry install`, which needs network
+The `install-*-deps` steps (and `duo-workflow-docs`/`duo-workflow-flow-schema`)
+run `poetry install`, which needs network
 access. In network-restricted environments (e.g. agent sandboxes) with a
 pre-installed `.venv`, prefix the make target with `CI=true` (e.g.
 `CI=true make check-mypy ...`) — the Makefile skips the install step when
@@ -193,7 +201,9 @@ unverified.
 `check-mypy` type-checks the whole repo (`LINT_WORKING_DIR`: `ai_gateway`,
 `duo_workflow_service`, `tests`, and more) and typically exceeds the ~120s
 per-command timeout in a sandbox. Scope it to the files you changed so it
-completes while keeping the Makefile's `--exclude` flags:
+completes while keeping the Makefile's `--exclude` flags. For scoped
+docformatter checks, pass a directory to `LINT_WORKING_DIR`, not a single file;
+the Makefile runs docformatter recursively (`-r`).
 
 ```shell
 CI=true make check-mypy LINT_WORKING_DIR="path/to/changed_file.py"
@@ -214,6 +224,11 @@ lefthook run pre-commit
 # Disable temporarily
 LEFTHOOK=0 git commit ...
 ```
+
+Don't pipe `git commit` output (`| tail`): the pipeline reports `tail`'s exit
+status and hides a lefthook failure. If a commit's outcome is unclear, never
+`sleep` and retry blind: verify with `git log --oneline -1` (and
+`ls .git/MERGE_HEAD` during a merge) before retrying or pushing.
 
 ### Protocol Buffers
 
@@ -263,6 +278,13 @@ make duo-workflow-docs
 # Validate model selection config
 poetry run validate-model-selection-config
 ```
+
+`docs/duo_workflow_service_graphs.md` is generated from the flow configs and
+the legacy workflows in `duo_workflow_service/workflows/`, so never hand-edit
+it: run `make duo-workflow-docs` after changing either. To resolve merge
+conflicts in this doc, first resolve any conflicts in those sources, then run
+`make duo-workflow-docs`; either side of the conflicted doc works as a starting
+point, since regeneration overwrites it.
 
 ## Code Style
 
@@ -476,6 +498,12 @@ Lefthook automatically runs on commit (skipped on `main`), scoped to staged file
    `check-duo-workflow-flow-schema` when flow config or schema sources change
 1. **Pre-push**: `lint-commit` validates commit messages with `commitlint` against `main`
 
+`lint-commit` checks every commit since the merge base, not only the ones you
+push. If it fails only on commits already on the remote branch that you didn't
+author, push with `LEFTHOOK_EXCLUDE=lint-commit git push ...` (other hooks still
+run) and report that CI `lint:commit` will keep failing until those commits are
+reworded, which rewrites history and needs the author's approval.
+
 **Before committing**:
 
 ```shell
@@ -588,9 +616,9 @@ prompts/definitions/
 **Updating prompts**: Use `scripts/update_prompt_version.sh` to create new versions.
 
 **Duo Developer**: Before changing the Duo Developer flow
-(`duo_workflow_service/agent_platform/v1/flows/configs/developer/`) or its shared
-system prompt (`ai_gateway/prompts/definitions/common/developer/`), read and follow
-[`duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md`](duo_workflow_service/agent_platform/v1/flows/configs/developer/PRINCIPLES.md).
+(`ai/features/code/developer/config/`) or its shared
+system prompt (`ai/features/code/developer/prompts/common/`), read and follow
+[`ai/features/code/developer/config/PRINCIPLES.md`](ai/features/code/developer/config/PRINCIPLES.md).
 
 ### Flow Registry
 

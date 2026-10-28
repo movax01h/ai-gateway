@@ -119,6 +119,19 @@ class TestSupervisorAgentComponentInit:
         supervisor = make_supervisor(max_delegations=None)
         assert supervisor.max_delegations is None
 
+    def test_ignores_delegation_batch_size_from_shared_config(self, make_supervisor):
+        """Unknown ``delegation_batch_size`` config key is ignored, not rejected.
+
+        The flow config is shared with ``SupervisorAgentComponentV2``, which
+        declares ``delegation_batch_size``. When the ``dap_parallel_subagents``
+        flag is off the factory builds this sequential component instead, which
+        has no such field. ``BaseComponent`` must ignore the unknown key (pydantic
+        ``extra="ignore"``) rather than reject it, otherwise every flag-off run
+        would fail at flow validation.
+        """
+        supervisor = make_supervisor(delegation_batch_size=10)
+        assert not hasattr(supervisor, "delegation_batch_size")
+
 
 class TestSupervisorExecutionFlow:
     """Tests for SupervisorAgentComponent execution via a real compiled graph."""

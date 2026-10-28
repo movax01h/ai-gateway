@@ -4,9 +4,17 @@ from typing import Optional
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from ai_gateway.feature_allowlist import ClientModelRequest, check_client_model_metadata
+from ai_gateway.feature_allowlist import (
+    ClientModelRequest,
+    check_client_model_metadata,
+    note_prompt_feature,
+)
 from ai_gateway.model_metadata import IamRoleNotAllowedError, create_model_metadata
 from ai_gateway.model_selection import ModelSelectionError
+from ai_gateway.prompts.registry import (
+    feature_setting_for_prompt_id,
+    mapped_feature_setting_for_prompt_id,
+)
 from lib.context import StarletteUser, current_model_metadata_context
 
 # Routes that serve one feature. The allowlist check uses this feature, so the client's
@@ -15,6 +23,11 @@ from lib.context import StarletteUser, current_model_metadata_context
 _ROUTE_FEATURE_SETTINGS = {
     "/v1/embeddings/code_embeddings": "embeddings_code",
 }
+
+# Routes whose path ends with a prompt ID. The allowlist check uses the feature setting of the
+# prompt from `PROMPT_ID_TO_FEATURE_SETTING`, so the client's `feature_setting` does not select the
+# allowlist for these prompts.
+_PROMPT_ROUTES = ("/v1/prompts/", "/v2/prompts/")
 
 
 class ModelConfigMiddleware:
@@ -71,13 +84,32 @@ class ModelConfigMiddleware:
                     raw_metadata = data["model_metadata"]
                     # Read the request first: create_model_metadata changes the mapping it gets.
                     request = ClientModelRequest.from_raw(raw_metadata)
+                    client_model_metadata = create_model_metadata(raw_metadata)
+                    path = scope.get("path", "")
+                    prompt_id = _route_prompt_id(path)
+                    prompt_feature_setting = _prompt_feature_setting(prompt_id)
+                    log_context = {"path": path}
+                    if prompt_id:
+                        log_context["prompt_id"] = prompt_id
+                    # A prompt without an entry logs a note when its derived feature would not
+                    # allow the model, but the check still uses the client's feature for it.
+                    if prompt_id and prompt_feature_setting is None:
+                        note_prompt_feature(
+                            request,
+                            client_model_metadata,
+                            prompt_feature_setting=feature_setting_for_prompt_id(
+                                prompt_id
+                            ),
+                            log_context=log_context,
+                        )
                     model_metadata = check_client_model_metadata(
                         request,
-                        create_model_metadata(raw_metadata),
+                        client_model_metadata,
                         surface="http",
-                        feature_setting=_route_feature_setting(scope.get("path", "")),
+                        feature_setting=prompt_feature_setting
+                        or _route_feature_setting(path),
                         user=_authenticated_user(scope),
-                        log_context={"path": scope.get("path")},
+                        log_context=log_context,
                     )
                     # None leaves the request on the prompt's own default model.
                     current_model_metadata_context.set(model_metadata)
@@ -118,3 +150,16 @@ def _route_feature_setting(path: str) -> Optional[str]:
         if path == route or path.startswith(f"{route}/"):
             return feature_setting
     return None
+
+
+def _route_prompt_id(path: str) -> Optional[str]:
+    """Return the prompt ID of a prompt route at ``path``, or None for any other route."""
+    for prefix in _PROMPT_ROUTES:
+        if path.startswith(prefix) and (prompt_id := path.removeprefix(prefix)):
+            return prompt_id
+    return None
+
+
+def _prompt_feature_setting(prompt_id: Optional[str]) -> Optional[str]:
+    """Return the feature setting of ``prompt_id`` from the prompt registry, or None for a prompt without an entry."""
+    return mapped_feature_setting_for_prompt_id(prompt_id) if prompt_id else None

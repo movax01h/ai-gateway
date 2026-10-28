@@ -22,6 +22,16 @@ from duo_workflow_service.tools.repository_files import (
     RepositoryTreeResourceInput,
 )
 
+PROJECT_ID_PATH_CASES = [
+    pytest.param(13, "13", id="numeric"),
+    pytest.param("namespace%2Fproject", "namespace%2Fproject", id="encoded"),
+    pytest.param("namespace/project", "namespace%2Fproject", id="unencoded"),
+    pytest.param("namespace/project/", "namespace%2Fproject", id="trailing-slash"),
+    pytest.param(
+        "https://gitlab.com/namespace/project", "namespace%2Fproject", id="full-url"
+    ),
+]
+
 
 @pytest.fixture(name="gitlab_client_mock")
 def gitlab_client_mock_fixture():
@@ -87,7 +97,7 @@ def tool_fixture(metadata):
                 "ref": "master",
                 "file_path": "README.md",
             },
-            "/api/v4/projects/gitlab-org/gitlab/repository/files/README.md",
+            "/api/v4/projects/gitlab-org%2Fgitlab/repository/files/README.md",
             "master",
             json.dumps(
                 {
@@ -117,7 +127,7 @@ def tool_fixture(metadata):
                 "ref": "master",
                 "file_path": "special_chars.py",
             },
-            "/api/v4/projects/gitlab-org/gitlab/repository/files/special_chars.py",
+            "/api/v4/projects/gitlab-org%2Fgitlab/repository/files/special_chars.py",
             "master",
             json.dumps(
                 {
@@ -138,7 +148,7 @@ def tool_fixture(metadata):
                 "ref": "master",
                 "file_path": "file/path/with/slashes",
             },
-            "/api/v4/projects/gitlab-org/gitlab/repository/files/file%2Fpath%2Fwith%2Fslashes",
+            "/api/v4/projects/gitlab-org%2Fgitlab/repository/files/file%2Fpath%2Fwith%2Fslashes",
             "master",
             json.dumps(
                 {
@@ -2469,3 +2479,58 @@ class TestGetRepositoryFilesEdgeCases:
         # The content should be truncated with a pagination hint
         assert "Use offset=" in content
         assert "Showing lines" in content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project_id,expected_project_path", PROJECT_ID_PATH_CASES)
+async def test_get_file_normalizes_project_id(
+    tool, gitlab_client_mock, project_id, expected_project_path
+):
+    gitlab_client_mock.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body={"content": base64.b64encode(b"file content").decode("utf-8")},
+        headers={"content-type": "application/json"},
+    )
+
+    await tool._arun(project_id=project_id, ref="main", file_path="README.md")
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path=f"/api/v4/projects/{expected_project_path}/repository/files/README.md",
+        params={"ref": "main"},
+        parse_json=True,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project_id,expected_project_path", PROJECT_ID_PATH_CASES)
+async def test_list_repository_tree_normalizes_project_id(
+    tree_tool, gitlab_client_mock, project_id, expected_project_path
+):
+    gitlab_client_mock.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body=[],
+        headers={"content-type": "application/json"},
+    )
+
+    await tree_tool._arun(project_id=project_id)
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path=f"/api/v4/projects/{expected_project_path}/repository/tree",
+        params={},
+    )
+
+
+def test_validate_repository_file_url_rejects_foreign_project_id_url(tool):
+    result = tool._validate_repository_file_url(
+        None, "https://gitlab.example.com/namespace/project", "main", "README.md"
+    )
+
+    assert result == (
+        None,
+        "main",
+        "README.md",
+        [
+            "Failed to parse 'project_id': URL netloc 'gitlab.example.com' does not "
+            "match gitlab_host 'gitlab.com'"
+        ],
+    )

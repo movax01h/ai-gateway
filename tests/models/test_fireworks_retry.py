@@ -1,9 +1,11 @@
 import asyncio
 import logging
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import litellm
 import pytest
+import tenacity
 from tenacity import stop_after_delay, wait_fixed
 
 from ai_gateway.models import fireworks_retry
@@ -54,6 +56,14 @@ def _service_unavailable() -> litellm.ServiceUnavailableError:
     return litellm.ServiceUnavailableError(
         message="Service temporarily unavailable",
         model="minimax-m2p7",
+        llm_provider="fireworks_ai",
+    )
+
+
+def _rate_limit() -> litellm.RateLimitError:
+    return litellm.RateLimitError(
+        message="Rate limit exceeded",
+        model="codestral-2508",
         llm_provider="fireworks_ai",
     )
 
@@ -122,3 +132,43 @@ async def test_cold_start_503s_keep_the_wall_clock_budget(logger):
     # More than the 3 attempts a connection error gets, because the clock rather than a
     # counter is what bounds this class.
     assert attempts > 3
+
+
+CALLER_WAIT_SECONDS = 55
+
+
+def test_status_retry_budget_ends_before_the_caller_stops_waiting():
+    """A status-error retry loop must give up, including its last backoff, while someone still listens."""
+    assert (
+        fireworks_retry._STATUS_RETRY_BUDGET_SECONDS
+        + fireworks_retry._MAX_BACKOFF_SECONDS
+        < CALLER_WAIT_SECONDS
+    )
+
+
+@pytest.mark.asyncio
+async def test_rate_limits_get_a_handful_of_attempts_inside_the_budget(logger):
+    """Instant 429s are retried on the real backoff schedule until the budget runs out, then re-raised."""
+    clock = 0.0
+
+    async def fake_sleep(seconds):
+        nonlocal clock
+        clock += seconds
+
+    attempts = 0
+
+    @create_fireworks_retry_decorator(logger)
+    async def failing_call():
+        nonlocal attempts
+        attempts += 1
+        raise _rate_limit()
+
+    with (
+        patch.object(tenacity, "time", SimpleNamespace(monotonic=lambda: clock)),
+        patch("asyncio.sleep", fake_sleep),
+    ):
+        with pytest.raises(litellm.RateLimitError):
+            await failing_call()
+
+    assert attempts == 6
+    assert clock == 25

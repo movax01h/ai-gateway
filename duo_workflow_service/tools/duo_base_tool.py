@@ -8,8 +8,10 @@ from typing import (
     Optional,
     Type,
     final,
+    overload,
     override,
 )
+from urllib.parse import quote, unquote, urlparse
 
 import structlog
 from langchain_core.tools import BaseTool, ToolException
@@ -115,6 +117,11 @@ class DuoBaseTool(BaseTool):
     # When set, a tier access check is performed if the tool returns an empty or error response.
     tier_check_licensed_feature: ClassVar[Optional[str]] = None
 
+    # Flow Registry flow ids that may use this tool; ``None`` means any flow. Matched against the registry flow id,
+    # which only the Flow Registry loader sets, so inline configs never match. Only applied to tools granted by an
+    # agent privilege; the registry refuses to import if a default, no-op or capability-dependent tool sets it.
+    allowed_flows: ClassVar[Optional[frozenset[str]]] = None
+
     @property
     def gitlab_client(self) -> GitlabHttpClient:
         client = self.metadata.get("gitlab_client")  # type: ignore
@@ -219,6 +226,37 @@ class DuoBaseTool(BaseTool):
     ) -> Optional[str]:
         return self.tier_check_licensed_feature
 
+    @overload
+    def _normalize_project_id(self, project_id: None) -> None: ...
+
+    @overload
+    def _normalize_project_id(self, project_id: int) -> int: ...
+
+    @overload
+    def _normalize_project_id(self, project_id: str) -> str: ...
+
+    def _normalize_project_id(
+        self, project_id: Optional[int | str]
+    ) -> Optional[int | str]:
+        """Return ``project_id`` in the form the REST API expects in ``/projects/:id``.
+
+        Integer IDs are returned unchanged. A full URL goes through ``GitLabUrlParser.parse_project_url``, which checks
+        the host against ``gitlab_host`` and drops any ``/-/...`` suffix. Any other string is decoded, stripped of
+        whitespace and surrounding slashes, and URL-encoded with ``quote(..., safe="")``, so a value is never sent
+        unescaped or encoded twice.
+
+        Raises:
+            GitLabUrlParseError: If ``project_id`` is a URL for another host or has no project path.
+        """
+        if not isinstance(project_id, str):
+            return project_id
+
+        parsed = urlparse(project_id.strip())
+        if parsed.scheme and parsed.netloc:
+            return GitLabUrlParser.parse_project_url(parsed.geturl(), self.gitlab_host)
+
+        return quote(unquote(project_id).strip().strip("/"), safe="")
+
     def _validate_project_url(
         self, url: Optional[str], project_id: Optional[int | str]
     ) -> ProjectURLValidationResult:
@@ -234,6 +272,12 @@ class DuoBaseTool(BaseTool):
                 - A list of error messages (empty if validation succeeded)
         """
         errors = []
+        try:
+            project_id = self._normalize_project_id(project_id)
+        except GitLabUrlParseError as e:
+            return ProjectURLValidationResult(
+                None, [f"Failed to parse 'project_id': {e!s}"]
+            )
 
         if not url:
             if not project_id:
@@ -276,6 +320,12 @@ class DuoBaseTool(BaseTool):
                 - A list of error messages (empty if validation succeeded)
         """
         errors = []
+        try:
+            project_id = self._normalize_project_id(project_id)
+        except GitLabUrlParseError as e:
+            return MergeRequestValidationResult(
+                None, merge_request_iid, [f"Failed to parse 'project_id': {e!s}"]
+            )
 
         if not url:
             if not project_id:

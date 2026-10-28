@@ -14,6 +14,9 @@ from duo_workflow_service.entities.state import (
     WorkflowState,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.errors.typing import (
+    ToolApprovalUnavailableError,
+)
 from duo_workflow_service.tools import (
     MalformedToolCallError,
     Toolset,
@@ -36,11 +39,13 @@ class ToolsApprovalComponent(HumanApprovalComponent):
         approved_agent_name: str,
         approved_agent_state: str,
         toolset: Toolset,
+        allow_agent_to_request_user: bool = True,
     ):
         super().__init__(
             workflow_id=workflow_id,
             approved_agent_name=approved_agent_name,
             approved_agent_state=approved_agent_state,
+            allow_agent_to_request_user=allow_agent_to_request_user,
         )
         self._toolset = toolset
 
@@ -88,6 +93,16 @@ class ToolsApprovalComponent(HumanApprovalComponent):
             }
 
         approval_messages = self._build_approval_request(state)
+
+        # A session that cannot prompt has no one to answer, so halt with an explicit
+        # error instead of parking on the approval executor's interrupt() forever.
+        if approval_messages and not self._allow_agent_to_request_user:
+            tool_names = []
+            for message in approval_messages:
+                info = message.get("tool_info")
+                if info:
+                    tool_names.append(info["name"])
+            raise ToolApprovalUnavailableError(tool_names)
 
         return {
             "status": self._approval_req_workflow_state,

@@ -303,13 +303,15 @@ class ConfigCustomModels(BaseModel):
 class ConfigDuoChat(BaseModel):
     max_tokens: Optional[int] = None
     model_request_timeout: float = Field(
-        default=30.0,
+        default=300.0,
         gt=0,
         description=(
             "Default timeout in seconds for a single chat model request on the "
-            "AI Gateway -> model leg. Applies to every chat model unless a "
-            "per-model timeout is set in MODEL_SPECIFICATIONS. Increase this for "
-            "long-running agentic prompts against slower self-hosted models. "
+            "AI Gateway -> model leg. Applies to the litellm, anthropic, openai "
+            "and google_genai chat model classes; a per-prompt `params: timeout:` "
+            "or a per-model `prompt_params.timeout` takes priority over this "
+            "value. Increase this for long-running agentic prompts against "
+            "slower self-hosted models. "
             "Set via AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT."
         ),
     )
@@ -529,6 +531,7 @@ class ConfigFeatureFlags(BaseModel):
     disallowed_flags: dict[str, Set[str]] = {}
     excl_post_process: list[str] = []
     fireworks_score_threshold: dict[str, float] = {}
+    cancel_on_client_disconnect: bool = True
 
 
 class ConfigProxyEndpoints(BaseModel):

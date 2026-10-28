@@ -30,7 +30,10 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
-from duo_workflow_service.components.tools_registry import ceiling_exempt_tool_names
+from duo_workflow_service.components.tools_registry import (
+    ToolsRegistry,
+    ceiling_exempt_tool_names,
+)
 from duo_workflow_service.entities.state import (
     MessageTypeEnum,
     ToolStatus,
@@ -40,6 +43,7 @@ from duo_workflow_service.errors.typing import (
     InvalidRequestException,
     NotifiableException,
     WorkflowAlreadyFinishedException,
+    WorkflowTokenRejectedError,
 )
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.tracking import (
@@ -50,7 +54,7 @@ from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     GraphInvocation,
     TraceableException,
-    _nothing_stamped_the_request,
+    _token_issued_by_dws,
 )
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
@@ -59,7 +63,7 @@ from duo_workflow_service.workflows.type_definitions import (
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
-from lib.internal_events.event_enum import EventEnum
+from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
 from lib.verbose_ai_logs import extended_logging_context
 
@@ -591,6 +595,7 @@ async def test_compile_and_run_graph(
         ask_tools=[],
         allow_client_injected_mcp_tools=False,
         allowed_tools=[],
+        registry_flow_id=None,
         admin_allowed_preapprovals=None,
     )
 
@@ -629,6 +634,55 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
 
     assert "read_file" in workflow._preapproved_tools
     assert "create_issue" in workflow._preapproved_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_orders_governance_tools_deterministically(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+):
+    # Set iteration order is randomized per process, so building these lists with
+    # list(set(...)) made an approval resume on another gateway process look like a
+    # reordered list, falsely triggering a full-snapshot compaction that dropped
+    # approved tool results on reload. The lists must come out in a stable order.
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": (
+                    '{"allow": ["read_file", "create_issue", "list_issues", "get_issue"], '
+                    '"deny": ["run_command", "create_merge_request"]}'
+                )
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._preapproved_tools == [
+        "create_issue",
+        "get_issue",
+        "list_issues",
+        "read_file",
+    ]
+    assert workflow._denied_tools == ["create_merge_request", "run_command"]
 
 
 @pytest.mark.asyncio
@@ -1494,6 +1548,206 @@ async def test_compile_and_run_graph_with_already_finished_session(
     # The server layer maps last_error to an OK gRPC status.
     assert isinstance(workflow.last_error, WorkflowAlreadyFinishedException)
     assert workflow.is_done
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.duo_workflow_metrics")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_with_token_rejection(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_user_interface,
+    mock_status_updater,
+    mock_metrics,
+    mock_fetch_workflow_and_container_data,
+    workflow,
+    internal_event_client,
+):
+    """A token the server rejected drops the session with a reason and fails before any work.
+
+    The stream used to abort before a workflow existed, which Workhorse turned into a normal close, so the row
+    stayed `created` and the client saw a finished run.
+    """
+    rejection = WorkflowTokenRejectedError(
+        "Workflow token is not authorized for the requested workflow"
+    )
+    workflow.token_rejection = rejection
+    workflow._internal_event_client = internal_event_client
+    mock_notifier = AsyncMock()
+    mock_user_interface.return_value = mock_notifier
+    mock_status_updater.return_value.update_workflow_status = AsyncMock()
+
+    with patch.object(
+        workflow, "_init_audit_events", new=AsyncMock()
+    ) as mock_init_audit_events:
+        with pytest.raises(TraceableException) as exc_info:
+            await workflow._compile_and_run_graph("Test goal")
+
+    # A rejected run opens no audit session, so it records no SessionStartedEvent.
+    mock_init_audit_events.assert_not_awaited()
+    mock_status_updater.return_value.update_workflow_status.assert_awaited_once_with(
+        workflow._workflow_id,
+        WorkflowStatusEventEnum.DROP,
+        drop_reason="token_rejected",
+    )
+    mock_fetch_workflow_and_container_data.assert_not_called()
+    mock_tools_registry.assert_not_called()
+    mock_gitlab_workflow.assert_not_called()
+    assert isinstance(exc_info.value.original_exception, NotifiableException)
+    assert exc_info.value.original_exception.__cause__ is rejection
+    # The server layer maps last_error to PERMISSION_DENIED with the details.
+    assert workflow.last_error is rejection
+    mock_notifier.send_event.assert_awaited_once()
+    sent_state = mock_notifier.send_event.await_args.kwargs["state"]
+    assert sent_state["status"] == WorkflowStatusEnum.ERROR
+    # The safe text comes from the exception, so a sibling rejection can reuse the path
+    # with its own message.
+    assert sent_state["ui_chat_log"][0]["content"] == rejection.user_message
+    assert rejection.user_message == (
+        "This session was blocked because its token does not belong to it."
+        " Start a new session."
+    )
+    mock_metrics.count_agent_platform_session_reject.assert_called_once_with(
+        flow_type=workflow._workflow_type.value
+    )
+    internal_event_client.track_event.assert_called_once()
+    tracked = internal_event_client.track_event.call_args.kwargs
+    assert tracked["event_name"] == EventEnum.WORKFLOW_REJECT.value
+    assert (
+        tracked["additional_properties"].label
+        == EventLabelEnum.WORKFLOW_REJECT_LABEL.value
+    )
+    assert workflow.is_done
+
+
+@pytest.mark.asyncio
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.TOKEN_REJECTION_DROP_TIMEOUT_S",
+    0.01,
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+async def test_compile_and_run_graph_token_rejection_survives_a_client_that_never_answers(
+    mock_gitlab_workflow,
+    mock_user_interface,
+    mock_status_updater,
+    mock_log_exception,
+    workflow,
+):
+    """A timeout bounds the drop, so an executor client that never answers its action stream cannot hold it back."""
+    rejection = WorkflowTokenRejectedError("details")
+    workflow.token_rejection = rejection
+    mock_user_interface.return_value = AsyncMock()
+
+    async def never_answers(*_args, **_kwargs):
+        await asyncio.sleep(5)
+
+    mock_status_updater.return_value.update_workflow_status = never_answers
+
+    with pytest.raises(TraceableException):
+        await workflow._compile_and_run_graph("Test goal")
+
+    logged_error = mock_log_exception.call_args_list[0].args[0]
+    assert isinstance(logged_error, asyncio.TimeoutError)
+    assert workflow.last_error is rejection
+    mock_gitlab_workflow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+@patch("duo_workflow_service.workflows.abstract_workflow.UserInterface")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+async def test_compile_and_run_graph_token_rejection_survives_failed_drop(
+    mock_gitlab_workflow,
+    mock_user_interface,
+    mock_status_updater,
+    mock_log_exception,
+    workflow,
+):
+    """A Rails error on the drop is logged; the rejection still reaches the client and the server."""
+    rejection = WorkflowTokenRejectedError("details")
+    workflow.token_rejection = rejection
+    mock_user_interface.return_value = AsyncMock()
+    mock_status_updater.return_value.update_workflow_status = AsyncMock(
+        side_effect=Exception("rails is down")
+    )
+
+    with pytest.raises(TraceableException):
+        await workflow._compile_and_run_graph("Test goal")
+
+    logged_error = mock_log_exception.call_args_list[0].args[0]
+    assert str(logged_error) == "rails is down"
+    assert workflow.last_error is rejection
+    mock_gitlab_workflow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.abstract_workflow.duo_workflow_metrics")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+async def test_fail_if_token_rejected_counts_before_a_cancelled_drop(
+    mock_status_updater,
+    mock_metrics,
+    workflow,
+    internal_event_client,
+):
+    """A client disconnect cancels the drop await; the reject count and event are recorded first, so they survive.
+
+    ``CancelledError`` is a ``BaseException`` the drop's ``except Exception`` does not catch, so recording after the
+    drop would be skipped. This pins the count and event ahead of the drop.
+    """
+    rejection = WorkflowTokenRejectedError("details")
+    workflow.token_rejection = rejection
+    workflow._internal_event_client = internal_event_client
+    mock_status_updater.return_value.update_workflow_status = AsyncMock(
+        side_effect=asyncio.CancelledError()
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await workflow._fail_if_token_rejected()
+
+    mock_metrics.count_agent_platform_session_reject.assert_called_once_with(
+        flow_type=workflow._workflow_type.value
+    )
+    internal_event_client.track_event.assert_called_once()
+    assert (
+        internal_event_client.track_event.call_args.kwargs["event_name"]
+        == EventEnum.WORKFLOW_REJECT.value
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_without_token_rejection_runs(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    mock_status_updater,
+    workflow,
+):
+    """With no rejection recorded the run proceeds, opens its audit session and sends no drop up front."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    with patch.object(
+        workflow, "_init_audit_events", new=AsyncMock(return_value=None)
+    ) as mock_init_audit_events:
+        await workflow._compile_and_run_graph("Test goal")
+
+    mock_init_audit_events.assert_awaited_once_with("Test goal")
+
+    mock_status_updater.assert_not_called()
+    mock_gitlab_workflow.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -2901,7 +3155,6 @@ async def test_compile_and_run_graph_starts_fresh_at_a_pre_run_input_checkpoint(
 @pytest.mark.parametrize(
     ("issuer", "expected"),
     [
-        # Only GenerateToken mints this issuer, and only direct access calls it.
         ("gitlab-duo-workflow-service", True),
         # Rails signs with the instance OIDC issuer; see CloudConnector::Tokens.
         ("https://gitlab.com", False),
@@ -2910,23 +3163,21 @@ async def test_compile_and_run_graph_starts_fresh_at_a_pre_run_input_checkpoint(
     ],
 )
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-def test_nothing_stamped_the_request_keys_on_the_token_issuer(issuer, expected):
+def test_token_issued_by_dws_keys_on_the_token_issuer(issuer, expected):
     user = CloudConnectorUser(
         authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
     )
 
-    assert _nothing_stamped_the_request(user) is expected
+    assert _token_issued_by_dws(user) is expected
 
 
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-def test_nothing_stamped_the_request_is_false_without_claims():
-    assert (
-        _nothing_stamped_the_request(CloudConnectorUser(authenticated=False)) is False
-    )
+def test_token_issued_by_dws_is_false_without_claims():
+    assert _token_issued_by_dws(CloudConnectorUser(authenticated=False)) is False
 
 
 @patch.dict(os.environ, {}, clear=False)
-def test_nothing_stamped_the_request_is_false_when_no_service_name_is_configured():
+def test_token_issued_by_dws_is_false_when_no_service_name_is_configured():
     """Unknown origin must fall back to the field rather than widening the carve-out."""
     user = CloudConnectorUser(
         authenticated=True,
@@ -2941,7 +3192,7 @@ def test_nothing_stamped_the_request_is_false_when_no_service_name_is_configured
             side_effect=NoServiceNameError("not configured")
         )
 
-        assert _nothing_stamped_the_request(user) is False
+        assert _token_issued_by_dws(user) is False
 
 
 def test_self_signed_token_carries_the_service_name_as_issuer():
@@ -2973,8 +3224,7 @@ def test_self_signed_token_carries_the_service_name_as_issuer():
     [("gitlab-duo-workflow-service", True), ("https://gitlab.com", False)],
 )
 @patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
-def test_client_injected_is_stamped_when_nothing_else_stamped_it(issuer, expected):
-    """A direct caller controls the field, so the service decides instead of reading it."""
+def test_client_injected_is_forced_on_a_dws_issued_token(issuer, expected):
     workflow = MockWorkflow(
         "id",
         {},
@@ -2992,7 +3242,61 @@ def test_client_injected_is_stamped_when_nothing_else_stamped_it(issuer, expecte
         ],
     )
 
-    assert workflow._mcp_tools[0]["client_injected"] is expected
+    assert workflow._mcp_tools[0]["client_injected"] is expected, (
+        "Workhorse never stamps a request carrying a DWS-issued token, "
+        "so the caller must not be able to claim GitLab origin"
+    )
+
+
+@pytest.mark.parametrize(
+    ("issuer", "expected"),
+    [
+        ("gitlab-duo-workflow-service", set()),
+        ("https://gitlab.com", {"salesforce_get_account"}),
+    ],
+)
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_only_stamped_client_tools_are_preapproved_with_the_flag_on(
+    tool_metadata, issuer, expected
+):
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
+        ),
+        mcp_tools=[
+            contract_pb2.McpTool(
+                name="gitlab_get_issue", description="GitLab tool", inputSchema="{}"
+            ),
+            contract_pb2.McpTool(
+                name="salesforce_get_account",
+                description="Client tool",
+                inputSchema="{}",
+                client_injected=True,
+            ),
+        ],
+    )
+    workflow._workflow_config["allow_client_injected_mcp_tools"] = True
+
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        allow_client_injected_mcp_tools=workflow._allow_client_injected_mcp_tools(),
+        mcp_tools=workflow._mcp_tools,
+    )
+
+    preapproved = {
+        name
+        for name in ("gitlab_get_issue", "salesforce_get_account")
+        if registry.is_preapproved(name)
+    }
+    assert preapproved == expected, (
+        "With the flag on, only client tools Workhorse stamped may skip approval. "
+        "A DWS-issued token is never stamped, so nothing skips it there"
+    )
 
 
 async def _configure_kwargs_for(claim, workflow_config, can_ask=True, issuer=None):
@@ -3066,8 +3370,11 @@ async def _configure_kwargs_for(claim, workflow_config, can_ask=True, issuer=Non
         ('{"allow": [], "ask": ["grep"], "deny": [], "ceiling": true}', False, set()),
         # A deny-only claim turns it on too.
         ('{"allow": [], "ask": [], "deny": ["grep"], "ceiling": true}', True, set()),
-        # An empty claim is an ungoverned session: no ceiling even if asked for.
-        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True, None),
+        # Rails only sets the ceiling on a resolved policy, so an empty one permits nothing
+        # beyond the tools the ceiling always keeps.
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True, set()),
+        # Without the ceiling, an empty claim is still an ungoverned session.
+        ('{"allow": [], "ask": [], "deny": []}', True, None),
         # Unparsable: fails closed only when the claim still asks for the ceiling.
         ('{"allow": 5, "ceiling": true}', True, set()),
         ('{"allow": 5}', True, None),
@@ -3094,8 +3401,9 @@ def _with_exemptions(claim, expected):
         return expected
     if not isinstance(data.get("allow", []), list):
         return expected
+    ruled = set(data.get("ask", [])) | set(data.get("deny", []))
     return expected | ceiling_exempt_tool_names(
-        set(data.get("ask", [])) | set(data.get("deny", []))
+        ruled, keep_read_only=bool(data.get("allow"))
     )
 
 
@@ -3120,22 +3428,48 @@ async def test_ceiling_ignores_a_feature_flag_header_without_the_claim(workflow_
 @pytest.mark.parametrize(
     "ceiling,issuer,expected",
     [
-        # Ceiling on and nothing stamped the request: no client-injected exemption.
         (True, "gitlab-duo-workflow-service", False),
-        # Ceiling on and Workhorse stamped the request: the exemption stays.
+        (False, "gitlab-duo-workflow-service", False),
+        (None, "gitlab-duo-workflow-service", False),
         (True, "https://gitlab.com", True),
-        # Ceiling off: unchanged, whatever stamped the request.
-        (False, "gitlab-duo-workflow-service", True),
+        (False, "https://gitlab.com", True),
+        (None, "https://gitlab.com", True),
     ],
 )
-async def test_client_injected_exemption_needs_a_stamped_request_when_the_ceiling_is_on(
+async def test_client_injected_exemption_is_off_on_a_dws_issued_token(
     workflow_config, ceiling, issuer, expected
 ):
-    claim = json.dumps(
-        {"allow": ["read_file"], "ask": [], "deny": [], "ceiling": ceiling}
+    claim = (
+        None
+        if ceiling is None
+        else json.dumps(
+            {"allow": ["read_file"], "ask": [], "deny": [], "ceiling": ceiling}
+        )
     )
 
     kwargs = await _configure_kwargs_for(claim, workflow_config, issuer=issuer)
+
+    assert kwargs["allow_client_injected_mcp_tools"] is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+@pytest.mark.parametrize(
+    "claim,expected",
+    [
+        # The claim asks for the ceiling but cannot be read, so its ask and deny lists are lost.
+        ('{"allow": "not-a-list", "ask": [], "deny": [], "ceiling": true}', False),
+        # Without the ceiling an unparsable claim keeps the exemption, as before.
+        ('{"allow": "not-a-list", "ask": [], "deny": []}', True),
+    ],
+)
+async def test_client_injected_exemption_fails_closed_on_an_unparsable_ceiling_claim(
+    workflow_config, claim, expected
+):
+    kwargs = await _configure_kwargs_for(
+        claim, workflow_config, issuer="https://gitlab.com"
+    )
 
     assert kwargs["allow_client_injected_mcp_tools"] is expected
 
@@ -3206,3 +3540,106 @@ async def test_ceiling_drops_client_preapprovals_it_does_not_permit(workflow_con
         await workflow._compile_and_run_graph("Test goal")
 
     assert workflow._preapproved_tools == ["read_file"]
+
+
+async def _run_with_client_preapprovals(workflow_config, claim, can_ask):
+    """Run the graph with client pre-approvals `read_file` and `start_flow`; return the workflow and kwargs."""
+    workflow_config["allow_agent_to_request_user"] = can_ask
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(gitlab_realm="saas", extra={"tool_access_policies": claim}),
+    )
+    with (
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs"
+        ),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow"
+        ) as mock_gitlab_workflow,
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure"
+        ) as mock_configure,
+    ):
+        registry = MagicMock()
+        registry.pre_approvals_allowed_by_policy.side_effect = lambda names: (
+            set(names) & mock_configure.call_args.kwargs["admin_allowed_preapprovals"]
+        )
+        mock_configure.return_value = registry
+        mock_checkpointer = AsyncMock()
+        mock_checkpointer.initial_status_event = "START"
+        mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+        workflow = MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("software_development"),
+            user,
+        )
+        workflow._preapproved_tools = ["read_file", "start_flow"]
+        await workflow._compile_and_run_graph("Test goal")
+
+    return workflow, mock_configure.call_args.kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    "claim,can_ask,expected_preapproved",
+    [
+        # Governance ran and allowed nothing, so the client list is dropped.
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True, []),
+        # Same for a session that cannot ask.
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', False, []),
+        # With an allow list, the client list is replaced by it (unchanged from main).
+        ('{"allow": ["grep"], "ask": [], "deny": [], "ceiling": true}', True, ["grep"]),
+    ],
+)
+async def test_compile_and_run_graph_treats_an_empty_ceiling_claim_as_governed(
+    workflow_config, claim, can_ask, expected_preapproved
+):
+    workflow, kwargs = await _run_with_client_preapprovals(
+        workflow_config, claim, can_ask
+    )
+
+    assert sorted(workflow._preapproved_tools) == expected_preapproved
+    # The registry gets the same answer: the allow list plus the tools always kept.
+    assert kwargs["allowed_tools"] == expected_preapproved
+    assert kwargs["admin_allowed_preapprovals"] == _with_exemptions(
+        claim, set(expected_preapproved)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    "claim,can_ask",
+    [
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', True),
+        ('{"allow": [], "ask": [], "deny": [], "ceiling": true}', False),
+        # A write-only rule leaves allow empty too, so the read-only exemption stays off.
+        ('{"allow": [], "ask": [], "deny": ["run_command"], "ceiling": true}', True),
+    ],
+)
+async def test_ceiling_with_an_empty_allow_keeps_only_start_flow(
+    workflow_config, claim, can_ask
+):
+    workflow, kwargs = await _run_with_client_preapprovals(
+        workflow_config, claim, can_ask
+    )
+
+    assert workflow._preapproved_tools == []
+    assert kwargs["admin_allowed_preapprovals"] == {"start_flow"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_compile_and_run_graph_keeps_an_empty_claim_without_ceiling_ungoverned(
+    workflow_config,
+):
+    """Without `ceiling`, empty lists still mean governance did not run, as on main."""
+    workflow, kwargs = await _run_with_client_preapprovals(
+        workflow_config, '{"allow": [], "ask": [], "deny": []}', can_ask=True
+    )
+
+    assert workflow._preapproved_tools == ["read_file", "start_flow"]
+    assert kwargs["allowed_tools"] == []
+    assert kwargs["admin_allowed_preapprovals"] is None

@@ -1,9 +1,13 @@
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import grpc
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from structlog.testing import capture_logs
 
+from ai_gateway.config import get_config
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from duo_workflow_service.entities.state import (
     get_current_model_max_context_token_limit,
@@ -11,6 +15,10 @@ from duo_workflow_service.entities.state import (
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
+)
+from lib.context import (
+    current_model_metadata_context,
+    current_model_metadata_with_size_context,
 )
 
 
@@ -422,3 +430,189 @@ async def test_self_hosted_identifier_sets_matched_context_limit(
         await interceptor.intercept_service(AsyncMock(), handler_call_details)
 
     assert get_current_model_max_context_token_limit() == expected_limit
+
+
+AGENT_PLATFORM = "duo_agent_platform"
+METHOD = "/DuoWorkflow/ExecuteWorkflow"
+NOT_ALLOWED_FOR_AGENT_PLATFORM = {
+    "provider": "gitlab",
+    "identifier": "codestral_2508_fireworks",
+    "feature_setting": AGENT_PLATFORM,
+}
+
+
+def _agent_platform_default() -> str:
+    return (
+        ModelSelectionConfig.instance()
+        .get_unit_primitive_config_map()[AGENT_PLATFORM]
+        .default_model_identifiers[0]
+    )
+
+
+def _call_details(model_metadata: dict) -> MagicMock:
+    details = MagicMock()
+    details.method = METHOD
+    details.invocation_metadata = [
+        ("x-gitlab-agent-platform-model-metadata", json.dumps(model_metadata))
+    ]
+    return details
+
+
+async def _intercept(model_metadata: dict):
+    """Run the interceptor with the real config; return its result and the metadata the call sees."""
+    seen = {}
+
+    async def continuation(_):
+        seen["default"] = current_model_metadata_context.get()
+        seen["by_tag"] = current_model_metadata_with_size_context.get()
+        return "continued"
+
+    result = await ModelMetadataInterceptor().intercept_service(
+        continuation, _call_details(model_metadata)
+    )
+    return result, seen
+
+
+@pytest.fixture(name="cloud_gateway")
+def cloud_gateway_fixture(monkeypatch, mock_user):
+    """Run as GitLab's own gateway: a gateway that serves custom models skips the allowlist check."""
+    monkeypatch.setattr(get_config().custom_models, "enabled", False)
+    token = current_user.set(mock_user)
+    yield
+    current_user.reset(token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("cloud_gateway", "feature_allowlist_mode")
+class TestFeatureAllowlist:
+    @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
+    async def test_log_mode_serves_the_model_and_logs_the_mismatch(self):
+        assert (
+            "codestral_2508_fireworks"
+            not in ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()[AGENT_PLATFORM]
+            .allowed_model_identifiers
+        )
+
+        with capture_logs() as logs:
+            result, seen = await _intercept(NOT_ALLOWED_FOR_AGENT_PLATFORM)
+
+        assert result == "continued"
+        assert seen["default"].llm_definition.gitlab_identifier == (
+            "codestral_2508_fireworks"
+        )
+        assert [
+            (entry["reason"], entry["surface"], entry["method"])
+            for entry in logs
+            if entry["event"] == "Model allowlist mismatch"
+        ] == [("model_not_allowed", "dws", METHOD)]
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+    async def test_fallback_mode_serves_the_feature_default(self):
+        result, seen = await _intercept(NOT_ALLOWED_FOR_AGENT_PLATFORM)
+
+        assert result == "continued"
+        assert seen["default"].llm_definition.gitlab_identifier == (
+            _agent_platform_default()
+        )
+        assert seen["by_tag"].default is seen["default"]
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+    async def test_fallback_mode_leaves_an_unknown_feature_on_the_prompt_default(
+        self,
+    ):
+        result, seen = await _intercept(
+            {
+                "provider": "gitlab",
+                "identifier": "codestral_2508_fireworks",
+                "feature_setting": "no_such_feature",
+            }
+        )
+
+        assert result == "continued"
+        assert seen == {"default": None, "by_tag": None}
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+    async def test_enforce_mode_rejects_the_call(self):
+        continuation = AsyncMock()
+        handler = await ModelMetadataInterceptor().intercept_service(
+            continuation, _call_details(NOT_ALLOWED_FOR_AGENT_PLATFORM)
+        )
+        context = AsyncMock()
+
+        await handler.unary_unary(None, context)
+
+        continuation.assert_not_called()
+        context.abort.assert_awaited_once_with(
+            grpc.StatusCode.PERMISSION_DENIED,
+            "Model 'codestral_2508_fireworks' is not available for 'duo_agent_platform'",
+        )
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+    @pytest.mark.parametrize(
+        "with_feature_setting",
+        [
+            pytest.param(True, id="allowed-model"),
+            pytest.param(False, id="resume-replay-without-feature"),
+        ],
+    )
+    async def test_enforce_mode_serves_an_allowed_model(self, with_feature_setting):
+        model_metadata = (
+            {
+                "provider": "gitlab",
+                "identifier": _agent_platform_default(),
+                "feature_setting": AGENT_PLATFORM,
+            }
+            if with_feature_setting
+            else {"provider": "gitlab", "name": _agent_platform_default()}
+        )
+
+        result, seen = await _intercept(model_metadata)
+
+        assert result == "continued"
+        assert seen["default"].llm_definition.gitlab_identifier == (
+            _agent_platform_default()
+        )
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+    async def test_enforce_mode_keeps_an_identifier_without_a_feature_with_a_note(
+        self,
+    ):
+        with capture_logs() as logs:
+            result, seen = await _intercept(
+                {"provider": "gitlab", "identifier": "codestral_2508_fireworks"}
+            )
+
+        assert result == "continued"
+        assert seen["default"].llm_definition.gitlab_identifier == (
+            "codestral_2508_fireworks"
+        )
+        assert seen["by_tag"].default is seen["default"]
+        assert [
+            (entry["reason"], entry["surface"], entry["method"])
+            for entry in logs
+            if entry["event"] == "Model allowlist note"
+        ] == [("missing_feature_setting", "dws", METHOD)]
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+    async def test_enforce_mode_rejects_a_provider_the_gateway_does_not_serve(self):
+        continuation = AsyncMock()
+        handler = await ModelMetadataInterceptor().intercept_service(
+            continuation,
+            _call_details(
+                {
+                    "provider": "anthropic",
+                    "name": _agent_platform_default(),
+                    "feature_setting": AGENT_PLATFORM,
+                }
+            ),
+        )
+        context = AsyncMock()
+
+        await handler.unary_unary(None, context)
+
+        continuation.assert_not_called()
+        context.abort.assert_awaited_once_with(
+            grpc.StatusCode.PERMISSION_DENIED,
+            "This gateway does not serve models from provider 'anthropic'",
+        )

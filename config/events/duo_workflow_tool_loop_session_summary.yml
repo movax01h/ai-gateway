@@ -15,7 +15,7 @@ additional_properties:
   workflow_type:
     description: "Type of flow the tool calls were made in (e.g. developer, fix_pipeline). Only flows whose tools run through a v1 agent component appear here"
   session_ending:
-    description: "How the session ended: success, stopped, aborted or failure. Distinguishes a session that completed normally from one that died at the recursion limit or was cancelled, so repeat counts can be compared across endings"
+    description: "How the session ended: success, stopped, aborted or failure. Distinguishes a session that completed normally from one that died at the recursion limit or was cancelled, so repeat counts can be compared across endings. idle marks a turn that ended with the session still open: such a session sends one event per turn, so group by value to count sessions"
   total_tool_calls:
     description: "Number of tool calls executed by v1 agent components in the session. Not a session-wide total: tool calls made through other execution paths are not counted"
   unique_tool_calls:

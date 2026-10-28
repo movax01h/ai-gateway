@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Callable, ClassVar, List, Optional
+from typing import Callable, ClassVar, List, Literal, Optional
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
@@ -31,6 +31,9 @@ _EXPERIMENTAL_MCP_AUTO_INJECT_ENVIRONMENTS = MCP_AUTO_INJECT_ENVIRONMENTS | froz
 
 class FlowConfig(BaseFlowConfig):
     DIRECTORY_PATH: ClassVar[Path] = Path(__file__).resolve().parent / "configs"
+    FEATURE_CONFIG_SUBDIR: ClassVar[Optional[str]] = "experimental"
+    # Validates that a file under ``config/experimental/`` declares its tier.
+    version: Literal["experimental"]
     prompts: Optional[list[InMemoryPromptConfig]] = None
     response_schemas: Optional[list[InlineResponseSchemaConfig]] = None
 

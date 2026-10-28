@@ -35,35 +35,13 @@ from lib.internal_events import EventContext
 @pytest.fixture(name="internal_event_middleware")
 def internal_event_middleware_fixture(mock_app):
     return InternalEventMiddleware(
-        mock_app, skip_endpoints=["/health"], enabled=True, environment="test"
+        mock_app, skip_endpoints=["/health"], environment="test"
     )
 
 
 @pytest.mark.asyncio
 async def test_middleware_non_http_request(internal_event_middleware):
     scope = {"type": "websocket"}
-    receive = AsyncMock()
-    send = AsyncMock()
-
-    with (
-        request_cycle_context({}),
-        patch(
-            "ai_gateway.api.middleware.internal_event.current_event_context"
-        ) as mock_event_context,
-    ):
-        await internal_event_middleware(scope, receive, send)
-        mock_event_context.set.assert_not_called()
-
-    internal_event_middleware.app.assert_called_once_with(scope, receive, send)
-
-
-@pytest.mark.asyncio
-async def test_middleware_disabled(mock_app):
-    internal_event_middleware = InternalEventMiddleware(
-        mock_app, skip_endpoints=[], enabled=False, environment="test"
-    )
-    request = Request({"type": "http"})
-    scope = request.scope
     receive = AsyncMock()
     send = AsyncMock()
 
@@ -1013,3 +991,64 @@ async def test_realm_bypass_auth_falls_back_to_header(internal_event_middleware)
     set_context = mock_event_context.set.call_args[0][0]
     # Header is used — bypass_auth residual risk documented here
     assert set_context.realm == "self-managed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "jwt_extra,header_value,expected",
+    [
+        ({"feature_enablement_type": "duo_pro"}, b"duo_core", "duo_pro"),
+        ({"feature_enablement_type": ""}, b"duo_pro", ""),
+        ({}, b"duo_pro", "duo_pro"),
+        ({}, None, None),
+        (None, b"duo_pro", "duo_pro"),
+    ],
+    ids=[
+        "claim_used",
+        "empty_claim_used",
+        "absent_claim_uses_header",
+        "absent_claim_and_header",
+        "no_claims_uses_header",
+    ],
+)
+async def test_feature_enablement_type_resolved_from_jwt_claim(
+    internal_event_middleware, jwt_extra, header_value, expected
+):
+    claims = (
+        UserClaims(
+            gitlab_realm="saas",
+            scopes=[],
+            gitlab_instance_uid="test-uid",
+            issuer="",
+            extra=jwt_extra,
+        )
+        if jwt_extra is not None
+        else None
+    )
+    wrapped = StarletteUser(CloudConnectorUser(authenticated=True, claims=claims))
+
+    headers: list[tuple[bytes, bytes]] = []
+    if header_value is not None:
+        headers.append(
+            (X_GITLAB_FEATURE_ENABLEMENT_TYPE_HEADER.lower().encode(), header_value)
+        )
+
+    request = Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": headers,
+            "user": wrapped,
+        }
+    )
+
+    with (
+        request_cycle_context({}),
+        patch(
+            "ai_gateway.api.middleware.internal_event.current_event_context"
+        ) as mock_event_context,
+    ):
+        await internal_event_middleware(request.scope, AsyncMock(), AsyncMock())
+
+    set_context = mock_event_context.set.call_args[0][0]
+    assert set_context.feature_enablement_type == expected

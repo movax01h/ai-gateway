@@ -273,6 +273,20 @@ models:
       model: "claude-fable-5-1"
       max_tokens: 128_000
 
+  - name: "Claude Mythos 5.1"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_mythos_5_1"
+    description: "Claude Mythos 5.1. Restricted to the business logic security flow (model_restrictions.yml)."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    model_class_provider: anthropic
+    requires_paid_credits: true
+    family:
+      - claude
+    params:
+      model: "claude-mythos-5-1"
+      max_tokens: 128_000
+
   - name: "Claude Fable 5.1"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_fable_5_1_vertex"
@@ -832,24 +846,6 @@ models:
       thinking_level: "low"
       streaming: "true"
 
-  - name: "Gemini 3.6 Flash"
-    provider: "Gemini Enterprise Agent Platform"
-    gitlab_identifier: "gemini_3_6_flash_vertex"
-    description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
-    cost_indicator: "$"
-    max_context_tokens: 1_000_000
-    model_class_provider: google_genai
-    family:
-      - gemini
-    params:
-      model: "gemini-3.6-flash"
-      max_tokens: 65_536
-      thinking_level: "low"
-      streaming: "true"
-    deprecation:
-      deprecation_date: "2026-10-06"
-      removal_version: "19.6"
-
   - name: "Gemini 3.7 Flash"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_7_flash_vertex"
@@ -979,6 +975,20 @@ models:
       model: gpt-6-sol
       max_tokens: 128_000
 
+  - name: "GPT-6.1 Terra"
+    provider: "OpenAI"
+    gitlab_identifier: "gpt_6_1_terra"
+    description: "OpenAI's fast and efficient model for everyday work."
+    cost_indicator: "$$"
+    max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-6.1-terra
+    proxy_provider: openai
+    model_class_provider: "openai"
+    family:
+      - gpt_5
+    params:
+      model: gpt-6.1-terra
+      max_tokens: 128_000
+
   - name: "GPT-6 Luna"
     provider: "OpenAI"
     gitlab_identifier: "gpt_6_luna"
@@ -1076,6 +1086,20 @@ models:
       - gpt_5
     params:
       model: bedrock_mantle/openai.gpt-5.6-luna
+      custom_llm_provider: bedrock_mantle
+      max_tokens: 128_000
+
+  - name: "GPT-6.1 Terra"
+    provider: "Bedrock"
+    gitlab_identifier: "gpt_6_1_terra_bedrock"
+    description: "OpenAI's fast and efficient model for everyday work."
+    cost_indicator: "$$"
+    max_context_tokens: 1050000  # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-terra.html
+    model_class_provider: litellm
+    family:
+      - gpt_5
+    params:
+      model: bedrock_mantle/openai.gpt-6.1-terra
       custom_llm_provider: bedrock_mantle
       max_tokens: 128_000
 

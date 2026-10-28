@@ -49,6 +49,32 @@ class TierAccessDeniedException(ToolException):
         )
 
 
+class WorkflowTokenRejectedError(Exception):
+    """The token does not authorize the requested workflow, so the run is rejected before any work.
+
+    Raised as the ``__cause__`` of a ``NotifiableException`` so the user sees a safe message while the server maps
+    this class to ``PERMISSION_DENIED`` with ``details``. Unlike ``UnrecoverableWorkflowException`` the session is
+    dropped: Rails still holds it as runnable, and a silent exit is what made the rejection look like a normal end.
+
+    Attributes:
+        details: The gRPC status detail, fixed text written by the server.
+        drop_reason: The reason recorded on the Rails row when it is dropped.
+        user_message: The safe text shown to the user, raised as the ``NotifiableException`` message. A subclass for
+            a different rejection (e.g. a token carrying no workflow binding, which asks the user to update their
+            client) overrides it while reusing the same reject-and-drop path.
+    """
+
+    drop_reason = "token_rejected"
+    user_message = (
+        "This session was blocked because its token does not belong to it."
+        " Start a new session."
+    )
+
+    def __init__(self, details: str) -> None:
+        super().__init__(details)
+        self.details = details
+
+
 class InvalidWorkflowIdException(Exception):
     """Raised when a workflow ID is invalid or not found."""
 
@@ -116,3 +142,74 @@ class InvalidRequestException(Exception):
     The ``message`` argument should describe the specific reason the request was
     rejected, as it is surfaced directly to the caller via the gRPC status detail.
     """
+
+
+class NotifiableAgentException(Exception):
+    """Exception raised in the agent platform whose safe, user-facing message is surfaced in the UI.
+
+    Use this exception when you need to communicate a safe, human-readable error to the end user
+    while keeping sensitive debugging context (tokens, internal hostnames, stack traces, tool
+    outputs) strictly server-side.
+
+    Args:
+        ui_message: A static or templated string that is safe to display to end users.
+            Must **not** contain interpolated values from network responses, tool outputs,
+            secrets, or LLM responses.
+        internal_detail: Optional additional context logged server-side only.
+            This value is never sent to the UI.
+    """
+
+    def __init__(self, ui_message: str, internal_detail: str | None = None) -> None:
+        super().__init__(ui_message)
+        self.ui_message = ui_message
+        self.internal_detail = internal_detail
+
+
+TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT = (
+    "An administrator blocked the {tool_name} tool, so it cannot be used. "
+    "Tell the user it is blocked and continue without it."
+)
+
+
+class ToolBlockedByAdministratorError(NotifiableAgentException):
+    """Raised when the agent calls a tool that governance deny rules removed from its toolset.
+
+    Halts the flow with a static UI message. The denied tool names stay server-side.
+
+    Args:
+        tool_names: Names of the denied tools the agent called. Logged server-side only.
+    """
+
+    UI_MESSAGE = (
+        "This flow stopped because an administrator blocked a tool it tried to use."
+    )
+
+    def __init__(self, tool_names: list[str]) -> None:
+        super().__init__(
+            self.UI_MESSAGE,
+            internal_detail=f"Denied tools called: {', '.join(tool_names)}",
+        )
+        self.tool_names = tool_names
+
+
+class ToolApprovalUnavailableError(NotifiableAgentException):
+    """Raised when a tool needs approval in a session that cannot prompt a human.
+
+    A non-interactive flow has no one to answer an approval request, so rather than parking on
+    ``interrupt()`` forever the flow halts with a static UI message. The tool names stay server-side.
+
+    Args:
+        tool_names: Names of the tools that needed approval. Logged server-side only.
+    """
+
+    UI_MESSAGE = (
+        "This flow stopped because a tool it tried to use needs approval, "
+        "and no one is available to approve it here."
+    )
+
+    def __init__(self, tool_names: list[str]) -> None:
+        super().__init__(
+            self.UI_MESSAGE,
+            internal_detail=f"Tools needing approval with no approver: {', '.join(tool_names)}",
+        )
+        self.tool_names = tool_names

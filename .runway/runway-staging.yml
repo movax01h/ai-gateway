@@ -37,6 +37,8 @@ spec:
     min_instances: 1
     max_instances: 100
     max_instance_request_concurrency: 40
+  # Gen2 to match duo-workflow-svc, see ai-assist#1421
+  execution_environment: EXECUTION_ENVIRONMENT_GEN2
   resources:
     startup_cpu_boost: true
     limits:

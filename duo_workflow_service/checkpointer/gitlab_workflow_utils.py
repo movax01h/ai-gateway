@@ -16,6 +16,7 @@ STATUS_TO_EVENT_PROPERTY = {
     "finished": EventPropertyEnum.WORKFLOW_COMPLETED,
     "stopped": EventPropertyEnum.CANCELLED_BY_USER,
     "input_required": EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN_AFTER_INPUT,
+    "idle": EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN_AFTER_INPUT,
     "plan_approval_required": EventPropertyEnum.WORKFLOW_RESUME_BY_PLAN_AFTER_APPROVAL,
 }
 
@@ -29,13 +30,15 @@ class WorkflowStatusEventEnum(StrEnum):
     STOP = "stop"
     RETRY = "retry"
     REQUIRE_INPUT = "require_input"
+    IDLE = "idle"
     REQUIRE_PLAN_APPROVAL = "require_plan_approval"
     REQUIRE_TOOL_CALL_APPROVAL = "require_tool_call_approval"
     STOP_RECOVERY = "stop_recovery"  # DWS-internal only; never a valid Rails wire event
 
 
 # Rails never recognizes STOP_RECOVERY as a status_event string — it must be
-# translated to the one event Rails actually accepts leaving `stopped`.
+# translated to the one event Rails actually accepts leaving `stopped`. IDLE is
+# translated per instance instead, see `status_projection.rails_status_event`.
 INTERNAL_TO_RAILS_STATUS_EVENT = {
     WorkflowStatusEventEnum.STOP_RECOVERY: WorkflowStatusEventEnum.RETRY,
 }
@@ -45,6 +48,7 @@ SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES = [
     WorkflowStatusEventEnum.FINISH,
     WorkflowStatusEventEnum.STOP,
     WorkflowStatusEventEnum.REQUIRE_INPUT,
+    WorkflowStatusEventEnum.IDLE,
     WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
     WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
 ]
@@ -101,11 +105,22 @@ def decode_gitlab_checkpoint_payload(checkpoint: Mapping[str, Any]) -> dict:
 
 NOOP_WORKFLOW_STATUSES = [WorkflowStatusEnum.APPROVAL_ERROR]
 
+# Statuses where a session rests and takes a next free-text message: a gate's
+# INPUT_REQUIRED or the chat engine's IDLE turn boundary. Approvals are not in
+# it: they wait on a decision, not on a message.
+AT_REST_STATUSES = frozenset(
+    [
+        WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.IDLE,
+    ]
+)
+
 BILLABLE_STATUSES = frozenset(
     [
         WorkflowStatusEnum.FINISHED,
         WorkflowStatusEnum.STOPPED,
         WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.IDLE,
         WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
         WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
     ]
@@ -118,6 +133,7 @@ CHECKPOINT_STATUS_TO_STATUS_EVENT = {
     "STOPPED": WorkflowStatusEventEnum.STOP,
     "PAUSED": WorkflowStatusEventEnum.PAUSE,
     "INPUT_REQUIRED": WorkflowStatusEventEnum.REQUIRE_INPUT,
+    "IDLE": WorkflowStatusEventEnum.IDLE,
     "PLAN_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL,
     "TOOL_CALL_APPROVAL_REQUIRED": WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
 }
@@ -132,6 +148,24 @@ TERMINAL_WORKFLOW_STATUS_EVENTS = frozenset(
     ]
 )
 
+# Maps each billable status event, as sent to Rails, to the Rails workflow
+# status it transitions the session to. `GitLabWorkflow._handle_completion` uses
+# it to trust the locally cached last status event instead of re-reading the
+# status from Rails, which may not reflect the transition yet (read-after-write
+# race). The lookup key is the Rails-translated event
+# (`status_projection.rails_status_event`), not the raw cached one, so IDLE only
+# maps to IDLE on an instance that accepts the `idle` status event.
+BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS: dict[
+    WorkflowStatusEventEnum, WorkflowStatusEnum
+] = {
+    WorkflowStatusEventEnum.FINISH: WorkflowStatusEnum.FINISHED,
+    WorkflowStatusEventEnum.STOP: WorkflowStatusEnum.STOPPED,
+    WorkflowStatusEventEnum.REQUIRE_INPUT: WorkflowStatusEnum.INPUT_REQUIRED,
+    WorkflowStatusEventEnum.IDLE: WorkflowStatusEnum.IDLE,
+    WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
+    WorkflowStatusEventEnum.REQUIRE_PLAN_APPROVAL: WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
+}
+
 # Maps WorkflowStatus(status key in LangGraph's WorkflowState) to checkpoint status.
 # Checkpoint status represents status human-readable workflow status (displayed in the UI)
 WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
@@ -139,6 +173,7 @@ WORKFLOW_STATUS_TO_CHECKPOINT_STATUS = {
         WorkflowStatusEnum.EXECUTION: "RUNNING",
         WorkflowStatusEnum.ERROR: "FAILED",
         WorkflowStatusEnum.INPUT_REQUIRED: "INPUT_REQUIRED",
+        WorkflowStatusEnum.IDLE: "IDLE",
         WorkflowStatusEnum.PLANNING: "RUNNING",
         WorkflowStatusEnum.PAUSED: "PAUSED",
         WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED: "PLAN_APPROVAL_REQUIRED",

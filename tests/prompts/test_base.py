@@ -31,6 +31,7 @@ from litellm.exceptions import InternalServerError as LiteLLMInternalServerError
 from litellm.exceptions import MidStreamFallbackError, Timeout
 from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APIError as OpenAIAPIError
+from openai import APITimeoutError as OpenAIAPITimeoutError
 from openai import BadRequestError as OpenAIBadRequestError
 from openai import InternalServerError as OpenAIInternalServerError
 from pydantic import AnyUrl, SecretStr, ValidationError
@@ -1220,7 +1221,11 @@ configurable_unit_primitives:
 
     @pytest.mark.asyncio
     async def test_ainvoke_retries_on_timeout(self, prompt: Prompt):
-        """Test that ainvoke retries on httpx.TimeoutException (covers ReadTimeout, ConnectTimeout, etc.)."""
+        """Test that ainvoke retries on httpx.TimeoutException (covers ReadTimeout, ConnectTimeout, etc.).
+
+        The Anthropic and OpenAI SDKs raise it unwrapped when a stream stalls after the response headers arrived, which
+        their own retry loop doesn't cover, and google_genai raises it raw with its own timeout retry turned off.
+        """
         success_response = AIMessage(content="Hello!")
         call_count = 0
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -1434,6 +1439,49 @@ configurable_unit_primitives:
         with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
             with mock.patch("asyncio.sleep"):
                 with pytest.raises(LiteLLMAPIConnectionError):
+                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                Timeout(
+                    message="Request timed out", model="m", llm_provider="vertex_ai"
+                ),
+                id="litellm_timeout",
+            ),
+            pytest.param(
+                APITimeoutError(request=httpx.Request("POST", "https://x")),
+                id="anthropic_api_timeout_error",
+            ),
+            pytest.param(
+                OpenAIAPITimeoutError(request=httpx.Request("POST", "https://x")),
+                id="openai_api_timeout_error",
+            ),
+        ],
+    )
+    async def test_ainvoke_does_not_double_retry_timeout_error(
+        self, prompt: Prompt, error
+    ):
+        """Model client timeout errors must not be retried by this module's own retry wrapper — the client raises them
+        only after retrying the request itself, so an outer retry would multiply upstream attempts (4 outer x inner).
+
+        They inherit from a connection error in _RETRYABLE_NETWORK_ERRORS (litellm.Timeout subclasses
+        openai.APITimeoutError), so they need an explicit exclusion.
+        """
+        call_count = 0
+
+        async def flaky_ainvoke(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise error
+
+        with mock.patch.object(FakeModel, "ainvoke", side_effect=flaky_ainvoke):
+            with mock.patch("asyncio.sleep"):
+                with pytest.raises(type(error)):
                     await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
         assert call_count == 1
@@ -3000,7 +3048,7 @@ configurable_unit_primitives:
                 [
                     mock.call(
                         "model_configuration/check",
-                        registry._DEFAULT_VERSION,
+                        None,
                         model_metadata=ModelMetadata(
                             provider="gitlab",
                             name="model_a",
@@ -3014,7 +3062,7 @@ configurable_unit_primitives:
                     ),
                     mock.call(
                         "model_configuration/check",
-                        registry._DEFAULT_VERSION,
+                        None,
                         model_metadata=ModelMetadata(
                             provider="gitlab",
                             name="model_b",
@@ -3028,7 +3076,7 @@ configurable_unit_primitives:
                     ),
                     mock.call(
                         "model_configuration/check",
-                        registry._DEFAULT_VERSION,
+                        None,
                         model_metadata=FireworksModelMetadata(
                             provider="fireworks_ai",
                             name="model_fireworks",

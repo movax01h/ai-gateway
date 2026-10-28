@@ -8,24 +8,21 @@
 
 # Duo Developer flows and prompts (including the shared system prompt) are
 # co-owned by the Agent Developer team
-/duo_workflow_service/agent_platform/v1/flows/configs/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
-/ai_gateway/prompts/definitions/common/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
-/ai_gateway/prompts/definitions/developer_*/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+/ai/features/code/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai/features/code/developer_agent_prompt/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai/features/code/local_code_review/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
+/ai/features/chat/slack_assistant/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+
 # Duo Code Review flows, tools, and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
-/duo_workflow_service/agent_platform/v1/flows/configs/deep_code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/review_merge_request_dap/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/deep_code_review_reviewer/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/code_review_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/explore_directories_for_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
-/duo_workflow_service/agent_platform/v1/flows/configs/risk_classification/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/risk_classification_claims/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/ (see work item 2853)
@@ -62,24 +59,21 @@
 /duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
 
 # Duo Developer flow configs and prompts (including the shared system prompt)
-/duo_workflow_service/agent_platform/v1/flows/configs/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
-/ai_gateway/prompts/definitions/common/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
-/ai_gateway/prompts/definitions/developer_*/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+/ai/features/code/developer/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai/features/code/developer_agent_prompt/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 /ai/features/code/local_code_review/ @gitlab-org/ai-powered/agent-foundations/agent-developer
 
+/ai/features/chat/slack_assistant/ @gitlab-org/ai-powered/agent-foundations/agent-developer
+
 # Duo Code Review flow configs, tools, and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
-/duo_workflow_service/agent_platform/v1/flows/configs/deep_code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/review_merge_request_dap/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/deep_code_review_reviewer/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/code_review_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/explore_directories_for_prescan/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/analyze_prescan_codebase_results/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/code_review_findings/ @kinsingh @wanpol @iamphill @marc_shaw
-/duo_workflow_service/agent_platform/v1/flows/configs/risk_classification/ @kinsingh @wanpol @iamphill @marc_shaw
 /ai_gateway/response_schemas/definitions/risk_classification_claims/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/

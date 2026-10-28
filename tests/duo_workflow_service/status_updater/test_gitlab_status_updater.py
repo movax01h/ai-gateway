@@ -58,6 +58,34 @@ async def test_update_workflow_status(gitlab_status_updater):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "drop_reason,expected_body",
+    [
+        (None, '{"status_event": "drop"}'),
+        ("token_rejected", '{"status_event": "drop", "drop_reason": "token_rejected"}'),
+    ],
+)
+async def test_update_workflow_status_sends_drop_reason_only_when_given(
+    gitlab_status_updater, drop_reason, expected_body
+):
+    gitlab_status_updater._client.apatch = AsyncMock(
+        return_value=GitLabHttpResponse(status_code=200, body={})
+    )
+
+    await gitlab_status_updater.update_workflow_status(
+        workflow_id="391",
+        status_event=WorkflowStatusEventEnum.DROP,
+        drop_reason=drop_reason,
+    )
+
+    gitlab_status_updater._client.apatch.assert_called_once_with(
+        path="/api/v4/ai/duo_workflows/workflows/391",
+        body=expected_body,
+        parse_json=True,
+    )
+
+
+@pytest.mark.asyncio
 async def test_update_workflow_status_when_response_error(gitlab_status_updater):
     gitlab_status_updater._client.apatch = AsyncMock(
         return_value={

@@ -14,6 +14,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from structlog.testing import capture_logs
 
 from ai_gateway.api import create_fast_api_server, server
+from ai_gateway.api.client_disconnect import (
+    ClientDisconnectedError,
+    client_disconnected_exception_handler,
+)
 from ai_gateway.api.feature_category import get_feature_categories
 from ai_gateway.api.server import (
     assume_role_exception_handler,
@@ -287,14 +291,18 @@ def test_middleware_log_request(fastapi_server_app: FastAPI):
 
 
 @pytest.mark.usefixtures("fastapi_server_app")
+# The context must be built even when events are off: the proxy reads
+# it on every request (#3222). internal_event.enabled only gates
+# sending, in track_event.
+@pytest.mark.parametrize("internal_events_enabled", [True, False])
 @pytest.mark.parametrize(
     "test_path,expected", [("/v2/chat/agent", True), ("/monitoring/healthz", False)]
 )
-def test_middleware_internal_event(test_path, expected):
+def test_middleware_internal_event(test_path, expected, internal_events_enabled):
     config = Config(
         _env_file=None,
         auth=ConfigAuth(bypass_external=True),
-        internal_event=ConfigInternalEvent(enabled=True),
+        internal_event=ConfigInternalEvent(enabled=internal_events_enabled),
     )
     app = create_fast_api_server(config)
     client = TestClient(app)
@@ -437,6 +445,7 @@ def test_setup_custom_exception_handlers(app, monkeypatch):
         mock.call(
             RestrictedModelAccessError, restricted_model_access_exception_handler
         ),
+        mock.call(ClientDisconnectedError, client_disconnected_exception_handler),
     ]
 
 
@@ -458,6 +467,19 @@ def test_custom_http_exception_handler(app):
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Test Exception"}
+
+
+def test_client_disconnected_exception_handler(app):
+    @app.get("/test")
+    def test_route():
+        raise ClientDisconnectedError()
+
+    setup_custom_exception_handlers(app)
+
+    response = TestClient(app).get("/test")
+
+    assert response.status_code == 499
+    assert response.content == b""
 
 
 def test_restricted_model_access_exception_handler(app):

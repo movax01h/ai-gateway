@@ -1210,6 +1210,9 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "user": user,
             "internal_event_client": flow._internal_event_client,
             "catalog_items": flow._catalog_items,
+            "allow_agent_to_request_user": flow._workflow_config.get(
+                "allow_agent_to_request_user", False
+            ),
         }
 
     def test_registry_flow_id_comes_from_the_registry_load(
@@ -2188,6 +2191,16 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 Command,
             ),
             (
+                # The chat engine's turn boundary is a rest point too.
+                [
+                    ("cp-2", WorkflowStatusEnum.EXECUTION),
+                    ("cp-1", WorkflowStatusEnum.IDLE),
+                    ("cp-0", WorkflowStatusEnum.NOT_STARTED),
+                ],
+                "cp-1",
+                Command,
+            ),
+            (
                 [
                     ("cp-1", WorkflowStatusEnum.EXECUTION),
                     ("cp-0", WorkflowStatusEnum.PLANNING),
@@ -2225,6 +2238,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         ],
         ids=[
             "input_required_boundary_resolves_to_resume",
+            "idle_boundary_resolves_to_resume",
             "no_pause_falls_back_to_oldest_checkpoint",
             "not_started_chain_resolves_to_session_start",
             "mid_turn_not_started_does_not_short_circuit",

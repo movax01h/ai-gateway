@@ -6,6 +6,7 @@ from unittest import mock
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.experimental.flows import (
     flow_config as experimental_flow_config,
@@ -248,4 +249,136 @@ def test_experimental_flows_ignore_v1_feature_roots(tmp_path: Path):
     _write_flow(features, "insights", "moved_flow", "1.0.0")
     flow_config.discover_feature_flow_configs(features)
 
-    assert experimental_flow_config.FlowConfig.feature_config_roots() == {}
+    # moved_flow has only a v1 config/ (no config/experimental/), so the
+    # experimental lister surfaces nothing for it.
+    with mock.patch.object(
+        experimental_flow_config.FlowConfig, "DIRECTORY_PATH", tmp_path / "empty"
+    ):
+        ids = {c["flow_identifier"] for c in experimental_flow_config.list_configs()}
+    assert "moved_flow" not in ids
+
+
+_EXPERIMENTAL_YAML = (
+    'version: "experimental"\n'
+    "environment: ambient\n"
+    'name: "{name}"\n'
+    "components: []\n"
+    "routers: []\n"
+    "flow:\n"
+    '  entry_point: "x"\n'
+)
+
+
+def _write_experimental_flow(
+    features_dir: Path, domain: str, feature: str, version: str
+) -> Path:
+    config_dir = features_dir / domain / feature / "config" / "experimental"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / f"{version}.yml").write_text(_EXPERIMENTAL_YAML.format(name=feature))
+    return config_dir
+
+
+class TestExperimentalSubfolder:
+    """Each tier reads its own ``config/`` subfolder; the folder picks the tier.
+
+    v1 lives in ``config/``; experimental in ``config/experimental/``. The listers
+    are unchanged — each tier's ``feature_config_roots()`` points at its own dir,
+    and the non-recursive glob keeps them apart. Same flow id and semver can exist
+    in both tiers without clashing.
+    """
+
+    def test_base_class_has_no_feature_roots(self):
+        # BaseFlowConfig sets FEATURE_CONFIG_SUBDIR = None, so it owns no roots.
+        assert flow_config.BaseFlowConfig.feature_config_roots() == {}
+
+    def test_experimental_tier_sees_its_subfolder(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        _write_experimental_flow(features, "security", "exp_flow", "1.0.0")
+        flow_config.discover_feature_flow_configs(features)
+
+        roots = experimental_flow_config.FlowConfig.feature_config_roots()
+        assert "exp_flow" in roots
+        assert roots["exp_flow"].name == "experimental"
+
+    def test_v1_tier_does_not_see_the_experimental_subfolder(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        _write_experimental_flow(features, "security", "exp_only", "1.0.0")
+        flow_config.discover_feature_flow_configs(features)
+
+        # The feature's config/ dir exists (it holds experimental/), so it is a
+        # v1 root, but it has no v1 *.yml, so the v1 lister surfaces nothing.
+        with mock.patch.object(
+            flow_config.FlowConfig, "DIRECTORY_PATH", tmp_path / "empty"
+        ):
+            ids = {c["flow_identifier"] for c in flow_config.list_configs()}
+        assert "exp_only" not in ids
+
+    def test_experimental_tier_does_not_see_v1_configs(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        _write_flow(features, "insights", "v1_only", "1.0.0")
+        flow_config.discover_feature_flow_configs(features)
+
+        # The experimental root points at config/experimental/, which does not
+        # exist for a v1-only feature, so the experimental lister surfaces nothing.
+        with mock.patch.object(
+            experimental_flow_config.FlowConfig, "DIRECTORY_PATH", tmp_path / "empty"
+        ):
+            ids = {
+                c["flow_identifier"] for c in experimental_flow_config.list_configs()
+            }
+        assert "v1_only" not in ids
+
+    def test_both_tiers_coexist_with_the_same_id_and_semver(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        _write_flow(features, "security", "shared", "1.0.0")  # config/1.0.0.yml (v1)
+        _write_experimental_flow(
+            features, "security", "shared", "1.0.0"
+        )  # .../experimental/1.0.0.yml
+        flow_config.discover_feature_flow_configs(features)
+
+        with mock.patch.object(
+            flow_config.FlowConfig, "DIRECTORY_PATH", tmp_path / "empty"
+        ):
+            v1_cfg = flow_config.FlowConfig.from_yaml_config("shared", "1.0.0")
+        with mock.patch.object(
+            experimental_flow_config.FlowConfig, "DIRECTORY_PATH", tmp_path / "empty"
+        ):
+            exp_cfg = experimental_flow_config.FlowConfig.from_yaml_config(
+                "shared", "1.0.0"
+            )
+
+        assert v1_cfg.version == "v1"
+        assert exp_cfg.version == "experimental"
+        assert v1_cfg.config_version == exp_cfg.config_version == "1.0.0"
+
+    def test_experimental_lister_surfaces_only_its_tier(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        _write_flow(features, "security", "mixed", "1.0.0")
+        _write_experimental_flow(features, "security", "mixed", "2.0.0")
+        flow_config.discover_feature_flow_configs(features)
+
+        with mock.patch.object(
+            experimental_flow_config.FlowConfig, "DIRECTORY_PATH", tmp_path / "empty"
+        ):
+            listed = {
+                (c["flow_identifier"], c["flow_version"], c["version"])
+                for c in experimental_flow_config.list_configs()
+            }
+
+        assert listed == {("mixed", "2.0.0", "experimental")}
+
+    def test_wrong_tier_in_subfolder_fails_to_load(self, tmp_path: Path):
+        # A file placed under config/experimental/ that declares version: v1 is
+        # rejected by the experimental tier's Literal — the folder and the field
+        # must agree.
+        features = tmp_path / "ai" / "features"
+        config_dir = features / "security" / "bad" / "config" / "experimental"
+        config_dir.mkdir(parents=True)
+        (config_dir / "1.0.0.yml").write_text(_YAML.format(name="bad"))  # version: v1
+        flow_config.discover_feature_flow_configs(features)
+
+        with mock.patch.object(
+            experimental_flow_config.FlowConfig, "DIRECTORY_PATH", tmp_path / "empty"
+        ):
+            with pytest.raises(ValidationError):
+                experimental_flow_config.FlowConfig.from_yaml_config("bad", "1.0.0")

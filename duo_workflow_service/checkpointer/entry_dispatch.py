@@ -74,6 +74,7 @@ async def rails_status_dispatch(
 
     if status in [
         WorkflowStatusEnum.INPUT_REQUIRED,
+        WorkflowStatusEnum.IDLE,
         WorkflowStatusEnum.PLAN_APPROVAL_REQUIRED,
         WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED,
     ]:
