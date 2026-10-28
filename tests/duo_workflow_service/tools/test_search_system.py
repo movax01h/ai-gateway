@@ -86,7 +86,9 @@ class TestGrep:
         ),
     ]
 
-    def _setup_grep_tool_with_mocks(self, mock_response: str) -> Grep:
+    def _setup_grep_tool_with_mocks(
+        self, mock_response: str, tool_class: type[Grep] = Grep
+    ) -> Grep:
         """Helper method to set up Grep tool with mocked outbox.
 
         Args:
@@ -101,7 +103,7 @@ class TestGrep:
         )
 
         metadata = {"outbox": mock_outbox}
-        grep_tool = Grep()
+        grep_tool = tool_class()
         grep_tool.metadata = metadata
 
         return grep_tool
@@ -151,6 +153,50 @@ class TestGrep:
         )
 
         assert result == "Searching above the current directory is not allowed"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_class", [Grep, GrepLiteral])
+    @pytest.mark.parametrize(
+        "keywords,expected_pattern",
+        [
+            pytest.param("foo,", "foo", id="trailing_comma"),
+            pytest.param("a,,b", "a,b", id="double_comma"),
+            pytest.param("a, b", "a,b", id="space_after_comma"),
+            pytest.param(" foo bar , baz ", "foo bar,baz", id="internal_space_kept"),
+            pytest.param("foo  bar,baz", "foo  bar,baz", id="inner_double_space_kept"),
+        ],
+    )
+    async def test_grep_normalizes_search_terms(
+        self, tool_class, keywords, expected_pattern
+    ):
+        grep_tool = self._setup_grep_tool_with_mocks("test.py:1:foo", tool_class)
+
+        await grep_tool._arun(keywords=keywords)
+
+        outbox = grep_tool.metadata["outbox"]
+        action = outbox.put_action_and_wait_for_response.call_args[0][0]
+        assert action.grep.pattern == expected_pattern
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_class", [Grep, GrepLiteral])
+    @pytest.mark.parametrize("keywords", ["", ",", " , ,"])
+    async def test_grep_rejects_empty_search_terms(self, tool_class, keywords):
+        grep_tool = self._setup_grep_tool_with_mocks("test.py:1:foo", tool_class)
+
+        result = await grep_tool._arun(keywords=keywords)
+
+        assert result == "No search terms given"
+        outbox = grep_tool.metadata["outbox"]
+        outbox.put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_class", [Grep, GrepLiteral])
+    async def test_grep_no_matches_message_shows_cleaned_terms(self, tool_class):
+        grep_tool = self._setup_grep_tool_with_mocks("", tool_class)
+
+        result = await grep_tool._arun(keywords="a, b")
+
+        assert result == "No matches found for pattern 'a,b' in '.'."
 
 
 def test_grep_format_display_message():
