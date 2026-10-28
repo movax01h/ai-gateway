@@ -40,7 +40,10 @@ from duo_workflow_service.entities.state import (
     ChatWorkflowState,
     UiChatLog,
 )
-from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.errors.typing import (
+    NotifiableException,
+    ToolApprovalUnavailableError,
+)
 from duo_workflow_service.tools.toolset import Toolset
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.chat.commands import (
@@ -481,6 +484,9 @@ async def test_workflow_run(
                 web_search_enabled=False,
                 web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
+                allow_agent_to_request_user=workflow._workflow_config.get(
+                    "allow_agent_to_request_user", True
+                ),
             )
 
             # The workflow's own tracker must be bound to this workflow's identity
@@ -572,6 +578,9 @@ async def test_workflow_run_with_agent_name_override(
                 web_search_enabled=False,
                 web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
+                allow_agent_to_request_user=workflow._workflow_config.get(
+                    "allow_agent_to_request_user", True
+                ),
             )
 
 
@@ -1226,6 +1235,23 @@ async def test_handle_workflow_failure(mock_log_exception, workflow_with_project
             "source": "duo_workflow_service.workflows.chat.workflow",
         },
     )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.workflows.chat.workflow.log_workflow_failure")
+async def test_handle_workflow_failure_logs_notifiable_internal_detail(
+    mock_log_exception, workflow_with_project
+):
+    """The halt's internal_detail (the unapproved tool names) must reach the chat logs too, matching the software-
+    development and v1 failure handlers."""
+    error = ToolApprovalUnavailableError(["run_command"])
+
+    await workflow_with_project._handle_workflow_failure(
+        error=error, compiled_graph=MagicMock(), graph_config=MagicMock()
+    )
+
+    _, kwargs = mock_log_exception.call_args
+    assert kwargs["extra"]["internal_detail"] == error.internal_detail
 
 
 @pytest.mark.asyncio

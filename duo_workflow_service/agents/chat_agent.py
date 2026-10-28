@@ -53,7 +53,11 @@ from duo_workflow_service.entities.state import (
     UiChatLog,
     WorkflowStatusEnum,
 )
-from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.errors.typing import (
+    NotifiableAgentException,
+    NotifiableException,
+    ToolApprovalUnavailableError,
+)
 from duo_workflow_service.gitlab.gitlab_instance_info_service import (
     GitLabInstanceInfoService,
 )
@@ -139,6 +143,7 @@ class ChatAgent:
         manual_compactor: CompactionOptimizer | None = None,
         tracker: ToolEventTracker | None = None,
         web_search: WebSearchState = WebSearchState(),
+        allow_agent_to_request_user: bool = True,
     ):
         self.name = name
         self.prompt_adapter = prompt_adapter
@@ -149,6 +154,7 @@ class ChatAgent:
         self.toolset = toolset
         self._tracker = tracker
         self.web_search = web_search
+        self._allow_agent_to_request_user = allow_agent_to_request_user
 
     async def _get_approvals(
         self, message: AIMessage, preapproved_tools: List[str], state: ChatWorkflowState
@@ -190,7 +196,10 @@ class ChatAgent:
                 if call_id:
                     requested_ids.append(call_id)
 
-                if self._tracker:
+                # A session that cannot prompt never shows this request — the halt
+                # in _build_tool_response tracks UNAVAILABLE for these calls instead,
+                # so skip REQUESTED to avoid double-counting a prompt nobody saw.
+                if self._tracker and self._allow_agent_to_request_user:
                     self._tracker.track_tool_governance_event(
                         EventEnum.WORKFLOW_TOOL_APPROVAL_REQUESTED,
                         tool_name=tool_name,
@@ -471,6 +480,23 @@ class ChatAgent:
         ) = await self._get_approvals(agent_response, preapproved_tools, state)
 
         if len(agent_response.tool_calls) > 0 and tools_need_approval:
+            # A session that cannot prompt has no one to answer, so halt with an
+            # explicit error instead of parking in TOOL_CALL_APPROVAL_REQUIRED forever.
+            if not self._allow_agent_to_request_user:
+                requested = set(requested_ids)
+                tool_names = [
+                    call["name"]
+                    for call in agent_response.tool_calls
+                    if call.get("id") in requested
+                ]
+                if self._tracker:
+                    for tool_name in tool_names:
+                        self._tracker.track_tool_governance_event(
+                            EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+                            tool_name=tool_name,
+                        )
+                raise ToolApprovalUnavailableError(tool_names)
+
             result["status"] = WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
             result["ui_chat_log"].extend(approval_messages)
             # Persist which calls required a fresh decision so the approval-resume
@@ -792,6 +818,10 @@ class ChatAgent:
                     else ui_chat_logs
                 ),
             }
+        except NotifiableAgentException:
+            # The unanswerable-approval halt carries its own safe UI message; let it
+            # propagate instead of masking it with the generic error response.
+            raise
         except Exception as error:
             log_exception(error, extra={"context": "Error processing chat agent"})
             return self._create_error_response(error)

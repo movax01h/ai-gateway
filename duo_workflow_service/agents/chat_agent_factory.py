@@ -58,6 +58,7 @@ def create_agent(
     web_search_enabled: bool = False,
     web_search_allowed_for_group: bool = False,
     tracker: ToolEventTracker | None = None,
+    allow_agent_to_request_user: bool = True,
 ) -> ChatAgent:
     # Use agent_name_override for chat-partial flows, default to "chat"
     agent_name = agent_name_override if agent_name_override else "chat"
@@ -115,4 +116,5 @@ def create_agent(
         manual_compactor=manual_compactor,
         tracker=tracker,
         web_search=web_search,
+        allow_agent_to_request_user=allow_agent_to_request_user,
     )
