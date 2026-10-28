@@ -46,7 +46,10 @@ from duo_workflow_service.entities.state import (
     _conversation_history_reducer,
     _ui_chat_log_reducer,
 )
-from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.errors.typing import (
+    NotifiableException,
+    ToolApprovalUnavailableError,
+)
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -62,6 +65,7 @@ from lib.context.approval_sources import (
 )
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.event_enum import EventEnum
 from tests.duo_workflow_service.ui_chat_log_contract import (
     assert_client_valid_tool_info,
 )
@@ -983,6 +987,118 @@ async def test_mixed_tool_calls_approval_only_for_requiring_tools(input, mock_to
     assert len(approval_messages) == 1
     assert approval_messages[0]["tool_info"]["name"] == "tool_requiring_approval"
     assert approval_messages[0]["tool_info"]["args"] == {"param": "value2"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_tracker", [True, False])
+async def test_unanswerable_approval_halts_when_session_cannot_prompt(
+    input, mock_toolset, with_tracker
+):
+    """A session that cannot prompt (allow_agent_to_request_user=False) halts with ToolApprovalUnavailableError instead
+    of parking in TOOL_CALL_APPROVAL_REQUIRED, with or without a tracker wired.
+
+    The prompt is never shown, so a wired tracker must emit only UNAVAILABLE — a REQUESTED event here
+    would double-count the halt against the approval metrics (mirrors the v1 node's
+    ``test_unanswerable_approval_does_not_request_approval``).
+    """
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    # None = a fresh human decision is required for this tool.
+    mock_toolset.resolve_approval_source = AsyncMock(return_value=None)
+    mock_tracker = Mock(spec=ToolEventTracker) if with_tracker else None
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+        tracker=mock_tracker,
+        allow_agent_to_request_user=False,
+    )
+
+    ai_message = AIMessage(
+        content="I need a tool",
+        tool_calls=[
+            {
+                "name": "tool_requiring_approval",
+                "args": {"param": "value"},
+                "id": "call_1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    with pytest.raises(ToolApprovalUnavailableError) as exc_info:
+        await chat_agent.run(input)
+
+    assert exc_info.value.tool_names == ["tool_requiring_approval"]
+
+    if mock_tracker:
+        mock_tracker.track_tool_governance_event.assert_called_once_with(
+            EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+            tool_name="tool_requiring_approval",
+        )
+
+
+@pytest.mark.asyncio
+async def test_unanswerable_halt_skips_preapproved_tools(input, mock_toolset):
+    """Only the calls that need a human are halted and counted: a preapproved sibling in the same batch must appear
+    neither in the error's tool names nor in the UNAVAILABLE events."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    # None = a fresh human decision is required (only consulted for the
+    # non-preapproved call; the preapproved one short-circuits the policy).
+    mock_toolset.resolve_approval_source = AsyncMock(return_value=None)
+    mock_tracker = Mock(spec=ToolEventTracker)
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+        tracker=mock_tracker,
+        allow_agent_to_request_user=False,
+    )
+
+    ai_message = AIMessage(
+        content="I need two tools",
+        tool_calls=[
+            {
+                "name": "preapproved_tool",
+                "args": {},
+                "id": "call_0",
+                "type": "tool_call",
+            },
+            {
+                "name": "tool_requiring_approval",
+                "args": {},
+                "id": "call_1",
+                "type": "tool_call",
+            },
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+    input["preapproved_tools"] = ["preapproved_tool"]
+
+    with pytest.raises(ToolApprovalUnavailableError) as exc_info:
+        await chat_agent.run(input)
+
+    assert exc_info.value.tool_names == ["tool_requiring_approval"]
+    mock_tracker.track_tool_governance_event.assert_called_once_with(
+        EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+        tool_name="tool_requiring_approval",
+    )
 
 
 @pytest.mark.asyncio

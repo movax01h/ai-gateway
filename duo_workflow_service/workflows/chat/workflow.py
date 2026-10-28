@@ -53,7 +53,10 @@ from duo_workflow_service.entities.state import (
     WorkflowStatusEnum,
     resolve_approval_attribution,
 )
-from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.errors.typing import (
+    NotifiableAgentException,
+    NotifiableException,
+)
 from duo_workflow_service.gitlab.gitlab_api import Checkpoint as GitLabCheckpoint
 from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_workflow_failure
@@ -888,6 +891,9 @@ class Workflow(AbstractWorkflow):
             web_search_enabled=web_search_enabled,
             web_search_allowed_for_group=web_search_allowed_for_group,
             tracker=self._tracker,
+            allow_agent_to_request_user=self._workflow_config.get(
+                "allow_agent_to_request_user", True
+            ),
         )
 
         tools_runner = ToolsExecutor(
@@ -1031,9 +1037,13 @@ class Workflow(AbstractWorkflow):
     async def _handle_workflow_failure(
         self, error: BaseException, compiled_graph: Any, graph_config: Any
     ):
-        log_workflow_failure(
-            error, extra={"workflow_id": self._workflow_id, "source": __name__}
-        )
+        extra = {"workflow_id": self._workflow_id, "source": __name__}
+        # The halt's unapproved tool names travel in internal_detail; without this
+        # the chat logs hold no record of which tools halted the run, unlike the
+        # software-development and v1 handlers.
+        if isinstance(error, NotifiableAgentException) and error.internal_detail:
+            extra["internal_detail"] = error.internal_detail
+        log_workflow_failure(error, extra=extra)
 
     @override
     def _support_namespace_level_workflow(self) -> bool:
