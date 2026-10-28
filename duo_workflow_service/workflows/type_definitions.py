@@ -38,11 +38,15 @@ OUTGOING_MESSAGE_TOO_LARGE = "OUTGOING_MESSAGE_TOO_LARGE"
 # goal).  Sessions that never reconnect are eventually reaped by Rails'
 # FailStuckWorkflowsWorker and land as `failed`, which is the accurate terminal state
 # for an infra interruption that was never recovered.
+#
+# WORKHORSE_RUN_LIMIT is sent when a detached server-side run reaches Workhorse's run
+# time limit, which sits below the one-hour cap on a DWS stream.
 INFRA_STOP_REASONS = frozenset(
     {
         "WORKHORSE_SERVER_SHUTDOWN",
         "WORKHORSE_WEBSOCKET_PING_FAILED",
         "WORKHORSE_WEBSOCKET_PONG_TIMEOUT",
+        "WORKHORSE_RUN_LIMIT",
     }
 )
 
@@ -50,9 +54,12 @@ INFRA_STOP_REASONS = frozenset(
 DWS_SERVER_SHUTDOWN_STOP_REASON = "DWS_SERVER_SHUTDOWN"
 
 # Stop reasons for which the RPC returns UNAVAILABLE so Workhorse retries the session on another instance.
+# WORKHORSE_RUN_LIMIT is here for the acknowledgment alone: Workhorse's stop handshake only treats
+# UNAVAILABLE as the ack, and would otherwise wait out its stop timeout.
 SERVER_SHUTDOWN_STOP_REASONS = frozenset(
     {
         "WORKHORSE_SERVER_SHUTDOWN",
+        "WORKHORSE_RUN_LIMIT",
         DWS_SERVER_SHUTDOWN_STOP_REASON,
     }
 )

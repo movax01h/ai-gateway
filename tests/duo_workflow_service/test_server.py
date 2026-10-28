@@ -1345,6 +1345,13 @@ def _cyclic_error() -> BaseException:
             "workflow execution stopped",
         ),
         (
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+            False,
+            "WORKHORSE_RUN_LIMIT",
+            grpc.StatusCode.UNAVAILABLE,
+            "workflow execution interrupted:",
+        ),
+        (
             ValueError("Some error"),
             False,
             None,
@@ -6298,6 +6305,10 @@ def test_extract_error_message_api_connection_error_token_normalization_still_ap
         ),
         (
             "WORKHORSE_WEBSOCKET_PONG_TIMEOUT",
+            AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
+        ),
+        (
+            "WORKHORSE_RUN_LIMIT",
             AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
         ),
         (

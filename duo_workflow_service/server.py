@@ -994,8 +994,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 context.set_details("workflow already finished")
             elif AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST in str(workflow.last_error):
                 # Infrastructure-initiated stop. UNAVAILABLE is the code Workhorse
-                # treats as "the session is resumable": for its own pod drain it is
-                # the ack its stop handshake waits for, and for a DWS drain it makes
+                # treats as "the session is resumable": for its own pod drain or run
+                # limit it is the ack its stop handshake waits for, and for a DWS drain it makes
                 # Workhorse send CloseGoingAway (1001) so the client reconnects and
                 # resumes from the last checkpoint. Workhorse never retries the gRPC
                 # call itself. Other infra stops (e.g. WebSocket ping failure) return OK.
