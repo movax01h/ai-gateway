@@ -4550,7 +4550,7 @@ def test_serialize_channel_blobs_includes_scalar_channels():
         }
     )
 
-    blobs, is_compaction = _serialize_channel_blobs(checkpoint, new_versions, {})
+    blobs, rewritten = _serialize_channel_blobs(checkpoint, new_versions, {})
 
     by_channel = {b["channel"]: b for b in blobs}
     assert set(by_channel) == {
@@ -4559,7 +4559,7 @@ def test_serialize_channel_blobs_includes_scalar_channels():
         "goal",
         "branch:to:build_context",
     }
-    assert is_compaction is False
+    assert not rewritten
 
     for blob in blobs:
         assert blob["write_type"] == "json"
@@ -4569,11 +4569,10 @@ def test_serialize_channel_blobs_includes_scalar_channels():
 
 
 def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
-    """Status blobs must carry step_action='compaction' and must not set is_compaction.
+    """Status blobs must carry step_action='compaction' and must not be reported as rewritten.
 
     status is a scalar channel so it bypasses the list/dict delta branches entirely. This means it always serialises as
-    a full replacement (step_action='compaction') and a status-only change must not trigger is_compaction=True (which
-    would incorrectly bump current_thread).
+    a full replacement (step_action='compaction') and never appears in the rewritten set.
     """
     checkpoint = {
         "id": "ckpt1",
@@ -4584,7 +4583,7 @@ def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
     new_versions = ChannelVersions({"status": "2.0"})
     prev_channel_values = {"status": "waiting"}
 
-    blobs, is_compaction = _serialize_channel_blobs(
+    blobs, rewritten = _serialize_channel_blobs(
         checkpoint, new_versions, prev_channel_values
     )
 
@@ -4593,8 +4592,7 @@ def test_serialize_channel_blobs_status_always_compaction_and_no_thread_bump():
     assert status_blob["channel"] == "status"
     # Scalar path always produces a full replacement, never a delta
     assert status_blob["step_action"] == "compaction"
-    # A status-only change must NOT set is_compaction — that would incorrectly bump current_thread
-    assert is_compaction is False
+    assert not rewritten
 
 
 def test_serialize_channel_blobs_list_delta():
@@ -4629,12 +4627,12 @@ def test_serialize_channel_blobs_list_unchanged_skips():
     new_versions = ChannelVersions({"messages": "2.0"})
     prev_channel_values = {"messages": ["a", "b"]}
 
-    blobs, is_compaction = _serialize_channel_blobs(
+    blobs, rewritten = _serialize_channel_blobs(
         checkpoint, new_versions, prev_channel_values
     )
 
     assert not blobs
-    assert not is_compaction
+    assert not rewritten
 
 
 def test_serialize_channel_blobs_list_shrink_stores_full():
@@ -4645,11 +4643,11 @@ def test_serialize_channel_blobs_list_shrink_stores_full():
     new_versions = ChannelVersions({"messages": "4.0"})
     prev_channel_values = {"messages": ["a", "b", "c"]}
 
-    blobs, is_compaction = _serialize_channel_blobs(
+    blobs, rewritten = _serialize_channel_blobs(
         checkpoint, new_versions, prev_channel_values
     )
 
-    assert is_compaction
+    assert rewritten == {"messages"}
     assert len(blobs) == 1
     val = _decode_blob(blobs[0])
     assert val == ["a"]
@@ -4701,11 +4699,11 @@ def test_serialize_channel_blobs_compaction_stores_full_value():
     }
     new_versions = ChannelVersions({"conversation_history": "3.0"})
 
-    blobs, is_compaction = _serialize_channel_blobs(
+    blobs, rewritten = _serialize_channel_blobs(
         checkpoint, new_versions, prev_channel_values
     )
 
-    assert is_compaction
+    assert rewritten == {"conversation_history"}
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
     val = _decode_blob(blobs[0])
@@ -4722,11 +4720,11 @@ def test_serialize_channel_blobs_dict_same_length_rewrite_is_compaction():
     }
     new_versions = ChannelVersions({"conversation_history": "3.0"})
 
-    blobs, is_compaction = _serialize_channel_blobs(
+    blobs, rewritten = _serialize_channel_blobs(
         checkpoint, new_versions, prev_channel_values
     )
 
-    assert is_compaction
+    assert rewritten == {"conversation_history"}
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
 
@@ -4747,13 +4745,13 @@ def test_serialize_channel_blobs_dict_channel_dropped_key_stores_full():
     }
     new_versions = ChannelVersions({"last_human_input": "2.0"})
 
-    blobs, is_compaction = _serialize_channel_blobs(
+    blobs, rewritten = _serialize_channel_blobs(
         checkpoint, new_versions, prev_channel_values
     )
 
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
-    assert is_compaction
+    assert rewritten == {"last_human_input"}
     assert _decode_blob(blobs[0]) == {
         "id": "2",
         "message": "go",
@@ -4768,14 +4766,14 @@ def test_serialize_channel_blobs_force_rewrite_bypasses_delta():
     new_versions = ChannelVersions({"messages": "2.0"})
     prev_channel_values = {"messages": ["a", "b"]}
 
-    blobs, is_compaction = _serialize_channel_blobs(
+    blobs, rewritten = _serialize_channel_blobs(
         checkpoint,
         new_versions,
         prev_channel_values,
         force_rewrite=True,
     )
 
-    assert not is_compaction
+    assert not rewritten
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "compaction"
     val = _decode_blob(blobs[0])
@@ -4789,11 +4787,11 @@ def test_serialize_channel_blobs_conversation_sends_delta():
     }
     new_versions = ChannelVersions({"messages": "3.0"})
 
-    blobs, is_compaction = _serialize_channel_blobs(
+    blobs, rewritten = _serialize_channel_blobs(
         checkpoint, new_versions, {"messages": ["a", "b"]}
     )
 
-    assert not is_compaction
+    assert not rewritten
     assert len(blobs) == 1
     assert blobs[0]["step_action"] == "conversation"
     val = _decode_blob(blobs[0])
@@ -5105,34 +5103,34 @@ async def test_aput_increments_thread_id_on_compaction(
 
     # Normal conversation step — thread_id stays 0
     checkpoint["id"] = "ckpt-1"
-    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    checkpoint["channel_values"]["ui_chat_log"] = [{"id": "a"}, {"id": "b"}]
     await gitlab_workflow.aput(
         {"configurable": {"checkpoint_id": None}},
         checkpoint,
         checkpoint_metadata,
-        ChannelVersions({"messages": "1.0"}),
+        ChannelVersions({"ui_chat_log": "1.0"}),
     )
     assert json.loads(http_client.apost.call_args[1]["body"])["current_thread"] == 0
 
     # Compaction step: list shrank — thread_id increments to 1
     checkpoint["id"] = "ckpt-2"
-    checkpoint["channel_values"]["messages"] = ["summary"]
+    checkpoint["channel_values"]["ui_chat_log"] = [{"id": "summary"}]
     await gitlab_workflow.aput(
         {"configurable": {"checkpoint_id": "ckpt-1"}},
         checkpoint,
         checkpoint_metadata,
-        ChannelVersions({"messages": "2.0"}),
+        ChannelVersions({"ui_chat_log": "2.0"}),
     )
     assert json.loads(http_client.apost.call_args[1]["body"])["current_thread"] == 1
 
     # Subsequent conversation step — thread_id stays 1
     checkpoint["id"] = "ckpt-3"
-    checkpoint["channel_values"]["messages"] = ["summary", "new_msg"]
+    checkpoint["channel_values"]["ui_chat_log"] = [{"id": "summary"}, {"id": "new_msg"}]
     await gitlab_workflow.aput(
         {"configurable": {"checkpoint_id": "ckpt-2"}},
         checkpoint,
         checkpoint_metadata,
-        ChannelVersions({"messages": "3.0"}),
+        ChannelVersions({"ui_chat_log": "3.0"}),
     )
     assert json.loads(http_client.apost.call_args[1]["body"])["current_thread"] == 1
 
@@ -5156,35 +5154,160 @@ async def test_aput_compaction_reseeds_all_channels_as_full_snapshot(
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
     # Group 0: both channels seeded.
     checkpoint["id"] = "ckpt-1"
-    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    checkpoint["channel_values"]["ui_chat_log"] = [{"id": "a"}, {"id": "b"}]
     await gitlab_workflow.aput(
         {"configurable": {"checkpoint_id": None}},
         checkpoint,
         checkpoint_metadata,
-        ChannelVersions({"messages": "1.0", "conversation_history": "1.0"}),
+        ChannelVersions({"ui_chat_log": "1.0", "conversation_history": "1.0"}),
     )
 
-    # Compaction: messages shrinks; conversation_history is unchanged this step.
+    # Compaction: ui_chat_log shrinks; conversation_history is unchanged this step.
     checkpoint["id"] = "ckpt-2"
-    checkpoint["channel_values"]["messages"] = ["summary"]
-    checkpoint["channel_versions"] = {"messages": "2.0", "conversation_history": "1.0"}
+    checkpoint["channel_values"]["ui_chat_log"] = [{"id": "summary"}]
+    checkpoint["channel_versions"] = {
+        "ui_chat_log": "2.0",
+        "conversation_history": "1.0",
+    }
     await gitlab_workflow.aput(
         {"configurable": {"checkpoint_id": "ckpt-1"}},
         checkpoint,
         checkpoint_metadata,
-        ChannelVersions({"messages": "2.0"}),
+        ChannelVersions({"ui_chat_log": "2.0"}),
     )
 
     body = json.loads(http_client.apost.call_args[1]["body"])
     assert body["current_thread"] == 1
     by_channel = {b["channel"]: b for b in body["channel_blobs"]}
     # Both channels re-seeded, not just the one that compacted.
-    assert set(by_channel) == {"messages", "conversation_history"}
+    assert set(by_channel) == {"ui_chat_log", "conversation_history"}
     assert all(b["step_action"] == "compaction" for b in body["channel_blobs"])
-    assert _decode_blob(by_channel["messages"]) == ["summary"]
+    assert _decode_blob(by_channel["ui_chat_log"]) == [{"id": "summary"}]
     # The unchanged channel carries its full value, not an empty delta.
     ch_val = _decode_blob(by_channel["conversation_history"])
     assert len(ch_val["planner"]) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("channel", "before", "after"),
+    [
+        pytest.param("tool_call_approval_requested", ["call-1"], ["call-2"], id="list"),
+        pytest.param(
+            "plan",
+            {"steps": [{"id": "1", "status": "Not Started"}]},
+            {"steps": [{"id": "1", "status": "Completed"}]},
+            id="dict",
+        ),
+    ],
+)
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_non_history_rewrite_stays_in_group(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+    channel,
+    before,
+    after,
+):
+    """A rewrite outside the history channels sends only that channel's compaction blob and keeps current_thread."""
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"][channel] = before
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({"conversation_history": "1.0", channel: "1.0"}),
+    )
+
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"][channel] = after
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-1"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions({channel: "2.0"}),
+    )
+
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 0
+    assert [(b["channel"], b["step_action"]) for b in body["channel_blobs"]] == [
+        (channel, "compaction")
+    ]
+    assert _decode_blob(body["channel_blobs"][0]) == after
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.checkpointer.gitlab_workflow.duo_workflow_metrics")
+async def test_aput_approval_step_keeps_history_deltas(
+    _mock_duo_workflow_metrics,
+    incremental_enabled,
+    gitlab_workflow,
+    http_client,
+    checkpoint_data,
+    checkpoint_metadata,
+):
+    """A second approval prompt rewrites tool_call_approval_requested in the same step that appends to the history.
+
+    The history channels keep their deltas, so readers that skip later dict snapshots still see the appended message.
+    """
+    checkpoint = checkpoint_data[0]["checkpoint"]
+    http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
+    channels = (
+        "conversation_history",
+        "ui_chat_log",
+        "tool_call_approval_requested",
+        "status",
+    )
+
+    checkpoint["id"] = "ckpt-1"
+    checkpoint["channel_values"].update(
+        {
+            "conversation_history": {"chat": ["human", "ai-call-1"]},
+            "ui_chat_log": [{"id": "a"}],
+            "tool_call_approval_requested": ["call-1"],
+            "status": "TOOL_CALL_APPROVAL_REQUIRED",
+        }
+    )
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": None}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions(dict.fromkeys(channels, "1.0")),
+    )
+
+    checkpoint["id"] = "ckpt-2"
+    checkpoint["channel_values"].update(
+        {
+            "conversation_history": {"chat": ["human", "ai-call-1", "ai-call-2"]},
+            "ui_chat_log": [{"id": "a"}, {"id": "b"}],
+            "tool_call_approval_requested": ["call-2"],
+            "status": "RUNNING",
+        }
+    )
+    await gitlab_workflow.aput(
+        {"configurable": {"checkpoint_id": "ckpt-1"}},
+        checkpoint,
+        checkpoint_metadata,
+        ChannelVersions(dict.fromkeys(channels, "2.0")),
+    )
+
+    body = json.loads(http_client.apost.call_args[1]["body"])
+    assert body["current_thread"] == 0
+    assert {
+        b["channel"]: (b["step_action"], _decode_blob(b)) for b in body["channel_blobs"]
+    } == {
+        "conversation_history": ("conversation", {"chat": ["ai-call-2"]}),
+        "ui_chat_log": ("conversation", [{"id": "b"}]),
+        "tool_call_approval_requested": ("compaction", ["call-2"]),
+        "status": ("compaction", "RUNNING"),
+    }
 
 
 _CHAT_LOG_E1 = {"message_id": "e1"}
@@ -5200,7 +5323,7 @@ async def _chat_log_blobs_at_group_start(
     parent_id: str,
     chat_log: list[dict[str, str]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Save a first checkpoint, then a group start where ``messages`` compacts.
+    """Save a first checkpoint, then a group start where ``conversation_history`` compacts.
 
     Returns the ui_chat_log blobs of each save, in payload order.
     """
@@ -5212,26 +5335,32 @@ async def _chat_log_blobs_at_group_start(
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
 
     checkpoint["id"] = "ckpt-1"
-    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    checkpoint["channel_values"]["conversation_history"] = {"chat": ["a", "b"]}
     checkpoint["channel_values"]["ui_chat_log"] = [_CHAT_LOG_E1]
-    checkpoint["channel_versions"] = {"messages": "1.0", "ui_chat_log": "1.0"}
+    checkpoint["channel_versions"] = {
+        "conversation_history": "1.0",
+        "ui_chat_log": "1.0",
+    }
     await gitlab_workflow.aput(
         {"configurable": {"checkpoint_id": None}},
         checkpoint,
         checkpoint_metadata,
-        ChannelVersions({"messages": "1.0", "ui_chat_log": "1.0"}),
+        ChannelVersions({"conversation_history": "1.0", "ui_chat_log": "1.0"}),
     )
     first_blobs = chat_log_blobs()
 
     checkpoint["id"] = "ckpt-2"
-    checkpoint["channel_values"]["messages"] = ["summary"]
+    checkpoint["channel_values"]["conversation_history"] = {"chat": ["summary"]}
     checkpoint["channel_values"]["ui_chat_log"] = chat_log
-    checkpoint["channel_versions"] = {"messages": "2.0", "ui_chat_log": "2.0"}
+    checkpoint["channel_versions"] = {
+        "conversation_history": "2.0",
+        "ui_chat_log": "2.0",
+    }
     await gitlab_workflow.aput(
         {"configurable": {"checkpoint_id": parent_id}},
         checkpoint,
         checkpoint_metadata,
-        ChannelVersions({"messages": "2.0", "ui_chat_log": "2.0"}),
+        ChannelVersions({"conversation_history": "2.0", "ui_chat_log": "2.0"}),
     )
     return first_blobs, chat_log_blobs()
 
@@ -5505,24 +5634,24 @@ async def test_aput_failed_post_at_group_boundary_keeps_state(
 
     http_client.apost.return_value = GitLabHttpResponse(status_code=200, body={})
     checkpoint["id"] = "ckpt-1"
-    checkpoint["channel_values"]["messages"] = ["a", "b"]
+    checkpoint["channel_values"]["ui_chat_log"] = [{"id": "a"}, {"id": "b"}]
     await gitlab_workflow.aput(
         {"configurable": {"checkpoint_id": None}},
         checkpoint,
         checkpoint_metadata,
-        ChannelVersions({"messages": "1.0"}),
+        ChannelVersions({"ui_chat_log": "1.0"}),
     )
 
-    # Compaction step (messages shrinks) — the POST is rejected.
+    # Compaction step (ui_chat_log shrinks) — the POST is rejected.
     http_client.apost.return_value = GitLabHttpResponse(status_code=500, body={})
     checkpoint["id"] = "ckpt-2"
-    checkpoint["channel_values"]["messages"] = ["summary"]
+    checkpoint["channel_values"]["ui_chat_log"] = [{"id": "summary"}]
     with pytest.raises(CheckpointSaveError, match="Failed to save checkpoint"):
         await gitlab_workflow.aput(
             {"configurable": {"checkpoint_id": "ckpt-1"}},
             checkpoint,
             checkpoint_metadata,
-            ChannelVersions({"messages": "2.0"}),
+            ChannelVersions({"ui_chat_log": "2.0"}),
         )
 
     # The attempted group start went to the wire with the bumped thread id...
@@ -5532,7 +5661,7 @@ async def test_aput_failed_post_at_group_boundary_keeps_state(
     state = _incremental_state(gitlab_workflow)
     assert state.current_thread == 0
     assert state.prev_checkpoint_id == "ckpt-1"
-    assert state.prev_channel_values["messages"] == ["a", "b"]
+    assert state.prev_channel_values["ui_chat_log"] == [{"id": "a"}, {"id": "b"}]
 
 
 @pytest.mark.asyncio

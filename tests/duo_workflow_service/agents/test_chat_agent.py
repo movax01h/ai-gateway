@@ -1554,11 +1554,11 @@ class TestChatAgentOptimizerPipeline:
         channel.update([response["conversation_history"]])
 
         checkpoint = {"channel_values": {"conversation_history": channel.checkpoint()}}
-        blobs, is_compaction = _serialize_channel_blobs(
+        blobs, rewritten = _serialize_channel_blobs(
             checkpoint, {"conversation_history": "2"}, aliased_baseline
         )
 
-        assert is_compaction
+        assert rewritten == {"conversation_history"}
         assert blobs[0]["step_action"] == "compaction"
 
     @pytest.mark.asyncio
@@ -1622,11 +1622,11 @@ class TestChatAgentOptimizerPipeline:
                 "ui_chat_log": ui_channel.checkpoint(),
             }
         }
-        blobs, is_compaction = _serialize_channel_blobs(
+        blobs, rewritten = _serialize_channel_blobs(
             checkpoint, {"conversation_history": "2", "ui_chat_log": "2"}, baseline
         )
 
-        assert is_compaction
+        assert rewritten == {"conversation_history", "ui_chat_log"}
         assert {b["step_action"] for b in blobs} == {"compaction"}
         assert len(ui_channel.get()) == 2
         assert ui_channel.get()[-1]["message_sub_type"] == "compaction"
