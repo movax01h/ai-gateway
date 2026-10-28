@@ -269,7 +269,7 @@ class AgentComponentBase(BaseComponent):
 
     max_cycles: Union[int, MaxCyclesConfig] = _DEFAULT_MAX_CYCLES
     max_wrap_up_retries: int = 3
-    identical_tool_call_limit: int = 3
+    identical_tool_call_limit: int = 0
     # Opt-in (per flow config): bind the provider-native web-search tool so the
     # agent can look up e.g. changelogs / migration guides. Still gated at runtime
     # by the dependency_bump_web_search flag and the client's "web_search"
