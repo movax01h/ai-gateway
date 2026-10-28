@@ -2,9 +2,6 @@
 # See docs/adding_and_moving_features.md. New versions inside a listed directory are fine.
 # Delete lines as features move to ai/features/. Never add lines.
 ai_gateway/prompts/definitions/agents_dot_md/base
-ai_gateway/prompts/definitions/analyze_prescan_codebase_results/base
-ai_gateway/prompts/definitions/analyze_prescan_codebase_results/system
-ai_gateway/prompts/definitions/analyze_prescan_codebase_results/user
 ai_gateway/prompts/definitions/categorize_question
 ai_gateway/prompts/definitions/categorize_question/base
 ai_gateway/prompts/definitions/chat/_library_section
@@ -150,9 +147,6 @@ ai_gateway/prompts/definitions/chat/write_tests/mistral
 ai_gateway/prompts/definitions/chat/write_tests/system
 ai_gateway/prompts/definitions/chat/write_tests/user
 ai_gateway/prompts/definitions/classify_goal_tier/base
-ai_gateway/prompts/definitions/code_review_prescan/base
-ai_gateway/prompts/definitions/code_review_prescan/system
-ai_gateway/prompts/definitions/code_review_prescan/user
 ai_gateway/prompts/definitions/code_suggestions/completions/base
 ai_gateway/prompts/definitions/code_suggestions/completions/codegemma
 ai_gateway/prompts/definitions/code_suggestions/completions/codellama
@@ -229,9 +223,6 @@ ai_gateway/prompts/definitions/create_repository_branch/user
 ai_gateway/prompts/definitions/ensure_clean_git_state/base
 ai_gateway/prompts/definitions/ensure_clean_git_state/system
 ai_gateway/prompts/definitions/ensure_clean_git_state/user
-ai_gateway/prompts/definitions/explore_directories_for_prescan/base
-ai_gateway/prompts/definitions/explore_directories_for_prescan/system
-ai_gateway/prompts/definitions/explore_directories_for_prescan/user
 ai_gateway/prompts/definitions/feature_discovery_search/base
 ai_gateway/prompts/definitions/feature_discovery_search/system
 ai_gateway/prompts/definitions/feature_discovery_search/user
@@ -319,9 +310,6 @@ ai_gateway/prompts/definitions/resolve_vulnerability/amazon_q
 ai_gateway/prompts/definitions/resolve_vulnerability/base
 ai_gateway/prompts/definitions/resolve_vulnerability/system
 ai_gateway/prompts/definitions/resolve_vulnerability/user
-ai_gateway/prompts/definitions/review_merge_request_dap/base
-ai_gateway/prompts/definitions/review_merge_request_dap/system
-ai_gateway/prompts/definitions/review_merge_request_dap/user
 ai_gateway/prompts/definitions/sast_fp_detection_agent_prompt/base
 ai_gateway/prompts/definitions/sast_fp_detection_agent_prompt/system
 ai_gateway/prompts/definitions/sast_fp_detection_agent_prompt/user
@@ -396,7 +384,6 @@ ai_gateway/prompts/definitions/workplan/partials/resolving_ambiguity
 ai_gateway/prompts/definitions/workspace_agent_skills/base
 duo_workflow_service/agent_platform/v1/flows/configs
 duo_workflow_service/agent_platform/v1/flows/configs/agentic_chat
-duo_workflow_service/agent_platform/v1/flows/configs/code_review
 duo_workflow_service/agent_platform/v1/flows/configs/convert_to_gl_ci
 duo_workflow_service/agent_platform/v1/flows/configs/duo_permissions_assistant
 duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline

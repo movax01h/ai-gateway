@@ -8,16 +8,29 @@ a forced placeholder publish.
 Parametrizes over every shipped config rather than a hardcoded list, so promoting a new version cannot skip the guards.
 """
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
+from duo_workflow_service.agent_platform.v1.flows import flow_config
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 
 FLOW = "code_review"
 
 
+@pytest.fixture(name="discover_flow_configs", autouse=True)
+def discover_flow_configs_fixture():
+    # The flow lives under ai/features/, which the service registers at startup.
+    # Restore the registry so tests that list flow configs never see these roots.
+    with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
+        flow_config.discover_feature_flow_configs()
+        yield
+
+
 def shipped_versions() -> list[str]:
     """Every version shipped for the flow, taken from the config filenames."""
-    config_dir = FlowConfig.DIRECTORY_PATH / FLOW
+    config_dir = Path(__file__).parent.parent / "config"
     return sorted(path.stem for path in config_dir.glob("*.yml"))
 
 
