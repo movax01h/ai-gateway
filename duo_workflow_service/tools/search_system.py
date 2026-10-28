@@ -74,6 +74,12 @@ class Grep(DuoBaseTool):
         if search_directory and ".." in search_directory:
             return "Searching above the current directory is not allowed"
 
+        # Executors split on ","; an empty term matches every line, and not all trim.
+        terms = [term.strip() for term in keywords.split(",")]
+        keywords = ",".join(term for term in terms if term)
+        if not keywords:
+            return "No search terms given"
+
         result = await _execute_action(
             self.metadata,  # type: ignore
             contract_pb2.Action(
@@ -107,8 +113,8 @@ class GrepLiteralInput(GrepInput):
     keywords: str = Field(
         description="A comma-separated list of literal strings to search for. Each one is matched"
         " literally, so punctuation is fine and no escaping is needed, but a comma cannot appear"
-        " inside a term because it separates them. Results pool every term together, so use one call"
-        " for terms you want ranked against each other and separate parallel calls for unrelated"
+        " inside a term because it separates them. Spaces around each term are ignored."
+        " Results pool every term together, so use one call for terms you want ranked against each other and separate parallel calls for unrelated"
         " questions. Examples: 'authentication,login,user_session' or 'LoginComponent,Dashboard'"
     )
 
