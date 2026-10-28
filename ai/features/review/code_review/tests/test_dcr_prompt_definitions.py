@@ -12,9 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-_PROMPTS_DEFINITIONS_DIR = (
-    Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
-)
+_REVIEW_FEATURES_DIR = Path(__file__).parent.parent.parent
 
 # Whether caching must stay disabled for each DCR prompt directory.
 # See https://gitlab.com/gitlab-org/gitlab/-/work_items/630239
@@ -30,7 +28,7 @@ def _collect_dcr_base_yaml_files() -> list[tuple[Path, bool]]:
     """Return each base YAML file of every DCR prompt directory, paired with whether caching must stay disabled."""
     files: list[tuple[Path, bool]] = []
     for prompt_dir, caching_disabled in _DCR_PROMPT_CACHING_DISABLED.items():
-        base_dir = _PROMPTS_DEFINITIONS_DIR / prompt_dir / "base"
+        base_dir = _REVIEW_FEATURES_DIR / prompt_dir / "prompts" / "base"
         files.extend((f, caching_disabled) for f in sorted(base_dir.glob("*.yml")))
     return files
 
@@ -46,7 +44,7 @@ def test_every_dcr_dir_has_base_yaml() -> None:
     is missing or contains no YAML files.
     """
     for prompt_dir in _DCR_PROMPT_CACHING_DISABLED:
-        base_dir = _PROMPTS_DEFINITIONS_DIR / prompt_dir / "base"
+        base_dir = _REVIEW_FEATURES_DIR / prompt_dir / "prompts" / "base"
         assert list(base_dir.glob("*.yml")), f"no base YAML under {prompt_dir}/base"
 
 
@@ -54,8 +52,7 @@ def test_every_dcr_dir_has_base_yaml() -> None:
     ("yaml_file", "caching_disabled"),
     _DCR_BASE_YAML_FILES,
     ids=[
-        f.relative_to(_PROMPTS_DEFINITIONS_DIR).as_posix()
-        for f, _ in _DCR_BASE_YAML_FILES
+        f.relative_to(_REVIEW_FEATURES_DIR).as_posix() for f, _ in _DCR_BASE_YAML_FILES
     ],
 )
 def test_dcr_prompt_cache_control_injection_points(
@@ -64,7 +61,7 @@ def test_dcr_prompt_cache_control_injection_points(
     """One-shot DCR prompts must set ``cache_control_injection_points: []``; looping ones must omit the key."""
     content = yaml.safe_load(yaml_file.read_text())
     params = content.get("params", {})
-    relative_path = yaml_file.relative_to(_PROMPTS_DEFINITIONS_DIR)
+    relative_path = yaml_file.relative_to(_REVIEW_FEATURES_DIR)
 
     if caching_disabled:
         assert params.get("cache_control_injection_points") == [], (
