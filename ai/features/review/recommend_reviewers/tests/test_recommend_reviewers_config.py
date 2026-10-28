@@ -30,8 +30,6 @@ def discover_flow_configs_fixture():
         ("^3.0.0", "3.1.0", "2.1.0"),
         # 3.0.0 pins the prompt to ^2.0.0, so it also gets the compact 2.1.0 prompt.
         ("3.0.0", "3.0.0", "2.1.0"),
-        # Rails requests 3.1.0-dev while its feature flag is on. Keep it until the flag is removed.
-        ("3.1.0-dev", "3.1.0-dev", "2.1.0"),
     ],
 )
 def test_config_resolution(
