@@ -173,9 +173,9 @@ class BlCollectAndFlatten(DuoBaseTool):
         "coverage. Deterministic, no LLM call."
     )
     args_schema: Type[BaseModel] = BlCollectAndFlattenInput
-    # Below 1.0.0 so ListTools does not publish it: it only runs inside
-    # the BL security flow.
+    # Below 1.0.0: not a stable tool.
     tool_version: ClassVar[Version] = Version("0.1.0")
+    allowed_flows: ClassVar[Optional[frozenset[str]]] = frozenset({"bl_security"})
     trust_level: ToolTrustLevel = ToolTrustLevel.TRUSTED_INTERNAL
     truncation_config: TruncationConfig = _NO_TRUNCATION
 

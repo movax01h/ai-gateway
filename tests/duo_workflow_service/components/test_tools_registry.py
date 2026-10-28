@@ -1,7 +1,7 @@
 # pylint: disable=too-many-lines
 import json
 import sys
-from typing import ClassVar
+from typing import ClassVar, Optional, Type
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,13 +14,16 @@ from contract import contract_pb2
 from duo_workflow_service import tools
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.components.tools_registry import (
+    _AGENT_PRIVILEGES,
     _CAPABILITY_DEPENDENT_TOOLS,
     _DEFAULT_TOOLS,
     _PREAPPROVED_CAPABILITY_TOOLS,
+    _READ_ONLY_GITLAB_TOOLS,
     NO_OP_TOOLS,
     Toolset,
     ToolsRegistry,
     _merge_feature_tools,
+    _reject_unchecked_allowed_flows,
     ceiling_exempt_tool_names,
     discover_feature_tools,
 )
@@ -42,6 +45,7 @@ from duo_workflow_service.tools.code_review.post_duo_code_review import (
     PostDuoCodeReview,
 )
 from duo_workflow_service.tools.command import RunCommand, ShellCommand
+from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.findings.get_security_finding_details import (
     GetSecurityFindingDetails,
 )
@@ -411,6 +415,7 @@ def test_registry_initialization(tool_metadata, config, expected_tools_set):
         preapproved_tools=[],
         tool_metadata=tool_metadata,
         mcp_tools=None,
+        registry_flow_id="bl_security",
     )
 
     assert set(registry._enabled_tools.keys()) == expected_tools_set
@@ -430,6 +435,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         preapproved_tools=[],
         tool_metadata=tool_metadata,
         mcp_tools=None,
+        registry_flow_id="bl_security",
     )
     expected_tools = {
         "ci_linter": tools.CiLinter(metadata=tool_metadata),
@@ -927,6 +933,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         enabled_tools=["read_write_files", "read_only_gitlab"],
         preapproved_tools=["read_write_files"],
         tool_metadata=tool_metadata,
+        registry_flow_id="bl_security",
     )
 
     # Default tools should always be in preapproved_tools
@@ -1023,6 +1030,7 @@ async def test_registry_configuration_with_preapproved_tools(
         gl_http_client=gl_http_client,
         outbox=_outbox,
         project=project_mock,
+        registry_flow_id="bl_security",
     )
 
     always_enabled_tools = {tool_cls.tool_title for tool_cls in NO_OP_TOOLS}
@@ -1355,6 +1363,28 @@ class TestUnavailableTools:
                 },
                 id="granting_privileges_union",
             ),
+            pytest.param(
+                # The privilege is enabled, but no privilege unlocks BLSA tools outside bl_security.
+                {
+                    "enabled_tools": ["read_write_files"],
+                    "registry_flow_id": "developer",
+                },
+                True,
+                ["bl_write_sast_report", "edit_file"],
+                {"flow_restricted_tools": ["bl_write_sast_report"]},
+                id="flow_restricted",
+            ),
+            pytest.param(
+                # Inside bl_security the real cause is the privilege.
+                {"enabled_tools": ["use_git"], "registry_flow_id": "bl_security"},
+                True,
+                ["bl_write_sast_report"],
+                {
+                    "missing_privilege_tools": ["bl_write_sast_report"],
+                    "granting_privileges": ["read_write_files"],
+                },
+                id="bl_tool_missing_privilege_in_bl_security",
+            ),
         ],
     )
     def test_logs_unavailable_tools_with_reason(
@@ -1382,6 +1412,7 @@ class TestUnavailableTools:
         unavailable = {
             name
             for key in (
+                "flow_restricted_tools",
                 "missing_privilege_tools",
                 "unsupported_client_tools",
                 "unknown_tools",
@@ -3309,6 +3340,118 @@ def test_ceiling_keeps_pre_approved_capability_tools(tool_metadata):
 
     assert added
     assert added <= registry._preapproved_tool_names
+
+
+_BL_SECURITY_TOOLS = (
+    tools.BlCollectAndFlatten,
+    tools.BlDedupFindings,
+    tools.BlDiscoverAndCluster,
+    tools.BlPrioritizeAndCap,
+    tools.BlWriteSastReport,
+)
+
+
+@pytest.mark.parametrize(
+    ("registry_flow_id", "has_bl_tools"),
+    [("bl_security", True), (None, False), ("developer", False)],
+)
+def test_bl_security_tools_follow_the_registry_flow_id(
+    tool_metadata, registry_flow_id, has_bl_tools
+):
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files"],
+        preapproved_tools=["read_write_files"],
+        tool_metadata=tool_metadata,
+        registry_flow_id=registry_flow_id,
+    )
+
+    bl_names = {
+        tool_cls.model_fields["name"].default for tool_cls in _BL_SECURITY_TOOLS
+    }
+    assert (bl_names <= set(registry._enabled_tools)) is has_bl_tools
+    assert bool(bl_names & set(registry._enabled_tools)) is has_bl_tools
+    assert "edit_file" in registry._enabled_tools
+
+
+def _is_bl_tool(tool_cls):
+    if "name" in tool_cls.model_fields:
+        return tool_cls.model_fields["name"].default.startswith("bl_")
+    return tool_cls.tool_title.startswith("bl_")
+
+
+def test_every_bl_tool_is_limited_to_bl_security():
+    granted = [*_READ_ONLY_GITLAB_TOOLS]
+    for tool_classes in _AGENT_PRIVILEGES.values():
+        granted.extend(tool_classes)
+    bl_tools = {t for t in granted if _is_bl_tool(t)}
+
+    assert bl_tools == set(_BL_SECURITY_TOOLS)
+    assert all(t.allowed_flows == frozenset({"bl_security"}) for t in bl_tools)
+
+    # These lists are enabled without the flow check, so no flow-limited tool may live there.
+    ungated = [*_DEFAULT_TOOLS, *_CAPABILITY_DEPENDENT_TOOLS, *NO_OP_TOOLS]
+    assert not [t for t in ungated if _is_bl_tool(t)]
+    assert not [t for t in ungated if getattr(t, "allowed_flows", None) is not None]
+
+
+class _SomeFlowInput(BaseModel):
+    pass
+
+
+class _SomeFlowTool(DuoBaseTool):
+    name: str = "some_flow_tool"
+    description: str = "A tool limited to some_flow."
+    args_schema: Type[BaseModel] = _SomeFlowInput
+    allowed_flows: ClassVar[Optional[frozenset[str]]] = frozenset({"some_flow"})
+
+    async def _execute(self) -> str:
+        return ""
+
+
+def test_allowed_flows_outside_a_privilege_fail_fast():
+    with pytest.raises(
+        RuntimeError, match="only applied to tools granted by an agent privilege"
+    ):
+        _reject_unchecked_allowed_flows([_SomeFlowTool])
+
+
+@pytest.mark.parametrize(
+    ("registry_flow_id", "allowed"),
+    [("some_flow", True), ("other_flow", False), (None, False)],
+)
+def test_allowed_flows_limit_a_tool_to_its_flows(
+    monkeypatch, tool_metadata, registry_flow_id, allowed
+):
+    monkeypatch.setitem(_AGENT_PRIVILEGES, "some_privilege", [_SomeFlowTool])
+    registry = ToolsRegistry(
+        enabled_tools=["some_privilege"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        registry_flow_id=registry_flow_id,
+    )
+
+    assert ("some_flow_tool" in registry._enabled_tools) is allowed
+    if not allowed:
+        assert registry._unavailable_reason("some_flow_tool") == "flow_restricted"
+
+
+@pytest.mark.asyncio
+async def test_configure_passes_the_registry_flow_id(gl_http_client, project_mock):
+    workflow_config = {"agent_privileges_names": ["read_write_files"]}
+
+    with_id, without_id = [
+        await ToolsRegistry.configure(
+            workflow_config=workflow_config,
+            gl_http_client=gl_http_client,
+            outbox=_outbox,
+            project=project_mock,
+            **kwargs,
+        )
+        for kwargs in ({"registry_flow_id": "bl_security"}, {})
+    ]
+
+    assert with_id.get("bl_write_sast_report") is not None
+    assert without_id.get("bl_write_sast_report") is None
 
 
 # The ceiling keeps start_flow and the read-only groups, minus anything ruled.

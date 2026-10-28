@@ -1230,6 +1230,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             if (
                 not hasattr(duo_tool_cls, "tool_version")
                 or duo_tool_cls.tool_version < STABLE_VERSION_THRESHOLD
+                # A flow-restricted tool is not public, whatever its version.
+                or getattr(duo_tool_cls, "allowed_flows", None) is not None
             ):
                 continue
 

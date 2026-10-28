@@ -19,6 +19,7 @@ from unittest.mock import Mock
 
 import pytest
 import yaml
+from google.protobuf import struct_pb2
 from pydantic import ValidationError as PydanticValidationError
 
 import duo_workflow_service.tools.bl_discovery as bl
@@ -31,6 +32,9 @@ from duo_workflow_service.agent_platform.experimental.components.agent.component
     AgentComponent,
     AgentComponentBase,
 )
+from duo_workflow_service.agent_platform.experimental.components.deterministic_step.component import (
+    DeterministicStepComponent,
+)
 from duo_workflow_service.agent_platform.experimental.components.for_each import (
     PUBLISHED_SUBKEYS,
 )
@@ -41,13 +45,17 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
 from duo_workflow_service.agent_platform.experimental.state import IOKey, IOKeyTemplate
-from duo_workflow_service.components.tools_registry import _AGENT_PRIVILEGES
+from duo_workflow_service.components.tools_registry import (
+    _AGENT_PRIVILEGES,
+    ToolsRegistry,
+)
 from duo_workflow_service.tools.bl_collect_and_flatten import BlCollectAndFlatten
 from duo_workflow_service.tools.bl_prioritize_and_cap import (
     resolve_effective_max_units,
 )
 from duo_workflow_service.tools.search import AdvanceBlobSearchInput, BlobSearchInput
 from duo_workflow_service.tools.toolset import Toolset
+from duo_workflow_service.workflows.registry import _load_flow_from_inline_config
 from lib.events import GLReportingEventContext
 from lib.version import resolve_version
 
@@ -758,3 +766,102 @@ class TestResponseSchemas:
         )
 
         assert json.loads(out["final_answer"]) == [finding]
+
+
+def _inline_copy() -> FlowConfig:
+    """The shipped config sent inline, as a caller could send its YAML."""
+    struct = struct_pb2.Struct()
+    struct.update(yaml.safe_load(_config_source()))
+    factory = _load_flow_from_inline_config(struct, "experimental")
+    assert isinstance(factory, functools.partial)
+    return factory.keywords["config"]
+
+
+def _tools_registry(registry_flow_id: str | None) -> ToolsRegistry:
+    return ToolsRegistry(
+        enabled_tools=list(_AGENT_PRIVILEGES),
+        preapproved_tools=[],
+        tool_metadata={},  # type: ignore[typeddict-item]
+        registry_flow_id=registry_flow_id,
+    )
+
+
+def _bl_steps(config: FlowConfig) -> list[dict]:
+    return [
+        c
+        for c in config.components
+        if c["type"] == "DeterministicStepComponent"
+        and c["tool_name"].startswith("bl_")
+    ]
+
+
+def _build_step(
+    step: dict, registry: ToolsRegistry, user
+) -> DeterministicStepComponent:
+    """Build a step the way the flow builds it, against ``registry``."""
+    return DeterministicStepComponent(
+        **{k: v for k, v in step.items() if k != "type"},
+        flow_id="wf-1",
+        flow_type=GLReportingEventContext.from_workflow_definition(FLOW_NAME),
+        user=user,
+        toolset=registry.toolset([step["tool_name"]]),
+    )
+
+
+_BL_HINT = " Available only in the bl_security flow, with one of these agent privileges: read_write_files."
+
+
+class TestBlSecurityTools:
+    def test_the_registry_flow_builds_every_bl_step(self, user):
+        config = _config()
+        registry = _tools_registry(config.config_id)
+        assert _bl_steps(config)
+        for step in _bl_steps(config):
+            component = _build_step(step, registry, user)
+            assert component.validated_tool.name == step["tool_name"]
+
+    def test_an_inline_copy_cannot_build_a_bl_step(self, user):
+        config = _inline_copy()
+        registry = _tools_registry(config.config_id)
+        assert config.config_id is None
+        assert _bl_steps(config)
+        for step in _bl_steps(config):
+            with pytest.raises(PydanticValidationError) as exc_info:
+                _build_step(step, registry, user)
+            message = str(exc_info.value)
+            assert _BL_HINT in message
+
+    def test_the_privilege_hint_is_kept_for_other_tools(self, user):
+        registry = ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata={},
+            registry_flow_id=None,
+        )
+        step = {**_bl_steps(_config())[0], "tool_name": "run_command"}
+        with pytest.raises(
+            PydanticValidationError,
+            match=re.escape("Grant one of these agent privileges: run_commands."),
+        ):
+            _build_step(step, registry, user)
+
+    def test_the_bl_hint_names_the_privilege_inside_the_flow(self, user):
+        config = _config()
+        registry = ToolsRegistry(
+            enabled_tools=[],
+            preapproved_tools=[],
+            tool_metadata={},
+            registry_flow_id=config.config_id,
+        )
+        with pytest.raises(
+            PydanticValidationError,
+            match=re.escape(_BL_HINT),
+        ):
+            _build_step(_bl_steps(config)[0], registry, user)
+
+    @pytest.mark.parametrize("registry_flow_id", [None, "developer"])
+    def test_other_flows_get_no_bl_tool(self, registry_flow_id):
+        registry = _tools_registry(registry_flow_id)
+        bl_names = {step["tool_name"] for step in _bl_steps(_config())}
+        assert not bl_names & set(registry.toolset(sorted(bl_names)).keys())
+        assert registry.get("edit_file") is not None

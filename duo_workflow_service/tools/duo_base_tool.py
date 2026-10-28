@@ -117,6 +117,11 @@ class DuoBaseTool(BaseTool):
     # When set, a tier access check is performed if the tool returns an empty or error response.
     tier_check_licensed_feature: ClassVar[Optional[str]] = None
 
+    # Flow Registry flow ids that may use this tool; ``None`` means any flow. Matched against the registry flow id,
+    # which only the Flow Registry loader sets, so inline configs never match. Only applied to tools granted by an
+    # agent privilege; the registry refuses to import if a default, no-op or capability-dependent tool sets it.
+    allowed_flows: ClassVar[Optional[frozenset[str]]] = None
+
     @property
     def gitlab_client(self) -> GitlabHttpClient:
         client = self.metadata.get("gitlab_client")  # type: ignore
