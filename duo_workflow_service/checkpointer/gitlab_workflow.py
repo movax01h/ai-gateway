@@ -163,6 +163,10 @@ TOP_LEVEL_CHECKPOINT_NS = ""
 # stay correct but degrade to full snapshots — each trim is logged, so it is observable.
 MAX_NESTED_INCREMENTAL_BASELINES = 16
 
+# Only a rewrite of these channels starts a checkpoint group. A rewrite of any other
+# channel writes a single-channel compaction blob, as a scalar change does.
+_GROUP_START_CHANNELS = frozenset({"ui_chat_log", "conversation_history"})
+
 
 class _FlushPoint(StrEnum):
     """When a deferred status event may be sent to Rails.
@@ -323,7 +327,7 @@ def _serialize_channel_blobs(
     prev_channel_values: Dict[str, Any],
     *,
     force_rewrite: bool = False,
-) -> Tuple[List[Dict[str, Any]], bool]:
+) -> Tuple[List[Dict[str, Any]], set[str]]:
     """Serialize only the channels that changed in this step as blobs.
 
     Uses new_versions to identify changed channels; every channel is blobbed regardless of type, so a reader that has
@@ -334,14 +338,15 @@ def _serialize_channel_blobs(
     regardless.
 
     When force_rewrite is True, delta computation is skipped and each blob is serialized as a full replacement with
-    step_action='compaction'. is_compaction in the return is then False — the caller asked for the rewrite and is
-    responsible for bumping current_thread itself.
+    step_action='compaction'. The returned set is then empty — the caller asked for the rewrite and is responsible for
+    bumping current_thread itself.
 
-    Returns (blobs, is_compaction) where is_compaction is True when delta analysis found a shrink or non-prefix change.
+    Returns (blobs, rewritten) where rewritten holds the list and dict channels in which delta analysis found a shrink
+    or non-prefix change.
     """
     channel_values = checkpoint.get("channel_values", {})
     blobs = []
-    is_compaction = False
+    rewritten: set[str] = set()
 
     for channel, version in new_versions.items():
         if channel not in channel_values:
@@ -366,7 +371,7 @@ def _serialize_channel_blobs(
                 val = new_val
                 step_action = "conversation"
             else:
-                is_compaction = True
+                rewritten.add(channel)
         elif isinstance(val, dict) and isinstance(prev, dict):
             dict_delta = _dict_of_list_delta(prev, val)
             if dict_delta is None:
@@ -376,7 +381,7 @@ def _serialize_channel_blobs(
                 val = new_val
                 step_action = "conversation"
             else:
-                is_compaction = True
+                rewritten.add(channel)
 
         # Encode with CustomEncoder JSON (not the langgraph msgpack serde) so blob
         # deltas match the header's channel_values representation, which Rails stores
@@ -394,7 +399,7 @@ def _serialize_channel_blobs(
             }
         )
 
-    return blobs, is_compaction
+    return blobs, rewritten
 
 
 def _serialize_all_channels_full(
@@ -1908,16 +1913,17 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     checkpoint_ns=checkpoint_ns,
                 )
 
-            channel_blobs, is_compaction = _serialize_channel_blobs(
+            channel_blobs, rewritten = _serialize_channel_blobs(
                 checkpoint,
                 new_versions,
                 state.prev_channel_values,
                 force_rewrite=stale_cache,
             )
+            rewrote_history = not rewritten.isdisjoint(_GROUP_START_CHANNELS)
             # A genuine group boundary: the workflow's first checkpoint, a stale-cache
-            # reset, or a compaction.
+            # reset, or a history rewrite.
             is_group_start = (
-                state.prev_checkpoint_id is None or stale_cache or is_compaction
+                state.prev_checkpoint_id is None or stale_cache or rewrote_history
             )
             if is_group_start:
                 # A group must be self-contained (issue 605653): re-seed EVERY channel
@@ -1934,7 +1940,7 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
                     and blob["step_action"] == "conversation"
                 )
             next_current_thread = state.current_thread + (
-                1 if stale_cache or is_compaction else 0
+                1 if stale_cache or rewrote_history else 0
             )
             payload["channel_blobs"] = channel_blobs
             payload["current_thread"] = next_current_thread
