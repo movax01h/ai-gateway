@@ -743,20 +743,24 @@ class FindFiles(DuoBaseTool):
 
     **Replaces these commands:**
     - find . -name "*.py" → find_files(name_pattern="*.py")
-    - find tests -name "test_*.js" → find_files(name_pattern="tests/test_*.js")
-    - find src -name "*.json" → find_files(name_pattern="src/*.json")
+    - find tests -name "test_*.js" → find_files(name_pattern="tests/**/test_*.js")
+    - find src -name "*.json" → find_files(name_pattern="src/**/*.json")
 
     **Examples:**
     - All Python files: find_files(name_pattern="*.py")
     - Test files: find_files(name_pattern="test_*.py")
     - Config files: find_files(name_pattern="*.json")
-    - Files in directory: find_files(name_pattern="src/*.js")
+    - Files directly in a directory: find_files(name_pattern="src/*.js")
+    - Files anywhere under a directory: find_files(name_pattern="src/**/*.js")
 
     **Don't use this for:**
     - Searching text content within files (use grep instead)
     - Finding where functions/variables are used (use grep instead)
 
-    Uses bash filename expansion syntax. Searches recursively and respects .gitignore rules.
+    Uses gitignore-style glob syntax and respects .gitignore rules:
+    - A pattern without `/` matches file names at any depth.
+    - A pattern with `/` is matched from the repository root, and `*` does not cross `/`.
+    - `**` matches any number of directories.
     """
     args_schema: Type[BaseModel] = FindFilesInput
 
