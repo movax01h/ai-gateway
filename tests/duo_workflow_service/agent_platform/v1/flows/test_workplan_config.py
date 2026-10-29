@@ -287,3 +287,53 @@ class TestContextRequestStopDecision:
         rendered = _rendered_system_prompt(config, _component(config, "research"))
 
         assert "the planner found\nthe description too thin" in rendered
+
+
+class TestReadinessScoreFeedback:
+    """Both scoring versions write the same feedback, so a re-score never shows stale feedback.
+
+    `update_work_item` only sends the fields it is given, so omitting
+    `readiness_score_feedback` would leave the previous run's feedback beside
+    the new score.
+    """
+
+    SUPERVISOR_PROMPT_ID = "workplan_readiness_supervisor_prompt"
+
+    @classmethod
+    def _supervisor_system(cls, version: str) -> str:
+        config = FlowConfig.from_yaml_config("workplan", version)
+        prompt = next(
+            p for p in config.prompts or [] if p.prompt_id == cls.SUPERVISOR_PROMPT_ID
+        )
+        system = prompt.prompt_template["system"]
+        assert isinstance(system, str)
+        return system
+
+    @pytest.mark.parametrize(
+        "expected",
+        [
+            "Always pass the `readiness_score_feedback` argument",
+            'pass an empty string (`""`)',
+            "up to three items",
+            "up to 3 numbered",
+            "list blocking items first",
+            "Blocking items are the gate's amendment",
+            "drop\nnon-blocking items first",
+            "skipping cons prefixed `(minor)`",
+        ],
+    )
+    @pytest.mark.parametrize("version", ["1.1.0", "1.2.0"])
+    def test_prompt_carries_the_rule(self, version, expected):
+        assert expected in self._supervisor_system(version)
+
+    @pytest.mark.parametrize(
+        "removed",
+        [
+            "write the score alone",
+            "exactly three items",
+            "the blocking amendment (when a gate fired) is item 1",
+        ],
+    )
+    @pytest.mark.parametrize("version", ["1.1.0", "1.2.0"])
+    def test_prompt_drops_the_old_rule(self, version, removed):
+        assert removed not in self._supervisor_system(version)
