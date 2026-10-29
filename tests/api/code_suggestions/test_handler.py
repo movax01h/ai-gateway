@@ -623,6 +623,7 @@ class TestEditorContentGeneration:
             suffix="\n",
         )
 
+    @pytest.mark.usefixtures("custom_models_gateway")
     class TestModelMetadataSelection:
         @dataclass
         class Case:

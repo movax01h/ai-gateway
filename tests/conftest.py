@@ -645,10 +645,25 @@ def reset_context_vars():
 
 @pytest.fixture(name="feature_allowlist_mode")
 def feature_allowlist_mode_fixture(request, monkeypatch):
-    """Set the feature allowlist mode for the test; parametrize indirectly to pick it."""
+    """Set the feature allowlist mode of both surfaces for the test; parametrize indirectly to pick it."""
     mode = getattr(request, "param", "log")
-    monkeypatch.setattr(get_config().model_selection, "feature_allowlist_mode", mode)
+    model_selection = get_config().model_selection
+    monkeypatch.setattr(model_selection, "feature_allowlist_mode_http", mode)
+    monkeypatch.setattr(model_selection, "feature_allowlist_mode_dws", mode)
     return mode
+
+
+# The `config_values` fixture configures the app container, but the allowlist check reads the global config.
+@pytest.fixture(name="cloud_gateway")
+def cloud_gateway_fixture(monkeypatch):
+    """Run as GitLab's own gateway, which checks client model metadata against the feature allowlist."""
+    monkeypatch.setattr(get_config().custom_models, "enabled", False)
+
+
+@pytest.fixture(name="custom_models_gateway")
+def custom_models_gateway_fixture(monkeypatch):
+    """Run as a gateway that serves custom models, which skips the feature allowlist check."""
+    monkeypatch.setattr(get_config().custom_models, "enabled", True)
 
 
 @pytest.fixture(autouse=True)

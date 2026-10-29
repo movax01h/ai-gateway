@@ -1,5 +1,3 @@
-from unittest.mock import patch
-
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -9,7 +7,6 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from structlog.testing import capture_logs
 
 from ai_gateway.api.middleware.model_config import ModelConfigMiddleware
-from ai_gateway.config import get_config
 from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
 from ai_gateway.prompts.registry import PROMPT_ID_TO_FEATURE_SETTING
@@ -75,6 +72,7 @@ def middleware_test_client_fixture(model_metadata_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_parses_model_params_into_context_var(middleware_test_client):
     model_params = {
         "name": "gpt",
@@ -123,6 +121,7 @@ async def test_model_params_is_none_when_metadata_is_not_in_body(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_handles_large_request_body_with_model_metadata(middleware_test_client):
     """Test that model_metadata is extracted from large request bodies (chunked requests)"""
     model_params = {
@@ -150,6 +149,7 @@ async def test_handles_large_request_body_with_model_metadata(middleware_test_cl
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_handles_very_large_request_body(middleware_test_client):
     """Test with very large request body (>1MB) to ensure chunking is handled."""
     model_params = {
@@ -189,6 +189,7 @@ async def test_handles_malformed_json_in_large_body(middleware_test_client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_handles_unicode_in_large_body(middleware_test_client):
     """Test that unicode characters in large bodies are handled correctly."""
     model_params = {
@@ -209,6 +210,7 @@ async def test_handles_unicode_in_large_body(middleware_test_client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_model_metadata_at_end_of_large_body(middleware_test_client):
     """Test that model_metadata is found even when it appears at the end of a large body."""
     model_params = {
@@ -265,6 +267,7 @@ async def test_null_model_metadata_in_large_body(middleware_test_client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_multiple_model_metadata_fields_in_large_body(middleware_test_client):
     """Test that only the first model_metadata field is processed in large bodies."""
     model_params_1 = {
@@ -302,19 +305,9 @@ BEDROCK_ENDPOINT = "https://bedrock-runtime.us-east-1.amazonaws.com/"
 IAM_ROLE_ARN = "arn:aws:iam::123456789012:role/my-role"
 
 
-@pytest.fixture(name="custom_models")
-def custom_models_fixture():
-    with patch("ai_gateway.model_metadata.get_config") as get_config:
-        get_config.return_value.custom_models.enabled = True
-        yield get_config.return_value.custom_models
-
-
 @pytest.mark.asyncio
-async def test_rejects_iam_role_when_custom_models_disabled(
-    middleware_test_client, custom_models
-):
-    custom_models.enabled = False
-
+@pytest.mark.usefixtures("cloud_gateway")
+async def test_rejects_iam_role_when_custom_models_disabled(middleware_test_client):
     response = middleware_test_client.post(
         "/iam-role",
         json={
@@ -335,7 +328,8 @@ async def test_rejects_iam_role_when_custom_models_disabled(
 
 
 @pytest.mark.asyncio
-async def test_parses_iam_role_into_context_var(middleware_test_client, custom_models):
+@pytest.mark.usefixtures("custom_models_gateway")
+async def test_parses_iam_role_into_context_var(middleware_test_client):
     model_params = {
         "name": "gpt",
         "provider": "bedrock",
@@ -395,12 +389,6 @@ class _AuthenticatedUser:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         scope["user"] = StarletteUser(CloudConnectorUser(True, global_user_id="user-1"))
         await self.app(scope, receive, send)
-
-
-@pytest.fixture(name="cloud_gateway")
-def cloud_gateway_fixture(monkeypatch):
-    """Run as GitLab's own gateway: a gateway that serves custom models skips the allowlist check."""
-    monkeypatch.setattr(get_config().custom_models, "enabled", False)
 
 
 @pytest.mark.usefixtures("cloud_gateway", "feature_allowlist_mode")

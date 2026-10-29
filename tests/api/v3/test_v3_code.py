@@ -502,7 +502,53 @@ class TestCustomModelsSSRF:
     def route_fixture(self):
         return "/code/completions"
 
+    def _post(self, mock_client: TestClient, route: str):
+        return mock_client.post(
+            route,
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+                "X-Gitlab-Global-User-Id": "test-user-id",
+            },
+            json={
+                "prompt_components": [
+                    {
+                        "type": "code_editor_completion",
+                        "payload": {
+                            "file_name": "main.py",
+                            "content_above_cursor": "# test",
+                            "content_below_cursor": "\n",
+                            "language_identifier": "python",
+                        },
+                    }
+                ],
+                "model_metadata": {
+                    "endpoint": "http://internal-server.local/ssrf",
+                    "api_key": "malicious-key",
+                    "identifier": "provider/model",
+                    "name": "mistral",
+                    "provider": "litellm",
+                },
+            },
+        )
+
+    @pytest.mark.usefixtures("cloud_gateway")
     def test_completions_ssrf_model_metadata_endpoint_rejected_when_custom_models_disabled(
+        self,
+        mock_client: TestClient,
+        route: str,
+    ):
+        response = self._post(mock_client, route)
+
+        assert response.status_code == 403
+        assert response.json() == {
+            "detail": "This gateway does not serve models from provider 'litellm'"
+        }
+
+    @pytest.mark.usefixtures("cloud_gateway", "feature_allowlist_mode")
+    def test_completions_ssrf_model_metadata_endpoint_rejected_in_log_mode(
         self,
         mock_client: TestClient,
         route: str,
@@ -510,36 +556,7 @@ class TestCustomModelsSSRF:
         with pytest.raises(
             ValueError, match="specifying custom models endpoint is disabled"
         ):
-            mock_client.post(
-                route,
-                headers={
-                    "Authorization": "Bearer 12345",
-                    "X-Gitlab-Authentication-Type": "oidc",
-                    "X-GitLab-Instance-Id": "1234",
-                    "X-GitLab-Realm": "self-managed",
-                    "X-Gitlab-Global-User-Id": "test-user-id",
-                },
-                json={
-                    "prompt_components": [
-                        {
-                            "type": "code_editor_completion",
-                            "payload": {
-                                "file_name": "main.py",
-                                "content_above_cursor": "# test",
-                                "content_below_cursor": "\n",
-                                "language_identifier": "python",
-                            },
-                        }
-                    ],
-                    "model_metadata": {
-                        "endpoint": "http://internal-server.local/ssrf",
-                        "api_key": "malicious-key",
-                        "identifier": "provider/model",
-                        "name": "mistral",
-                        "provider": "litellm",
-                    },
-                },
-            )
+            self._post(mock_client, route)
 
 
 class TestCodeSuggestionTypeLogged:

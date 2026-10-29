@@ -29,7 +29,9 @@ def unit_primitive_fixture():
 
 
 @pytest.fixture(name="config_values")
-def config_values_fixture():
+def config_values_fixture(monkeypatch):
+    # The config values configure the app container; the allowlist check reads the global config.
+    monkeypatch.setattr(get_config().custom_models, "enabled", True)
     return {
         "custom_models": {"enabled": True},
     }
@@ -38,6 +40,7 @@ def config_values_fixture():
 @pytest.fixture(name="config_values_custom_models_disabled")
 def config_values_custom_models_disabled_fixture(config_values, monkeypatch):
     monkeypatch.setitem(config_values["custom_models"], "enabled", False)
+    monkeypatch.setattr(get_config().custom_models, "enabled", False)
     return config_values
 
 
@@ -448,10 +451,7 @@ class BaseTestCodeEmbeddings:
         self,
         mock_client: TestClient,
         mock_litellm_aembedding: AsyncMock,
-        monkeypatch,
     ):
-        # The fixture configures the app container; the allowlist check reads the global config.
-        monkeypatch.setattr(get_config().custom_models, "enabled", False)
         params = self._build_params(
             model_provider="gitlab", model_identifier="claude_sonnet_4_6_vertex"
         )
@@ -536,10 +536,30 @@ class BaseTestCodeEmbeddings:
         assert response.status_code == 422
         assert response.json() == {"detail": expected_error_message}
 
-    @pytest.mark.usefixtures("config_values_custom_models_disabled")
+    @pytest.mark.usefixtures(
+        "config_values_custom_models_disabled", "feature_allowlist_mode"
+    )
+    @pytest.mark.parametrize(
+        ("feature_allowlist_mode", "status_code", "detail"),
+        [
+            (
+                "log",
+                422,
+                "specifying custom models endpoint is disabled: api_base is not allowed",
+            ),
+            (
+                "fallback",
+                403,
+                "This gateway does not serve models from provider 'litellm'",
+            ),
+        ],
+        indirect=["feature_allowlist_mode"],
+    )
     def test_endpoint_provided_with_custom_models_disabled(
         self,
         mock_client: TestClient,
+        status_code: int,
+        detail: str,
     ):
         params = self._build_params(
             model_provider="litellm",
@@ -549,11 +569,8 @@ class BaseTestCodeEmbeddings:
         )
         response = self._post_request(mock_client=mock_client, params=params)
 
-        assert response.status_code == 422
-        assert (
-            response.json()["detail"]
-            == "specifying custom models endpoint is disabled: api_base is not allowed"
-        )
+        assert response.status_code == status_code
+        assert response.json()["detail"] == detail
 
     @pytest.mark.parametrize(
         ("error_class", "error_args", "expected_error_message"),

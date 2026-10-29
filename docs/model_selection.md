@@ -645,14 +645,15 @@ The check looks at:
   here; `validate_custom_endpoint` rejects both on a gateway without custom models.
 - A `dev` model or a deprecated model (logged only).
 
-`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE` selects the behavior. Set the same value on AI Gateway and Duo
-Workflow Service:
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP` selects the behavior on the AI Gateway HTTP routes, and
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS` on the Duo Workflow Service. Each surface reads only its own
+variable, so you can set both in the same environment:
 
 | Mode | Behavior |
 |------|-----------|
 | `off` | No check. |
-| `log` | Log mismatches, change nothing. This is the default. |
-| `fallback` | Serve the feature's default model instead of a model that is not allowed. Rebuild a GitLab-managed model from its definition when a raw `identifier` would rewrite it. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. |
+| `log` | Log mismatches, change nothing. This is the default on the Duo Workflow Service. |
+| `fallback` | Serve the feature's default model instead of a model that is not allowed. Rebuild a GitLab-managed model from its definition when a raw `identifier` would rewrite it. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. This is the default on HTTP. |
 | `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. Rebuild a raw `identifier` override as `fallback` does. |
 
 Every mismatch is logged as `Model allowlist mismatch` with a `reason` (`provider_not_served`, `model_not_allowed`,
@@ -665,7 +666,8 @@ rather than by event. Informational cases (`missing_feature_setting` on the Duo 
 `deprecated_model`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
 `Model allowlist note`.
 
-To roll back a stricter mode, set `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE=log`.
+To roll back a stricter mode, set the variable of that surface to `log`. For example, set
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP=log`.
 
 ## Developer models
 

@@ -38,7 +38,9 @@ def mock_get_usage_metadata_fixture(token_usage: TokenUsage | None):
 
 
 class TestPrompt:
-    @pytest.mark.usefixtures("mock_get_usage_metadata", "frozen_datetime_now")
+    @pytest.mark.usefixtures(
+        "mock_get_usage_metadata", "frozen_datetime_now", "custom_models_gateway"
+    )
     @pytest.mark.parametrize(
         (
             "inputs",
@@ -455,7 +457,7 @@ class TestMisdirectedRequest:
 
             yield mock
 
-    @pytest.mark.usefixtures("mock_model_misdirection")
+    @pytest.mark.usefixtures("mock_model_misdirection", "custom_models_gateway")
     def test_misdirected_request(self, mock_registry_get, mock_client, model_metadata):
         response = mock_client.post(
             "/prompts/test",

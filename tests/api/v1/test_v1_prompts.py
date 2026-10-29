@@ -168,7 +168,7 @@ class TestPrompt:
             ),
         ],
     )
-    @pytest.mark.usefixtures("frozen_datetime_now")
+    @pytest.mark.usefixtures("frozen_datetime_now", "custom_models_gateway")
     def test_request(
         self,
         mock_registry_get,
@@ -341,7 +341,7 @@ class TestMisdirectedRequest:
 
             yield mock
 
-    @pytest.mark.usefixtures("mock_model_misdirection")
+    @pytest.mark.usefixtures("mock_model_misdirection", "custom_models_gateway")
     def test_misdirected_request(self, mock_registry_get, mock_client, model_metadata):
         response = mock_client.post(
             "/prompts/test",
