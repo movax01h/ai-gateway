@@ -94,8 +94,20 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
 
 
 @pytest.mark.asyncio
-async def test_model_metadata_interceptor_null_json_skips_context_setting(mock_user):
-    """JSON 'null' parses to None, which create_model_metadata_by_tag rejects with ValueError.
+@pytest.mark.parametrize(
+    "header",
+    [
+        pytest.param("null", id="null"),
+        pytest.param("5", id="number"),
+        pytest.param("true", id="boolean"),
+        pytest.param('"provider"', id="string"),
+        pytest.param('["provider"]', id="array"),
+    ],
+)
+async def test_model_metadata_interceptor_non_object_json_skips_context_setting(
+    mock_user, header
+):
+    """JSON that is not an object fails in create_model_metadata_by_tag with ValueError.
 
     Both context vars must remain unset and the request must still continue.
     """
@@ -104,7 +116,7 @@ async def test_model_metadata_interceptor_null_json_skips_context_setting(mock_u
 
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
-        ("x-gitlab-agent-platform-model-metadata", "null"),
+        ("x-gitlab-agent-platform-model-metadata", header),
     ]
 
     continuation = AsyncMock(return_value="mocked_response")

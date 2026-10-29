@@ -386,7 +386,7 @@ def create_model_metadata_by_tag(
     If the data contains a ``feature_setting``, looks up ``models_for_tags`` in the YAML config and
     creates ``ModelMetadata`` objects for each tag key.
     """
-    if not data or "provider" not in data:
+    if not isinstance(data, dict) or "provider" not in data:
         raise ValueError("Argument error: provider must be present.")
 
     # Read these before create_model_metadata pops feature_setting from data.
