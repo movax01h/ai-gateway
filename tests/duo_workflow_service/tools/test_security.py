@@ -660,7 +660,7 @@ class TestListVulnerabilities:
         empty_vulnerabilities_response,
     ):
         """Test instances too old for the ai_workflows scope are not probed."""
-        mock_gitlab_version.get.return_value = "18.10.0"
+        mock_gitlab_version.get.return_value = "18.11.0"
         gitlab_client_mock.apost = AsyncMock(
             return_value=empty_vulnerabilities_response
         )

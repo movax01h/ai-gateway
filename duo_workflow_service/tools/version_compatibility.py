@@ -17,7 +17,7 @@ NOTE_RESOLVABLE_AND_RESOLVED_FIELDS_VERSION = Version("18.9.0")
 BASE_DISCUSSION_ID_FIELD_VERSION = Version("18.9.0")
 DEVELOPMENT_WIDGET_VERSION = Version("18.9.0")
 LICENSED_FEATURE_AVAILABILITY_VERSION = Version("18.11.0")
-PROJECT_VULNERABILITIES_REST_SCOPE_VERSION = Version("18.11.0")
+PROJECT_VULNERABILITIES_REST_SCOPE_VERSION = Version("19.0.0")
 AGENT_PLAN_WIDGET_VERSION = Version("19.0.0")
 GROUP_LEVEL_CUSTOM_INSTRUCTIONS_VERSION = Version("19.0.0")
 SET_REVIEWERS_AI_WORKFLOWS_SCOPE_VERSION = Version("19.2.0")
@@ -176,7 +176,7 @@ def supports_project_vulnerabilities_rest_scope() -> bool:
     """Check if the project vulnerabilities REST endpoint accepts an ai_workflows token.
 
     The endpoint is much older, but the ai_workflows scope a flow's token carries was
-    only allowed for it in 18.11. Older instances answer 403 for the scope rather than
+    only allowed for it in 19.0. Older instances answer 403 for the scope rather than
     for the permission, so callers cannot read a 403 as a permission signal there.
 
     Returns:
