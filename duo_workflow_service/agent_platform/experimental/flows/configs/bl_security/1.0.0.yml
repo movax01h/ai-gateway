@@ -381,32 +381,54 @@ components:
       - "on_tool_execution_failed"
 
 routers:
+  # A failed deterministic step has no route, so the router raises and the run
+  # ends in ERROR at that step, instead of a later step failing on its empty
+  # output or the run COMPLETING with a partial or missing report.
   - from: "grounding"
     to: "tuner"
   - from: "tuner"
     to: "discover_units"
   - from: "discover_units"
-    to: "map_reviews_prep"
+    condition:
+      input: "context:discover_units.execution_result"
+      routes:
+        "success": "map_reviews_prep"
   - from: "map_reviews_prep"
-    to: "map_reviews"
+    condition:
+      input: "context:map_reviews_prep.execution_result"
+      routes:
+        "success": "map_reviews"
   - from: "map_reviews"
     to: "map_reviews_collect"
   - from: "map_reviews_collect"
-    to: "sibling_scan_prep"
+    condition:
+      input: "context:map_reviews_collect.execution_result"
+      routes:
+        "success": "sibling_scan_prep"
   - from: "sibling_scan_prep"
-    to: "sibling_scan"
+    condition:
+      input: "context:sibling_scan_prep.execution_result"
+      routes:
+        "success": "sibling_scan"
   - from: "sibling_scan"
     to: "sibling_scan_collect"
   - from: "sibling_scan_collect"
-    to: "adjudicate"
+    condition:
+      input: "context:sibling_scan_collect.execution_result"
+      routes:
+        "success": "adjudicate"
   - from: "adjudicate"
-    to: "triage_prep"
+    condition:
+      input: "context:adjudicate.execution_result"
+      routes:
+        "success": "triage_prep"
   - from: "triage_prep"
-    to: "triage"
+    condition:
+      input: "context:triage_prep.execution_result"
+      routes:
+        "success": "triage"
   - from: "triage"
     to: "triage_collect"
-  # A failed closing step has no route, so the router raises and the run ends
-  # in ERROR instead of COMPLETED with a partial or missing report.
   - from: "triage_collect"
     condition:
       input: "context:triage_collect.execution_result"
