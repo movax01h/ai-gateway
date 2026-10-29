@@ -33,10 +33,6 @@ flow:
 prompts:
   - name: "business_context_security_guidelines_prompt"
     prompt_id: "business_context_security_guidelines_prompt"
-    model:
-      params:
-        max_tokens: 8192
-        temperature: 0
     unit_primitives:
       - duo_agent_platform
     prompt_template:
