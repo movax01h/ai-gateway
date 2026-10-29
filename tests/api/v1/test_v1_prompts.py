@@ -1,14 +1,16 @@
 # pylint: disable=line-too-long,file-naming-for-tests
+import asyncio
 from typing import Any, List, Optional
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain_core.messages.ai import AIMessage, AIMessageChunk
 from pydantic import AnyUrl
 from structlog.testing import capture_logs
 
+from ai_gateway.api.client_disconnect import ClientDisconnectedError
 from ai_gateway.api.v1 import api_router
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
@@ -363,6 +365,85 @@ class TestMisdirectedRequest:
         )
         assert response.status_code == 421
         assert response.json() == {"detail": "401: Unauthorized"}
+
+
+class TestClientDisconnect:
+    """The client leaves while the model call is in flight."""
+
+    @pytest.fixture(name="model_factory")
+    def model_factory_fixture(self):
+        return lambda *args, **kwargs: FakeModel(
+            model_engine="fake-engine",
+            model_name="fake-model",
+            responses=["Hi John!"],
+        )
+
+    @pytest.fixture(name="model_call")
+    def model_call_fixture(self):
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def hanging(*_args, **_kwargs):
+            started.set()
+            try:
+                # Bounded, so the test fails instead of hanging if nothing cancels it
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        # The client leaves only once the model call is in flight, so a fast first poll
+        # can't cancel the call before it reaches the model
+        disconnected = AsyncMock(side_effect=lambda: started.is_set())
+
+        with (
+            patch.object(FakeModel, "_agenerate", side_effect=hanging) as mock,
+            patch.object(Request, "is_disconnected", disconnected),
+            patch(
+                "ai_gateway.api.client_disconnect._DISCONNECT_POLL_INTERVAL_SECONDS",
+                0.01,
+            ),
+        ):
+            mock.cancelled = cancelled
+            yield mock
+
+    @pytest.mark.usefixtures("mock_registry_get")
+    def test_cancels_the_model_call_without_retrying(self, mock_client, model_call):
+        # Goes through the real `Prompt.ainvoke`, so the cancellation has to pass the
+        # retry loop and the instrumentator to reach the model
+        with pytest.raises(ClientDisconnectedError):
+            _post_prompt(mock_client)
+
+        assert model_call.cancelled.is_set()
+        model_call.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "config_values", [{"feature_flags": {"cancel_on_client_disconnect": False}}]
+    )
+    @pytest.mark.usefixtures("mock_registry_get")
+    def test_waits_for_the_model_when_disabled(self, mock_client):
+        agenerate = FakeModel._agenerate
+
+        async def slower_than_the_poll(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return await agenerate(*args, **kwargs)
+
+        disconnected = AsyncMock(return_value=True)
+
+        # With the flag on, the poll would see the client gone and cancel this call
+        with (
+            patch.object(FakeModel, "_agenerate", slower_than_the_poll),
+            patch.object(Request, "is_disconnected", disconnected),
+            patch(
+                "ai_gateway.api.client_disconnect._DISCONNECT_POLL_INTERVAL_SECONDS",
+                0.01,
+            ),
+        ):
+            response = _post_prompt(mock_client)
+
+        assert response.status_code == 200
+        assert response.json() == "Hi John!"
+        disconnected.assert_not_awaited()
 
 
 class TestContentBlockResponse:
