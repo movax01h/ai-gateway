@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, _Call, patch
 import pytest
 from langchain_core.tools import ToolException
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from structlog.testing import capture_logs
 
 from duo_workflow_service.agent_platform.v1.components.deterministic_step.validation import (
     validate_against_schema,
@@ -1101,9 +1102,10 @@ def _aget_responses(mr_data, diffs_data, *extra):
     """Build the aget side effects in the order _build_context issues them.
 
     The order is load-bearing: merge request metadata, then diffs, then custom
-    instructions, then the compare (only when a baseline is supplied), then the
-    original file contents. If the compare ever moves earlier, these tests hand it
-    the custom-instructions exception and report "failed" for the wrong reason.
+    instructions, then the versions and the compare (only when a baseline is supplied
+    and the head has moved), then the original file contents. If the compare ever
+    moves earlier, these tests hand it the custom-instructions exception and report
+    "failed" for the wrong reason.
     """
     return [
         GitLabHttpResponse(status_code=200, body=json.dumps(mr_data)),
@@ -1122,11 +1124,51 @@ def _file_content():
     )
 
 
+def _versions_response(versions):
+    return GitLabHttpResponse(status_code=200, body=json.dumps(versions))
+
+
+def _versions(
+    baseline_patch_id="patch-a",
+    head_patch_id="patch-b",
+    baseline_base="base-1",
+    head_base="base-1",
+):
+    """Two versions, newest first, one push apart.
+
+    By default the bases match and the patch ids differ, so the compare still runs.
+    """
+    return _versions_response(
+        [
+            {
+                "id": 2,
+                "head_commit_sha": HEAD_SHA,
+                "base_commit_sha": head_base,
+                "patch_id_sha": head_patch_id,
+            },
+            {
+                "id": 1,
+                "head_commit_sha": BASELINE_SHA,
+                "base_commit_sha": baseline_base,
+                "patch_id_sha": baseline_patch_id,
+            },
+        ]
+    )
+
+
 def _compare_calls(gitlab_client_mock):
     return [
         str(call)
         for call in gitlab_client_mock.aget.call_args_list
         if "repository/compare" in str(call)
+    ]
+
+
+def _versions_calls(gitlab_client_mock):
+    return [
+        str(call)
+        for call in gitlab_client_mock.aget.call_args_list
+        if "/versions" in str(call)
     ]
 
 
@@ -1181,6 +1223,7 @@ async def test_review_scope_marks_only_the_hunk_that_changed(
         side_effect=_aget_responses(
             mr_data_with_refs,
             two_hunk_diffs,
+            _versions(),
             GitLabHttpResponse(status_code=200, body=json.dumps(compare)),
             _file_content(),
         )
@@ -1212,6 +1255,7 @@ async def test_review_scope_matches_on_file_path_as_well_as_line(
         side_effect=_aget_responses(
             mr_data_with_refs,
             two_file_diffs,
+            _versions(),
             GitLabHttpResponse(status_code=200, body=json.dumps(compare)),
             _file_content(),
             _file_content(),
@@ -1302,6 +1346,7 @@ async def test_review_scope_falls_back_to_a_full_review(
     # whole diff unmarked, so an absent marker is never read as "already reviewed".
     extra = []
     if compare is not NO_COMPARE:
+        extra.append(_versions())
         extra.append(
             compare
             if isinstance(compare, (GitLabHttpResponse, Exception))
@@ -1356,6 +1401,7 @@ async def test_review_scope_compares_in_the_project_holding_both_commits(
         side_effect=_aget_responses(
             data,
             diffs_data,
+            _versions(),
             GitLabHttpResponse(
                 status_code=200, body=json.dumps({"diffs": [CALCULATOR_COMPARE_DIFF]})
             ),
@@ -1368,6 +1414,11 @@ async def test_review_scope_compares_in_the_project_holding_both_commits(
     calls = _compare_calls(gitlab_client_mock)
     assert len(calls) == 1
     assert f"/projects/{expected_project}/repository/compare" in calls[0]
+    # Versions belong to the merge request, so they come from the target project.
+    assert (
+        "/projects/7/merge_requests/123/versions"
+        in _versions_calls(gitlab_client_mock)[0]
+    )
     assert f"from={BASELINE_SHA}" in calls[0]
     assert f"to={HEAD_SHA}" in calls[0]
     # straight=true keeps the compare to the two commits. The merge base default
@@ -1387,6 +1438,7 @@ async def test_review_scope_block_survives_tool_response_security(
         side_effect=_aget_responses(
             mr_data_with_refs,
             diffs_data,
+            _versions(),
             GitLabHttpResponse(
                 status_code=200, body=json.dumps({"diffs": [CALCULATOR_COMPARE_DIFF]})
             ),
@@ -1462,6 +1514,7 @@ async def test_review_scope_marks_a_line_after_added_content_starting_with_plus_
         side_effect=_aget_responses(
             mr_data_with_refs,
             mr_diffs,
+            _versions(),
             GitLabHttpResponse(status_code=200, body=json.dumps(compare)),
             _file_content(),
         )
@@ -1480,6 +1533,212 @@ async def test_review_scope_marks_a_line_after_added_content_starting_with_plus_
     # The "++" line is an added line at new_line 2, not metadata. Its number is what
     # a comment on it would anchor to.
     assert '<line type="added" old_line="" new_line="2">++counter;</line>' in response
+
+
+@pytest.mark.asyncio
+async def test_review_scope_skips_the_compare_when_the_diff_is_unchanged(
+    gitlab_client_mock, metadata, mr_data_with_refs, diffs_data
+):
+    # The base changed too: an unchanged diff wins over a base change.
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs,
+            diffs_data,
+            _versions(
+                baseline_patch_id="same", head_patch_id="same", head_base="base-2"
+            ),
+            _file_content(),
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, baseline_sha=BASELINE_SHA
+    )
+
+    assert '<review_scope state="no_new_lines">' in response
+    assert _marker_count(response) == 0
+    assert _compare_calls(gitlab_client_mock) == []
+    versions_calls = _versions_calls(gitlab_client_mock)
+    assert len(versions_calls) == 1
+    assert "/projects/1/merge_requests/123/versions?per_page=100" in versions_calls[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "versions",
+    [
+        # The baseline is older than the first page of versions.
+        _versions_response(
+            [{"id": 2, "head_commit_sha": HEAD_SHA, "patch_id_sha": "same"}]
+        ),
+        # The newest version is not the merge request head, e.g. a push landed between
+        # the two requests.
+        _versions_response(
+            [
+                {"id": 2, "head_commit_sha": "cccc3333", "patch_id_sha": "same"},
+                {"id": 1, "head_commit_sha": BASELINE_SHA, "patch_id_sha": "same"},
+            ]
+        ),
+        # Patch ids are missing, which must not read as a match.
+        _versions(baseline_patch_id=None, head_patch_id=None),
+        GitLabHttpResponse(status_code=403, body='{"message":"403 Forbidden"}'),
+        RuntimeError("connection reset"),
+        _versions_response({"message": "not a list"}),
+        # A missing base must not read as a changed one.
+        _versions_response(
+            [
+                {"id": 2, "head_commit_sha": HEAD_SHA, "base_commit_sha": "base-2"},
+                {"id": 1, "head_commit_sha": BASELINE_SHA, "base_commit_sha": None},
+            ]
+        ),
+        _versions_response([None]),
+        _versions_response([{"id": 2, "head_commit_sha": HEAD_SHA}, "junk"]),
+    ],
+)
+async def test_review_scope_compares_when_the_versions_cannot_rule_it_out(
+    gitlab_client_mock, metadata, mr_data_with_refs, diffs_data, versions
+):
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs,
+            diffs_data,
+            versions,
+            GitLabHttpResponse(
+                status_code=200, body=json.dumps({"diffs": [CALCULATOR_COMPARE_DIFF]})
+            ),
+            _file_content(),
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, baseline_sha=BASELINE_SHA
+    )
+
+    assert '<review_scope state="delta">' in response
+    assert _marker_count(response) == 1
+    assert len(_compare_calls(gitlab_client_mock)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "older_patch_id,newer_patch_id,expected_compares",
+    [
+        # A retarget or target force push can repeat the baseline head. The newest
+        # match decides.
+        ("patch-b", "patch-c", 1),
+        ("patch-c", "patch-b", 0),
+    ],
+)
+async def test_review_scope_uses_the_newest_version_with_the_baseline_head(
+    gitlab_client_mock,
+    metadata,
+    mr_data_with_refs,
+    diffs_data,
+    older_patch_id,
+    newer_patch_id,
+    expected_compares,
+):
+    versions = _versions_response(
+        [
+            {"id": 3, "head_commit_sha": HEAD_SHA, "patch_id_sha": "patch-b"},
+            {"id": 2, "head_commit_sha": BASELINE_SHA, "patch_id_sha": newer_patch_id},
+            {"id": 1, "head_commit_sha": BASELINE_SHA, "patch_id_sha": older_patch_id},
+        ]
+    )
+    compare = GitLabHttpResponse(
+        status_code=200, body=json.dumps({"diffs": [CALCULATOR_COMPARE_DIFF]})
+    )
+    extra = [versions, compare] if expected_compares else [versions]
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs, diffs_data, *extra, _file_content()
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    await tool._arun(project_id=1, merge_request_iid=123, baseline_sha=BASELINE_SHA)
+
+    assert len(_compare_calls(gitlab_client_mock)) == expected_compares
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "versions,expected_scope,expected_compares",
+    [
+        # Retarget, then push: the bases match, so the compare runs.
+        (
+            [
+                {"id": 3, "head_commit_sha": HEAD_SHA, "base_commit_sha": "base-2"},
+                {"id": 2, "head_commit_sha": BASELINE_SHA, "base_commit_sha": "base-2"},
+                {"id": 1, "head_commit_sha": BASELINE_SHA, "base_commit_sha": "base-1"},
+            ],
+            "delta",
+            1,
+        ),
+        # Push, then retarget: the bases differ, so the compare is skipped.
+        (
+            [
+                {"id": 3, "head_commit_sha": HEAD_SHA, "base_commit_sha": "base-2"},
+                {"id": 2, "head_commit_sha": HEAD_SHA, "base_commit_sha": "base-1"},
+                {"id": 1, "head_commit_sha": BASELINE_SHA, "base_commit_sha": "base-1"},
+            ],
+            "truncated",
+            0,
+        ),
+    ],
+)
+async def test_review_scope_after_a_retarget_depends_on_its_order_with_the_push(
+    gitlab_client_mock,
+    metadata,
+    mr_data_with_refs,
+    diffs_data,
+    versions,
+    expected_scope,
+    expected_compares,
+):
+    compare = GitLabHttpResponse(
+        status_code=200, body=json.dumps({"diffs": [CALCULATOR_COMPARE_DIFF]})
+    )
+    extra = [_versions_response(versions)] + ([compare] if expected_compares else [])
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs, diffs_data, *extra, _file_content()
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+    response = await tool._arun(
+        project_id=1, merge_request_iid=123, baseline_sha=BASELINE_SHA
+    )
+
+    assert f'<review_scope state="{expected_scope}">' in response
+    assert len(_compare_calls(gitlab_client_mock)) == expected_compares
+
+
+@pytest.mark.asyncio
+async def test_review_scope_skips_the_compare_when_the_base_changed(
+    gitlab_client_mock, metadata, mr_data_with_refs, diffs_data
+):
+    gitlab_client_mock.aget = AsyncMock(
+        side_effect=_aget_responses(
+            mr_data_with_refs,
+            diffs_data,
+            _versions(head_base="base-2"),
+            _file_content(),
+        )
+    )
+    tool = BuildReviewMergeRequestContext(metadata=metadata)
+
+    with capture_logs() as logs:
+        response = await tool._arun(
+            project_id=1, merge_request_iid=123, baseline_sha=BASELINE_SHA
+        )
+
+    assert '<review_scope state="truncated">' in response
+    assert _marker_count(response) == 0
+    assert _compare_calls(gitlab_client_mock) == []
+    assert (
+        "Merge request base changed since the review baseline, skipping the compare"
+        in [entry["event"] for entry in logs]
+    )
 
 
 def test_baseline_sha_is_hidden_from_the_model_but_open_to_the_flow(metadata):
