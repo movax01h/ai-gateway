@@ -20,7 +20,7 @@ duo-workflow-svc-eks:
       LANGSMITH_PROJECT: "duo-workflow-production"
       DUO_WORKFLOW_SERVICE_ENVIRONMENT: "production"
       AIGW_GOOGLE_CLOUD_PLATFORM__PROJECT: "gitlab-ai-framework-prod"
-      AIGW_INTERNAL_EVENT__ENDPOINT: "https://snowplowprd.trx.gitlab.net"
+      AIGW_INTERNAL_EVENT__ENDPOINT: "https://events.gitlab.net"
       AIGW_BILLING_EVENT__ENDPOINT: "https://billing.prdsub.gitlab.net"
 
   workloadSecrets:
