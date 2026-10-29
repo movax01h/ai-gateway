@@ -90,7 +90,6 @@ class TestFireworksHandler:
                 {
                     "max_output_tokens": 48,
                     "context_max_percent": 0.3,
-                    "max_prompt_tokens": 32767,
                 },
             ),
             (
@@ -109,7 +108,6 @@ class TestFireworksHandler:
                 {
                     "max_output_tokens": 48,
                     "context_max_percent": 0.3,
-                    "max_prompt_tokens": 32767,
                     "code_context": [
                         "from typing import List",
                         "from typing import Any",
@@ -161,7 +159,6 @@ class TestVertexHandler:
                     "temperature": 0.7,
                     "max_output_tokens": 64,
                     "context_max_percent": 0.3,
-                    "max_prompt_tokens": 32767,
                 },
                 "claude-sonnet-4-5@20250929",
             ),
@@ -183,7 +180,6 @@ class TestVertexHandler:
                     "temperature": 0.7,
                     "max_output_tokens": 64,
                     "context_max_percent": 0.3,
-                    "max_prompt_tokens": 32767,
                     "code_context": [
                         "from typing import List",
                         "from typing import Any",
@@ -198,7 +194,6 @@ class TestVertexHandler:
                     "temperature": 0.7,
                     "max_output_tokens": 64,
                     "context_max_percent": 0.3,
-                    "max_prompt_tokens": 32767,
                 },
                 "codestral-2508",
             ),

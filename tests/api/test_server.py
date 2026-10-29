@@ -19,15 +19,22 @@ from ai_gateway.api.client_disconnect import (
     client_disconnected_exception_handler,
 )
 from ai_gateway.api.feature_category import get_feature_categories
+from ai_gateway.api.middleware import (
+    MiddlewareAuthentication,
+    ModelConfigMiddleware,
+    RequestBodyLimitMiddleware,
+)
 from ai_gateway.api.server import (
     assume_role_exception_handler,
     custom_http_exception_handler,
     model_api_exception_handler,
+    prompt_too_long_exception_handler,
     restricted_model_access_exception_handler,
     setup_custom_exception_handlers,
     setup_gcp_service_account,
     validation_exception_handler,
 )
+from ai_gateway.code_suggestions.processing.pre import PromptTooLongError
 from ai_gateway.config import (
     Config,
     ConfigAuth,
@@ -204,6 +211,21 @@ def test_every_route_has_feature_category():
     assert not missing, (
         f"Add @feature_category or @feature_categories to these routes: {missing}"
     )
+
+
+def test_request_body_limit_runs_after_authentication(fastapi_server_app):
+    middleware = fastapi_server_app.user_middleware
+    authentication = next(
+        i for i, m in enumerate(middleware) if isinstance(m, MiddlewareAuthentication)
+    )
+    body_limit = next(
+        i for i, m in enumerate(middleware) if m.cls is RequestBodyLimitMiddleware
+    )
+    model_config = next(
+        i for i, m in enumerate(middleware) if m.cls is ModelConfigMiddleware
+    )
+
+    assert authentication < body_limit < model_config
 
 
 def test_setup_prometheus_fastapi_instrumentator():
@@ -439,6 +461,7 @@ def test_setup_custom_exception_handlers(app, monkeypatch):
 
     assert mock_add_exception_handler.mock_calls == [
         mock.call(StarletteHTTPException, custom_http_exception_handler),
+        mock.call(PromptTooLongError, prompt_too_long_exception_handler),
         mock.call(ModelAPIError, model_api_exception_handler),
         mock.call(AssumeRoleError, assume_role_exception_handler),
         mock.call(RequestValidationError, validation_exception_handler),
@@ -480,6 +503,21 @@ def test_client_disconnected_exception_handler(app):
 
     assert response.status_code == 499
     assert response.content == b""
+
+
+def test_prompt_too_long_exception_handler(app):
+    @app.get("/test")
+    def test_route():
+        raise PromptTooLongError("the prompt size exceeds overall maximum length")
+
+    setup_custom_exception_handlers(app)
+
+    response = TestClient(app).get("/test")
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "the prompt size exceeds overall maximum length"
+    }
 
 
 def test_restricted_model_access_exception_handler(app):
