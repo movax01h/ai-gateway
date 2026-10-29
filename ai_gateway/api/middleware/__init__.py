@@ -21,6 +21,7 @@ from .headers import (
 )
 from .internal_event import InternalEventMiddleware
 from .model_config import ModelConfigMiddleware
+from .request_body_limit import RequestBodyLimitMiddleware
 from .request_metadata import RequestMetadataMiddleware
 
 __all__ = [
@@ -45,5 +46,6 @@ __all__ = [
     "InternalEventMiddleware",
     "MiddlewareAuthentication",
     "ModelConfigMiddleware",
+    "RequestBodyLimitMiddleware",
     "RequestMetadataMiddleware",
 ]

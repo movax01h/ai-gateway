@@ -32,6 +32,7 @@ from ai_gateway.api.middleware import (
     InternalEventMiddleware,
     MiddlewareAuthentication,
     ModelConfigMiddleware,
+    RequestBodyLimitMiddleware,
     RequestMetadataMiddleware,
 )
 from ai_gateway.api.middleware.self_hosted_logging import (
@@ -43,6 +44,7 @@ from ai_gateway.api.v1 import api_router as http_api_router_v1
 from ai_gateway.api.v2 import api_router as http_api_router_v2
 from ai_gateway.api.v3 import api_router as http_api_router_v3
 from ai_gateway.api.v4 import api_router as http_api_router_v4
+from ai_gateway.code_suggestions.processing.pre import PromptTooLongError
 from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.instrumentators.threads import monitor_threads
@@ -65,6 +67,13 @@ _SKIP_ENDPOINTS = [
     "/metrics",
     "/v1/models/definitions",
 ]
+_CODE_SUGGESTIONS_PATH_PREFIXES = (
+    "/v2/completions",
+    "/v2/code/",
+    "/v3/code/",
+    "/v4/code/",
+)
+_CODE_SUGGESTIONS_MAX_BODY_BYTES = 600_000
 CONTAINER_APPLICATION_MODULES = [
     "ai_gateway.api.v1.embeddings.code_embeddings",
     "ai_gateway.api.v1.search.docs",
@@ -191,6 +200,11 @@ def create_fast_api_server(config: Config):
                 skip_endpoints=_SKIP_ENDPOINTS,
                 environment=config.environment,
             ),
+            Middleware(
+                RequestBodyLimitMiddleware,
+                max_bytes=_CODE_SUGGESTIONS_MAX_BODY_BYTES,
+                path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
+            ),
             Middleware(ModelConfigMiddleware),
         ],
         extra={"config": config},
@@ -287,9 +301,23 @@ async def assume_role_exception_handler(
     )
 
 
+async def prompt_too_long_exception_handler(
+    request: Request, exc: PromptTooLongError
+) -> Response:
+    return await http_exception_handler(
+        request,
+        StarletteHTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ),
+    )
+
+
 def setup_custom_exception_handlers(app: FastAPI):
     app.add_exception_handler(
         StarletteHTTPException, cast(ExceptionHandler, custom_http_exception_handler)
+    )
+    app.add_exception_handler(
+        PromptTooLongError, cast(ExceptionHandler, prompt_too_long_exception_handler)
     )
     app.add_exception_handler(
         ModelAPIError, cast(ExceptionHandler, model_api_exception_handler)

@@ -25,10 +25,8 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
     # Percentage of tokens reserved for suffix (0 <= value <= 1).
     KEY_SUFFIX_RESERVED_PERCENT = "suffix_reserved_percent"
     KEY_CONTEXT_MAX_PERCENT = "context_max_percent"
-    KEY_MAX_PROMPT_TOKENS = "max_prompt_tokens"
     DEFAULT_SUFFIX_RESERVED_PERCENT = 0
     DEFAULT_CONTEXT_MAX_PERCENT = 1
-    DEFAULT_MAX_PROMPT_TOKENS = None
     CODE_CONTEXT_MAX_TOKENS = 4_096
 
     def __init__(self, total_max_len: int, tkn_strategy: TokenStrategyBase):
@@ -40,7 +38,6 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
         self.opts: dict = {
             self.KEY_SUFFIX_RESERVED_PERCENT: self.DEFAULT_SUFFIX_RESERVED_PERCENT,
             self.KEY_CONTEXT_MAX_PERCENT: self.DEFAULT_CONTEXT_MAX_PERCENT,
-            self.KEY_MAX_PROMPT_TOKENS: self.DEFAULT_MAX_PROMPT_TOKENS,
         }
 
         # This prompt builder requires a `prefix` placeholder to be present in the template
@@ -60,8 +57,6 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
             opts[self.KEY_SUFFIX_RESERVED_PERCENT] = max(0, min(dist, 1))
         if dist := kwargs.pop(self.KEY_CONTEXT_MAX_PERCENT, None):
             opts[self.KEY_CONTEXT_MAX_PERCENT] = max(0, min(dist, 1))
-        if (dist := kwargs.pop(self.KEY_MAX_PROMPT_TOKENS, None)) is not None:
-            opts[self.KEY_MAX_PROMPT_TOKENS] = max(0, dist)
 
         self.opts.update(opts)
 
@@ -69,11 +64,7 @@ class PromptBuilderPrefixBased(PromptBuilderBase):
     def build(self) -> Prompt:
         suffix_reserved_percent = self.opts[self.KEY_SUFFIX_RESERVED_PERCENT]
         context_max_percent = self.opts[self.KEY_CONTEXT_MAX_PERCENT]
-        total_max_len = self.total_max_len
-        max_prompt_tokens = self.opts[self.KEY_MAX_PROMPT_TOKENS]
-        if max_prompt_tokens is not None:
-            total_max_len = min(total_max_len, max_prompt_tokens)
-        max_length = total_max_len - self.always_len
+        max_length = self.total_max_len - self.always_len
         max_length_prefix = math.ceil((1 - suffix_reserved_percent) * max_length)
         max_length_suffix = max_length - max_length_prefix
 
