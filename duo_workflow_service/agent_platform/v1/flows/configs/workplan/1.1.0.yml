@@ -937,29 +937,41 @@ prompts:
         rounded to the nearest integer, and readiness_score_feedback = the
         recommendation markdown described under "Final answer" below. When a
         gate fired the score MUST be the capped value, never
-        aggregate_uncapped. The feedback is the same three recommendations
-        you write in your final answer, as an ordered markdown list
-        (`1.`, `2.`, `3.`) of exactly three items with no heading or
-        title before it, most impactful first; the blocking amendment (when a gate fired) is item 1 and is
-        marked `**blocking**`, the others `**non-blocking**`. Omit the
-        `readiness_score_feedback` argument (write the score alone) only
-        when fewer than three genuine recommendations exist — never
-        fabricate an issue to reach the count.
+        aggregate_uncapped. The feedback is the same recommendations you
+        write in your final answer, as an ordered markdown list
+        (`1.`, `2.`, `3.`) of up to three items with no heading or
+        title before it. Mark each item `**blocking**` or
+        `**non-blocking**` and list blocking items first, most impactful
+        first within each group. Blocking items are the gate's amendment
+        (item 1, when a gate fired) and any most_damaging_finding a
+        cross-examiner marked "confirmed"; when trimming to three, drop
+        non-blocking items first. List only
+        genuine recommendations and never fabricate an issue to reach a
+        count. Always pass the `readiness_score_feedback` argument, even
+        when no genuine recommendation exists: pass an empty string (`""`)
+        then. Each scoring run replaces the stored feedback, so omitting the
+        argument would leave a previous run's recommendations beside the new
+        score.
 
         ## Final answer
 
         After the `update_work_item` call returns, finish with a plain-text
         final answer covering: the score you wrote (and whether it was
         capped), the verdict band, which round-1 evaluators and
-        cross-examiners actually returned, and exactly 3 numbered
-        recommendations most impactful first (when a gate fired, item 1 is the blocking
-        amendment — the resolution when resolution_known is true, otherwise
-        the falsification experiment — marked blocking; fill the rest from
+        cross-examiners actually returned, and up to 3 numbered
+        recommendations, every blocking item before any non-blocking one and
+        most impactful first within each group (when a gate fired, item 1 is
+        the blocking amendment — the resolution when resolution_known is
+        true, otherwise the falsification experiment; any other blocking
+        items follow it, then fill the rest from
         the deduped material cons of the two scorers and their
-        discarded_pros, never fabricating an issue to reach the count). The
+        discarded_pros, skipping cons prefixed `(minor)` and never
+        fabricating an issue to reach the count; say
+        so when none exist). The
         `readiness_score_feedback` argument you just passed to
         `update_work_item` is this same recommendation list as an
-        ordered markdown list with no heading — the widget shows it beside
+        ordered markdown list with no heading, or an empty string when the
+        list is empty — the widget shows it beside
         the score, so the author can see why the plan scored what it did
         and what to change. If the `update_work_item` call failed, or you
         stopped early on a partial ensemble, say so plainly instead.
