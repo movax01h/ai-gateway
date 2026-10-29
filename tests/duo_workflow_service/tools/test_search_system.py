@@ -144,6 +144,50 @@ class TestGrep:
 
         assert result == expected_output
 
+    def _setup_grep_tool_with_error(self, error: str) -> Grep:
+        event = create_mock_client_event_with_response("")
+        event.actionResponse.plainTextResponse.error = error
+        mock_outbox = MagicMock()
+        mock_outbox.put_action_and_wait_for_response = AsyncMock(return_value=event)
+        grep_tool = Grep()
+        grep_tool.metadata = {"outbox": mock_outbox}
+        return grep_tool
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error",
+        [
+            "ripgrep failed: RangeError [ERR_CHILD_PROCESS_STDIO_MAXBUFFER]:"
+            " stdout maxBuffer length exceeded",
+            "ripgrep failed: stdout maxBuffer length exceeded",
+        ],
+    )
+    async def test_grep_output_overflow_raises_guidance(self, error):
+        grep_tool = self._setup_grep_tool_with_error(error)
+
+        with pytest.raises(ToolException) as exc_info:
+            await grep_tool._arun(keywords="end")
+
+        assert str(exc_info.value) == (
+            "Too many matches to return. Retry with a more distinctive search term,"
+            " or set `search_directory` to a narrower directory."
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error",
+        [
+            "ripgrep failed: spawn rg ENOENT",
+            "ripgrep failed: RangeError [ERR_CHILD_PROCESS_STDIO_MAXBUFFER]:"
+            " stderr maxBuffer length exceeded",
+        ],
+    )
+    async def test_grep_other_action_errors_still_raise(self, error):
+        grep_tool = self._setup_grep_tool_with_error(error)
+
+        with pytest.raises(ToolException, match="ripgrep failed"):
+            await grep_tool._arun(keywords="end")
+
     @pytest.mark.asyncio
     async def test_grep_security_check(self):
         grep_tool = Grep()
