@@ -1955,6 +1955,16 @@ _PROMPTS_WITHOUT_AN_ENTRY: frozenset[str] = _GRAPH_NODE_PROMPT_IDS | frozenset(
 )
 
 
+# Prompt versions that declare a unit primitive that the feature setting of their entry doesn't list. The `amazon_q`
+# versions need no entry here: the allowlist check skips the Amazon Q model metadata that selects them.
+_VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE: frozenset[Path] = frozenset(
+    {
+        # Declares `duo_agent_platform`.
+        Path("ai/features/review/summarize_review/prompts/base/3.0.0.yml"),
+    }
+)
+
+
 class TestPromptFeatureSettings:
     """Safeguard: every prompt has an entry in PROMPT_ID_TO_FEATURE_SETTING or is listed as needing none.
 
@@ -2081,3 +2091,28 @@ class TestPromptFeatureSettings:
         )
 
         assert not unknown
+
+    def test_every_entry_lists_the_unit_primitive_of_its_prompt(self) -> None:
+        feature_settings = (
+            ModelSelectionConfig.instance().get_unit_primitive_config_map()
+        )
+
+        unlisted = []
+        for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items():
+            for version_file in self._prompt_dir(prompt_id).glob("*/*.yml"):
+                version = version_file.relative_to(self._repo_root)
+                if (
+                    version_file.parent.name == "amazon_q"
+                    or version in _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE
+                ):
+                    continue
+                unit_primitive = yaml.safe_load(version_file.read_text())[
+                    "unit_primitive"
+                ]
+                if (
+                    unit_primitive
+                    not in feature_settings[feature_setting].unit_primitives
+                ):
+                    unlisted.append(f"{version}: {unit_primitive}")
+
+        assert not unlisted
