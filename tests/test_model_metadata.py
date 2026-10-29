@@ -882,9 +882,19 @@ class TestBedrockIamRole:
         assert self._bedrock_metadata(iam_role="").iam_role is None
 
 
-def test_create_model_metadata_with_none_data():
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param(None, id="none"),
+        pytest.param(5, id="number"),
+        pytest.param(True, id="boolean"),
+        pytest.param("provider", id="string"),
+        pytest.param(["provider"], id="list"),
+    ],
+)
+def test_create_model_metadata_with_data_that_is_not_an_object(data):
     with pytest.raises(ValueError, match="provider must be present"):
-        create_model_metadata(None)
+        create_model_metadata(data)
 
 
 def test_create_model_metadata_without_provider():
