@@ -71,6 +71,24 @@ class TestStructuredFields:
         assert boundary in line
 
 
+class TestModelParams:
+    """The prompt must not set model params such as ``temperature``.
+
+    The model comes from model selection, and ``InMemoryPromptRegistry`` ignores a flow
+    prompt's ``model.params`` whenever model metadata is present. So a ``temperature`` here
+    is never sent, even though the config makes it look like it is. If it ever were sent,
+    reasoning models that reject ``temperature`` (for example GPT-6.1 Terra) would return
+    a 400.
+    """
+
+    def test_prompt_declares_no_model_block(self):
+        prompts = FlowConfig.from_yaml_config(FLOW_NAME, None).prompts
+        assert prompts is not None
+
+        assert prompts[0].model is None
+        assert prompts[0].to_prompt_data()["model"] is None
+
+
 class TestRemovedContent:
     """Content removed in this update must not reappear."""
 
