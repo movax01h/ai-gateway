@@ -1,5 +1,6 @@
 from typing import Annotated
 
+from dependency_injector.providers import Configuration
 from fastapi import APIRouter, Depends, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory
 from langchain_core.messages import BaseMessage
@@ -8,7 +9,7 @@ from pydantic import BaseModel, Field
 from ai_gateway.api.content_utils import content_to_text
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.api.v1.prompts.invoke import PromptRequest, _invoke
-from ai_gateway.async_dependency_resolver import get_prompt_registry
+from ai_gateway.async_dependency_resolver import get_config, get_prompt_registry
 from ai_gateway.instrumentators.model_requests import (
     TokenUsage,
     init_token_usage,
@@ -45,15 +46,18 @@ def _process_chunk(chunk: BaseMessage):
 )
 @feature_category(GitLabFeatureCategory.AI_ABSTRACTION_LAYER)
 async def invoke(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     prompt_request: PromptRequest,
     prompt_id: str,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
+    config: Annotated[Configuration, Depends(get_config)],
 ):
     init_token_usage()
 
     return await _invoke(
+        request=request,
+        config=config,
         prompt_request=prompt_request,
         prompt_id=prompt_id,
         current_user=current_user,

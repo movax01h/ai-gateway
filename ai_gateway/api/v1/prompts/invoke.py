@@ -2,6 +2,7 @@ from datetime import datetime
 from http.client import responses
 from typing import Annotated, Any, AsyncIterator, Callable, Optional
 
+from dependency_injector.providers import Configuration
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory, WrongUnitPrimitives
 from langchain_core.messages import BaseMessage
@@ -9,12 +10,13 @@ from poetry.core.constraints.version.exceptions import ParseConstraintError
 from pydantic import BaseModel, RootModel, model_validator
 from starlette.responses import StreamingResponse
 
+from ai_gateway.api.client_disconnect import run_unless_disconnected
 from ai_gateway.api.content_utils import content_to_text
 from ai_gateway.api.feature_category import (
     feature_category,
     set_feature_category_for_unit_primitive,
 )
-from ai_gateway.async_dependency_resolver import get_prompt_registry
+from ai_gateway.async_dependency_resolver import get_config, get_prompt_registry
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from lib.context import StarletteUser, get_current_user
 
@@ -49,13 +51,16 @@ def _process_chunk(chunk: BaseMessage):
 )
 @feature_category(GitLabFeatureCategory.AI_ABSTRACTION_LAYER)
 async def invoke(
-    request: Request,  # pylint: disable=unused-argument
+    request: Request,
     prompt_request: PromptRequest,
     prompt_id: str,
     current_user: Annotated[StarletteUser, Depends(get_current_user)],
     prompt_registry: Annotated[BasePromptRegistry, Depends(get_prompt_registry)],
+    config: Annotated[Configuration, Depends(get_config)],
 ):
     return await _invoke(
+        request=request,
+        config=config,
         prompt_request=prompt_request,
         prompt_id=prompt_id,
         current_user=current_user,
@@ -66,6 +71,8 @@ async def invoke(
 
 
 async def _invoke(
+    request: Request,
+    config: Configuration,
     prompt_request: PromptRequest,
     prompt_id: str,
     current_user: StarletteUser,
@@ -130,7 +137,13 @@ async def _invoke(
 
             return StreamingResponse(_handle_stream(), media_type="text/event-stream")
 
-        response_chunk: BaseMessage = await prompt.ainvoke(prompt_request.inputs.root)
+        # Under uvicorn (ASGI spec 2.3), Starlette already cancels streaming responses
+        # when the client leaves.
+        response_chunk: BaseMessage = await run_unless_disconnected(
+            request,
+            prompt.ainvoke(prompt_request.inputs.root),
+            enabled=config.feature_flags.cancel_on_client_disconnect(),
+        )
         return process_chunk(response_chunk)
     except KeyError as e:
         raise HTTPException(
