@@ -9,6 +9,12 @@ from duo_workflow_service.executor.action import _execute_action
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.filesystem import _format_no_matches_message
 
+_OUTPUT_OVERFLOW_MARKER = "stdout maxBuffer length exceeded"
+_OUTPUT_OVERFLOW_MESSAGE = (
+    "Too many matches to return. Retry with a more distinctive search term,"
+    " or set `search_directory` to a narrower directory."
+)
+
 
 class GrepInput(BaseModel):
     search_directory: Optional[str] = Field(
@@ -80,16 +86,22 @@ class Grep(DuoBaseTool):
         if not keywords:
             return "No search terms given"
 
-        result = await _execute_action(
-            self.metadata,  # type: ignore
-            contract_pb2.Action(
-                grep=contract_pb2.Grep(
-                    pattern=keywords,
-                    search_directory=search_directory,
-                    case_insensitive=case_insensitive,
-                )
-            ),
-        )
+        try:
+            result = await _execute_action(
+                self.metadata,  # type: ignore
+                contract_pb2.Action(
+                    grep=contract_pb2.Grep(
+                        pattern=keywords,
+                        search_directory=search_directory,
+                        case_insensitive=case_insensitive,
+                    )
+                ),
+            )
+        except ToolException as e:
+            # The executor fails the whole search when ripgrep's output exceeds its buffer.
+            if _OUTPUT_OVERFLOW_MARKER in str(e):
+                raise ToolException(_OUTPUT_OVERFLOW_MESSAGE) from e
+            raise
 
         if (
             "No such file or directory" in result
