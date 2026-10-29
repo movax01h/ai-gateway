@@ -245,42 +245,59 @@ def _split_tool_images(content: list) -> tuple[list, list[dict]]:
     return kept, images
 
 
-# Providers whose endpoint validates assistant content strictly: a string, or a
-# list of bare {"type": "text", "text": ...} blocks. A conversation started on
-# another provider carries content blocks this endpoint rejects, e.g. Anthropic
+# Providers whose endpoint validates assistant messages strictly: content is a
+# string, or a list of bare {"type": "text", "text": ...} blocks, and no keys
+# beyond the plain chat-completions ones. A conversation started on another
+# provider carries content blocks this endpoint rejects, e.g. Anthropic
 # `tool_use` / `thinking`, OpenAI `reasoning` / `function_call`, and the
-# streaming `index` key on every block.
+# streaming `index` key on every block, plus the legacy top-level
+# `function_call` key on the message itself.
 _ASSISTANT_TEXT_ONLY_PROVIDERS = frozenset({"fireworks_ai"})
+
+# Top-level assistant message keys the strict providers reject. Fireworks fails
+# with "Extra inputs are not permitted, field: 'messages[N].function_call'".
+_ASSISTANT_REJECTED_KEYS = frozenset({"function_call"})
 
 
 def flatten_assistant_content(
     messages: list[dict], custom_llm_provider: Optional[str]
 ) -> list[dict]:
-    """Collapse list-shaped assistant content into a string of its text blocks.
+    """Make assistant messages acceptable to providers that validate them strictly.
 
-    Tool calls are unaffected: the converter rebuilds ``tool_calls`` from ``AIMessage.tool_calls``, so ``tool_use`` and
-    ``function_call`` blocks in the content are duplicates. Reasoning blocks are provider-specific and dropped.
-    Request-time only, never persisted.
+    List-shaped assistant content is collapsed into a string of its text blocks, and the legacy top-level
+    ``function_call`` key is removed. Tool calls are unaffected: the converter rebuilds ``tool_calls`` from
+    ``AIMessage.tool_calls``, so ``tool_use`` and ``function_call`` blocks in the content, and the ``function_call``
+    key, are duplicates. Reasoning blocks are provider-specific and dropped. Request-time only, never persisted.
 
     Args:
         messages: Message dicts from the LiteLLM converter.
         custom_llm_provider: litellm provider tag used for the gate.
 
     Returns:
-        A new list with assistant content flattened, or ``messages`` itself when the gate is closed.
+        A new list with assistant messages sanitized, or ``messages`` itself when the gate is closed.
     """
     if custom_llm_provider not in _ASSISTANT_TEXT_ONLY_PROVIDERS:
         return messages
 
     return [
         (
-            {**message, "content": _join_text_blocks(message["content"])}
+            _sanitize_assistant_message(message)
             if message.get("role") == "assistant"
-            and isinstance(message.get("content"), list)
             else message
         )
         for message in messages
     ]
+
+
+def _sanitize_assistant_message(message: dict) -> dict:
+    sanitized = {
+        key: value
+        for key, value in message.items()
+        if key not in _ASSISTANT_REJECTED_KEYS
+    }
+    if isinstance(sanitized.get("content"), list):
+        sanitized["content"] = _join_text_blocks(sanitized["content"])
+    return sanitized
 
 
 def _join_text_blocks(content: list) -> str:
