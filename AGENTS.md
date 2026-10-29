@@ -438,6 +438,10 @@ Use `glab` for MR/issue CLI operations (or the GitLab MCP tools, if available).
 - Worktrees usually check out a single branch, so local `main` may not exist.
   Diff against `origin/main` (for example `git fetch origin main`, then
   `git diff origin/main...HEAD`), and never assume `main` resolves locally.
+- For conflict-resolution tasks with a restricted file scope, use
+  `git diff --name-only --diff-filter=U` to identify conflicts. Avoid merging
+  or rebasing unrelated target-branch changes into the work; verify every
+  changed path is in scope before committing or pushing, and stop if it is not.
 - Shell commands have a default timeout (often ~120s). Don't block a
   single call with a long `sleep`. Instead, request a longer timeout if
   your tool supports it, and poll in a bounded loop with an early break:
