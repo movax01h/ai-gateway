@@ -22,6 +22,7 @@ from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
 )
 from ai_gateway.model_selection.models import ChatAmazonQParams, ChatLiteLLMParams
+from lib.version import MAX_VERSION_QUERY_LENGTH
 from tests.conftest import FakeModel
 
 
@@ -246,6 +247,34 @@ class TestPrompt:
         assert response.status_code == 200
         assert response.text == "Hi John!"
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+
+@pytest.mark.usefixtures("frozen_datetime_now")
+class TestPromptVersionLength:
+    @pytest.mark.parametrize(
+        ("length", "expected_status"),
+        [
+            (MAX_VERSION_QUERY_LENGTH, 200),
+            (MAX_VERSION_QUERY_LENGTH + 1, 422),
+        ],
+    )
+    def test_long_version_is_rejected_before_the_registry(
+        self, mock_client, mock_registry_get, length: int, expected_status: int
+    ):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "inputs": {"name": "John", "age": 20},
+                "prompt_version": "1.0.0".ljust(length),
+            },
+        )
+
+        assert response.status_code == expected_status
+        assert mock_registry_get.called == (expected_status == 200)
 
 
 def _post_prompt(mock_client, stream: bool = False):

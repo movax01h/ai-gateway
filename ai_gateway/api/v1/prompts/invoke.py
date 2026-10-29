@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from gitlab_cloud_connector import GitLabFeatureCategory, WrongUnitPrimitives
 from langchain_core.messages import BaseMessage
 from poetry.core.constraints.version.exceptions import ParseConstraintError
-from pydantic import BaseModel, RootModel, model_validator
+from pydantic import BaseModel, Field, RootModel, model_validator
 from starlette.responses import StreamingResponse
 
 from ai_gateway.api.client_disconnect import run_unless_disconnected
@@ -19,6 +19,7 @@ from ai_gateway.api.feature_category import (
 from ai_gateway.async_dependency_resolver import get_config, get_prompt_registry
 from ai_gateway.prompts import BasePromptRegistry, Prompt
 from lib.context import StarletteUser, get_current_user
+from lib.version import MAX_VERSION_QUERY_LENGTH
 
 
 class PromptInputs(RootModel):
@@ -33,7 +34,9 @@ class PromptInputs(RootModel):
 
 class PromptRequest(BaseModel):
     inputs: PromptInputs
-    prompt_version: Optional[str] = None
+    prompt_version: Optional[str] = Field(
+        default=None, max_length=MAX_VERSION_QUERY_LENGTH
+    )
     stream: Optional[bool] = False
 
 
