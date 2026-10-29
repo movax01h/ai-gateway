@@ -1348,9 +1348,19 @@ class TestCreateModelMetadataByTag:
         assert result.default.llm_definition == gitlab_model1
         assert result.by_tag == {}
 
-    def test_invalid_data_raises(self):
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param(None, id="none"),
+            pytest.param(5, id="number"),
+            pytest.param(True, id="boolean"),
+            pytest.param("provider", id="string"),
+            pytest.param(["provider"], id="list"),
+        ],
+    )
+    def test_invalid_data_raises(self, data):
         with pytest.raises(ValueError, match="provider must be present"):
-            create_model_metadata_by_tag(None)
+            create_model_metadata_by_tag(data)
 
     def test_unresolvable_tag_is_skipped_not_raised(self, gitlab_model1, gitlab_model2):
         # An unresolvable models_for_tags entry must not drop the whole context:
