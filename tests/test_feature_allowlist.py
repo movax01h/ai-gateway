@@ -211,7 +211,7 @@ def _dws_metadata(raw: dict) -> Optional[TypeModelMetadata]:
     token = current_user.set(USER.cloud_connector_user)
     try:
         with patch.object(
-            get_config().model_selection, "feature_allowlist_mode", "off"
+            get_config().model_selection, "feature_allowlist_mode_dws", "off"
         ):
             asyncio.run(
                 ModelMetadataInterceptor().intercept_service(continuation, details)
@@ -304,6 +304,27 @@ class TestCheckClientModelMetadata:
 
         assert result is metadata
         assert logs == []
+
+    @pytest.mark.parametrize(
+        ("surface", "mode", "served"),
+        [("http", "fallback", "allowed_model"), ("dws", "log", "other_model")],
+    )
+    def test_each_surface_uses_its_own_mode(self, monkeypatch, surface, mode, served):
+        model_selection = get_config().model_selection
+        monkeypatch.setattr(model_selection, "feature_allowlist_mode_http", "fallback")
+        monkeypatch.setattr(model_selection, "feature_allowlist_mode_dws", "log")
+
+        _, result, logs = _check(
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": FEATURE,
+            },
+            surface=surface,
+        )
+
+        assert result.llm_definition.gitlab_identifier == served
+        assert [e["mode"] for e in logs if e["event"] == MISMATCH] == [mode]
 
     @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
     def test_a_gateway_that_serves_custom_models_does_not_check(self, monkeypatch):

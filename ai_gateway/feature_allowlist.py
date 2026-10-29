@@ -24,11 +24,12 @@ that the server builds itself is never checked. A gateway that serves custom mod
 (``AIGW_CUSTOM_MODELS__ENABLED``) runs every model on the operator's own keys, so it skips the check
 altogether.
 
-``AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE`` selects the behavior:
+``AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP`` selects the behavior on the HTTP routes, and
+``AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS`` on the Duo Workflow Service:
 
 - ``off``: no check.
-- ``log``: log mismatches, change nothing (default).
-- ``fallback``: serve the feature's default model instead of a model that is not allowed.
+- ``log``: log mismatches, change nothing (the Duo Workflow Service default).
+- ``fallback``: serve the feature's default model instead of a model that is not allowed (the HTTP default).
 - ``enforce``: reject a model that is not allowed (HTTP 403, gRPC ``PERMISSION_DENIED``).
 
 ``fallback`` and ``enforce`` also rebuild a GitLab-managed model from its definition when a raw
@@ -487,7 +488,11 @@ def _new_check(
 ) -> Optional[_AllowlistCheck]:
     """Return the check for a request, or None when this gateway does not check it."""
     config = get_config()
-    mode = config.model_selection.feature_allowlist_mode
+    mode = (
+        config.model_selection.feature_allowlist_mode_http
+        if surface == "http"
+        else config.model_selection.feature_allowlist_mode_dws
+    )
     if (
         mode == "off"
         or config.custom_models.enabled

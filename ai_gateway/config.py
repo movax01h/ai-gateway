@@ -514,15 +514,22 @@ class ConfigModelSelection(BaseModel):
             "gitlab_identifier when the ai_model_release feature flag is enabled."
         ),
     )
-    feature_allowlist_mode: FeatureAllowlistMode = Field(
+    feature_allowlist_mode_http: FeatureAllowlistMode = Field(
+        default="fallback",
+        description=(
+            "How the HTTP routes check client-supplied model metadata that names a "
+            "GitLab-managed model against the feature's allowlist (default, selectable, beta, "
+            "dev and tag models). 'off': no check. 'log': log mismatches only. 'fallback': "
+            "serve the feature's default model instead, and rebuild a managed model whose raw "
+            "identifier would rewrite it. 'enforce': reject a model that is not allowed "
+            "(HTTP 403), and rebuild an identifier override as in 'fallback'."
+        ),
+    )
+    feature_allowlist_mode_dws: FeatureAllowlistMode = Field(
         default="log",
         description=(
-            "How client-supplied model metadata that names a GitLab-managed model is checked "
-            "against the feature's allowlist (default, selectable, beta, dev and tag models). "
-            "'off': no check. 'log': log mismatches only. 'fallback': serve the feature's "
-            "default model instead, and rebuild a managed model whose raw identifier would "
-            "rewrite it. 'enforce': reject a model that is not allowed (HTTP 403, gRPC "
-            "PERMISSION_DENIED), and rebuild an identifier override as in 'fallback'."
+            "The same check on the Duo Workflow Service, with the same modes. 'enforce' "
+            "rejects the call with gRPC PERMISSION_DENIED."
         ),
     )
 

@@ -937,8 +937,12 @@ def test_config_bedrock_guardrail_identifier_at_max_length():
             ),
         ),
         (
-            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE": "enforce"},
-            ConfigModelSelection(feature_allowlist_mode="enforce"),
+            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP": "enforce"},
+            ConfigModelSelection(feature_allowlist_mode_http="enforce"),
+        ),
+        (
+            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS": "fallback"},
+            ConfigModelSelection(feature_allowlist_mode_dws="fallback"),
         ),
     ],
 )
@@ -949,16 +953,23 @@ def test_config_model_selection(values: dict, expected: ConfigModelSelection):
         assert config.model_selection == expected
 
 
-def test_config_model_selection_feature_allowlist_mode_defaults_to_log():
+def test_config_model_selection_feature_allowlist_modes_default_per_surface():
     with mock.patch.dict(os.environ, {}, clear=True):
         config = Config(_env_file=None)
 
-        assert config.model_selection.feature_allowlist_mode == "log"
+        assert config.model_selection.feature_allowlist_mode_http == "fallback"
+        assert config.model_selection.feature_allowlist_mode_dws == "log"
 
 
-def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode():
-    values = {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE": "strict"}
-    with mock.patch.dict(os.environ, values, clear=True):
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP",
+        "AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS",
+    ],
+)
+def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variable):
+    with mock.patch.dict(os.environ, {variable: "strict"}, clear=True):
         with pytest.raises(ValidationError):
             Config(_env_file=None)
 
