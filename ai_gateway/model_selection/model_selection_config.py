@@ -427,7 +427,8 @@ class ModelSelectionConfig:
     def _load_env_releases(self, model_releases: str) -> None:
         try:
             payload = ModelReleasesPayload.model_validate_json(model_releases)
-        except Exception as exc:  # catches json.JSONDecodeError, ValidationError, and anything else  # pylint: disable=broad-except
+        # catches json.JSONDecodeError, ValidationError, and anything else
+        except Exception as exc:  # pylint: disable=broad-except
             log.error(
                 "AIGW_MODEL_SELECTION__MODEL_RELEASES failed to parse; env-injected models will not be available",
                 errors=_safe_error_details(exc),
@@ -441,7 +442,8 @@ class ModelSelectionConfig:
                     model_data
                 )
                 self._env_llm_definitions[definition.gitlab_identifier] = definition
-            except Exception as exc:  # catches all Pydantic validation errors to allow warm startup  # pylint: disable=broad-except
+            # catches all Pydantic validation errors to allow warm startup
+            except Exception as exc:  # pylint: disable=broad-except
                 log.error(
                     "Env-injected model definition failed validation; skipping",
                     gitlab_identifier=identifier,
