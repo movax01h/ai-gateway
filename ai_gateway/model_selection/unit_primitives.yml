@@ -7,6 +7,12 @@ configurable_unit_primitives:
     unit_primitives:
       - "ask_build"
       - "ask_commit"
+      - "ask_epic"
+      - "ask_issue"
+      - "ask_merge_request"
+      - "ask_work_item"
+      - "documentation_search"
+      - "duo_chat"
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
