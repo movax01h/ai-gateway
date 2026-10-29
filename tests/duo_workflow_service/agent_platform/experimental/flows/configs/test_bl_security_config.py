@@ -53,7 +53,6 @@ from duo_workflow_service.tools.bl_collect_and_flatten import BlCollectAndFlatte
 from duo_workflow_service.tools.bl_prioritize_and_cap import (
     resolve_effective_max_units,
 )
-from duo_workflow_service.tools.search import AdvanceBlobSearchInput, BlobSearchInput
 from duo_workflow_service.tools.toolset import Toolset
 from duo_workflow_service.workflows.registry import _load_flow_from_inline_config
 from lib.events import GLReportingEventContext
@@ -102,6 +101,14 @@ def _config() -> FlowConfig:
 def _config_source() -> str:
     """Raw YAML, comments included: the parsed config cannot see comments."""
     return CONFIG_PATH.read_text(encoding="utf-8")
+
+
+@functools.cache
+def _prompt_sources() -> str:
+    """The flow YAML plus any partial templates it includes."""
+    partials = sorted((CONFIG_PATH.parent / "partials").rglob("*"))
+    texts = [p.read_text(encoding="utf-8") for p in partials if p.is_file()]
+    return "\n".join([_config_source(), *texts])
 
 
 def test_the_flow_version_resolves_as_a_semver_constraint():
@@ -512,17 +519,6 @@ def _tool_names(toolset: list) -> list[str]:
     ]
 
 
-def _tool_options(component: str, tool: str) -> dict:
-    return next(
-        (
-            entry[tool]
-            for entry in _component(component)["toolset"]
-            if isinstance(entry, dict) and tool in entry
-        ),
-        {},
-    )
-
-
 class TestToolsets:
     def test_every_tool_the_flow_names_is_registered(self):
         # tools_registry skips an unknown toolset name silently.
@@ -534,12 +530,34 @@ class TestToolsets:
         }
         assert named <= set(_registered_tools())
 
-    @pytest.mark.parametrize("schema", [BlobSearchInput, AdvanceBlobSearchInput])
-    def test_the_pinned_option_is_a_blob_search_argument(self, schema):
-        # Mirrors Toolset._validate_tool_options: a renamed field fails here.
-        assert set(_tool_options("grounding", "gitlab_blob_search")) <= set(
-            schema.model_fields
+    @pytest.mark.parametrize(
+        "agent", ["grounding", "map_reviews", "sibling_scan", "triage"]
+    )
+    def test_each_search_stage_searches_the_job_s_clone(self, agent):
+        # The search API is rate limited per user and every unit shares that budget.
+        tools = _tool_names(_component(agent)["toolset"])
+        assert "grep" in tools
+        assert "gitlab_blob_search" not in tools
+
+    def test_no_prompt_points_the_agent_at_the_search_api(self):
+        banned = ("gitlab_blob_search", "`incomplete`", "filename:", "ANDed")
+        assert not [b for b in banned if b in _prompt_sources()]
+
+    def test_every_completeness_rule_names_grep_truncation_not_its_limits(self):
+        sources = _prompt_sources()
+        assert not re.search(r"\b\d+ (snippets|matches per file)", sources)
+        anchors = (
+            "3. Call-site verified.",
+            "`SEARCHED_NONE_FOUND` in the callers slot",
         )
+        for anchor in anchors:
+            sites = [line for line in sources.splitlines() if anchor in line]
+            assert sites
+            for site in sites:
+                assert "Results truncated" in site
+                assert "header's match count equals the number shown" in site
+                assert "`read_file` every file in the results" in site
+                assert "Tool runtime exception" in site
 
     @pytest.mark.parametrize(
         "agent", [c["name"] for c in _config().components if "toolset" in c]
