@@ -618,7 +618,7 @@ def resolve_provider_aware_metadata(
 def create_model_metadata(
     data: dict[str, Any] | None, mock_model_responses: bool = False
 ) -> TypeModelMetadata:
-    if not data or "provider" not in data:
+    if not isinstance(data, dict) or "provider" not in data:
         raise ValueError("Argument error: provider must be present.")
 
     if data.get("iam_role") and not get_config().custom_models.enabled:

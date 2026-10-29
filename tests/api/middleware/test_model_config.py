@@ -188,6 +188,26 @@ async def test_handles_malformed_json_in_large_body(middleware_test_client):
     assert response.json() is None
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b'["model_metadata"]', id="array-body"),
+        pytest.param(b'"model_metadata"', id="string-body"),
+        pytest.param(b'{"model_metadata": 5}', id="number-value"),
+        pytest.param(b'{"model_metadata": true}', id="boolean-value"),
+        pytest.param(b'{"model_metadata": "provider"}', id="string-value"),
+        pytest.param(b'{"model_metadata": ["provider"]}', id="array-value"),
+    ],
+)
+def test_ignores_model_metadata_that_is_not_an_object(middleware_test_client, body):
+    response = middleware_test_client.post(
+        "/test", content=body, headers={"content-type": "application/json"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
 @pytest.mark.asyncio
 async def test_handles_unicode_in_large_body(middleware_test_client):
     """Test that unicode characters in large bodies are handled correctly."""

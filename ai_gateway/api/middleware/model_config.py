@@ -79,6 +79,9 @@ class ModelConfigMiddleware:
             try:
                 body_str = full_body.decode("utf-8")
                 data = json.loads(body_str)
+                # A JSON array or string can contain the text `model_metadata`, but it has no such key.
+                if not isinstance(data, dict):
+                    return replay
 
                 if "model_metadata" in data:
                     raw_metadata = data["model_metadata"]
