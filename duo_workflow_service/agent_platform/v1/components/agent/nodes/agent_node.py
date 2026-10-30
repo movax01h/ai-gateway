@@ -666,7 +666,12 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     answer_rejections = self._count_answer_rejection(
                         answer_rejections, check.reason
                     )
-                    history = [*history, *check.corrections]
+                    # The corrections answer ``tool_calls`` only. A completion that also
+                    # carries ``invalid_tool_calls`` would otherwise be retried with those
+                    # calls unanswered, which the provider rejects.
+                    history = restore_message_consistency(
+                        [*history, *check.corrections]
+                    )
                     continue
 
                 if wrap_up_active and self._completion_has_non_final_tool_calls(
