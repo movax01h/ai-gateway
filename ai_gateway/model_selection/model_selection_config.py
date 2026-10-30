@@ -139,6 +139,9 @@ class BaseLLMDefinition(BaseModel):
     # Set per deployment, with a dated comment naming the evidence.
     supports_vision: Optional[bool] = None
     requires_single_system_message: bool = False
+    # Claude caches the prompt up to explicit breakpoints placed on messages, so it keeps the per-session security
+    # block in its own system message behind them. All other models get one merged system message.
+    uses_cache_breakpoints: bool = False
     # Some models are available only to accounts that have purchased GitLab credits.
     # When true, clients show a "Requires paid credits" indicator and block chat input.
     requires_paid_credits: bool = False

@@ -155,6 +155,10 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 - `requires_paid_credits` (optional, defaults to `false`): Marks the model as available only to accounts that have purchased GitLab credits. Surfaced in the `/v1/models/definitions` response so clients can show a "Requires paid credits" indicator and block chat input.
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
 [How models and prompts are selected](#how-models-and-prompts-are-selected) for more details)
+- `uses_cache_breakpoints` (optional, defaults to `false`): set to `true` for every Claude model. Claude caches the
+  prompt up to explicit breakpoints, so these models get the per-session security block as a separate system message
+  behind the stable system prompt. All other models get one merged system message. This flag is independent of
+  `family`, which only selects prompt files.
 - `params`: Dictionary with custom parameters to be passed to the model client
 - `prompt_params`: Dictionary with custom parameters to be passed to LLM invocations
 
