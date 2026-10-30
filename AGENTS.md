@@ -530,7 +530,9 @@ git push --set-upstream origin <branch-name>
 ```
 
 When working on an existing MR, push to its `source_branch` (find it with
-`glab mr view <iid> --output json`). Don't guess remote state: check
+`glab mr view <iid> --output json`). Before reporting the change complete, verify
+the intended diff is committed, pushed, and included in the MR's latest commit;
+a working-tree diff alone is not enough. Don't guess remote state: check
 `git branch -a` or `glab` rather than enabling `push.autoSetupRemote` or
 retrying blindly.
 
