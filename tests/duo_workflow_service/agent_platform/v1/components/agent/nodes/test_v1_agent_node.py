@@ -1308,6 +1308,73 @@ def _combined_final_answer() -> AIMessage:
     return message
 
 
+def _with_dangling_invalid_call(message: AIMessage) -> AIMessage:
+    """Add a malformed tool call, which providers report apart from ``tool_calls``."""
+    message.invalid_tool_calls = [
+        {
+            "type": "invalid_tool_call",
+            "name": "read_file",
+            "args": "{not json",
+            "id": "invalid",
+            "error": "Malformed JSON",
+        }
+    ]
+    return message
+
+
+class TestAgentNodeAnswerCorrectionConsistency:
+    """A rejected answer is retried with its corrections, and that retry must stay valid for the provider."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("rejected_answer_factory", "answered_ids"),
+        [
+            pytest.param(_invalid_final_answer, ["bad"], id="validation_error"),
+            pytest.param(
+                _combined_final_answer,
+                ["final", "other"],
+                id="combined_with_other_tool",
+            ),
+        ],
+    )
+    async def test_retry_answers_every_tool_call_of_a_rejected_answer(
+        self,
+        mock_prompt,
+        agent_node_with_schema,
+        base_flow_state,
+        rejected_answer_factory,
+        answered_ids,
+    ):
+        """Regression for #3207: no tool call may reach the provider without a result right after it."""
+        rejected = _with_dangling_invalid_call(rejected_answer_factory())
+        mock_prompt.ainvoke = AsyncMock(side_effect=[rejected, _valid_final_answer()])
+
+        await agent_node_with_schema.run(base_flow_state)
+
+        retry_history = mock_prompt.ainvoke.call_args_list[1].kwargs["input"]["history"]
+        assert retry_history[0] == rejected
+        assert all(isinstance(msg, ToolMessage) for msg in retry_history[1:])
+        assert [msg.tool_call_id for msg in retry_history[1:]] == [
+            *answered_ids,
+            "invalid",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_retry_keeps_real_corrections_and_marks_only_the_missing_call(
+        self, mock_prompt, agent_node_with_schema, base_flow_state
+    ):
+        """The validation error the model must act on is kept; only the unanswered call gets a placeholder."""
+        rejected = _with_dangling_invalid_call(_invalid_final_answer())
+        mock_prompt.ainvoke = AsyncMock(side_effect=[rejected, _valid_final_answer()])
+
+        await agent_node_with_schema.run(base_flow_state)
+
+        retry_history = mock_prompt.ainvoke.call_args_list[1].kwargs["input"]["history"]
+        by_id = {msg.tool_call_id: msg.content for msg in retry_history[1:]}
+        assert "raised validation error" in by_id["bad"]
+        assert "interrupted" in by_id["invalid"].lower()
+
+
 class TestAgentNodeAnswerRejections:
     """Rejected final answers are retried inside run(), so they need their own cap."""
 
