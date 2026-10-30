@@ -1195,16 +1195,20 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 *[cb.on_before_llm_call() for cb in self.internal_callbacks]
             )
 
-            async for item in super().astream(
-                input,
-                config,
-                **kwargs,
-            ):
-                watcher.register_message(item)
+            try:
+                async for item in super().astream(
+                    input,
+                    config,
+                    **kwargs,
+                ):
+                    watcher.register_message(item)
 
-                if previous_item:
-                    yield previous_item
-                previous_item = item
+                    if previous_item:
+                        yield previous_item
+                    previous_item = item
+            except asyncio.CancelledError:
+                self._handle_early_exit_usage(watcher, usage_cb.usage_metadata)
+                raise
 
             self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
 
@@ -1232,12 +1236,16 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             # See `astream` comments for why we yield off by one
             previous_item: BaseMessage | None = None
 
-            async for item in super().atransform(input, config, **kwargs):
-                watcher.register_message(item)
+            try:
+                async for item in super().atransform(input, config, **kwargs):
+                    watcher.register_message(item)
 
-                if previous_item:
-                    yield previous_item
-                previous_item = item
+                    if previous_item:
+                        yield previous_item
+                    previous_item = item
+            except asyncio.CancelledError:
+                self._handle_early_exit_usage(watcher, usage_cb.usage_metadata)
+                raise
 
             self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
 
@@ -1245,6 +1253,35 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 yield previous_item
 
             await watcher.afinish()
+
+    def _handle_early_exit_usage(
+        self,
+        watcher: ModelRequestInstrumentator.WatchContainer,
+        usage_metadata: dict[str, UsageMetadata],
+    ) -> None:
+        """Register usage for a stream whose task was cancelled, for example when the client disconnects.
+
+        The provider reports usage once, when the stream ends. If the provider already did, register it as for a
+        completed call. If not, the consumer would find no operation and could not bill the request, so register an
+        operation with zero tokens for billing only. The call did not finish, so no event, log or counter is sent for
+        it.
+
+        Only `CancelledError` is handled. `GeneratorExit` also fires when an abandoned generator is garbage-collected,
+        possibly in the context of an unrelated request, and must not register usage there.
+
+        This relies on Starlette cancelling the task on client disconnect. Starlette does that only when the server
+        reports ASGI ``spec_version`` below 2.4 (uvicorn reports 2.3 today). See
+        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3551
+        """
+        if usage_metadata:
+            self.handle_usage_metadata(watcher, usage_metadata)
+            return
+
+        watcher.register_llm_operation(
+            self.reported_model_name,
+            UsageMetadata(input_tokens=0, output_tokens=0, total_tokens=0),
+            {**self.internal_event_extra, "operation_type": self.operation_type},
+        )
 
     def handle_usage_metadata(
         self,

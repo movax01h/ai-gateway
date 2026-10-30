@@ -1050,6 +1050,97 @@ configurable_unit_primitives:
         with pytest.raises(StopAsyncIteration):
             await anext(iterator)
 
+    @staticmethod
+    def _open_stream(prompt: Prompt, method: str):
+        inputs = {"name": "Duo", "content": "What's up?"}
+        if method == "astream":
+            return prompt.astream(inputs)
+
+        async def _input():
+            yield inputs
+
+        return prompt.atransform(_input())
+
+    @staticmethod
+    async def _cancel_stream(iterator):
+        # A client disconnect cancels the task: CancelledError at the yield.
+        with pytest.raises(asyncio.CancelledError):
+            await iterator.athrow(asyncio.CancelledError())
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model_response", ["abc"])
+    @pytest.mark.parametrize("method", ["astream", "atransform"])
+    async def test_stream_cancelled_before_usage_available_registers_zero_usage_for_billing_only(
+        self, mock_watch: mock.Mock, prompt: Prompt, method: str
+    ):
+        """A client that leaves before the provider reports usage must still be billable, without events."""
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+        empty_usage_callback = mock.MagicMock(usage_metadata={})
+
+        with mock.patch(
+            "ai_gateway.prompts.base.UsageMetadataCallbackHandler",
+            return_value=empty_usage_callback,
+        ):
+            iterator = self._open_stream(prompt, method)
+            await anext(iterator)
+            await self._cancel_stream(iterator)
+
+        mock_watcher.register_llm_operation.assert_called_once_with(
+            prompt.reported_model_name,
+            UsageMetadata(input_tokens=0, output_tokens=0, total_tokens=0),
+            {**prompt.internal_event_extra, "operation_type": prompt.operation_type},
+        )
+        mock_watcher.register_token_usage.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("model_response", "usage_metadata"),
+        [("abc", UsageMetadata(input_tokens=1, output_tokens=3, total_tokens=4))],
+    )
+    @pytest.mark.parametrize("method", ["astream", "atransform"])
+    async def test_stream_cancelled_after_usage_available_registers_real_usage(
+        self,
+        mock_watch: mock.Mock,
+        prompt: Prompt,
+        usage_metadata: UsageMetadata,
+        method: str,
+    ):
+        """Usage the provider already reported is registered once, as for a completed call."""
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+
+        with self._mock_usage_metadata(prompt.model_name, usage_metadata):
+            iterator = self._open_stream(prompt, method)
+            await anext(iterator)
+            await self._cancel_stream(iterator)
+
+        mock_watcher.register_token_usage.assert_called_once_with(
+            prompt.model_name,
+            usage_metadata,
+            {**prompt.internal_event_extra, "operation_type": prompt.operation_type},
+        )
+        mock_watcher.register_llm_operation.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model_response", ["abc"])
+    @pytest.mark.parametrize("method", ["astream", "atransform"])
+    async def test_closed_stream_registers_no_usage(
+        self, mock_watch: mock.Mock, prompt: Prompt, method: str
+    ):
+        """A closed generator may be a garbage-collected one in an unrelated context, so it registers nothing."""
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+        empty_usage_callback = mock.MagicMock(usage_metadata={})
+
+        with mock.patch(
+            "ai_gateway.prompts.base.UsageMetadataCallbackHandler",
+            return_value=empty_usage_callback,
+        ):
+            iterator = self._open_stream(prompt, method)
+            await anext(iterator)
+            await iterator.aclose()  # raises GeneratorExit inside the generator
+
+        mock_watcher.register_llm_operation.assert_not_called()
+        mock_watcher.register_token_usage.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_ainvoke_model_input(self, prompt: Prompt):
         with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
