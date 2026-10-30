@@ -778,7 +778,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 1.0.1",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-5-sonnet-20241022",
@@ -802,7 +803,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 1.0.2-dev",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-5-sonnet-20241022",
@@ -826,7 +828,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 1.0.0",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-5-sonnet-20241022",
@@ -850,7 +853,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 0.0.1",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-haiku-20240307",
@@ -870,7 +874,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -896,7 +901,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Amazon Q React prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -923,7 +929,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Chat react custom prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -962,7 +969,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react custom prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1001,7 +1009,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react custom prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1037,7 +1046,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react claude_3 prompt",  # Should map to claude_3 variant
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1068,7 +1078,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react claude_4_5 prompt",  # Should use claude_4_5 specific prompt
                 [
-                    ("system", _SECURITY_BLOCK + "Claude 4.5 Template"),
+                    ("system", "Claude 4.5 Template"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1099,10 +1110,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react claude_vertex_4_5 prompt",  # Should use claude_vertex_4_5 specific prompt
                 [
-                    (
-                        "system",
-                        _SECURITY_BLOCK + "Claude Vertex 4.5 Template",
-                    ),
+                    ("system", "Claude Vertex 4.5 Template"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],

@@ -12,7 +12,6 @@ from uuid import uuid4
 
 from gitlab_cloud_connector import CloudConnectorUser
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langgraph.constants import TAG_NOSTREAM
 from structlog import get_logger
@@ -432,9 +431,9 @@ class CompactionOptimizer(HistoryOptimizer):
         overhead_inputs: dict[str, object] = {"history": []}
         if is_manual:
             overhead_inputs["user_instruction"] = user_instruction
-        prompt_tpl = cast(ChatPromptTemplate, self._get_prompt(is_manual).prompt_tpl)
+        prompt_tpl = self._get_prompt(is_manual).prompt_tpl
         overhead = self._token_estimator.count(
-            prompt_tpl.format_messages(**overhead_inputs),
+            prompt_tpl.invoke(overhead_inputs).to_messages(),
             is_complete_history=False,
         )
 

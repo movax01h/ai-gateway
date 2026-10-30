@@ -5,7 +5,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 
 from ai_gateway.model_selection import PromptParams
-from ai_gateway.model_selection.models import ModelClassProvider
+from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
+from ai_gateway.model_selection.models import ChatLiteLLMParams, ModelClassProvider
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.caching import (
     CACHE_CONTROL_INJECTION_POINTS_KEY,
@@ -13,6 +14,7 @@ from ai_gateway.prompts.caching import (
     CacheControlInjectionPointsConverter,
     default_cache_control_injection_points,
     filter_cache_control_injection_points,
+    merges_system_messages,
     should_inject_default_cache_control,
 )
 from lib.prompts.caching import set_prompt_caching_enabled_to_current_request
@@ -526,3 +528,39 @@ class TestShouldInjectDefaultCacheControl:
             should_inject_default_cache_control(model_class_provider, model_kwargs)
             is expected
         )
+
+
+def _definition(family: list[str], requires_single_system_message: bool = False):
+    return ChatLiteLLMDefinition(
+        name="Test model",
+        gitlab_identifier="test_model",
+        max_context_tokens=200000,
+        family=family,
+        requires_single_system_message=requires_single_system_message,
+        params=ChatLiteLLMParams(model="test-model"),
+    )
+
+
+class TestMergesSystemMessages:
+    @pytest.mark.parametrize(
+        ("model_class_provider", "llm_definition", "expected"),
+        [
+            # Claude caches up to a breakpoint on a message, so the security block keeps its own message.
+            (ModelClassProvider.ANTHROPIC, None, False),
+            (ModelClassProvider.LITE_LLM, _definition(["claude"]), False),
+            # Every other chat model gets one system message.
+            (ModelClassProvider.LITE_LLM, _definition(["mistral"]), True),
+            (ModelClassProvider.LITE_LLM, None, True),
+            (ModelClassProvider.OPENAI, None, True),
+            # The model's own requirement wins, even for a model that would keep them separate.
+            (ModelClassProvider.LITE_LLM, _definition(["qwen"], True), True),
+            (ModelClassProvider.LITE_LLM, _definition(["claude"], True), True),
+            # Prompts without chat messages have nothing to merge.
+            (ModelClassProvider.LITE_LLM_COMPLETION, _definition(["mistral"]), False),
+            (ModelClassProvider.LITE_LLM_EMBEDDING, None, False),
+        ],
+    )
+    def test_merges_system_messages(
+        self, model_class_provider, llm_definition, expected
+    ):
+        assert merges_system_messages(model_class_provider, llm_definition) is expected

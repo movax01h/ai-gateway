@@ -55,7 +55,12 @@ from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate, string
 from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
-from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
+from langchain_core.runnables import (
+    Runnable,
+    RunnableBinding,
+    RunnableConfig,
+    RunnableLambda,
+)
 from langchain_core.runnables.config import merge_configs
 from langchain_core.tools import BaseTool
 from langsmith import tracing_context
@@ -98,6 +103,7 @@ from ai_gateway.prompts.caching import (
     CacheControlInjectionPointsConverter,
     default_cache_control_injection_points,
     filter_cache_control_injection_points,
+    merges_system_messages,
     should_inject_default_cache_control,
 )
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
@@ -108,7 +114,11 @@ from ai_gateway.structured_logging import get_request_logger
 from lib.billing_events.service import LLMOperationType
 from lib.context import StarletteUser, current_model_metadata_context
 from lib.internal_events.client import InternalEventsClient
-from lib.prompts.utilities import prompt_template_to_messages, render_security_block
+from lib.prompts.utilities import (
+    merge_leading_system_messages,
+    prompt_template_to_messages,
+    render_security_block,
+)
 
 __all__ = [
     "BasePromptCallbackHandler",
@@ -871,7 +881,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     **(bind_tools_params or {}),
                 )
 
-        prompt_tpl = (
+        prompt_tpl: Runnable[Any, PromptValue] = (
             prompt_template_factory(model_provider, config)
             if prompt_template_factory
             else bind_model_variables(
@@ -880,6 +890,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 model_metadata,
             )
         )
+        if merges_system_messages(model_provider, llm_definition):
+            prompt_tpl = prompt_tpl | RunnableLambda(merge_leading_system_messages)
+
         prompt = self._chain_cache_control_injection_points_converter(
             model_kwargs, prompt_tpl, model_provider
         )

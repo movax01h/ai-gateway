@@ -94,7 +94,7 @@ from ai_gateway.prompts.config.base import (
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from lib.context import StarletteUser, current_model_metadata_context
-from lib.prompts.utilities import render_security_block
+from lib.prompts.utilities import prompt_template_to_messages, render_security_block
 from tests.conftest import FakeModel
 
 
@@ -318,10 +318,8 @@ configurable_unit_primitives:
 
         assert prompt_template == ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    render_security_block() + "{% include 'system.jinja' %}",
-                ),
+                ("system", "{% include 'system.jinja' %}"),
+                ("system", render_security_block().rstrip("\n")),
                 ("user", "{{content}}"),
                 MessagesPlaceholder("history", optional=True),
             ],
@@ -351,10 +349,8 @@ configurable_unit_primitives:
 
         assert prompt_template == ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    render_security_block() + "{% include 'system.jinja' %}",
-                ),
+                ("system", "{% include 'system.jinja' %}"),
+                ("system", render_security_block().rstrip("\n")),
                 ("user", "{{content}}"),
                 MessagesPlaceholder("history", optional=True),
             ],
@@ -645,10 +641,8 @@ configurable_unit_primitives:
 
         assert prompt_template == ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    render_security_block() + "{% include 'system.jinja' %}",
-                ),
+                ("system", "{% include 'system.jinja' %}"),
+                ("system", render_security_block().rstrip("\n")),
                 ("user", "{{content}}"),
                 MessagesPlaceholder("messages"),
                 MessagesPlaceholder("history", optional=True),
@@ -684,7 +678,7 @@ configurable_unit_primitives:
 
         expected_call = mock.call(
             "Performing LLM request",
-            prompt=f"System: {render_security_block()}Hi, I'm Duo\nHuman: What's up?",
+            prompt=f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\nHuman: What's up?",
         )
         assert mock_logger.info.mock_calls[0] == expected_call
 
@@ -725,7 +719,7 @@ configurable_unit_primitives:
         expected_call = mock.call(
             "Performing LLM request",
             prompt=(
-                f"System: {render_security_block()}Hi, I'm Duo\n"
+                f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\n"
                 "Human: What's up?\nAI: Fine, you?\nHuman: Good."
             ),
         )
@@ -764,7 +758,7 @@ configurable_unit_primitives:
 
         expected_call = mock.call(
             "Performing LLM request",
-            prompt=f"System: {render_security_block()}Hi, I'm Duo\nHuman: What's up?",
+            prompt=f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\nHuman: What's up?",
         )
         assert mock_logger.info.mock_calls[0] == expected_call
 
@@ -814,7 +808,7 @@ configurable_unit_primitives:
         expected_call = mock.call(
             "Performing LLM request",
             prompt=(
-                f"System: {render_security_block()}Hi, I'm Duo\n"
+                f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\n"
                 "Human: What's up?\nAI: Fine, you?\nHuman: Good."
             ),
         )
@@ -858,7 +852,7 @@ configurable_unit_primitives:
 
         expected_call = mock.call(
             "Performing LLM request",
-            prompt=f"System: {render_security_block()}Hi, I'm Duo\nHuman: What's up?",
+            prompt=f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\nHuman: What's up?",
         )
         assert mock_logger.info.mock_calls[0] == expected_call
 
@@ -909,7 +903,7 @@ configurable_unit_primitives:
         expected_call = mock.call(
             "Performing LLM request",
             prompt=(
-                f"System: {render_security_block()}Hi, I'm Duo\n"
+                f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\n"
                 "Human: What's up?\nAI: Fine, you?\nHuman: Good."
             ),
         )
@@ -1058,7 +1052,9 @@ configurable_unit_primitives:
         mock_ainvoke.assert_called_once()
         assert mock_ainvoke.call_args.args[0] == ChatPromptValue(
             messages=[
-                SystemMessage(content=render_security_block() + "Hi, I'm Duo"),
+                SystemMessage(
+                    content="Hi, I'm Duo\n\n" + render_security_block().rstrip("\n")
+                ),
                 HumanMessage(content="What's up?"),
             ]
         )
@@ -1085,7 +1081,9 @@ configurable_unit_primitives:
         mock_astream.assert_called_once()
         assert mock_astream.call_args.args[0] == ChatPromptValue(
             messages=[
-                SystemMessage(content=render_security_block() + "Hi, I'm Duo"),
+                SystemMessage(
+                    content="Hi, I'm Duo\n\n" + render_security_block().rstrip("\n")
+                ),
                 HumanMessage(content="What's up?"),
             ]
         )
@@ -2043,6 +2041,79 @@ class TestPromptRequestedModel:
 
 class _FakeLiteLLMModel(FakeModel):
     custom_llm_provider: Optional[str] = None
+
+
+class TestPromptSystemMessageLayout:
+    """The system messages the model receives follow ``merges_system_messages``, whatever built the template."""
+
+    @pytest.fixture(name="family")
+    def family_fixture(self):
+        return ["claude"]
+
+    @pytest.fixture(name="llm_definition")
+    def llm_definition_fixture(self, family: list[str]):
+        return ChatLiteLLMDefinition(
+            name="Test model",
+            gitlab_identifier="test_model",
+            max_context_tokens=200000,
+            family=family,
+            params=ChatLiteLLMParams(
+                model="test-model", temperature=0.0, max_tokens=4096
+            ),
+        )
+
+    @pytest.fixture(name="prompt_template")
+    def prompt_template_fixture(self):
+        return {"system": ["Hi, I'm {{name}}", "Dynamic part"], "user": "{{content}}"}
+
+    @pytest.fixture(name="factory_built")
+    def factory_built_fixture(self):
+        return False
+
+    @pytest.fixture(name="prompt_template_factory")
+    def prompt_template_factory_fixture(self, factory_built: bool):
+        if not factory_built:
+            return None
+
+        # Like ``AgentPromptTemplate``: a factory that builds its own messages with the shared helper.
+        def factory(_model_provider, config):
+            return ChatPromptTemplate.from_messages(
+                prompt_template_to_messages(config.prompt_template),
+                template_format="jinja2",
+            )
+
+        return factory
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("family", "factory_built", "expected_system_messages"),
+        [
+            (["claude"], False, ["Hi, I'm Duo", "Dynamic part", "{security}"]),
+            (["mistral"], False, ["Hi, I'm Duo\n\nDynamic part\n\n{security}"]),
+            (["claude"], True, ["Hi, I'm Duo", "Dynamic part", "{security}"]),
+            (["mistral"], True, ["Hi, I'm Duo\n\nDynamic part\n\n{security}"]),
+        ],
+    )
+    async def test_model_input_system_messages(
+        self, prompt: Prompt, expected_system_messages: list[str]
+    ):
+        inputs = {"name": "Duo", "content": "What's up?"}
+        with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+            await prompt.ainvoke(inputs)
+
+        security = render_security_block().rstrip("\n")
+        expected = [
+            *(
+                ("system", t.replace("{security}", security))
+                for t in expected_system_messages
+            ),
+            ("human", "What's up?"),
+        ]
+        sent = mock_ainvoke.call_args.args[0].to_messages()
+        rendered = prompt.prompt_tpl.invoke(inputs).to_messages()
+
+        assert [(m.type, m.text) for m in sent] == expected
+        assert [(m.type, m.text) for m in rendered] == expected
 
 
 class TestPromptModelVendor:

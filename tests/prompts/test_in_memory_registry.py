@@ -601,21 +601,15 @@ class TestInMemoryPromptRegistry:
         prompt_config = call_kwargs["config"]
         assert prompt_config.model.params == expected_model_params
 
-    @pytest.mark.parametrize(
-        "requires_single_system_message, expected_system",
-        [
-            (True, "Static part.\nDynamic part."),
-            (False, ["Static part.", "Dynamic part."]),
-        ],
-    )
-    def test_system_messages_collapsed_when_model_requires_it(
+    @pytest.mark.parametrize("requires_single_system_message", [True, False])
+    def test_system_list_reaches_prompt_unchanged(
         self,
         in_memory_registry,
         mock_shared_registry,
         prompt,
         requires_single_system_message,
-        expected_system,
     ):
+        """The registry passes the ``system`` list through; ``Prompt`` merges it after rendering when needed."""
         model_metadata = ModelMetadata(
             name="test",
             provider="test",
@@ -640,7 +634,10 @@ class TestInMemoryPromptRegistry:
         )
 
         call_kwargs = mock_shared_registry._build_prompt.call_args.kwargs
-        assert call_kwargs["config"].prompt_template["system"] == expected_system
+        assert call_kwargs["config"].prompt_template["system"] == [
+            "Static part.",
+            "Dynamic part.",
+        ]
 
 
 class TestGetRequiredVariables:
@@ -732,30 +729,3 @@ class TestGetRequiredVariables:
             "dup_list_prompt", prompt_version=None
         )
         assert result == {"name"}
-
-
-class TestJoinSystemMessages:
-    def test_list_is_joined_with_newline(self):
-        template = {"system": ["Static part.", "Dynamic part."], "user": "Hello"}
-        result = InMemoryPromptRegistry._join_system_messages(template)
-        assert result["system"] == "Static part.\nDynamic part."
-        assert result["user"] == "Hello"
-
-    def test_single_string_is_passed_through_unchanged(self):
-        template: dict[str, str | list[str]] = {
-            "system": "Already a string.",
-            "user": "Hello",
-        }
-        result = InMemoryPromptRegistry._join_system_messages(template)
-        assert result["system"] == "Already a string."
-
-    def test_empty_string_is_passed_through_unchanged(self):
-        template: dict[str, str | list[str]] = {"system": "", "user": "Hello"}
-        result = InMemoryPromptRegistry._join_system_messages(template)
-        assert result["system"] == ""
-
-    def test_no_system_key_returns_template_unchanged(self):
-        template: dict[str, str | list[str]] = {"user": "Hello"}
-        result = InMemoryPromptRegistry._join_system_messages(template)
-        assert "system" not in result
-        assert result["user"] == "Hello"

@@ -1151,11 +1151,12 @@ class TestCompactManualMode:
             _large_history(), is_manual=True, user_instruction=user_instruction
         )
 
-        format_calls = mock_prompt.prompt_tpl.format_messages.call_args_list
-        assert format_calls, "expected at least one format_messages call for overhead"
-        assert all("user_instruction" in call.kwargs for call in format_calls)
+        render_calls = mock_prompt.prompt_tpl.invoke.call_args_list
+        assert render_calls, "expected at least one prompt render for overhead"
+        assert all("user_instruction" in call.args[0] for call in render_calls)
         assert all(
-            call.kwargs["user_instruction"] == user_instruction for call in format_calls
+            call.args[0]["user_instruction"] == user_instruction
+            for call in render_calls
         )
 
     @pytest.mark.asyncio
