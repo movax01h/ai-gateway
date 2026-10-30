@@ -15,13 +15,13 @@ from ai_gateway.model_selection.model_selection_config import (
     MODEL_RESTRICTIONS_CONFIG_PATH,
     ChatAnthropicDefinition,
     ChatLiteLLMDefinition,
-    CompletionLiteLLMDefinition,
     EmbeddingLiteLLMDefinition,
     ModelRestriction,
     ModelSelectionConfig,
     ModelTagEntry,
     UnitPrimitiveConfig,
 )
+from ai_gateway.model_selection.models import MAX_MODEL_RETRIES
 from ai_gateway.model_selection.types import DefaultModelEntry, DevConfig
 from lib.feature_flags.context import current_feature_flag_context
 
@@ -309,6 +309,21 @@ def test_model_params_override_merges_params():
     assert llm_definitions["gitlab-model-1"].params.custom_llm_provider == "value1"
     # Unaffected models should retain their original params
     assert llm_definitions["gitlab-model-2"].params.model == "provider-model-2"
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_model_params_override_rejects_max_retries_above_cap():
+    """Test that AIGW_MODEL_SELECTION__MODEL_PARAMS cannot raise max_retries above the cap."""
+    ModelSelectionConfig._instance = None
+    config = ModelSelectionConfig(
+        default_models_override={},
+        model_params_override={
+            "gitlab-model-1": {"max_retries": MAX_MODEL_RETRIES + 1}
+        },
+    )
+
+    with pytest.raises(ValidationError, match="max_retries"):
+        config.get_llm_definitions()
 
 
 @pytest.mark.usefixtures("mock_fs")
@@ -949,25 +964,6 @@ def test_selectable_models_have_required_fields(selection_config):
         )
 
     assert not errors, "\n".join(errors)
-
-
-def test_fireworks_models_have_max_retries_10(selection_config):
-    """Test that all Fireworks models have max_retries set to 10 for exponential backoff."""
-    llm_definitions = selection_config.get_llm_definitions()
-
-    fireworks_models = [
-        (identifier, definition)
-        for identifier, definition in llm_definitions.items()
-        if isinstance(definition, CompletionLiteLLMDefinition)
-        and definition.params.custom_llm_provider == "fireworks_ai"
-    ]
-
-    assert len(fireworks_models) > 0, "No Fireworks models found in models.yml"
-
-    for identifier, definition in fireworks_models:
-        assert definition.params.max_retries == 10, (
-            f"Fireworks model '{identifier}' should have max_retries=10, got {definition.params.max_retries}"
-        )
 
 
 @pytest.mark.usefixtures("mock_fs")

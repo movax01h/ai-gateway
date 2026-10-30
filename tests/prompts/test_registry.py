@@ -233,7 +233,7 @@ model:
     top_p: 0.1
     top_k: 50
     max_tokens: 256
-    max_retries: 10
+    max_retries: 3
 unit_primitive: explain_code
 prompt_template:
   system: Template1
@@ -274,7 +274,7 @@ model:
     top_p: 0.1
     top_k: 50
     max_tokens: 256
-    max_retries: 10
+    max_retries: 3
 unit_primitive: explain_code
 prompt_template:
   system: Template1
@@ -290,7 +290,7 @@ model:
     top_p: 0.1
     top_k: 50
     max_tokens: 256
-    max_retries: 10
+    max_retries: 3
 unit_primitive: explain_code
 prompt_template:
   system: Template1
@@ -306,7 +306,7 @@ model:
     top_p: 0.1
     top_k: 50
     max_tokens: 256
-    max_retries: 10
+    max_retries: 3
 unit_primitive: explain_code
 prompt_template:
   system: Template1
@@ -323,7 +323,7 @@ model:
     top_p: 0.8
     top_k: 40
     max_tokens: 256
-    max_retries: 6
+    max_retries: 2
 unit_primitive: duo_chat
 prompt_template:
   system: Template1
@@ -362,7 +362,7 @@ model:
     top_p: 0.8
     top_k: 40
     max_tokens: 256
-    max_retries: 6
+    max_retries: 2
 unit_primitive: duo_chat
 prompt_template:
   system: Template1
@@ -386,7 +386,7 @@ model:
     top_p: 0.8
     top_k: 40
     max_tokens: 256
-    max_retries: 6
+    max_retries: 2
 unit_primitive: duo_chat
 prompt_template:
   system: Template1
@@ -409,7 +409,7 @@ model:
     top_p: 0.9
     top_k: 50
     max_tokens: 512
-    max_retries: 8
+    max_retries: 0
 unit_primitive: duo_chat
 prompt_template:
   system: Claude 4.5 Template
@@ -432,7 +432,7 @@ model:
     top_p: 0.9
     top_k: 50
     max_tokens: 512
-    max_retries: 8
+    max_retries: 0
 unit_primitive: duo_chat
 prompt_template:
   system: Claude Vertex 4.5 Template
@@ -792,7 +792,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.1,
                     "top_k": 50,
                     "max_tokens": 256,
-                    "max_retries": 10,
+                    "max_retries": 3,
                 },
                 ChatLiteLLM,
             ),
@@ -817,7 +817,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.1,
                     "top_k": 50,
                     "max_tokens": 256,
-                    "max_retries": 10,
+                    "max_retries": 3,
                 },
                 ChatLiteLLM,
             ),
@@ -842,7 +842,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.1,
                     "top_k": 50,
                     "max_tokens": 256,
-                    "max_retries": 10,
+                    "max_retries": 3,
                 },
                 ChatLiteLLM,
             ),
@@ -863,7 +863,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.1,
                     "top_k": 50,
                     "max_tokens": 256,
-                    "max_retries": 10,
+                    "max_retries": 3,
                 },
                 ChatAnthropic,
             ),
@@ -886,7 +886,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatAnthropic,
             ),
@@ -952,7 +952,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatLiteLLM,
             ),
@@ -992,7 +992,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatLiteLLM,
             ),
@@ -1032,7 +1032,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatLiteLLM,
             ),
@@ -1064,7 +1064,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatLiteLLM,
             ),
@@ -1096,7 +1096,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.9,
                     "top_k": 50,
                     "max_tokens": 512,
-                    "max_retries": 8,
+                    "max_retries": 0,
                 },
                 ChatLiteLLM,
             ),
@@ -1129,7 +1129,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.9,
                     "top_k": 50,
                     "max_tokens": 512,
-                    "max_retries": 8,
+                    "max_retries": 0,
                 },
                 ChatLiteLLM,
             ),

@@ -122,6 +122,7 @@ model:
         top_p: <float>                # Optional. 0.0-1.0. Controls diversity (default: 1.0)
         top_k: <integer>              # Optional. Token consideration limit (default: 40)
         max_tokens: <integer>         # Optional. Maximum tokens to generate
+        max_retries: <integer>        # Optional. 0-3. Provider SDK retry attempts (default: 1)
         stop: <string[]>              # Optional. Array of stopping sequences
 
 unit_primitives: # Required. Features that can use this prompt
@@ -137,7 +138,6 @@ prompt_template: # Required. Templates for model interaction
 
 params: # Optional. Request handling parameters
     timeout: <integer>              # Optional. Maximum response time in seconds (default: 30)
-    max_retries: <integer>          # Optional. Maximum retry attempts (default: 3)
     context_management:             # Optional. Anthropic-only context window management
         edits:
             - type: <string>        # Edit strategy (e.g., "clear_tool_uses_20250919")
@@ -161,6 +161,7 @@ model:
     params:
         temperature: 0.2
         max_tokens: 1024
+        max_retries: 3
         stop:
             - "End"
 unit_primitives:
@@ -170,7 +171,6 @@ prompt_template:
     user: "Review this code: {{ code_diff }}"
 params:
     timeout: 120
-    max_retries: 3
 ```
 
 ### Message Placeholders
@@ -383,6 +383,7 @@ model:
         temperature: 0.2
         top_p: 0.7
         max_tokens: 300
+        max_retries: 3
 unit_primitives:
     - duo_chat
 prompt_template:
@@ -390,7 +391,6 @@ prompt_template:
     user: "What can I help with?"
 params:
     timeout: 60
-    max_retries: 5
     stop:
         - "End"
 ```

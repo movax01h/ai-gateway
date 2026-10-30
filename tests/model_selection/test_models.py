@@ -2,9 +2,17 @@ import pytest
 from pydantic import ValidationError
 
 from ai_gateway.model_selection.models import (
+    MAX_MODEL_RETRIES,
     AnthropicWorkloadIdentityParams,
+    BaseModelParams,
+    ChatAmazonQParams,
     ChatAnthropicParams,
+    ChatGoogleGenAIParams,
+    ChatLiteLLMParams,
     ChatOpenAIParams,
+    CompletionLiteLLMParams,
+    CompletionType,
+    EmbeddingLiteLLMParams,
     OpenAIProviderParams,
     OpenAIReasoningParams,
     validate_client_headers,
@@ -165,3 +173,36 @@ class TestChatAnthropicParams:
             ChatAnthropicParams(
                 model="claude-fable-5-1", api_key="sk-ant-x", workload_identity=self.WIF
             )
+
+
+# Each params class with the fields it requires besides max_retries.
+_PARAMS_CLASSES = [
+    (BaseModelParams, {}),
+    (ChatAmazonQParams, {}),
+    (ChatAnthropicParams, {}),
+    (ChatGoogleGenAIParams, {}),
+    (ChatLiteLLMParams, {}),
+    (ChatOpenAIParams, {}),
+    (CompletionLiteLLMParams, {"completion_type": CompletionType.TEXT}),
+    (EmbeddingLiteLLMParams, {}),
+]
+
+
+class TestMaxRetriesCap:
+    def test_covers_every_params_class(self):
+        covered = {params_class for params_class, _ in _PARAMS_CLASSES}
+
+        assert set(BaseModelParams.__subclasses__()) <= covered
+
+    @pytest.mark.parametrize(("params_class", "required"), _PARAMS_CLASSES)
+    @pytest.mark.parametrize("max_retries", [None, 0, 1, MAX_MODEL_RETRIES])
+    def test_accepts_values_within_cap(self, params_class, required, max_retries):
+        params = params_class(**required, max_retries=max_retries)
+
+        assert params.max_retries == max_retries
+
+    @pytest.mark.parametrize(("params_class", "required"), _PARAMS_CLASSES)
+    @pytest.mark.parametrize("max_retries", [-1, MAX_MODEL_RETRIES + 1])
+    def test_rejects_values_outside_cap(self, params_class, required, max_retries):
+        with pytest.raises(ValidationError, match="max_retries"):
+            params_class(**required, max_retries=max_retries)
