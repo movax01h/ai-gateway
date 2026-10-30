@@ -75,13 +75,14 @@ name: Mistral Code Suggestions
 model:
   params:
     temperature: 0.1
+    max_retries: 3
 unit_primitives:
   - complete_code
 prompt_template:
   system: Complete the following code
   user: Here's my code: {{code}}
 params:
-  max_retries: 3
+  timeout: 60
 ```
 
 Assume `code_suggestions/completions` is given as the `prompt_id`, and `1.0.0` as the `prompt_version` for each example.
@@ -108,6 +109,7 @@ Thus, the resulting values will be:
 model: codestral:22b # From model definition
 max_tokens: 4_096 # From model definition
 temperature: 0.1 # Overwritten in prompt definition
+max_retries: 3 # Overwritten in prompt definition
 prompt_template: # From prompt definition
   system: Complete the following code
   user: Here's my code: {{code}}
@@ -117,7 +119,6 @@ prompt_template: # From prompt definition
 
 ```yaml
 timeout: 60
-max_retries: 3
 ```
 
 #### Custom models example
@@ -174,7 +175,6 @@ models:
       max_retries: 1
     prompt_params:
       timeout: 60
-      max_retries: 3
 ```
 
 ### Thinking configuration for Claude models

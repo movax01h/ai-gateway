@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Iterable, Mapping, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "AnthropicWorkloadIdentityParams",
@@ -85,6 +85,11 @@ class CompletionType(StrEnum):
     TEXT = "text"
 
 
+# Upper bound on provider SDK retries. Nested retry layers multiply this value, so
+# it must not be open-ended. 3 is the highest value any shipped prompt sets.
+MAX_MODEL_RETRIES = 3
+
+
 class BaseModelParams(BaseModel):
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
@@ -93,7 +98,7 @@ class BaseModelParams(BaseModel):
     top_p: float | None = None
     top_k: int | None = None
     max_tokens: int | None = None
-    max_retries: int | None = 1
+    max_retries: int | None = Field(default=1, ge=0, le=MAX_MODEL_RETRIES)
     extra_headers: Mapping[str, str] | None = None
 
 

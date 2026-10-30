@@ -67,6 +67,8 @@
         "max_retries": {
           "anyOf": [
             {
+              "maximum": 3,
+              "minimum": 0,
               "type": "integer"
             },
             {
