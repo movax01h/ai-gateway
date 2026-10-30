@@ -40,6 +40,56 @@
 # Workflow session prompts under ai/features/workflow/ are co-owned by Agent Observability (see work item 90)
 /ai/features/workflow/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
 
+# Security Review flow and prompts (Code Security)
+/duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham
+/ai_gateway/prompts/definitions/security_review*/ @mbenayoun @philipcunningham
+/ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham
+/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham
+
+# Business Logic Security flows and tools (Code Security)
+/duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham
+/duo_workflow_service/agent_platform/experimental/flows/configs/business_context_security_guidelines/ @mbenayoun @philipcunningham
+/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham
+/duo_workflow_service/tools/bl_*.py @mbenayoun @philipcunningham
+/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_bl_security_*.py @mbenayoun @philipcunningham
+/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_business_context_security_guidelines_prompt.py @mbenayoun @philipcunningham
+/tests/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham
+/tests/duo_workflow_service/tools/test_bl_*.py @mbenayoun @philipcunningham
+/tests/model_selection/test_shipped_bl_security_setting.py @mbenayoun @philipcunningham
+
+# SAST vulnerability resolution flow and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/resolve_sast_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/tests/prompts/test_resolve_sast_vulnerability_push_prompt.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+
+# SAST false positive detection flow, tools, and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/sast_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/validate_sast_vulnerability_agent_prompt/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/sast_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/validate_sast_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/duo_workflow_service/tools/vulnerabilities/post_sast_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis @gitlab-org/maintainers/duo-workflow-service
+/tests/duo_workflow_service/tools/vulnerabilities/test_post_sast_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+
+# Secret false positive detection flow, tools, and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/secrets_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+/ai_gateway/prompts/definitions/secret_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+/ai_gateway/response_schemas/definitions/secret_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+/duo_workflow_service/tools/vulnerabilities/post_secret_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection @gitlab-org/maintainers/duo-workflow-service
+/tests/duo_workflow_service/tools/vulnerabilities/test_post_secret_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+
+# Dependency bump resolution flows and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump/ @mbenayoun @gitlab-org/govern/agentic-security-flows
+/duo_workflow_service/agent_platform/experimental/flows/configs/resolve_dependency_bump/ @mbenayoun @gitlab-org/govern/agentic-security-flows
+/ai_gateway/prompts/definitions/resolve_dep_bump_pipeline_fix/ @mbenayoun @gitlab-org/govern/agentic-security-flows
+/tests/duo_workflow_service/agent_platform/v1/flows/test_resolve_dependency_bump_config.py @mbenayoun @gitlab-org/govern/agentic-security-flows
+/tests/ai_gateway/prompts/test_resolve_dep_bump_templates.py @mbenayoun @gitlab-org/govern/agentic-security-flows
+
 # Security features under ai/features/
 /ai/features/security/ @gitlab-org/maintainers/duo-workflow-service
 
@@ -84,6 +134,56 @@
 
 # Workflow session prompts under ai/features/workflow/
 /ai/features/workflow/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
+
+# Security Review flow and prompts (Code Security)
+/duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham
+/ai_gateway/prompts/definitions/security_review*/ @mbenayoun @philipcunningham
+/ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham
+/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham
+
+# Business Logic Security flows and tools (Code Security)
+/duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham
+/duo_workflow_service/agent_platform/experimental/flows/configs/business_context_security_guidelines/ @mbenayoun @philipcunningham
+/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham
+/duo_workflow_service/tools/bl_*.py @mbenayoun @philipcunningham
+/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_bl_security_*.py @mbenayoun @philipcunningham
+/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_business_context_security_guidelines_prompt.py @mbenayoun @philipcunningham
+/tests/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham
+/tests/duo_workflow_service/tools/test_bl_*.py @mbenayoun @philipcunningham
+/tests/model_selection/test_shipped_bl_security_setting.py @mbenayoun @philipcunningham
+
+# SAST vulnerability resolution flow and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/resolve_sast_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/tests/prompts/test_resolve_sast_vulnerability_push_prompt.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+
+# SAST false positive detection flow, tools, and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/sast_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/prompts/definitions/validate_sast_vulnerability_agent_prompt/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/sast_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai_gateway/response_schemas/definitions/validate_sast_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/duo_workflow_service/tools/vulnerabilities/post_sast_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis @gitlab-org/maintainers/duo-workflow-service
+/tests/duo_workflow_service/tools/vulnerabilities/test_post_sast_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+
+# Secret false positive detection flow, tools, and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/secrets_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+/ai_gateway/prompts/definitions/secret_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+/ai_gateway/response_schemas/definitions/secret_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+/duo_workflow_service/tools/vulnerabilities/post_secret_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection @gitlab-org/maintainers/duo-workflow-service
+/tests/duo_workflow_service/tools/vulnerabilities/test_post_secret_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+
+# Dependency bump resolution flows and prompts
+/duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump/ @mbenayoun @gitlab-org/govern/agentic-security-flows
+/duo_workflow_service/agent_platform/experimental/flows/configs/resolve_dependency_bump/ @mbenayoun @gitlab-org/govern/agentic-security-flows
+/ai_gateway/prompts/definitions/resolve_dep_bump_pipeline_fix/ @mbenayoun @gitlab-org/govern/agentic-security-flows
+/tests/duo_workflow_service/agent_platform/v1/flows/test_resolve_dependency_bump_config.py @mbenayoun @gitlab-org/govern/agentic-security-flows
+/tests/ai_gateway/prompts/test_resolve_dep_bump_templates.py @mbenayoun @gitlab-org/govern/agentic-security-flows
 
 # SkillGuard flow and prompts (Code Security)
 /ai/features/security/skillguard_scan/ @mbenayoun @mtolpin @philipcunningham
