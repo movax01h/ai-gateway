@@ -205,7 +205,7 @@ def create_fast_api_server(config: Config):
                 max_bytes=_CODE_SUGGESTIONS_MAX_BODY_BYTES,
                 path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
             ),
-            Middleware(ModelConfigMiddleware),
+            Middleware(ModelConfigMiddleware, skip_endpoints=_SKIP_ENDPOINTS),
         ],
         extra={"config": config},
     )

@@ -312,6 +312,36 @@ def test_middleware_log_request(fastapi_server_app: FastAPI):
         assert len(correlation_ids) > 0
 
 
+@pytest.mark.usefixtures("fastapi_server_app", "custom_models_gateway")
+@pytest.mark.parametrize(
+    "test_path,expected", [("/v2/chat/agent", True), ("/monitoring/healthz", False)]
+)
+def test_middleware_model_config(test_path, expected):
+    config = Config(_env_file=None, auth=ConfigAuth(bypass_external=True))
+    app = create_fast_api_server(config)
+    client = TestClient(app)
+
+    with patch(
+        "ai_gateway.api.middleware.model_config.current_model_metadata_context"
+    ) as mock_model_metadata_context:
+        client.post(
+            test_path,
+            json={
+                "model_metadata": {
+                    "name": "gpt",
+                    "provider": "custom_openai",
+                    "endpoint": "http://test_model.com/",
+                    "api_key": "test_api_key",
+                    "identifier": "test_model_identifier",
+                }
+            },
+        )
+        if expected:
+            mock_model_metadata_context.set.assert_called_once()
+        else:
+            mock_model_metadata_context.set.assert_not_called()
+
+
 @pytest.mark.usefixtures("fastapi_server_app")
 # The context must be built even when events are off: the proxy reads
 # it on every request (#3222). internal_event.enabled only gates
