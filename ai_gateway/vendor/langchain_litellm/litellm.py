@@ -352,17 +352,22 @@ def _convert_delta_to_message_chunk(
         reasoning_content = getattr(delta, "reasoning_content", None)
         provider_specific_fields = getattr(delta, "provider_specific_fields", None)
 
-    additional_kwargs: Dict[str, Any]
-    if function_call:
-        additional_kwargs = {"function_call": dict(function_call)}
+    additional_kwargs: Dict[str, Any] = {}
+    # Diverges from upstream: LiteLLM streams a legacy `function_call` delta
+    # alongside `tool_calls`. LangChain merges `additional_kwargs` by string
+    # concatenation, so parallel tool calls yield a corrupted `function_call`
+    # (concatenated names and `{...}{...}` arguments) that Vertex rejects with
+    # "Extra data" when it is echoed back. `tool_calls` are merged correctly by
+    # index, so only keep `function_call` for legacy function_call-only deltas.
+    # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3211
+    if function_call and not raw_tool_calls:
+        additional_kwargs["function_call"] = dict(function_call)
     # The hasattr check is necessary because litellm explicitly deletes the
     # `reasoning_content` attribute when it is absent to comply with the OpenAI API.
     # This ensures that the code gracefully handles cases where the attribute is
     # missing, avoiding potential errors or non-compliance with the API.
-    elif reasoning_content:
-        additional_kwargs = {"reasoning_content": reasoning_content}
-    else:
-        additional_kwargs = {}
+    if reasoning_content:
+        additional_kwargs["reasoning_content"] = reasoning_content
 
     raw_tool_calls = server_tools.split_tool_calls(raw_tool_calls or [])
     blocks = server_tools.content_blocks(provider_specific_fields)
@@ -437,7 +442,13 @@ def _convert_message_to_dict(message: BaseMessage) -> dict:
         message_dict["role"] = "user"
     elif isinstance(message, AIMessage):
         message_dict["role"] = "assistant"
-        if "function_call" in message.additional_kwargs:
+        # Diverges from upstream: never echo `function_call` next to tool calls.
+        # Checkpoints saved before the streaming fix may hold a `function_call`
+        # corrupted by chunk concatenation, which Vertex rejects (see #3211).
+        has_tool_calls = bool(
+            message.tool_calls or message.additional_kwargs.get("tool_calls")
+        )
+        if "function_call" in message.additional_kwargs and not has_tool_calls:
             message_dict["function_call"] = message.additional_kwargs["function_call"]
         if message.tool_calls:
             message_dict["tool_calls"] = [

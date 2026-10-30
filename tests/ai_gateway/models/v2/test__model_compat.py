@@ -757,13 +757,37 @@ class TestChatLiteLLMFlattenIntegration:
         assert message_dicts[1]["content"] == "Reading it."
         assert message_dicts[1]["tool_calls"][0]["id"] == "call_1"
 
-    def test_other_providers_keep_function_call_key(self):
+    def legacy_function_call_only_history(self):
+        # Without tool calls the converter keeps `function_call` (see #3211), so
+        # the key reaches the provider gate.
+        return [
+            HumanMessage(content="read the file"),
+            AIMessage(
+                content="Reading it.",
+                additional_kwargs={
+                    "function_call": {"name": "read_file", "arguments": "{}"}
+                },
+            ),
+            HumanMessage(content="thanks"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("provider", "expect_function_call"),
+        [("fireworks_ai", False), ("openai", True)],
+    )
+    def test_function_call_key_is_dropped_only_for_fireworks(
+        self, provider, expect_function_call
+    ):
+        message_dicts = self.convert(provider, self.legacy_function_call_only_history())
+
+        assert ("function_call" in message_dicts[1]) is expect_function_call
+        assert message_dicts[1]["content"] == "Reading it."
+
+    def test_function_call_key_is_dropped_next_to_tool_calls_for_all_providers(self):
         message_dicts = self.convert("openai", self.function_call_history())
 
-        assert message_dicts[1]["function_call"] == {
-            "name": "read_file",
-            "arguments": "{}",
-        }
+        assert all("function_call" not in message for message in message_dicts)
+        assert message_dicts[1]["tool_calls"][0]["id"] == "call_1"
 
 
 class TestStripImageBlocksForNonVisionModel:

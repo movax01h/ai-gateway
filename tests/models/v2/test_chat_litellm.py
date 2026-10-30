@@ -1,3 +1,4 @@
+import json
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -1854,6 +1855,197 @@ class TestConvertDeltaToMessageChunk:
 
         assert [call["name"] for call in merged.tool_calls] == ["get_issue"]
         assert merged.tool_calls[0]["args"] == {"id": 5}
+
+
+MR_ARGS = '{"merge_request_iid": 720, "project_id": "63055015"}'
+
+
+def legacy_function_call(name, arguments):
+    return {"name": name, "arguments": arguments}
+
+
+class TestLegacyFunctionCallAlongsideToolCalls:
+    """LiteLLM streams a legacy `function_call` next to `tool_calls`; LangChain concatenates it across chunks.
+
+    See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3211
+    """
+
+    @pytest.fixture(name="parallel_tool_call_deltas")
+    def parallel_tool_call_deltas_fixture(self):
+        """Mirrors the #3238 payload: parallel get_merge_request + list_merge_request_diffs with identical args."""
+        return [
+            {
+                "role": "assistant",
+                "function_call": legacy_function_call("get_merge_request", MR_ARGS),
+                "tool_calls": [
+                    client_tool_call(
+                        index=0,
+                        name="get_merge_request",
+                        arguments=MR_ARGS,
+                        tool_call_id="call_1",
+                    )
+                ],
+            },
+            {
+                "role": "assistant",
+                "function_call": legacy_function_call(
+                    "list_merge_request_diffs", MR_ARGS
+                ),
+                "tool_calls": [
+                    client_tool_call(
+                        index=1,
+                        name="list_merge_request_diffs",
+                        arguments=MR_ARGS,
+                        tool_call_id="call_2",
+                    )
+                ],
+            },
+        ]
+
+    def test_merged_chunks_carry_no_function_call(self, parallel_tool_call_deltas):
+        merged = _merge_deltas(parallel_tool_call_deltas)
+
+        assert "function_call" not in merged.additional_kwargs
+        assert [(tc["name"], tc["args"]) for tc in merged.tool_calls] == [
+            ("get_merge_request", {"merge_request_iid": 720, "project_id": "63055015"}),
+            (
+                "list_merge_request_diffs",
+                {"merge_request_iid": 720, "project_id": "63055015"},
+            ),
+        ]
+
+    def test_regression_3238_message_dict_has_no_concatenated_function_call(
+        self, parallel_tool_call_deltas
+    ):
+        merged = _merge_deltas(parallel_tool_call_deltas)
+        message = AIMessage(
+            content=merged.content,
+            additional_kwargs=merged.additional_kwargs,
+            tool_calls=merged.tool_calls,
+        )
+
+        result = _convert_message_to_dict(message)
+
+        assert "function_call" not in result
+        assert [tc["function"]["name"] for tc in result["tool_calls"]] == [
+            "get_merge_request",
+            "list_merge_request_diffs",
+        ]
+        for tc in result["tool_calls"]:
+            assert json.loads(tc["function"]["arguments"]) == json.loads(MR_ARGS)
+
+    @pytest.mark.parametrize(
+        "delta",
+        [
+            {"function_call": legacy_function_call("get_issue", '{"id": 5}')},
+            Delta(
+                role="assistant",
+                content="",
+                function_call=legacy_function_call("get_issue", '{"id": 5}'),
+            ),
+        ],
+        ids=["dict", "delta_object"],
+    )
+    def test_function_call_only_delta_keeps_function_call(self, delta):
+        merged = _merge_deltas([delta])
+
+        assert merged.additional_kwargs["function_call"] == legacy_function_call(
+            "get_issue", '{"id": 5}'
+        )
+
+    @pytest.mark.parametrize(
+        ("delta", "expect_function_call"),
+        [
+            (
+                {
+                    "function_call": legacy_function_call("get_issue", '{"id": 5}'),
+                    "reasoning_content": "Thinking...",
+                },
+                True,
+            ),
+            (
+                {
+                    "function_call": legacy_function_call("get_issue", '{"id": 5}'),
+                    "reasoning_content": "Thinking...",
+                    "tool_calls": [client_tool_call(arguments='{"id": 5}')],
+                },
+                False,
+            ),
+        ],
+        ids=["function_call_only", "with_tool_calls"],
+    )
+    def test_reasoning_content_preserved_alongside_function_call(
+        self, delta, expect_function_call
+    ):
+        merged = _merge_deltas([delta])
+
+        assert merged.additional_kwargs["reasoning_content"] == "Thinking..."
+        assert ("function_call" in merged.additional_kwargs) is expect_function_call
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            AIMessage(
+                content="",
+                additional_kwargs={
+                    "function_call": legacy_function_call(
+                        "get_merge_requestlist_merge_request_diffs", MR_ARGS + MR_ARGS
+                    )
+                },
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "get_merge_request",
+                        "args": {"merge_request_iid": 720},
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                additional_kwargs={
+                    "function_call": legacy_function_call(
+                        "get_merge_requestlist_merge_request_diffs", MR_ARGS + MR_ARGS
+                    ),
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "id": "call_1",
+                            "function": {
+                                "name": "get_merge_request",
+                                "arguments": '{"merge_request_iid": 720}',
+                            },
+                        }
+                    ],
+                },
+            ),
+        ],
+        ids=["message_tool_calls", "additional_kwargs_tool_calls"],
+    )
+    def test_convert_message_to_dict_omits_function_call_with_tool_calls(self, message):
+        result = _convert_message_to_dict(message)
+
+        assert "function_call" not in result
+        assert result["tool_calls"] == [
+            {
+                "type": "function",
+                "id": "call_1",
+                "function": {
+                    "name": "get_merge_request",
+                    "arguments": '{"merge_request_iid": 720}',
+                },
+            }
+        ]
+
+    def test_legacy_function_call_only_message_round_trips(self):
+        function_call = legacy_function_call("get_issue", '{"id": 5}')
+        message = _convert_dict_to_message(
+            {"role": "assistant", "content": "", "function_call": function_call}
+        )
+
+        result = _convert_message_to_dict(message)
+
+        assert result["function_call"] == function_call
+        assert "tool_calls" not in result
 
 
 def streaming_chunk(delta, finish_reason=None):
