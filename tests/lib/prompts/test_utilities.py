@@ -5,15 +5,65 @@ import hashlib
 from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+from jinja2 import DictLoader
+from jinja2.sandbox import SandboxedEnvironment
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from lib.prompts.utilities import (
     _security_suffix,
     _security_suffix_var,
+    merge_leading_system_messages,
     prompt_template_to_messages,
     render_security_block,
 )
+
+
+class TestMergeLeadingSystemMessages:
+    @pytest.mark.parametrize(
+        ("messages", "expected"),
+        [
+            (
+                [SystemMessage("a"), SystemMessage("b"), HumanMessage("hi")],
+                [SystemMessage("a\n\nb"), HumanMessage("hi")],
+            ),
+            (
+                [SystemMessage("a"), HumanMessage("hi")],
+                [SystemMessage("a"), HumanMessage("hi")],
+            ),
+            # Only the leading run merges: history keeps its own messages.
+            (
+                [SystemMessage("a"), HumanMessage("hi"), SystemMessage("later")],
+                [SystemMessage("a"), HumanMessage("hi"), SystemMessage("later")],
+            ),
+            ([HumanMessage("hi")], [HumanMessage("hi")]),
+        ],
+    )
+    def test_merges_only_the_leading_run(self, messages, expected):
+        result = merge_leading_system_messages(ChatPromptValue(messages=messages))
+
+        assert result.to_messages() == expected
+
+    def test_keeps_security_block_of_extends_template(self):
+        """Merging rendered messages keeps the block that Jinja drops when appended to an ``{% extends %}`` source."""
+        env = SandboxedEnvironment(
+            loader=DictLoader({"base.jinja": "BASE {% block body %}{% endblock %}"})
+        )
+        child = "{% extends 'base.jinja' %}{% block body %}child{% endblock %}"
+        security = render_security_block().rstrip("\n")
+
+        assert security not in env.from_string(child + security).render()
+
+        rendered = ChatPromptValue(
+            messages=[
+                SystemMessage(env.from_string(child).render()),
+                SystemMessage(security),
+            ]
+        )
+        merged = merge_leading_system_messages(rendered).to_messages()
+
+        assert merged == [SystemMessage("BASE child\n\n" + security)]
 
 
 class TestPromptTemplateToMessages:
@@ -33,15 +83,13 @@ class TestPromptTemplateToMessages:
 
         result = prompt_template_to_messages(tpl)
 
-        assert len(result) == 3
-        assert result[0] == (
-            "system",
-            render_security_block() + "You are a helpful assistant",
-        )
-        assert result[1] == ("user", "Hello!")
-        assert isinstance(result[2], MessagesPlaceholder)
-        assert result[2].variable_name == "history"
-        assert result[2].optional is True
+        assert len(result) == 4
+        assert result[0] == ("system", "You are a helpful assistant")
+        assert result[1] == ("system", render_security_block().rstrip("\n"))
+        assert result[2] == ("user", "Hello!")
+        assert isinstance(result[3], MessagesPlaceholder)
+        assert result[3].variable_name == "history"
+        assert result[3].optional is True
 
     def test_placeholder_conversion(self):
         """Test that 'placeholder' role creates a MessagesPlaceholder."""
@@ -53,14 +101,12 @@ class TestPromptTemplateToMessages:
 
         result = prompt_template_to_messages(tpl)
 
-        assert len(result) == 3
-        assert result[0] == (
-            "system",
-            render_security_block() + "You are a helpful assistant",
-        )
-        assert isinstance(result[1], MessagesPlaceholder)
-        assert result[1].variable_name == "history"
-        assert result[2] == ("user", "Hello!")
+        assert len(result) == 4
+        assert result[0] == ("system", "You are a helpful assistant")
+        assert result[1] == ("system", render_security_block().rstrip("\n"))
+        assert isinstance(result[2], MessagesPlaceholder)
+        assert result[2].variable_name == "history"
+        assert result[3] == ("user", "Hello!")
 
     def test_empty_template(self):
         """Test handling of empty template."""
@@ -82,11 +128,9 @@ class TestPromptTemplateToMessages:
 
         result = prompt_template_to_messages(tpl)
 
-        assert result[0] == (
-            "system",
-            render_security_block() + "You are {{ role }}",
-        )
-        assert result[1] == (
+        assert result[0] == ("system", "You are {{ role }}")
+        assert result[1] == ("system", render_security_block().rstrip("\n"))
+        assert result[2] == (
             "user",
             "{% if condition %}Hello{% else %}Goodbye{% endif %}",
         )
@@ -102,20 +146,22 @@ class TestPromptTemplateToMessages:
 
         result = prompt_template_to_messages(tpl)
 
-        assert len(result) == 5
-        assert result[0] == (
-            "system",
-            render_security_block() + "System message",
-        )
-        assert result[1] == ("assistant", "Assistant message")
-        assert result[2] == ("human", "Human message")
-        assert result[3] == ("user", "User message")
-        assert isinstance(result[4], MessagesPlaceholder)
-        assert result[4].variable_name == "history"
-        assert result[4].optional is True
+        assert len(result) == 6
+        assert result[0] == ("system", "System message")
+        assert result[1] == ("system", render_security_block().rstrip("\n"))
+        assert result[2] == ("assistant", "Assistant message")
+        assert result[3] == ("human", "Human message")
+        assert result[4] == ("user", "User message")
+        assert isinstance(result[5], MessagesPlaceholder)
+        assert result[5].variable_name == "history"
+        assert result[5].optional is True
 
-    def test_tool_output_security_added_only_once(self):
-        """Test that security include is only prepended to the first system message."""
+    def test_tool_output_security_added_once_after_system_messages(self):
+        """The security block is added once, as its own message after the leading system messages.
+
+        Keeping the per-session block out of the author's system messages keeps them byte-identical across sessions, so
+        their prompt-cache entry can be reused.
+        """
         tpl = {
             "system_static": "Static system content",
             "system_dynamic": "Dynamic system content",
@@ -124,16 +170,26 @@ class TestPromptTemplateToMessages:
 
         result = prompt_template_to_messages(tpl)
 
-        assert len(result) == 4
-        assert result[0] == (
-            "system_static",
-            render_security_block() + "Static system content",
-        )
+        assert len(result) == 5
+        assert result[0] == ("system_static", "Static system content")
         assert result[1] == ("system_dynamic", "Dynamic system content")
-        assert result[2] == ("user", "Hello!")
-        assert isinstance(result[3], MessagesPlaceholder)
-        assert result[3].variable_name == "history"
-        assert result[3].optional is True
+        assert result[2] == ("system", render_security_block().rstrip("\n"))
+        assert result[3] == ("user", "Hello!")
+        assert isinstance(result[4], MessagesPlaceholder)
+        assert result[4].variable_name == "history"
+        assert result[4].optional is True
+
+    def test_system_message_is_identical_across_sessions(self):
+        """Sessions with different security suffixes render byte-identical author system messages."""
+        tpl = {"system": "You are a helpful assistant", "user": "Hello!"}
+
+        with patch("lib.prompts.utilities._security_suffix", return_value="aaaa"):
+            first_session = prompt_template_to_messages(tpl)
+        with patch("lib.prompts.utilities._security_suffix", return_value="bbbb"):
+            second_session = prompt_template_to_messages(tpl)
+
+        assert first_session[0] == second_session[0]
+        assert first_session[1] != second_session[1]
 
     def test_no_security_injection_when_disabled(self):
         tpl = {
@@ -237,9 +293,10 @@ class TestPromptTemplateToMessagesListSupport:
 
         result = prompt_template_to_messages(tpl)
 
-        assert result[0] == ("system", render_security_block() + "Static part")
+        assert result[0] == ("system", "Static part")
         assert result[1] == ("system", "Dynamic part")
-        assert result[2] == ("user", "Hello")
+        assert result[2] == ("system", render_security_block().rstrip("\n"))
+        assert result[3] == ("user", "Hello")
 
     def test_single_element_list_behaves_like_string(self):
         """A single-element list produces the same output as a plain string."""
@@ -270,8 +327,8 @@ class TestPromptTemplateToMessagesListSupport:
 
         result = prompt_template_to_messages(tpl)
 
-        assert len(result) == 4
-        assert isinstance(result[2], MessagesPlaceholder)
+        assert len(result) == 5
+        assert isinstance(result[3], MessagesPlaceholder)
 
 
 class TestAutoAddHistoryPlaceholder:
@@ -324,6 +381,7 @@ class TestAutoAddHistoryPlaceholder:
         msg_types = [type(m).__name__ for m in rendered.messages]
         assert msg_types == [
             "SystemMessage",
+            "SystemMessage",
             "HumanMessage",
             "AIMessage",
             "ToolMessage",
@@ -338,7 +396,7 @@ class TestAutoAddHistoryPlaceholder:
         rendered = ct.invoke({"history": []})
 
         msg_types = [type(m).__name__ for m in rendered.messages]
-        assert msg_types == ["SystemMessage", "HumanMessage"]
+        assert msg_types == ["SystemMessage", "SystemMessage", "HumanMessage"]
 
     def test_history_omitted_on_first_turn_when_auto_added(self):
         """Optional placeholder renders as zero messages when history is not provided."""
@@ -350,4 +408,4 @@ class TestAutoAddHistoryPlaceholder:
         rendered = ct.invoke({})
 
         msg_types = [type(m).__name__ for m in rendered.messages]
-        assert msg_types == ["SystemMessage", "HumanMessage"]
+        assert msg_types == ["SystemMessage", "SystemMessage", "HumanMessage"]

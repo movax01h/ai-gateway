@@ -364,7 +364,7 @@ class TestBuildHistoryOptimizerPipelineCompactionThenTrim:
         )
         prompt = mock_prompt_registry.get_on_behalf.return_value
         prompt.ainvoke = AsyncMock(return_value=summary)
-        prompt.prompt_tpl.format_messages.return_value = [
+        prompt.prompt_tpl.invoke.return_value.to_messages.return_value = [
             SystemMessage(content="system prompt"),
             HumanMessage(content="user prompt"),
         ]

@@ -1,4 +1,4 @@
-from typing import Any, MutableMapping, Optional, override
+from typing import TYPE_CHECKING, Any, MutableMapping, Optional, override
 
 import structlog
 from langchain_core.messages import BaseMessage
@@ -7,6 +7,9 @@ from langchain_core.runnables import Runnable, RunnableConfig
 
 from ai_gateway.model_selection.models import ModelClassProvider
 from lib.prompts.caching import prompt_caching_enabled_in_current_request
+
+if TYPE_CHECKING:
+    from ai_gateway.model_selection.model_selection_config import LLMDefinition
 
 log = structlog.stdlib.get_logger("prompts")
 
@@ -51,6 +54,31 @@ def should_inject_default_cache_control(
     if model_class_provider == ModelClassProvider.LITE_LLM:
         return not _is_gemini_on_litellm(model_kwargs)
     return False
+
+
+# Providers whose prompts carry no chat messages, so there are no system messages to lay out.
+_NON_CHAT_PROVIDERS = frozenset(
+    {ModelClassProvider.LITE_LLM_COMPLETION, ModelClassProvider.LITE_LLM_EMBEDDING}
+)
+
+
+def merges_system_messages(
+    model_class_provider: str | None,
+    llm_definition: Optional["LLMDefinition"],
+) -> bool:
+    """Return True when the leading system messages are merged into one before they reach the model.
+
+    Claude keeps them separate: it caches up to a breakpoint placed on a message, so the per-session security block
+    needs its own message behind the stable system prompt. All other chat models get one merged system message: many
+    chat templates reject or drop a second one, and their providers cache prefixes without breakpoints.
+    """
+    if model_class_provider in _NON_CHAT_PROVIDERS:
+        return False
+    if llm_definition and llm_definition.requires_single_system_message:
+        return True
+    if model_class_provider == ModelClassProvider.ANTHROPIC:
+        return False
+    return not (llm_definition and "claude" in llm_definition.family)
 
 
 def default_cache_control_injection_points() -> list[dict]:
