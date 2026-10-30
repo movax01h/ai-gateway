@@ -77,6 +77,39 @@ def test_get_llm_operations():
 
 class TestWatchContainer:
     @mock.patch("prometheus_client.Counter.labels")
+    def test_register_llm_operation_is_for_billing_only(
+        self, mock_counters, container, internal_event_client
+    ):
+        init_token_usage()
+        init_llm_operations()
+
+        container.register_llm_operation(
+            "test_model",
+            {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            {"agent_name": "my_agent", "operation_type": "compaction_auto"},
+        )
+
+        assert llm_operations.get() == [
+            {
+                "token_count": 0,
+                "model_id": "test_model",
+                "model_engine": "test_provider",
+                "model_provider": "test_provider",
+                "model_vendor": "test_provider",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "agent_name": "my_agent",
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "operation_type": "compaction_auto",
+            }
+        ]
+        # No accumulator update, no counters, no internal event
+        assert token_usage.get() == {}
+        assert mock_counters.mock_calls == []
+        internal_event_client.track_event.assert_not_called()
+
+    @mock.patch("prometheus_client.Counter.labels")
     def test_register_token_usage(self, mock_counters, container):
         init_token_usage()
         init_llm_operations()

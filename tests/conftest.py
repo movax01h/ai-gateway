@@ -1,3 +1,4 @@
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional, Union
@@ -400,6 +401,30 @@ def model_fixture(
         disable_streaming=model_disable_streaming,
         max_tokens=model_max_tokens,
     )
+
+
+@pytest.fixture(name="blocked_model_stream")
+def blocked_model_stream_fixture():
+    """Make `FakeModel` stream two chunks, then wait for the provider forever.
+
+    Yields an `asyncio.Event` that is set when the stream starts waiting, so a test can cancel the task that consumes
+    it. The Prompt holds back one item, and `execute()` reads the first chunk, so a consumer needs two model chunks to
+    have received one before the cancel.
+    """
+    waiting = asyncio.Event()
+    original_astream = FakeModel._astream  # pylint: disable=protected-access
+
+    async def _astream(self, *args, **kwargs):
+        sent = 0
+        async for chunk in original_astream(self, *args, **kwargs):
+            yield chunk
+            sent += 1
+            if sent == 2:
+                waiting.set()
+                await asyncio.Event().wait()
+
+    with patch.object(FakeModel, "_astream", _astream):
+        yield waiting
 
 
 @pytest.fixture(name="model_factory")

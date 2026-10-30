@@ -1,11 +1,13 @@
 # pylint: disable=too-many-lines,too-many-public-methods
 
+import asyncio
 from contextlib import contextmanager
 from typing import Any, AsyncIterator, Type, cast
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser
+from langchain_core.messages.ai import UsageMetadata
 from litellm.exceptions import MidStreamFallbackError, RateLimitError
 
 from ai_gateway.code_suggestions import CodeCompletions
@@ -37,6 +39,7 @@ from ai_gateway.models.base_text import (
 from ai_gateway.safety_attributes import SafetyAttributes
 from lib.billing_events import BillingEvent, BillingEventService, ExecutionEnvironment
 from lib.billing_events.client import BillingEventsClient
+from lib.context.llm_operations import init_llm_operations, llm_operations
 
 
 @pytest.fixture(name="llm_ops_from_context")
@@ -1005,6 +1008,7 @@ class TestCodeCompletions:
         mock_user,
         mock_billing_client,
         mock_get_llm_operations,
+        llm_ops_from_context,
         expected_billing_metadata,
     ):
         """Test that billing events are tracked for streaming responses."""
@@ -1012,6 +1016,8 @@ class TestCodeCompletions:
         async def _stream_generator(_prefix, _suffix, _stream):
             yield TextGenModelChunk(text="hello ")
             yield TextGenModelChunk(text="world!")
+            # Usage is registered at the end of the stream, as Prompt.astream does.
+            llm_operations.set(llm_ops_from_context)
 
         use_case_with_billing.model.generate = AsyncMock(side_effect=_stream_generator)
 
@@ -1047,12 +1053,116 @@ class TestCodeCompletions:
         )
         mock_get_llm_operations.assert_called()
 
+    @pytest.fixture(name="streaming_use_case")
+    def streaming_use_case_fixture(self, use_case_with_billing):
+        async def _stream_generator(_prefix, _suffix, _stream):
+            yield TextGenModelChunk(text="a")
+            yield TextGenModelChunk(text="b")
+            yield TextGenModelChunk(text="c")
+
+        use_case_with_billing.model.generate = AsyncMock(side_effect=_stream_generator)
+
+        # Real context variable, empty: no usage was registered.
+        init_llm_operations()
+
+        return use_case_with_billing
+
+    @staticmethod
+    async def _start_stream(use_case, user):
+        return await use_case.execute(
+            prefix="def hello",
+            suffix=":",
+            file_name="test.py",
+            editor_lang="python",
+            stream=True,
+            user=user,
+        )
+
+    async def test_billing_event_tracked_when_task_cancelled_after_usage_registered(
+        self,
+        use_case_with_billing,
+        mock_user,
+        mock_billing_client,
+        llm_ops_from_context,
+        expected_billing_metadata,
+    ):
+        """A client disconnect cancels the task.
+
+        The model unwinds first and registers usage, then it is billed.
+        """
+        waiting = asyncio.Event()
+
+        async def _stream_generator(_prefix, _suffix, _stream):
+            try:
+                yield TextGenModelChunk(text="a")
+                yield TextGenModelChunk(text="b")
+                waiting.set()
+                await asyncio.Event().wait()  # waiting for the provider
+            except asyncio.CancelledError:
+                # What Prompt does when the client leaves: it registers usage.
+                llm_operations.get().extend(llm_ops_from_context)
+                raise
+
+        use_case_with_billing.model.generate = AsyncMock(side_effect=_stream_generator)
+
+        result = await self._start_stream(use_case_with_billing, mock_user)
+
+        async def _consume():
+            async for _chunk in result:
+                pass
+
+        task = asyncio.create_task(_consume())
+        await asyncio.wait_for(waiting.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        mock_billing_client.track_billing_event.assert_called_once_with(
+            mock_user,
+            BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            "CodeCompletions",
+            unit_of_measure="request",
+            quantity=1,
+            metadata=expected_billing_metadata,
+        )
+
+    async def test_no_fallback_billing_when_completed_stream_has_no_usage(
+        self, streaming_use_case, mock_user, mock_billing_client
+    ):
+        """A normal stream that registered no usage is a bug, and must not be hidden."""
+        result = await self._start_stream(streaming_use_case, mock_user)
+
+        assert [chunk.text async for chunk in result] == ["a", "b", "c"]
+
+        mock_billing_client.track_billing_event.assert_not_called()
+
+    async def test_no_fallback_billing_when_provider_fails_mid_stream(
+        self, use_case_with_billing, mock_user, mock_billing_client
+    ):
+        """A provider error is not a client cancel, so it is not billed by the fallback."""
+
+        async def _failing_stream(_prefix, _suffix, _stream):
+            yield TextGenModelChunk(text="a")
+            raise RuntimeError("provider failed")
+
+        use_case_with_billing.model.generate = AsyncMock(side_effect=_failing_stream)
+        init_llm_operations()
+
+        result = await self._start_stream(use_case_with_billing, mock_user)
+
+        with pytest.raises(RuntimeError, match="provider failed"):
+            async for _chunk in result:
+                pass
+
+        mock_billing_client.track_billing_event.assert_not_called()
+
     async def test_billing_event_exception_handling_streaming(
         self,
         use_case_with_billing,
         mock_user,
         mock_billing_client,
         mock_get_llm_operations,
+        llm_ops_from_context,
         expected_billing_metadata,
     ):
         """Test that billing event exceptions are handled gracefully for streaming."""
@@ -1060,6 +1170,8 @@ class TestCodeCompletions:
         async def _stream_generator(_prefix, _suffix, _stream):
             yield TextGenModelChunk(text="hello ")
             yield TextGenModelChunk(text="world!")
+            # Usage is registered at the end of the stream, as Prompt.astream does.
+            llm_operations.set(llm_ops_from_context)
 
         use_case_with_billing.model.generate = AsyncMock(side_effect=_stream_generator)
 
@@ -1414,6 +1526,112 @@ async def _stream_of(*texts, error=None):
 
     if error:
         raise error
+
+
+@pytest.mark.asyncio
+class TestCodeCompletionsWithPrompt:
+    """Billing for a stream that goes through a real Prompt, with a fake model."""
+
+    @pytest.fixture(name="prompt_template")
+    def prompt_template_fixture(self):
+        return {"system": "Complete the code.", "user": "{{prefix}}{{suffix}}"}
+
+    @pytest.fixture(name="model_response")
+    def model_response_fixture(self):
+        return "abc"
+
+    @pytest.fixture(name="usage_metadata")
+    def usage_metadata_fixture(self):
+        return UsageMetadata(input_tokens=1, output_tokens=3, total_tokens=4)
+
+    @pytest.fixture(name="mock_billing_client")
+    def mock_billing_client_fixture(self):
+        return Mock(spec=BillingEventsClient)
+
+    @pytest.fixture(name="use_case")
+    def use_case_fixture(self, prompt, mock_billing_client):
+        use_case = CodeCompletions(
+            AgentModel(prompt),
+            Mock(spec=TokenStrategyBase),
+            BillingEventService(client=mock_billing_client),
+        )
+        use_case.prompt_builder = Mock(spec=PromptBuilderPrefixBased)
+        use_case.prompt_builder.build.return_value = Prompt(
+            prefix="def hello",
+            suffix=":",
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prefix": MetadataCodeContent(length=10, length_tokens=2),
+                    "suffix": MetadataCodeContent(length=10, length_tokens=2),
+                }
+            ),
+        )
+        return use_case
+
+    @staticmethod
+    async def _start_stream(use_case):
+        return await use_case.execute(
+            prefix="def hello",
+            suffix=":",
+            file_name="test.py",
+            editor_lang="python",
+            stream=True,
+            user=Mock(spec=CloudConnectorUser),
+        )
+
+    @staticmethod
+    def _billed_operations(mock_billing_client):
+        mock_billing_client.track_billing_event.assert_called_once()
+        call = mock_billing_client.track_billing_event.call_args
+        return call.kwargs["metadata"]["llm_operations"]
+
+    async def test_task_cancelled_before_provider_usage_is_billed_with_prompt_identifiers(
+        self, use_case, prompt, mock_billing_client, blocked_model_stream
+    ):
+        result = await self._start_stream(use_case)
+
+        async def _consume():
+            async for _chunk in result:
+                pass
+
+        task = asyncio.create_task(_consume())
+        await asyncio.wait_for(blocked_model_stream.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        operations = self._billed_operations(mock_billing_client)
+        assert len(operations) == 1
+        assert operations[0]["model_id"] == prompt.reported_model_name
+        assert operations[0]["model_provider"] == prompt.model_provider
+        assert operations[0]["token_count"] == 0
+
+    async def test_closing_only_the_outer_generator_is_not_billed(
+        self, use_case, mock_billing_client, blocked_model_stream
+    ):
+        """Closing the outer generator does not close the inner Prompt generator first.
+
+        CodeCompletions bills in its `finally` before Prompt had a chance to register usage, so nothing is billed. Only
+        a task cancel unwinds the generators inner-first.
+        """
+        assert not blocked_model_stream.is_set()
+        result = await self._start_stream(use_case)
+        await anext(result)
+        await result.aclose()
+
+        mock_billing_client.track_billing_event.assert_not_called()
+
+    async def test_completed_stream_is_billed_with_provider_usage(
+        self, use_case, mock_billing_client
+    ):
+        result = await self._start_stream(use_case)
+        assert "".join([chunk.text async for chunk in result]) == "abc"
+
+        operations = self._billed_operations(mock_billing_client)
+        assert len(operations) == 1
+        assert operations[0]["token_count"] == 4
+        assert operations[0]["prompt_tokens"] == 1
+        assert operations[0]["completion_tokens"] == 3
 
 
 class TestCodeCompletionsPromptBudget:
