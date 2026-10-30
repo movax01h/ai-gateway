@@ -1,10 +1,12 @@
 # pylint: disable=file-naming-for-tests
+import asyncio
 from contextlib import contextmanager
 from typing import Any, AsyncIterator, List
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser
+from langchain_core.messages.ai import UsageMetadata
 
 from ai_gateway.code_suggestions import CodeGenerations, ModelProvider
 from ai_gateway.code_suggestions.processing import TokenStrategyBase
@@ -18,6 +20,7 @@ from ai_gateway.code_suggestions.processing.typing import (
     MetadataPromptBuilder,
     Prompt,
 )
+from ai_gateway.models.agent_model import AgentModel
 from ai_gateway.models.amazon_q import AmazonQModel
 from ai_gateway.models.base_text import (
     TextGenModelBase,
@@ -761,3 +764,89 @@ class TestCodeGeneration:
             metadata=expected_billing_metadata,
         )
         mock_get_llm_operations.assert_called()
+
+
+@pytest.mark.asyncio
+class TestCodeGenerationsWithPrompt:
+    """Billing for a stream that goes through a real Prompt, with a fake model."""
+
+    @pytest.fixture(name="prompt_template")
+    def prompt_template_fixture(self):
+        return {"system": "Generate code.", "user": "{{instruction}}"}
+
+    @pytest.fixture(name="model_response")
+    def model_response_fixture(self):
+        return "abc"
+
+    @pytest.fixture(name="usage_metadata")
+    def usage_metadata_fixture(self):
+        return UsageMetadata(input_tokens=1, output_tokens=3, total_tokens=4)
+
+    @pytest.fixture(name="mock_billing_client")
+    def mock_billing_client_fixture(self):
+        return Mock(spec=BillingEventsClient)
+
+    @pytest.fixture(name="use_case")
+    def use_case_fixture(self, prompt, mock_billing_client):
+        use_case = CodeGenerations(
+            model=AgentModel(prompt),
+            tokenization_strategy=Mock(spec=TokenStrategyBase),
+            billing_event_service=BillingEventService(client=mock_billing_client),
+        )
+        use_case.prompt_builder = Mock(spec=PromptBuilderBase)
+        use_case.prompt_builder.build.return_value = Prompt(
+            prefix="write a function",
+            metadata=MetadataPromptBuilder(
+                components={
+                    "prompt": MetadataCodeContent(length=16, length_tokens=4),
+                }
+            ),
+        )
+        return use_case
+
+    @staticmethod
+    async def _start_stream(use_case):
+        return await use_case.execute(
+            prefix="def hello",
+            file_name="test.py",
+            editor_lang="python",
+            stream=True,
+            user=Mock(spec=CloudConnectorUser),
+        )
+
+    @staticmethod
+    def _billed_operations(mock_billing_client):
+        mock_billing_client.track_billing_event.assert_called_once()
+        call = mock_billing_client.track_billing_event.call_args
+        return call.kwargs["metadata"]["llm_operations"]
+
+    async def test_task_cancelled_before_provider_usage_is_billed_with_prompt_identifiers(
+        self, use_case, prompt, mock_billing_client, blocked_model_stream
+    ):
+        result = await self._start_stream(use_case)
+
+        async def _consume():
+            async for _chunk in result:
+                pass
+
+        task = asyncio.create_task(_consume())
+        await asyncio.wait_for(blocked_model_stream.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        operations = self._billed_operations(mock_billing_client)
+        assert len(operations) == 1
+        assert operations[0]["model_id"] == prompt.reported_model_name
+        assert operations[0]["model_provider"] == prompt.model_provider
+        assert operations[0]["token_count"] == 0
+
+    async def test_completed_stream_is_billed_with_provider_usage(
+        self, use_case, mock_billing_client
+    ):
+        result = await self._start_stream(use_case)
+        assert [chunk async for chunk in result]
+
+        operations = self._billed_operations(mock_billing_client)
+        assert len(operations) == 1
+        assert operations[0]["token_count"] == 4

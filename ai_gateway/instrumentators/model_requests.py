@@ -272,6 +272,23 @@ class ModelRequestInstrumentator:
                 usage["total_tokens"]
             )
 
+        def register_llm_operation(
+            self,
+            model: str,
+            usage: UsageMetadata,
+            internal_event_extra: dict[str, Any] | None = None,
+        ) -> None:
+            """Register an LLM operation for billing only.
+
+            Unlike `register_token_usage`, this does not update the token accumulator or the counters and sends no
+            internal event or log. Use it for a call that did not finish, such as a stream that the client left.
+            """
+            extra = internal_event_extra or {}
+            operation_type: LLMOperationType = extra.get("operation_type", "standard")
+            self._update_llm_operations(
+                model, usage, extra.get("agent_name"), operation_type
+            )
+
         def register_message(self, message: BaseMessage):
             finish_reason = message.response_metadata.get(
                 "finish_reason"
