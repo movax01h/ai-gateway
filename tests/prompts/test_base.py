@@ -2046,17 +2046,17 @@ class _FakeLiteLLMModel(FakeModel):
 class TestPromptSystemMessageLayout:
     """The system messages the model receives follow ``merges_system_messages``, whatever built the template."""
 
-    @pytest.fixture(name="family")
-    def family_fixture(self):
-        return ["claude"]
+    @pytest.fixture(name="uses_cache_breakpoints")
+    def uses_cache_breakpoints_fixture(self):
+        return True
 
     @pytest.fixture(name="llm_definition")
-    def llm_definition_fixture(self, family: list[str]):
+    def llm_definition_fixture(self, uses_cache_breakpoints: bool):
         return ChatLiteLLMDefinition(
             name="Test model",
             gitlab_identifier="test_model",
             max_context_tokens=200000,
-            family=family,
+            uses_cache_breakpoints=uses_cache_breakpoints,
             params=ChatLiteLLMParams(
                 model="test-model", temperature=0.0, max_tokens=4096
             ),
@@ -2086,12 +2086,12 @@ class TestPromptSystemMessageLayout:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("family", "factory_built", "expected_system_messages"),
+        ("uses_cache_breakpoints", "factory_built", "expected_system_messages"),
         [
-            (["claude"], False, ["Hi, I'm Duo", "Dynamic part", "{security}"]),
-            (["mistral"], False, ["Hi, I'm Duo\n\nDynamic part\n\n{security}"]),
-            (["claude"], True, ["Hi, I'm Duo", "Dynamic part", "{security}"]),
-            (["mistral"], True, ["Hi, I'm Duo\n\nDynamic part\n\n{security}"]),
+            (True, False, ["Hi, I'm Duo", "Dynamic part", "{security}"]),
+            (False, False, ["Hi, I'm Duo\n\nDynamic part\n\n{security}"]),
+            (True, True, ["Hi, I'm Duo", "Dynamic part", "{security}"]),
+            (False, True, ["Hi, I'm Duo\n\nDynamic part\n\n{security}"]),
         ],
     )
     async def test_model_input_system_messages(
