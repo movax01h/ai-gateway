@@ -158,7 +158,7 @@ class TestDeepCodeReviewConfig:
         components = self._components()
         review = components["review"]
 
-        assert review["max_cycles"] == 25
+        assert review["max_cycles"] == 50
 
     def test_fetch_disables_the_instruction_format_hint(self):
         """The publish step renders the attribution; sending the hint too would attribute comments twice."""
