@@ -3,6 +3,7 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
+from starlette_context.middleware import RawContextMiddleware
 
 from ai_gateway.api.middleware.model_config import ModelConfigMiddleware
 from ai_gateway.api.middleware.request_body_limit import RequestBodyLimitMiddleware
@@ -19,9 +20,10 @@ def handled_paths_fixture() -> list[str]:
 @pytest.fixture(name="client", params=["limit only", "limit then model config"])
 def client_fixture(request, handled_paths: list[str]) -> TestClient:
     middleware = [
+        Middleware(RawContextMiddleware),
         Middleware(
             RequestBodyLimitMiddleware, max_bytes=MAX_BYTES, path_prefixes=CODE_PATHS
-        )
+        ),
     ]
     if request.param == "limit then model config":
         middleware.append(Middleware(ModelConfigMiddleware))

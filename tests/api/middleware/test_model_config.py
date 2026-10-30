@@ -1,11 +1,15 @@
+from unittest.mock import patch
+
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser
 from starlette.middleware import Middleware
 from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette_context.middleware import RawContextMiddleware
 from structlog.testing import capture_logs
 
+from ai_gateway.api.middleware.access_log import AccessLogMiddleware
 from ai_gateway.api.middleware.model_config import ModelConfigMiddleware
 from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
@@ -22,7 +26,11 @@ def model_metadata_context_fixture():
 @pytest.fixture(name="middleware_test_client")
 def middleware_test_client_fixture(model_metadata_context):
     app = FastAPI(
-        middleware=[Middleware(ModelConfigMiddleware, skip_endpoints=["/skipped"])]
+        middleware=[
+            Middleware(RawContextMiddleware),
+            Middleware(AccessLogMiddleware, skip_endpoints=[]),
+            Middleware(ModelConfigMiddleware, skip_endpoints=["/skipped"]),
+        ]
     )
 
     @app.get("/body")
@@ -128,6 +136,51 @@ def test_reads_the_body_only_for_requests_that_can_use_model_metadata(
         "body": payload,
         "model_metadata_set": model_metadata_set,
     }
+
+
+@pytest.mark.parametrize(
+    ("body", "has_model_metadata"),
+    [
+        pytest.param(b"", False, id="empty"),
+        pytest.param(b'{"foo": "bar"}', False, id="without-model-metadata"),
+        pytest.param(b'{"foo": "model_metadata"}', False, id="key-only-in-a-value"),
+        pytest.param(b'{"model_metadata": null}', True, id="with-model-metadata"),
+    ],
+)
+def test_logs_the_body_size_on_the_access_log(
+    middleware_test_client, body, has_model_metadata
+):
+    with patch("ai_gateway.api.middleware.access_log.access_logger") as access_logger:
+        middleware_test_client.post(
+            "/test", content=body, headers={"content-type": "application/json"}
+        )
+
+    fields = access_logger.info.call_args.kwargs
+    assert {
+        "request_body_bytes": fields["request_body_bytes"],
+        "request_body_has_model_metadata": fields["request_body_has_model_metadata"],
+    } == {
+        "request_body_bytes": len(body),
+        "request_body_has_model_metadata": has_model_metadata,
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        pytest.param("GET", "/body", id="get"),
+        pytest.param("POST", "/skipped", id="skipped-endpoint"),
+    ],
+)
+def test_does_not_log_the_body_size_when_it_does_not_read_the_body(
+    middleware_test_client, method, path
+):
+    with patch("ai_gateway.api.middleware.access_log.access_logger") as access_logger:
+        middleware_test_client.request(method, path, json={"model_metadata": None})
+
+    fields = access_logger.info.call_args.kwargs
+    assert "request_body_bytes" not in fields
+    assert "request_body_has_model_metadata" not in fields
 
 
 @pytest.mark.asyncio
@@ -514,6 +567,7 @@ class TestFeatureAllowlist:
     def test_a_fireworks_default_gets_the_user_session(self, model_metadata_context):
         app = FastAPI(
             middleware=[
+                Middleware(RawContextMiddleware),
                 Middleware(_AuthenticatedUser),
                 Middleware(ModelConfigMiddleware),
             ]

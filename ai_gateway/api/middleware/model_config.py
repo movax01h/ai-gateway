@@ -3,6 +3,7 @@ from typing import Optional
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette_context import context as starlette_context
 
 from ai_gateway.api.middleware.base import _PathResolver
 from ai_gateway.feature_allowlist import (
@@ -74,6 +75,9 @@ class ModelConfigMiddleware:
                     return message
 
             full_body = b"".join(body_parts) if body_parts else b""
+            # The access log records these fields. We use them to choose a size cap for the parse.
+            starlette_context["request_body_bytes"] = len(full_body)
+            starlette_context["request_body_has_model_metadata"] = False
 
             replay: Message = {
                 "type": "http.request",
@@ -92,6 +96,7 @@ class ModelConfigMiddleware:
                     return replay
 
                 if "model_metadata" in data:
+                    starlette_context["request_body_has_model_metadata"] = True
                     raw_metadata = data["model_metadata"]
                     # Read the request first: create_model_metadata changes the mapping it gets.
                     request = ClientModelRequest.from_raw(raw_metadata)
