@@ -1,4 +1,5 @@
 import asyncio
+import random
 from enum import Enum
 
 import structlog
@@ -65,7 +66,11 @@ class ModelErrorHandler:
         return ERROR_TYPES.get(status_code, ModelErrorType.UNKNOWN)
 
     def _get_retry_after(self) -> float:
-        return self.base_delay * (2**self._retry_count)
+        # Full jitter between half the base delay and the exponential cap, so
+        # sessions failing together don't retry in synchronized waves.
+        return random.uniform(
+            self.base_delay / 2, self.base_delay * (2**self._retry_count)
+        )
 
     async def handle_error(self, error: ModelError) -> None:
         if error.error_type not in RETRYABLE_ERRORS:

@@ -1162,11 +1162,13 @@ configurable_unit_primitives:
         ]
 
         assert [log_entry["attempt"] for log_entry in retry_logs] == [1, 2, 3]
-        assert [log_entry["sleep_before_retry_s"] for log_entry in retry_logs] == [
-            3.0,
-            9.0,
-            27.0,
-        ]
+        # Jittered waits fall between the floor and each attempt's exponential cap.
+        sleeps = [log_entry["sleep_before_retry_s"] for log_entry in retry_logs]
+        upper_bounds = [3.0, 9.0, 27.0]
+        assert all(
+            1.5 <= sleep <= upper_bound
+            for sleep, upper_bound in zip(sleeps, upper_bounds)
+        )
         assert all(log_entry["timeout_suspected"] for log_entry in retry_logs)
         assert all(
             log_entry["exception_class"] == "ReadTimeout" for log_entry in retry_logs
@@ -1693,8 +1695,8 @@ configurable_unit_primitives:
                 await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
     @pytest.mark.asyncio
-    async def test_ainvoke_uses_exponential_backoff(self, prompt: Prompt):
-        """Test that retry waits follow exponential backoff: ~3s, ~9s, ~27s."""
+    async def test_ainvoke_uses_jittered_exponential_backoff(self, prompt: Prompt):
+        """Test that retry waits are random between 1.5s and the exponential cap: 3s, 9s, 27s."""
         sleep_calls = []
 
         async def fake_sleep(seconds: float) -> None:
@@ -1706,13 +1708,19 @@ configurable_unit_primitives:
             side_effect=httpx.ReadError("Connection reset by peer"),
         ):
             with mock.patch("asyncio.sleep", side_effect=fake_sleep):
-                with pytest.raises(httpx.ReadError):
-                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+                with mock.patch(
+                    "random.uniform", side_effect=lambda low, high: high
+                ) as mock_uniform:
+                    with pytest.raises(httpx.ReadError):
+                        await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
-        assert len(sleep_calls) == 3
-        assert sleep_calls[0] == pytest.approx(3.0)
-        assert sleep_calls[1] == pytest.approx(9.0)
-        assert sleep_calls[2] == pytest.approx(27.0)
+        assert sleep_calls == pytest.approx([3.0, 9.0, 27.0])
+        # Tenacity also computes a wait after the final attempt, but never sleeps it.
+        assert [call.args for call in mock_uniform.call_args_list[:3]] == [
+            pytest.approx((1.5, 3.0)),
+            pytest.approx((1.5, 9.0)),
+            pytest.approx((1.5, 27.0)),
+        ]
 
     @pytest.mark.parametrize(
         "tool_choice",

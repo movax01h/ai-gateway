@@ -77,7 +77,7 @@ from tenacity import (
     retry,
     retry_if_exception,
     stop_after_attempt,
-    wait_exponential,
+    wait_random_exponential,
 )
 
 from ai_gateway.config import ConfigModelLimits, ModelLimits, get_config
@@ -371,7 +371,9 @@ def _log_retries_exhausted(retry_state: RetryCallState) -> None:
 @retry(
     reraise=True,
     stop=stop_after_attempt(_RETRY_STOP_AFTER_ATTEMPT),
-    wait=wait_exponential(multiplier=3, min=3, max=29, exp_base=3),
+    # Full jitter: each wait is random between 1.5s and the exponential cap
+    # (3s, 9s, 27s), so sessions failing together don't retry in waves.
+    wait=wait_random_exponential(multiplier=3, min=1.5, max=29, exp_base=3),
     retry=retry_if_exception(_is_retryable),
     before=_record_attempt_start,
     after=_log_retries_exhausted,
