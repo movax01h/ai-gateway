@@ -21,7 +21,18 @@ def model_metadata_context_fixture():
 
 @pytest.fixture(name="middleware_test_client")
 def middleware_test_client_fixture(model_metadata_context):
-    app = FastAPI(middleware=[Middleware(ModelConfigMiddleware)])
+    app = FastAPI(
+        middleware=[Middleware(ModelConfigMiddleware, skip_endpoints=["/skipped"])]
+    )
+
+    @app.get("/body")
+    @app.post("/body")
+    @app.post("/skipped")
+    async def body(request: Request):
+        return {
+            "body": await request.json(),
+            "model_metadata_set": model_metadata_context.get() is not None,
+        }
 
     @app.post("/test")
     async def do_something(
@@ -87,6 +98,36 @@ async def test_parses_model_params_into_context_var(middleware_test_client):
     )
 
     assert response.json() == model_params
+
+
+@pytest.mark.usefixtures("custom_models_gateway")
+@pytest.mark.parametrize(
+    ("method", "path", "model_metadata_set"),
+    [
+        pytest.param("POST", "/body", True, id="post"),
+        pytest.param("GET", "/body", False, id="get"),
+        pytest.param("POST", "/skipped", False, id="skipped-endpoint"),
+    ],
+)
+def test_reads_the_body_only_for_requests_that_can_use_model_metadata(
+    middleware_test_client, method, path, model_metadata_set
+):
+    payload = {
+        "model_metadata": {
+            "name": "gpt",
+            "provider": "custom_openai",
+            "endpoint": "http://test_model.com/",
+            "api_key": "test_api_key",
+            "identifier": "test_model_identifier",
+        }
+    }
+
+    response = middleware_test_client.request(method, path, json=payload)
+
+    assert response.json() == {
+        "body": payload,
+        "model_metadata_set": model_metadata_set,
+    }
 
 
 @pytest.mark.asyncio

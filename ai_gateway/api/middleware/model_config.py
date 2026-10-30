@@ -4,6 +4,7 @@ from typing import Optional
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from ai_gateway.api.middleware.base import _PathResolver
 from ai_gateway.feature_allowlist import (
     ClientModelRequest,
     check_client_model_metadata,
@@ -31,8 +32,9 @@ _PROMPT_ROUTES = ("/v1/prompts/", "/v2/prompts/")
 
 
 class ModelConfigMiddleware:
-    def __init__(self, app: ASGIApp):
+    def __init__(self, app: ASGIApp, skip_endpoints: Optional[list[str]] = None):
         self.app = app
+        self.path_resolver = _PathResolver.from_optional_list(skip_endpoints)
 
     async def __call__(
         self,
@@ -40,7 +42,13 @@ class ModelConfigMiddleware:
         receive: Receive,
         send: Send,
     ) -> None:
-        if scope["type"] != "http":
+        # GET routes and the skipped endpoints do not use `model_metadata`. Do not read the body
+        # for them, because the skipped endpoints accept requests without authentication.
+        if (
+            scope["type"] != "http"
+            or scope["method"] == "GET"
+            or self.path_resolver.skip_path(scope["path"])
+        ):
             await self.app(scope, receive, send)
             return
 
