@@ -1,8 +1,8 @@
 # pylint: disable=file-naming-for-tests
 """Guards for the shipped workplan flow config.
 
-These tests assert on the content of ``workplan/1.0.0.yml`` (pinned tool
-options) rather than on ``FlowConfig`` machinery — generic ``FlowConfig``
+These tests assert on the content of the shipped ``workplan/*.yml`` configs
+(pinned tool options) rather than on ``FlowConfig`` machinery — generic ``FlowConfig``
 behavior is covered in ``test_flow_config.py``.
 """
 
@@ -22,18 +22,30 @@ from lib.version import resolve_version
 AGENT_COMPONENT_NAMES = ["research", "planner"]
 
 
+def shipped_versions() -> list[str]:
+    """Every version shipped for the flow, taken from the config filenames."""
+    config_dir = FlowConfig.DIRECTORY_PATH / "workplan"
+    return sorted(path.stem for path in config_dir.glob("*.yml"))
+
+
+# Every shipped version shares the same prompt partials, so each one must pin the
+# same tool options.
+WORKPLAN_VERSIONS = shipped_versions()
+
+
+def test_shipped_versions_are_discovered():
+    """A bad glob would silently parametrize the guards below into nothing."""
+    assert WORKPLAN_VERSIONS, "no shipped configs found for workplan"
+
+
 class TestWorkplanToolOptions:
     """Guard the workplan flow's pinned create_work_item_note tool options.
 
-    internal is pinned at the flow level (rather than left to the LLM) so
-    every note either stage posts is structurally a plain, visible-to-humans
-    comment, not an internal-only one. start_discussion isn't pinned because
-    it isn't exposed on the tool at all (createDiscussion lacks the
-    ai_workflows token scope; see !6551) - a human replying to the comment
-    is what makes it a resolvable discussion instead.
+    Pinned at the flow level rather than left to the LLM, so every note either stage posts is visible to humans and
+    opens a thread they can resolve, which is how the gates read "answered".
     """
 
-    EXPECTED_OPTIONS = {"internal": False}
+    EXPECTED_OPTIONS = {"internal": False, "start_discussion": True}
 
     @staticmethod
     def _create_work_item_note_options(config: FlowConfig, component_name: str) -> dict:
@@ -48,19 +60,23 @@ class TestWorkplanToolOptions:
             f"in {component_name}"
         )
 
+    @pytest.mark.parametrize("version", WORKPLAN_VERSIONS)
     @pytest.mark.parametrize("component_name", AGENT_COMPONENT_NAMES)
-    def test_create_work_item_note_args_are_pinned(self, component_name):
-        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+    def test_create_work_item_note_args_are_pinned(self, version, component_name):
+        config = FlowConfig.from_yaml_config("workplan", version)
         assert (
             self._create_work_item_note_options(config, component_name)
             == self.EXPECTED_OPTIONS
         )
 
+    @pytest.mark.parametrize("version", WORKPLAN_VERSIONS)
     @pytest.mark.parametrize("component_name", AGENT_COMPONENT_NAMES)
-    def test_pinned_option_keys_are_valid_tool_parameters(self, component_name):
+    def test_pinned_option_keys_are_valid_tool_parameters(
+        self, version, component_name
+    ):
         # Mirrors Toolset._validate_tool_options: every pinned key must be a real
         # parameter on the tool's input schema, so a typo/rename fails fast here.
-        config = FlowConfig.from_yaml_config("workplan", "1.0.0")
+        config = FlowConfig.from_yaml_config("workplan", version)
         options = self._create_work_item_note_options(config, component_name)
         valid_fields = set(CreateWorkItemNoteInput.model_fields.keys())
         assert set(options).issubset(valid_fields)
@@ -133,7 +149,7 @@ class TestWorkplanRouterWiring:
 class TestWorkplanGatesAreAnsweredExternally:
     """Replies come from the work item, so the session page must not render approval buttons for any gate."""
 
-    @pytest.mark.parametrize("version", ["1.0.0", "1.1.0", "1.2.0"])
+    @pytest.mark.parametrize("version", WORKPLAN_VERSIONS)
     @pytest.mark.parametrize(
         "gate_name", ["research_gate", "plan_gate", "context_gate"]
     )
