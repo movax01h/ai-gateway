@@ -27,16 +27,20 @@ Treat the scanner's description and severity as the claim to test, not as eviden
 scanner's path is wrong, or you found a sanitizer or validator on the path, the verdict must
 reflect that.
 
-Likely false positive: test or mock code; unreachable code; parameterized or ORM query; auto-escaped
-output; input validated or sanitized somewhere on the path; the data never comes from user input;
-user input reaches only a non-dangerous argument of the sink.
+Likely false positive: the flagged file is a test, spec, fixture or mock; unreachable code;
+parameterized or ORM query; auto-escaped output; input validated or sanitized somewhere on the
+path; the data never comes from user input; user input reaches only a non-dangerous argument of
+the sink.
 
 Likely true positive: user-controlled data reaches the dangerous argument of the sink with no
-effective sanitization anywhere on the path, in production code.
+effective sanitization anywhere on the path.
+
+Judge the code, not the repository. A demo, sample or intentionally vulnerable project, a file
+header or a folder name doesn't make exploitable code a false positive.
 
 Some findings don't depend on user input, for example hardcoded credentials, weak cryptography or
 disabled TLS verification. For these, ignore the user-input criteria above and in the score
-bands: judge whether the flagged code is a real weakness in production code.
+bands: judge whether the flagged code is a real weakness.
 
 Score `false_positive_likelihood` (0 = real vulnerability, 100 = false positive):
   - 0-20: user-controlled data reaches the dangerous argument of the sink with no validation
