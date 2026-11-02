@@ -731,6 +731,43 @@ def test_duo_workflow_config_use_caching_proxy(
 
 
 @pytest.mark.parametrize(
+    ("values", "expected_max_bytes", "expected_max_components"),
+    [
+        ({}, 160 * 1024, 100),
+        (
+            {
+                "DUO_WORKFLOW_FLOW_VALIDATION__MAX_BYTES": "1024",
+                "DUO_WORKFLOW_FLOW_VALIDATION__MAX_COMPONENTS": "5",
+            },
+            1024,
+            5,
+        ),
+    ],
+)
+def test_duo_workflow_config_flow_validation(
+    values: dict, expected_max_bytes: int, expected_max_components: int
+):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = ConfigDuoWorkflow()
+
+        assert config.flow_validation.max_bytes == expected_max_bytes
+        assert config.flow_validation.max_components == expected_max_components
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"DUO_WORKFLOW_FLOW_VALIDATION__MAX_BYTES": "0"},
+        {"DUO_WORKFLOW_FLOW_VALIDATION__MAX_COMPONENTS": "-1"},
+    ],
+)
+def test_duo_workflow_config_flow_validation_rejects_non_positive(values: dict):
+    with mock.patch.dict(os.environ, values, clear=True):
+        with pytest.raises(ValidationError):
+            ConfigDuoWorkflow()
+
+
+@pytest.mark.parametrize(
     ("values", "expected"),
     [
         ({}, ConfigCachingProxy(url="http://localhost:8888")),

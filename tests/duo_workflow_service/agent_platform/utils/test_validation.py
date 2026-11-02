@@ -6,7 +6,11 @@ import pytest
 import yaml
 
 from ai_gateway.prompts.registry import LocalPromptRegistry
-from duo_workflow_service.agent_platform.utils.validation import FlowValidator
+from duo_workflow_service.agent_platform.utils.validation import (
+    FlowConfigLimitExceededError,
+    FlowValidationError,
+    FlowValidator,
+)
 
 
 def _build_yaml(
@@ -43,17 +47,107 @@ def _build_yaml(
     )
 
 
+def _build_prompt_registry() -> LocalPromptRegistry:
+    return LocalPromptRegistry(
+        prompt_template_factories={},
+        model_factories={},
+        internal_event_client=Mock(),
+        model_limits=Mock(),
+        custom_models_enabled=False,
+    )
+
+
 @pytest.fixture(name="validator")
 def validator_fixture() -> FlowValidator:
-    return FlowValidator(
-        prompt_registry=LocalPromptRegistry(
-            prompt_template_factories={},
-            model_factories={},
-            internal_event_client=Mock(),
-            model_limits=Mock(),
-            custom_models_enabled=False,
+    return FlowValidator(prompt_registry=_build_prompt_registry())
+
+
+def _chain_config(component_count: int) -> dict:
+    """A valid v1 ambient flow with ``component_count`` agent components routed in a chain."""
+    components = []
+    routers = []
+    for index in range(component_count):
+        name = f"comp{index}"
+        components.append(
+            {
+                "name": name,
+                "type": "AgentComponent",
+                "prompt_id": "test_prompt",
+                "toolset": [],
+                "inputs": [{"from": "context:goal", "as": "goal"}],
+            }
         )
+        next_name = f"comp{index + 1}" if index + 1 < component_count else "end"
+        routers.append({"from": name, "to": next_name})
+    return {
+        "version": "v1",
+        "environment": "ambient",
+        "flow": {"entry_point": "comp0"},
+        "components": components,
+        "routers": routers,
+        "prompts": [
+            {
+                "prompt_id": "test_prompt",
+                "name": "test_prompt",
+                "unit_primitives": ["duo_agent_platform"],
+                "prompt_template": {"system": "Hello {{ goal }}"},
+            }
+        ],
+    }
+
+
+class TestComponentCountLimit:
+    @pytest.mark.parametrize(
+        ("max_components", "component_count"),
+        [(None, 3), (3, 3), (3, 1)],
+        ids=["no_limit", "at_limit", "under_limit"],
     )
+    def test_within_limit_is_valid(self, max_components, component_count):
+        validator = FlowValidator(
+            prompt_registry=_build_prompt_registry(), max_components=max_components
+        )
+
+        validator.validate_dict(_chain_config(component_count))
+
+    def test_over_limit_is_rejected(self):
+        validator = FlowValidator(
+            prompt_registry=_build_prompt_registry(), max_components=2
+        )
+
+        with pytest.raises(FlowConfigLimitExceededError) as exc_info:
+            validator.validate_dict(_chain_config(3))
+
+        assert isinstance(exc_info.value, FlowValidationError)
+        assert exc_info.value.errors == [
+            "Flow config has 3 components; the maximum is 2"
+        ]
+
+    def test_limit_is_checked_before_schema_parsing(self):
+        """An oversized config is rejected on the count alone, without paying for Pydantic or compilation."""
+        validator = FlowValidator(
+            prompt_registry=_build_prompt_registry(), max_components=1
+        )
+        config = _chain_config(2)
+        del config["routers"]  # would fail Pydantic parsing if it got that far
+
+        with pytest.raises(FlowValidationError) as exc_info:
+            validator.validate_dict(config)
+
+        assert exc_info.value.errors == [
+            "Flow config has 2 components; the maximum is 1"
+        ]
+
+    def test_non_list_components_is_left_to_schema_validation(self):
+        validator = FlowValidator(
+            prompt_registry=_build_prompt_registry(), max_components=1
+        )
+        config = _chain_config(1)
+        config["components"] = "not-a-list"
+
+        with pytest.raises(FlowValidationError) as exc_info:
+            validator.validate_dict(config)
+
+        assert all("maximum" not in err for err in exc_info.value.errors)
 
 
 class TestToolsetOptional:

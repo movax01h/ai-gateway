@@ -24,13 +24,17 @@ from duo_workflow_service.workflows.registry import flow_factory, get_flow_class
 # Re-export so existing callers can still import from here.
 __all__ = [
     "ExtraInputVariablesError",
+    "FlowConfigLimitExceededError",
     "FlowValidationError",
     "FlowValidator",
     "MissingInputVariablesError",
 ]
 
 
-from duo_workflow_service.agent_platform.utils.exceptions import FlowValidationError
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    FlowConfigLimitExceededError,
+    FlowValidationError,
+)
 
 
 class FlowValidator:
@@ -50,8 +54,17 @@ class FlowValidator:
         prompt_registry: LocalPromptRegistry = Provide[
             ContainerApplication.pkg_prompts.prompt_registry
         ],
+        max_components: int | None = None,
     ) -> None:
+        """Create a validator.
+
+        Args:
+            prompt_registry: Registry used to resolve prompts referenced by the flow.
+            max_components: When set, configs with more entries in ``components`` are rejected before any
+                Pydantic parsing or graph compilation runs, since validation cost grows with the component count.
+        """
         self._prompt_registry = prompt_registry
+        self._max_components = max_components
 
     def validate(self, yaml_content: str) -> None:
         """Validate a flow configuration YAML string end-to-end.
@@ -97,6 +110,8 @@ class FlowValidator:
                 ["Missing required field 'environment' in flow config"]
             )
 
+        self._check_component_count(config_dict)
+
         flow_config_cls, flow_cls = get_flow_classes(version, environment)
         try:
             config = flow_config_cls(**config_dict)
@@ -121,3 +136,16 @@ class FlowValidator:
                 raise NotImplementedError(
                     f"Dry-run validation is not implemented for config type: {type(config).__name__}"
                 )
+
+    def _check_component_count(self, config_dict: Dict[str, Any]) -> None:
+        if self._max_components is None:
+            return
+
+        components = config_dict.get("components")
+        count = len(components) if isinstance(components, list) else 0
+        if count > self._max_components:
+            raise FlowConfigLimitExceededError(
+                [
+                    f"Flow config has {count} components; the maximum is {self._max_components}"
+                ]
+            )
