@@ -34,6 +34,9 @@ from duo_workflow_service.agent_platform.v1.catalog.sources import (
     CatalogItemRef,
     source_for,
 )
+from duo_workflow_service.agent_platform.v1.catalog.sources.ai_catalog_agent import (
+    ai_catalog_agent_key,
+)
 from duo_workflow_service.components.tools_registry import ToolsRegistry
 
 __all__ = ["bind_catalog_items"]
@@ -196,7 +199,7 @@ def _warn_about_unclaimed_agents(
     refs: list[CatalogItemRef], items: CatalogItems
 ) -> None:
     """Log the AI Catalog agents no claim binds, so a silent drop is visible."""
-    claimed = {(ref.item_id, ref.version) for ref in refs}
+    claimed = {ai_catalog_agent_key(ref) for ref in refs}
     dropped = [
         f"{agent.item_id}@{agent.version}"
         for agent in items.ai_catalog_agents

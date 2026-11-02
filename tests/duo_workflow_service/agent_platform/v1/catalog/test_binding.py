@@ -751,6 +751,16 @@ class TestAgentsNobodyClaims:
 
         assert not any("dropped" in log for log in logs)
 
+    def test_a_reference_with_spaces_around_its_id_counts_as_a_claim(self, expand):
+        padded = {**AI_CATALOG_REFERENCE, "item_id": " 42 ", "version": " 1.0.0 "}
+        include = [CatalogItemRef(**padded)]
+        items = CatalogItems(ai_catalog_agents=[self._agent("42")])
+
+        with capture_logs() as logs:
+            expand(self._claiming(padded), include, items)
+
+        assert not any("dropped" in log for log in logs)
+
 
 class TestCatalogItemValidation:
     @pytest.mark.parametrize(

@@ -50,12 +50,13 @@ def _bind(
     items: CatalogItems,
     claimant: dict | None = None,
     tools_registry: Mock | None = None,
+    ref: CatalogItemRef | None = None,
 ) -> list[dict]:
     claimant = claimant or {"name": "coordinator", "subagents": [dict(REFERENCE)]}
 
     return AiCatalogAgentSource().bind(
         BindRequest(
-            ref=_ref(),
+            ref=ref or _ref(),
             claimant_config=claimant,
             components_config=[claimant],
             items=items,
@@ -162,6 +163,11 @@ class TestBindWithAMatch:
             "coordinator",
             "ai-catalog/agents/tester (42)",
         ]
+
+    def test_the_match_ignores_spaces_around_the_id_and_version(self):
+        bound = _bind(_items(_agent()), ref=_ref(item_id=" 42 ", version=" 1.0.0 "))
+
+        assert bound[1]["name"] == "ai-catalog/agents/tester (42)"
 
     def test_static_subagents_compose_with_the_matched_agent(self):
         claimant = {
