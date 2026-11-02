@@ -69,6 +69,7 @@ from duo_workflow_service.executor.outbox import (
     OutgoingMessageTooLargeError,
 )
 from duo_workflow_service.flow_request import (
+    FlowRequest,
     InlineFlowRequest,
     RegistryFlowRequest,
     normalize_catalog_items,
@@ -104,6 +105,9 @@ from duo_workflow_service.interceptors.request_metadata_log_interceptor import (
     RequestMetadataLogInterceptor,
 )
 from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
+from duo_workflow_service.interceptors.trusted_restricted_issuers import (
+    TrustedRestrictedIssuerVerifier,
+)
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
@@ -176,7 +180,11 @@ from lib.internal_events.context import (
     merge_event_context_extra,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
-from lib.jwt import FEATURE_ENABLEMENT_TYPE_CLAIM, instance_uid_claim
+from lib.jwt import (
+    FEATURE_ENABLEMENT_TYPE_CLAIM,
+    instance_uid_claim,
+    trusted_instance_id,
+)
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
@@ -198,6 +206,9 @@ WORKFLOW_BINDING_DETAILS = "Workflow token is not authorized for the requested w
 # minted for, and ExecuteWorkflow accepts their instance token's flow claim for
 # restricted models. Empty means no instance qualifies.
 RESTRICTED_FLOW_INSTANCE_UIDS_ENV = "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS"
+# A trusted restricted-flow issuer's proof for one flow and workflow (see trusted_restricted_issuers), sent on
+# ExecuteWorkflow next to the usual token.
+RESTRICTED_FLOW_PROOF_HEADER = "x-gitlab-restricted-flow-proof"
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
@@ -592,6 +603,58 @@ def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
     return flow_config_id
 
 
+@functools.cache
+def _restricted_flow_proof_verifier() -> TrustedRestrictedIssuerVerifier:
+    return TrustedRestrictedIssuerVerifier()
+
+
+async def _restricted_access_flow_from_proof(
+    context: grpc.ServicerContext,
+    user: CloudConnectorUser,
+    flow_request: FlowRequest,
+    workflow_id: str,
+) -> Optional[str]:
+    """Return the requested flow if a trusted restricted-flow issuer's proof grants it restricted models.
+
+    The proof must verify against its issuer's own keys, the issuer's configured `uid` must be the instance ID the
+    request's signed main token vouches for (lib.jwt.trusted_instance_id), and the proof must name the requested
+    registry flow, enabled for that issuer, and the requested workflow. Request headers are not used for this binding:
+    they are not signed. Any other proof, or none, grants nothing; the request goes on without restricted access.
+    Debug users never qualify.
+    """
+    metadata = dict(context.invocation_metadata() or ())
+    proof_token = metadata.get(RESTRICTED_FLOW_PROOF_HEADER)
+    if user.is_debug or not isinstance(proof_token, str) or not proof_token:
+        return None
+
+    # Off the event loop: a cache miss fetches the issuer's keys.
+    proof = await asyncio.to_thread(
+        _restricted_flow_proof_verifier().verify_proof, proof_token
+    )
+    if proof is None:
+        log.info("Restricted-flow proof ignored", reason="not verified")
+        return None
+
+    requested_flow = (
+        flow_request.config_id
+        if isinstance(flow_request, RegistryFlowRequest)
+        else None
+    )
+    reason = None
+    if trusted_instance_id(user.claims) != proof.issuer.uid:
+        reason = "instance id mismatch"
+    elif proof.flow_config_id != requested_flow:
+        reason = "flow mismatch"
+    elif not _workflow_binding_matches(proof.workflow_id, workflow_id):
+        reason = "workflow mismatch"
+    if reason:
+        log.info(
+            "Restricted-flow proof ignored", reason=reason, issuer=proof.issuer.issuer
+        )
+        return None
+    return proof.flow_config_id
+
+
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
     # Set to 10 seconds to provide a reasonable balance between:
     # - Giving tasks enough time to properly clean up resources
@@ -760,7 +823,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         # restricted to, on a signed flow claim; no debug bypass. Prompt construction
         # enforces this for every model; the default model and every tagged model are
         # checked here so a denied run fails before any workflow setup.
-        authorized_flow = _restricted_access_flow(user)
+        authorized_flow = _restricted_access_flow(
+            user
+        ) or await _restricted_access_flow_from_proof(
+            context, user, flow_request, start_req.workflowID
+        )
         restricted_access_ctx.set(authorized_flow)
         by_tag_metadata = current_model_metadata_with_size_context.get()
         for metadata in filter(

@@ -26,7 +26,7 @@ from gitlab_cloud_connector import (
 from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from grpc_health.v1 import health, health_pb2
-from jose import jwt
+from jose import jwk, jwt
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from litellm.exceptions import APIConnectionError as LiteLLMAPIConnectionError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
@@ -79,7 +79,11 @@ from duo_workflow_service.executor.outbox import (
     OutboxSignal,
     OutgoingMessageTooLargeError,
 )
-from duo_workflow_service.flow_request import InlineFlowRequest, RegistryFlowRequest
+from duo_workflow_service.flow_request import (
+    InlineFlowRequest,
+    LegacyWorkflowRequest,
+    RegistryFlowRequest,
+)
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.metadata_context_interceptor import (
@@ -87,6 +91,9 @@ from duo_workflow_service.interceptors.metadata_context_interceptor import (
 )
 from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
+)
+from duo_workflow_service.interceptors.trusted_restricted_issuers import (
+    TrustedRestrictedIssuerVerifier,
 )
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.server import (
@@ -98,6 +105,8 @@ from duo_workflow_service.server import (
     _extract_error_message,
     _flow_config_digest,
     _restricted_access_flow,
+    _restricted_access_flow_from_proof,
+    _restricted_flow_proof_verifier,
     _workflow_binding_matches,
     clean_start_request,
     drain_workflow_tasks,
@@ -7522,6 +7531,404 @@ async def test_execute_workflow_restricted_tag_model_is_denied_at_start(
         grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
     )
     mock_resolve_flow.assert_not_called()
+
+
+# Restricted-flow proofs from trusted restricted-flow issuers (named GitLab Dedicated instances).
+
+TENANT_ISSUER = "https://tenant-a.gitlab-dedicated.com"
+TENANT_UID = "aaaaaaaa-1111-4111-8111-111111111111"
+TENANT_FLOWS_ENV = "DUO_WORKFLOW_AUTH__TRUSTED_RESTRICTED_ISSUERS"
+TRUSTED_ISSUER_ENV = {
+    **RESTRICTED_MODEL_ENV,
+    TENANT_FLOWS_ENV: json.dumps(
+        {TENANT_ISSUER: {"uid": TENANT_UID, "flows": ["bl_security"]}}
+    ),
+}
+TENANT_JWK = {
+    **jwk.RSAKey(algorithm="RS256", key=TEST_PRIVATE_KEY).public_key().to_dict(),
+    "kid": "kid-a",
+}
+
+
+class _TenantKeys:
+    """The tenant's key cache, holding one key."""
+
+    def __init__(self, _keys_url):
+        pass
+
+    def key_for(self, kid):
+        return TENANT_JWK if kid == "kid-a" else None
+
+
+def _restricted_flow_proof(iss: str = TENANT_ISSUER, **overrides) -> str:
+    now = int(datetime.now(timezone.utc).timestamp())
+    claims = {
+        "iss": iss,
+        "sub": TENANT_UID,
+        "aud": "gitlab-duo-workflow-service",
+        "typ": "restricted_flow_proof",
+        "flow_config_id": "bl_security",
+        "workflow_id": "123",
+        "iat": now,
+        "nbf": now,
+        "exp": now + 3600,
+        "jti": "proof-1",
+        **overrides,
+    }
+    claims = {k: v for k, v in claims.items() if v is not None}
+    return jwt.encode(
+        claims, TEST_PRIVATE_KEY, algorithm="RS256", headers={"kid": "kid-a"}
+    )
+
+
+def _dedicated_user(
+    is_debug: bool = False,
+    issuer: str = "gitlab-duo-workflow-service",
+    instance_uid: Optional[str] = TENANT_UID,
+    subject: Optional[str] = None,
+) -> CloudConnectorUser:
+    """The usual token of a Dedicated instance: by default a workflow token GenerateToken minted without verification.
+
+    Its signed instance ID (lib.jwt.trusted_instance_id) is `instance_uid`, or `subject` for a self-signed token.
+    """
+    return CloudConnectorUser(
+        authenticated=True,
+        is_debug=is_debug,
+        claims=UserClaims(
+            scopes=["duo_agent_platform"],
+            issuer=issuer,
+            subject=subject,
+            gitlab_realm="self-managed",
+            gitlab_instance_uid=instance_uid,
+            extra={"flow_config_id": "bl_security", "workflow_id": "123"},
+        ),
+    )
+
+
+@pytest.fixture(name="proof_verifier")
+def proof_verifier_fixture():
+    verifier = TrustedRestrictedIssuerVerifier(_TenantKeys)
+    with patch(
+        "duo_workflow_service.server._restricted_flow_proof_verifier",
+        return_value=verifier,
+    ):
+        yield verifier
+
+
+def _with_proof(mock_context, proof, instance_id=TENANT_UID):
+    metadata = [("x-gitlab-instance-id", instance_id)]
+    if proof is not None:
+        metadata.append(("x-gitlab-restricted-flow-proof", proof))
+    mock_context.invocation_metadata.return_value = metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata", "proof_verifier")
+@pytest.mark.usefixtures("flow_enabled")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, TRUSTED_ISSUER_ENV)
+@pytest.mark.parametrize(
+    ("user", "instance_id_header"),
+    [
+        pytest.param(_dedicated_user(), TENANT_UID, id="signed-gitlab-instance-uid"),
+        pytest.param(
+            _dedicated_user(
+                issuer=TENANT_ISSUER, instance_uid=None, subject=TENANT_UID
+            ),
+            TENANT_UID,
+            id="self-signed-sub",
+        ),
+        pytest.param(
+            _dedicated_user(),
+            "bbbbbbbb-2222-4222-8222-222222222222",
+            id="instance-id-header-not-used",
+        ),
+    ],
+)
+async def test_execute_workflow_allows_restricted_model_with_trusted_issuer_proof(
+    mock_resolve_flow, mock_workflow_class, mock_context, user, instance_id_header
+):
+    current_user.set(user)
+    _with_proof(mock_context, _restricted_flow_proof(), instance_id_header)
+
+    seen = await _execute_registry_flow(
+        "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+    )
+
+    mock_context.abort.assert_not_called()
+    assert seen == ["bl_security"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("proof_verifier")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, TRUSTED_ISSUER_ENV)
+async def test_execute_workflow_allows_restricted_tag_model_with_trusted_issuer_proof(
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_context,
+    fake_restricted_model,
+    llm_definition,
+):
+    """A valid proof grants the restricted model reachable only through a tag, as it does the default model."""
+    current_user.set(_dedicated_user())
+    _with_proof(mock_context, _restricted_flow_proof())
+
+    with _models_in_context(
+        _gitlab_model("default_model", llm_definition),
+        {
+            "large": _gitlab_model(
+                fake_restricted_model.gitlab_identifier, fake_restricted_model
+            )
+        },
+    ):
+        seen = await _execute_registry_flow(
+            "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+        )
+
+    mock_context.abort.assert_not_called()
+    assert seen == ["bl_security"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata", "proof_verifier")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, TRUSTED_ISSUER_ENV)
+async def test_execute_workflow_denies_restricted_model_with_ignored_proof(
+    mock_resolve_flow, mock_context
+):
+    """An ignored proof leaves the restricted model denied, as without a proof."""
+    current_user.set(_dedicated_user())
+    _with_proof(mock_context, _restricted_flow_proof(workflow_id="456"))
+
+    with pytest.raises(grpc.RpcError):
+        await _execute_registry_flow(
+            "bl_security", mock_context, mock_resolve_flow, MagicMock()
+        )
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model", "proof_verifier")
+@pytest.mark.parametrize(
+    ("env", "proof", "instance_id", "is_debug"),
+    [
+        pytest.param({}, None, TENANT_UID, False, id="no-proof"),
+        pytest.param(
+            {},
+            _restricted_flow_proof(iss="https://gitlab.com"),
+            TENANT_UID,
+            False,
+            id="tenant-key-spoofing-gitlab-com",
+        ),
+        pytest.param(
+            {},
+            _restricted_flow_proof(iss="https://other.gitlab-dedicated.com"),
+            TENANT_UID,
+            False,
+            id="untrusted-issuer",
+        ),
+        pytest.param(
+            {},
+            _restricted_flow_proof(aud="gitlab-ai-gateway"),
+            TENANT_UID,
+            False,
+            id="wrong-aud",
+        ),
+        pytest.param(
+            {},
+            _restricted_flow_proof(typ="access_token"),
+            TENANT_UID,
+            False,
+            id="wrong-typ",
+        ),
+        pytest.param(
+            {
+                TENANT_FLOWS_ENV: json.dumps(
+                    {TENANT_ISSUER: {"uid": TENANT_UID, "flows": ["other_flow"]}}
+                )
+            },
+            _restricted_flow_proof(),
+            TENANT_UID,
+            False,
+            id="flow-not-in-issuer-list",
+        ),
+        pytest.param(
+            {
+                TENANT_FLOWS_ENV: json.dumps(
+                    {
+                        TENANT_ISSUER: {
+                            "uid": TENANT_UID,
+                            "flows": ["bl_security", "other_flow"],
+                        }
+                    }
+                )
+            },
+            _restricted_flow_proof(flow_config_id="other_flow"),
+            TENANT_UID,
+            False,
+            id="proof-for-other-flow",
+        ),
+        pytest.param(
+            {},
+            _restricted_flow_proof(workflow_id=None),
+            TENANT_UID,
+            False,
+            id="no-workflow-id",
+        ),
+        pytest.param(
+            {},
+            _restricted_flow_proof(workflow_id="456"),
+            TENANT_UID,
+            False,
+            id="other-workflow-id",
+        ),
+        pytest.param(
+            {TENANT_FLOWS_ENV: ""},
+            _restricted_flow_proof(),
+            TENANT_UID,
+            False,
+            id="issuer-removed",
+        ),
+        pytest.param({}, _restricted_flow_proof(), TENANT_UID, True, id="debug"),
+        pytest.param({}, "not-a-jwt", TENANT_UID, False, id="garbage"),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_ignores_proof_and_runs_without_restricted_access(  # pylint: disable=too-many-arguments
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_context,
+    env,
+    proof,
+    instance_id,
+    is_debug,
+):
+    """A missing or unusable proof never fails the request: the flow runs on its unrestricted models."""
+    current_user.set(_dedicated_user(is_debug=is_debug))
+    _with_proof(mock_context, proof, instance_id)
+
+    with patch.dict(os.environ, {**TRUSTED_ISSUER_ENV, **env}):
+        seen = await _execute_registry_flow(
+            "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+        )
+
+    mock_context.abort.assert_not_called()
+    assert seen == [None]
+
+
+OTHER_UID = "bbbbbbbb-2222-4222-8222-222222222222"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fake_restricted_model", "proof_verifier")
+@pytest.mark.parametrize(
+    "user",
+    [
+        pytest.param(
+            _dedicated_user(instance_uid=OTHER_UID),
+            id="header-matches-signed-instance-id-does-not",
+        ),
+        pytest.param(
+            _dedicated_user(instance_uid=None, subject=TENANT_UID),
+            id="dws-issued-token-sub-is-a-user",
+        ),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, TRUSTED_ISSUER_ENV)
+async def test_execute_workflow_ignores_proof_not_bound_to_signed_instance_id(
+    mock_resolve_flow, mock_workflow_class, mock_context, user
+):
+    """The proof's issuer must be the instance the signed main token vouches for; the header does not count."""
+    current_user.set(user)
+    _with_proof(mock_context, _restricted_flow_proof(), TENANT_UID)
+
+    seen = await _execute_registry_flow(
+        "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+    )
+
+    mock_context.abort.assert_not_called()
+    assert seen == [None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("proof_verifier")
+@patch.dict(os.environ, TRUSTED_ISSUER_ENV)
+async def test_proof_grants_nothing_for_non_registry_request(mock_context):
+    _with_proof(mock_context, _restricted_flow_proof())
+    registry = RegistryFlowRequest(
+        config_id="bl_security", schema_version="v1", version="1.0.0"
+    )
+    legacy = LegacyWorkflowRequest(workflow_definition="software_development")
+
+    assert (
+        await _restricted_access_flow_from_proof(
+            mock_context, _dedicated_user(), registry, "123"
+        )
+        == "bl_security"
+    )
+    assert (
+        await _restricted_access_flow_from_proof(
+            mock_context, _dedicated_user(), legacy, "123"
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_proof_is_verified_off_the_event_loop(mock_context, proof_verifier):
+    _with_proof(mock_context, "a-proof")
+    with patch(
+        "duo_workflow_service.server.asyncio.to_thread", AsyncMock(return_value=None)
+    ) as to_thread:
+        assert not await _restricted_access_flow_from_proof(
+            mock_context, _dedicated_user(), None, "123"
+        )
+    to_thread.assert_awaited_once_with(proof_verifier.verify_proof, "a-proof")
+
+
+def test_restricted_flow_proof_verifier_is_a_cached_trusted_issuer_verifier():
+    _restricted_flow_proof_verifier.cache_clear()
+    try:
+        verifier = _restricted_flow_proof_verifier()
+        assert isinstance(verifier, TrustedRestrictedIssuerVerifier)
+        assert _restricted_flow_proof_verifier() is verifier
+    finally:
+        _restricted_flow_proof_verifier.cache_clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restricted_model_metadata")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, TRUSTED_ISSUER_ENV)
+async def test_execute_workflow_for_gitlab_com_unchanged_with_trusted_issuers(
+    mock_resolve_flow, mock_workflow_class, mock_context
+):
+    """GitLab.com's instance token is authorized as before; a proof header is not even read."""
+    verifier = MagicMock()
+    current_user.set(_instance_user(extra=BL_SECURITY_CLAIM))
+    _with_proof(mock_context, "not-a-jwt")
+
+    with patch(
+        "duo_workflow_service.server._restricted_flow_proof_verifier",
+        return_value=verifier,
+    ):
+        seen = await _execute_registry_flow(
+            "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+        )
+
+    mock_context.abort.assert_not_called()
+    assert seen == ["bl_security"]
+    verifier.verify_proof.assert_not_called()
 
 
 ALLOWED_INSTANCE_UID = "11111111-1111-4111-8111-111111111111"
