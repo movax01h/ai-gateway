@@ -18,6 +18,7 @@ from duo_workflow_service.agent_platform.node_naming import component_name_from_
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
+    log_server_tool_turn,
 )
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
@@ -363,25 +364,38 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         return ""
 
     def _emit_reasoning(self, completion: AIMessage) -> None:
-        """Emit an ``ON_AGENT_REASONING`` log entry if the completion has non-empty text.
+        """Emit the completion's reasoning text, split around any server-tool cards it carries.
 
-        Only emits when ``ui_history`` is set and ``ON_AGENT_REASONING`` is in its
-        event list.  Empty or whitespace-only content is silently skipped.
+        Text goes out as ``ON_AGENT_REASONING`` entries; empty or whitespace-only text is
+        skipped. Server-tool calls (e.g. a provider-native web search) become TOOL cards
+        between the text segments, see :func:`log_server_tool_turn`.
 
         Args:
             completion: The ``AIMessage`` returned by the LLM.
         """
         if self._ui_history is None:
             return
+        if log_server_tool_turn(
+            self._ui_history,
+            completion,
+            log_text=self._log_reasoning_text,
+            component_name=component_name_from_node(self.name),
+        ):
+            return
+        self._log_reasoning_text(self._extract_text(completion), completion.id)
+
+    def _log_reasoning_text(self, text: str, message_id: Optional[str]) -> None:
+        if self._ui_history is None:
+            return
         if UILogEventsAgent.ON_AGENT_REASONING not in self._ui_history.events:
             return
-        text = self._extract_text(completion).strip()
-        if not text:
+        text = text.strip()
+        if not text or text == _LITELLM_EMPTY_CONTENT_PLACEHOLDER:
             return
         self._ui_history.log.warning(
             text,
             event=UILogEventsAgent.ON_AGENT_REASONING,
-            message_id=completion.id,
+            message_id=message_id,
         )
 
     @staticmethod

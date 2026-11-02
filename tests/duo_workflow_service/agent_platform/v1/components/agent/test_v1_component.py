@@ -5,7 +5,7 @@ from typing import ClassVar, Literal
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
@@ -43,13 +43,18 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.state.base import IOKey, NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
 )
 from duo_workflow_service.entities import MessageTypeEnum
-from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.entities.state import ToolStatus, WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
+from lib.context import client_capabilities
 from lib.feature_flags import FeatureFlag
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
+)
 
 
 @pytest.fixture(name="prompt_id")
@@ -3348,3 +3353,181 @@ class TestWebSearchBinding:
         assert call_kwargs["prompt_template_inputs"] == {
             "tools_enabled": {"web_search": True, "run_command": True}
         }
+
+
+_SEARCH_RESULT_URL = "https://pypi.org/project/urllib3/"
+_SEARCH_RESULT_TITLE = "urllib3 · PyPI"
+
+
+def _anthropic_search_answer(msg_id: str = "msg_search") -> AIMessage:
+    """A final answer in the shape native Anthropic web search returns it."""
+    return AIMessage(
+        content=[
+            {"type": "text", "text": "Let me check PyPI."},
+            {
+                "type": "server_tool_use",
+                "id": "srvtoolu_1",
+                "name": "web_search",
+                "input": {"query": "urllib3 latest version"},
+            },
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_1",
+                "content": [
+                    {
+                        "type": "web_search_result",
+                        "url": _SEARCH_RESULT_URL,
+                        "title": _SEARCH_RESULT_TITLE,
+                        "encrypted_content": "opaque",
+                        "page_age": None,
+                    }
+                ],
+            },
+            {"type": "text", "text": "The latest release is 2.8.0."},
+        ],
+        id=msg_id,
+        response_metadata={"model_name": "claude-sonnet-4-5"},
+    )
+
+
+def _openai_search_answer(msg_id: str = "resp_search") -> AIMessage:
+    """A final answer in the shape the OpenAI Responses API returns it."""
+    return AIMessage(
+        content=[
+            {"type": "text", "text": "Let me check PyPI."},
+            {
+                "type": "web_search_call",
+                "id": "ws_1",
+                "status": "completed",
+                "action": {"type": "search", "query": "urllib3 latest version"},
+            },
+            {
+                "type": "text",
+                "text": "The latest release is 2.8.0.",
+                "annotations": [
+                    {
+                        "type": "url_citation",
+                        "url": _SEARCH_RESULT_URL,
+                        "title": _SEARCH_RESULT_TITLE,
+                        "start_index": 0,
+                        "end_index": 1,
+                    }
+                ],
+            },
+        ],
+        id=msg_id,
+        response_metadata={"model_name": "gpt-5"},
+    )
+
+
+class TestServerToolCardsInUiChatLog:
+    """Server-tool cards from a turn land in graph state, so the next checkpoint and a resume still show them.
+
+    The streaming notifier draws these cards live, but it keeps only PENDING entries the state does not know about once
+    the next values event arrives. A card that state never received vanishes at that point.
+    """
+
+    _CHAT_UI_LOG_EVENTS: ClassVar[list[UILogEventsAgent]] = [
+        UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+        UILogEventsAgent.ON_AGENT_REASONING,
+        UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+        UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+    ]
+
+    @staticmethod
+    async def _run_turn(component, completion, base_flow_state, thread_id="turn"):
+        """Run one turn of ``component`` in a real graph with a checkpointer; return the reloaded state values."""
+        component.prompt_registry.get_on_behalf.return_value.ainvoke = AsyncMock(
+            return_value=completion
+        )
+        router = Mock()
+        router.route.return_value = END
+        graph = StateGraph(FlowState)
+        component.attach(graph, router)
+        graph.set_entry_point(component.__entry_hook__())
+        compiled = graph.compile(checkpointer=InMemorySaver())
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": RECURSION_LIMIT,
+        }
+        await compiled.ainvoke(base_flow_state, config)
+        return (await compiled.aget_state(config)).values
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("completion", "card_id"),
+        [
+            (_anthropic_search_answer(), "srvtoolu_1"),
+            (_openai_search_answer(), "ws_1"),
+        ],
+        ids=["anthropic", "openai"],
+    )
+    async def test_final_answer_keeps_cards_between_text_segments(
+        self, make_agent_component, base_flow_state, completion, card_id
+    ):
+        component = make_agent_component(
+            inputs=["context:user_input"], ui_log_events=self._CHAT_UI_LOG_EVENTS
+        )
+
+        values = await self._run_turn(component, completion, base_flow_state)
+
+        log = values[FlowStateKeys.UI_CHAT_LOG]
+        assert [(e["message_type"], e["message_id"]) for e in log] == [
+            (MessageTypeEnum.AGENT, completion.id),
+            (MessageTypeEnum.TOOL, card_id),
+            (MessageTypeEnum.AGENT, f"{completion.id}:seg1"),
+        ]
+        before, card, after = log
+        assert before["content"] == "Let me check PyPI."
+        assert after["content"] == "The latest release is 2.8.0."
+        assert card["status"] == ToolStatus.SUCCESS
+        assert card["message_sub_type"] == "web_search"
+        assert card["component_name"] == component.name
+        assert card["tool_info"]["name"] == "web_search"
+        assert card["tool_info"]["args"] == {"query": "urllib3 latest version"}
+        assert card["tool_info"]["sources"] == [
+            {"title": _SEARCH_RESULT_TITLE, "url": _SEARCH_RESULT_URL}
+        ]
+        assert_client_valid_tool_info(card["tool_info"])
+        # The component's output is still the whole answer text.
+        assert (
+            values["context"][component.name]["final_answer"]
+            == "Let me check PyPI.The latest release is 2.8.0."
+        )
+
+    @pytest.mark.asyncio
+    async def test_streamed_entries_are_replaced_not_duplicated(
+        self, make_agent_component, base_flow_state
+    ):
+        """The state entries reuse the ids the notifier streamed under, so the values event replaces them in place."""
+        completion = _anthropic_search_answer()
+        component = make_agent_component(
+            inputs=["context:user_input"], ui_log_events=self._CHAT_UI_LOG_EVENTS
+        )
+        values = await self._run_turn(component, completion, base_flow_state)
+
+        client_capabilities.set({"incremental_streaming", "tool_call_streaming"})
+        notifier = UserInterface(outbox=Mock(), goal="goal")
+        streamed = AIMessageChunk(
+            id=completion.id,
+            content=[
+                {**block, "index": index}
+                for index, block in enumerate(completion.content)
+            ],
+        )
+        await notifier.send_event(
+            "messages",
+            (streamed, {"langgraph_node": component.__entry_hook__()}),
+            stream=True,
+        )
+        streamed_ids = [e["message_id"] for e in notifier.ui_chat_log]
+
+        await notifier.send_event("values", values, stream=True)
+
+        ids = [e["message_id"] for e in notifier.ui_chat_log]
+        assert ids == streamed_ids
+        assert len(ids) == len(set(ids))
+        card = next(
+            e for e in notifier.ui_chat_log if e["message_type"] == MessageTypeEnum.TOOL
+        )
+        assert card["status"] == ToolStatus.SUCCESS

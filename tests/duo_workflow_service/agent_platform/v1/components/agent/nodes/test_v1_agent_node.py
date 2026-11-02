@@ -1119,6 +1119,119 @@ class TestAgentNodeWebSearchAudit:
         assert len(collector._buffer) == 1  # pylint: disable=protected-access
 
 
+class TestAgentNodeServerToolCards:
+    """A turn that searched and then called a local tool logs its cards with the reasoning around them."""
+
+    @staticmethod
+    def _searching_turn() -> AIMessage:
+        return AIMessage(
+            content=[
+                {"type": "text", "text": "Checking the changelog."},
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtoolu_1",
+                    "name": "web_search",
+                    "input": {"query": "urllib3 changelog"},
+                },
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "srvtoolu_1",
+                    "content": [
+                        {
+                            "type": "web_search_result",
+                            "url": "https://urllib3.readthedocs.io/",
+                            "title": "urllib3 docs",
+                        }
+                    ],
+                },
+                {"type": "text", "text": "Now reading the lockfile."},
+            ],
+            tool_calls=[
+                {"id": "call_1", "name": "read_file", "args": {"path": "poetry.lock"}}
+            ],
+            id="msg_turn",
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("events", "expected"),
+        [
+            (
+                [
+                    UILogEventsAgent.ON_AGENT_REASONING,
+                    UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+                ],
+                [
+                    (MessageTypeEnum.AGENT, "msg_turn"),
+                    (MessageTypeEnum.TOOL, "srvtoolu_1"),
+                    (MessageTypeEnum.AGENT, "msg_turn:seg1"),
+                ],
+            ),
+            (
+                [UILogEventsAgent.ON_AGENT_REASONING],
+                [
+                    (MessageTypeEnum.AGENT, "msg_turn"),
+                    (MessageTypeEnum.AGENT, "msg_turn:seg1"),
+                ],
+            ),
+            (
+                [UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS],
+                [(MessageTypeEnum.TOOL, "srvtoolu_1")],
+            ),
+        ],
+        ids=["reasoning_and_tools", "reasoning_only", "tools_only"],
+    )
+    async def test_cards_follow_ui_log_events(
+        self,
+        flow_id,
+        mock_prompt,
+        inputs,
+        conversation_history_key,
+        mock_internal_event_client,
+        optimizer_pipeline,
+        base_flow_state,
+        _mock_get_vars_from_state,
+        events,
+        expected,
+    ):
+        mock_prompt.ainvoke = AsyncMock(return_value=self._searching_turn())
+        node = AgentNode(
+            flow_id=flow_id,
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
+            name="developer_agent#agent",
+            prompt=mock_prompt,
+            inputs=inputs,
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            internal_event_client=mock_internal_event_client,
+            invoke_config={},
+            optimizer_pipeline=optimizer_pipeline,
+            ui_history=UIHistory(
+                events=events,
+                writer_class=agent_tools_ui_log_writer_class(
+                    component_name="developer_agent"
+                ),
+            ),
+        )
+
+        result = await node.run(base_flow_state)
+
+        log = result[FlowStateKeys.UI_CHAT_LOG]
+        assert [(e["message_type"], e["message_id"]) for e in log] == expected
+        for entry in log:
+            assert entry["component_name"] == "developer_agent"
+        cards = [e for e in log if e["message_type"] == MessageTypeEnum.TOOL]
+        for card in cards:
+            assert card["status"] == ToolStatus.SUCCESS
+            assert card["tool_info"]["args"] == {"query": "urllib3 changelog"}
+            assert card["tool_info"]["sources"] == [
+                {"title": "urllib3 docs", "url": "https://urllib3.readthedocs.io/"}
+            ]
+
+
 class TestAgentNodeTruncation:
     """Test suite for AgentNode truncation recovery support."""
 
