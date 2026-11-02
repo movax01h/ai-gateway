@@ -209,6 +209,11 @@ the Makefile runs docformatter recursively (`-r`).
 CI=true make check-mypy LINT_WORKING_DIR="path/to/changed_file.py"
 ```
 
+If `check-mypy` fails with `Failed to establish connection with worker` (or a
+`PermissionError` from `socket`), the sandbox blocks the sockets mypy's
+parallel workers use. Rerun with `MYPY_NUM_WORKERS=0` (also as a prefix to
+`git commit` for the lefthook mypy hook) to check in-process.
+
 Run the full-repo `check-mypy` only when you can allow a longer timeout;
 never weaken the check to make it pass.
 
