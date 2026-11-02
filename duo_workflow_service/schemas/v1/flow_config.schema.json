@@ -317,6 +317,7 @@
         "malware_advisories",
         "measure_comment_temperature",
         "observability_all",
+        "package_advisories",
         "package_licenses",
         "refactor_code",
         "resolve_vulnerability",

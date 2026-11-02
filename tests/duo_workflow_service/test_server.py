@@ -196,6 +196,22 @@ YQIDAQAB
 """
 
 
+def _token_issued_by(
+    issuer: str,
+    sub: str,
+    gitlab_realm: str,
+    user: CloudConnectorUser,
+    gitlab_instance_id: str,
+    scopes: list[str],
+    extra_claims: dict | None = None,
+) -> str:
+    token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
+        sub, gitlab_realm, user, gitlab_instance_id, scopes, extra_claims=extra_claims
+    )
+    claims = {**jwt.get_unverified_claims(token), "iss": issuer}
+    return jwt.encode(claims, TEST_PRIVATE_KEY, algorithm=TokenAuthority.ALGORITHM)
+
+
 @pytest.fixture(autouse=True)
 def setup_event_loop():
     loop = asyncio.new_event_loop()
@@ -2389,15 +2405,14 @@ async def test_generate_token_propagates_gitlab_root_namespace_id_end_to_end(
         authenticated=True,
         claims=UserClaims(scopes=["duo_agent_platform"], gitlab_instance_uid="uid-1"),
     )
-    incoming_token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
+    incoming_token = _token_issued_by(
+        "gitlab-rails",
         "user-1",
         "saas",
         incoming_user,
         "1234",
         ["duo_agent_platform"],
-        # Override "iss" to simulate a Rails-issued token — GenerateToken
-        # disallows tokens self-issued by this service via `disallowed_issuers`.
-        extra_claims={"iss": "gitlab-rails", "gitlab_root_namespace_id": "123"},
+        extra_claims={"gitlab_root_namespace_id": "123"},
     )
 
     provider = CompositeProvider(
@@ -2452,13 +2467,8 @@ async def test_generate_token_binds_request_claim_end_to_end(
         authenticated=True,
         claims=UserClaims(scopes=["duo_agent_platform"], gitlab_instance_uid="uid-1"),
     )
-    incoming_token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
-        "user-1",
-        "saas",
-        incoming_user,
-        "1234",
-        ["duo_agent_platform"],
-        extra_claims={"iss": "gitlab-rails"},
+    incoming_token = _token_issued_by(
+        "gitlab-rails", "user-1", "saas", incoming_user, "1234", ["duo_agent_platform"]
     )
     provider = CompositeProvider(
         [LocalAuthProvider(structlog, TEST_PRIVATE_KEY, TEST_PUBLIC_KEY)], structlog
@@ -7052,13 +7062,13 @@ async def _mint_flow_token(
     provider = CompositeProvider(
         [LocalAuthProvider(structlog, TEST_PRIVATE_KEY, TEST_PUBLIC_KEY)], structlog
     )
-    incoming_token, _ = TokenAuthority(TEST_PRIVATE_KEY).encode(
+    incoming_token = _token_issued_by(
+        issuer,
         GITLAB_COM_INSTANCE_UID,
         realm,
         CloudConnectorUser(authenticated=True, claims=UserClaims()),
         "1234",
         ["duo_agent_platform"],
-        extra_claims={"iss": issuer},
     )
     current_user.set(provider.authenticate(incoming_token))
     mock_context.invocation_metadata.return_value = [
