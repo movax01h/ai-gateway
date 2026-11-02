@@ -252,6 +252,12 @@ LEGACY_ROOTS_BASE ?=
 check-legacy-roots:
 	@poetry run python scripts/check_legacy_roots.py $(if $(LEGACY_ROOTS_BASE),--base $(LEGACY_ROOTS_BASE))
 
+# Git ref whose served include names are the baseline; a name it served must still resolve.
+INCLUDE_NAMES_BASE ?=
+.PHONY: check-include-names
+check-include-names:
+	@poetry run python scripts/check_include_names.py $(if $(INCLUDE_NAMES_BASE),--base $(INCLUDE_NAMES_BASE))
+
 .PHONY: install-test-deps
 install-test-deps:
 	@echo "Installing test dependencies..."

@@ -255,6 +255,39 @@ class TestJinjaIncludeLoader:
         assert source
 
 
+class TestLegacyIncludeAliases:
+    def test_retired_name_resolves_to_current_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        features = tmp_path / "ai" / "features"
+        _write_moved_feature(features, "code", "my_feature")
+        feature_roots.discover_feature_prompts(features)
+        monkeypatch.setitem(
+            feature_roots.LEGACY_INCLUDE_ALIASES,
+            "common/naming/1.0.0.jinja",
+            "my_feature/system/1.0.0.jinja",
+        )
+
+        rendered = base.jinja_env.from_string(
+            "{% include 'common/naming/1.0.0.jinja' %}"
+        ).render(target="world")
+        assert rendered == "Hello world"
+
+    def test_unknown_name_still_raises(self):
+        with pytest.raises(TemplateNotFound):
+            base.jinja_loader.get_source(base.jinja_env, "common/nope/1.0.0.jinja")
+
+    def test_every_alias_points_at_an_existing_template(self):
+        feature_roots.discover_feature_prompts()
+        assert feature_roots.LEGACY_INCLUDE_ALIASES
+
+        for retired, current in feature_roots.LEGACY_INCLUDE_ALIASES.items():
+            assert retired != current
+            via_alias, _, _ = base.jinja_loader.get_source(base.jinja_env, retired)
+            direct, _, _ = base.jinja_loader.get_source(base.jinja_env, current)
+            assert via_alias == direct, retired
+
+
 class TestMovedFeatureEndToEnd:
     """Exercises the real moved glab_ask_git_command feature files."""
 

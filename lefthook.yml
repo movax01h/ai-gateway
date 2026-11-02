@@ -31,6 +31,11 @@ pre-commit:
         if echo '{staged_files}' | tr ' ' '\n' | grep -qE '^(ai_gateway/prompts/definitions/|duo_workflow_service/agent_platform/v1/flows/configs/)|^scripts/(check_legacy_roots\.py|legacy_roots_allowlist\.txt)$'; then
           make check-legacy-roots LEGACY_ROOTS_BASE=origin/main
         fi
+    check-include-names:
+      run: |
+        if echo '{staged_files}' | tr ' ' '\n' | grep -qE '^(ai_gateway/prompts/definitions/|ai/features/[^/]+/[^/]+/prompts/|ai/shared/[^/]+/prompts/)|^(ai_gateway/prompts/feature_roots\.py|scripts/check_include_names\.py)$'; then
+          make check-include-names INCLUDE_NAMES_BASE=origin/main
+        fi
     lint-graphql:
       glob: "*.graphql"
       run: make check-graphql
