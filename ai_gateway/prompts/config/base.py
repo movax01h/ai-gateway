@@ -1,7 +1,7 @@
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from ai_gateway.model_selection import PromptParams
+from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
 from ai_gateway.model_selection.models import (
     BaseModelParams,
     LiteLLMProviderParams,
@@ -65,10 +65,34 @@ class PromptConfig(BaseModel):
     name: str
     model: ModelConfig = ModelConfig()
     unit_primitive: GitLabUnitPrimitive
+    # The feature setting in unit_primitives.yml that lists the models of this prompt version.
+    models_from: str | None = None
     prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
     operation_type: LLMOperationType = "standard"
     tool_output_security: bool = True
+
+    @model_validator(mode="after")
+    def validate_models_from(self) -> "PromptConfig":
+        if self.models_from is None:
+            return self
+
+        unit_primitive_config = (
+            ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()
+            .get(self.models_from)
+        )
+        if unit_primitive_config is None:
+            raise ValueError(
+                f"models_from '{self.models_from}' is not a feature setting in unit_primitives.yml"
+            )
+        if self.unit_primitive not in unit_primitive_config.unit_primitives:
+            raise ValueError(
+                f"The '{self.models_from}' entry in unit_primitives.yml does not list the unit primitive "
+                f"'{self.unit_primitive}'"
+            )
+
+        return self
 
 
 class InMemoryPromptConfig(BaseModel):
