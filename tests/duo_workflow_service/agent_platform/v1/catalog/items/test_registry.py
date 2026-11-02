@@ -16,10 +16,22 @@ def _agent(**overrides) -> dict:
     }
 
 
+def _catalog_agent(**overrides) -> dict:
+    return {
+        "item_id": "42",
+        "version": "1.0.0",
+        "name": "tester",
+        "description": "Runs tests.",
+        "prompt": "You are a specialist.",
+        **overrides,
+    }
+
+
 class TestCatalogItems:
     def test_defaults_to_no_items(self):
         """A request that carries no catalog section builds the flow exactly as authored."""
         assert CatalogItems().workspace_agents == []
+        assert CatalogItems().ai_catalog_agents == []
 
     @pytest.mark.parametrize(
         "names",
@@ -50,6 +62,23 @@ class TestCatalogItems:
 
         with pytest.raises(ValidationError, match="Too many workspace agents"):
             CatalogItems(workspace_agents=payload)
+
+
+class TestAiCatalogAgents:
+    def test_no_ceiling_and_no_duplicate_check(self):
+        """GitLab enforces the per-flow limit and the one-reference-per-item rule; this side does not repeat them."""
+        agents = [_catalog_agent(item_id=str(i)) for i in range(25)]
+        agents.append(_catalog_agent(item_id="0", version="2.0.0"))
+
+        assert len(CatalogItems(ai_catalog_agents=agents).ai_catalog_agents) == 26
+
+    def test_a_workspace_name_does_not_collide_with_a_catalog_name(self):
+        items = CatalogItems(
+            workspace_agents=[_agent()], ai_catalog_agents=[_catalog_agent()]
+        )
+
+        assert items.workspace_agents[0].name == "workspace/agents/tester"
+        assert items.ai_catalog_agents[0].name == "ai-catalog/agents/tester (42)"
 
 
 class TestFromPayload:
@@ -115,3 +144,22 @@ class TestFromPayload:
         """``from_payload`` is the boundary door; the constructor stays pydantic-native."""
         with pytest.raises(ValidationError):
             CatalogItems(workspace_agents=[_agent(), _agent()])
+
+
+class TestWithAiCatalogAgents:
+    def test_keeps_the_workspace_agents(self):
+        items = CatalogItems(workspace_agents=[_agent()])
+        fetched = CatalogItems(ai_catalog_agents=[_catalog_agent()]).ai_catalog_agents
+
+        updated = items.with_ai_catalog_agents(fetched)
+
+        assert updated.workspace_agents == items.workspace_agents
+        assert updated.ai_catalog_agents == fetched
+        assert updated.ai_catalog_skipped_reason is None
+        assert items.ai_catalog_agents == []
+
+    def test_records_the_skip_reason(self):
+        updated = CatalogItems().with_ai_catalog_agents([], "duo_features_disabled")
+
+        assert updated.ai_catalog_agents == []
+        assert updated.ai_catalog_skipped_reason == "duo_features_disabled"

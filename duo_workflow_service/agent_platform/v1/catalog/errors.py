@@ -8,7 +8,10 @@ from typing import Optional
 from langchain_core.tools import ToolException
 from pydantic import ValidationError
 
+from duo_workflow_service.errors.typing import NotifiableAgentException
+
 __all__ = [
+    "CatalogAgentsUnavailableError",
     "CatalogItemConfigError",
     "CatalogItemError",
     "CatalogItemsError",
@@ -80,3 +83,28 @@ class CatalogItemsFetchError(ToolException):
             self.status_code >= 500
             or self.status_code in self._RETRYABLE_CLIENT_STATUSES
         )
+
+
+class CatalogAgentsUnavailableError(NotifiableAgentException):
+    """The run cannot use the AI Catalog agents its flow references.
+
+    The UI message is static. GitLab's answer is a network response, so it stays in the server log.
+    """
+
+    REFUSED_MESSAGE = (
+        "This flow stopped because it uses an AI Catalog agent that cannot be used. "
+        "Check that the agent is published and that you have access to it."
+    )
+    FETCH_FAILED_MESSAGE = (
+        "This flow stopped because GitLab could not load the AI Catalog agents it uses. "
+        "Try again."
+    )
+
+    @classmethod
+    def from_error(
+        cls, error: CatalogItemsFetchError | CatalogItemsError
+    ) -> "CatalogAgentsUnavailableError":
+        """Wrap a fetch or binding error, with its detail kept server-side."""
+        if isinstance(error, CatalogItemsFetchError):
+            return cls(cls.FETCH_FAILED_MESSAGE, internal_detail=str(error))
+        return cls(cls.REFUSED_MESSAGE, internal_detail=str(error))

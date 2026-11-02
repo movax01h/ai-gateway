@@ -16,6 +16,16 @@ from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.agent_platform.v1.catalog import (
+    AiCatalogAgent,
+    CatalogItems,
+)
+from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogAgentsUnavailableError,
+    CatalogItemsError,
+    CatalogItemsFetchError,
+)
+from duo_workflow_service.agent_platform.v1.catalog.fetch import FetchedCatalogAgents
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
     EndComponent,
@@ -2790,3 +2800,156 @@ class TestSetTrackingContextFromAdditionalContext:
         finally:
             merge_request_url_context.reset(mr_token)
             pipeline_source_context.reset(ps_token)
+
+
+AI_CATALOG_REF = {
+    "source": "ai-catalog",
+    "item_type": "agent",
+    "item_id": "53",
+    "version": "1.0.0",
+}
+WORKSPACE_REF = {"source": "workspace", "item_type": "agent_template", "item_id": "*"}
+
+
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+class TestPrepareCompileFetchesCatalogAgents:
+    """``Flow._prepare_compile`` fetches AI Catalog agents before the graph is built."""
+
+    @staticmethod
+    def _agent() -> AiCatalogAgent:
+        return AiCatalogAgent.model_validate(
+            {
+                "item_id": "53",
+                "version": "1.0.0",
+                "name": "Code Reviewer",
+                "description": "Reviews code.",
+                "prompt": "You review code.",
+            }
+        )
+
+    @staticmethod
+    def _flow(include, user, subagents=None) -> Flow:
+        component = {
+            "name": "agent",
+            "type": "AgentComponent",
+            "inputs": ["context:goal"],
+            "prompt_id": "test/prompt",
+            "prompt_version": "v1",
+            "toolset": [],
+        }
+        if subagents is not None:
+            component["subagents"] = subagents
+
+        config = FlowConfig(
+            flow=FlowConfigMetadata(entry_point="agent"),
+            components=[component],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+            include=include,
+        )
+        return Flow(
+            workflow_id="44",
+            workflow_metadata={},
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
+            user=user,
+            config=config,
+        )
+
+    @pytest.fixture(name="fetch")
+    def fetch_fixture(self):
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.fetch_catalog_agents",
+            new=AsyncMock(return_value=FetchedCatalogAgents(agents=[self._agent()])),
+        ) as fetch:
+            yield fetch
+
+    @pytest.mark.asyncio
+    async def test_a_flow_that_references_the_catalog_fetches_its_agents(
+        self, fetch, user
+    ):
+        flow = self._flow([AI_CATALOG_REF], user)
+
+        await flow._prepare_compile(Mock())
+
+        fetch.assert_awaited_once_with(flow._http_client, "44")
+        assert [a.item_id for a in flow._catalog_items.ai_catalog_agents] == ["53"]
+
+    @pytest.mark.asyncio
+    async def test_the_fetched_agents_keep_the_request_workspace_agents(
+        self, fetch, user
+    ):
+        flow = self._flow([AI_CATALOG_REF], user)
+        flow._catalog_items = CatalogItems(
+            workspace_agents=[
+                {
+                    "name": "tester",
+                    "description": "Runs tests.",
+                    "prompt": "You run tests.",
+                }
+            ]
+        )
+
+        await flow._prepare_compile(Mock())
+
+        assert [a.name for a in flow._catalog_items.workspace_agents] == [
+            "workspace/agents/tester"
+        ]
+        assert len(flow._catalog_items.ai_catalog_agents) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("include", [None, [], [WORKSPACE_REF]])
+    async def test_a_flow_without_catalog_references_makes_no_request(
+        self, fetch, user, include
+    ):
+        flow = self._flow(include, user)
+
+        await flow._prepare_compile(Mock())
+
+        fetch.assert_not_awaited()
+        assert flow._catalog_items.ai_catalog_agents == []
+
+    @pytest.mark.asyncio
+    async def test_a_skip_reason_is_recorded_for_the_binding(self, fetch, user):
+        fetch.return_value = FetchedCatalogAgents(
+            skipped_reason="custom_agents_disabled"
+        )
+        flow = self._flow(
+            [AI_CATALOG_REF, WORKSPACE_REF], user, subagents=[AI_CATALOG_REF]
+        )
+
+        await flow._prepare_compile(Mock())
+
+        assert flow._catalog_items.ai_catalog_agents == []
+        assert flow._catalog_items.ai_catalog_skipped_reason == "custom_agents_disabled"
+        assert [ref.source for ref in flow._config.include] == [
+            "ai-catalog",
+            "workspace",
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("error", "ui_message"),
+        [
+            (
+                CatalogItemsError("AI Catalog agent '53' (53) was refused: not_found"),
+                CatalogAgentsUnavailableError.REFUSED_MESSAGE,
+            ),
+            (
+                CatalogItemsFetchError("HTTP 503: upstream down"),
+                CatalogAgentsUnavailableError.FETCH_FAILED_MESSAGE,
+            ),
+        ],
+    )
+    async def test_a_failed_fetch_shows_a_static_message_and_logs_the_detail(
+        self, fetch, user, error, ui_message
+    ):
+        fetch.side_effect = error
+        flow = self._flow([AI_CATALOG_REF], user)
+
+        with pytest.raises(CatalogAgentsUnavailableError) as raised:
+            await flow._prepare_compile(Mock())
+
+        assert raised.value.ui_message == ui_message
+        assert raised.value.internal_detail == str(error)
+        assert raised.value.__cause__ is error

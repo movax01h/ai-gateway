@@ -21,8 +21,15 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 )
 from duo_workflow_service.agent_platform.v1.catalog import (
     CatalogItems,
+    CatalogItemSource,
     default_prompts,
 )
+from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogAgentsUnavailableError,
+    CatalogItemsError,
+    CatalogItemsFetchError,
+)
+from duo_workflow_service.agent_platform.v1.catalog.fetch import fetch_catalog_agents
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.agent_platform.v1.flows.graph_builder import FlowGraphBuilder
 from duo_workflow_service.agent_platform.v1.flows.inputs import (
@@ -668,6 +675,34 @@ class Flow(AbstractWorkflow):
                 return None  # retry from last checkpoint
             case _:
                 return None
+
+    @override
+    async def _prepare_compile(self, tools_registry: ToolsRegistry) -> None:
+        """Fetch the AI Catalog agents the flow references, when it references any.
+
+        The fetch is a RunHTTPRequest action on the run's stream, which Workhorse serves with the run's token. GitLab
+        resolves the agents from the saved flow's dependency rows and checks each one for the current user. A flow
+        without an ``ai-catalog`` entry makes no request.
+
+        Runs on every turn. A pinned version cannot change, but it can be unpublished or become unreadable between
+        turns, and a resume must see that.
+        """
+        if not self._references_ai_catalog():
+            return
+
+        try:
+            fetched = await fetch_catalog_agents(self._http_client, self._workflow_id)
+        except (CatalogItemsFetchError, CatalogItemsError) as exc:
+            raise CatalogAgentsUnavailableError.from_error(exc) from exc
+        self._catalog_items = self._catalog_items.with_ai_catalog_agents(
+            fetched.agents, fetched.skipped_reason
+        )
+
+    def _references_ai_catalog(self) -> bool:
+        return any(
+            ref.source == CatalogItemSource.AI_CATALOG
+            for ref in self._config.include or []
+        )
 
     @override
     def _compile(
