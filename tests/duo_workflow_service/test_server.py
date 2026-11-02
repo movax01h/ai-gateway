@@ -41,6 +41,7 @@ from structlog.testing import capture_logs
 from ai_gateway.config import (
     Config,
     ConfigCustomModels,
+    ConfigDuoWorkflow,
     ConfigGoogleCloudPlatform,
     ConfigTLS,
 )
@@ -445,6 +446,53 @@ def test_run(custom_models_enabled, vertex_project, should_validate_llm):
 
         # Clean up the coroutine to prevent the warning
         actual_arg.close()
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_run_installs_clean_io_handle_context_before_llm_validation(
+    vertex_project, enabled
+):
+    """The wrapper goes on the loop before validate_llm_access() opens the first pooled connection."""
+    calls = MagicMock()
+
+    with (
+        patch("duo_workflow_service.server.setup_container"),
+        patch("duo_workflow_service.server.discover_feature_flow_configs"),
+        patch("duo_workflow_service.server.setup_profiling"),
+        patch("duo_workflow_service.server.setup_error_tracking"),
+        patch("duo_workflow_service.server.setup_monitoring"),
+        patch("duo_workflow_service.server.setup_logging"),
+        patch(
+            "duo_workflow_service.server.validate_llm_access",
+            calls.validate_llm_access,
+        ),
+        patch(
+            "duo_workflow_service.server.install_clean_io_handle_context",
+            calls.install_clean_io_handle_context,
+        ),
+        patch("asyncio.get_event_loop") as mock_get_loop,
+    ):
+        mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        mock_get_loop.return_value = mock_loop
+
+        config = Config(
+            google_cloud_platform=ConfigGoogleCloudPlatform(project=vertex_project),
+            custom_models=ConfigCustomModels(enabled="false"),
+            duo_workflow=ConfigDuoWorkflow(clean_io_handle_context=enabled),
+        )
+
+        run(config)
+
+        mock_loop.run_until_complete.call_args[0][0].close()
+
+    if enabled:
+        assert calls.mock_calls[:2] == [
+            call.install_clean_io_handle_context(mock_loop),
+            call.validate_llm_access(),
+        ]
+    else:
+        calls.install_clean_io_handle_context.assert_not_called()
+        calls.validate_llm_access.assert_called_once()
 
 
 class TestRunMockUsageQuotaServer:

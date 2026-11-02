@@ -53,6 +53,7 @@ from duo_workflow_service.agent_platform.utils.validation import FlowValidator
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     discover_feature_flow_configs,
 )
+from duo_workflow_service.asyncio_io_context import install_clean_io_handle_context
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
@@ -1978,10 +1979,15 @@ def run(config: Config):
     # After observability setup, so a duplicate feature id is reported, not lost.
     discover_feature_flow_configs()
     setup_profiling()
+    loop = asyncio.get_event_loop()
+    # Before validate_llm_access() opens the first pooled connection, so every
+    # I/O handle of this process goes through the wrapper; see asyncio_io_context.
+    if config.duo_workflow.clean_io_handle_context:
+        install_clean_io_handle_context(loop)
     if not self_hosted_mode:
         validate_llm_access()
     port = int(os.environ.get("PORT", "50052"))
-    asyncio.get_event_loop().run_until_complete(serve(config, port))
+    loop.run_until_complete(serve(config, port))
 
 
 def run_app():
