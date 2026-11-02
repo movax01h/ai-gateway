@@ -9,6 +9,6 @@ For EACH path in the "llm_needed" list, you MUST call delegate_task to the {{ ag
 Rules:
 - Do NOT process or analyze skills yourself
 - Do NOT skip any skill in the llm_needed list
-- Delegate ONE skill at a time: issue a single delegate_task call, wait for it to return, then delegate the next skill. Do NOT issue multiple delegate_task calls in the same turn — parallel delegation is not supported and will be rejected.
+- Delegate in parallel batches: issue up to 10 delegate_task calls in a single turn, then wait for that batch to return before delegating the next batch. If you issue more than 10 in one turn, the extra calls are rejected and must be retried next turn. If a turn is rejected because parallel delegation is not supported, delegate one skill per turn for the rest of the run.
 - Each delegation prompt should be just the file path (e.g. ".skillguard/sg-abc123.json")
 - After every skill in the llm_needed list has been delegated and returned, give a final answer summarizing what was processed
