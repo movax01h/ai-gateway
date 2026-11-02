@@ -4,9 +4,13 @@ import structlog
 from langgraph.graph import StateGraph
 from pydantic import model_validator
 
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    MissingAdditionalContextError,
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.base import BaseComponent
 from duo_workflow_service.agent_platform.v1.routers.base import BaseRouter
-from duo_workflow_service.agent_platform.v1.state import FlowState
+from duo_workflow_service.agent_platform.v1.state import FlowState, IOKey
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
@@ -52,7 +56,17 @@ class Router(BaseRouter):
         if self.input is None:
             return self.to_component.__entry_hook__()  # type: ignore[union-attr]
 
-        route_value = str(self.input.value_from_state(state))
+        try:
+            route_value = str(self.input.value_from_state(state))
+        except MissingAdditionalContextError:
+            # The caller did not supply a required additional context category.
+            # That is an invalid request rather than a flow fault, and the server
+            # already maps this to INVALID_ARGUMENT, so it must reach the server
+            # unchanged instead of being reshaped into an internal error here.
+            raise
+        except KeyError as err:
+            raise self._missing_context_key_error(self.input, err) from err
+
         is_default_route = route_value not in self.to_component
 
         self._track_route_decision(route_value, is_default_route=is_default_route)
@@ -66,6 +80,62 @@ class Router(BaseRouter):
         raise KeyError(
             f"Route key {self.input} not found in conditions {self.to_component}"
         )
+
+    def _missing_context_key_error(
+        self, input_key: IOKey, err: KeyError
+    ) -> NotifiableAgentException:
+        """Turn a bare ``KeyError`` from a context lookup into a domain error.
+
+        A router decides the next node by reading a value out of the flow
+        context (for example ``context:classify_impact.execution_result``). When
+        the producing node never wrote that value, ``IOKey.value_from_state``
+        raises a raw ``KeyError`` that reaches the end user as an opaque
+        ``KeyError: 'execution_result'``. Re-raise it as a
+        :class:`NotifiableAgentException` whose safe message names the flow node
+        and the missing key in the documented ``context:{node}.{key}`` form,
+        while keeping the original error server-side for engineers.
+
+        ``context:inputs.*`` is not written by a node, so blaming a step called
+        ``inputs`` would point the user at something that does not exist. A
+        missing additional context *category* raises
+        :class:`MissingAdditionalContextError` and is re-raised unchanged by
+        :meth:`route`; the message here covers the remaining ``inputs`` shapes
+        and describes them as caller-supplied input.
+        """
+        subkeys = input_key.subkeys or []
+        reads_caller_input = bool(subkeys) and subkeys[0] == "inputs"
+        node = (
+            self.from_component.name
+            if reads_caller_input or not subkeys
+            else subkeys[0]
+        )
+        context_key = (
+            f"{input_key.target}:{'.'.join(subkeys)}" if subkeys else input_key.target
+        )
+        detail = str(err.args[0] if err.args else err)
+
+        log.error(
+            "Flow route failed: missing context key",
+            component_name=self.from_component.name,
+            node=node,
+            context_key=context_key,
+            flow_id=self.flow_id,
+            flow_type=self.flow_type.value if self.flow_type else "unknown",
+            error=detail,
+        )
+
+        if reads_caller_input:
+            ui_message = (
+                "An internal error occurred: the flow could not continue because "
+                f"the required input '{context_key}' was not supplied."
+            )
+        else:
+            ui_message = (
+                "An internal error occurred: the flow could not continue because the "
+                f"step '{node}' did not produce the expected output '{context_key}'."
+            )
+
+        return NotifiableAgentException(ui_message, internal_detail=detail)
 
     def _track_route_decision(self, route_value: str, is_default_route: bool) -> None:
         component_name = self.from_component.name
