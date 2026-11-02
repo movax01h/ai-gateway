@@ -93,6 +93,23 @@ lint:legacy_roots:
     - if [ -n "$BASE" ]; then git fetch origin "$BASE" --depth=1; fi
     - make check-legacy-roots LEGACY_ROOTS_BASE="$BASE"
 
+lint:include_names:
+  stage: test
+  extends: .poetry
+  needs:
+    - install
+  rules:
+    - changes:
+        - "ai_gateway/prompts/definitions/**/*"
+        - "ai/features/**/prompts/**/*"
+        - "ai/shared/**/prompts/**/*"
+        - "ai_gateway/prompts/feature_roots.py"
+        - "scripts/check_include_names.py"
+  script:
+    - BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+    - if [ -n "$BASE" ]; then git fetch origin "$BASE" --depth=1; fi
+    - make check-include-names INCLUDE_NAMES_BASE="$BASE"
+
 lint:doc:
   stage: test
   image: ${DOCS_LINT_IMAGE}

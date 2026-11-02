@@ -107,7 +107,10 @@ from ai_gateway.prompts.caching import (
     should_inject_default_cache_control,
 )
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
-from ai_gateway.prompts.feature_roots import feature_prompt_root
+from ai_gateway.prompts.feature_roots import (
+    LEGACY_INCLUDE_ALIASES,
+    feature_prompt_root,
+)
 from ai_gateway.prompts.model_variables import bind_model_variables
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
@@ -707,10 +710,26 @@ class FeatureRootLoader(BaseLoader):
         )
 
 
-# Legacy root first, then moved features; first match wins.
-jinja_loader = ChoiceLoader(
+class LegacyIncludeLoader(BaseLoader):
+    """Serve an include name that a move retired, from the current name of the file."""
+
+    def __init__(self, delegate: BaseLoader) -> None:
+        self._delegate = delegate
+
+    def get_source(
+        self, environment: Environment, template: str
+    ) -> tuple[str, str | None, Callable[[], bool] | None]:
+        target = LEGACY_INCLUDE_ALIASES.get(template)
+        if target is None:
+            raise TemplateNotFound(template)
+        return self._delegate.get_source(environment, target)
+
+
+# Legacy root first, then moved features, then retired names; first match wins.
+_current_loaders = ChoiceLoader(
     [PackageLoader("ai_gateway.prompts", "definitions"), FeatureRootLoader()]
 )
+jinja_loader = ChoiceLoader([_current_loaders, LegacyIncludeLoader(_current_loaders)])
 jinja_env = PromptSandboxedEnvironment(loader=jinja_loader)
 jinja_env.filters["split"] = split_filter
 jinja_env.filters["parse_json"] = parse_json

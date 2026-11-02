@@ -214,6 +214,15 @@ Move the whole feature in one merge request:
    Includes such as `<feature>/system/1.0.0.jinja` or `chat/react/system/1.0.0.jinja` keep
    working without a change.
 
+   An include string that changes its prefix in the move is part of the Flow Registry public
+   API, because custom flows in the AI Catalog include it by the old name. For example,
+   `common/branch_naming/1.0.0.jinja` became `developer/common/branch_naming/1.0.0.jinja`.
+   Add the old name to `LEGACY_INCLUDE_ALIASES` in `ai_gateway/prompts/feature_roots.py`,
+   so the old name still renders. `make check-include-names INCLUDE_NAMES_BASE=origin/main`
+   lists every include name that stopped resolving. A fragment that you delete on purpose
+   goes to `RETIRED_INCLUDE_NAMES` in the same module instead; check first that no AI
+   Catalog flow includes it.
+
 1. Run `make check-legacy-roots`. From `scripts/legacy_roots_allowlist.txt`, delete each line
    that it reports as stale.
 

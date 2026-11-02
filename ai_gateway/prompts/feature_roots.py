@@ -16,11 +16,29 @@ from pathlib import Path
 from lib.feature_roots import default_features_dir
 
 __all__ = [
+    "LEGACY_INCLUDE_ALIASES",
+    "RETIRED_INCLUDE_NAMES",
     "discover_feature_prompts",
     "feature_prompt_aliases",
     "feature_prompt_root",
     "register_prompt_root",
 ]
+
+# Include names that a move retired, mapped to the current name of the file.
+# Custom AI Catalog flows include by the old name, so the Flow Registry must
+# keep serving it (ai-assist#3494).
+LEGACY_INCLUDE_ALIASES: dict[str, str] = {
+    "common/api_assistant/system/1.0.0.jinja": "slack_assistant/common/api_assistant/system/1.0.0.jinja",
+    "common/branch_naming/1.0.0.jinja": "developer/common/branch_naming/1.0.0.jinja",
+    "common/developer/system/1.0.0.jinja": "developer/common/system/1.0.0.jinja",
+    "common/git_commits/1.0.0.jinja": "developer/common/git_commits/1.0.0.jinja",
+    "common/merge_request_guidelines/1.0.0.jinja": "developer/common/merge_request_guidelines/1.0.0.jinja",
+}
+
+# Include names deleted on purpose, with no replacement. Only
+# scripts/check_include_names.py reads this. Before you add a name, check that
+# no AI Catalog flow includes it.
+RETIRED_INCLUDE_NAMES: frozenset[str] = frozenset()
 
 # prompt id -> the `prompts/` directory that owns it
 _FEATURE_PROMPT_ROOTS: dict[str, Path] = {}
