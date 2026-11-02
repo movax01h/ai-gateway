@@ -132,7 +132,7 @@ def test_get_models_returns_correct_data(client):
         "deprecation": None,
         "description": "Fast, cost-effective responses.",
         "cost_indicator": "$",
-        "requires_paid_credits": False,
+        "requires_paid_credits": True,
     }
     assert data["models"][1] == {
         "name": "Model 2 - Gemini Enterprise Agent Platform",
@@ -141,7 +141,7 @@ def test_get_models_returns_correct_data(client):
         "deprecation": None,
         "description": "Fast, cost-effective responses.",
         "cost_indicator": "$$",
-        "requires_paid_credits": False,
+        "requires_paid_credits": True,
     }
     # Models without a provider should not have a suffix appended.
     assert data["models"][2] == {
@@ -151,7 +151,7 @@ def test_get_models_returns_correct_data(client):
         "deprecation": {"deprecation_date": "2025-10-28", "removal_version": "18.8"},
         "description": None,
         "cost_indicator": None,
-        "requires_paid_credits": False,
+        "requires_paid_credits": True,
     }
 
     # config1 has multiple default models:
@@ -384,26 +384,52 @@ def test_models_for_tags_is_emitted_as_a_flat_mapping(
 
 
 def test_requires_paid_credits_is_exposed_per_model(client, mock_model_config):
-    """A model flagged in models.yml reports the flag; unflagged models stay False."""
+    """Models default to requiring paid credits; an opted-out model reports False."""
     definitions = mock_model_config.get_llm_definitions.return_value
-    definitions["model1"].requires_paid_credits = True
+    definitions["model1"].requires_paid_credits = False
 
     data = client.get("/definitions").json()
     by_identifier = {m["identifier"]: m for m in data["models"]}
 
-    assert by_identifier["model1"]["requires_paid_credits"] is True
-    assert by_identifier["model2"]["requires_paid_credits"] is False
-    assert by_identifier["model3"]["requires_paid_credits"] is False
+    assert by_identifier["model1"]["requires_paid_credits"] is False
+    assert by_identifier["model2"]["requires_paid_credits"] is True
+    assert by_identifier["model3"]["requires_paid_credits"] is True
 
 
-def test_pseudo_model_inherits_requires_paid_credits(client, mock_model_config):
-    """The load-balanced pseudo-model takes the flag from its first default model."""
+@pytest.mark.parametrize(
+    ("free_models", "default_model_ids", "expected"),
+    [
+        ({"model1", "model2"}, ["model1", "model2"], False),
+        ({"model1"}, ["model1", "model2"], True),
+        ({"model2"}, ["model1", "model2"], True),
+        (set(), ["model1", "model2"], True),
+        ({"model1", "model2"}, ["model1", "missing_model"], True),
+        ({"model1", "model2"}, ["missing_model", "model2"], True),
+    ],
+    ids=[
+        "all-free",
+        "first-free-only",
+        "second-free-only",
+        "none-free",
+        "unresolvable-second",
+        "unresolvable-first",
+    ],
+)
+def test_pseudo_model_requires_paid_credits_unless_every_default_is_free(
+    client, mock_model_config, free_models, default_model_ids, expected
+):
+    """The load-balanced pseudo-model is open to trials only when every default is."""
     definitions = mock_model_config.get_llm_definitions.return_value
-    definitions["model1"].requires_paid_credits = True
+    for model_id in free_models:
+        definitions[model_id].requires_paid_credits = False
+    primitives = mock_model_config.get_resolved_unit_primitive_config_map.return_value
+    primitives["config1"].default_models = [
+        DefaultModelEntry(identifier=model_id) for model_id in default_model_ids
+    ]
 
     data = client.get("/definitions").json()
     pseudo_model = next(
         m for m in data["models"] if m["identifier"] == "__default__config1"
     )
 
-    assert pseudo_model["requires_paid_credits"] is True
+    assert pseudo_model["requires_paid_credits"] is expected

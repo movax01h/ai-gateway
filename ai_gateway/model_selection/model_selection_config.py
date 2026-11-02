@@ -141,9 +141,9 @@ class BaseLLMDefinition(BaseModel):
     # Claude caches the prompt up to explicit breakpoints placed on messages, so it keeps the per-session security
     # block in its own system message behind them. All other models get one merged system message.
     uses_cache_breakpoints: bool = False
-    # Some models are available only to accounts that have purchased GitLab credits.
-    # When true, clients show a "Requires paid credits" indicator and block chat input.
-    requires_paid_credits: bool = False
+    # Default deny: a model requires purchased GitLab credits unless it sets this to
+    # false. Clients show a "Requires paid credits" indicator and block chat input.
+    requires_paid_credits: bool = True
     # Some models return an empty 404 on streaming requests when max_tokens is at the
     # model's max. Opt in to use this model's max_tokens from models.yml
     use_model_max_tokens: bool = False
@@ -634,6 +634,26 @@ class ModelSelectionConfig:
             ]
         return []
 
+    def _validate_default_models_available_without_paid_credits(
+        self,
+        unit_primitive_configs: Iterable[UnitPrimitiveConfig],
+        models: dict,
+        models_ids: set,
+    ) -> list[str]:
+        errors = [
+            f"Feature '{upc.feature_setting}' has default model "
+            f"'{model_id}' that requires paid credits."
+            for upc in unit_primitive_configs
+            for model_id in upc.default_model_identifiers
+            if model_id in models_ids and models[model_id].requires_paid_credits
+        ]
+        if errors:
+            return [
+                "Default models must set requires_paid_credits: false:\n"
+                + "\n".join(f"  - {error}" for error in errors)
+            ]
+        return []
+
     def _validate_deprecated_models_are_selectable(
         self, unit_primitive_configs: Iterable[UnitPrimitiveConfig]
     ) -> list[str]:
@@ -791,6 +811,9 @@ class ModelSelectionConfig:
         error_messages = [
             *self._validate_model_ids_exist(unit_primitive_configs, models_ids),
             *self._validate_default_models_are_selectable(unit_primitive_configs),
+            *self._validate_default_models_available_without_paid_credits(
+                unit_primitive_configs, models, models_ids
+            ),
             *self._validate_deprecated_models_are_selectable(unit_primitive_configs),
             *self._validate_selectable_model_required_fields(
                 unit_primitive_configs, models, models_ids

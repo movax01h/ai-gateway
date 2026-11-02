@@ -497,6 +497,7 @@ def llm_definition_fixture():
         name="Mistral",
         gitlab_identifier="mistral",
         max_context_tokens=128000,
+        requires_paid_credits=False,
         family=["mistral"],
         params={"model": "mistral", "temperature": 0.0, "max_tokens": 4096},
     )

@@ -73,6 +73,7 @@ class TestPrompt:
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
+                        requires_paid_credits=False,
                     ),
                 ),
                 (
@@ -87,6 +88,7 @@ class TestPrompt:
                             name="Mistral",
                             gitlab_identifier="mistral",
                             max_context_tokens=128000,
+                            requires_paid_credits=False,
                             family=["mistral"],
                             params=ChatLiteLLMParams(
                                 model="mistral",
@@ -114,6 +116,7 @@ class TestPrompt:
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=200000,
+                        requires_paid_credits=False,
                     ),
                 ),
                 (
@@ -127,6 +130,7 @@ class TestPrompt:
                             gitlab_identifier="amazon_q",
                             name="Amazon Q",
                             max_context_tokens=200000,
+                            requires_paid_credits=False,
                             family=["amazon_q"],
                             params=ChatAmazonQParams(
                                 model="amazon_q",

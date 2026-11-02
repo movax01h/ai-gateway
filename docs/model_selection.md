@@ -152,7 +152,7 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 - `provider` (optional): The provider of the model, used for display in the UI (e.g "Vertex", "Anthropic")
 - `description`: **Required** for GitLab UI-selectable models. A brief description of the model (up to 90 characters) used for display in the UI e.g "Fast, cost-effective responses". When adding descriptions, tag `@badesoji` (BJ Adesoji) for a vendor approval on the copy.
 - `cost_indicator`: **Required** for GitLab UI-selectable models. A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`, `$$$$`). See [Determining model cost indicators](#determining-model-cost-indicators).
-- `requires_paid_credits` (optional, defaults to `false`): Marks the model as available only to accounts that have purchased GitLab credits. Surfaced in the `/v1/models/definitions` response so clients can show a "Requires paid credits" indicator and block chat input.
+- `requires_paid_credits` (optional, defaults to `true`): Marks the model as available only to accounts that have purchased GitLab credits. Surfaced in the `/v1/models/definitions` response so clients can show a "Requires paid credits" indicator and block chat input. A newly added model is therefore unavailable to trials until it explicitly sets `requires_paid_credits: false`.
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
 [How models and prompts are selected](#how-models-and-prompts-are-selected) for more details)
 - `uses_cache_breakpoints` (optional, defaults to `false`): set to `true` for every Claude model. Claude caches the

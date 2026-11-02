@@ -39,6 +39,7 @@ def mock_fs_fixture(fs: FakeFilesystem):
             models:
               - name: Model One
                 gitlab_identifier: gitlab-model-1
+                requires_paid_credits: false
                 model_class_provider: litellm
                 max_context_tokens: 200000
                 cost_indicator: "$"
@@ -48,6 +49,7 @@ def mock_fs_fixture(fs: FakeFilesystem):
                   custom_llm_provider: value1
               - name: Model Two
                 gitlab_identifier: gitlab-model-2
+                requires_paid_credits: false
                 model_class_provider: anthropic
                 max_context_tokens: 200000
                 cost_indicator: "$"
@@ -109,6 +111,7 @@ def test_load_llm_definitions(selection_config):
         "gitlab-model-1": ChatLiteLLMDefinition(
             name="Model One",
             gitlab_identifier="gitlab-model-1",
+            requires_paid_credits=False,
             max_context_tokens=200000,
             cost_indicator="$",
             description="Model one description.",
@@ -117,6 +120,7 @@ def test_load_llm_definitions(selection_config):
         "gitlab-model-2": ChatAnthropicDefinition(
             name="Model Two",
             gitlab_identifier="gitlab-model-2",
+            requires_paid_credits=False,
             max_context_tokens=200000,
             cost_indicator="$",
             description="Model two description.",
@@ -537,6 +541,7 @@ def test_get_model(selection_config):
     assert selection_config.get_model("gitlab-model-1") == ChatLiteLLMDefinition(
         name="Model One",
         gitlab_identifier="gitlab-model-1",
+        requires_paid_credits=False,
         max_context_tokens=200000,
         cost_indicator="$",
         description="Model one description.",
@@ -557,6 +562,7 @@ def test_get_model_for_feature(selection_config):
     ) == ChatLiteLLMDefinition(
         name="Model One",
         gitlab_identifier="gitlab-model-1",
+        requires_paid_credits=False,
         max_context_tokens=200000,
         cost_indicator="$",
         description="Model one description.",
@@ -575,6 +581,7 @@ def test_get_model_for_feature_with_multiple_defaults(selection_config):
         ) == ChatAnthropicDefinition(
             name="Model Two",
             gitlab_identifier="gitlab-model-2",
+            requires_paid_credits=False,
             max_context_tokens=200000,
             cost_indicator="$",
             description="Model two description.",
@@ -791,6 +798,7 @@ def test_validate_default_model_not_in_selectable_models(
             models:
               - name: Model One
                 gitlab_identifier: model_1
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$"
@@ -799,6 +807,7 @@ def test_validate_default_model_not_in_selectable_models(
                   model: provider-model-1
               - name: Model Two
                 gitlab_identifier: model_2
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$$"
@@ -807,6 +816,7 @@ def test_validate_default_model_not_in_selectable_models(
                   model: provider-model-2
               - name: Model Three
                 gitlab_identifier: model_3
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$$$"
@@ -861,6 +871,73 @@ def test_validate_default_model_not_in_selectable_models(
         "  - Feature 'another_config' has default model 'model_2' that is not in selectable_models."
     )
     assert error_message == expected_error
+
+
+def test_validate_default_model_requires_paid_credits(
+    selection_config, fs: FakeFilesystem
+):
+    """Test that validation fails when a default model requires paid credits."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent("""
+            models:
+              - name: Free Model
+                gitlab_identifier: free_model
+                requires_paid_credits: false
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$"
+                description: "Free model description."
+                params:
+                  model: provider-free-model
+              - name: Paid Model
+                gitlab_identifier: paid_model
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$$$"
+                description: "Paid model description."
+                params:
+                  model: provider-paid-model
+            """),
+    )
+
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent("""
+            configurable_unit_primitives:
+              - feature_setting: "free_default"
+                unit_primitives:
+                  - "ask_commit"
+                default_models:
+                  - "free_model"
+                selectable_models:
+                  - "free_model"
+                  - "paid_model"
+              - feature_setting: "paid_default"
+                unit_primitives:
+                  - "generate_code"
+                default_models:
+                  - "free_model"
+                  - "paid_model"
+                selectable_models:
+                  - "free_model"
+                  - "paid_model"
+            """),
+    )
+    # editorconfig-checker-enable
+
+    with pytest.raises(ValueError) as excinfo:
+        selection_config.validate()
+
+    assert str(excinfo.value) == (
+        "Default models must set requires_paid_credits: false:\n"
+        "  - Feature 'paid_default' has default model 'paid_model' that requires paid credits."
+    )
 
 
 def test_get_proxy_models_for_provider(selection_config, fs: FakeFilesystem):
@@ -1009,6 +1086,7 @@ def test_validate_with_tags_field(selection_config, fs: FakeFilesystem):
                   model: claude-haiku
               - name: Large Model
                 gitlab_identifier: large-model
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$$"
@@ -1110,6 +1188,7 @@ def size_preference_model_dir_fixture(fs: FakeFilesystem):
                   model: claude-haiku
               - name: Large Model
                 gitlab_identifier: large-model
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$$"
@@ -1425,6 +1504,7 @@ def test_validate_deprecated_model_not_in_selectable_models(
             models:
               - name: Model One
                 gitlab_identifier: model_1
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$"
@@ -1433,6 +1513,7 @@ def test_validate_deprecated_model_not_in_selectable_models(
                   model: provider-model-1
               - name: Model Two
                 gitlab_identifier: model_2
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$$"
@@ -1485,6 +1566,7 @@ def test_validate_with_valid_deprecated_model(selection_config, fs: FakeFilesyst
             models:
               - name: Model One
                 gitlab_identifier: model_1
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$"
