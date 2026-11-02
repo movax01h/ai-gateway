@@ -1896,6 +1896,37 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
 @patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"})
 # pylint: enable=direct-environment-variable-reference
 @patch.object(MockWorkflow, "_compile_and_run_graph")
+async def test_run_strips_credentials_from_git_url_in_langsmith_metadata(
+    mock_compile_and_run_graph, user
+):
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {
+            "git_url": "https://oauth:0123456789abcdef@gitlab.example.com/group/project.git",
+            "git_sha": "abc123",
+        },
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    await workflow.run("Test goal")
+
+    _, kwargs = mock_compile_and_run_graph.call_args
+    metadata = kwargs["langsmith_extra"]["metadata"]
+    assert metadata["git_url"] == "https://gitlab.example.com/group/project.git"
+    # The constructor strips the token too, so it must not live on the workflow
+    # for the rest of the session.
+    assert (
+        workflow._workflow_metadata["git_url"]
+        == "https://gitlab.example.com/group/project.git"
+    )
+
+
+@pytest.mark.asyncio
+# pylint: disable=direct-environment-variable-reference
+@patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"})
+# pylint: enable=direct-environment-variable-reference
+@patch.object(MockWorkflow, "_compile_and_run_graph")
 async def test_run_passes_flow_versioning_metadata_to_langsmith_extra(
     mock_compile_and_run_graph, workflow
 ):
