@@ -305,6 +305,13 @@ class UIHistory[W: BaseUILogWriter, E: BaseUILogEvents](BaseModel):
     def log(self) -> W:
         return self._writer
 
+    def add(self, record: UiChatLog, *, event: E) -> None:
+        """Queue a record built outside the writer, in order with the writer's own.
+
+        Filtered by ``events`` like any other entry when the updates are popped.
+        """
+        self._logs.append(_UILogEntry(record=record, event=event))
+
     def pop_state_updates(self) -> dict[str, Any]:
         # Log only specified events
         logs = [log.record for log in self._logs if log.event in self.events]

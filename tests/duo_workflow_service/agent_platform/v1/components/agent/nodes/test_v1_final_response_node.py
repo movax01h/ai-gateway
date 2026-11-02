@@ -87,6 +87,7 @@ class TestFinalResponseNode:
             final_response_content,
             event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
             subsession_id=None,
+            message_id=None,
         )
 
         # Verify ui_history.pop_state_updates was called
@@ -311,9 +312,7 @@ class TestFinalResponseNode:
         ui_history,
     ):
         """Test run with empty tool calls uses text-only response path."""
-        mock_message = Mock(spec=AIMessage)
-        mock_message.tool_calls = []
-        mock_message.text = "Text-only response"
+        mock_message = AIMessage(content="Text-only response")
 
         node = FinalResponseNode(
             name="test_node",
@@ -336,6 +335,7 @@ class TestFinalResponseNode:
             "Text-only response",
             event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
             subsession_id=None,
+            message_id=None,
         )
 
     @pytest.mark.asyncio
