@@ -647,6 +647,88 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_prepares_compile_with_the_tools_registry(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    user,
+):
+    """The async prepare step runs after the tools registry exists and before the graph is compiled."""
+    tools_registry = MagicMock()
+    mock_tools_registry.return_value = tools_registry
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    order: list[str] = []
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    async def prepare(registry):
+        order.append("prepare")
+        assert registry is tools_registry
+
+    original_compile = workflow._compile
+
+    def compile_(*args, **kwargs):
+        order.append("compile")
+        return original_compile(*args, **kwargs)
+
+    with (
+        patch.object(workflow, "_prepare_compile", side_effect=prepare),
+        patch.object(workflow, "_compile", side_effect=compile_),
+    ):
+        await workflow._compile_and_run_graph("Test goal")
+
+    assert order == ["prepare", "compile"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("status_event", ["START", "RESUME", "RETRY"])
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_prepares_compile_on_every_turn(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    status_event,
+    user,
+):
+    """Unlike model routing, the prepare step is not limited to START."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = status_event
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    with (
+        patch.object(workflow, "_prepare_compile", new=AsyncMock()) as prepare,
+        patch.object(workflow, "_route_default_model", new=AsyncMock()),
+    ):
+        await workflow._compile_and_run_graph("Test goal")
+
+    prepare.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_orders_governance_tools_deterministically(
     mock_tools_registry,
     mock_gitlab_workflow,
