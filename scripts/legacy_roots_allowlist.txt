@@ -19,7 +19,6 @@ ai_gateway/prompts/definitions/chat/agent/partials/system_dynamic
 ai_gateway/prompts/definitions/chat/agent/partials/system_static
 ai_gateway/prompts/definitions/chat/agent/partials/system_static/gpt_5
 ai_gateway/prompts/definitions/chat/agent/partials/user
-ai_gateway/prompts/definitions/chat/agent/qwen
 ai_gateway/prompts/definitions/chat/build_reader/amazon_q
 ai_gateway/prompts/definitions/chat/build_reader/assistant
 ai_gateway/prompts/definitions/chat/build_reader/assistant_mistral

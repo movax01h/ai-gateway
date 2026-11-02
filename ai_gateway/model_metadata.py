@@ -487,7 +487,6 @@ def _is_custom_wire_provider(provider: str) -> bool:
 # `prompt_params` (they would override prompt-definition params).
 MATCHED_DEFINITION_FIELDS = (
     "max_context_tokens",
-    "requires_single_system_message",
     "strip_reasoning",
     "uses_cache_breakpoints",
     "use_model_max_tokens",

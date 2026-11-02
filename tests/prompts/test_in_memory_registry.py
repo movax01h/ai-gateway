@@ -384,7 +384,6 @@ class TestInMemoryPromptRegistry:
 
         model_metadata = Mock()
         model_metadata.llm_definition.model_class_provider = ModelClassProvider.LITE_LLM
-        model_metadata.llm_definition.requires_single_system_message = False
 
         in_memory_registry.get(
             prompt_id, prompt_version=None, model_metadata=model_metadata
@@ -601,13 +600,11 @@ class TestInMemoryPromptRegistry:
         prompt_config = call_kwargs["config"]
         assert prompt_config.model.params == expected_model_params
 
-    @pytest.mark.parametrize("requires_single_system_message", [True, False])
     def test_system_list_reaches_prompt_unchanged(
         self,
         in_memory_registry,
         mock_shared_registry,
         prompt,
-        requires_single_system_message,
     ):
         """The registry passes the ``system`` list through; ``Prompt`` merges it after rendering when needed."""
         model_metadata = ModelMetadata(
@@ -617,7 +614,6 @@ class TestInMemoryPromptRegistry:
                 gitlab_identifier="qwen",
                 name="Qwen",
                 max_context_tokens=262144,
-                requires_single_system_message=requires_single_system_message,
                 params=ChatLiteLLMParams(model="qwen3"),
             ),
         )

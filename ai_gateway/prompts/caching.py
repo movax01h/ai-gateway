@@ -75,8 +75,6 @@ def merges_system_messages(
     """
     if model_class_provider in _NON_CHAT_PROVIDERS:
         return False
-    if llm_definition and llm_definition.requires_single_system_message:
-        return True
     if model_class_provider == ModelClassProvider.ANTHROPIC:
         return False
     return not (llm_definition and llm_definition.uses_cache_breakpoints)

@@ -532,7 +532,6 @@ class TestShouldInjectDefaultCacheControl:
 
 def _definition(
     family: list[str],
-    requires_single_system_message: bool = False,
     uses_cache_breakpoints: bool = False,
 ):
     return ChatLiteLLMDefinition(
@@ -540,7 +539,6 @@ def _definition(
         gitlab_identifier="test_model",
         max_context_tokens=200000,
         family=family,
-        requires_single_system_message=requires_single_system_message,
         uses_cache_breakpoints=uses_cache_breakpoints,
         params=ChatLiteLLMParams(model="test-model"),
     )
@@ -566,11 +564,9 @@ class TestMergesSystemMessages:
             (ModelClassProvider.LITE_LLM, _definition(["claude"]), True),
             # Every other chat model gets one system message.
             (ModelClassProvider.LITE_LLM, _definition(["mistral"]), True),
+            (ModelClassProvider.LITE_LLM, _definition(["qwen"]), True),
             (ModelClassProvider.LITE_LLM, None, True),
             (ModelClassProvider.OPENAI, None, True),
-            # The model's own requirement wins, even for a model that would keep them separate.
-            (ModelClassProvider.LITE_LLM, _definition(["qwen"], True), True),
-            (ModelClassProvider.LITE_LLM, _definition(["claude"], True, True), True),
             # Prompts without chat messages have nothing to merge.
             (ModelClassProvider.LITE_LLM_COMPLETION, _definition(["mistral"]), False),
             (ModelClassProvider.LITE_LLM_EMBEDDING, None, False),
