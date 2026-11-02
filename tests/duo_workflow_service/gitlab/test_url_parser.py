@@ -8,6 +8,7 @@ from duo_workflow_service.gitlab.url_parser import (
     GitLabUrlParseError,
     GitLabUrlParser,
     ParsedWorkItemUrl,
+    sanitize_url_credentials,
 )
 
 
@@ -1204,3 +1205,67 @@ class TestGitLabUrlParser:
     )
     def test_detect_parent_type(self, url, expected_parent_type):
         assert GitLabUrlParser.detect_parent_type(url) == expected_parent_type
+
+
+class TestSanitizeUrlCredentials:
+    @pytest.mark.parametrize(
+        "url, expected",
+        [
+            # No userinfo: unchanged
+            (
+                "https://gitlab.com/group/project.git",
+                "https://gitlab.com/group/project.git",
+            ),
+            ("https://gitlab.com/group/project", "https://gitlab.com/group/project"),
+            ("", ""),
+            # OAuth token userinfo, as built by Rails oauth_remote_commands
+            (
+                "https://oauth:0123456789abcdef@gitlab.com/group/project.git",
+                "https://gitlab.com/group/project.git",
+            ),
+            # Username-only userinfo
+            (
+                "https://oauth@gitlab.example.com/group/project.git",
+                "https://gitlab.example.com/group/project.git",
+            ),
+            # Userinfo with a non-default port is kept, minus the credentials
+            (
+                "https://oauth:token@gitlab.example.com:8443/group/project.git",
+                "https://gitlab.example.com:8443/group/project.git",
+            ),
+            # URL-encoded characters in the password still count as userinfo
+            (
+                "https://user:p%40ss%3Aword@gitlab.com/group/project.git",
+                "https://gitlab.com/group/project.git",
+            ),
+            # Query and fragment survive sanitization
+            (
+                "https://oauth:token@gitlab.com/group/project.git?foo=bar#frag",
+                "https://gitlab.com/group/project.git?foo=bar#frag",
+            ),
+            # SCP-like SSH syntax has no URL userinfo: unchanged
+            ("git@gitlab.com:group/project.git", "git@gitlab.com:group/project.git"),
+            # A '@' in the path is not userinfo: unchanged
+            (
+                "https://gitlab.com/group/project/-/tree/@head",
+                "https://gitlab.com/group/project/-/tree/@head",
+            ),
+            # Unparsable port fails closed rather than leaking credentials
+            ("https://oauth:token@gitlab.com:notaport/project.git", ""),
+        ],
+        ids=[
+            "clean_https_url",
+            "clean_https_url_no_suffix",
+            "empty",
+            "oauth_token_userinfo",
+            "username_only_userinfo",
+            "userinfo_with_port",
+            "url_encoded_password",
+            "query_and_fragment_preserved",
+            "scp_like_ssh",
+            "at_sign_in_path",
+            "invalid_port_fails_closed",
+        ],
+    )
+    def test_sanitize_url_credentials(self, url, expected):
+        assert sanitize_url_credentials(url) == expected

@@ -1,6 +1,6 @@
 import re
 from typing import List, Literal, NamedTuple, Tuple
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import structlog
 
@@ -19,6 +19,38 @@ WORK_ITEM_URL_REGEX = (
 
 SESSION_URL_PATH = "/-/automate/agent-sessions/"
 log = structlog.stdlib.get_logger("url_parser")
+
+
+def sanitize_url_credentials(url: str) -> str:
+    """Strip any userinfo (e.g. ``oauth:<token>@``) from a URL.
+
+    Executors may send a remote ``origin`` URL that embeds the workflow OAuth
+    token (``https://oauth:<token>@host/project.git``). DWS must never forward
+    that form to third parties such as LangSmith. The returned URL keeps the
+    scheme, host, port, path, query, and fragment, and drops only the userinfo.
+
+    Args:
+        url: The URL to sanitize.
+
+    Returns:
+        The URL without userinfo, the input unchanged when it carries no
+        userinfo, or an empty string when it cannot be parsed.
+    """
+    if not url:
+        return url
+
+    try:
+        parsed = urlparse(url)
+        if "@" not in parsed.netloc:
+            return url
+        host = parsed.hostname or ""
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        return urlunparse(parsed._replace(netloc=host))
+    except ValueError:
+        # Fail closed: a URL we cannot parse must not reach the trace store
+        # with potential credentials in it.
+        return ""
 
 
 class ParsedWorkItemUrl(NamedTuple):

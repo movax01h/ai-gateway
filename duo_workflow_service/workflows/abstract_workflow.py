@@ -96,7 +96,10 @@ from duo_workflow_service.gitlab.gitlab_api import (
 )
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
-from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
+from duo_workflow_service.gitlab.url_parser import (
+    SESSION_URL_PATH,
+    sanitize_url_credentials,
+)
 from duo_workflow_service.model_routing import (
     route_default_model,
     track_routing_decision,
@@ -259,6 +262,11 @@ class AbstractWorkflow(ABC):
     ):
         self._outbox = Outbox()
         self._workflow_id = workflow_id
+        # Strip any embedded userinfo from git_url at the boundary: executors
+        # may forward an origin URL carrying the workflow OAuth token, and the
+        # value must not live on the workflow for the whole session.
+        if git_url := workflow_metadata.get("git_url"):
+            workflow_metadata["git_url"] = sanitize_url_credentials(git_url)
         self._workflow_metadata = workflow_metadata
         self._user = user
         self._resume_checkpoint_ts = resume_checkpoint_ts
@@ -322,7 +330,11 @@ class AbstractWorkflow(ABC):
             monitoring_context: MonitoringContext = current_monitoring_context.get()
 
             tracing_metadata = {
-                "git_url": self._workflow_metadata.get("git_url", ""),
+                # Defense in depth: sanitize again at the sink so a git_url set
+                # after __init__ can never leak credentials to LangSmith.
+                "git_url": sanitize_url_credentials(
+                    self._workflow_metadata.get("git_url", "")
+                ),
                 "git_sha": self._workflow_metadata.get("git_sha", ""),
                 "workflow_type": self._workflow_type.value,
                 "thread_id": self._workflow_id,
