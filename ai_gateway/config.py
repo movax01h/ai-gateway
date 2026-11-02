@@ -630,6 +630,13 @@ class ConfigDuoWorkflow(BaseSettings):
     )
     caching_proxy: ConfigCachingProxy = Field(default_factory=ConfigCachingProxy)
     tls: ConfigTLS = Field(default_factory=ConfigTLS)
+    clean_io_handle_context: bool = Field(
+        default=True,
+        description=(
+            "Create asyncio I/O handles outside the request context so that pooled "
+            "connections do not keep finished workflows in memory"
+        ),
+    )
 
     def caching_proxy_url(self) -> str | None:
         if self.use_caching_proxy:
