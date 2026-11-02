@@ -1,4 +1,6 @@
 # pylint: disable=too-many-lines
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import litellm
@@ -396,6 +398,41 @@ class TestGenerate:
             model._generate(messages)
 
 
+class RateLimitedServer:
+    def __init__(self):
+        self.requests = 0
+        server = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                server.requests += 1
+                self.rfile.read(int(self.headers.get("content-length", 0)))
+                self.send_response(429)
+                self.send_header("content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error": {"message": "rate limited"}}')
+
+            def log_message(self, *_args):
+                pass
+
+        self._server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self._server.server_port}/inference/v1"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def close(self):
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join()
+
+
+@pytest.fixture(name="rate_limited_server")
+def rate_limited_server_fixture():
+    server = RateLimitedServer()
+    yield server
+    server.close()
+
+
 class TestAGenerate:
     @pytest.fixture
     def fim_model(self):
@@ -466,6 +503,39 @@ class TestAGenerate:
                 assert "suffix" not in call_kwargs
             else:
                 assert call_kwargs["suffix"] == expected_suffix
+
+    @pytest.mark.asyncio
+    async def test_other_providers_keep_the_sdk_retries(
+        self, text_model, messages, mock_response
+    ):
+        with patch(
+            "litellm.atext_completion", new=AsyncMock(return_value=mock_response)
+        ) as mock_acompletion:
+            await text_model._agenerate(messages)
+
+        assert "max_retries" not in mock_acompletion.call_args[1]
+
+    @pytest.mark.asyncio
+    async def test_fireworks_sends_one_request_per_attempt(
+        self, fim_model, messages, rate_limited_server
+    ):
+        fim_model.request_timeout = 5
+
+        def no_retry(*_args, **_kwargs):
+            return lambda fn: fn
+
+        with (
+            patch(
+                "ai_gateway.models.v2.completion_litellm.create_fireworks_retry_decorator",
+                new=no_retry,
+            ),
+            pytest.raises(litellm.RateLimitError),
+        ):
+            await fim_model._agenerate(
+                messages, api_base=rate_limited_server.url, api_key="test-key"
+            )
+
+        assert rate_limited_server.requests == 1
 
 
 class TestStreamSync:

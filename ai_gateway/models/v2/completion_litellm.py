@@ -92,6 +92,12 @@ MODEL_STOP_TOKENS: Dict[str, List[str]] = {
 }
 
 
+_FIREWORKS_SDK_RETRIES_OFF = {
+    "max_retries": 0,
+    "allowed_openai_params": ["max_retries"],
+}
+
+
 class CompletionLiteLLM(BaseChatModel):
     """Chat model wrapper for FiM and text completion endpoints via LiteLLM.
 
@@ -272,6 +278,7 @@ class CompletionLiteLLM(BaseChatModel):
     async def _acompletion_with_retry(self, **completion_args: Any) -> Any:
         """Execute text completion with retry logic for Fireworks provider."""
         if self.custom_llm_provider == "fireworks_ai":
+            completion_args.update(_FIREWORKS_SDK_RETRIES_OFF)
 
             @create_fireworks_retry_decorator(logger, DEFAULT_FIREWORKS_ERRORS)
             async def _completion_with_retry() -> Any:
