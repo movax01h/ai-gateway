@@ -1,1 +1,1 @@
-Read .skillguard/manifest.json and delegate one {{ agent_name }} per file path in the "llm_needed" list.
+Read .skillguard/manifest.json and delegate the {{ agent_name }} for every file path in the "llm_needed" list, in parallel batches of up to 10 per turn.
