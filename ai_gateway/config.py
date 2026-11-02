@@ -29,6 +29,7 @@ __all__ = [
     "ConfigDuoChat",
     "ConfigDuoWorkflow",
     "ConfigFastApi",
+    "ConfigFlowValidation",
     "ConfigGoogleCloudProfiler",
     "ConfigInstrumentator",
     "ConfigLogging",
@@ -618,6 +619,31 @@ class ConfigCachingProxy(BaseSettings):
     )
 
 
+class ConfigFlowValidation(BaseModel):
+    """Input caps for the ``ValidateFlowConfig`` gRPC method.
+
+    Validating a flow config is CPU-bound: it parses the config with Pydantic, scans the prompts, and dry-run compiles
+    the graph. The cost grows with the number of components, so an unbounded request can occupy an instance for
+    seconds. Requests above either cap are rejected before that work starts.
+
+    ``max_bytes`` applies to the serialized ``flow_config`` Struct and is checked before decoding. ``max_components``
+    applies to the ``components`` list and is checked before parsing. GitLab already limits flow YAML to 40 KiB, but
+    its request can carry the raw YAML alongside the parsed config, so a flow at that limit arrives as roughly 80 KiB.
+    The byte default stays above that so this service never rejects a config GitLab accepted.
+    """
+
+    max_bytes: int = Field(
+        default=160 * 1024,
+        gt=0,
+        description="Maximum serialized size of the flow_config Struct, in bytes",
+    )
+    max_components: int = Field(
+        default=100,
+        gt=0,
+        description="Maximum number of entries allowed in the flow config components list",
+    )
+
+
 class ConfigDuoWorkflow(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DUO_WORKFLOW_",
@@ -637,6 +663,7 @@ class ConfigDuoWorkflow(BaseSettings):
             "connections do not keep finished workflows in memory"
         ),
     )
+    flow_validation: ConfigFlowValidation = Field(default_factory=ConfigFlowValidation)
 
     def caching_proxy_url(self) -> str | None:
         if self.use_caching_proxy:

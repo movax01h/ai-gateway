@@ -1,6 +1,7 @@
 # pylint: disable=direct-environment-variable-reference,invalid-overridden-method,too-many-branches,too-many-lines,too-many-statements
 import ast
 import asyncio
+import contextvars
 import functools
 import hashlib
 import hmac
@@ -8,6 +9,7 @@ import json
 import os
 import re
 import signal
+from concurrent.futures import ThreadPoolExecutor
 from itertools import chain
 from typing import Any, AsyncIterable, AsyncIterator, Optional, cast, override
 
@@ -46,6 +48,7 @@ from ai_gateway.model_selection import (
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import (
+    FlowConfigLimitExceededError,
     FlowValidationError,
     MissingAdditionalContextError,
 )
@@ -306,6 +309,15 @@ _FLOW_VERSION_MAPPING = [
 ]
 
 log = structlog.stdlib.get_logger("server")
+
+# ValidateFlowConfig runs its CPU-bound validation off the event loop. A dedicated single worker, rather than the
+# shared default executor, keeps N concurrent validations from becoming N threads competing with the event loop and
+# with workflow graph compiles for the GIL. Because calls queue behind the single worker, one the caller has already
+# cancelled is dropped before it starts. The GIL serialises the work anyway, so one worker costs no throughput; the
+# trade is latency, since a validation waits for the ones queued ahead of it, each bounded by the caps.
+_FLOW_VALIDATION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="flow-validation"
+)
 
 catalog = data_model.load_catalog()
 allowed_ijwt_scopes = {
@@ -1405,15 +1417,26 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         return response
 
     @override
+    @inject
     async def ValidateFlowConfig(
         self,
         request: contract_pb2.ValidateFlowConfigRequest,
         context: grpc.ServicerContext,
+        max_bytes: int = Provide[
+            ContainerApplication.config.duo_workflow.flow_validation.max_bytes
+        ],
+        max_components: int = Provide[
+            ContainerApplication.config.duo_workflow.flow_validation.max_components
+        ],
     ) -> contract_pb2.ValidateFlowConfigResponse:
         """Validate a flow configuration without executing it.
 
         Accepts a flow config payload and returns a structured validation result (valid/invalid + list of errors). Uses
         the existing DryRunFlowValidator to exercise the full compilation path without touching external systems.
+
+        Validation is CPU-bound, so it runs on a dedicated worker thread to keep the event loop responsive for other
+        sessions. The GIL still serialises the work, so the request is also rejected up front when it exceeds the
+        configured size or component-count caps; those bound how much CPU a single call can take.
         """
         log.info("Validating flow config")
 
@@ -1423,14 +1446,51 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 errors=["Missing required field: flow_config"],
             )
 
+        size_bytes = request.flow_config.ByteSize()
+        if size_bytes > max_bytes:
+            log.warning(
+                "Flow config rejected: exceeds size limit",
+                size_bytes=size_bytes,
+                max_bytes=max_bytes,
+            )
+            return contract_pb2.ValidateFlowConfigResponse(
+                valid=False,
+                errors=[
+                    f"Flow config is {size_bytes} bytes; the maximum is {max_bytes} bytes"
+                ],
+            )
+
         try:
             # FlowValidator uses @inject in its __init__ to resolve the prompt registry.
-            flow_validator = FlowValidator()
-            flow_validator.validate_dict(MessageToDict(request.flow_config))
-            log.info("Flow config validation succeeded")
+            flow_validator = FlowValidator(max_components=max_components)
+            # Struct decoding and validation are both CPU-bound; run them on the dedicated worker so the event loop
+            # stays responsive. Unlike asyncio.to_thread, run_in_executor does not copy contextvars, so copy them
+            # explicitly to keep the request-bound logging context in the worker.
+            context_copy = contextvars.copy_context()
+            await asyncio.get_running_loop().run_in_executor(
+                _FLOW_VALIDATION_EXECUTOR,
+                context_copy.run,
+                lambda: flow_validator.validate_dict(
+                    MessageToDict(request.flow_config)
+                ),
+            )
+            log.info("Flow config validation succeeded", size_bytes=size_bytes)
             return contract_pb2.ValidateFlowConfigResponse(valid=True, errors=[])
+        except FlowConfigLimitExceededError as e:
+            log.warning(
+                "Flow config rejected: exceeds component limit",
+                errors=e.errors,
+                max_components=max_components,
+                size_bytes=size_bytes,
+            )
+            return contract_pb2.ValidateFlowConfigResponse(
+                valid=False,
+                errors=e.errors,
+            )
         except FlowValidationError as e:
-            log.info("Flow config validation failed", errors=e.errors)
+            log.info(
+                "Flow config validation failed", errors=e.errors, size_bytes=size_bytes
+            )
             return contract_pb2.ValidateFlowConfigResponse(
                 valid=False,
                 errors=e.errors,

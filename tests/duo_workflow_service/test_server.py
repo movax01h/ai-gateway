@@ -1,8 +1,10 @@
 # pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
+import contextvars
 import json
 import os
 import signal
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterable, List, Optional, cast
@@ -5649,6 +5651,7 @@ async def test_validate_flow_config_with_an_ai_catalog_agent_reference(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
 @patch("duo_workflow_service.server.FlowValidator")
 async def test_validate_flow_config_valid(mock_flow_validator_cls):
     """A valid flow config returns valid=True with no errors."""
@@ -5671,6 +5674,7 @@ async def test_validate_flow_config_valid(mock_flow_validator_cls):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
 @patch("duo_workflow_service.server.FlowValidator")
 async def test_validate_flow_config_invalid_raises_value_error(mock_flow_validator_cls):
     """A flow config that fails validation returns valid=False with error messages."""
@@ -5695,6 +5699,7 @@ async def test_validate_flow_config_invalid_raises_value_error(mock_flow_validat
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
 async def test_validate_flow_config_missing_flow_config():
     """A request without flow_config returns valid=False with a descriptive error."""
     mock_context = MagicMock(spec=grpc.ServicerContext)
@@ -5708,6 +5713,7 @@ async def test_validate_flow_config_missing_flow_config():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
 async def test_validate_flow_config_missing_version_in_config():
     """A config without an embedded `version` field returns the validator's error."""
     mock_context = MagicMock(spec=grpc.ServicerContext)
@@ -5726,6 +5732,7 @@ async def test_validate_flow_config_missing_version_in_config():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
 @patch("duo_workflow_service.server.FlowValidator")
 async def test_validate_flow_config_unexpected_exception(mock_flow_validator_cls):
     """Unexpected exceptions are caught and returned as validation errors."""
@@ -5747,6 +5754,173 @@ async def test_validate_flow_config_unexpected_exception(mock_flow_validator_cls
     assert len(response.errors) == 1
     assert "RuntimeError" in response.errors[0]
     assert "Something went very wrong" in response.errors[0]
+
+
+@contextmanager
+def _flow_validation_limits(container, **limits):
+    """Temporarily override the ValidateFlowConfig caps on the shared module-scoped container.
+
+    ConfigurationOption has no reset_override(); override() sets the value in place, so restoring the original values
+    with a second override() is the only way to undo the change.
+    """
+    provider = container.config.duo_workflow.flow_validation
+    original = dict(provider())
+    provider.override({**original, **limits})
+    try:
+        yield
+    finally:
+        provider.override(original)
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.FlowValidator")
+async def test_validate_flow_config_rejects_oversized_request(
+    mock_flow_validator_cls, mock_duo_workflow_service_container
+):
+    """A flow_config over the byte cap is rejected before the validator is even constructed."""
+    service = DuoWorkflowService()
+    request = contract_pb2.ValidateFlowConfigRequest(
+        flow_config=_make_flow_config_struct(),
+    )
+    size_bytes = request.flow_config.ByteSize()
+
+    with (
+        _flow_validation_limits(
+            mock_duo_workflow_service_container, max_bytes=size_bytes - 1
+        ),
+        capture_logs() as cap_logs,
+    ):
+        response = await service.ValidateFlowConfig(
+            request, MagicMock(spec=grpc.ServicerContext)
+        )
+
+    assert response.valid is False
+    assert list(response.errors) == [
+        f"Flow config is {size_bytes} bytes; the maximum is {size_bytes - 1} bytes"
+    ]
+    mock_flow_validator_cls.assert_not_called()
+    assert any(
+        entry["log_level"] == "warning"
+        and entry["event"] == "Flow config rejected: exceeds size limit"
+        for entry in cap_logs
+    )
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.FlowValidator")
+async def test_validate_flow_config_at_size_limit_is_validated(
+    mock_flow_validator_cls, mock_duo_workflow_service_container
+):
+    """A flow_config exactly at the byte cap still goes through validation."""
+    mock_flow_validator_cls.return_value.validate_dict = MagicMock()
+    service = DuoWorkflowService()
+    request = contract_pb2.ValidateFlowConfigRequest(
+        flow_config=_make_flow_config_struct(),
+    )
+
+    with _flow_validation_limits(
+        mock_duo_workflow_service_container, max_bytes=request.flow_config.ByteSize()
+    ):
+        response = await service.ValidateFlowConfig(
+            request, MagicMock(spec=grpc.ServicerContext)
+        )
+
+    assert response.valid is True
+    mock_flow_validator_cls.return_value.validate_dict.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.FlowValidator")
+async def test_validate_flow_config_passes_component_cap_to_validator(
+    mock_flow_validator_cls, mock_duo_workflow_service_container
+):
+    mock_flow_validator_cls.return_value.validate_dict = MagicMock()
+    service = DuoWorkflowService()
+    request = contract_pb2.ValidateFlowConfigRequest(
+        flow_config=_make_flow_config_struct(),
+    )
+
+    with _flow_validation_limits(mock_duo_workflow_service_container, max_components=7):
+        await service.ValidateFlowConfig(request, MagicMock(spec=grpc.ServicerContext))
+
+    mock_flow_validator_cls.assert_called_once_with(max_components=7)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+@patch("duo_workflow_service.server.FlowValidator")
+async def test_validate_flow_config_runs_validation_on_the_dedicated_worker(
+    mock_flow_validator_cls,
+):
+    """validate_dict is CPU-bound, so it runs on the dedicated flow-validation worker with the caller's context.
+
+    run_in_executor does not copy contextvars on its own, so the handler must copy them explicitly; the context var set
+    here has to be visible from inside the worker.
+    """
+    request_marker: contextvars.ContextVar[str] = contextvars.ContextVar(
+        "request_marker", default="unset"
+    )
+    request_marker.set("from-handler-context")
+    seen: list[tuple[int, str, str]] = []
+
+    def record(_config):
+        seen.append(
+            (
+                threading.get_ident(),
+                threading.current_thread().name,
+                request_marker.get(),
+            )
+        )
+
+    mock_flow_validator_cls.return_value.validate_dict = MagicMock(side_effect=record)
+    service = DuoWorkflowService()
+    request = contract_pb2.ValidateFlowConfigRequest(
+        flow_config=_make_flow_config_struct(),
+    )
+
+    response = await service.ValidateFlowConfig(
+        request, MagicMock(spec=grpc.ServicerContext)
+    )
+
+    assert response.valid is True
+    ((thread_id, thread_name, marker),) = seen
+    assert thread_id != threading.get_ident()
+    assert thread_name.startswith("flow-validation")
+    assert marker == "from-handler-context"
+
+
+@pytest.mark.asyncio
+async def test_validate_flow_config_rejects_too_many_components_end_to_end(
+    mock_duo_workflow_service_container,
+):
+    """Runs the real validator: the component cap configured on the container reaches it."""
+    service = DuoWorkflowService()
+    config_dict = MessageToDict(_make_flow_config_struct())
+    second = dict(config_dict["components"][0], name="second")
+    config_dict["components"].append(second)
+    config_dict["routers"] = [
+        {"from": "comp", "to": "second"},
+        {"from": "second", "to": "end"},
+    ]
+    struct = struct_pb2.Struct()
+    struct.update(config_dict)
+
+    with (
+        _flow_validation_limits(mock_duo_workflow_service_container, max_components=1),
+        capture_logs() as cap_logs,
+    ):
+        response = await service.ValidateFlowConfig(
+            contract_pb2.ValidateFlowConfigRequest(flow_config=struct),
+            MagicMock(spec=grpc.ServicerContext),
+        )
+
+    assert response.valid is False
+    assert list(response.errors) == ["Flow config has 2 components; the maximum is 1"]
+    assert any(
+        entry["log_level"] == "warning"
+        and entry["event"] == "Flow config rejected: exceeds component limit"
+        for entry in cap_logs
+    )
 
 
 @pytest.mark.asyncio
