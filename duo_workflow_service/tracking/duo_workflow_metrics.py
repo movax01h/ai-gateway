@@ -62,6 +62,7 @@ WORKFLOW_TIME_SCALE_BUCKETS = [
     3600,
 ]
 LLM_TIME_SCALE_BUCKETS = [0.25, 0.5, 1, 2, 4, 7, 10, 20, 30, 60]
+TOOL_CALL_TIME_SCALE_BUCKETS = [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60]
 FIRST_RESPONSE_SCALE_BUCKETS = [0.5, 1, 1.5, 2, 2.5, 3, 5, 10, 20, 30, 60]
 
 LLM_FINISH_REASONS = LLMFinishReason.values()
@@ -88,6 +89,7 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             "Duration of tool calls in Duo Workflow",
             ["tool_name", "flow_type"] + METADATA_LABELS,
             registry=registry,
+            buckets=TOOL_CALL_TIME_SCALE_BUCKETS,
         )
 
         self.compute_duration = Histogram(

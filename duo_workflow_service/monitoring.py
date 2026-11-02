@@ -3,7 +3,7 @@
 import os
 
 import structlog
-from prometheus_client import start_http_server
+from prometheus_client import disable_created_metrics, start_http_server
 
 from duo_workflow_service.tracking.duo_workflow_metrics import DuoWorkflowMetrics
 
@@ -13,6 +13,11 @@ duo_workflow_metrics = DuoWorkflowMetrics()
 
 
 def setup_monitoring():
+    # Every counter and histogram child also exports a `<name>_created` sample.
+    # The Runway OTel collector folds them into start timestamps, so Mimir keeps
+    # no series for them, but each scrape still renders and sends them.
+    disable_created_metrics()
+
     addr = os.environ.get("PROMETHEUS_METRICS__ADDR")
     port = os.environ.get("PROMETHEUS_METRICS__PORT")
     if port and addr:
