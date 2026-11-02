@@ -29,6 +29,11 @@ Staging and production use port `8082`, set in `.runway/duo-workflow-svc/env-{st
 If either variable is missing, the service logs `Metrics are disabled...` at debug level and opens no endpoint.
 The metric objects still exist and accumulate values; a scraper simply never reads them.
 
+`setup_monitoring` also turns off the `<name>_created` samples that `prometheus_client` adds to every counter and
+histogram, whether or not the endpoint starts. They only record when a series first appeared. The Runway OpenTelemetry
+collector turns them into start timestamps, so Mimir keeps no series for them, but every scrape still renders and sends
+them.
+
 The Duo Workflow Service registers metrics against the default `prometheus_client` registry, which it shares with the
 AI Gateway instrumentation it loads through the DI container. A scrape of this endpoint therefore also returns
 AI Gateway metrics such as `model_inferences_total` and `inference_request_duration_seconds`.
@@ -85,7 +90,7 @@ change for existing dashboards and alert rules.
 
 | Metric | Type | Labels | Emitted when |
 |---|---|---|---|
-| `duo_workflow_tool_call_seconds` | Histogram | `tool_name`, `flow_type`, `<metadata>` | Around every tool invocation. Emitted from `tools_executor`, `run_tool_node`, and the agent platform tool, one-off, and deterministic-step nodes. Default Prometheus buckets. |
+| `duo_workflow_tool_call_seconds` | Histogram | `tool_name`, `flow_type`, `<metadata>` | Around every tool invocation. Emitted from `tools_executor`, `run_tool_node`, and the agent platform tool, one-off, and deterministic-step nodes. Buckets: `TOOL_CALL_TIME_SCALE_BUCKETS` (0.1s to 60s). |
 | `agent_platform_tool_failure_total` | Counter | `flow_type`, `tool_name`, `failure_reason`, `<metadata>` | A tool call fails (`WORKFLOW_TOOL_FAILURE`), from `tools_executor` and `agent_platform/utils/tool_event_tracker.py`. `failure_reason` is the `error_type` of the internal event. |
 | `executor_actions_duration_seconds` | Histogram | `action_class` | An action sent to the Duo Workflow Executor gets a response, measured in `record_metrics` in [`duo_workflow_service/executor/action.py`](../duo_workflow_service/executor/action.py). `action_class` is the protobuf oneof field name, for example `runHTTPRequest`. Only successful responses are recorded — errored responses raise before the observation. |
 | `duo_workflow_compute_seconds` | Histogram | `operation_type` | Around agent processing in `Agent.run`. `operation_type` is `<agent name>_processing`. |
