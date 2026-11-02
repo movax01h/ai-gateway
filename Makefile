@@ -10,6 +10,8 @@ INTEGRATION_TESTS_DIR := ${ROOT_DIR}/integration_tests
 LITELLM_PARAM_TESTS_DIR := ${ROOT_DIR}/litellm_param_tests
 
 PYTEST_SLOWEST_TESTS_COUNT ?= 10
+# mypy worker processes; 0 type-checks in-process (for sandboxes that block sockets).
+MYPY_NUM_WORKERS ?= auto
 
 LINT_WORKING_DIR ?= ${AI_GATEWAY_DIR} \
 	ai \
@@ -217,7 +219,7 @@ check-pylint: install-lint-deps
 .PHONY: check-mypy
 check-mypy: install-lint-deps
 	@echo "Running mypy check..."
-	@poetry run mypy -n auto ${LINT_WORKING_DIR} --exclude "scripts/vendor/*"
+	@poetry run mypy -n ${MYPY_NUM_WORKERS} ${LINT_WORKING_DIR} --exclude "scripts/vendor/*"
 
 .PHONY: check-codespell
 check-codespell: install-lint-deps
