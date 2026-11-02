@@ -124,9 +124,10 @@ model:
         max_tokens: <integer>         # Optional. Maximum tokens to generate
         stop: <string[]>              # Optional. Array of stopping sequences
 
-unit_primitives: # Required. Features that can use this prompt
-    - duo_chat                      # For GitLab Duo chat conversations
-    # Additional primitives as needed
+unit_primitive: duo_chat          # Required. The unit primitive that a request needs to use this prompt
+
+models_from: duo_chat             # Optional. The feature setting in `unit_primitives.yml` that lists the models of
+                                  # this prompt version. That entry must list `unit_primitive`.
 
 prompt_template: # Required. Templates for model interaction
     system: <string>                # Optional. System-level instructions (supports Jinja2)
@@ -163,8 +164,7 @@ model:
         max_tokens: 1024
         stop:
             - "End"
-unit_primitives:
-    - duo_chat
+unit_primitive: duo_chat
 prompt_template:
     system: "You are a code review assistant with access to previous conversations. {{ context }}"
     user: "Review this code: {{ code_diff }}"

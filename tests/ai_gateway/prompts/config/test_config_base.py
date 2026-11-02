@@ -1,7 +1,10 @@
 # pylint: disable=file-naming-for-tests
 """Tests for ai_gateway.prompts.config.base module."""
 
+from pathlib import Path
+
 import pytest
+import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
 
 from ai_gateway.model_selection.models import CompletionLiteLLMParams, CompletionType
@@ -114,6 +117,62 @@ class TestInMemoryPromptConfig:
         # Should not have excluded fields
         assert not hasattr(prompt_config, "prompt_id")
         assert not hasattr(prompt_config, "unit_primitives")
+
+
+class TestPromptConfig:
+    _repo_root = Path(__file__).parents[4]
+
+    @staticmethod
+    def _config(**fields) -> PromptConfig:
+        return PromptConfig(
+            name="Test", prompt_template={"user": "{{ input }}"}, **fields
+        )
+
+    def test_models_from_is_optional(self):
+        config = self._config(unit_primitive=GitLabUnitPrimitive.ASK_ISSUE)
+
+        assert config.models_from is None
+
+    def test_accepts_models_from_that_lists_the_unit_primitive(self):
+        config = self._config(
+            unit_primitive=GitLabUnitPrimitive.ASK_ISSUE, models_from="duo_chat"
+        )
+
+        assert config.models_from == "duo_chat"
+
+    @pytest.mark.parametrize(
+        ("models_from", "message"),
+        [
+            ("no_such_feature", "is not a feature setting in unit_primitives.yml"),
+            ("generate_commit_message", "does not list the unit primitive 'ask_issue'"),
+        ],
+    )
+    def test_rejects_models_from_that_does_not_list_the_unit_primitive(
+        self, models_from, message
+    ):
+        with pytest.raises(ValueError, match=message):
+            self._config(
+                unit_primitive=GitLabUnitPrimitive.ASK_ISSUE, models_from=models_from
+            )
+
+    def test_every_shipped_prompt_version_is_valid(self):
+        version_files = [
+            *(self._repo_root / "ai_gateway" / "prompts" / "definitions").rglob(
+                "*.yml"
+            ),
+            *(self._repo_root / "ai").glob("features/*/*/prompts/**/*.yml"),
+            *(self._repo_root / "ai").glob("shared/*/prompts/**/*.yml"),
+        ]
+
+        invalid = []
+        for version_file in sorted(version_files):
+            try:
+                PromptConfig(**yaml.safe_load(version_file.read_text()))
+            except ValueError as error:
+                invalid.append(f"{version_file.relative_to(self._repo_root)}: {error}")
+
+        assert version_files
+        assert not invalid
 
 
 class TestCompletionLiteLLMParams:
