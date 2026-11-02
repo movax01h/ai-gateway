@@ -6,6 +6,7 @@ import pytest
 import yaml
 from dependency_injector import containers, providers
 from dependency_injector.providers import Factory
+from langchain_core.runnables import RunnableLambda, RunnableSequence
 from pydantic import AnyUrl
 
 from ai_gateway.config import ConfigModelLimits
@@ -25,6 +26,7 @@ from ai_gateway.prompts.registry import (
     LocalPromptRegistry,
     feature_setting_for_prompt_id,
 )
+from lib.prompts.utilities import merge_leading_system_messages
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -149,6 +151,68 @@ def test_container(
                 model_metadata=model,
             )
             assert isinstance(prompt, Prompt)
+
+
+@pytest.mark.parametrize(
+    ("prompt_version", "model_metadata", "merges"),
+    [
+        # A Qwen-family model has no `chat/agent/qwen` directory, so it falls
+        # back to the base prompt, and the built chain folds the split system
+        # messages into one.
+        (
+            "^1.0.0",
+            {"provider": "gitlab", "identifier": "qwen_3_8_27b_fireworks"},
+            True,
+        ),
+        (
+            "^1.0.0",
+            {
+                "provider": "custom_openai",
+                "name": "qwen",
+                "identifier": "custom_openai/qwen3",
+                "endpoint": "http://localhost:4000",
+                "api_key": "test-key",
+            },
+            True,
+        ),
+        # Older pinned versions must still resolve. The legacy mapping
+        # overrides the family with `base`, but the model keeps cache
+        # breakpoints, so its system messages stay separate.
+        ("1.0.0", None, False),
+        (
+            "1.0.0",
+            {"provider": "gitlab", "identifier": "claude_sonnet_4_5_20250929"},
+            False,
+        ),
+    ],
+    ids=["qwen_fireworks", "qwen_self_hosted", "legacy_mapping", "base_1_0_0"],
+)
+def test_chat_agent_resolves_base_prompt(
+    mock_ai_gateway_container: containers.DeclarativeContainer,
+    prompt_version: str,
+    model_metadata: dict | None,
+    merges: bool,
+):
+    prompts = cast(providers.Container, mock_ai_gateway_container.pkg_prompts)
+    registry = cast(LocalPromptRegistry, prompts.prompt_registry())
+
+    prompt = registry.get(
+        "chat/agent",
+        prompt_version,
+        model_metadata=(
+            create_model_metadata(model_metadata) if model_metadata else None
+        ),
+    )
+
+    assert isinstance(prompt, Prompt)
+    # The chain ends in the merge step only for chat models without cache
+    # breakpoints (such as Qwen); Claude keeps separate system messages, so
+    # its template is the bare ChatAgentPromptTemplate.
+    is_merge_step = isinstance(prompt.prompt_tpl, RunnableSequence) and (
+        isinstance(prompt.prompt_tpl.last, RunnableLambda)
+        and prompt.prompt_tpl.last.func is merge_leading_system_messages
+    )
+    assert is_merge_step is merges
 
 
 def test_container_openai_model_factory_exists(

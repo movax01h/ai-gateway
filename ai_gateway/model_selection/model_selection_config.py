@@ -138,7 +138,6 @@ class BaseLLMDefinition(BaseModel):
     # Whether this deployment accepts image input; absent means ask litellm's registry.
     # Set per deployment, with a dated comment naming the evidence.
     supports_vision: Optional[bool] = None
-    requires_single_system_message: bool = False
     # Claude caches the prompt up to explicit breakpoints placed on messages, so it keeps the per-session security
     # block in its own system message behind them. All other models get one merged system message.
     uses_cache_breakpoints: bool = False

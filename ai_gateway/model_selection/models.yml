@@ -54,7 +54,6 @@ models:
     supports_vision: true  # 2026-09-29 - https://huggingface.co/Qwen/Qwen3.8-27B and confirmed via manual testing
     model_class_provider: litellm
     strip_reasoning: true
-    requires_single_system_message: true
     family:
       - qwen
     params:
@@ -1416,7 +1415,6 @@ models:
     max_context_tokens: 262_144
     model_class_provider: litellm
     strip_reasoning: true
-    requires_single_system_message: true
     family:
       - qwen
     params:

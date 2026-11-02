@@ -68,24 +68,16 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
         denied_tools = list(dict.fromkeys(input.get("denied_tools", []) or []))
         system_template_override = _kwargs.get("system_template_override")
 
-        if "system" in self.prompt_template:
-            messages.extend(
-                self._build_single_system_message(
-                    static_template_context,
-                    dynamic_template_context,
-                    system_template_override,
-                    denied_tools,
-                )
+        # ``Prompt`` merges the split system messages into one for models that
+        # need a single system message (``merges_system_messages``).
+        messages.extend(
+            self._build_split_system_messages(
+                static_template_context,
+                dynamic_template_context,
+                system_template_override,
+                denied_tools,
             )
-        else:
-            messages.extend(
-                self._build_split_system_messages(
-                    static_template_context,
-                    dynamic_template_context,
-                    system_template_override,
-                    denied_tools,
-                )
-            )
+        )
 
         history = restore_message_consistency(input["conversation_history"][agent_name])
         for m in history:
@@ -195,46 +187,6 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             "If asked to perform an action that requires a blocked tool, inform the user that "
             "this action has been blocked by an administrator."
         )
-
-    def _build_single_system_message(
-        self,
-        static_template_context: dict[str, Any],
-        dynamic_template_context: dict[str, Any],
-        system_template_override: Any,
-        denied_tools: list[str],
-    ) -> list[SystemMessage]:
-        """Build a single SystemMessage for models that require only one system message (e.g. Qwen).
-
-        The security block and denied tools context are appended to the system content so that the static portion at the
-        beginning of the message remains cacheable at the prefix level.
-        """
-        all_context = {**static_template_context, **dynamic_template_context}
-
-        if isinstance(system_template_override, str):
-            base_system = jinja2_formatter(
-                cast(str, self.prompt_template["system"]),
-                system_template_override=None,
-                **all_context,
-            )
-            base_system = base_system.lstrip().rstrip("\n") + "\n"
-            system_template_override = jinja2_formatter(
-                system_template_override,
-                base_agentic_chat_system=base_system,
-                **all_context,
-            )
-
-        content = jinja2_formatter(
-            cast(str, self.prompt_template["system"]),
-            system_template_override=system_template_override,
-            **all_context,
-        )
-
-        content += "\n" + render_security_block()
-
-        if denied_tools:
-            content += "\n" + self._build_denied_tools_text(denied_tools)
-
-        return [SystemMessage(content=content)]
 
     def _build_split_system_messages(
         self,
