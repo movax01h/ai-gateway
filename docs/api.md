@@ -63,7 +63,7 @@ POST /v4/code/suggestions
 
 v3 callers keep the same `prompt_components` body. Only the URL and the streaming format change, and `code_context` content may be up to 500,000 characters instead of 100,000.
 
-The v4 endpoint takes a `prompt_components` list (1 to 100 items). Move your v2 request fields as follows:
+The v4 endpoint takes a `prompt_components` list (1 to 100 items). The first item must be the `code_editor_completion` or `code_editor_generation` component, and any `code_context` components follow it. Move your v2 request fields as follows:
 
 - The keys of `current_file` (`file_name`, `content_above_cursor`, `content_below_cursor`, `language_identifier`) become top-level keys of the `payload` of the `code_editor_completion` or `code_editor_generation` component.
 - In v2 the endpoint chose the task: `/v2/completions` and `/v2/code/completions` for completion, `/v2/code/generations` for generation. In v4 the component type does: `code_editor_completion` or `code_editor_generation`.
