@@ -44,6 +44,7 @@ from ai_gateway.config import (
     ConfigDuoWorkflow,
     ConfigGoogleCloudPlatform,
     ConfigTLS,
+    get_config,
 )
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import (
@@ -51,7 +52,7 @@ from ai_gateway.model_metadata import (
     ModelMetadataByTag,
     TypeModelMetadata,
 )
-from ai_gateway.model_selection import RestrictedModelAccessError
+from ai_gateway.model_selection import ModelSelectionConfig, RestrictedModelAccessError
 from ai_gateway.model_selection.model_selection_config import LLMDefinition
 from ai_gateway.model_selection.models import BaseModelParams, ModelClassProvider
 from ai_gateway.prompts import BasePromptRegistry, Prompt
@@ -7087,6 +7088,82 @@ async def test_execute_workflow_denies_checkpoint_resume_on_restricted_model(
         grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
     )
     mock_resolve_flow.assert_not_called()
+
+
+async def _run_registry_flow_with_model_header(
+    flow_config_id: str, raw: dict, mock_context, mock_resolve_flow, mock_workflow_class
+) -> list[str]:
+    """Run a registry flow for a direct caller that sends `raw` as model metadata, and return the models it gets."""
+    current_user.set(_workflow_token_user(flow_config_id=None))
+    details = MagicMock()
+    details.invocation_metadata = [
+        (
+            ModelMetadataInterceptor.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA,
+            json.dumps(raw),
+        )
+    ]
+    await ModelMetadataInterceptor().intercept_service(AsyncMock(), details)
+    served: list[str] = []
+
+    def record_model() -> None:
+        metadata = current_model_metadata_context.get()
+        assert metadata is not None
+        served.append(metadata.llm_definition.gitlab_identifier)
+
+    await _execute_registry_flow(
+        flow_config_id,
+        mock_context,
+        mock_resolve_flow,
+        mock_workflow_class,
+        on_build=record_model,
+    )
+
+    return served
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_runs_a_flat_rate_flow_on_its_feature_models(
+    mock_resolve_flow, mock_workflow_class, mock_context, monkeypatch
+):
+    """A direct caller cannot run a model at the flat Code Review rate that the review feature does not allow."""
+    monkeypatch.setattr(get_config().custom_models, "enabled", False)
+
+    served = await _run_registry_flow_with_model_header(
+        "code_review",
+        {"provider": "gitlab", "identifier": "claude_fable_5"},
+        mock_context,
+        mock_resolve_flow,
+        mock_workflow_class,
+    )
+
+    mock_context.abort.assert_not_called()
+    review = ModelSelectionConfig.instance().get_unit_primitive_config_map()[
+        "review_merge_request_dap"
+    ]
+    assert len(served) == 1
+    assert served[0] in review.default_model_identifiers
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_keeps_the_client_model_for_a_flow_billed_per_operation(
+    mock_resolve_flow, mock_workflow_class, mock_context, monkeypatch
+):
+    monkeypatch.setattr(get_config().custom_models, "enabled", False)
+
+    served = await _run_registry_flow_with_model_header(
+        "developer",
+        {"provider": "gitlab", "identifier": "claude_fable_5"},
+        mock_context,
+        mock_resolve_flow,
+        mock_workflow_class,
+    )
+
+    mock_context.abort.assert_not_called()
+    assert served == ["claude_fable_5"]
 
 
 @pytest.mark.asyncio
