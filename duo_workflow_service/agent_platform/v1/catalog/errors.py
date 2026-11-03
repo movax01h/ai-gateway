@@ -16,6 +16,7 @@ __all__ = [
     "CatalogItemError",
     "CatalogItemsError",
     "CatalogItemsFetchError",
+    "is_catalog_refusal",
 ]
 
 
@@ -104,7 +105,20 @@ class CatalogAgentsUnavailableError(NotifiableAgentException):
     def from_error(
         cls, error: CatalogItemsFetchError | CatalogItemsError
     ) -> "CatalogAgentsUnavailableError":
-        """Wrap a fetch or binding error, with its detail kept server-side."""
-        if isinstance(error, CatalogItemsFetchError):
-            return cls(cls.FETCH_FAILED_MESSAGE, internal_detail=str(error))
-        return cls(cls.REFUSED_MESSAGE, internal_detail=str(error))
+        """Wrap a fetch or binding error, with its detail kept server-side.
+
+        Only a fetch error that a later request can pass asks the user to try again.
+        """
+        if is_catalog_refusal(error):
+            return cls(cls.REFUSED_MESSAGE, internal_detail=str(error))
+        return cls(cls.FETCH_FAILED_MESSAGE, internal_detail=str(error))
+
+
+def is_catalog_refusal(error: Optional[BaseException]) -> bool:
+    """Whether the catalog items for this run fail the same way on every turn.
+
+    A refused or unusable item is a refusal. So is a fetch error that a retry cannot pass, like a 404.
+    """
+    if isinstance(error, CatalogItemsFetchError):
+        return not error.retryable
+    return isinstance(error, CatalogItemsError)

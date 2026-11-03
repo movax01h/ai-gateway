@@ -2936,8 +2936,12 @@ class TestPrepareCompileFetchesCatalogAgents:
                 CatalogAgentsUnavailableError.REFUSED_MESSAGE,
             ),
             (
-                CatalogItemsFetchError("HTTP 503: upstream down"),
+                CatalogItemsFetchError("HTTP 503: upstream down", status_code=503),
                 CatalogAgentsUnavailableError.FETCH_FAILED_MESSAGE,
+            ),
+            (
+                CatalogItemsFetchError("HTTP 404: not found", status_code=404),
+                CatalogAgentsUnavailableError.REFUSED_MESSAGE,
             ),
         ],
     )

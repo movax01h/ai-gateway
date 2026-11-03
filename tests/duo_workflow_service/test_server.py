@@ -64,6 +64,10 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
     MissingAdditionalContextError,
     NotifiableAgentException,
 )
+from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogItemsError,
+    CatalogItemsFetchError,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
@@ -101,6 +105,7 @@ from duo_workflow_service.interceptors.trusted_restricted_issuers import (
 )
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.server import (
+    CATALOG_REFUSAL_DETAILS,
     CONTAINER_APPLICATION_PACKAGES,
     DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S,
     DEFAULT_SHUTDOWN_KILL_DEADLINE_S,
@@ -1594,6 +1599,27 @@ def _cyclic_error() -> BaseException:
             None,
             grpc.StatusCode.PERMISSION_DENIED,
             "Workflow token is not authorized for the requested workflow",
+        ),
+        (
+            CatalogItemsError("Item 'gid://gitlab/Ai::Catalog::Item/7' is not enabled"),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            CATALOG_REFUSAL_DETAILS,
+        ),
+        (
+            CatalogItemsFetchError("HTTP 404: not found", status_code=404),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            CATALOG_REFUSAL_DETAILS,
+        ),
+        (
+            CatalogItemsFetchError("HTTP 503: upstream down", status_code=503),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            "workflow execution failure: CatalogItemsFetchError",
         ),
     ],
 )

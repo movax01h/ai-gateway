@@ -54,6 +54,7 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
     MissingAdditionalContextError,
 )
 from duo_workflow_service.agent_platform.utils.validation import FlowValidator
+from duo_workflow_service.agent_platform.v1.catalog.errors import is_catalog_refusal
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     discover_feature_flow_configs,
 )
@@ -208,6 +209,7 @@ WORKFLOW_ID_CLAIM = "workflow_id"
 # Rails sets this on every token it self-signs for DWS, so with no workflow_id the token is unbound.
 BINDS_WORKFLOW_CLAIM = "binds_workflow"
 WORKFLOW_BINDING_DETAILS = "Workflow token is not authorized for the requested workflow"
+CATALOG_REFUSAL_DETAILS = "The AI Catalog agents for this flow are not available"
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
 # these get workflow tokens that unlock the restricted models of the flow they are
 # minted for, and ExecuteWorkflow accepts their instance token's flow claim for
@@ -1208,6 +1210,11 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             elif isinstance(workflow.last_error, WorkflowTokenRejectedError):
                 context.set_code(grpc.StatusCode.PERMISSION_DENIED)
                 context.set_details(workflow.last_error.details)
+            elif is_catalog_refusal(workflow.last_error):
+                # Every turn gets the same answer, so this is a refusal and not a service fault.
+                # The error text can hold GitLab's answer, so the details are static.
+                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                context.set_details(CATALOG_REFUSAL_DETAILS)
             elif restricted_error := _find_restricted_model_access_error(
                 workflow.last_error
             ):
