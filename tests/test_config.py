@@ -17,6 +17,7 @@ from ai_gateway.config import (
     ConfigBedrockGuardrail,
     ConfigBillingEvent,
     ConfigCachingProxy,
+    ConfigCodeSuggestions,
     ConfigCustomModels,
     ConfigDuoChat,
     ConfigDuoWorkflow,
@@ -1007,6 +1008,62 @@ def test_config_model_selection_feature_allowlist_modes_default_per_surface():
 )
 def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variable):
     with mock.patch.dict(os.environ, {variable: "strict"}, clear=True):
+        with pytest.raises(ValidationError):
+            Config(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (
+            {},
+            ConfigCodeSuggestions(
+                actor_limit_mode="off",
+                user_limit=5,
+                instance_limit=20,
+                instance_limit_per_seat=0.05,
+                namespace_limit=20,
+            ),
+        ),
+        (
+            {
+                "AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE": "enforce",
+                "AIGW_CODE_SUGGESTIONS__USER_LIMIT": "3",
+                "AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT": "30",
+                "AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "0.1",
+                "AIGW_CODE_SUGGESTIONS__NAMESPACE_LIMIT": "40",
+            },
+            ConfigCodeSuggestions(
+                actor_limit_mode="enforce",
+                user_limit=3,
+                instance_limit=30,
+                instance_limit_per_seat=0.1,
+                namespace_limit=40,
+            ),
+        ),
+    ],
+)
+def test_config_code_suggestions(values: dict, expected: ConfigCodeSuggestions):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.code_suggestions == expected
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE": "strict"},
+        {"AIGW_CODE_SUGGESTIONS__USER_LIMIT": "0"},
+        {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT": "0"},
+        {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "-1"},
+        {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "inf"},
+        {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "nan"},
+        {"AIGW_CODE_SUGGESTIONS__NAMESPACE_LIMIT": "0"},
+    ],
+)
+def test_config_code_suggestions_rejects_invalid_values(values: dict):
+    with mock.patch.dict(os.environ, values, clear=True):
         with pytest.raises(ValidationError):
             Config(_env_file=None)
 

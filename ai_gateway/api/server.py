@@ -27,6 +27,7 @@ from ai_gateway.api.client_disconnect import (
 )
 from ai_gateway.api.middleware import (
     AccessLogMiddleware,
+    ActorLimitMiddleware,
     DistributedTraceMiddleware,
     FeatureFlagMiddleware,
     InternalEventMiddleware,
@@ -203,6 +204,11 @@ def create_fast_api_server(config: Config):
             Middleware(
                 RequestBodyLimitMiddleware,
                 max_bytes=_CODE_SUGGESTIONS_MAX_BODY_BYTES,
+                path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
+            ),
+            Middleware(
+                ActorLimitMiddleware,
+                limits=config.code_suggestions,
                 path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
             ),
             Middleware(ModelConfigMiddleware, skip_endpoints=_SKIP_ENDPOINTS),
