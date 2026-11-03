@@ -85,7 +85,13 @@ class AiCatalogAgentSource(CatalogSource):
 
     @override
     def validate_ref(self, ref: CatalogItemRef) -> None:
-        """Require an id and a version, since GitLab resolves the agent itself."""
+        """Require an id and a version, since GitLab resolves the agent itself.
+
+        Raises:
+            CatalogItemConfigError: If the id or the version is missing or blank. A blank value is refused too, because
+                bind matches the reference to a served agent by its stripped id and version, and a blank one never
+                matches.
+        """
         if not ref.item_id.strip():
             raise CatalogItemConfigError(
                 f"include entry '{ref}' must name an agent by id."
@@ -103,8 +109,16 @@ class AiCatalogAgentSource(CatalogSource):
         When GitLab named a setting that turned the agents off, the claim is removed and nothing is attached, so
         the flow runs without its AI Catalog subagents.
 
+        Args:
+            request: The reference, the claiming component, and the agents GitLab served for this run.
+
+        Returns:
+            The flow's components, with the claimant rewritten and one component appended for the matched agent.
+
         Raises:
             CatalogItemConfigError: If GitLab served no agent for the claimed reference.
+            CatalogItemsError: If the agent's name collides with a component of this flow, or it declares an unusable
+                tool.
         """
         claimant_config = request.claimant_config
         reason = request.items.ai_catalog_skipped_reason

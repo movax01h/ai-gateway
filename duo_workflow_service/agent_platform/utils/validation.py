@@ -164,6 +164,12 @@ def placeholder_items_for(include: list[CatalogItemRef] | None) -> CatalogItems:
 
     GitLab resolves the real agents when the flow runs. The dry run still builds the supervisor and one subagent for
     each entry, so a flow that cannot build them fails validation at save.
+
+    Args:
+        include: The flow's include entries, or None when it declares none.
+
+    Returns:
+        The catalog items, with one placeholder agent for each AI Catalog agent entry that names an id and a version.
     """
     return CatalogItems(
         ai_catalog_agents=[
