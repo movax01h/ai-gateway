@@ -58,6 +58,66 @@ def remove_trailing_assistant_message(payload: dict) -> dict:
     return payload
 
 
+def remove_blank_text_blocks(payload: dict) -> dict:
+    """Drop empty and whitespace-only text blocks, which Anthropic rejects with a 400.
+
+    langchain-anthropic sends a bare string content item as a text block without its blank check. A reply streamed
+    with no tools from a model that thinks by default (Claude 5.x) is saved as ["", {thinking}, "text"], so every later
+    turn of the thread fails: https://github.com/langchain-ai/langchain/issues/39687
+    """
+    system = payload.get("system")
+    if isinstance(system, list):
+        system = [block for block in system if not _is_blank_text(block)]
+    if isinstance(system, str):
+        system = system if system.strip() else None
+    if system:
+        payload["system"] = system
+    else:
+        payload.pop("system", None)
+
+    if "messages" in payload:
+        cleaned = map(_without_blank_text, payload["messages"])
+        payload["messages"] = _rstrip_final_assistant_text(
+            [message for message in cleaned if message is not None]
+        )
+    return payload
+
+
+def _without_blank_text(message: dict) -> dict | None:
+    """Return the message unchanged, a copy without its blank text blocks, or None when nothing is left."""
+    content = message.get("content")
+    if not isinstance(content, list) or not any(map(_is_blank_text, content)):
+        return message
+
+    kept = [block for block in content if not _is_blank_text(block)]
+    return {**message, "content": kept} if kept else None
+
+
+def _rstrip_final_assistant_text(messages: list[dict]) -> list[dict]:
+    """Strip trailing whitespace from the last text block of a final assistant turn.
+
+    Anthropic rejects a prefill that ends with whitespace. langchain-anthropic strips the last block before the blank
+    filter runs, so dropping a blank last block exposes a block it never stripped.
+    """
+    if not messages or messages[-1].get("role") != "assistant":
+        return messages
+
+    content = messages[-1].get("content")
+    if not (isinstance(content, list) and content and _is_text(content[-1])):
+        return messages
+
+    last_block = {**content[-1], "text": content[-1]["text"].rstrip()}
+    return [*messages[:-1], {**messages[-1], "content": [*content[:-1], last_block]}]
+
+
+def _is_text(block: Any) -> bool:
+    return isinstance(block, dict) and block.get("type") == "text"
+
+
+def _is_blank_text(block: Any) -> bool:
+    return _is_text(block) and not str(block.get("text", "")).strip()
+
+
 def _extract_text(content: Any) -> str:
     if isinstance(content, str):
         return content
