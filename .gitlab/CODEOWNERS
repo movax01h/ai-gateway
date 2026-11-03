@@ -62,7 +62,6 @@
 /ai_gateway/prompts/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/prompts/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/prompts/definitions/resolve_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
@@ -96,6 +95,9 @@
 
 # SkillGuard flow and prompts (Code Security)
 /ai/features/security/skillguard_scan/ @mbenayoun @mtolpin @philipcunningham
+
+# Vulnerability resolution prompt (Code Security)
+/ai/features/security/resolve_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude
@@ -158,7 +160,6 @@
 /ai_gateway/prompts/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/prompts/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/prompts/definitions/resolve_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
@@ -189,6 +190,9 @@
 
 # SkillGuard flow and prompts (Code Security)
 /ai/features/security/skillguard_scan/ @mbenayoun @mtolpin @philipcunningham
+
+# Vulnerability resolution prompt (Code Security)
+/ai/features/security/resolve_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 
 # Fix Pipeline prompts and response schemas
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
