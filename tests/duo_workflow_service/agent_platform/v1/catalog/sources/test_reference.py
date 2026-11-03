@@ -92,5 +92,16 @@ class TestCatalogItemRef:
         """
         assert (ref() == ref(**overrides)) is expected
 
+    @pytest.mark.parametrize(
+        "overrides,expected",
+        [
+            ({"item_id": " 53 ", "version": " 1.0.0 "}, ("53", "1.0.0")),
+            ({"item_id": "53"}, ("53", "")),
+        ],
+        ids=["stripped", "no_version"],
+    )
+    def test_match_key_is_the_stripped_id_and_version(self, overrides, expected, ref):
+        assert ref(**overrides).match_key() == expected
+
     def test_str_names_the_reference_for_error_messages(self, ref):
         assert str(ref()) == "workspace/agent_template/*"

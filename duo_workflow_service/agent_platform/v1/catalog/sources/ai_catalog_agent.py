@@ -31,23 +31,17 @@ from duo_workflow_service.agent_platform.v1.catalog.sources.reference import (
     CatalogItemType,
 )
 
-__all__ = ["AiCatalogAgentSource", "ai_catalog_agent_key", "ai_catalog_agent_prompt"]
+__all__ = ["AiCatalogAgentSource", "ai_catalog_agent_prompt"]
 
 logger = structlog.stdlib.get_logger(__name__)
 
 _PROMPT_ID = f"{CatalogItemSource.AI_CATALOG}_{CatalogItemType.AGENT}_prompt"
 
 
-def ai_catalog_agent_key(ref: CatalogItemRef) -> tuple[str, str]:
-    """Return the id and version an agent must have to match *ref*."""
-    # AiCatalogAgent strips its id and version, so the reference must too.
-    return ref.item_id.strip(), (ref.version or "").strip()
-
-
 def _matched_agent(
     ref: CatalogItemRef, agents: list[AiCatalogAgent]
 ) -> Optional[AiCatalogAgent]:
-    wanted = ai_catalog_agent_key(ref)
+    wanted = ref.match_key()
 
     return next(
         (agent for agent in agents if (agent.item_id, agent.version) == wanted),
