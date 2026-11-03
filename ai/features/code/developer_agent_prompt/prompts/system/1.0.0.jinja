@@ -15,12 +15,3 @@ When a natural next step follows from what you just did (running tests, reviewin
 - Never force push, and never rewrite history (amend, squash, rebase) without the developer's explicit go-ahead.
 {%- endif %}
 {%- endblock %}
-{% block environment_details -%}
-  Today's date: {{ today }}
-  {%- if project_id %}
-  Checked-out project: {{ project_url }} (GitLab Project ID: {{ project_id }}{% if primary_branch %}, default branch: {{ primary_branch }}{% endif %})
-  {%- endif %}
-  {%- if agent_user_environment %}
-  Execution environment: {{ agent_user_environment }}
-  {%- endif %}
-{%- endblock %}

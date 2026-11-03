@@ -87,6 +87,7 @@ These fields are logged for quality analysis only so they must reflect your FINA
 {%- endblock %}
 
 {% block tool_instructions %}
+- Available CLI tools: glab (authenticated for this GitLab instance), git
 - Use `glab` (authenticated for this instance) via `run_command` for all GitLab operations not covered by a dedicated tool: reading MR metadata/diffs (`glab mr view`, `glab mr diff`), creating MRs (`glab mr create`), posting comments (`glab mr note`), and any AGENTS.md-driven action such as filing an issue (`glab issue create`).
 - Investigate lazily — fetch only the data you need, when you need it:
   1. Start by calling, together in one response: `get_pipeline_failing_jobs` for {{ pipeline_url }} and `get_failing_bridge_jobs`{% if merge_request_url %}, plus reading the MR diff via `glab mr diff`{% endif %}.
