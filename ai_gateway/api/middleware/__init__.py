@@ -1,4 +1,5 @@
 from .access_log import AccessLogMiddleware
+from .actor_limit import ActorLimitMiddleware
 from .authentication import MiddlewareAuthentication
 from .distributed_trace import DistributedTraceMiddleware
 from .feature_flag import FeatureFlagMiddleware
@@ -41,6 +42,7 @@ __all__ = [
     "X_GITLAB_TEAM_MEMBER_HEADER",
     "X_GITLAB_VERSION_HEADER",
     "AccessLogMiddleware",
+    "ActorLimitMiddleware",
     "DistributedTraceMiddleware",
     "FeatureFlagMiddleware",
     "InternalEventMiddleware",

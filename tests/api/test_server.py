@@ -20,6 +20,7 @@ from ai_gateway.api.client_disconnect import (
 )
 from ai_gateway.api.feature_category import get_feature_categories
 from ai_gateway.api.middleware import (
+    ActorLimitMiddleware,
     MiddlewareAuthentication,
     ModelConfigMiddleware,
     RequestBodyLimitMiddleware,
@@ -213,7 +214,7 @@ def test_every_route_has_feature_category():
     )
 
 
-def test_request_body_limit_runs_after_authentication(fastapi_server_app):
+def test_code_suggestions_limits_run_after_authentication(fastapi_server_app):
     middleware = fastapi_server_app.user_middleware
     authentication = next(
         i for i, m in enumerate(middleware) if isinstance(m, MiddlewareAuthentication)
@@ -221,11 +222,14 @@ def test_request_body_limit_runs_after_authentication(fastapi_server_app):
     body_limit = next(
         i for i, m in enumerate(middleware) if m.cls is RequestBodyLimitMiddleware
     )
+    actor_limit = next(
+        i for i, m in enumerate(middleware) if m.cls is ActorLimitMiddleware
+    )
     model_config = next(
         i for i, m in enumerate(middleware) if m.cls is ModelConfigMiddleware
     )
 
-    assert authentication < body_limit < model_config
+    assert authentication < body_limit < actor_limit < model_config
 
 
 def test_setup_prometheus_fastapi_instrumentator():
