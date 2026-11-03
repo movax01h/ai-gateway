@@ -322,6 +322,7 @@ components:
       - on_delegation_returns
       - on_delegation_error
       - on_agent_final_answer
+      - on_tool_execution_success
       - on_tool_execution_failed
     subagents:
       - name: rubric
