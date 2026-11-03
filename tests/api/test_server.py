@@ -264,7 +264,7 @@ async def test_lifespan(config, app, unused_port, monkeypatch, vertex_project):
 
     config.fastapi.metrics_port = unused_port
 
-    app.extra = {"extra": {"config": config}}
+    app.state.config = config
 
     async with server.lifespan(app):
         mock_container_app.assert_called_once()
@@ -768,7 +768,7 @@ async def test_lifespan_wires_and_validates():
     config = MagicMock()
     config.instrumentator.thread_monitoring_enabled = False
     app = MagicMock()
-    app.extra = {"extra": {"config": config}}
+    app.state.config = config
 
     with (
         patch("ai_gateway.api.server.ContainerApplication") as mock_container,
@@ -793,7 +793,7 @@ async def test_lifespan_snowplow_shutdown():
     config = MagicMock()
     config.instrumentator.thread_monitoring_enabled = False
     app = MagicMock()
-    app.extra = {"extra": {"config": config}}
+    app.state.config = config
 
     with (
         patch("ai_gateway.api.server.ContainerApplication") as mock_container,
@@ -816,7 +816,7 @@ async def test_lifespan_snowplow_shutdown_exception():
     config = MagicMock()
     config.instrumentator.thread_monitoring_enabled = False
     app = MagicMock()
-    app.extra = {"extra": {"config": config}}
+    app.state.config = config
 
     with (
         patch("ai_gateway.api.server.ContainerApplication") as mock_container,

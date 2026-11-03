@@ -125,8 +125,8 @@ def mock_client_fixture(
     mock_config,
 ):
     """Setup all the needed mocks to perform requests in the test environment."""
-    # Set the config on the app in the nested structure: extra['extra']['config']
-    test_client.app.extra["extra"] = {"config": mock_config}
+    # Set the config on the app state
+    test_client.app.state.config = mock_config
 
     # Initialize usage quota service for tests
     test_client.app.state.usage_quota_service = UsageQuotaService(
