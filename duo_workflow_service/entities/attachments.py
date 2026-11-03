@@ -49,6 +49,7 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 from pydantic import BaseModel
 
 from duo_workflow_service.entities.image_blocks import image_content_block
+from duo_workflow_service.errors.typing import NotifiableException
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 __all__ = [
@@ -58,6 +59,7 @@ __all__ = [
     "MAX_ATTACHMENT_BYTES",
     "MAX_TOTAL_ATTACHMENT_BYTES",
     "Attachment",
+    "AttachmentsNotAllowedError",
     "attachment_content_blocks",
     "attachment_reference_envelopes",
     "attachment_rejection_block",
@@ -106,6 +108,14 @@ MAX_TOTAL_ATTACHMENT_BYTES = 2_500_000
 # thread. 255 is the limit essentially every filesystem imposes, so a longer name
 # did not come from a file picker.
 MAX_FILENAME_CHARS = 255
+
+
+class AttachmentsNotAllowedError(NotifiableException):
+    """Raised when a turn carries attachments this workflow does not allow.
+
+    A ``NotifiableException`` because the message tells the user why the turn was refused and is safe to display
+    verbatim.
+    """
 
 
 class Attachment(BaseModel):
