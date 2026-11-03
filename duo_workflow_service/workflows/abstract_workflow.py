@@ -974,7 +974,7 @@ class AbstractWorkflow(ABC):
                     status_event = WorkflowStatusEventEnum.START
 
                 await self._route_default_model(goal, status_event)
-                await self._prepare_compile(tools_registry)
+                await self._prepare_compile()
 
                 # Compile is CPU-bound process hence we're using a thread to avoid interrupting the gRPC server.
                 # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1468
@@ -1202,7 +1202,7 @@ class AbstractWorkflow(ABC):
         """
         return None, WorkflowStatusEventEnum.RETRY
 
-    async def _prepare_compile(self, tools_registry: ToolsRegistry) -> None:
+    async def _prepare_compile(self) -> None:
         """Fetch what the graph needs before it is built.
 
         ``_compile`` runs in a thread and is synchronous, so a subclass that needs GitLab data for the build fetches it

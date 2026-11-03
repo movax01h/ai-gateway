@@ -2870,7 +2870,7 @@ class TestPrepareCompileFetchesCatalogAgents:
     ):
         flow = self._flow([AI_CATALOG_REF], user)
 
-        await flow._prepare_compile(Mock())
+        await flow._prepare_compile()
 
         fetch.assert_awaited_once_with(flow._http_client, "44")
         assert [a.item_id for a in flow._catalog_items.ai_catalog_agents] == ["53"]
@@ -2890,7 +2890,7 @@ class TestPrepareCompileFetchesCatalogAgents:
             ]
         )
 
-        await flow._prepare_compile(Mock())
+        await flow._prepare_compile()
 
         assert [a.name for a in flow._catalog_items.workspace_agents] == [
             "workspace/agents/tester"
@@ -2904,7 +2904,7 @@ class TestPrepareCompileFetchesCatalogAgents:
     ):
         flow = self._flow(include, user)
 
-        await flow._prepare_compile(Mock())
+        await flow._prepare_compile()
 
         fetch.assert_not_awaited()
         assert flow._catalog_items.ai_catalog_agents == []
@@ -2918,7 +2918,7 @@ class TestPrepareCompileFetchesCatalogAgents:
             [AI_CATALOG_REF, WORKSPACE_REF], user, subagents=[AI_CATALOG_REF]
         )
 
-        await flow._prepare_compile(Mock())
+        await flow._prepare_compile()
 
         assert flow._catalog_items.ai_catalog_agents == []
         assert flow._catalog_items.ai_catalog_skipped_reason == "custom_agents_disabled"
@@ -2948,7 +2948,7 @@ class TestPrepareCompileFetchesCatalogAgents:
         flow = self._flow([AI_CATALOG_REF], user)
 
         with pytest.raises(CatalogAgentsUnavailableError) as raised:
-            await flow._prepare_compile(Mock())
+            await flow._prepare_compile()
 
         assert raised.value.ui_message == ui_message
         assert raised.value.internal_detail == str(error)

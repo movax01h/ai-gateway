@@ -647,15 +647,14 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
-async def test_compile_and_run_graph_prepares_compile_with_the_tools_registry(
+async def test_compile_and_run_graph_prepares_compile_before_the_build(
     mock_tools_registry,
     mock_gitlab_workflow,
     _mock_convert_mcp_tools,
     user,
 ):
-    """The async prepare step runs after the tools registry exists and before the graph is compiled."""
-    tools_registry = MagicMock()
-    mock_tools_registry.return_value = tools_registry
+    """The async prepare step runs before the graph is compiled."""
+    mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
     mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
     mock_checkpointer.initial_status_event = "START"
@@ -669,9 +668,8 @@ async def test_compile_and_run_graph_prepares_compile_with_the_tools_registry(
         user,
     )
 
-    async def prepare(registry):
+    async def prepare():
         order.append("prepare")
-        assert registry is tools_registry
 
     original_compile = workflow._compile
 

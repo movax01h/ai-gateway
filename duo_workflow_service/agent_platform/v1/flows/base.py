@@ -677,7 +677,7 @@ class Flow(AbstractWorkflow):
                 return None
 
     @override
-    async def _prepare_compile(self, tools_registry: ToolsRegistry) -> None:
+    async def _prepare_compile(self) -> None:
         """Fetch the AI Catalog agents the flow references, when it references any.
 
         The fetch is a RunHTTPRequest action on the run's stream, which Workhorse serves with the run's token. GitLab
