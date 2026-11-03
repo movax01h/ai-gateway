@@ -476,6 +476,48 @@ class TestCompactionOptimizerCompact:
 
     @pytest.mark.asyncio
     @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_compact_stores_a_streamed_summary_as_text_only(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        """A summary streamed after a thinking block merges to ["", {thinking}, "text"]."""
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+        mock_prompt.ainvoke.return_value = AIMessage(
+            content=[
+                "",
+                {"type": "thinking", "signature": "sig", "index": 0},
+                "Summary of conversation",
+            ],
+            response_metadata={"stop_reason": "max_tokens"},
+        )
+
+        result = await compactor.compact(_history_with_usage())
+
+        assert result.was_compacted is True
+        assert result.summary.content == "Summary of conversation"
+        assert result.summary.response_metadata == {"stop_reason": "max_tokens"}
+        assert result.messages[1] == result.summary
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
+    async def test_compact_keeps_original_messages_when_the_summary_has_no_text(
+        self, mock_count_tokens, mock_get_max_context, compactor, mock_prompt
+    ):
+        mock_get_max_context.return_value = 400_000
+        mock_count_tokens.side_effect = _token_count_side_effect(int(0.8 * 400_000))
+        mock_prompt.ainvoke.return_value = AIMessage(
+            content=["", {"type": "thinking", "signature": "sig", "index": 0}]
+        )
+        messages = _history_with_usage()
+
+        result = await compactor.compact(messages)
+
+        assert result.was_compacted is False
+        assert result.messages == messages
+        assert isinstance(result.error, ValueError)
+
+    @pytest.mark.asyncio
+    @patch("duo_workflow_service.conversation.token_estimator.TokenEstimator.count")
     @patch(
         "duo_workflow_service.conversation.history_optimizer.optimizers.compaction.get_model_metadata",
         return_value=None,

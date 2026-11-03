@@ -94,7 +94,7 @@ ExceptionHandler = Callable[[Request, Exception], Awaitable[Response]]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    config = app.extra["extra"]["config"]
+    config = app.state.config
     container_application = ContainerApplication()
     wire_and_validate(container_application, modules=CONTAINER_APPLICATION_MODULES)
     container_application.config.from_dict(config.model_dump())
@@ -221,9 +221,9 @@ def create_fast_api_server(config: Config):
             ),
             Middleware(ModelConfigMiddleware, skip_endpoints=_SKIP_ENDPOINTS),
         ],
-        extra={"config": config},
     )
 
+    fastapi_app.state.config = config
     fastapi_app.state.cloud_connector_auth_provider = (
         auth_provider  # For readiness check
     )

@@ -412,8 +412,15 @@ class CompactionOptimizer(HistoryOptimizer):
             inputs["user_instruction"] = user_instruction
 
         prompt = self._get_prompt(is_manual)
-        result = await prompt.ainvoke(inputs, config=config)
-        return cast(AIMessage, result)
+        result = cast(AIMessage, await prompt.ainvoke(inputs, config=config))
+
+        # A streamed reply that opens with a thinking block merges to
+        # ["", {thinking}, "text"], and langchain-anthropic sends that bare ""
+        # as an empty text block, which Anthropic rejects on every later turn.
+        summary_text = str(result.text)
+        if not summary_text.strip():
+            raise ValueError("Compaction summary is empty")
+        return result.model_copy(update={"content": summary_text})
 
     def _calculate_compacted_tokens(
         self,
@@ -506,7 +513,7 @@ def build_compaction_tool_card(
     summary = result.summary if result is not None else None
     if summary is not None:
         tool_info["tool_response"] = ToolMessage(
-            content=render_for_display(summary.text(), tool_name="compaction"),
+            content=render_for_display(summary.text, tool_name="compaction"),
             name="compaction",
             tool_call_id=tool_call_id,
             status="success",
