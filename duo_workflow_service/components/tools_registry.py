@@ -17,6 +17,7 @@ from typing import (
     Type,
     TypedDict,
     Union,
+    cast,
 )
 
 import boto3
@@ -68,6 +69,10 @@ class ToolMetadata(TypedDict):
     # Signs AgentCore gateway requests for web search. None whenever web search is disabled,
     # which AgentCoreWebSearch reports as a configuration error rather than searching unsigned.
     boto_session: NotRequired[Optional[boto3.Session]]
+    # Privileges Rails granted the run, with each read privilege filled in from its
+    # write superset, so a tool checks one name. Absent only when ListTools builds
+    # tools without a registry.
+    granted_privileges: NotRequired[frozenset[str]]
 
 
 # This tools agent uses to interact with its internal state, they are required for
@@ -343,6 +348,15 @@ _PRIVILEGE_SUPERSETS: dict[str, list[str]] = {
     "read_only_gitlab": ["read_only_gitlab", "read_write_gitlab"],
     "read_only_files": ["read_only_files", "read_write_files"],
 }
+
+
+def _effective_privileges(enabled: Iterable[str]) -> frozenset[str]:
+    """The granted privileges plus every read privilege that a granted write privilege implies."""
+    granted = set(enabled)
+    for read_privilege, supersets in _PRIVILEGE_SUPERSETS.items():
+        if granted.intersection(supersets):
+            granted.add(read_privilege)
+    return frozenset(granted)
 
 
 def _tool_name(tool_cls: Union[Type[BaseTool], Type[BaseModel]]) -> str:
@@ -694,6 +708,16 @@ class ToolsRegistry:
         enabled_tools.append(_RUN_MCP_TOOLS_PRIVILEGE)
         self._enabled_privileges = set(enabled_tools)
 
+        # Tools that gate a step on a privilege read it from their metadata, so the
+        # superset rules stay in this one place.
+        tool_metadata = cast(
+            ToolMetadata,
+            {
+                **tool_metadata,
+                "granted_privileges": _effective_privileges(enabled_tools),
+            },
+        )
+
         registered_mcp_tools: list[McpToolConfig] = []
         if _RUN_MCP_TOOLS_PRIVILEGE in enabled_tools:
             registered_mcp_tools = _drop_shadowing_mcp_tools(
@@ -749,52 +773,7 @@ class ToolsRegistry:
                 if privilege in preapproved_tools:
                     self._preapproved_tool_names.add(tool.name)
 
-        # Add capability-dependent tools if condition is met.
-        # Each tool's required_capability frozenset encodes all capabilities needed,
-        # so is_client_capable alone resolves to the correct supersession tool.
-        for tool_cls in _CAPABILITY_DEPENDENT_TOOLS:
-            required_capability = getattr(tool_cls, "required_capability", None)
-            if not required_capability:
-                error_msg = (
-                    f"Tool {tool_cls.__name__} is in "
-                    "_CAPABILITY_DEPENDENT_TOOLS but does not define "
-                    "'required_capability'"
-                )
-                raise RuntimeError(error_msg)
-
-            # Skip tool if client capability check fails
-            if not is_client_capable(required_capability):
-                continue
-
-            # Skip tool if it declares additional runtime conditions that are not met,
-            # such as a feature flag or a fallback that only applies for some models.
-            is_available = getattr(tool_cls, "is_available", None)
-            if is_available is not None and not is_available():
-                continue
-
-            # Don't add capability dependent tool if it supersedes another tool
-            # and the superseded tool is not currently enabled
-            supersedes = getattr(tool_cls, "supersedes", None)
-            if (
-                supersedes is not None
-                and supersedes.model_fields["name"].default not in self._enabled_tools
-            ):
-                continue
-
-            # replace the superseded tool with this tool instance
-            # pre-approval status will not be changed
-            # deny status is inherited implicitly: if the superseded tool name is in
-            # _denied_tools, toolset() will strip it regardless of which instance is active
-            tool_name = tool_cls.model_fields["name"].default
-            self._enabled_tools[tool_name] = tool_cls(metadata=tool_metadata)
-
-            # A tool that supersedes nothing introduces a new name, so there is no pre-approval to
-            # inherit and the default is to prompt. Pre-approval is granted only by explicit
-            # listing, so adding a capability-dependent tool never changes its approval behaviour
-            # by itself.
-            if tool_cls in _PREAPPROVED_CAPABILITY_TOOLS:
-                self._preapproved_tool_names.add(tool_name)
-                baseline_preapproved.add(tool_name)
+        self._add_capability_dependent_tools(tool_metadata, baseline_preapproved)
 
         if allow_client_injected_mcp_tools:
             client_injected = {
@@ -848,6 +827,60 @@ class ToolsRegistry:
         # a user can be prompted: headless sessions arrive with `ask_tools` already
         # emptied upstream, so an ask rule cannot force a prompt there.
         self._preapproved_tool_names -= self._ask_tool_names
+
+    def _add_capability_dependent_tools(
+        self, tool_metadata: ToolMetadata, baseline_preapproved: set[str]
+    ) -> None:
+        """Add the tools whose presence depends on what the client declared.
+
+        Split out of ``__init__`` as is; the body is unchanged.
+        """
+        # Add capability-dependent tools if condition is met.
+        # Each tool's required_capability frozenset encodes all capabilities needed,
+        # so is_client_capable alone resolves to the correct supersession tool.
+        for tool_cls in _CAPABILITY_DEPENDENT_TOOLS:
+            required_capability = getattr(tool_cls, "required_capability", None)
+            if not required_capability:
+                error_msg = (
+                    f"Tool {tool_cls.__name__} is in "
+                    "_CAPABILITY_DEPENDENT_TOOLS but does not define "
+                    "'required_capability'"
+                )
+                raise RuntimeError(error_msg)
+
+            # Skip tool if client capability check fails
+            if not is_client_capable(required_capability):
+                continue
+
+            # Skip tool if it declares additional runtime conditions that are not met,
+            # such as a feature flag or a fallback that only applies for some models.
+            is_available = getattr(tool_cls, "is_available", None)
+            if is_available is not None and not is_available():
+                continue
+
+            # Don't add capability dependent tool if it supersedes another tool
+            # and the superseded tool is not currently enabled
+            supersedes = getattr(tool_cls, "supersedes", None)
+            if (
+                supersedes is not None
+                and supersedes.model_fields["name"].default not in self._enabled_tools
+            ):
+                continue
+
+            # replace the superseded tool with this tool instance
+            # pre-approval status will not be changed
+            # deny status is inherited implicitly: if the superseded tool name is in
+            # _denied_tools, toolset() will strip it regardless of which instance is active
+            tool_name = tool_cls.model_fields["name"].default
+            self._enabled_tools[tool_name] = tool_cls(metadata=tool_metadata)
+
+            # A tool that supersedes nothing introduces a new name, so there is no pre-approval to
+            # inherit and the default is to prompt. Pre-approval is granted only by explicit
+            # listing, so adding a capability-dependent tool never changes its approval behaviour
+            # by itself.
+            if tool_cls in _PREAPPROVED_CAPABILITY_TOOLS:
+                self._preapproved_tool_names.add(tool_name)
+                baseline_preapproved.add(tool_name)
 
     def _apply_first_party_verdicts(
         self, first_party_tools: Mapping[str, FirstPartyVerdict]
