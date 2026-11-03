@@ -300,6 +300,7 @@ def create_mock_internal_event_client():
 def create_mock_default_config():
     """Helper function to create a mock default config for tests."""
     mock_config = MagicMock(spec=Config)
+    mock_config.custom_models = ConfigCustomModels()
     mock_config.duo_workflow = MagicMock()
     mock_config.duo_workflow.tls = ConfigTLS()
     return mock_config
@@ -3076,6 +3077,7 @@ class TestServeTLS:
         """Return a minimal mock Config with TLS settings for duo_workflow."""
 
         mock_config = MagicMock(spec=Config)
+        mock_config.custom_models = ConfigCustomModels()
         mock_config.duo_workflow = MagicMock()
         mock_config.duo_workflow.tls = ConfigTLS(
             enabled=tls_enabled, cert_file=cert_file, key_file=key_file

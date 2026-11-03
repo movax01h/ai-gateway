@@ -287,6 +287,44 @@ def test_cloud_connector_auth_provider_in_app_state():
     assert app.state.cloud_connector_auth_provider is not None
 
 
+@pytest.mark.parametrize(
+    ("custom_models_enabled", "portal_url", "expects_customers_dot"),
+    [
+        pytest.param("false", None, True, id="saas_default_url"),
+        pytest.param("false", "https://cdot.example.com", True, id="saas_explicit"),
+        pytest.param("true", None, False, id="self_hosted_default_url"),
+        pytest.param("true", "", False, id="self_hosted_empty_url"),
+        pytest.param(
+            "true", "https://cdot.example.com", True, id="self_hosted_explicit"
+        ),
+        pytest.param(
+            "true",
+            "https://customers.gitlab.com",
+            True,
+            id="self_hosted_explicit_default_value",
+        ),
+    ],
+)
+def test_cloud_connector_customers_dot_provider(
+    monkeypatch, custom_models_enabled, portal_url, expects_customers_dot
+):
+    monkeypatch.setenv("AIGW_CUSTOM_MODELS__ENABLED", custom_models_enabled)
+    if portal_url is None:
+        monkeypatch.delenv("AIGW_CUSTOMER_PORTAL_URL", raising=False)
+    else:
+        monkeypatch.setenv("AIGW_CUSTOMER_PORTAL_URL", portal_url)
+
+    config = Config(_env_file=None, auth=ConfigAuth(bypass_external=True))
+    app = create_fast_api_server(config)
+
+    expected = {"Gitlab": config.gitlab_url}
+    if expects_customers_dot:
+        expected["CustomersDot"] = portal_url or "https://customers.gitlab.com"
+
+    providers = app.state.cloud_connector_auth_provider.providers
+    assert providers[1].oidc_providers == expected
+
+
 def test_middleware_authentication(fastapi_server_app: FastAPI, auth_enabled: bool):
     client = TestClient(fastapi_server_app)
 
