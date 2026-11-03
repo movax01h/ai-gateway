@@ -17,6 +17,7 @@ from gitlab_cloud_connector import (
 )
 from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
 
+from ai_gateway.config import Config
 from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS, abort_handler
 from lib.context import cloud_connector_token_context_var
 from lib.jwt import (
@@ -50,8 +51,10 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
         "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
     )
 
-    def __init__(self, reflection_enabled: bool = False):
-        self.oidc_auth_provider = self._init_oidc_auth_provider()
+    def __init__(self, config: Config, reflection_enabled: bool = False):
+        self.oidc_auth_provider = self._init_oidc_auth_provider(
+            config.custom_models.enabled
+        )
         self._allow_unauthenticated_methods = GRPC_HEALTH_METHODS + (
             self._REFLECTION_METHODS if reflection_enabled else ()
         )
@@ -114,7 +117,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
 
         return root_namespace_id_from_claims_extra(claims.extra) is not None
 
-    def _init_oidc_auth_provider(self) -> AuthProvider:
+    def _init_oidc_auth_provider(self, custom_models_enabled: bool) -> AuthProvider:
         gitlab_url: str = oidc_gitlab_url()
         customer_portal_url: str = os.environ.get(
             "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
@@ -127,17 +130,17 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
             "DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY", ""
         )
 
+        oidc_providers = {"Gitlab": gitlab_url}
+        if not custom_models_enabled or os.environ.get(
+            "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL"
+        ):
+            oidc_providers["CustomersDot"] = customer_portal_url
+
         try:
             provider = CompositeProvider(
                 [
                     LocalAuthProvider(structlog, signing_key, validation_key),
-                    GitLabOidcProvider(
-                        structlog,
-                        oidc_providers={
-                            "Gitlab": gitlab_url,
-                            "CustomersDot": customer_portal_url,
-                        },
-                    ),
+                    GitLabOidcProvider(structlog, oidc_providers=oidc_providers),
                 ],
                 structlog,
             )

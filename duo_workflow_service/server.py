@@ -1827,7 +1827,7 @@ async def serve(config: Config, port: int) -> None:
             MetadataContextInterceptor(config),
             CorrelationIdInterceptor(),
             RequestMetadataLogInterceptor(),
-            AuthenticationInterceptor(reflection_enabled=reflection_enabled),
+            AuthenticationInterceptor(config, reflection_enabled=reflection_enabled),
             FeatureFlagInterceptor(),
             InternalEventsInterceptor(),
             ModelMetadataInterceptor(),

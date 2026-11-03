@@ -137,6 +137,20 @@ async def lifespan(app: FastAPI):
         )
 
 
+def _oidc_providers(config: Config) -> dict[str, str]:
+    """Return the OIDC key sources: GitLab's own keys always, and the Customers Portal keys unless custom models are
+    enabled, in which case only when `AIGW_CUSTOMER_PORTAL_URL` is explicitly set to a non-empty value.
+    """
+    oidc_providers = {"Gitlab": config.gitlab_url}
+
+    if not config.custom_models.enabled or (
+        config.customer_portal_url and "customer_portal_url" in config.model_fields_set
+    ):
+        oidc_providers["CustomersDot"] = config.customer_portal_url
+
+    return oidc_providers
+
+
 def create_fast_api_server(config: Config):
     auth_provider = CompositeProvider(
         [
@@ -145,13 +159,7 @@ def create_fast_api_server(config: Config):
                 signing_key=config.self_signed_jwt.signing_key,
                 validation_key=config.self_signed_jwt.validation_key,
             ),
-            GitLabOidcProvider(
-                structlog,
-                oidc_providers={
-                    "Gitlab": config.gitlab_url,
-                    "CustomersDot": config.customer_portal_url,
-                },
-            ),
+            GitLabOidcProvider(structlog, oidc_providers=_oidc_providers(config)),
         ],
         structlog,
         bypass_auth_jwt_signature=config.auth.bypass_jwt_signature,
