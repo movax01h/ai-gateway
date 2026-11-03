@@ -10,17 +10,27 @@ Incremental checkpoints send only the channels that changed, and within those ch
 
 ## Gating
 
-A per-workflow property gates this feature: `WorkflowConfig.incremental_checkpoints_enabled`, sourced from the workflow's `incrementalCheckpointsEnabled` field (see [`gitlab_api.py`](../duo_workflow_service/gitlab/gitlab_api.py)) and checked in `aput`. Workflows without it enabled receive the legacy payload unchanged. The current rollout is a **shadow write**: `aput` still sends the full `compressed_checkpoint` so reads keep working, and additionally sends the blobs; Rails persists both, and reads the header and blobs for any workflow with the column set.
+The workflow's `incremental_checkpoints_enabled` attribute gates this feature. The gateway reads it through the `incrementalCheckpointsEnabled` GraphQL field into `WorkflowConfig.incremental_checkpoints_enabled` (see [`gitlab_api.py`](../duo_workflow_service/gitlab/gitlab_api.py)) and checks it in `aput`. Workflows without the attribute set receive the legacy payload unchanged. GitLab sets the attribute on every workflow it creates from 19.5 on.
 
-A second gate layers on top: the `incremental_checkpoints_only` server capability, which says the instance stores only the header and the blobs. `aput` then sends the checkpoint skeleton (the langgraph checkpoint minus `channel_values`) instead of `compressed_checkpoint`. Rails advertises the capability from `duo_workflow_write_incremental_only`, workhorse appends it to `clientCapabilities`, and `is_client_capable` reads it here. An instance too old to advertise it keeps receiving the full payload, and Rails accepts both shapes, so a mid-session change can't break a write.
+A second gate layers on top: the `incremental_checkpoints_only` server capability, which says the instance stores only the header and the blobs. `aput` then sends the checkpoint skeleton (the langgraph checkpoint minus `channel_values`) instead of `compressed_checkpoint`. Rails advertises the capability unconditionally (earlier versions gated it behind the `duo_workflow_write_incremental_only` feature flag, removed in [GitLab merge request 265798](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265798)), workhorse appends it to `clientCapabilities`, and `is_client_capable` reads it here. An instance too old to advertise it keeps receiving `compressed_checkpoint`, and Rails accepts both shapes, so a mid-session change can't break a write.
 
-The proposed end state ([issue #605653](https://gitlab.com/gitlab-org/gitlab/-/issues/605653)) is to drop the full checkpoint from storage entirely: Rails would keep a slim **header** and reconstruct `channel_values` from the blobs on read. Storage would use two range-partitioned tables:
+`aput` picks one of three strategies from the two gates:
+
+- `incremental_only`: the attribute is set and the instance advertises `incremental_checkpoints_only`. Current GitLab versions use this path. Rails writes only the header and the blobs.
+
+- `incremental`: the attribute is set, but the instance doesn't advertise the capability. `aput` sends `compressed_checkpoint` and the blobs, and Rails writes the full row as well as the header and the blobs.
+
+- `full`: the attribute isn't set, for example on a workflow created before 19.5. `aput` sends only `compressed_checkpoint`, and Rails writes only the full row.
+
+The `incremental` path stays until the oldest supported GitLab version advertises the capability ([issue 2880](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2880)). `aput` picks the `full` path from the workflow alone, so it stays until no workflow without the attribute set can still receive checkpoints. The Rails legacy write has the same bound ([GitLab issue 611971](https://gitlab.com/gitlab-org/gitlab/-/issues/611971), [GitLab issue 627332](https://gitlab.com/gitlab-org/gitlab/-/issues/627332)).
+
+On the `incremental_only` path Rails stores no full checkpoint ([issue #605653](https://gitlab.com/gitlab-org/gitlab/-/issues/605653)): it keeps a slim **header** and reconstructs `channel_values` from the blobs on read. Storage uses two range-partitioned tables:
 
 - `p_duo_workflows_checkpoint_headers` — one row per checkpoint holding only what's needed to rebuild a `CheckpointTuple` and isn't already in the blobs: the langgraph checkpoint minus `channel_values` (`channel_versions`, `versions_seen`, `v`, `ts`, `updated_channels`) plus its `metadata`.
 
 - `p_duo_workflows_checkpoint_blobs` — the channel deltas described below.
 
-Both would partition by a dedicated `workflow_created_at` column (= the workflow's `created_at`, written on every row), so all of a workflow's rows land in one daily partition. An incremental read filters `workflow_id` + `current_thread` with no `created_at` bound; partitioning by `workflow_created_at` lets that read equality-prune to a single partition instead of scanning every retained daily partition. A 30-day TTL would be enforced by dropping old partitions rather than deleting rows.
+Both partition by a dedicated `workflow_created_at` column (= the workflow's `created_at`, written on every row), so all of a workflow's rows land in one daily partition. An incremental read filters `workflow_id` + `current_thread` with no `created_at` bound; partitioning by `workflow_created_at` lets that read equality-prune to a single partition instead of scanning every retained daily partition. A 30-day TTL is enforced by dropping old partitions rather than deleting rows.
 
 ## Table structure
 
@@ -94,34 +104,33 @@ CREATE UNIQUE INDEX idx_duo_wf_checkpoint_blobs_dedup
     NULLS NOT DISTINCT;
 ```
 
-Reconstruction on read: start from the header, then fold the group's blobs — the group-start `compaction` snapshots plus its later blobs (see [Self-contained groups](#self-contained-groups)). During the shadow-write transition both models are written; readers still use `p_duo_workflows_checkpoints`, and its rows age out via the 30-day TTL.
+Reconstruction on read: start from the header, then fold the group's blobs — the group-start `compaction` snapshots plus its later blobs (see [Self-contained groups](#self-contained-groups)). Only the `incremental` and `full` strategies still write `p_duo_workflows_checkpoints`, and its rows age out via the 30-day TTL.
 
 ## Payload
 
-When the property is enabled, the `aput` POST body gains three fields alongside `compressed_checkpoint`: `current_thread`, `channel_blobs`, and `current_thread_started_at`:
+When the attribute is set, the `aput` POST body gains two fields alongside `compressed_checkpoint`: `current_thread` and `channel_blobs`:
 
 ```jsonc
 {
-  "compressed_checkpoint": "...",       // unchanged — full state (shadow write)
+  "compressed_checkpoint": "...",       // unchanged — full state (incremental strategy)
   "current_thread": 0,                  // group counter; bumped on a history rewrite / stale-cache reset
-  "current_thread_started_at": "<ISO8601 timestamp>",       // ISO8601 start of this group; still sent but no longer read by Rails (see below)
   "channel_blobs": [
     {
       "channel": "conversation_history",
       "version": "3.0",
       "data": "<base64(zlib(json))>",
-      "write_type": "json",             // CustomEncoder JSON, matching the header's channel_values
+      "write_type": "json",             // CustomEncoder JSON, matching the channel_values Rails serves
       "step_action": "conversation"     // "conversation" = append delta, "compaction" = full replace
     }
   ]
 }
 ```
 
-Blobs are encoded as `CustomEncoder` JSON (not langgraph's msgpack serde) so their representation matches the header's `channel_values`, which Rails also stores as JSON. Rails can then merge blob deltas onto the header without reimplementing langgraph's msgpack extension types.
+Blobs are encoded as `CustomEncoder` JSON (not langgraph's msgpack serde) so their representation matches the `channel_values` that Rails serves, and that the legacy full row stores, as JSON. Rails can then fold blob deltas into `channel_values` without reimplementing langgraph's msgpack extension types.
 
-`current_thread_started_at` is derived from the group's first checkpoint ID (a time-ordered UUID) and omitted when the ID isn't time-based. It originally bounded the `created_at` range of the blob read query; that role is obsolete now blobs prune by the `workflow_created_at` partition key (see [Gating](#gating)), so the field is still sent but no longer read by Rails. These three (`current_thread`, `channel_blobs`, `current_thread_started_at`) are the complete set of fields incremental mode adds; the incremental-only variant below adds one more.
+These two (`current_thread` and `channel_blobs`) are the complete set of fields incremental mode adds; the incremental-only variant below adds one more.
 
-When the instance also advertises `incremental_checkpoints_only`, `checkpoint` replaces `compressed_checkpoint`: the langgraph checkpoint minus `channel_values` (the same skeleton stored as the header). A `channel_keys` field is added. `current_thread`, `current_thread_started_at`, and `channel_blobs` are unchanged:
+When the instance also advertises `incremental_checkpoints_only`, `checkpoint` replaces `compressed_checkpoint`: the langgraph checkpoint minus `channel_values` (the same skeleton stored as the header). A `channel_keys` field is added. `current_thread` and `channel_blobs` are unchanged:
 
 ```jsonc
 {
@@ -135,7 +144,6 @@ When the instance also advertises `incremental_checkpoints_only`, `checkpoint` r
   },
   "channel_keys": ["conversation_history", "status"],   // live channel membership
   "current_thread": 0,
-  "current_thread_started_at": "<ISO8601 timestamp>",
   "channel_blobs": [ /* unchanged — see above */ ]
 }
 ```
@@ -148,7 +156,7 @@ This shape is tagged with the query parameter `checkpoint_strategy=incremental_o
 
 `_serialize_channel_blobs` walks `new_versions` (LangGraph's set of channels changed this step) and emits one blob per changed channel:
 
-- **Scalar channels** (`status`, `goal`, `branch:to:*`, …) are blobbed as full values, since they have no delta form. No channel is filtered by type: once the header is dropped (see [Gating](#gating)) a skipped scalar is simply lost, and `branch:to:*` — LangGraph's run queue — decides which tasks a resumed graph runs. Because blobs are append-only, the read path must select only the channels the checkpoint header declares live, or deleted channels linger in the reconstructed state ([GitLab issue 613956](https://gitlab.com/gitlab-org/gitlab/-/issues/613956)).
+- **Scalar channels** (`status`, `goal`, `branch:to:*`, …) are blobbed as full values, since they have no delta form. No channel is filtered by type: the header stores no `channel_values` (see [Gating](#gating)), so a skipped scalar is simply lost, and `branch:to:*` — LangGraph's run queue — decides which tasks a resumed graph runs. Because blobs are append-only, the read path must select only the channels the checkpoint header declares live, or deleted channels linger in the reconstructed state ([GitLab issue 613956](https://gitlab.com/gitlab-org/gitlab/-/issues/613956)).
 
 - **List channels** use `_list_delta`: if the previous value is a prefix of the current one, only the appended tail is sent (`step_action="conversation"`); any other change (shrink, reorder, in-place edit) sends the full list (`step_action="compaction"`).
 
@@ -160,7 +168,7 @@ This shape is tagged with the query parameter `checkpoint_strategy=incremental_o
 
 ## Self-contained groups
 
-The per-step deltas above describe only the channels that changed. That's enough while Rails overlays deltas on the full-checkpoint header, but the end state drops the header (see [Gating](#gating)), and then a channel that hasn't changed since a previous `current_thread` group would have no base to fold onto — its history lived in the old group.
+The per-step deltas above describe only the channels that changed. That would be enough if Rails overlaid deltas on a full checkpoint, but the header stores no `channel_values` (see [Gating](#gating)), so a channel that hasn't changed since a previous `current_thread` group would have no base to fold onto — its history lived in the old group.
 
 To make each group reconstruct on its own, the **start of every group** re-seeds _all_ channels as full `compaction` snapshots via `_serialize_all_channels_full`, replacing the per-channel deltas for that one step. The exception is the step's `ui_chat_log` `conversation` delta, which is kept after its snapshot with the same `thread_ts` and version. Readers keep one blob per `(thread_ts, version)`, so the two are never both applied. A group starts on:
 
@@ -178,7 +186,7 @@ A non-append change to any other list or dict channel, such as `plan` or `tool_c
 
 Because the trim shrinks the channel in state, every other group start (first checkpoint, stale-cache reset, or a non-append history splice such as the cancelled-tool reorder in `ChatAgent`) snapshots at most the entries since the last compaction, about one context window.
 
-The group boundary is keyed on `state.prev_checkpoint_id`, not on `current_thread_started_at`. The started-at marker is `None` for checkpoint IDs that aren't time-based, which would otherwise re-seed every step. Outside a group boundary, behavior is the per-channel deltas described above.
+Outside a group boundary, behavior is the per-channel deltas described above.
 
 ## State across `aput` calls
 
