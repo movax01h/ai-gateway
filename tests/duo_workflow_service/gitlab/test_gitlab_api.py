@@ -1011,3 +1011,48 @@ async def test_fetch_workflow_web_search_allowed_for_group(
 
     assert workflow_config["web_search_allowed_for_group"] is expected
     assert workflow_config["web_search_enabled"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "workflow_fields, expected",
+    [
+        pytest.param({"fileAttachmentsAllowed": True}, True, id="allowed"),
+        pytest.param({"fileAttachmentsAllowed": False}, False, id="not_allowed"),
+        pytest.param({"fileAttachmentsAllowed": None}, False, id="null_from_schema"),
+        pytest.param({}, False, id="field_missing"),
+    ],
+)
+async def test_fetch_workflow_file_attachments_allowed(workflow_fields, expected):
+    """Fails closed: GitLab before 19.6 strips the field, and no admin there could have allowed attachments."""
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test.git",
+                        "webUrl": "http://example.com/test",
+                    },
+                    "namespaceId": None,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": None,
+                    **workflow_fields,
+                }
+            ]
+        }
+    }
+
+    _, _, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["file_attachments_allowed"] is expected
