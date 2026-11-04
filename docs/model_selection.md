@@ -707,6 +707,13 @@ At request time, the model is usable only when the flow config ID the request is
 claim) is one of its `feature_settings`. A flow's feature setting is its flow config ID (for example,
 `bl_security`). This is a naming convention: if the names differ, validation rejects the entry (fail-safe).
 
+For GitLab.com, `DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS` holds its instance UUID (the `sub` of its
+instance token) as the explicit opt-in for restricted models, and must be set before any model GitLab.com uses is
+added to `model_restrictions.yml`. UUIDs are compared as UUIDs, ignoring case. While it is empty, GitLab.com cannot
+use restricted models; outside self-hosted mode, the service also logs a warning at startup. A Dedicated instance in
+`DUO_WORKFLOW_AUTH__TRUSTED_RESTRICTED_ISSUERS` gets restricted models through a signed proof instead, so this list
+does not apply to it.
+
 ## Model deprecations
 
 There are two kinds of model deprecation, depending on whether the model is going away everywhere or only for a

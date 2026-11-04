@@ -173,6 +173,7 @@ from lib.flow_enablement import (
     GATED_FLOWS,
     GITLAB_COM_VERIFIED_CLAIM,
     SAAS_REALM,
+    _canonical_uid,
     flow_enablement_enforced,
     is_flow_enabled,
     is_gitlab_com_caller,
@@ -581,14 +582,40 @@ def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
     claims = user.claims
     if user.is_debug or not claims:
         return False
-    allowlist = {
-        uid.strip()
-        for uid in os.environ.get(RESTRICTED_FLOW_INSTANCE_UIDS_ENV, "").split(",")
-        if uid.strip()
-    }
-    return (
-        is_gitlab_com_signed(claims, oidc_gitlab_url()) and claims.subject in allowlist
+    allowlist = _restricted_flow_instance_uids(
+        os.environ.get(RESTRICTED_FLOW_INSTANCE_UIDS_ENV, "")
     )
+    return (
+        is_gitlab_com_signed(claims, oidc_gitlab_url())
+        and _canonical_uid(claims.subject) in allowlist
+    )
+
+
+@functools.lru_cache(maxsize=4)
+def _restricted_flow_instance_uids(raw: str) -> frozenset[str]:
+    """Parse the comma-separated instance UUID allowlist; invalid entries are dropped."""
+    canonical = [
+        _canonical_uid(entry.strip()) for entry in raw.split(",") if entry.strip()
+    ]
+    if None in canonical:
+        log.warning(
+            "Ignoring invalid instance UUIDs",
+            env_var=RESTRICTED_FLOW_INSTANCE_UIDS_ENV,
+            dropped=canonical.count(None),
+        )
+    return frozenset(uid for uid in canonical if uid)
+
+
+def warn_if_restricted_flows_lack_instance_uids() -> None:
+    """Warn at startup when restricted models are configured but the instance UUID allowlist is empty."""
+    flows = ModelSelectionConfig.instance().all_restricted_flows()
+    raw = os.environ.get(RESTRICTED_FLOW_INSTANCE_UIDS_ENV, "")
+    if flows and not _restricted_flow_instance_uids(raw):
+        log.warning(
+            "Restricted models are configured but the instance UUID allowlist is empty",
+            env_var=RESTRICTED_FLOW_INSTANCE_UIDS_ENV,
+            restricted_flows=sorted(flows),
+        )
 
 
 def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
@@ -2075,6 +2102,7 @@ def run(config: Config):
         install_clean_io_handle_context(loop)
     if not self_hosted_mode:
         validate_llm_access()
+        warn_if_restricted_flows_lack_instance_uids()
     port = int(os.environ.get("PORT", "50052"))
     loop.run_until_complete(serve(config, port))
 
