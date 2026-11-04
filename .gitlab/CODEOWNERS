@@ -38,7 +38,11 @@
 /ai/features/utilities/generate_description @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 
 # Workflow session prompts under ai/features/workflow/ are co-owned by Agent Observability (see work item 90)
-/ai/features/workflow/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
+/ai/features/workflow/generate_session_title/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
+/ai/features/workflow/summarize_duo_workflow/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
+
+# Pipeline features under ai/features/pipeline/ (team ownership still under discussion)
+/ai/features/pipeline/ @gitlab-org/maintainers/duo-workflow-service
 
 # Security Review flow and prompts (Code Security)
 /duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham
@@ -136,7 +140,11 @@
 /ai/features/utilities/generate_description @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/duo-service-infra
 
 # Workflow session prompts under ai/features/workflow/
-/ai/features/workflow/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
+/ai/features/workflow/generate_session_title/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
+/ai/features/workflow/summarize_duo_workflow/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/agent-foundations/agent-execution/agent-observability
+
+# Pipeline features under ai/features/pipeline/ (team ownership still under discussion)
+/ai/features/pipeline/ @gitlab-org/maintainers/duo-workflow-service
 
 # Security Review flow and prompts (Code Security)
 /duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham

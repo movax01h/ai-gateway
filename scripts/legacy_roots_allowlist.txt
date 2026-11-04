@@ -206,12 +206,6 @@ ai_gateway/prompts/definitions/conversation_compaction/system
 ai_gateway/prompts/definitions/conversation_compaction/user
 ai_gateway/prompts/definitions/conversation_compaction_manual/base
 ai_gateway/prompts/definitions/conversation_compaction_manual/user
-ai_gateway/prompts/definitions/convert_ci_push_changes/base
-ai_gateway/prompts/definitions/convert_ci_push_changes/system
-ai_gateway/prompts/definitions/convert_ci_push_changes/user
-ai_gateway/prompts/definitions/convert_to_gl_ci/base
-ai_gateway/prompts/definitions/convert_to_gl_ci/system
-ai_gateway/prompts/definitions/convert_to_gl_ci/user
 ai_gateway/prompts/definitions/create_merge_request/base
 ai_gateway/prompts/definitions/create_merge_request/system
 ai_gateway/prompts/definitions/create_merge_request/user
@@ -358,9 +352,6 @@ ai_gateway/prompts/definitions/validate_sast_vulnerability_agent_prompt/system
 ai_gateway/prompts/definitions/validate_sast_vulnerability_agent_prompt/user
 ai_gateway/prompts/definitions/workflow/context_builder/base
 ai_gateway/prompts/definitions/workflow/context_builder/system
-ai_gateway/prompts/definitions/workflow/convert_to_gitlab_ci/base
-ai_gateway/prompts/definitions/workflow/convert_to_gitlab_ci/system
-ai_gateway/prompts/definitions/workflow/convert_to_gitlab_ci/user
 ai_gateway/prompts/definitions/workflow/create_branch/base
 ai_gateway/prompts/definitions/workflow/create_branch/gpt_5
 ai_gateway/prompts/definitions/workflow/create_branch/user
@@ -379,7 +370,6 @@ ai_gateway/prompts/definitions/workplan/partials/resolving_ambiguity
 ai_gateway/prompts/definitions/workspace_agent_skills/base
 duo_workflow_service/agent_platform/v1/flows/configs
 duo_workflow_service/agent_platform/v1/flows/configs/agentic_chat
-duo_workflow_service/agent_platform/v1/flows/configs/convert_to_gl_ci
 duo_workflow_service/agent_platform/v1/flows/configs/duo_permissions_assistant
 duo_workflow_service/agent_platform/v1/flows/configs/fix_pipeline
 duo_workflow_service/agent_platform/v1/flows/configs/flow_creator
