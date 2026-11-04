@@ -280,16 +280,30 @@ class ChatLiteLLM(_LChatLiteLLM):
 
     @model_validator(mode="after")
     def _apply_reasoning_effort(self) -> "ChatLiteLLM":
-        if self.reasoning_effort:
+        if not self.reasoning_effort:
+            return self
+
+        model_kwargs = {**self.model_kwargs, "reasoning_effort": self.reasoning_effort}
+        if not self._litellm_maps_reasoning_effort():
+            # litellm rejects the param for openai-compatible providers unless it is
+            # explicitly allowed through. Never allow it for providers that map it
+            # natively (Anthropic on Vertex/Bedrock): the raw key is then forwarded
+            # alongside the mapped `output_config` and the API rejects it.
             allowed = self.model_kwargs.get("allowed_openai_params", [])
-            self.model_kwargs = {
-                **self.model_kwargs,
-                "reasoning_effort": self.reasoning_effort,
-                # litellm rejects the param for openai-compatible providers
-                # unless it is explicitly allowed through.
-                "allowed_openai_params": sorted({*allowed, "reasoning_effort"}),
-            }
+            model_kwargs["allowed_openai_params"] = sorted(
+                {*allowed, "reasoning_effort"}
+            )
+        self.model_kwargs = model_kwargs
         return self
+
+    def _litellm_maps_reasoning_effort(self) -> bool:
+        try:
+            supported = litellm.get_supported_openai_params(
+                model=self.model, custom_llm_provider=self.custom_llm_provider
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            return False
+        return "reasoning_effort" in (supported or [])
 
     def validate_endpoint_kwargs(self, kwargs: dict[str, Any]) -> None:
         validate_custom_endpoint(

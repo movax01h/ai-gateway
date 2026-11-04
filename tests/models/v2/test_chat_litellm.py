@@ -2172,6 +2172,36 @@ class TestReasoningEffort:
             "reasoning_effort",
         ]
 
+    @pytest.mark.parametrize(
+        ("model_name", "custom_llm_provider"),
+        [
+            ("claude-sonnet-5-5", "vertex_ai"),
+            ("bedrock/global.anthropic.claude-sonnet-5-5", "bedrock"),
+        ],
+    )
+    def test_does_not_allow_param_through_when_litellm_maps_it(
+        self, model_name: str, custom_llm_provider: str
+    ):
+        """Anthropic providers map `reasoning_effort` to `output_config`; allowing the raw key through as well makes the
+        API reject it as an extra input."""
+        model = ChatLiteLLM(
+            model=model_name,
+            custom_llm_provider=custom_llm_provider,
+            reasoning_effort="xhigh",
+        )
+
+        assert model.model_kwargs["reasoning_effort"] == "xhigh"
+        assert "allowed_openai_params" not in model.model_kwargs
+
+    def test_allows_param_through_when_litellm_cannot_resolve_the_model(self):
+        with patch(
+            "ai_gateway.models.v2.chat_litellm.litellm.get_supported_openai_params",
+            side_effect=ValueError("unknown provider"),
+        ):
+            model = ChatLiteLLM(model="some-model", reasoning_effort="low")
+
+        assert model.model_kwargs["allowed_openai_params"] == ["reasoning_effort"]
+
 
 class TestNonStreamedModelName:
     """The non-streamed result names the model the request was sent with, as the streamed path does."""
