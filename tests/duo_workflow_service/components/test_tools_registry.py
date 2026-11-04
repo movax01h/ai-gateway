@@ -22,6 +22,7 @@ from duo_workflow_service.components.tools_registry import (
     NO_OP_TOOLS,
     Toolset,
     ToolsRegistry,
+    _effective_privileges,
     _merge_feature_tools,
     _reject_unchecked_allowed_flows,
     ceiling_exempt_tool_names,
@@ -421,6 +422,41 @@ def test_registry_initialization(tool_metadata, config, expected_tools_set):
     assert set(registry._enabled_tools.keys()) == expected_tools_set
 
 
+@pytest.mark.parametrize(
+    ("enabled", "expected"),
+    [
+        (["read_only_files"], {"read_only_files"}),
+        (["read_write_gitlab"], {"read_write_gitlab", "read_only_gitlab"}),
+        (
+            ["read_write_files", "read_write_gitlab"],
+            {
+                "read_write_files",
+                "read_only_files",
+                "read_write_gitlab",
+                "read_only_gitlab",
+            },
+        ),
+    ],
+)
+def test_effective_privileges_fill_in_read_from_write(enabled, expected):
+    assert _effective_privileges(enabled) == frozenset(expected)
+
+
+def test_registry_hands_effective_privileges_to_tools(tool_metadata):
+    # A tool that gates a step on a privilege reads it from its metadata, so the
+    # superset rule lives in the registry only.
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_gitlab", "read_only_files"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=None,
+    )
+
+    granted = registry._enabled_tools["read_file"].metadata["granted_privileges"]
+    assert {"read_write_gitlab", "read_only_gitlab", "read_only_files"} <= granted
+    assert "granted_privileges" not in tool_metadata
+
+
 def test_registry_initialization_leaves_module_tool_lists_unchanged(
     tool_metadata, mcp_tools
 ):
@@ -447,6 +483,22 @@ def test_registry_initialization_leaves_module_tool_lists_unchanged(
 def test_registry_initialization_initialises_tools_with_correct_attributes(
     tool_metadata,
 ):
+    # The registry hands tools the effective privileges on top of the metadata it
+    # was given; run_mcp_tools is always added, read_only_files comes from
+    # read_write_files.
+    expected_metadata = {
+        **tool_metadata,
+        "granted_privileges": _effective_privileges(
+            [
+                "run_commands",
+                "use_git",
+                "read_write_gitlab",
+                "read_only_gitlab",
+                "read_write_files",
+                "run_mcp_tools",
+            ]
+        ),
+    }
     registry = ToolsRegistry(
         enabled_tools=[
             "run_commands",
@@ -461,183 +513,199 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         registry_flow_id="bl_security",
     )
     expected_tools = {
-        "ci_linter": tools.CiLinter(metadata=tool_metadata),
+        "ci_linter": tools.CiLinter(metadata=expected_metadata),
         "create_plan": tools.CreatePlan(),
         "add_new_task": tools.AddNewTask(),
-        "ascp_create_scan": CreateAscpScan(metadata=tool_metadata),
-        "ascp_create_component": CreateAscpComponent(metadata=tool_metadata),
+        "ascp_create_scan": CreateAscpScan(metadata=expected_metadata),
+        "ascp_create_component": CreateAscpComponent(metadata=expected_metadata),
         "ascp_create_security_context": CreateAscpSecurityContext(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "ascp_list_scans": ListAscpScans(metadata=tool_metadata),
-        "ascp_list_components": ListAscpComponents(metadata=tool_metadata),
+        "ascp_list_scans": ListAscpScans(metadata=expected_metadata),
+        "ascp_list_components": ListAscpComponents(metadata=expected_metadata),
         "remove_task": tools.RemoveTask(),
         "update_task_description": tools.UpdateTaskDescription(),
         "update_vulnerability_severity": tools.UpdateVulnerabilitySeverity(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "get_plan": tools.GetPlan(),
         "set_task_status": tools.SetTaskStatus(),
         "todo_write": tools.TodoWrite(),
-        "run_command": tools.RunCommand(metadata=tool_metadata),
-        "create_issue": tools.CreateIssue(metadata=tool_metadata),
-        "list_issues": tools.ListIssues(metadata=tool_metadata),
-        "get_issue": tools.GetIssue(metadata=tool_metadata),
-        "update_issue": tools.UpdateIssue(metadata=tool_metadata),
-        "get_job_logs": tools.GetLogsFromJob(metadata=tool_metadata),
-        "get_merge_request": tools.GetMergeRequest(metadata=tool_metadata),
-        "gitlab_merge_request_search": tools.ListMergeRequest(metadata=tool_metadata),
-        "list_merge_request_diffs": tools.ListMergeRequestDiffs(metadata=tool_metadata),
+        "run_command": tools.RunCommand(metadata=expected_metadata),
+        "create_issue": tools.CreateIssue(metadata=expected_metadata),
+        "list_issues": tools.ListIssues(metadata=expected_metadata),
+        "get_issue": tools.GetIssue(metadata=expected_metadata),
+        "update_issue": tools.UpdateIssue(metadata=expected_metadata),
+        "get_job_logs": tools.GetLogsFromJob(metadata=expected_metadata),
+        "get_merge_request": tools.GetMergeRequest(metadata=expected_metadata),
+        "gitlab_merge_request_search": tools.ListMergeRequest(
+            metadata=expected_metadata
+        ),
+        "list_merge_request_diffs": tools.ListMergeRequestDiffs(
+            metadata=expected_metadata
+        ),
         "create_merge_request_note": tools.CreateMergeRequestNote(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "create_merge_request_diff_note": tools.CreateMergeRequestDiffNote(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "list_all_merge_request_notes": tools.ListAllMergeRequestNotes(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "update_merge_request": tools.UpdateMergeRequest(metadata=tool_metadata),
+        "update_merge_request": tools.UpdateMergeRequest(metadata=expected_metadata),
         "add_merge_request_reviewers": tools.AddMergeRequestReviewers(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "post_suggested_reviewers": tools.PostSuggestedReviewers(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "get_pipeline_failing_jobs": tools.GetPipelineFailingJobs(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "get_downstream_pipelines": tools.GetDownstreamPipelines(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_failing_bridge_jobs": tools.GetFailingBridgeJobs(metadata=tool_metadata),
-        "get_project": tools.GetProject(metadata=tool_metadata),
-        "gitlab_group_project_search": tools.GroupProjectSearch(metadata=tool_metadata),
-        "gitlab_issue_search": tools.IssueSearch(metadata=tool_metadata),
+        "get_failing_bridge_jobs": tools.GetFailingBridgeJobs(
+            metadata=expected_metadata
+        ),
+        "get_project": tools.GetProject(metadata=expected_metadata),
+        "gitlab_group_project_search": tools.GroupProjectSearch(
+            metadata=expected_metadata
+        ),
+        "gitlab_issue_search": tools.IssueSearch(metadata=expected_metadata),
         "gitlab_documentation_search": tools.DocumentationSearch(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "gitlab_milestone_search": tools.MilestoneSearch(metadata=tool_metadata),
-        "gitlab__user_search": tools.UserSearch(metadata=tool_metadata),
-        "gitlab_blob_search": tools.BlobSearch(metadata=tool_metadata),
-        "gitlab_commit_search": tools.CommitSearch(metadata=tool_metadata),
-        "gitlab_wiki_blob_search": tools.WikiBlobSearch(metadata=tool_metadata),
-        "gitlab_note_search": tools.NoteSearch(metadata=tool_metadata),
-        "read_file": tools.ReadFile(metadata=tool_metadata),
-        "bl_prioritize_and_cap": tools.BlPrioritizeAndCap(metadata=tool_metadata),
-        "read_files": tools.ReadFiles(metadata=tool_metadata),
-        "list_dir": tools.ListDir(metadata=tool_metadata),
-        "create_file_with_contents": tools.WriteFile(metadata=tool_metadata),
-        "edit_file": tools.EditFile(metadata=tool_metadata),
-        "find_files": tools.FindFiles(metadata=tool_metadata),
-        "bl_dedup_findings": tools.BlDedupFindings(metadata=tool_metadata),
-        "bl_write_sast_report": tools.BlWriteSastReport(metadata=tool_metadata),
-        "grep": tools.Grep(metadata=tool_metadata),
-        "mkdir": tools.Mkdir(metadata=tool_metadata),
-        "bl_discover_and_cluster": tools.BlDiscoverAndCluster(metadata=tool_metadata),
-        "run_git_command": tools.git.Command(metadata=tool_metadata),
+        "gitlab_milestone_search": tools.MilestoneSearch(metadata=expected_metadata),
+        "gitlab__user_search": tools.UserSearch(metadata=expected_metadata),
+        "gitlab_blob_search": tools.BlobSearch(metadata=expected_metadata),
+        "gitlab_commit_search": tools.CommitSearch(metadata=expected_metadata),
+        "gitlab_wiki_blob_search": tools.WikiBlobSearch(metadata=expected_metadata),
+        "gitlab_note_search": tools.NoteSearch(metadata=expected_metadata),
+        "read_file": tools.ReadFile(metadata=expected_metadata),
+        "bl_prioritize_and_cap": tools.BlPrioritizeAndCap(metadata=expected_metadata),
+        "read_files": tools.ReadFiles(metadata=expected_metadata),
+        "list_dir": tools.ListDir(metadata=expected_metadata),
+        "create_file_with_contents": tools.WriteFile(metadata=expected_metadata),
+        "edit_file": tools.EditFile(metadata=expected_metadata),
+        "find_files": tools.FindFiles(metadata=expected_metadata),
+        "bl_dedup_findings": tools.BlDedupFindings(metadata=expected_metadata),
+        "bl_write_sast_report": tools.BlWriteSastReport(metadata=expected_metadata),
+        "grep": tools.Grep(metadata=expected_metadata),
+        "mkdir": tools.Mkdir(metadata=expected_metadata),
+        "bl_discover_and_cluster": tools.BlDiscoverAndCluster(
+            metadata=expected_metadata
+        ),
+        "run_git_command": tools.git.Command(metadata=expected_metadata),
         "handover_tool": tools.HandoverTool,
         "request_user_clarification_tool": tools.RequestUserClarificationTool,
         "clarification_question": tools.ClarificationQuestionTool(),
         "render_ui": tools.RenderUiTool(),
-        "get_epic": tools.GetEpic(metadata=tool_metadata),
-        "list_epics": tools.ListEpics(metadata=tool_metadata),
-        "create_epic": tools.CreateEpic(metadata=tool_metadata),
-        "update_epic": tools.UpdateEpic(metadata=tool_metadata),
-        "list_issue_notes": tools.ListIssueNotes(metadata=tool_metadata),
-        "get_issue_note": tools.GetIssueNote(metadata=tool_metadata),
-        "create_issue_note": tools.CreateIssueNote(metadata=tool_metadata),
-        "create_merge_request": tools.CreateMergeRequest(metadata=tool_metadata),
-        "get_repository_file": tools.GetRepositoryFile(metadata=tool_metadata),
-        "list_repository_tree": tools.ListRepositoryTree(metadata=tool_metadata),
-        "get_repository_files": tools.GetRepositoryFiles(metadata=tool_metadata),
-        "list_epic_notes": tools.ListEpicNotes(metadata=tool_metadata),
-        "get_session_context": tools.GetSessionContext(metadata=tool_metadata),
-        "list_vulnerabilities": tools.ListVulnerabilities(metadata=tool_metadata),
-        "get_commit": tools.GetCommit(metadata=tool_metadata),
-        "list_commits": tools.ListCommits(metadata=tool_metadata),
-        "get_commit_diff": tools.GetCommitDiff(metadata=tool_metadata),
-        "get_commit_comments": tools.GetCommitComments(metadata=tool_metadata),
-        "create_commit": tools.CreateCommit(metadata=tool_metadata),
-        "dismiss_vulnerability": tools.DismissVulnerability(metadata=tool_metadata),
-        "confirm_vulnerability": tools.ConfirmVulnerability(metadata=tool_metadata),
+        "get_epic": tools.GetEpic(metadata=expected_metadata),
+        "list_epics": tools.ListEpics(metadata=expected_metadata),
+        "create_epic": tools.CreateEpic(metadata=expected_metadata),
+        "update_epic": tools.UpdateEpic(metadata=expected_metadata),
+        "list_issue_notes": tools.ListIssueNotes(metadata=expected_metadata),
+        "get_issue_note": tools.GetIssueNote(metadata=expected_metadata),
+        "create_issue_note": tools.CreateIssueNote(metadata=expected_metadata),
+        "create_merge_request": tools.CreateMergeRequest(metadata=expected_metadata),
+        "get_repository_file": tools.GetRepositoryFile(metadata=expected_metadata),
+        "list_repository_tree": tools.ListRepositoryTree(metadata=expected_metadata),
+        "get_repository_files": tools.GetRepositoryFiles(metadata=expected_metadata),
+        "list_epic_notes": tools.ListEpicNotes(metadata=expected_metadata),
+        "get_session_context": tools.GetSessionContext(metadata=expected_metadata),
+        "list_vulnerabilities": tools.ListVulnerabilities(metadata=expected_metadata),
+        "get_commit": tools.GetCommit(metadata=expected_metadata),
+        "list_commits": tools.ListCommits(metadata=expected_metadata),
+        "get_commit_diff": tools.GetCommitDiff(metadata=expected_metadata),
+        "get_commit_comments": tools.GetCommitComments(metadata=expected_metadata),
+        "create_commit": tools.CreateCommit(metadata=expected_metadata),
+        "dismiss_vulnerability": tools.DismissVulnerability(metadata=expected_metadata),
+        "confirm_vulnerability": tools.ConfirmVulnerability(metadata=expected_metadata),
         "list_instance_audit_events": tools.ListInstanceAuditEvents(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "list_group_audit_events": tools.ListGroupAuditEvents(metadata=tool_metadata),
+        "list_group_audit_events": tools.ListGroupAuditEvents(
+            metadata=expected_metadata
+        ),
         "list_project_audit_events": tools.ListProjectAuditEvents(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_current_user": tools.GetCurrentUser(metadata=tool_metadata),
-        "create_work_item": tools.CreateWorkItem(metadata=tool_metadata),
-        "create_work_item_note": tools.CreateWorkItemNote(metadata=tool_metadata),
+        "get_current_user": tools.GetCurrentUser(metadata=expected_metadata),
+        "create_work_item": tools.CreateWorkItem(metadata=expected_metadata),
+        "create_work_item_note": tools.CreateWorkItemNote(metadata=expected_metadata),
         "link_vulnerability_to_issue": tools.LinkVulnerabilityToIssue(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "link_vulnerability_to_merge_request": tools.LinkVulnerabilityToMergeRequest(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_vulnerability_details": GetVulnerabilityDetails(metadata=tool_metadata),
+        "get_vulnerability_details": GetVulnerabilityDetails(
+            metadata=expected_metadata
+        ),
         "evaluate_vuln_fp_status": EvaluateVulnerabilityFalsePositiveStatus(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "resolve_vulnerability_target_branch": ResolveVulnerabilityTargetBranch(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "update_work_item": tools.UpdateWorkItem(metadata=tool_metadata),
+        "update_work_item": tools.UpdateWorkItem(metadata=expected_metadata),
         "revert_to_detected_vulnerability": tools.RevertToDetectedVulnerability(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "create_vulnerability_issue": tools.CreateVulnerabilityIssue(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_work_item": tools.GetWorkItem(metadata=tool_metadata),
-        "list_work_items": tools.ListWorkItems(metadata=tool_metadata),
-        "get_work_item_notes": tools.GetWorkItemNotes(metadata=tool_metadata),
-        "get_work_item_statuses": tools.GetWorkItemStatuses(metadata=tool_metadata),
-        "post_duo_code_review": PostDuoCodeReview(metadata=tool_metadata),
+        "get_work_item": tools.GetWorkItem(metadata=expected_metadata),
+        "list_work_items": tools.ListWorkItems(metadata=expected_metadata),
+        "get_work_item_notes": tools.GetWorkItemNotes(metadata=expected_metadata),
+        "get_work_item_statuses": tools.GetWorkItemStatuses(metadata=expected_metadata),
+        "post_duo_code_review": PostDuoCodeReview(metadata=expected_metadata),
         "submit_merge_request_risk_classification": tools.SubmitMergeRequestRiskClassification(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "extract_lines_from_text": tools.ExtractLinesFromText(metadata=tool_metadata),
+        "extract_lines_from_text": tools.ExtractLinesFromText(
+            metadata=expected_metadata
+        ),
         "finalize_code_review_findings": tools.FinalizeCodeReviewFindings(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "detect_review_context_truncation": tools.DetectReviewContextTruncation(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_glql_schema": tools.GetGlqlSchema(metadata=tool_metadata),
-        "fetch_glql_schema": tools.FetchGlqlSchema(metadata=tool_metadata),
-        "run_glql_query": tools.RunGLQLQuery(metadata=tool_metadata),
+        "get_glql_schema": tools.GetGlqlSchema(metadata=expected_metadata),
+        "fetch_glql_schema": tools.FetchGlqlSchema(metadata=expected_metadata),
+        "run_glql_query": tools.RunGLQLQuery(metadata=expected_metadata),
         "post_sast_fp_analysis_to_gitlab": PostSastFpAnalysisToGitlab(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "post_secret_fp_analysis_to_gitlab": PostSecretFpAnalysisToGitlab(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "run_tests": tools.RunTests(metadata=tool_metadata),
-        "bl_collect_and_flatten": tools.BlCollectAndFlatten(metadata=tool_metadata),
+        "run_tests": tools.RunTests(metadata=expected_metadata),
+        "bl_collect_and_flatten": tools.BlCollectAndFlatten(metadata=expected_metadata),
         "build_review_merge_request_context": BuildReviewMergeRequestContext(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "post_duo_code_review_findings": tools.PostDuoCodeReviewFindings(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "get_security_finding_details": GetSecurityFindingDetails(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "list_security_findings": ListSecurityFindings(metadata=tool_metadata),
-        "get_wiki_page": GetWikiPage(metadata=tool_metadata),
-        "create_branch": CreateBranch(metadata=tool_metadata),
-        "gitlab_api_get": GitLabApiGet(metadata=tool_metadata),
-        "gitlab_graphql": GitLabGraphQL(metadata=tool_metadata),
-        "update_form_fields": UpdateFormFields(metadata=tool_metadata),
-        "update_form_permissions": UpdateFormPermissions(metadata=tool_metadata),
-        "submit_mr_review": SubmitMrReview(metadata=tool_metadata),
-        "list_mr_discussions": ListMrDiscussions(metadata=tool_metadata),
-        "reply_to_discussion": ReplyToDiscussion(metadata=tool_metadata),
-        "set_discussion_resolved": SetDiscussionResolved(metadata=tool_metadata),
-        "set_form_permissions": SetFormPermissions(metadata=tool_metadata),
+        "list_security_findings": ListSecurityFindings(metadata=expected_metadata),
+        "get_wiki_page": GetWikiPage(metadata=expected_metadata),
+        "create_branch": CreateBranch(metadata=expected_metadata),
+        "gitlab_api_get": GitLabApiGet(metadata=expected_metadata),
+        "gitlab_graphql": GitLabGraphQL(metadata=expected_metadata),
+        "update_form_fields": UpdateFormFields(metadata=expected_metadata),
+        "update_form_permissions": UpdateFormPermissions(metadata=expected_metadata),
+        "submit_mr_review": SubmitMrReview(metadata=expected_metadata),
+        "list_mr_discussions": ListMrDiscussions(metadata=expected_metadata),
+        "reply_to_discussion": ReplyToDiscussion(metadata=expected_metadata),
+        "set_discussion_resolved": SetDiscussionResolved(metadata=expected_metadata),
+        "set_form_permissions": SetFormPermissions(metadata=expected_metadata),
     }
 
     assert registry._enabled_tools == expected_tools

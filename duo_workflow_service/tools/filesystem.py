@@ -215,19 +215,17 @@ IMAGE_READ_CAPABILITY = "read_file_image"
 _READ_FILE_IMAGE_NOTE = f"""Image files ({supported_image_formats_display()}) are supported: reading one returns the
     actual image so you can see its contents.
 
-    Images uploaded to issues or merge requests in the current project are
-    also supported: pass the upload reference exactly as it appears in the
-    markdown, e.g. `/uploads/<secret>/screenshot.png`. It is downloaded
-    using the user's own GitLab credentials. Uploads on epics or other
-    groups' items are not reachable this way.
-
     """
 
 _READ_FILE_CHUNKED_IMAGE_NOTE = f"""\
 - Image files ({supported_image_formats_display()}) are supported and return the actual image so you can see its contents.
     - Offset/limit do not apply to images.
 
-    Images uploaded to issues or merge requests in the current project are
+    """
+
+# Shown only when this run may download uploads: image support on, and a GitLab
+# privilege granted, since the download is a GitLab API read.
+_READ_FILE_UPLOAD_NOTE = """Images uploaded to issues or merge requests in the current project are
     also supported: pass the upload reference exactly as it appears in the
     markdown, e.g. `/uploads/<secret>/screenshot.png`. It is downloaded
     using the user's own GitLab credentials. Uploads on epics or other
@@ -247,9 +245,34 @@ def _image_support_enabled() -> bool:
     )
 
 
-def _strip_image_note_if_disabled(tool: DuoBaseTool, note: str) -> None:
-    if not _image_support_enabled():
+# An upload download is a GitLab API read with the user's credential, so it also
+# needs a GitLab read privilege. The registry fills each read privilege in from its
+# write superset before it hands the set over, so one name is enough here.
+_UPLOAD_READ_PRIVILEGE = "read_only_gitlab"
+
+
+def _granted_privileges(metadata: Any) -> frozenset[str]:
+    """The run's privileges from tool metadata; empty when no run built the tool (ListTools)."""
+    return (metadata or {}).get("granted_privileges") or frozenset()
+
+
+def _upload_reads_enabled(metadata: Any) -> bool:
+    """Whether this run may download uploads: image support on, and a GitLab read privilege granted."""
+    return _image_support_enabled() and _UPLOAD_READ_PRIVILEGE in _granted_privileges(
+        metadata
+    )
+
+
+def _strip_note_unless(tool: DuoBaseTool, note: str, enabled: bool) -> None:
+    if not enabled:
         tool.description = tool.description.replace(note, "")
+
+
+def _gate_read_file_notes(tool: DuoBaseTool, image_note: str) -> None:
+    _strip_note_unless(tool, image_note, _image_support_enabled())
+    _strip_note_unless(
+        tool, _READ_FILE_UPLOAD_NOTE, _upload_reads_enabled(tool.metadata)
+    )
 
 
 _NO_VISION_NOTE = (
@@ -344,6 +367,7 @@ def _log_upload_read(
     outcome: str,
     response_type: Optional[str],
     size_bytes: Optional[int],
+    reason: Optional[str] = None,
 ) -> None:
     """Record the service's decision to ask for an upload, in the security logging standard's shape.
 
@@ -354,6 +378,10 @@ def _log_upload_read(
     ``outcome`` reports the download, not what the model received: ``success`` means the client answered the request,
     even when the payload then failed the image checks. That case reads as ``size_bytes`` set with ``response_type``
     ``text``, since the bytes were pulled into the service before the check refused them.
+
+    ``reason`` names why the service itself refused before any request went out, so a blocked reference reads
+    differently from a failed download in a SIEM search; it is ``None`` whenever the download was attempted. The
+    standard allows only ``success``, ``failure`` and ``unknown`` for ``outcome``, hence a separate field.
 
     Fields this layer cannot fill: ``author_name`` (only ids reach the service), ``target_id`` (uploads are addressed
     by secret and filename), ``ip_address`` (the request arrives over gRPC) and ``details.token_type`` (the client
@@ -376,6 +404,7 @@ def _log_upload_read(
             "outcome": outcome,
             "provider": "duo_workflow_service",
             "response_type": response_type,
+            "reason": reason,
         },
         gitlab={"data_type": "upload", "size_bytes": size_bytes},
     )
@@ -402,6 +431,22 @@ async def _read_upload_reference(
     request_path = _resolve_upload_reference(file_path, project)
     if request_path is None:
         return None
+
+    # Refuse readably rather than fall through to a file read: a planted
+    # reference in a flow without GitLab access is what the trail is for.
+    if _UPLOAD_READ_PRIVILEGE not in _granted_privileges(metadata):
+        _log_upload_read(
+            project,
+            request_path,
+            outcome="failure",
+            response_type=None,
+            size_bytes=None,
+            reason="missing_privilege",
+        )
+        return (
+            f'Cannot read upload: "{file_path}" is an issue or merge request upload, '
+            "and this flow has no GitLab API access."
+        )
 
     # An agent pulling a project upload into model context is worth a trail;
     # see _log_upload_read for what the trail is and is not.
@@ -443,7 +488,7 @@ class ReadFile(DuoBaseTool):
     name: str = "read_file"
     description: str = f"""Read the contents of a file.
 
-    {_READ_FILE_IMAGE_NOTE}Batching:
+    {_READ_FILE_IMAGE_NOTE}{_READ_FILE_UPLOAD_NOTE}Batching:
     - When multiple files need inspection, emit multiple read_file calls concurrently in a single turn.
     - Do not make separate turns for each file - group all related file reads together.
     - Avoid redundant re-reads of files that are unchanged since you last read them.
@@ -459,7 +504,7 @@ class ReadFile(DuoBaseTool):
 
     @model_validator(mode="after")
     def _gate_image_support_description(self) -> "ReadFile":
-        _strip_image_note_if_disabled(self, _READ_FILE_IMAGE_NOTE)
+        _gate_read_file_notes(self, _READ_FILE_IMAGE_NOTE)
         return self
 
     async def _execute(self, file_path: str) -> str | list[dict[str, Any]]:
@@ -524,7 +569,7 @@ class ReadFileChunked(DuoBaseTool):
     - Only read files directly relevant to the current task. Do NOT speculatively read unrelated files or entire directories.
     - Returns up to 2000 lines from offset (0-indexed).
     - For large files (>100 lines), specify offset and limit to inspect only the relevant section.
-    {_READ_FILE_CHUNKED_IMAGE_NOTE}
+    {_READ_FILE_CHUNKED_IMAGE_NOTE}{_READ_FILE_UPLOAD_NOTE}
     {GITIGNORED_FILE_NOTE}
     """
     args_schema: Type[BaseModel] = ReadFileChunkedInput
@@ -534,7 +579,7 @@ class ReadFileChunked(DuoBaseTool):
 
     @model_validator(mode="after")
     def _gate_image_support_description(self) -> "ReadFileChunked":
-        _strip_image_note_if_disabled(self, _READ_FILE_CHUNKED_IMAGE_NOTE)
+        _gate_read_file_notes(self, _READ_FILE_CHUNKED_IMAGE_NOTE)
         return self
 
     async def _execute(
@@ -592,7 +637,7 @@ class ReadFiles(DuoBaseTool):
 
     @model_validator(mode="after")
     def _gate_image_support_description(self) -> "ReadFiles":
-        _strip_image_note_if_disabled(self, _READ_FILES_IMAGE_NOTE)
+        _strip_note_unless(self, _READ_FILES_IMAGE_NOTE, _image_support_enabled())
         return self
 
     async def _execute(self, file_paths: list[str]) -> str:
