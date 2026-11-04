@@ -1370,6 +1370,25 @@ class BasePromptRegistry(ABC):
                 exception explicitly.
         """
 
+    def models_from(
+        self,
+        prompt_id: str,
+        prompt_version: Optional[str],
+        model_metadata: Optional[TypeModelMetadata] = None,
+    ) -> Optional[str]:
+        """Return the ``models_from`` of the prompt version that ``get`` resolves for this model.
+
+        Args:
+            prompt_id: Identifier of the prompt.
+            prompt_version: Version constraint of the request, or ``None`` for the default version.
+            model_metadata: The model the prompt runs on. Its family selects the prompt definition.
+
+        Returns:
+            The feature setting that lists the models of the version, or ``None`` when the version does not declare
+            one or the registry cannot resolve it.
+        """
+        return None
+
     def get_on_behalf(
         self,
         # TODO: We should allow only `CloudConnectorUser` in the future.

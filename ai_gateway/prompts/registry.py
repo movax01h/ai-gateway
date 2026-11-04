@@ -186,13 +186,17 @@ LEGACY_MODEL_MAPPING = {
 # that Rails sends: Rails takes it from the unit primitive of the call, not from the prompt ID, so
 # the chat tools have their own feature settings and `categorize_question` runs on the chat model.
 #
-# - The registry picks the default model of a request without model metadata from this feature.
-#   Without an entry, a prompt whose ID doesn't start with a feature setting fails with "Invalid
-#   feature setting" when model metadata is absent, for example on a self-managed instance with a
-#   configured ai_gateway_url.
-# - ModelConfigMiddleware checks client model metadata on the prompt routes against this feature.
-# - Each version of a prompt here that the AI Gateway serves over HTTP declares this feature as
-#   `models_from`. A prompt that only the Duo Workflow Service runs does not set `models_from`.
+# - The registry picks the default model of a request without model metadata from the
+#   `models_from` of the prompt version, or from this feature for a version without
+#   `models_from`. Without either, a prompt whose ID doesn't start with a feature setting fails
+#   with "Invalid feature setting" when model metadata is absent, for example on a self-managed
+#   instance with a configured ai_gateway_url.
+# - The prompt routes check client model metadata in the same order: the `models_from` of the
+#   version, then this feature.
+# - Each version of a prompt here that the AI Gateway serves over HTTP declares `models_from`.
+#   It is this feature, except for a version that uses the unit primitive of another feature,
+#   such as `summarize_review` 3.0.0. A prompt that only the Duo Workflow Service runs does not
+#   set `models_from`.
 PROMPT_ID_TO_FEATURE_SETTING: dict[str, str] = {
     "code_suggestions/completions": "code_completions",
     "code_suggestions/generations": "code_generations",
@@ -349,9 +353,28 @@ class LocalPromptRegistry(BasePromptRegistry):
         return create_model_metadata(
             {
                 "provider": "gitlab",
-                "feature_setting": feature_setting_for_prompt_id(prompt_id),
+                "feature_setting": self.models_from(prompt_id, prompt_version)
+                or feature_setting_for_prompt_id(prompt_id),
             }
         )
+
+    @override
+    def models_from(
+        self,
+        prompt_id: str,
+        prompt_version: Optional[str],
+        model_metadata: Optional[TypeModelMetadata] = None,
+    ) -> Optional[str]:
+        family = model_metadata.llm_definition.family if model_metadata else []
+        try:
+            prompt_path = self._resolve_id(prompt_id, family)
+            versions = self._load_prompt_definition(prompt_id, prompt_path).versions
+            config = self._get_prompt_config(
+                versions, prompt_version or self._DEFAULT_VERSION
+            )
+        except (FileNotFoundError, ValueError):
+            return None
+        return config.models_from
 
     def _adjust_tool_choice_for_model(
         self, tool_choice: Optional[str], model_metadata: Optional[TypeModelMetadata]

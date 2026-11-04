@@ -2746,6 +2746,11 @@ class TestBaseRegistry:
 
         assert result == prompt
 
+    def test_models_from_returns_none_without_an_override(
+        self, registry: BasePromptRegistry
+    ):
+        assert registry.models_from("test", "^1.0.0") is None
+
 
 class TestPromptCallbacks:
     """Test callback execution in Prompt class."""
