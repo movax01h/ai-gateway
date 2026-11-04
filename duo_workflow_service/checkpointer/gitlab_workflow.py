@@ -191,6 +191,12 @@ def _flush_point_for(status: WorkflowStatusEventEnum) -> _FlushPoint:
     return _FlushPoint.ON_NEXT_CHECKPOINT
 
 
+# The flush points a clean completion drains, in order: FINISH by design, then
+# the rest as a backstop. The single source of truth for both sending the
+# completion PATCHes and predicting the status they leave cached for billing.
+_COMPLETION_FLUSH_POINTS = (_FlushPoint.ON_COMPLETION, _FlushPoint.ON_NEXT_CHECKPOINT)
+
+
 def _is_response_size_limit_error(exc: BaseException) -> bool:
     """Whether `exc` is Workhorse's oversized gRPC-message guard tripping."""
     return _RESPONSE_SIZE_LIMIT_ERROR_MARKER in str(exc)
@@ -977,13 +983,17 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
 
                 await self._handle_workflow_exception(exc_value, event)
 
-            await self._update_workflow_status_safely(status)
+            # The status PATCH is sent by _handle_completion, after it settles
+            # billing: the executor relays the PATCH and may never answer it.
+            # Completion errors are swallowed so they don't override the
+            # original teardown exception.
+            await self._handle_completion(
+                exc_type, exc_value, reraise_errors=False, exit_status_event=status
+            )
+            return None
 
-        # If we're handling a "clean" exit (no `exc_type`), reraise any completion handling errors. Otherwise
-        # swallow them so they don't override the original teardown exception
-        await self._handle_completion(
-            exc_type, exc_value, reraise_errors=exc_type is None
-        )
+        # If we're handling a "clean" exit (no `exc_type`), reraise any completion handling errors.
+        await self._handle_completion(reraise_errors=True)
 
     def _defer_status(
         self,
@@ -1000,6 +1010,21 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         )
         self._deferred_statuses[status] = (flush_point, checkpoint_id)
 
+    def _due_deferred_statuses(
+        self, flush_point: _FlushPoint, checkpoint_id: str | None = None
+    ) -> List[WorkflowStatusEventEnum]:
+        """The deferred statuses due at ``flush_point``, in the order ``_flush_deferred_statuses`` sends them.
+
+        With ``checkpoint_id`` set, only statuses parked against that id are due; without it, every status at the
+        flush point is. Side-effect free, so it also predicts what a flush will send.
+        """
+        return [
+            status
+            for status, (point, parked_id) in self._deferred_statuses.items()
+            if point is flush_point
+            and (checkpoint_id is None or parked_id == checkpoint_id)
+        ]
+
     async def _flush_deferred_statuses(
         self, flush_point: _FlushPoint, checkpoint_id: str | None = None
     ) -> None:
@@ -1013,15 +1038,12 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
         A failed PATCH propagates (a transient Rails error surfaces like any save failure); the entry stays parked, so
         the next matching checkpoint save retries it.
         """
-        for status, (point, parked_id) in list(self._deferred_statuses.items()):
-            if point is not flush_point:
-                continue
-            if checkpoint_id is not None and parked_id != checkpoint_id:
-                continue
+        for status in self._due_deferred_statuses(flush_point, checkpoint_id):
+            _, parked_id = self._deferred_statuses[status]
             self._logger.debug(
                 "Firing deferred workflow status",
                 status_event=status.value,
-                flush_point=point.value,
+                flush_point=flush_point.value,
                 checkpoint_id=parked_id,
             )
             await self._update_workflow_status(status)
@@ -1030,37 +1052,184 @@ class GitLabWorkflow(BaseCheckpointSaver[Any], AbstractAsyncContextManager[Any])
     def _is_status_deferred(self, status: WorkflowStatusEventEnum) -> bool:
         return status in self._deferred_statuses
 
-    async def _handle_completion(
-        self, exc_type=None, exc_value=None, reraise_errors=True
+    def _last_dws_billable_event(self) -> Optional[WorkflowStatusEventEnum]:
+        """The last billable status event DWS already reached this session, or None.
+
+        Prefers the last pending deferred status (walking ``_COMPLETION_FLUSH_POINTS`` through
+        ``_due_deferred_statuses``, exactly as ``_send_completion_statuses`` flushes them, so it matches
+        ``_last_status_event`` after the flush) over the event cached by the last PATCH. The candidate is
+        translated with ``rails_status_event`` before consulting ``BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS``,
+        so IDLE is billable only on an instance that accepts the ``idle`` status event.
+        """
+        pending = [
+            status
+            for flush_point in _COMPLETION_FLUSH_POINTS
+            for status in self._due_deferred_statuses(flush_point)
+        ]
+        candidate = pending[-1] if pending else self._last_status_event
+        if candidate is None:
+            return None
+        if (
+            BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS.get(rails_status_event(candidate))
+            is None
+        ):
+            return None
+        return candidate
+
+    def _final_status_event(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exit_status_event: Optional[WorkflowStatusEventEnum],
+    ) -> Optional[WorkflowStatusEventEnum]:
+        """The status event billed at completion, as it will stand once completion has sent its PATCHes.
+
+        All candidates are DWS-decided: the exit status of an exception exit, the last deferred status a clean exit
+        flushes (walking ``_COMPLETION_FLUSH_POINTS`` through ``_due_deferred_statuses``, exactly as
+        ``_send_completion_statuses`` does, so it matches ``_last_status_event`` after the flush), or else the event
+        cached by the last PATCH.
+
+        A DROP exit (the client cancelled mid-turn, or the run failed) still bills a turn whose billable status
+        DWS already reached: the client controls when it cancels, so it must not be able to turn a delivered
+        answer into an unbilled DROP (security issue 25). Only the billing lookup falls back; the PATCH that
+        ``_send_completion_statuses`` sends stays DROP, so Rails still records the drop.
+        """
+        if exit_status_event is not None:
+            if exit_status_event is not WorkflowStatusEventEnum.DROP:
+                # STOP is billable on its own.
+                return exit_status_event
+            billable = self._last_dws_billable_event()
+            return billable if billable is not None else exit_status_event
+        return self._last_dws_billable_event() or self._last_status_event
+
+    async def _send_completion_statuses(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exit_status_event: Optional[WorkflowStatusEventEnum],
     ) -> None:
-        if self._offline_mode:
+        """Send the status PATCHes that end the session; each is relayed, and may be stalled, by the executor."""
+        if exit_status_event is not None:
+            await self._update_workflow_status_safely(exit_status_event)
+
+        # The graph loop has drained and its terminal checkpoint is
+        # persisted: drain FINISH by design, the rest as a backstop so no
+        # status is lost even if its super-step saved no checkpoint. The
+        # order is _COMPLETION_FLUSH_POINTS, shared with _final_status_event.
+        if exc_type is None:
+            for flush_point in _COMPLETION_FLUSH_POINTS:
+                await self._flush_deferred_statuses(flush_point)
+
+    def _log_executor_status_mismatch(
+        self,
+        executor_status: Optional[str],
+        dws_status_event: Optional[WorkflowStatusEventEnum],
+    ) -> None:
+        """Log when the executor-relayed workflow status contradicts DWS on whether the session is billable.
+
+        Only reached when DWS knows no billable status, so a billable executor-reported status disagrees with it.
+        """
+        if dws_status_event is None or executor_status not in BILLABLE_STATUSES:
             return
 
+        self._logger.warning(
+            "Executor-reported workflow status differs from DWS status",
+            workflow_id=self._workflow_id,
+            executor_reported_status=executor_status,
+            dws_status_event=dws_status_event.value,
+        )
+
+    async def _handle_completion(
+        self,
+        exc_type: Optional[type[BaseException]] = None,
+        exc_value: Optional[BaseException] = None,
+        reraise_errors: bool = True,
+        exit_status_event: Optional[WorkflowStatusEventEnum] = None,
+    ) -> None:
+        """Send the session's final status to Rails and track its completion, billing it when billable.
+
+        Every Rails call here is relayed by the executor, which is the client and may never answer. So when DWS already
+        decided a billable status, completion is tracked (and billed) before any of those calls is awaited.
+
+        Args:
+            exc_type: Type of the exception that ended the session, if any.
+            exc_value: Exception that ended the session, if any.
+            reraise_errors: Whether to reraise errors raised while handling completion, or only log them.
+            exit_status_event: Status event an exception exit ends the session with (e.g. STOP or DROP). An exception
+                exit that omits it logs an error and ends the session as DROP.
+        """
+        # An exception exit must say how it ends the session: without an exit
+        # status, a billable cached status would be billed while
+        # _send_completion_statuses sends no PATCH, so Rails never hears of it.
+        # Not an assert: that is stripped under `python -O`, and raising here,
+        # inside __aexit__, would replace the original teardown exception. So
+        # log the caller bug and end the session as DROP, the exception exit
+        # default, which still sends a PATCH to Rails.
+        if exc_type is not None and exit_status_event is None:
+            self._logger.error(
+                "Exception exit without an exit status event; ending the session as DROP",
+                workflow_id=self._workflow_id,
+                exc_type=exc_type.__name__,
+            )
+            exit_status_event = WorkflowStatusEventEnum.DROP
+
+        if self._offline_mode:
+            if exit_status_event is not None:
+                await self._update_workflow_status_safely(exit_status_event)
+            return
+
+        # Prefer the DWS-decided final status event whenever it ends or pauses
+        # the session in a billable Rails status, translated to the workflow
+        # status it transitions the session to, over a remote Rails status
+        # relayed by the executor. The event is first translated to the event
+        # Rails receives (e.g. IDLE is sent as REQUIRE_INPUT to an instance that
+        # does not accept IDLE), so the completion status matches what Rails
+        # records.
+        # On a DROP exit the final event still falls back to the last billable
+        # status DWS already reached this turn (see _final_status_event): the
+        # client decides when it cancels, so it must not be able to turn a
+        # delivered answer into an unbilled DROP.
+        final_event = self._final_status_event(exc_type, exit_status_event)
+        status: str | None = None
+        if final_event is not None:
+            status = BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS.get(
+                rails_status_event(final_event)
+            )
+
         try:
-            # The graph loop has drained and its terminal checkpoint is
-            # persisted: drain FINISH by design, the rest as a backstop so no
-            # status is lost even if its super-step saved no checkpoint.
-            if exc_type is None:
-                await self._flush_deferred_statuses(_FlushPoint.ON_COMPLETION)
-                await self._flush_deferred_statuses(_FlushPoint.ON_NEXT_CHECKPOINT)
+            if status is not None:
+                tracking_error: Optional[Exception] = None
+                try:
+                    await self._track_workflow_completion(status, exc_type, exc_value)
+                except Exception as error:
+                    tracking_error = error
 
-            # Prefer the locally cached last status event whenever it ends or
-            # pauses the session in a billable Rails status, translated to the
-            # workflow status it transitions the session to, over a remote Rails
-            # status that may not reflect the transition yet. The cached event is
-            # first translated to the event Rails actually received (e.g. IDLE is
-            # sent as REQUIRE_INPUT to an instance that does not accept IDLE), so
-            # the completion status matches what Rails recorded.
-            status: str | None = None
-            if self._last_status_event is not None:
-                status = BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS.get(
-                    rails_status_event(self._last_status_event)
-                )
+                # The status PATCHes go out whether or not tracking raised.
+                try:
+                    await self._send_completion_statuses(exc_type, exit_status_event)
+                except Exception:
+                    if tracking_error is not None:
+                        # Both failed. The PATCH error is the one that propagates
+                        # (or is logged below), so log the tracking error here
+                        # rather than leave it reachable only as __context__.
+                        log_exception(
+                            tracking_error,
+                            extra={
+                                "workflow_id": self._workflow_id,
+                                "source": __name__,
+                                "context": "Error tracking workflow completion",
+                            },
+                        )
+                    raise
 
-            if status is None:
-                status = await self._status_handler.get_workflow_status(
-                    workflow_id=self._workflow_id
-                )
+                if tracking_error is not None:
+                    raise tracking_error
+                return
+
+            await self._send_completion_statuses(exc_type, exit_status_event)
+
+            status = await self._status_handler.get_workflow_status(
+                workflow_id=self._workflow_id
+            )
+            self._log_executor_status_mismatch(status, final_event)
 
             await self._track_workflow_completion(status, exc_type, exc_value)
         except Exception as finish_error:

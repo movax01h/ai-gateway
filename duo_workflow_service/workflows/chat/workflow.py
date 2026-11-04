@@ -37,6 +37,7 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.entities.attachments import (
     Attachment,
+    AttachmentsNotAllowedError,
     attachment_content_blocks,
     attachment_rejection_block,
     partition_attachment_envelopes,
@@ -478,7 +479,19 @@ class Workflow(AbstractWorkflow):
         goes ahead without the files instead, and both the user and the model
         are told they are missing (see ``_attachments_rejected_log`` and
         :func:`attachment_rejection_block`).
+
+        Attachments this workflow does not allow are the exception and do raise:
+        that is a policy violation rather than a bad file, so the whole turn is
+        refused. ``AttachmentsNotAllowedError`` is a ``NotifiableException``, so
+        the user is shown why.
         """
+        if not self._workflow_config.get("file_attachments_allowed", False):
+            _, dropped = partition_attachment_envelopes(self._additional_context)
+            if dropped:
+                raise AttachmentsNotAllowedError(
+                    "File attachments are not allowed for this session."
+                )
+
         try:
             remaining, attachments = split_attachment_envelopes(
                 self._additional_context

@@ -50,6 +50,9 @@ from duo_workflow_service.errors.typing import (
     WorkflowAlreadyFinishedException,
 )
 from duo_workflow_service.executor.outbox import OutgoingMessageTooLargeError
+from duo_workflow_service.gitlab.executor_http_client import (
+    ExecutorRequestTimeoutError,
+)
 from duo_workflow_service.gitlab.http_client import (
     GitLabHttpResponse,
     checkpoint_decoder,
@@ -2282,6 +2285,52 @@ async def test_workflow_status_events(
     )
 
 
+@pytest.fixture(name="workflow_with_deferred_statuses")
+def workflow_with_deferred_statuses_fixture(gitlab_workflow):
+    gitlab_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.PAUSE: (_FlushPoint.ON_NEXT_CHECKPOINT, "cp-1"),
+        WorkflowStatusEventEnum.FINISH: (_FlushPoint.ON_COMPLETION, "cp-1"),
+        WorkflowStatusEventEnum.REQUIRE_INPUT: (
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+            "cp-2",
+        ),
+    }
+    return gitlab_workflow
+
+
+@pytest.mark.parametrize(
+    ("flush_point", "checkpoint_id", "expected"),
+    [
+        (
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+            None,
+            [WorkflowStatusEventEnum.PAUSE, WorkflowStatusEventEnum.REQUIRE_INPUT],
+        ),
+        (_FlushPoint.ON_NEXT_CHECKPOINT, "cp-1", [WorkflowStatusEventEnum.PAUSE]),
+        (
+            _FlushPoint.ON_NEXT_CHECKPOINT,
+            "cp-2",
+            [WorkflowStatusEventEnum.REQUIRE_INPUT],
+        ),
+        (_FlushPoint.ON_NEXT_CHECKPOINT, "cp-unknown", []),
+        (_FlushPoint.ON_COMPLETION, None, [WorkflowStatusEventEnum.FINISH]),
+    ],
+)
+def test_due_deferred_statuses(
+    workflow_with_deferred_statuses, flush_point, checkpoint_id, expected
+):
+    before = dict(workflow_with_deferred_statuses._deferred_statuses)
+
+    assert (
+        workflow_with_deferred_statuses._due_deferred_statuses(
+            flush_point, checkpoint_id
+        )
+        == expected
+    )
+    # Pure: predicting what a flush sends must not consume the parked entries.
+    assert workflow_with_deferred_statuses._deferred_statuses == before
+
+
 @pytest.mark.asyncio
 async def test_track_workflow_completion_early_return(
     gitlab_workflow, internal_event_client: Mock
@@ -2909,6 +2958,727 @@ async def test_handle_completion_cached_terminal_status_end_to_end(
     )
 
 
+# ---------------------------------------------------------------------------
+# Completion billing must not depend on any executor reply (security issue 25):
+# the executor is the client and relays every Rails call DWS makes here.
+# ---------------------------------------------------------------------------
+
+_DEFERRED_INPUT_FIRST_STEP = (_FlushPoint.ON_NEXT_CHECKPOINT, None)
+
+
+async def _executor_never_answers(*_args: Any, **_kwargs: Any) -> None:
+    """Stand in for an executor-relayed request that the executor never answers."""
+    await asyncio.Event().wait()
+
+
+async def _wait_until_awaited(mock: AsyncMock) -> None:
+    """Yield to the event loop until ``mock`` has been awaited."""
+    for _ in range(100):
+        if mock.await_count:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(f"{mock} was never awaited")
+
+
+@pytest.fixture(name="status_handler")
+def status_handler_fixture() -> AsyncMock:
+    """A mocked status handler standing in for the executor-relayed status PATCH and GET."""
+    return AsyncMock()
+
+
+@pytest.fixture(name="billing_workflow")
+def billing_workflow_fixture(
+    gitlab_workflow: GitLabWorkflow,
+    status_handler: AsyncMock,
+    internal_event_client: Mock,
+    billing_event_service,
+    mock_user,
+    mock_llm_operations,  # pylint: disable=unused-argument  # billing needs LLM operations in context
+) -> GitLabWorkflow:
+    """A ``GitLabWorkflow`` that emits real billing events, with a mocked status handler."""
+    current_user.set(mock_user)
+    gitlab_workflow._internal_event_client = internal_event_client
+    gitlab_workflow._billing_event_service = billing_event_service
+    gitlab_workflow._status_handler = status_handler
+    return gitlab_workflow
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "deferred_statuses,last_status_event,exit_kwargs,stalled_call",
+    [
+        pytest.param(
+            {WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH},
+            WorkflowStatusEventEnum.START,
+            {},
+            "update_workflow_status",
+            id="finish_patch_never_answered",
+        ),
+        pytest.param(
+            {WorkflowStatusEventEnum.REQUIRE_INPUT: _DEFERRED_INPUT_FIRST_STEP},
+            WorkflowStatusEventEnum.START,
+            {},
+            "update_workflow_status",
+            id="require_input_patch_never_answered",
+        ),
+        pytest.param(
+            {},
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            {},
+            "get_workflow_status",
+            id="status_get_never_answered",
+        ),
+        pytest.param(
+            {},
+            WorkflowStatusEventEnum.START,
+            {
+                "exc_type": asyncio.CancelledError,
+                "exc_value": asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+                "reraise_errors": False,
+                "exit_status_event": WorkflowStatusEventEnum.STOP,
+            },
+            "update_workflow_status",
+            id="stop_patch_never_answered",
+        ),
+    ],
+)
+async def test_handle_completion_bills_when_executor_never_answers(
+    billing_workflow: GitLabWorkflow,
+    billing_event_client: Mock,
+    status_handler: AsyncMock,
+    deferred_statuses: dict,
+    last_status_event: WorkflowStatusEventEnum,
+    exit_kwargs: dict[str, Any],
+    stalled_call: str,
+):
+    """A billable status DWS decided is billed even if the executor never answers the status PATCH or GET."""
+    stalled = AsyncMock(side_effect=_executor_never_answers)
+    setattr(status_handler, stalled_call, stalled)
+    status_handler.get_workflow_status.return_value = "running"
+    billing_workflow._deferred_statuses = dict(deferred_statuses)
+    billing_workflow._last_status_event = last_status_event
+
+    task = asyncio.create_task(billing_workflow._handle_completion(**exit_kwargs))
+    if stalled_call == "update_workflow_status":
+        await _wait_until_awaited(stalled)
+        # Still stuck on the PATCH, yet already billed.
+        assert not task.done()
+        billing_event_client.track_billing_event.assert_called_once()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        # Billing is settled from DWS state alone, so the GET is never sent.
+        await task
+        stalled.assert_not_awaited()
+
+    billing_event_client.track_billing_event.assert_called_once()
+    assert (
+        billing_event_client.track_billing_event.call_args.args[1]
+        == BillingEvent.DAP_FLOW_ON_COMPLETION
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_completion_bills_when_finish_patch_times_out(
+    billing_workflow: GitLabWorkflow,
+    billing_event_client: Mock,
+    status_handler: AsyncMock,
+    workflow_id: str,
+):
+    """A DWS-side executor timeout on the FINISH PATCH still surfaces, but only after the session is billed."""
+    status_handler.update_workflow_status.side_effect = ExecutorRequestTimeoutError(
+        "PATCH", f"/api/v4/ai/duo_workflows/workflows/{workflow_id}", 60.0
+    )
+    billing_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
+
+    with pytest.raises(ExecutorRequestTimeoutError):
+        await billing_workflow._handle_completion()
+
+    billing_event_client.track_billing_event.assert_called_once()
+    status_handler.get_workflow_status.assert_not_called()
+    # The entry stays parked, as before, when its PATCH fails.
+    assert WorkflowStatusEventEnum.FINISH in billing_workflow._deferred_statuses
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "deferred_statuses,last_status_event",
+    [
+        pytest.param(
+            {WorkflowStatusEventEnum.REQUIRE_INPUT: _DEFERRED_INPUT_FIRST_STEP},
+            WorkflowStatusEventEnum.START,
+            id="deferred_require_input",
+        ),
+        pytest.param(
+            {},
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            id="cached_require_input",
+        ),
+    ],
+)
+async def test_aexit_bills_require_input_turn_despite_spoofed_running_get(
+    billing_workflow: GitLabWorkflow,
+    billing_event_client: Mock,
+    status_handler: AsyncMock,
+    workflow_id: str,
+    deferred_statuses: dict,
+    last_status_event: WorkflowStatusEventEnum,
+):
+    """A chat turn that ends at require_input is billed even if the executor would answer the GET with ``running``."""
+    status_handler.get_workflow_status.return_value = "running"
+    billing_workflow._deferred_statuses = dict(deferred_statuses)
+    billing_workflow._last_status_event = last_status_event
+
+    await billing_workflow.__aexit__(None, None, None)
+
+    billing_event_client.track_billing_event.assert_called_once()
+    status_handler.get_workflow_status.assert_not_called()
+    assert [c.args for c in status_handler.update_workflow_status.await_args_list] == [
+        (workflow_id, WorkflowStatusEventEnum.REQUIRE_INPUT) for _ in deferred_statuses
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "deferred_statuses,last_status_event,capabilities",
+    [
+        pytest.param(
+            {}, WorkflowStatusEventEnum.REQUIRE_INPUT, (), id="cached_require_input"
+        ),
+        pytest.param(
+            {},
+            WorkflowStatusEventEnum.IDLE,
+            (IDLE_STATUS_EVENT_CAPABILITY,),
+            id="cached_idle_on_instance_accepting_idle",
+        ),
+        pytest.param(
+            {},
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+            (),
+            id="cached_require_tool_call_approval",
+        ),
+        # The final checkpoint aput was interrupted, so the turn's status is
+        # still parked (ON_NEXT_CHECKPOINT) instead of PATCHed. RESUME is what
+        # __aenter__ cached when this turn started.
+        pytest.param(
+            {WorkflowStatusEventEnum.REQUIRE_INPUT: _DEFERRED_INPUT_FIRST_STEP},
+            WorkflowStatusEventEnum.RESUME,
+            (),
+            id="deferred_require_input_over_cached_resume",
+        ),
+    ],
+)
+async def test_aexit_bills_interrupted_turn_on_client_cancel(
+    billing_workflow: GitLabWorkflow,
+    billing_event_client: Mock,
+    status_handler: AsyncMock,
+    declare_capabilities,
+    workflow_id: str,
+    deferred_statuses: dict,
+    last_status_event: WorkflowStatusEventEnum,
+    capabilities: tuple[str, ...],
+):
+    """A chat turn that already reached a billable status is billed even when the client then cancels the RPC.
+
+    The plain CancelledError (not a stop request) takes the DROP branch in __aexit__: the DROP PATCH is still sent so
+    Rails records the drop, but billing falls back to the billable status DWS already reached -- a cancel must not turn
+    a delivered answer into an unbilled DROP (security issue 25).
+    """
+    declare_capabilities(*capabilities)
+    # A spoofed executor would answer the fallback GET with a non-billable status.
+    status_handler.get_workflow_status.return_value = "running"
+    billing_workflow._deferred_statuses = dict(deferred_statuses)
+    billing_workflow._last_status_event = last_status_event
+
+    await billing_workflow.__aexit__(
+        asyncio.CancelledError, asyncio.CancelledError(), None
+    )
+
+    billing_event_client.track_billing_event.assert_called_once()
+    assert (
+        billing_event_client.track_billing_event.call_args.args[1]
+        == BillingEvent.DAP_FLOW_ON_COMPLETION
+    )
+    # Billing is settled from DWS state alone, so the executor-relayed GET is never sent.
+    status_handler.get_workflow_status.assert_not_called()
+    # Rails still records the drop; the parked REQUIRE_INPUT is not flushed on an exception exit.
+    status_handler.update_workflow_status.assert_awaited_once_with(
+        workflow_id, WorkflowStatusEventEnum.DROP
+    )
+    assert billing_workflow._deferred_statuses == deferred_statuses
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "deferred_statuses,last_status_event",
+    [
+        pytest.param(
+            {}, WorkflowStatusEventEnum.REQUIRE_INPUT, id="cached_require_input"
+        ),
+        pytest.param(
+            {WorkflowStatusEventEnum.REQUIRE_INPUT: _DEFERRED_INPUT_FIRST_STEP},
+            WorkflowStatusEventEnum.RESUME,
+            id="deferred_require_input_over_cached_resume",
+        ),
+    ],
+)
+async def test_aexit_bills_interrupted_turn_when_drop_patch_never_answers(
+    billing_workflow: GitLabWorkflow,
+    billing_event_client: Mock,
+    status_handler: AsyncMock,
+    workflow_id: str,
+    deferred_statuses: dict,
+    last_status_event: WorkflowStatusEventEnum,
+):
+    """The interrupted turn is already billed while the DROP PATCH the executor never answers is still in flight."""
+    status_handler.update_workflow_status.side_effect = _executor_never_answers
+    status_handler.get_workflow_status.return_value = "running"
+    billing_workflow._deferred_statuses = dict(deferred_statuses)
+    billing_workflow._last_status_event = last_status_event
+
+    task = asyncio.create_task(
+        billing_workflow.__aexit__(
+            asyncio.CancelledError, asyncio.CancelledError(), None
+        )
+    )
+    await _wait_until_awaited(status_handler.update_workflow_status)
+
+    # Still stuck on the DROP PATCH, yet already billed from DWS state.
+    assert not task.done()
+    billing_event_client.track_billing_event.assert_called_once()
+    assert (
+        billing_event_client.track_billing_event.call_args.args[1]
+        == BillingEvent.DAP_FLOW_ON_COMPLETION
+    )
+    assert status_handler.update_workflow_status.await_args.args == (
+        workflow_id,
+        WorkflowStatusEventEnum.DROP,
+    )
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    billing_event_client.track_billing_event.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "last_status_event",
+    [
+        WorkflowStatusEventEnum.START,
+        WorkflowStatusEventEnum.RESUME,
+        WorkflowStatusEventEnum.RETRY,
+        WorkflowStatusEventEnum.PAUSE,
+    ],
+    ids=["start", "resume", "retry", "pause"],
+)
+async def test_aexit_client_cancel_without_billable_status_falls_back_to_remote(
+    billing_workflow: GitLabWorkflow,
+    billing_event_client: Mock,
+    status_handler: AsyncMock,
+    workflow_id: str,
+    last_status_event: WorkflowStatusEventEnum,
+):
+    """A cancel with no billable status reached bills nothing from the cache and falls back to the remote GET.
+
+    RESUME/RETRY are what __aenter__ sends for a fresh resume, so a stale pause status from a previous turn
+    cannot be re-billed by an immediate cancel: the cache holds only what this session sent.
+    """
+    status_handler.get_workflow_status.return_value = "running"
+    billing_workflow._deferred_statuses = {}
+    billing_workflow._last_status_event = last_status_event
+
+    await billing_workflow.__aexit__(
+        asyncio.CancelledError, asyncio.CancelledError(), None
+    )
+
+    billing_event_client.track_billing_event.assert_not_called()
+    status_handler.update_workflow_status.assert_awaited_once_with(
+        workflow_id, WorkflowStatusEventEnum.DROP
+    )
+    status_handler.get_workflow_status.assert_awaited_once_with(workflow_id=workflow_id)
+
+
+@pytest.mark.parametrize(
+    "deferred_statuses,last_status_event,expected",
+    [
+        # A pending deferred status wins over the event cached by the last PATCH.
+        pytest.param(
+            {WorkflowStatusEventEnum.REQUIRE_INPUT: _DEFERRED_INPUT_FIRST_STEP},
+            WorkflowStatusEventEnum.RESUME,
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            id="deferred_billable_wins_over_cached",
+        ),
+        pytest.param(
+            {},
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            id="cached_billable_when_nothing_deferred",
+        ),
+        pytest.param(
+            {},
+            WorkflowStatusEventEnum.RESUME,
+            WorkflowStatusEventEnum.DROP,
+            id="neither_billable_returns_drop",
+        ),
+        pytest.param(
+            {},
+            None,
+            WorkflowStatusEventEnum.DROP,
+            id="nothing_reached_returns_drop",
+        ),
+    ],
+)
+def test_final_status_event_drop_exit_bills_last_dws_billable_status(
+    gitlab_workflow: GitLabWorkflow,
+    deferred_statuses: dict,
+    last_status_event: Optional[WorkflowStatusEventEnum],
+    expected: WorkflowStatusEventEnum,
+):
+    """On a DROP exit, _final_status_event falls back to the last billable status DWS already reached."""
+    gitlab_workflow._deferred_statuses = dict(deferred_statuses)
+    gitlab_workflow._last_status_event = last_status_event
+
+    assert (
+        gitlab_workflow._final_status_event(
+            asyncio.CancelledError, WorkflowStatusEventEnum.DROP
+        )
+        == expected
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "aexit_args,deferred_statuses,patch_error,track_error,last_status_event",
+    [
+        pytest.param(
+            (None, None, None),
+            {WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH},
+            None,
+            None,
+            None,
+            id="clean_finish",
+        ),
+        pytest.param(
+            (None, None, None),
+            {WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH},
+            RuntimeError("PATCH failed"),
+            None,
+            None,
+            id="clean_finish_patch_fails",
+        ),
+        pytest.param(
+            (
+                asyncio.CancelledError,
+                asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+                None,
+            ),
+            {},
+            None,
+            None,
+            None,
+            id="user_stop",
+        ),
+        # A user stop bills STOP itself, never a billable status cached from an
+        # earlier point in the turn.
+        pytest.param(
+            (
+                asyncio.CancelledError,
+                asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+                None,
+            ),
+            {},
+            None,
+            None,
+            WorkflowStatusEventEnum.REQUIRE_INPUT,
+            id="user_stop_with_cached_require_input",
+        ),
+        pytest.param(
+            (
+                asyncio.CancelledError,
+                asyncio.CancelledError(AIO_CANCEL_STOP_WORKFLOW_REQUEST),
+                None,
+            ),
+            {},
+            RuntimeError("PATCH failed"),
+            None,
+            None,
+            id="user_stop_patch_fails",
+        ),
+        pytest.param(
+            (None, None, None),
+            {WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH},
+            None,
+            RuntimeError("tracking failed"),
+            None,
+            id="clean_finish_tracking_fails",
+        ),
+    ],
+)
+async def test_completion_bills_exactly_once(
+    billing_workflow: GitLabWorkflow,
+    billing_event_client: Mock,
+    status_handler: AsyncMock,
+    aexit_args: tuple,
+    deferred_statuses: dict,
+    patch_error: Optional[Exception],
+    track_error: Optional[Exception],
+    last_status_event: Optional[WorkflowStatusEventEnum],
+):
+    """Billing runs exactly once per completion, and the status PATCH is still sent when tracking raises."""
+    status_handler.update_workflow_status.side_effect = patch_error
+    status_handler.get_workflow_status.return_value = "finished"
+    billing_workflow._deferred_statuses = dict(deferred_statuses)
+    billing_workflow._last_status_event = last_status_event
+
+    with patch.object(
+        billing_workflow,
+        "_track_tool_loop_session_summary",
+        side_effect=track_error,
+    ):
+        try:
+            await billing_workflow.__aexit__(*aexit_args)
+        except RuntimeError as error:
+            # Only a clean exit reraises completion errors.
+            assert aexit_args[0] is None
+            assert error in (patch_error, track_error)
+
+    billing_event_client.track_billing_event.assert_called_once()
+    status_handler.update_workflow_status.assert_awaited_once()
+    status_handler.get_workflow_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "patch_error,reraise_errors,expected_logged",
+    [
+        pytest.param(
+            RuntimeError("PATCH failed"),
+            True,
+            ["tracking failed"],
+            id="both_fail_reraised",
+        ),
+        pytest.param(
+            RuntimeError("PATCH failed"),
+            False,
+            ["tracking failed", "PATCH failed"],
+            id="both_fail_swallowed",
+        ),
+        pytest.param(None, True, [], id="patch_succeeds"),
+    ],
+)
+async def test_handle_completion_logs_tracking_error_hidden_by_patch_error(
+    billing_workflow: GitLabWorkflow,
+    status_handler: AsyncMock,
+    workflow_id: str,
+    patch_error: Optional[Exception],
+    reraise_errors: bool,
+    expected_logged: list[str],
+):
+    """A tracking error hidden by a failed status PATCH is logged, not left only as the PATCH error's ``__context__``.
+
+    The PATCH error is the one that propagates (or is swallowed and logged). When the PATCH succeeds, nothing hides the
+    tracking error, so it propagates as is and is not logged twice.
+    """
+    tracking_error = RuntimeError("tracking failed")
+    status_handler.update_workflow_status.side_effect = patch_error
+    billing_workflow._deferred_statuses = {
+        WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH
+    }
+
+    with (
+        patch.object(
+            billing_workflow,
+            "_track_tool_loop_session_summary",
+            side_effect=tracking_error,
+        ),
+        patch(
+            "duo_workflow_service.checkpointer.gitlab_workflow.log_exception"
+        ) as mock_log_exception,
+    ):
+        if reraise_errors:
+            with pytest.raises(RuntimeError) as raised:
+                await billing_workflow._handle_completion(reraise_errors=True)
+            assert raised.value is (patch_error or tracking_error)
+        else:
+            await billing_workflow._handle_completion(reraise_errors=False)
+
+    logged = [str(c.args[0]) for c in mock_log_exception.call_args_list]
+    assert logged == expected_logged
+    for arg in mock_log_exception.call_args_list:
+        assert arg.kwargs["extra"]["workflow_id"] == workflow_id
+    status_handler.update_workflow_status.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "deferred_statuses,expected_status_event",
+    [
+        pytest.param(
+            {WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH},
+            WorkflowStatusEventEnum.FINISH,
+            id="finish",
+        ),
+        pytest.param(
+            {
+                WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL
+            },
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+            id="tool_call_approval",
+        ),
+        # ON_COMPLETION entries flush before ON_NEXT_CHECKPOINT ones, so the
+        # latter is what Rails ends up with.
+        pytest.param(
+            {
+                WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL: _DEFERRED_TOOL_APPROVAL,
+                WorkflowStatusEventEnum.FINISH: _DEFERRED_FINISH,
+            },
+            WorkflowStatusEventEnum.REQUIRE_TOOL_CALL_APPROVAL,
+            id="finish_then_tool_call_approval",
+        ),
+    ],
+)
+async def test_handle_completion_bills_status_the_flush_leaves_cached(
+    gitlab_workflow: GitLabWorkflow,
+    workflow_id: str,
+    deferred_statuses: dict,
+    expected_status_event: WorkflowStatusEventEnum,
+):
+    """The status billed before the flush is the one ``_last_status_event`` holds after it, as before this change."""
+    status_handler = AsyncMock()
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._last_status_event = WorkflowStatusEventEnum.START
+    gitlab_workflow._deferred_statuses = dict(deferred_statuses)
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion") as mock_track:
+        await gitlab_workflow._handle_completion()
+
+    assert gitlab_workflow._last_status_event == expected_status_event
+    mock_track.assert_awaited_once_with(
+        BILLABLE_STATUS_EVENT_TO_WORKFLOW_STATUS[expected_status_event], None, None
+    )
+    status_handler.get_workflow_status.assert_not_called()
+    assert status_handler.update_workflow_status.await_count == len(deferred_statuses)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "last_status_event,executor_status,expect_warning",
+    [
+        pytest.param(
+            WorkflowStatusEventEnum.RESUME, "finished", True, id="billable_report"
+        ),
+        pytest.param(
+            WorkflowStatusEventEnum.DROP, "failed", False, id="non_billable_report"
+        ),
+        pytest.param(None, "finished", False, id="no_dws_status"),
+    ],
+)
+async def test_handle_completion_logs_executor_status_mismatch(
+    gitlab_workflow: GitLabWorkflow,
+    workflow_id: str,
+    last_status_event: Optional[WorkflowStatusEventEnum],
+    executor_status: str,
+    expect_warning: bool,
+):
+    """The fallback GET logs a status that contradicts DWS on billability, without an extra request."""
+    status_handler = AsyncMock()
+    status_handler.get_workflow_status.return_value = executor_status
+    gitlab_workflow._status_handler = status_handler
+    gitlab_workflow._last_status_event = last_status_event
+
+    with (
+        patch.object(gitlab_workflow, "_track_workflow_completion"),
+        capture_logs() as cap_logs,
+    ):
+        await gitlab_workflow._handle_completion()
+
+    status_handler.get_workflow_status.assert_awaited_once()
+    mismatches = [
+        log
+        for log in cap_logs
+        if log["event"] == "Executor-reported workflow status differs from DWS status"
+    ]
+    if expect_warning:
+        assert last_status_event is not None
+        assert mismatches == [
+            {
+                "event": "Executor-reported workflow status differs from DWS status",
+                "log_level": "warning",
+                "workflow_id": workflow_id,
+                "executor_reported_status": executor_status,
+                "dws_status_event": last_status_event.value,
+            }
+        ]
+    else:
+        assert mismatches == []
+
+
+@pytest.mark.asyncio
+async def test_handle_completion_offline_mode_caches_exit_status(
+    gitlab_workflow: GitLabWorkflow,
+):
+    """Offline mode sends nothing, but an exception exit still caches its status event, as before."""
+    gitlab_workflow._offline_mode = "true"
+    status_handler = AsyncMock()
+    gitlab_workflow._status_handler = status_handler
+
+    with patch.object(gitlab_workflow, "_track_workflow_completion") as mock_track:
+        await gitlab_workflow._handle_completion(
+            RuntimeError,
+            RuntimeError("boom"),
+            reraise_errors=False,
+            exit_status_event=WorkflowStatusEventEnum.DROP,
+        )
+
+    assert gitlab_workflow._last_status_event == WorkflowStatusEventEnum.DROP
+    status_handler.update_workflow_status.assert_not_called()
+    mock_track.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("offline_mode", [False, True])
+async def test_handle_completion_exception_exit_without_exit_status_drops(
+    gitlab_workflow: GitLabWorkflow, workflow_id: str, offline_mode: bool
+):
+    """An exception exit that omits its exit status is a caller bug: it is logged, not raised (which would replace the
+    original teardown exception), and the session ends as DROP so Rails still hears of it."""
+    gitlab_workflow._offline_mode = "true" if offline_mode else None
+    gitlab_workflow._last_status_event = WorkflowStatusEventEnum.REQUIRE_INPUT
+    status_handler = AsyncMock()
+    gitlab_workflow._status_handler = status_handler
+
+    with (
+        patch.object(gitlab_workflow, "_track_workflow_completion") as mock_track,
+        capture_logs() as cap_logs,
+    ):
+        await gitlab_workflow._handle_completion(
+            RuntimeError, RuntimeError("boom"), reraise_errors=False
+        )
+
+    assert {
+        "event": "Exception exit without an exit status event; ending the session as DROP",
+        "log_level": "error",
+        "workflow_id": workflow_id,
+        "exc_type": "RuntimeError",
+    } in cap_logs
+    assert gitlab_workflow._last_status_event == WorkflowStatusEventEnum.DROP
+    if offline_mode:
+        status_handler.update_workflow_status.assert_not_called()
+        mock_track.assert_not_called()
+    else:
+        status_handler.update_workflow_status.assert_awaited_once_with(
+            workflow_id, WorkflowStatusEventEnum.DROP
+        )
+        # DROP still bills the billable status DWS already reached.
+        mock_track.assert_awaited_once_with(
+            WorkflowStatusEnum.INPUT_REQUIRED, RuntimeError, ANY
+        )
+
+
 @pytest.mark.asyncio
 async def test_aexit_clean_exit_propagates_completion_error(gitlab_workflow):
     """On a clean exit there is no original exception to preserve, so a completion failure must surface rather than
@@ -3074,16 +3844,21 @@ async def test_aexit_pending_finish_oversized_save_fails_loudly(
     with (
         patch.object(gitlab_workflow, "_track_workflow_completion") as mock_completion,
         patch.object(gitlab_workflow, "_handle_workflow_exception") as mock_exception,
-        patch.object(gitlab_workflow, "_handle_completion"),
+        patch.object(gitlab_workflow, "_handle_completion") as mock_handle_completion,
     ):
         suppressed = await gitlab_workflow.__aexit__(type(error), error, None)
 
     assert not suppressed
     mock_completion.assert_not_called()
     mock_exception.assert_awaited_once()
-    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
-    assert WorkflowStatusEventEnum.FINISH not in calls
-    assert WorkflowStatusEventEnum.DROP in calls
+    # The exit status PATCH is sent by _handle_completion, after billing is settled.
+    mock_handle_completion.assert_awaited_once_with(
+        type(error),
+        error,
+        reraise_errors=False,
+        exit_status_event=WorkflowStatusEventEnum.DROP,
+    )
+    status_handler.update_workflow_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -3146,13 +3921,18 @@ async def test_aexit_drops_when_answer_checkpoint_save_failed(
     }
 
     error = CheckpointSaveError("Failed to save checkpoint")
-    with patch.object(gitlab_workflow, "_handle_completion"):
+    with patch.object(gitlab_workflow, "_handle_completion") as mock_handle_completion:
         suppressed = await gitlab_workflow.__aexit__(CheckpointSaveError, error, None)
 
     assert not suppressed
-    calls = [c.args[1] for c in status_handler.update_workflow_status.call_args_list]
-    assert WorkflowStatusEventEnum.DROP in calls
-    assert WorkflowStatusEventEnum.FINISH not in calls
+    # The exit status PATCH is sent by _handle_completion, after billing is settled.
+    mock_handle_completion.assert_awaited_once_with(
+        CheckpointSaveError,
+        error,
+        reraise_errors=False,
+        exit_status_event=WorkflowStatusEventEnum.DROP,
+    )
+    status_handler.update_workflow_status.assert_not_called()
 
 
 @pytest.mark.asyncio

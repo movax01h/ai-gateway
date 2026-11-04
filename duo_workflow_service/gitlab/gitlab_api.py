@@ -61,6 +61,7 @@ class WorkflowConfig(TypedDict):
     agent_privileges_names: list
     pre_approved_agent_privileges_names: list
     allow_client_injected_mcp_tools: bool
+    file_attachments_allowed: bool
     workflow_status: str
     mcp_enabled: bool
     incremental_checkpoints_enabled: bool
@@ -190,6 +191,8 @@ async def fetch_workflow_and_container_data(
         allow_client_injected_mcp_tools=bool(
             workflow.get("allowClientInjectedMcpTools", False)
         ),
+        # Missing on GitLab < 19.6, where no admin could have allowed attachments.
+        file_attachments_allowed=bool(workflow.get("fileAttachmentsAllowed", False)),
         workflow_status=workflow.get("statusName", ""),
         mcp_enabled=workflow.get("mcpEnabled", False),
         incremental_checkpoints_enabled=workflow.get(
@@ -247,6 +250,7 @@ def empty_workflow_config() -> WorkflowConfig:
         "agent_privileges_names": [],
         "pre_approved_agent_privileges_names": [],
         "allow_client_injected_mcp_tools": False,
+        "file_attachments_allowed": False,
         "allow_agent_to_request_user": False,
         "mcp_enabled": False,
         "incremental_checkpoints_enabled": False,

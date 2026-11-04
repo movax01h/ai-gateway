@@ -10,7 +10,11 @@ from duo_workflow_service.conversation.trimmer import LEGACY_MAX_CONTEXT_TOKENS
 from duo_workflow_service.entities.event import WorkflowEvent
 from duo_workflow_service.entities.image_blocks import content_as_text
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
-from duo_workflow_service.security.secret_redaction import redact_secrets_for_ui
+from duo_workflow_service.security.secret_redaction import (
+    redact_cut_comparison,
+    redact_secrets_for_ui,
+    redact_unclosed_assignment,
+)
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.context import get_model_metadata
 
@@ -162,6 +166,9 @@ def resolve_approval_attribution(
 # Display only first 4KB of a tool response on UI to avoid duplicating large responses twice in a checkpoint
 TOOL_RESPONSE_MAX_DISPLAY_MSG = 4 * 1024
 
+# A longer text is cut to this before redaction as redacting megabytes stalls the event loop and only the head is shown
+_DISPLAY_REDACTION_WINDOW = 3 * TOOL_RESPONSE_MAX_DISPLAY_MSG
+
 
 def render_for_display(content: Any, tool_name: str) -> str:
     """Render *content* for a tool card: one string, redacted, then capped.
@@ -171,13 +178,36 @@ def render_for_display(content: Any, tool_name: str) -> str:
     and the IDE show `tool_response` as the tool's output, so a silent cut would read as the whole output. The marker
     sits after the cap, so the first `TOOL_RESPONSE_MAX_DISPLAY_MSG` characters are always the original text. Every
     card builder calls this once.
+
+    A text longer than `_DISPLAY_REDACTION_WINDOW` is cut to it before redaction, and the head drops the last
+    `TOOL_RESPONSE_MAX_DISPLAY_MSG` characters of the window, where the cut may have split a secret.
+    `truncate_redacted_window` does the same for a tool result, with the same masks for an unclosed assignment and a
+    cut comparison. For such a text the marker counts the characters before redaction.
+
+    As for a tool result, a comparison cut inside its value is not masked. On the card that takes a value of about
+    8 KiB.
     """
-    text = redact_secrets_for_ui(content_as_text(content), tool_name=tool_name)
-    if len(text) <= TOOL_RESPONSE_MAX_DISPLAY_MSG:
-        return text
+    text = content_as_text(content)
+    cap = TOOL_RESPONSE_MAX_DISPLAY_MSG
+    if len(text) <= _DISPLAY_REDACTION_WINDOW:
+        redacted = redact_secrets_for_ui(text, tool_name=tool_name)
+        if len(redacted) <= cap:
+            return redacted
+        keep, total = cap, len(redacted)
+    else:
+        redacted = redact_secrets_for_ui(
+            text[:_DISPLAY_REDACTION_WINDOW], tool_name=tool_name
+        )
+        masked = redact_unclosed_assignment(redacted, cap) or redact_cut_comparison(
+            redacted, cap
+        )
+        # The head stops `cap` short of the cut, where a split secret may be left. A mask runs to the end instead.
+        slack = 0 if masked else cap
+        redacted = masked or redacted
+        keep, total = max(min(cap, len(redacted) - slack), 0), len(text)
     return (
-        text[:TOOL_RESPONSE_MAX_DISPLAY_MSG]
-        + f"\n[... display truncated: {TOOL_RESPONSE_MAX_DISPLAY_MSG:,} of {len(text):,} characters shown ...]"
+        redacted[:keep]
+        + f"\n[... display truncated: {keep:,} of {total:,} characters shown ...]"
     )
 
 

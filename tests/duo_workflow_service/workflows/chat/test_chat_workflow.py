@@ -35,6 +35,7 @@ from duo_workflow_service.entities import (
     ToolStatus,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.entities.attachments import AttachmentsNotAllowedError
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
@@ -2522,6 +2523,13 @@ class TestChatAttachments:
     later turn (the plain-message branch of `get_graph_input`).
     """
 
+    @pytest.fixture(name="attachments_allowed", autouse=True)
+    def attachments_allowed_fixture(self, workflow_with_project):
+        workflow_with_project._workflow_config = {
+            **workflow_with_project._workflow_config,
+            "file_attachments_allowed": True,
+        }
+
     @pytest.fixture(name="workflow_with_attachment")
     def workflow_with_attachment_fixture(self, workflow_with_project):
         workflow_with_project._additional_context = [
@@ -2973,6 +2981,87 @@ class TestChatAttachments:
             item for item in (ui_context or []) if item.category == "attachments"
         ]
         assert "could not be sent" in result.update["ui_chat_log"][-1]["content"]
+
+
+class TestChatAttachmentsNotAllowed:
+    """Attachments the workflow's top-level group has not allowed are refused outright."""
+
+    @pytest.fixture(name="workflow_with_attachment")
+    def workflow_with_attachment_fixture(self, workflow_with_project, request):
+        workflow_with_project._workflow_config = {
+            **workflow_with_project._workflow_config,
+            **request.param,
+        }
+        workflow_with_project._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(),
+        ]
+        return workflow_with_project
+
+    @pytest.mark.parametrize(
+        "workflow_with_attachment",
+        [
+            pytest.param({"file_attachments_allowed": False}, id="not_allowed"),
+            pytest.param({}, id="setting_missing"),
+        ],
+        indirect=True,
+    )
+    def test_first_turn_raises(self, workflow_with_attachment):
+        with pytest.raises(AttachmentsNotAllowedError):
+            workflow_with_attachment.get_workflow_state("what is in this screenshot?")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "workflow_with_attachment",
+        [
+            pytest.param({"file_attachments_allowed": False}, id="not_allowed"),
+            pytest.param({}, id="setting_missing"),
+        ],
+        indirect=True,
+    )
+    async def test_later_turn_raises(self, workflow_with_attachment):
+        with pytest.raises(AttachmentsNotAllowedError):
+            await workflow_with_attachment.get_graph_input(
+                "what is in this screenshot?",
+                WorkflowStatusEventEnum.RESUME,
+                EXISTING_CHECKPOINT,
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_duo_workflow_service_container")
+    async def test_the_rejection_reason_is_shown_to_the_user(
+        self, workflow_with_project
+    ):
+        """The specific reason reaches the transcript rather than the generic error message."""
+        notifier = AsyncMock()
+        workflow_with_project.checkpoint_notifier = notifier
+        error = AttachmentsNotAllowedError(
+            "File attachments are not allowed for this session."
+        )
+
+        with pytest.raises(TraceableException) as exc_info:
+            await workflow_with_project._handle_compile_and_run_exception(
+                error, AsyncMock(), {}
+            )
+
+        assert exc_info.value.original_exception is error
+        state = notifier.send_event.call_args.kwargs["state"]
+        assert state["status"] == WorkflowStatusEnum.ERROR
+        (entry,) = state["ui_chat_log"]
+        assert entry["content"] == "File attachments are not allowed for this session."
+        assert entry["status"] == ToolStatus.FAILURE
+
+    def test_a_turn_without_attachments_is_unaffected(self, workflow_with_project):
+        workflow_with_project._workflow_config = {
+            **workflow_with_project._workflow_config,
+            "file_attachments_allowed": False,
+        }
+        workflow_with_project._additional_context = [FILE_CONTEXT]
+
+        state = workflow_with_project.get_workflow_state("explain this file")
+
+        message = state["conversation_history"]["test_prompt"][0]
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
 
 
 FLOW_COMMAND_CONTEXT = AdditionalContext(

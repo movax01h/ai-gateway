@@ -113,6 +113,7 @@ from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
 from duo_workflow_service.interceptors.trusted_restricted_issuers import (
     TrustedRestrictedIssuerVerifier,
 )
+from duo_workflow_service.model_scope import scope_flat_rate_flow_models
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
@@ -949,6 +950,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         gl_event_context = GLReportingEventContext.from_workflow_definition(
             workflow_definition, bool(flow_config)
         )
+        # A flat-rate flow is billed once whatever models it runs, so its models come from the allowlist of the
+        # feature it is billed as, not from the client's choice.
+        scope_flat_rate_flow_models(gl_event_context.feature_qualified_name, user)
 
         duo_workflow_metrics.count_agent_platform_receive_start_counter(
             flow_type=gl_event_context.value
