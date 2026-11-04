@@ -77,7 +77,13 @@ def _litellm_maps_reasoning_effort(
         supported = litellm.get_supported_openai_params(
             model=model, custom_llm_provider=custom_llm_provider
         )
-    except Exception:  # pylint: disable=broad-exception-caught
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        log.warning(
+            "litellm could not resolve supported params, allowing reasoning_effort through",
+            model=model,
+            custom_llm_provider=custom_llm_provider,
+            error=str(exc),
+        )
         return False
     return "reasoning_effort" in (supported or [])
 
