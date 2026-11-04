@@ -26,6 +26,7 @@ from ai_gateway.models.v2.chat_litellm import (
     ChatLiteLLM,
     _drop_unsupported_web_search,
     _force_gpt_5_max_completion_tokens,
+    _litellm_maps_reasoning_effort,
     _litellm_maps_web_search,
     _remove_deprecated_temperature_parameters,
     _rewrite_trailing_assistant_prefill,
@@ -2194,6 +2195,7 @@ class TestReasoningEffort:
         assert "allowed_openai_params" not in model.model_kwargs
 
     def test_allows_param_through_when_litellm_cannot_resolve_the_model(self):
+        _litellm_maps_reasoning_effort.cache_clear()
         with patch(
             "ai_gateway.models.v2.chat_litellm.litellm.get_supported_openai_params",
             side_effect=ValueError("unknown provider"),

@@ -68,6 +68,20 @@ def litellm_supports_native_web_search(
     )
 
 
+@lru_cache(maxsize=64)
+def _litellm_maps_reasoning_effort(
+    model: Optional[str], custom_llm_provider: Optional[str]
+) -> bool:
+    """Whether the installed LiteLLM maps `reasoning_effort` for this model."""
+    try:
+        supported = litellm.get_supported_openai_params(
+            model=model, custom_llm_provider=custom_llm_provider
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        return False
+    return "reasoning_effort" in (supported or [])
+
+
 def _drop_unsupported_web_search(kwargs: Dict[str, Any]) -> None:
     """Drop `web_search_options` unless the model can run a hosted web search."""
     if kwargs.get("web_search_options") is None:
@@ -284,7 +298,7 @@ class ChatLiteLLM(_LChatLiteLLM):
             return self
 
         model_kwargs = {**self.model_kwargs, "reasoning_effort": self.reasoning_effort}
-        if not self._litellm_maps_reasoning_effort():
+        if not _litellm_maps_reasoning_effort(self.model, self.custom_llm_provider):
             # litellm rejects the param for openai-compatible providers unless it is
             # explicitly allowed through. Never allow it for providers that map it
             # natively (Anthropic on Vertex/Bedrock): the raw key is then forwarded
@@ -295,15 +309,6 @@ class ChatLiteLLM(_LChatLiteLLM):
             )
         self.model_kwargs = model_kwargs
         return self
-
-    def _litellm_maps_reasoning_effort(self) -> bool:
-        try:
-            supported = litellm.get_supported_openai_params(
-                model=self.model, custom_llm_provider=self.custom_llm_provider
-            )
-        except Exception:  # pylint: disable=broad-exception-caught
-            return False
-        return "reasoning_effort" in (supported or [])
 
     def validate_endpoint_kwargs(self, kwargs: dict[str, Any]) -> None:
         validate_custom_endpoint(

@@ -8,13 +8,10 @@ prompt_template:
     {% include 'deep_code_review_reviewer/user/1.0.0.jinja' %}
   placeholder: history
 # xhigh effort is what makes Sonnet 5.5 investigate instead of stopping after a few turns (gitlab#637120, #637410).
-# Prompt.__init__ strips `output_config` for LiteLLM providers, so Vertex/Bedrock get the same level via
-# `reasoning_effort`, which LiteLLM maps to `output_config.effort` for adaptive-thinking Claude models.
+# LiteLLM maps `reasoning_effort` to `output_config.effort` for adaptive-thinking Claude models.
 model:
   provider_params:
     litellm:
       reasoning_effort: xhigh
 params:
   timeout: 300
-  output_config:
-    effort: xhigh
