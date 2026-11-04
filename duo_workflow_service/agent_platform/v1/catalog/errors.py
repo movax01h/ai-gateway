@@ -115,10 +115,12 @@ class CatalogAgentsUnavailableError(NotifiableAgentException):
 
 
 def is_catalog_refusal(error: Optional[BaseException]) -> bool:
-    """Whether the catalog items for this run fail the same way on every turn.
+    """Whether the catalog items for this run are the catalog's own answer, fixed on every turn.
 
-    A refused or unusable item is a refusal. So is a fetch error that a retry cannot pass, like a 404.
+    A refused or unusable item is a refusal. So is a fetch error GitLab answered with a status that
+    a retry cannot pass, like a 404. A fetch error with no status is not: GitLab answered 2xx with a
+    malformed body, which is a server fault the run should report as a failure, not a refusal.
     """
     if isinstance(error, CatalogItemsFetchError):
-        return not error.retryable
+        return error.status_code is not None and not error.retryable
     return isinstance(error, CatalogItemsError)

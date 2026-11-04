@@ -2943,6 +2943,12 @@ class TestPrepareCompileFetchesCatalogAgents:
                 CatalogItemsFetchError("HTTP 404: not found", status_code=404),
                 CatalogAgentsUnavailableError.REFUSED_MESSAGE,
             ),
+            (
+                # No status: GitLab answered 2xx with a malformed body. A server fault,
+                # not the catalog's own answer, so the run asks the user to try again.
+                CatalogItemsFetchError("expected object, got list"),
+                CatalogAgentsUnavailableError.FETCH_FAILED_MESSAGE,
+            ),
         ],
     )
     async def test_a_failed_fetch_shows_a_static_message_and_logs_the_detail(
