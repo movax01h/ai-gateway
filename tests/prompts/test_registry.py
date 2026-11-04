@@ -39,6 +39,12 @@ from ai_gateway.prompts.registry import (
 )
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
+from tests.prompts.prompt_dirs import (
+    REPO_ROOT,
+    prompt_dir,
+    prompt_ids_by_dir,
+    version_files,
+)
 
 _SECURITY_BLOCK = "<test security block>test</test security block>"
 
@@ -1964,12 +1970,23 @@ _PROMPTS_WITHOUT_AN_ENTRY: frozenset[str] = _GRAPH_NODE_PROMPT_IDS | frozenset(
 )
 
 
-# Prompt versions that declare a unit primitive that the feature setting of their entry doesn't list. The `amazon_q`
-# versions need no entry here: the allowlist check skips the Amazon Q model metadata that selects them.
-_VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE: frozenset[Path] = frozenset(
+# Prompt versions that declare a unit primitive that the feature setting of their entry doesn't list, with the feature
+# setting that they declare as `models_from`. The `amazon_q` versions need no entry here: the allowlist check skips the
+# Amazon Q model metadata that selects them.
+_VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE: dict[Path, str] = {
+    # The Agent Platform edition of the prompt. It declares `duo_agent_platform`. GitLab 18.9 to 18.11 call it from
+    # the comment processing step of the Agent Platform code review flow (gitlab!218609). Later releases do not call it.
+    Path(
+        "ai/features/review/summarize_review/prompts/base/3.0.0.yml"
+    ): "duo_agent_platform",
+}
+
+# Prompts with an entry in PROMPT_ID_TO_FEATURE_SETTING that the AI Gateway does not serve over HTTP. `models_from` is
+# only for prompts served over HTTP, so their versions do not set it.
+_PROMPTS_WITH_AN_ENTRY_NOT_SERVED_OVER_HTTP: frozenset[str] = frozenset(
     {
-        # Declares `duo_agent_platform`.
-        Path("ai/features/review/summarize_review/prompts/base/3.0.0.yml"),
+        # The Duo Workflow Service runs it in-process to route a goal to a model.
+        "classify_goal_tier",
     }
 )
 
@@ -1981,65 +1998,22 @@ class TestPromptFeatureSettings:
     setting of the prompt's entry. For a prompt without an entry, the client's `feature_setting`
     selects the allowlist. When you add a prompt that GitLab Rails or another client calls on the
     prompt routes, add it to PROMPT_ID_TO_FEATURE_SETTING in ai_gateway/prompts/registry.py with
-    the feature setting that the client sends for it. Otherwise add it to
-    `_GRAPH_NODE_PROMPT_IDS` (graph-node prompts) or `_PROMPTS_WITHOUT_AN_ENTRY` in this file.
+    the feature setting that the client sends for it, and set `models_from` to that feature setting
+    in each version of the prompt. `models_from` is only for prompts that the AI Gateway serves over
+    HTTP. Otherwise add the prompt to `_GRAPH_NODE_PROMPT_IDS` (graph-node prompts) or
+    `_PROMPTS_WITHOUT_AN_ENTRY` in this file.
     """
-
-    _repo_root = Path(__file__).parent.parent.parent
-    _legacy_dir = _repo_root / "ai_gateway" / "prompts" / "definitions"
-    _features_dir = _repo_root / "ai" / "features"
-    _shared_dir = _repo_root / "ai" / "shared"
-
-    @staticmethod
-    def _defines_a_prompt(prompts_dir: Path) -> bool:
-        """Return whether ``prompts_dir`` has a ``<model family or base>/<version>.yml``.
-
-        A flow-only feature keeps only Jinja fragments in its `prompts/` dir. Its ID loads no prompt, so it needs no
-        entry.
-        """
-        return any(prompts_dir.glob("*/*.yml"))
-
-    def _feature_prompt_dirs(self) -> dict[str, Path]:
-        """Return the `prompts/` dir of each prompt ID that `discover_feature_prompts` registers and that loads a
-        prompt."""
-        dirs: dict[str, Path] = {}
-        for feature_dir in self._features_dir.glob("*/*"):
-            if self._defines_a_prompt(prompts_dir := feature_dir / "prompts"):
-                dirs[feature_dir.name] = prompts_dir
-                dirs[f"{feature_dir.parent.name}/{feature_dir.name}"] = prompts_dir
-        for shared_dir in self._shared_dir.glob("*"):
-            if self._defines_a_prompt(prompts_dir := shared_dir / "prompts"):
-                dirs[shared_dir.name] = prompts_dir
-        return dirs
-
-    def _prompt_dir(self, prompt_id: str) -> Path:
-        """Return the directory that the registry resolves ``prompt_id`` to."""
-        return self._feature_prompt_dirs().get(prompt_id, self._legacy_dir / prompt_id)
-
-    def _prompt_ids_by_dir(self) -> dict[Path, set[str]]:
-        """Return every prompt directory, with the prompt IDs that resolve to it."""
-        prompt_ids: dict[Path, set[str]] = {}
-        for version_file in self._legacy_dir.rglob("*.yml"):
-            # <prompt_id>/<model family or base>/<version>.yml
-            parts = version_file.relative_to(self._legacy_dir).parts[:-2]
-            if parts:
-                prompt_ids.setdefault(self._legacy_dir.joinpath(*parts), set()).add(
-                    "/".join(parts)
-                )
-        for prompt_id, prompts_dir in self._feature_prompt_dirs().items():
-            prompt_ids.setdefault(prompts_dir, set()).add(prompt_id)
-        return prompt_ids
 
     def test_every_prompt_has_an_entry_or_is_listed(self) -> None:
         classified = {
-            self._prompt_dir(prompt_id)
+            prompt_dir(prompt_id)
             for prompt_id in [*PROMPT_ID_TO_FEATURE_SETTING, *_PROMPTS_WITHOUT_AN_ENTRY]
         }
 
         unclassified = sorted(
             sorted(prompt_ids)
-            for prompt_dir, prompt_ids in self._prompt_ids_by_dir().items()
-            if prompt_dir not in classified
+            for directory, prompt_ids in prompt_ids_by_dir().items()
+            if directory not in classified
         )
 
         assert not unclassified, (
@@ -2048,12 +2022,12 @@ class TestPromptFeatureSettings:
         )
 
     def test_every_classified_prompt_exists(self) -> None:
-        prompt_dirs = self._prompt_ids_by_dir()
+        known_dirs = prompt_ids_by_dir()
 
         missing = sorted(
             prompt_id
             for prompt_id in {*PROMPT_ID_TO_FEATURE_SETTING, *_PROMPTS_WITHOUT_AN_ENTRY}
-            if self._prompt_dir(prompt_id) not in prompt_dirs
+            if prompt_dir(prompt_id) not in known_dirs
         )
 
         assert not missing
@@ -2062,14 +2036,14 @@ class TestPromptFeatureSettings:
         """The middleware gets the entry for each ID that loads the prompt, so another spelling can't skip it."""
         feature_roots.discover_feature_prompts()
         entries = {
-            self._prompt_dir(prompt_id): feature_setting
+            prompt_dir(prompt_id): feature_setting
             for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items()
         }
 
         missed = sorted(
             spelling
-            for prompt_dir, prompt_ids in self._prompt_ids_by_dir().items()
-            if prompt_dir in entries
+            for directory, prompt_ids in prompt_ids_by_dir().items()
+            if directory in entries
             for prompt_id in prompt_ids
             for spelling in (
                 prompt_id,
@@ -2077,14 +2051,14 @@ class TestPromptFeatureSettings:
                 f"./{prompt_id}",
                 prompt_id.replace("/", "//"),
             )
-            if mapped_feature_setting_for_prompt_id(spelling) != entries[prompt_dir]
+            if mapped_feature_setting_for_prompt_id(spelling) != entries[directory]
         )
 
         assert not missed
 
     def test_no_prompt_has_an_entry_and_is_listed(self) -> None:
-        with_entry = {self._prompt_dir(p) for p in PROMPT_ID_TO_FEATURE_SETTING}
-        listed = {self._prompt_dir(p) for p in _PROMPTS_WITHOUT_AN_ENTRY}
+        with_entry = {prompt_dir(p) for p in PROMPT_ID_TO_FEATURE_SETTING}
+        listed = {prompt_dir(p) for p in _PROMPTS_WITHOUT_AN_ENTRY}
 
         assert with_entry.isdisjoint(listed)
 
@@ -2108,8 +2082,8 @@ class TestPromptFeatureSettings:
 
         unlisted = []
         for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items():
-            for version_file in self._prompt_dir(prompt_id).glob("*/*.yml"):
-                version = version_file.relative_to(self._repo_root)
+            for version_file in version_files(prompt_dir(prompt_id)):
+                version = version_file.relative_to(REPO_ROOT)
                 if (
                     version_file.parent.name == "amazon_q"
                     or version in _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE
@@ -2125,3 +2099,52 @@ class TestPromptFeatureSettings:
                     unlisted.append(f"{version}: {unit_primitive}")
 
         assert not unlisted
+
+    def test_every_version_of_a_prompt_with_an_entry_declares_its_models(self) -> None:
+        """Each version sets `models_from` to the feature setting of its entry, or to the one listed for it in
+        `_VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE`.
+
+        The versions of `_PROMPTS_WITH_AN_ENTRY_NOT_SERVED_OVER_HTTP` set none. The `amazon_q` versions set none
+        either: no feature setting lists their `amazon_q_integration` unit primitive.
+        """
+        mismatched = []
+        for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items():
+            for version_file in version_files(prompt_dir(prompt_id)):
+                version = version_file.relative_to(REPO_ROOT)
+                expected = (
+                    None
+                    if prompt_id in _PROMPTS_WITH_AN_ENTRY_NOT_SERVED_OVER_HTTP
+                    or version_file.parent.name == "amazon_q"
+                    else _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE.get(
+                        version, feature_setting
+                    )
+                )
+                models_from = yaml.safe_load(version_file.read_text()).get(
+                    "models_from"
+                )
+                if models_from != expected:
+                    mismatched.append(
+                        f"{version}: models_from is {models_from!r}, expected {expected!r}"
+                    )
+
+        assert not mismatched
+
+    def test_no_version_of_a_prompt_without_an_entry_declares_its_models(self) -> None:
+        """Only the prompts with an entry set `models_from`.
+
+        A prompt without an entry is a graph-node or Duo Workflow Service prompt, or a prompt that a client calls on the
+        prompt routes without a feature setting of its own, like `generate_description`. A prompt that only runs in a
+        flow must never set `models_from`: the prompt routes would then serve it. The prompts that clients call get
+        `models_from` before the prompt routes reject versions without it.
+        """
+        with_entry = {prompt_dir(p) for p in PROMPT_ID_TO_FEATURE_SETTING}
+
+        declared = sorted(
+            str(version_file.relative_to(REPO_ROOT))
+            for directory in prompt_ids_by_dir()
+            if directory not in with_entry
+            for version_file in version_files(directory)
+            if "models_from" in yaml.safe_load(version_file.read_text())
+        )
+
+        assert not declared

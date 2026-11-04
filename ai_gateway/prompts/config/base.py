@@ -65,7 +65,9 @@ class PromptConfig(BaseModel):
     name: str
     model: ModelConfig = ModelConfig()
     unit_primitive: GitLabUnitPrimitive
-    # The feature setting in unit_primitives.yml that lists the models of this prompt version.
+    # The feature setting in unit_primitives.yml that lists the models of this prompt version. Only for prompts that the
+    # AI Gateway serves over HTTP. A prompt that only the Duo Workflow Service runs does not set it: the flow selects
+    # the models of its prompts.
     models_from: str | None = None
     prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None

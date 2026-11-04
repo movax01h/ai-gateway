@@ -127,8 +127,10 @@ model:
 
 unit_primitive: duo_chat          # Required. The unit primitive that a request needs to use this prompt
 
-models_from: duo_chat             # Optional. The feature setting in `unit_primitives.yml` that lists the models of
-                                  # this prompt version. That entry must list `unit_primitive`.
+# Optional. Only for prompts that the AI Gateway serves over HTTP. The feature setting in `unit_primitives.yml`
+# that lists the models of this prompt version. That entry must list `unit_primitive`.
+# See "Models of prompts served over HTTP" below.
+models_from: duo_chat
 
 prompt_template: # Required. Templates for model interaction
     system: <string>                # Optional. System-level instructions (supports Jinja2)
@@ -172,6 +174,24 @@ prompt_template:
 params:
     timeout: 120
 ```
+
+### Models of prompts served over HTTP
+
+The AI Gateway serves some prompts over HTTP, for example on the prompt routes (`/v1/prompts/<prompt_id>` and
+`/v2/prompts/<prompt_id>`) that GitLab Rails calls. For each version of such a prompt, `models_from` names the feature
+setting in `unit_primitives.yml` whose models the version can run on.
+
+- Set `models_from` only on prompts that the AI Gateway serves over HTTP.
+- Do not set `models_from` on a prompt that only the Duo Workflow Service runs, for example the prompt of a flow
+  component or `classify_goal_tier`. The flow selects the models of its prompts.
+- `InMemoryPromptConfig`, the inline prompt of a custom flow, does not accept `models_from`. A client must not select
+  the models of its own prompt.
+- The `amazon_q` versions do not set `models_from`, because no entry in `unit_primitives.yml` lists
+  `amazon_q_integration`.
+
+The prompt routes do not read `models_from` yet. Until they do, `PROMPT_ID_TO_FEATURE_SETTING` in
+`ai_gateway/prompts/registry.py` selects the models of a prompt, and a test checks that the `models_from` of each
+version matches its entry.
 
 ### Message Placeholders
 

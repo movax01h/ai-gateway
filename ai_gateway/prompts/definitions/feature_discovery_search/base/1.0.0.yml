@@ -4,6 +4,7 @@ model:
   params:
     max_tokens: 1024
 unit_primitive: feature_discovery_search
+models_from: feature_discovery_search
 prompt_template:
   system: |
     {% include 'feature_discovery_search/system/1.0.0.jinja' %}

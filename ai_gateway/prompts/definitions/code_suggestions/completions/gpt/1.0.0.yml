@@ -6,6 +6,7 @@ model:
     litellm:
       reasoning_effort: low
 unit_primitive: complete_code
+models_from: code_completions
 tool_output_security: false
 prompt_template:
   system: |
