@@ -209,8 +209,9 @@ async def test_arun_redact_receives_original_response():
         redact_inputs.append(response)
         return original_redact(response, tool_name)
 
-    # Build a large response that will trigger truncation
-    large_response = "a" * (300 * 1024)  # 300 KiB
+    # Build a large response that will trigger truncation, but is short enough to be redacted whole. A longer one is
+    # cut first, see the window tests below.
+    large_response = "a" * (250 * 1024)  # 250 KiB
 
     tool = SecretReturningTool(
         metadata={},

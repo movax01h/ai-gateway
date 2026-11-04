@@ -26,6 +26,8 @@ from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.tier_access_checker import TierAccessChecker
 from duo_workflow_service.tools.tool_output_manager import (
     TruncationConfig,
+    redact_window,
+    truncate_redacted_window,
     truncate_tool_response,
 )
 
@@ -187,6 +189,11 @@ class DuoBaseTool(BaseTool):
         pattern-based detectors to no longer match the partial token.  By redacting
         *before* truncation we ensure full secrets are caught before truncation
         can split them.
+
+        A ``str`` result much longer than the truncation limit is the exception. Redacting megabytes on the event
+        loop stalls every other session, so ``redact_window`` cuts it first, with margin, and
+        ``truncate_redacted_window`` drops that margin again. If truncating the window fails, the call fails. The end
+        of the window can hold part of a split secret, so it is not returned untruncated.
         """
         saved_kwargs = dict(kwargs)
         kwargs = self._apply_tool_options(kwargs)
@@ -201,6 +208,16 @@ class DuoBaseTool(BaseTool):
                 project=self.project,
             )
             await checker.check_tier_access(feature, tool_result, saved_kwargs)
+
+        if isinstance(tool_result, str):
+            window = redact_window(tool_result, self.truncation_config)
+            if window is not None:
+                return truncate_redacted_window(
+                    redact_secrets(response=window, tool_name=self.name),
+                    tool_name=self.name,
+                    truncation_config=self.truncation_config,
+                    original_len=len(tool_result),
+                )
 
         # Redaction pass: catch full secrets before truncation splits them
         tool_response = redact_secrets(response=tool_result, tool_name=self.name)

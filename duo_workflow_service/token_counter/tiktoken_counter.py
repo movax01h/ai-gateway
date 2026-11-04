@@ -36,8 +36,9 @@ class TikTokenCounter:
     ) -> int:
         threshold = n_samples * sample_size
 
+        # encode_ordinary counts text such as "<|endoftext|>" in a tool result as text. encode raises on it.
         if len(content) <= threshold:
-            return len(self._encoding.encode(content))
+            return len(self._encoding.encode_ordinary(content))
 
         # Divide file into n_samples equal cells, sample from center of each
         cell_size = len(content) // n_samples
@@ -47,7 +48,7 @@ class TikTokenCounter:
         for i in range(n_samples):
             start_pos = i * cell_size + offset
             sample = content[start_pos : start_pos + sample_size]
-            tokens = len(self._encoding.encode(sample))
+            tokens = len(self._encoding.encode_ordinary(sample))
             densities.append(tokens / len(sample))
 
         # Use trimmed mean
