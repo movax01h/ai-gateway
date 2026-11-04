@@ -2148,3 +2148,113 @@ class TestPromptFeatureSettings:
         )
 
         assert not declared
+
+    def test_every_model_family_of_a_prompt_declares_the_same_models(self) -> None:
+        """A prompt with more than one model family declares one `models_from` in all of them.
+
+        The prompt routes check the model against the `models_from` of the version that the model's family resolves.
+        When `fallback` mode serves another model, its family can resolve another version. That version must check
+        against the same models. The `amazon_q` versions set no `models_from`.
+        """
+        mixed = {}
+        for directory in prompt_ids_by_dir():
+            families: dict[str, set[str | None]] = {}
+            for version_file in version_files(directory):
+                if version_file.parent.name == "amazon_q":
+                    continue
+                families.setdefault(version_file.parent.name, set()).add(
+                    yaml.safe_load(version_file.read_text()).get("models_from")
+                )
+            declared = set().union(*families.values())
+            if len(families) > 1 and len(declared) > 1:
+                mixed[str(directory.relative_to(REPO_ROOT))] = sorted(
+                    map(str, declared)
+                )
+
+        assert not mixed
+
+
+@pytest.fixture(name="repo_registry")
+def repo_registry_fixture():
+    """A registry that loads the prompt definitions of the repository."""
+    return LocalPromptRegistry.from_local_yaml(
+        prompt_template_factories={},
+        model_factories={},
+        internal_event_client=Mock(),
+        model_limits=ConfigModelLimits(),
+    )
+
+
+class TestModelsFrom:
+    @pytest.mark.parametrize(
+        ("prompt_version", "expected"),
+        [
+            ("3.0.0", "duo_agent_platform"),
+            ("^2.0.0", "summarize_review"),
+            (None, "summarize_review"),
+        ],
+    )
+    def test_returns_the_models_of_the_version(
+        self, repo_registry: LocalPromptRegistry, prompt_version, expected
+    ):
+        assert repo_registry.models_from("summarize_review", prompt_version) == expected
+
+    def test_resolves_the_version_in_the_folder_of_the_model_family(
+        self, repo_registry: LocalPromptRegistry
+    ):
+        mistral = create_model_metadata({"provider": "gitlab", "identifier": "mistral"})
+
+        assert (
+            repo_registry.models_from("chat/write_tests", "1.2.0")
+            == "duo_chat_write_tests"
+        )
+        assert repo_registry.models_from("chat/write_tests", "1.2.0", mistral) is None
+
+    @pytest.mark.parametrize(
+        ("prompt_id", "prompt_version"),
+        [
+            pytest.param("classify_goal_tier", None, id="version-without-models-from"),
+            pytest.param("no/such/prompt", None, id="unknown-prompt"),
+            pytest.param("summarize_review", "^9.0.0", id="unknown-version"),
+            pytest.param("summarize_review", "not a version", id="invalid-version"),
+        ],
+    )
+    def test_returns_none(
+        self, repo_registry: LocalPromptRegistry, prompt_id, prompt_version
+    ):
+        assert repo_registry.models_from(prompt_id, prompt_version) is None
+
+
+class TestDefaultModelOfAPromptVersion:
+    @pytest.mark.parametrize(
+        ("prompt_version", "feature_setting"),
+        [
+            ("3.0.0", "duo_agent_platform"),
+            ("^2.0.0", "summarize_review"),
+        ],
+    )
+    def test_serves_the_default_of_the_version_models(
+        self, repo_registry: LocalPromptRegistry, prompt_version, feature_setting
+    ):
+        metadata = repo_registry._default_model_metadata(
+            "summarize_review", prompt_version
+        )
+
+        assert (
+            metadata.llm_definition.gitlab_identifier
+            == ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()[feature_setting]
+            .default_model_identifiers[0]
+        )
+
+    def test_serves_the_default_of_the_entry_for_a_version_without_models_from(
+        self, repo_registry: LocalPromptRegistry
+    ):
+        metadata = repo_registry._default_model_metadata("classify_goal_tier", "^1.0.0")
+
+        assert (
+            metadata.llm_definition.gitlab_identifier
+            == ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()["duo_agent_platform"]
+            .default_model_identifiers[0]
+        )

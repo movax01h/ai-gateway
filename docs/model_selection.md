@@ -590,15 +590,19 @@ embeddings routes serve the model that the check returns, so `fallback` mode ser
 there. They build the model from the request body only to answer HTTP 422 for metadata that is not valid. The route
 payloads do not call the check yet.
 
-On the `/v1/prompts/<prompt_id>` and `/v2/prompts/<prompt_id>` routes, the middleware passes the feature setting of
-the prompt's entry in `PROMPT_ID_TO_FEATURE_SETTING` (`ai_gateway/prompts/registry.py`). For a prompt that GitLab Rails
-calls, the entry is the feature that Rails sends. Rails takes it from the unit primitive of the call, not from the prompt
-ID: for example, `chat/explain_code` uses `duo_chat_explain_code`, and `categorize_question` uses `duo_chat`. The
-registry also picks the default model of a request without model metadata from this entry. The middleware finds the
-entry for each spelling of the prompt ID that loads the same prompt, for example `chat/explain_code/` or
-`review/review_merge_request`.
+On the `/v1/prompts/<prompt_id>` and `/v2/prompts/<prompt_id>` routes, the allowlist depends on the prompt version,
+and only the route resolves the version. So the middleware sets no model metadata for these routes. The route runs the
+check before it builds the prompt, in `check_prompt_model_metadata` (`ai_gateway/api/v1/prompts/invoke.py`), and
+answers HTTP 403 in `enforce` mode. The check uses the `models_from` of the version that the client's model resolves
+(see [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http)). A version
+without `models_from` uses the feature setting of the prompt's entry in `PROMPT_ID_TO_FEATURE_SETTING`
+(`ai_gateway/prompts/registry.py`). For a prompt that GitLab Rails calls, the entry is the feature that Rails sends.
+Rails takes it from the unit primitive of the call, not from the prompt ID: for example, `chat/explain_code` uses
+`duo_chat_explain_code`, and `categorize_question` uses `duo_chat`. The registry picks the default model of a request
+without model metadata in the same order. The route finds the entry for each spelling of the prompt ID that loads the
+same prompt, for example `chat/explain_code/` or `review/review_merge_request`.
 
-For a prompt without an entry, the check still uses the client's `feature_setting`, and the middleware logs a
+For a prompt with neither, the check still uses the client's `feature_setting`, and the route logs a
 `Model allowlist note` when a named model would not pass the allowlist of the feature that `feature_setting_for_prompt_id`
 derives from the first part of the prompt ID: `prompt_feature_unknown` when the derived feature does not exist, and
 `prompt_feature_model_not_allowed` when its allowlist does not have the model. The note has the `prompt_id`, and its

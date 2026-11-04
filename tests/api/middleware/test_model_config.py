@@ -1,7 +1,8 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser
 from starlette.middleware import Middleware
@@ -11,9 +12,18 @@ from structlog.testing import capture_logs
 
 from ai_gateway.api.middleware.access_log import AccessLogMiddleware
 from ai_gateway.api.middleware.model_config import ModelConfigMiddleware
-from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
+from ai_gateway.api.v1.prompts.invoke import check_prompt_model_metadata
+from ai_gateway.config import ConfigModelLimits
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    ModelSelectionError,
+    UnitPrimitiveConfig,
+)
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
-from ai_gateway.prompts.registry import PROMPT_ID_TO_FEATURE_SETTING
+from ai_gateway.prompts.registry import (
+    PROMPT_ID_TO_FEATURE_SETTING,
+    LocalPromptRegistry,
+)
 from lib.context import StarletteUser, current_model_metadata_context
 
 
@@ -69,10 +79,23 @@ def middleware_test_client_fixture(model_metadata_context):
             "name": model_metadata.name if model_metadata else None,
         }
 
+    prompt_registry = LocalPromptRegistry.from_local_yaml(
+        prompt_template_factories={},
+        model_factories={},
+        internal_event_client=Mock(),
+        model_limits=ConfigModelLimits(),
+    )
+
     @app.post("/v1/prompts/{prompt_id:path}")
     @app.post("/v2/prompts/{prompt_id:path}")
     async def prompts(request: Request, prompt_id: str):
-        await request.body()
+        body = await request.json()
+        try:
+            check_prompt_model_metadata(
+                prompt_registry, prompt_id, body.get("prompt_version")
+            )
+        except ModelSelectionError as error:
+            return JSONResponse(status_code=403, content={"detail": str(error)})
         model_metadata = model_metadata_context.get()
         return {
             "prompt_id": prompt_id,
@@ -843,6 +866,109 @@ class TestFeatureAllowlist:
                     for entry in logs
                     if entry["event"].startswith("Model allowlist")
                 ] == []
+
+        class TestPromptVersions:
+            """The allowlist is the `models_from` of the prompt version that runs, not the entry of its prompt."""
+
+            AGENT_PLATFORM_MODEL = {
+                "provider": "gitlab",
+                "identifier": "claude_fable_5_1_vertex",
+                "feature_setting": "summarize_review",
+            }
+
+            @pytest.fixture(autouse=True)
+            def model_of_another_feature(self):
+                assert (
+                    "claude_fable_5_1_vertex"
+                    in _feature("duo_agent_platform").allowed_model_identifiers
+                )
+                assert (
+                    "claude_fable_5_1_vertex"
+                    not in _feature("summarize_review").allowed_model_identifiers
+                )
+
+            @pytest.mark.parametrize(
+                "feature_allowlist_mode", ["enforce"], indirect=True
+            )
+            def test_enforce_mode_serves_a_model_that_the_version_allows(
+                self, middleware_test_client
+            ):
+                response = middleware_test_client.post(
+                    "/v1/prompts/summarize_review",
+                    json={
+                        "model_metadata": self.AGENT_PLATFORM_MODEL,
+                        "prompt_version": "3.0.0",
+                    },
+                )
+
+                assert response.status_code == 200
+                assert response.json()["name"] == "claude_fable_5_1_vertex"
+
+            @pytest.mark.parametrize(
+                "feature_allowlist_mode", ["enforce"], indirect=True
+            )
+            def test_enforce_mode_rejects_a_model_that_the_version_does_not_allow(
+                self, middleware_test_client
+            ):
+                response = middleware_test_client.post(
+                    "/v1/prompts/summarize_review",
+                    json={
+                        "model_metadata": self.AGENT_PLATFORM_MODEL,
+                        "prompt_version": "^2.0.0",
+                    },
+                )
+
+                assert response.status_code == 403
+                assert response.json() == {
+                    "detail": "Model 'claude_fable_5_1_vertex' is not available for 'summarize_review'"
+                }
+
+            @pytest.mark.parametrize(
+                "feature_allowlist_mode", ["fallback"], indirect=True
+            )
+            def test_fallback_mode_serves_the_default_of_the_version(
+                self, middleware_test_client
+            ):
+                response = middleware_test_client.post(
+                    "/v1/prompts/summarize_review",
+                    json={
+                        "model_metadata": self.AGENT_PLATFORM_MODEL,
+                        "prompt_version": "^2.0.0",
+                    },
+                )
+
+                assert (
+                    response.json()["name"]
+                    == _feature("summarize_review").default_model_identifiers[0]
+                )
+
+        class TestUncheckedRoute:
+            @pytest.mark.parametrize(
+                "feature_allowlist_mode", ["enforce"], indirect=True
+            )
+            def test_sets_no_model_metadata_until_the_route_checks_it(
+                self, model_metadata_context
+            ):
+                app = FastAPI(
+                    middleware=[
+                        Middleware(RawContextMiddleware),
+                        Middleware(ModelConfigMiddleware),
+                    ]
+                )
+
+                @app.post("/v1/prompts/{prompt_id:path}")
+                async def unchecked(request: Request):
+                    await request.body()
+                    return {
+                        "model_metadata_set": model_metadata_context.get() is not None
+                    }
+
+                response = TestClient(app).post(
+                    "/v1/prompts/chat/explain_code",
+                    json={"model_metadata": CODE_COMPLETIONS_MODEL},
+                )
+
+                assert response.json() == {"model_metadata_set": False}
 
         class TestOtherPrompts:
             PATHS = [

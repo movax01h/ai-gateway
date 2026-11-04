@@ -4,7 +4,7 @@ from typing import Any, List, Optional
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain_core.messages.ai import AIMessage, AIMessageChunk
 from pydantic import AnyUrl
@@ -364,6 +364,58 @@ class TestUnauthorizedScopes:
 
         assert response.status_code == 403
         assert _logged_feature_category(cap_logs) == "ai_abstraction_layer"
+
+
+@pytest.mark.usefixtures("frozen_datetime_now", "cloud_gateway")
+@pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+class TestModelsOfThePromptVersion:
+    """The route checks the client's model against the `models_from` of the prompt version that runs."""
+
+    @pytest.fixture(name="fast_api_router", scope="class")
+    def fast_api_router_fixture(self):
+        # ModelConfigMiddleware leaves the check to the route only under the `/v1/prompts/` path.
+        router = APIRouter()
+        router.include_router(api_router, prefix="/v1")
+        return router
+
+    @staticmethod
+    def _post(mock_client, prompt_version: str):
+        return mock_client.post(
+            "/v1/prompts/summarize_review",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "inputs": {"name": "John", "age": 20},
+                "prompt_version": prompt_version,
+                "model_metadata": {
+                    "provider": "gitlab",
+                    "identifier": "claude_fable_5_1_vertex",
+                    "feature_setting": "summarize_review",
+                },
+            },
+        )
+
+    def test_serves_a_model_that_the_version_allows(
+        self, mock_client, mock_registry_get, feature_allowlist_mode
+    ):
+        response = self._post(mock_client, "3.0.0")
+
+        assert response.status_code == 200
+        served = mock_registry_get.call_args.args[2]
+        assert served.llm_definition.gitlab_identifier == "claude_fable_5_1_vertex"
+
+    def test_rejects_a_model_that_the_version_does_not_allow(
+        self, mock_client, mock_registry_get, feature_allowlist_mode
+    ):
+        response = self._post(mock_client, "^2.0.0")
+
+        assert response.status_code == 403
+        assert response.json() == {
+            "detail": "Model 'claude_fable_5_1_vertex' is not available for 'summarize_review'"
+        }
+        mock_registry_get.assert_not_called()
 
 
 class TestMisdirectedRequest:

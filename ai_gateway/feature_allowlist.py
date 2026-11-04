@@ -8,10 +8,11 @@ header, and the routes that build metadata from their own payload, such as the l
 
 The allowlist is the one of the feature that the call site serves. A call site that passes no feature
 uses the client's ``feature_setting``, so the client can name the feature whose allowlist suits it.
-The HTTP prompt routes pass the feature of a prompt with an entry in ``PROMPT_ID_TO_FEATURE_SETTING``.
-The fallback stays for any other prompt, and on the Duo Workflow Service until it derives the feature
-from the flow. For a prompt without an entry, ``note_prompt_feature`` logs where the feature derived
-from the prompt ID would not allow the requested model.
+The HTTP prompt routes pass the ``models_from`` of the prompt version that runs. A version without
+``models_from`` uses the entry of its prompt in ``PROMPT_ID_TO_FEATURE_SETTING``. The client's feature
+stays for a prompt with neither, and on the Duo Workflow Service until it derives the feature from the
+flow. For a prompt with neither, ``note_prompt_feature`` logs where the feature derived from the prompt
+ID would not allow the requested model.
 
 A gateway without custom models serves GitLab-managed models only. Over HTTP it accepts ``gitlab``
 and ``amazon_q``, which GitLab Rails sends, and ``anthropic``, ``vertex-ai`` and ``fireworks_ai``,
@@ -37,6 +38,7 @@ altogether.
 GitLab-managed models are resolved by their GitLab identifier only.
 """
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Mapping, Optional
 
@@ -65,8 +67,10 @@ from lib.context import StarletteUser
 __all__ = [
     "SERVED_PROVIDERS",
     "ClientModelRequest",
+    "PromptModelCheck",
     "check_client_model_metadata",
     "note_prompt_feature",
+    "prompt_model_check_context",
 ]
 
 log = structlog.stdlib.get_logger("feature_allowlist")
@@ -132,6 +136,26 @@ class ClientModelRequest:
     def pinned(self) -> bool:
         """Whether the client named a model, by ``name`` or by ``identifier``."""
         return bool(self.name or self.identifier)
+
+
+@dataclass(frozen=True)
+class PromptModelCheck:
+    """Client model metadata of a prompt route request, which the route checks once it resolves the prompt version.
+
+    The allowlist of a prompt route depends on the ``models_from`` of the prompt version, and only the route resolves
+    the version. So ``ModelConfigMiddleware`` keeps the metadata here unchecked, and sets no model metadata, for the
+    route to check.
+    """
+
+    request: ClientModelRequest
+    metadata: TypeModelMetadata
+    user: Optional[StarletteUser]
+    log_context: Mapping[str, Any]
+
+
+prompt_model_check_context: ContextVar[Optional[PromptModelCheck]] = ContextVar(
+    "prompt_model_check_context", default=None
+)
 
 
 def _text(value: Any) -> Optional[str]:
@@ -453,8 +477,9 @@ def note_prompt_feature(
 ) -> None:
     """Log a note when a named model would not pass the allowlist of an HTTP prompt's own feature.
 
-    The prompt routes call it for a prompt without an entry in ``PROMPT_ID_TO_FEATURE_SETTING``. For
-    such a prompt, ``check_client_model_metadata`` still uses the client's ``feature_setting``,
+    The prompt routes call it for a prompt version without ``models_from`` whose prompt has no entry in
+    ``PROMPT_ID_TO_FEATURE_SETTING``. For such a prompt, ``check_client_model_metadata`` still uses the
+    client's ``feature_setting``,
     because the feature derived from a prompt ID does not always match the one that GitLab Rails
     sends. The note shows where the two differ, so the prompt can get an entry. It changes nothing,
     in any mode.

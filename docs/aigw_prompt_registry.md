@@ -189,9 +189,12 @@ setting in `unit_primitives.yml` whose models the version can run on.
 - The `amazon_q` versions do not set `models_from`, because no entry in `unit_primitives.yml` lists
   `amazon_q_integration`.
 
-The prompt routes do not read `models_from` yet. Until they do, `PROMPT_ID_TO_FEATURE_SETTING` in
-`ai_gateway/prompts/registry.py` selects the models of a prompt, and a test checks that the `models_from` of each
-version matches its entry.
+The prompt routes check the client's model against the `models_from` of the version that runs, and the registry picks
+the default model of a request without model metadata from it. A version without `models_from` uses the entry of its
+prompt in `PROMPT_ID_TO_FEATURE_SETTING` (`ai_gateway/prompts/registry.py`).
+
+- A prompt with more than one model family must declare one `models_from` in all of them. In `fallback` mode the
+  check can serve another model, and its family can resolve another version. A test checks this.
 
 ### Message Placeholders
 
