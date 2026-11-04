@@ -107,8 +107,10 @@ from duo_workflow_service.server import (
     DuoWorkflowService,
     _extract_error_message,
     _flow_config_digest,
+    _is_gitlab_com_instance_token,
     _restricted_access_flow,
     _restricted_access_flow_from_proof,
+    _restricted_flow_instance_uids,
     _restricted_flow_proof_verifier,
     _workflow_binding_matches,
     clean_start_request,
@@ -119,6 +121,7 @@ from duo_workflow_service.server import (
     setup_container,
     setup_signal_handlers,
     validate_llm_access,
+    warn_if_restricted_flows_lack_instance_uids,
 )
 from duo_workflow_service.status_updater.gitlab_status_updater import (
     BadStatusEvent,
@@ -418,6 +421,9 @@ def test_run(custom_models_enabled, vertex_project, should_validate_llm):
         patch(
             "duo_workflow_service.server.validate_llm_access"
         ) as mock_validate_llm_access,
+        patch(
+            "duo_workflow_service.server.warn_if_restricted_flows_lack_instance_uids"
+        ) as mock_warn_instance_uids,
         patch("asyncio.get_event_loop") as mock_get_loop,
     ):
         mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
@@ -438,8 +444,10 @@ def test_run(custom_models_enabled, vertex_project, should_validate_llm):
 
         if should_validate_llm:
             mock_validate_llm_access.assert_called_once()
+            mock_warn_instance_uids.assert_called_once()
         else:
             mock_validate_llm_access.assert_not_called()
+            mock_warn_instance_uids.assert_not_called()
 
         assert mock_loop.run_until_complete.call_count == 1
         actual_arg = mock_loop.run_until_complete.call_args[0][0]
@@ -6745,7 +6753,7 @@ def flow_enabled_fixture():
         yield
 
 
-GITLAB_COM_INSTANCE_UID = "gitlab-com-instance-uid"
+GITLAB_COM_INSTANCE_UID = "0f8f7c6e-2b1a-4c3d-9e8f-1a2b3c4d5e6f"
 RESTRICTED_MODEL_ENV = {
     "CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service",
     "DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL": "https://gitlab.com",
@@ -6769,6 +6777,87 @@ def _instance_user(
             extra=extra or {},
         ),
     )
+
+
+@pytest.fixture(name="clear_instance_uid_cache")
+def clear_instance_uid_cache_fixture():
+    _restricted_flow_instance_uids.cache_clear()
+    yield
+    _restricted_flow_instance_uids.cache_clear()
+
+
+@pytest.mark.usefixtures("clear_instance_uid_cache")
+@pytest.mark.parametrize(
+    ("allowlist", "subject", "expected"),
+    [
+        pytest.param(GITLAB_COM_INSTANCE_UID.upper(), None, True, id="upper-allowlist"),
+        pytest.param(None, GITLAB_COM_INSTANCE_UID.upper(), True, id="upper-subject"),
+        pytest.param(
+            f" other, {GITLAB_COM_INSTANCE_UID}\t,", None, True, id="whitespace"
+        ),
+        pytest.param("not-a-uuid", "not-a-uuid", False, id="invalid-entry"),
+        pytest.param(",  ,", None, False, id="only-separators"),
+    ],
+)
+def test_is_gitlab_com_instance_token_normalises_uids(allowlist, subject, expected):
+    env = {**RESTRICTED_MODEL_ENV}
+    if allowlist is not None:
+        env["DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS"] = allowlist
+    user = _instance_user(subject=subject or GITLAB_COM_INSTANCE_UID)
+    with patch.dict(os.environ, env):
+        assert _is_gitlab_com_instance_token(user) is expected
+
+
+@pytest.mark.usefixtures("clear_instance_uid_cache")
+def test_invalid_instance_uid_warning_omits_value():
+    with capture_logs() as cap_logs:
+        uids = _restricted_flow_instance_uids(f"secret-ish,{GITLAB_COM_INSTANCE_UID}")
+
+    assert uids == {GITLAB_COM_INSTANCE_UID}
+    assert [log["dropped"] for log in cap_logs] == [1]
+    assert "secret-ish" not in str(cap_logs)
+
+
+@pytest.mark.usefixtures("clear_instance_uid_cache")
+@pytest.mark.parametrize(
+    ("restricted", "allowlist", "should_warn"),
+    [
+        pytest.param(True, "", True, id="restricted-unset"),
+        pytest.param(True, "not-a-uuid", True, id="restricted-invalid-only"),
+        pytest.param(True, GITLAB_COM_INSTANCE_UID, False, id="restricted-set"),
+        pytest.param(False, "", False, id="unrestricted"),
+    ],
+)
+def test_warn_if_restricted_flows_lack_instance_uids(
+    restricted, allowlist, should_warn
+):
+    flows = frozenset({"bl_security"} if restricted else ())
+    env = {"DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS": allowlist}
+    with (
+        patch.dict(os.environ, env),
+        patch("duo_workflow_service.server.ModelSelectionConfig") as mock_config,
+        capture_logs() as cap_logs,
+    ):
+        mock_config.instance.return_value.all_restricted_flows.return_value = flows
+        warn_if_restricted_flows_lack_instance_uids()
+
+    warnings = [
+        log
+        for log in cap_logs
+        if log["event"].startswith("Restricted models are configured")
+    ]
+    if should_warn:
+        assert warnings == [
+            {
+                "event": "Restricted models are configured but the instance UUID allowlist is empty",
+                "log_level": "warning",
+                "env_var": "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS",
+                "restricted_flows": ["bl_security"],
+            }
+        ]
+    else:
+        assert not warnings
+    assert GITLAB_COM_INSTANCE_UID not in str(cap_logs)
 
 
 @pytest.mark.asyncio
