@@ -17,6 +17,7 @@ from graphql.language.printer import print_ast
 from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field, field_validator
 
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
 log = structlog.stdlib.get_logger("workflow")
@@ -246,21 +247,15 @@ class GitLabApiGet(DuoBaseTool):
 
         response = await self.gitlab_client.aget(
             path=full_path,
+            parse_json=False,
         )
 
         body = self._process_http_response("GitLab API GET request", response, log)
 
-        # Parse response body
-        # Response body might already be parsed
-        if isinstance(body, (dict, list)):
-            result = body
-        else:
-            result = json.loads(body)
-
-        response_payload: dict = {
-            "status": "success",
-            "data": result,
-        }
+        response_payload: dict = {"status": "success"}
+        response_payload.update(
+            self._build_data_payload(body, response.headers.get("content-type"))
+        )
 
         # Only attach pagination when headers are present to keep single-resource
         # responses lean and preserve backward compatibility.
@@ -271,19 +266,41 @@ class GitLabApiGet(DuoBaseTool):
         return json.dumps(response_payload)
 
     @staticmethod
-    def _extract_pagination_headers(response: Any) -> Optional[Dict[str, str]]:
+    def _build_data_payload(body: Any, content_type: Optional[str]) -> Dict[str, Any]:
+        """Build the ``data`` (and optional ``content_type``) part of the response.
+
+        JSON bodies (already parsed or JSON-encoded strings) are returned as parsed data. Empty bodies yield an empty
+        dict. A body whose ``Content-Type`` is not JSON, such as a raw file or a job trace, is returned as text even if
+        it happens to parse as JSON (a file containing ``1.10`` must not become the number ``1.1``). Without a
+        ``Content-Type`` header, a body that fails to parse as JSON is returned as text.
+        """
+        if isinstance(body, (dict, list)):
+            return {"data": body}
+
+        # Anything else is the protobuf ``HttpResponse.body`` string, or None.
+        if body is None or not body.strip():
+            return {"data": {}}
+
+        if content_type and "json" not in content_type.lower():
+            return {"content_type": "text", "data": body}
+
+        try:
+            return {"data": json.loads(body)}
+        except json.JSONDecodeError:
+            return {"content_type": "text", "data": body}
+
+    @staticmethod
+    def _extract_pagination_headers(
+        response: GitLabHttpResponse,
+    ) -> Optional[Dict[str, str]]:
         """Extract GitLab pagination headers from a response.
 
         Returns a dict with pagination metadata if any pagination headers are present, or None if the response has no
         pagination info.
         """
-        raw_headers = getattr(response, "headers", {}) or {}
-        # Normalize to lowercase keys so the lookup works regardless of whether
-        # the HTTP client preserves the original casing or lowercases all names.
-        headers = {k.lower(): v for k, v in raw_headers.items()}
-        next_page = headers.get("x-next-page", "")
-        total = headers.get("x-total", "")
-        total_pages = headers.get("x-total-pages", "")
+        next_page = response.headers.get("x-next-page", "")
+        total = response.headers.get("x-total", "")
+        total_pages = response.headers.get("x-total-pages", "")
 
         if not any([next_page, total, total_pages]):
             return None

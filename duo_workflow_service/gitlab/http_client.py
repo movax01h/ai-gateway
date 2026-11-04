@@ -1,8 +1,9 @@
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Mapping, Optional, Union
 
+import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.types import Send
 
@@ -13,10 +14,17 @@ logger = logging.getLogger(__name__)
 
 
 class GitLabHttpResponse:
-    def __init__(self, status_code, body, headers={}):
+    def __init__(
+        self,
+        status_code: int,
+        body: Any,
+        headers: Optional[Mapping[str, str]] = None,
+    ):
         self.status_code = status_code
         self.body = body
-        self.headers = headers
+        # Executors differ in how they case header names: the Node executor lowercases them, Workhorse canonicalises
+        # them. httpx.Headers makes every lookup case-insensitive, so callers can use either form.
+        self.headers = httpx.Headers(headers or {})
 
     def is_success(self) -> bool:
         """Check if the HTTP response indicates success (2xx status codes)."""
@@ -127,8 +135,9 @@ class GitlabHttpClient(ABC):
 
         Returns:
             Parsed response data (dict/list) if parsing succeeds,
-            or raw response (str) if parsing fails or is not requested,
-            or None if response is None
+            the raw response if ``parse_json`` is False,
+            or an empty dict if the response is not a string/dict or the JSON
+            cannot be decoded (the decode error is logged)
         """
         if not parse_json:
             return response
