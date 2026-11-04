@@ -272,7 +272,7 @@ class TestDeepCodeReviewConfig:
         gate = self._input(components["publish_review"], "min_confidence")
         reviewer = self._input(components["review"], "min_confidence")
 
-        assert gate["from"] == "4"
+        assert gate["from"] == "5"
         assert gate["literal"] is True
         assert reviewer == gate
 

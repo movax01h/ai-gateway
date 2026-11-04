@@ -83,7 +83,7 @@ components:
         as: "last_reviewed_head_sha"
         optional: true
       # The publish step reuses this anchor, so the summary rule and the gate share one threshold.
-      - from: &min_confidence "4"
+      - from: &min_confidence "5"
         as: "min_confidence"
         literal: true
     toolset:
@@ -118,7 +118,7 @@ components:
 
   # Step 5: Publish in pure code from the reviewer's schema-validated answer.
   # `findings` is required so a missing answer fails the flow instead of posting
-  # a clean review. min_confidence 4 comes from the benchmark sweep (gitlab#618672).
+  # a clean review. min_confidence 5 comes from the Sonnet 5.5 xhigh sweep (gitlab#637410).
   - name: "publish_review"
     type: DeterministicStepComponent
     tool_name: "post_duo_code_review_findings"
