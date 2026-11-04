@@ -424,7 +424,7 @@ class TestGetRepositoryFilePagination:
         )
         content = json.loads(result)["content"]
         expected = "\n".join(f"line {i}" for i in range(7, 10))
-        expected += "\n\n[Showing lines 7-9 of 10 total.]"
+        expected += "\n\n[Showing lines 8-10 of 10 total.]"
         assert content == expected
 
     @pytest.mark.asyncio
@@ -437,7 +437,7 @@ class TestGetRepositoryFilePagination:
         content = json.loads(result)["content"]
         expected = "\n".join(f"line {i}" for i in range(3))
         expected += (
-            "\n\n[Showing lines 0-2 of 10 total. Use offset=3 to continue reading.]"
+            "\n\n[Showing lines 1-3 of 10 total. Use offset=3 to continue reading.]"
         )
         assert content == expected
 
@@ -451,9 +451,28 @@ class TestGetRepositoryFilePagination:
         content = json.loads(result)["content"]
         expected = "\n".join(f"line {i}" for i in range(3, 7))
         expected += (
-            "\n\n[Showing lines 3-6 of 10 total. Use offset=7 to continue reading.]"
+            "\n\n[Showing lines 4-7 of 10 total. Use offset=7 to continue reading.]"
         )
         assert content == expected
+
+    @pytest.mark.asyncio
+    async def test_footer_labels_match_gitlab_line_numbers(
+        self, tool, gitlab_client_mock, multiline_content
+    ):
+        """The first line returned at offset N is GitLab line N+1, and the footer says so.
+
+        Agents quote footer labels as line numbers (gitlab-org/gitlab!264604#note_4155269968).
+        """
+        gitlab_client_mock.aget.return_value = multiline_content
+        result = await tool._arun(
+            project_id="org/repo", ref="main", file_path="file.py", offset=3, limit=1
+        )
+        content = json.loads(result)["content"]
+        assert content.startswith("line 3\n")
+        assert (
+            "[Showing lines 4-4 of 10 total. Use offset=4 to continue reading.]"
+            in content
+        )
 
     @pytest.mark.asyncio
     async def test_offset_beyond_file_length(
@@ -480,7 +499,7 @@ class TestGetRepositoryFilePagination:
         )
         content = json.loads(result)["content"]
         expected = "\n".join(f"line {i}" for i in range(8, 10))
-        expected += "\n\n[Showing lines 8-9 of 10 total.]"
+        expected += "\n\n[Showing lines 9-10 of 10 total.]"
         assert content == expected
 
     @pytest.mark.asyncio
@@ -495,7 +514,7 @@ class TestGetRepositoryFilePagination:
         content = json.loads(result)["content"]
         expected = "\n".join(f"line {i}" for i in range(5))
         expected += (
-            "\n\n[Showing lines 0-4 of 10 total. Use offset=5 to continue reading.]"
+            "\n\n[Showing lines 1-5 of 10 total. Use offset=5 to continue reading.]"
         )
         assert content == expected
 
@@ -582,7 +601,7 @@ class TestGetRepositoryFilePagination:
         )
         content = json.loads(result)["content"]
         assert (
-            "[Showing lines 0-1999 of 3000 total. Use offset=2000 to continue reading.]"
+            "[Showing lines 1-2000 of 3000 total. Use offset=2000 to continue reading.]"
             in content
         )
 
@@ -609,7 +628,7 @@ class TestGetRepositoryFilePagination:
         )
         content = json.loads(result)["content"]
         assert (
-            "[Showing lines 0-1999 of 3000 total. Use offset=2000 to continue reading.]"
+            "[Showing lines 1-2000 of 3000 total. Use offset=2000 to continue reading.]"
             in content
         )
         # Should contain exactly 2000 lines of content + hint
@@ -670,7 +689,7 @@ class TestGetRepositoryFilePagination:
         content = json.loads(result)["content"]
         assert content.startswith("line 2000")
         assert (
-            "[Showing lines 2000-3999 of 5000 total. Use offset=4000 to continue reading.]"
+            "[Showing lines 2001-4000 of 5000 total. Use offset=4000 to continue reading.]"
             in content
         )
 
