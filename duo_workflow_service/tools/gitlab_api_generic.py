@@ -253,15 +253,18 @@ class GitLabApiGet(DuoBaseTool):
         body = self._process_http_response("GitLab API GET request", response, log)
 
         response_payload: dict = {"status": "success"}
-        response_payload.update(
-            self._build_data_payload(body, response.headers.get("content-type"))
-        )
 
         # Only attach pagination when headers are present to keep single-resource
-        # responses lean and preserve backward compatibility.
+        # responses lean and preserve backward compatibility. It goes before
+        # ``data`` so it survives when the display copy of a large response is
+        # truncated.
         pagination = self._extract_pagination_headers(response)
         if pagination:
             response_payload["pagination"] = pagination
+
+        response_payload.update(
+            self._build_data_payload(body, response.headers.get("content-type"))
+        )
 
         return json.dumps(response_payload)
 

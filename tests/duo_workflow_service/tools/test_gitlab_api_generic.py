@@ -14,6 +14,8 @@ from duo_workflow_service.tools.gitlab_api_generic import (
     validate_api_endpoint,
 )
 
+PAGINATION_HEADERS = {"X-Next-Page": "2", "X-Total": "50", "X-Total-Pages": "3"}
+
 
 @pytest.fixture(name="gitlab_client_mock")
 def gitlab_client_mock_fixture():
@@ -352,6 +354,38 @@ class TestGitLabApiGet:
             "total": "50",
             "total_pages": "3",
         }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body,headers,expected_keys",
+        [
+            ('[{"id": 1}]', {}, ["status", "data"]),
+            ('[{"id": 1}]', PAGINATION_HEADERS, ["status", "pagination", "data"]),
+            ("plain text", {}, ["status", "content_type", "data"]),
+            (
+                "plain text",
+                PAGINATION_HEADERS,
+                ["status", "pagination", "content_type", "data"],
+            ),
+        ],
+        ids=["json", "json_paginated", "text", "text_paginated"],
+    )
+    async def test_get_response_keys_in_expected_order(
+        self, gitlab_api_get_tool, gitlab_client_mock, body, headers, expected_keys
+    ):
+        """Keys are ordered so small metadata comes before ``data`` and survives truncation of large responses."""
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=body,
+            headers=headers,
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
+
+        result = await gitlab_api_get_tool._execute(
+            endpoint="/api/v4/projects/13/issues"
+        )
+
+        assert list(json.loads(result)) == expected_keys
 
     @pytest.mark.asyncio
     async def test_get_response_no_pagination_when_headers_absent(
