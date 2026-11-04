@@ -6,7 +6,9 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Dict, Optional, Union
 from urllib.parse import urlencode
 
+import structlog
 from langchain_core.tools import ToolException
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from tenacity import (
     RetryCallState,
     before_sleep_log,
@@ -23,8 +25,38 @@ from duo_workflow_service.executor.action import (
 )
 from duo_workflow_service.executor.outbox import Outbox
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
+from lib.context.workflow import get_workflow_id
 
 logger = logging.getLogger(__name__)
+_structured_log = structlog.stdlib.get_logger("executor_http_client")
+
+
+class ExecutorHttpClientSettings(BaseSettings):
+    """Settings for HTTP requests DWS relays through the executor."""
+
+    model_config = SettingsConfigDict(env_prefix="DUO_WORKFLOW_EXECUTOR_HTTP__")
+
+    rest_timeout_seconds: float = 60.0
+    """How long DWS waits for the executor to answer one REST request attempt.
+
+    The executor is the client, so DWS must not wait on it indefinitely. Each retry attempt gets its own timeout.
+    """
+
+
+class ExecutorRequestTimeoutError(ToolException):
+    """Raised when the executor does not answer a relayed REST request within the DWS-side timeout.
+
+    A ``ToolException`` so that tools surface it to the model like any other executor action error.
+    """
+
+    def __init__(self, method: str, path: str, timeout: float) -> None:
+        super().__init__(
+            f"Executor HTTP request {method} {path} timed out after {timeout} seconds"
+        )
+        self.method = method
+        self.path = path
+        self.timeout = timeout
+
 
 # Retry budget: 4 attempts with 3s / 9s / 27s of backoff between them (39s total).
 #
@@ -52,6 +84,15 @@ _RETRY_WAIT_MAX_SECONDS = 27
 # throttled responder tells us exactly how much later via `Retry-After`, so
 # these waits are driven by the header rather than by the ladder above.
 _RETRYABLE_STATUS_CODES = frozenset({401, 429})
+
+# Methods whose DWS-side timeout (ExecutorRequestTimeoutError) is retried.
+#
+# A timeout is the failure where the request most likely already reached
+# Rails: retrying a slow POST that creates an issue, note or MR would likely
+# create a duplicate. So only safe methods are retried on timeout; the rest
+# surface the timeout at once. Status responses (5xx, 401, 429) are still
+# retried for every method.
+_TIMEOUT_RETRYABLE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 # Network-error keywords that indicate a transient connectivity problem.
 _NETWORK_ERROR_KEYWORDS = (
@@ -104,7 +145,7 @@ class _RetryableStatusError(Exception):
     descriptive :class:`Exception`.
     """
 
-    def __init__(self, status_code: int, body: str, headers: Any):
+    def __init__(self, status_code: int, body: str, headers: Any) -> None:
         super().__init__(f"Retryable HTTP status: {status_code}")
         self.status_code = status_code
         self.body = body
@@ -239,10 +280,15 @@ def _is_retryable_error(exc: BaseException) -> bool:
     """Return True if the exception represents a transient, retryable error.
 
     Retryable conditions:
-    - Timeout errors (asyncio.TimeoutError or messages containing "timed out")
+    - DWS-side REST timeouts (``ExecutorRequestTimeoutError``), for safe methods only (GET, HEAD, OPTIONS)
+    - Other timeout errors (asyncio.TimeoutError or messages containing "timed out")
     - Network connectivity errors (connection refused, reset, etc.)
     - Retryable HTTP statuses: 5xx, and 401 caused by database replica lag
     """
+    # Checked before the "timed out" message match below, which would retry it
+    # regardless of method.
+    if isinstance(exc, ExecutorRequestTimeoutError):
+        return exc.method.upper() in _TIMEOUT_RETRYABLE_METHODS
     if isinstance(exc, asyncio.TimeoutError):
         return True
     if isinstance(exc, _RetryableStatusError):
@@ -275,8 +321,13 @@ _retry_on_transient_error = retry(
 class ExecutorGitLabHttpClient(GitlabHttpClient):
     """GitLab HTTP client implementation that uses the executor service."""
 
-    def __init__(self, outbox: Outbox):
+    def __init__(self, outbox: Outbox, rest_timeout: Optional[float] = None) -> None:
         self.outbox = outbox
+        self._rest_timeout = (
+            rest_timeout
+            if rest_timeout is not None
+            else ExecutorHttpClientSettings().rest_timeout_seconds
+        )
 
     async def _call(
         self,
@@ -287,20 +338,34 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
         params: Optional[Dict[str, Any]] = None,
         object_hook: Union[Callable, None] = None,
     ) -> Any:
+        # Logged without the query string, which can carry user-supplied values.
+        log_path = path.split("?", 1)[0]
         if params:
             query_string = urlencode(params)
             path = f"{path}?{query_string}"
 
         @_retry_on_transient_error
         async def _call_with_retry() -> Any:
-            action_response = await _execute_action_and_get_action_response(
-                {"outbox": self.outbox},
-                contract_pb2.Action(
-                    runHTTPRequest=contract_pb2.RunHTTPRequest(
-                        path=path, method=method, body=data
-                    )
-                ),
-            )
+            # The executor is the client: one that never answers must not stall DWS,
+            # e.g. before it reaches completion billing.
+            try:
+                action_response = await self._run_http_action(
+                    contract_pb2.Action(
+                        runHTTPRequest=contract_pb2.RunHTTPRequest(
+                            path=path, method=method, body=data
+                        )
+                    ),
+                    timeout=self._rest_timeout,
+                )
+            except asyncio.TimeoutError:
+                _structured_log.warning(
+                    "Executor HTTP request timed out",
+                    workflow_id=get_workflow_id(),
+                    method=method,
+                    path=log_path,
+                    timeout_s=self._rest_timeout,
+                )
+                raise ExecutorRequestTimeoutError(method, log_path, self._rest_timeout)
             status_code = action_response.httpResponse.statusCode
             if _is_retryable_status(status_code):
                 raise _RetryableStatusError(
@@ -347,16 +412,13 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
         @_retry_on_transient_error
         async def _graphql_with_retry() -> str:
             try:
-                action_response = await asyncio.wait_for(
-                    _execute_action_and_get_action_response(
-                        {"outbox": self.outbox},
-                        contract_pb2.Action(
-                            runHTTPRequest=contract_pb2.RunHTTPRequest(
-                                path="/api/graphql",
-                                method="POST",
-                                body=json.dumps(payload),
-                            )
-                        ),
+                action_response = await self._run_http_action(
+                    contract_pb2.Action(
+                        runHTTPRequest=contract_pb2.RunHTTPRequest(
+                            path="/api/graphql",
+                            method="POST",
+                            body=json.dumps(payload),
+                        )
                     ),
                     timeout=timeout,
                 )
@@ -383,6 +445,29 @@ class ExecutorGitLabHttpClient(GitlabHttpClient):
             raise GitLabGraphQLError(data["errors"])
 
         return data["data"]
+
+    async def _run_http_action(
+        self, action: contract_pb2.Action, timeout: float
+    ) -> contract_pb2.ActionResponse:
+        """Send ``action`` to the executor and wait up to ``timeout`` seconds for its response.
+
+        On timeout the request is deregistered from the outbox before ``asyncio.TimeoutError`` propagates. Older
+        executors (Language Server before 8.20, VS Code before 6.49.7) don't echo ``requestID``, so the outbox hands
+        each of their responses to the first pending ``runHTTPRequest``. A timed-out request left registered would
+        take the response meant for its retry, and shift every later request in the session by one.
+        """
+        try:
+            return await asyncio.wait_for(
+                _execute_action_and_get_action_response(
+                    {"outbox": self.outbox}, action
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError as error:
+            # put_action assigns the request ID on this same Action object.
+            if action.requestID:
+                self.outbox.fail_action(action.requestID, error)
+            raise
 
     @staticmethod
     def _graphql_response_body(
