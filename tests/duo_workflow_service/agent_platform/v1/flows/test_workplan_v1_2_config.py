@@ -1,7 +1,7 @@
 # pylint: disable=file-naming-for-tests
 """Guards for the workplan flow's 1.2.0 config: 1.1.0 plus workspace agents and skills.
 
-1.2.0 is a copy of 1.1.0 with two additions:
+1.2.0 is a copy of 1.1.0 with three additions:
 
 -   Workspace agent templates, bound through an ``include`` block
     (``source: workspace``, ``item_type: agent_template``, ``item_id: "*"``).
@@ -10,11 +10,13 @@
 -   Workspace agent skills. ``research`` and ``planner`` each take an optional
     ``workspace_agent_skills`` input, render the shared skills partial, and get
     ``read_files`` so they can open skill bodies at the manifest's absolute paths.
+-   Child work item tools. ``planner`` alone gets ``create_work_item`` and
+    ``gitlab_graphql`` so skills that decompose work can create children.
 
 These invariants matter enough to pin in CI. The generic sweep in
 ``test_configs.py`` only proves the config binds and compiles with synthetic
 items. It would not notice ``read_files`` or the skills input going missing, or
-the claim moving from ``research`` to ``planner``. Everything outside the two
+the claim moving from ``research`` to ``planner``. Everything outside the
 additions must match 1.1.0 exactly, so the versions stay comparable.
 """
 
@@ -51,6 +53,8 @@ SKILLS_INPUT = {
     "as": "workspace_agent_skills",
     "optional": True,
 }
+
+PLANNER_CHILD_ITEM_TOOLS = ["create_work_item", "gitlab_graphql"]
 
 SKILLS_PARTIAL = "{% include 'workspace_agent_skills/base/1.0.0.jinja' %}"
 
@@ -105,7 +109,11 @@ def _without_skill_additions(component: dict) -> dict:
     """Undo 1.2.0's component additions, leaving what 1.1.0 declares."""
     stripped = copy.deepcopy(component)
     stripped["inputs"] = [i for i in stripped["inputs"] if i != SKILLS_INPUT]
-    stripped["toolset"] = [t for t in stripped["toolset"] if t != "read_files"]
+    stripped["toolset"] = [
+        t
+        for t in stripped["toolset"]
+        if t != "read_files" and t not in PLANNER_CHILD_ITEM_TOOLS
+    ]
     stripped.pop("subagents", None)
     return stripped
 
@@ -246,6 +254,21 @@ class TestWorkplanV120WorkspaceAgentSkills:
         system = _system(_config(), prompt_id)
         assert NEW_FILES_CONSTRAINT in system
         assert OLD_FILES_CONSTRAINT not in system
+
+
+class TestWorkplanV120PlannerChildItemTools:
+    """Only planner can create child work items."""
+
+    def test_planner_has_child_item_tools(self):
+        toolset = _component(_config(), "planner")["toolset"]
+        assert all(tool in toolset for tool in PLANNER_CHILD_ITEM_TOOLS)
+
+    def test_no_other_component_gets_child_item_tools(self):
+        for component in _config().components:
+            if component["name"] == "planner":
+                continue
+            for tool in PLANNER_CHILD_ITEM_TOOLS:
+                assert tool not in (component.get("toolset") or []), component["name"]
 
 
 class TestWorkplanV120MatchesV110OutsideAdditions:

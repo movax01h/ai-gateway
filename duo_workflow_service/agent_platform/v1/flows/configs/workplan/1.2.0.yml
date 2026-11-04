@@ -10,7 +10,9 @@ environment: ambient
 
 # 1.2.0 adds workspace agent templates as subagents of `research`, and gives
 # both agents `read_files` so they can open agent skill bodies at the absolute
-# paths the `workspace_agent_skills` manifest advertises. 1.1.0 is frozen.
+# paths the `workspace_agent_skills` manifest advertises. It also gives `planner`
+# `create_work_item` and `gitlab_graphql` for skills that create child work
+# items. 1.1.0 is frozen.
 
 components:
   - name: research
@@ -101,6 +103,10 @@ components:
       # workspace_agent_skills manifest advertises (~/.agents/skills/...).
       # Repository reads still go through get_repository_files.
       - read_files
+      # Lets a workspace skill that decomposes work look up the allowed child
+      # types (gitlab_graphql) and create the children (create_work_item).
+      - create_work_item
+      - gitlab_graphql
       # Pinned as on the research stage above, plan announcement included.
       - "create_work_item_note":
           "internal": false
