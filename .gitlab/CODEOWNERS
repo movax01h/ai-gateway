@@ -62,14 +62,10 @@
 /tests/model_selection/test_shipped_bl_security_setting.py @mbenayoun @philipcunningham
 
 # SAST vulnerability resolution flow and prompts
-/duo_workflow_service/agent_platform/v1/flows/configs/resolve_sast_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/prompts/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/prompts/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/tests/prompts/test_resolve_sast_vulnerability_push_prompt.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 
 # SAST false positive detection flow, tools, and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/sast_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
@@ -102,6 +98,10 @@
 
 # Vulnerability resolution prompt (Code Security)
 /ai/features/security/resolve_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+
+# SAST vulnerability resolution flow and prompts (Code Security)
+/ai/features/security/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai/features/security/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude
@@ -164,14 +164,10 @@
 /tests/model_selection/test_shipped_bl_security_setting.py @mbenayoun @philipcunningham
 
 # SAST vulnerability resolution flow and prompts
-/duo_workflow_service/agent_platform/v1/flows/configs/resolve_sast_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/prompts/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/prompts/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai_gateway/response_schemas/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/tests/prompts/test_resolve_sast_vulnerability_push_prompt.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 
 # SAST false positive detection flow, tools, and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/sast_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
@@ -201,6 +197,10 @@
 
 # Vulnerability resolution prompt (Code Security)
 /ai/features/security/resolve_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+
+# SAST vulnerability resolution flow and prompts (Code Security)
+/ai/features/security/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+/ai/features/security/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 
 # Fix Pipeline prompts and response schemas
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
