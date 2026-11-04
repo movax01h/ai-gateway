@@ -82,6 +82,7 @@ from tenacity import (
 
 from ai_gateway.config import ConfigModelLimits, ModelLimits, get_config
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from ai_gateway.instrumentators.timeouts import is_timeout_error
 from ai_gateway.model_metadata import (
     TypeModelMetadata,
     resolve_provider_aware_metadata,
@@ -146,10 +147,6 @@ class TemplateNotFoundError(Exception):
 # Total attempts (initial call + retries) performed by `_ainvoke_with_retry`.
 # Named so the retry logging below can tell "will retry" apart from "gave up".
 _RETRY_STOP_AFTER_ATTEMPT = 4
-
-# aiohttp's idle-read timer message; litellm surfaces it as a generic
-# APIConnectionError, so it can't be classified by exception type alone.
-_SOCKET_READ_TIMEOUT_MESSAGE = "Timeout on reading data from socket"
 
 # Transient network errors that are safe to retry
 _RETRYABLE_NETWORK_ERRORS = (
@@ -256,29 +253,6 @@ def _is_retryable(exc: BaseException) -> bool:
     return False
 
 
-def _is_timeout_error(exc: BaseException | None) -> bool:
-    """Best-effort check whether an exception (or its causes) is a timeout.
-
-    Covers httpx timeout classes plus the aiohttp idle-read timeout that
-    litellm wraps in ``APIConnectionError``/``MidStreamFallbackError`` with a
-    fixed message rather than a distinct type. Walks ``__cause__`` and
-    litellm's ``original_exception`` a bounded number of steps to avoid
-    reference cycles.
-    """
-    for _ in range(5):
-        if exc is None:
-            return False
-        if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
-            return True
-        message = str(exc)
-        if _SOCKET_READ_TIMEOUT_MESSAGE in message or "timed out" in message.lower():
-            # NOTE: "timed out" is a broad heuristic and may over-match
-            # exceptions unrelated to the request timeout.
-            return True
-        exc = exc.__cause__ or getattr(exc, "original_exception", None)
-    return False
-
-
 # Provider chat classes name the factory-level request timeout differently:
 # ChatLiteLLM/ChatOpenAI use `request_timeout`, ChatAnthropic uses
 # `default_request_timeout`, and ChatGoogleGenerativeAI uses `timeout` (its
@@ -332,7 +306,7 @@ def _attempt_failure_log_fields(retry_state: RetryCallState) -> dict[str, Any] |
         "total_elapsed_s": round(retry_state.seconds_since_start or 0.0, 3),
         "exception_class": type(exc).__name__,
         "exception_message": str(exc)[:200],
-        "timeout_suspected": _is_timeout_error(exc),
+        "timeout_suspected": is_timeout_error(exc),
     }
 
 

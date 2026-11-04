@@ -2,7 +2,10 @@ import asyncio
 import contextvars
 from unittest import mock
 
+import anthropic
 import httpx
+import litellm
+import openai
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.messages import AIMessage
@@ -780,6 +783,21 @@ class TestDetailLabels:
             assert labels["unit_primitive"] == "unknown"
 
 
+_TIMEOUT_REQUEST = httpx.Request("POST", "https://x")
+
+
+def _wrapped_read_timeout() -> anthropic.APIConnectionError:
+    try:
+        try:
+            raise httpx.ReadTimeout("", request=_TIMEOUT_REQUEST)
+        except httpx.ReadTimeout as cause:
+            raise anthropic.APIConnectionError(
+                message="Connection error.", request=_TIMEOUT_REQUEST
+            ) from cause
+    except anthropic.APIConnectionError as exc:
+        return exc
+
+
 class TestRegisterError:
     def test_register_error_no_exception(self, container):
         container.register_error(None)
@@ -917,3 +935,32 @@ class TestRegisterError:
         container.register_error(exception)
         assert container.error is True
         assert container.error_type == "connection_error"
+
+    @pytest.mark.parametrize(
+        ("exception", "expected_error_type"),
+        [
+            # status_code=408, which would otherwise fall through to "other"
+            (
+                litellm.Timeout(message="...", model="m", llm_provider="vertex_ai"),
+                "timeout",
+            ),
+            (anthropic.APITimeoutError(request=_TIMEOUT_REQUEST), "timeout"),
+            (openai.APITimeoutError(request=_TIMEOUT_REQUEST), "timeout"),
+            (httpx.ReadTimeout("", request=_TIMEOUT_REQUEST), "timeout"),
+            (_wrapped_read_timeout(), "timeout"),
+            # A dropped connection is not a timeout.
+            (httpx.ReadError("", request=_TIMEOUT_REQUEST), "connection_error"),
+        ],
+        ids=[
+            "litellm_timeout",
+            "anthropic_api_timeout",
+            "openai_api_timeout",
+            "httpx_read_timeout",
+            "wrapped_read_timeout",
+            "httpx_read_error",
+        ],
+    )
+    def test_register_error_timeout(self, container, exception, expected_error_type):
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == expected_error_type
