@@ -41,6 +41,15 @@ _PROMPT_ID = f"{CatalogItemSource.AI_CATALOG}_{CatalogItemType.AGENT}_prompt"
 def _matched_agent(
     ref: CatalogItemRef, agents: list[AiCatalogAgent]
 ) -> Optional[AiCatalogAgent]:
+    """Find the served agent a reference claims, by its id and version.
+
+    Args:
+        ref: The claiming reference, carrying the id and version to match.
+        agents: The agents GitLab served for this run.
+
+    Returns:
+        The agent whose id and version match the reference, or ``None`` when none does.
+    """
     wanted = ref.match_key()
 
     return next(
@@ -50,6 +59,15 @@ def _matched_agent(
 
 
 def _validate_agent(agent: AiCatalogAgent, request: BindRequest) -> None:
+    """Check the matched agent against this flow: a free name, and tools the registry can resolve.
+
+    Args:
+        agent: The agent the reference resolved to.
+        request: The claim being bound.
+
+    Raises:
+        CatalogItemsError: If the agent's name collides with a component of this flow, or it declares an unusable tool.
+    """
     taken = {comp_config.get("name") for comp_config in request.components_config}
 
     if agent.name in taken:
