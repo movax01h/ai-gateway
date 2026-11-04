@@ -40,6 +40,7 @@ from pydantic import ValidationError as PydanticValidationError
 import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.config import Config, get_config, setup_litellm
 from ai_gateway.container import ContainerApplication
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.model_selection import (
     ModelSelectionConfig,
     RestrictedModelAccessError,
@@ -616,6 +617,48 @@ def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
     return flow_config_id
 
 
+def _model_references(
+    metadata: TypeModelMetadata,
+) -> dict[str, list[Optional[str]]]:
+    """Return the identifiers and provider model strings a restricted model is matched on."""
+    llm_definition = metadata.llm_definition
+    return {
+        "identifiers": [
+            llm_definition.gitlab_identifier,
+            getattr(metadata, "name", None),
+        ],
+        "models": [metadata.to_params().get("model"), llm_definition.params.model],
+    }
+
+
+def _drop_denied_tagged_models(authorized_flow: Optional[str]) -> None:
+    """Remove tags whose restricted model the authorized flow may not use.
+
+    Tags are routing hints, not a security boundary, so a step asking for such a tag gets the default model instead of
+    refusing the run.
+    """
+    by_tag_metadata = current_model_metadata_with_size_context.get()
+    if by_tag_metadata is None:
+        return
+    config = ModelSelectionConfig.instance()
+    kept = {}
+    for tag, metadata in by_tag_metadata.by_tag.items():
+        allowed = config.restricted_flows_for(**_model_references(metadata))
+        if allowed is None or authorized_flow in allowed:
+            kept[tag] = metadata
+            continue
+        log.info(
+            "Restricted tagged model falls back to the default model",
+            feature_setting=by_tag_metadata.feature_setting,
+            tag=tag,
+            model=metadata.llm_definition.gitlab_identifier,
+        )
+    if len(kept) < len(by_tag_metadata.by_tag):
+        current_model_metadata_with_size_context.set(
+            by_tag_metadata.model_copy(update={"by_tag": kept})
+        )
+
+
 @functools.cache
 def _restricted_flow_proof_verifier() -> TrustedRestrictedIssuerVerifier:
     return TrustedRestrictedIssuerVerifier()
@@ -834,34 +877,19 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         # Restricted models (model_restrictions.yml) are usable only by the flows they are
         # restricted to, on a signed flow claim; no debug bypass. Prompt construction
-        # enforces this for every model; the default model and every tagged model are
-        # checked here so a denied run fails before any workflow setup.
+        # enforces this for every model. A tagged model the caller may not use falls back
+        # to the default model; the default model is checked here so a denied run fails
+        # before any workflow setup.
         authorized_flow = _restricted_access_flow(
             user
         ) or await _restricted_access_flow_from_proof(
             context, user, flow_request, start_req.workflowID
         )
         restricted_access_ctx.set(authorized_flow)
-        by_tag_metadata = current_model_metadata_with_size_context.get()
-        for metadata in filter(
-            None,
-            [
-                current_model_metadata_context.get(),
-                *(by_tag_metadata.by_tag.values() if by_tag_metadata else []),
-            ],
-        ):
-            llm_definition = metadata.llm_definition
+        if (default_metadata := current_model_metadata_context.get()) is not None:
+            llm_definition = default_metadata.llm_definition
             try:
-                ensure_restricted_model_access(
-                    identifiers=[
-                        llm_definition.gitlab_identifier,
-                        getattr(metadata, "name", None),
-                    ],
-                    models=[
-                        metadata.to_params().get("model"),
-                        llm_definition.params.model,
-                    ],
-                )
+                ensure_restricted_model_access(**_model_references(default_metadata))
             except RestrictedModelAccessError as e:
                 log.warning(
                     "Restricted model denied at workflow start",
@@ -875,6 +903,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     model=llm_definition.gitlab_identifier,
                 )
                 await context.abort(grpc.StatusCode.PERMISSION_DENIED, str(e))
+        _drop_denied_tagged_models(authorized_flow)
 
         workflow_id = start_req.workflowID
         set_workflow_id(workflow_id)

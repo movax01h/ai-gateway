@@ -7481,7 +7481,7 @@ async def test_unverified_restricted_flow_token_runs_only_unrestricted_models(
         "DUO_WORKFLOW_SELF_SIGNED_JWT__SIGNING_KEY": TEST_PRIVATE_KEY,
     },
 )
-async def test_unverified_restricted_flow_token_denied_tagged_restricted_model_at_start(
+async def test_unverified_restricted_flow_token_tagged_restricted_model_falls_back_to_default(
     mock_resolve_flow,
     mock_workflow_class,
     mock_context,
@@ -7491,20 +7491,65 @@ async def test_unverified_restricted_flow_token_denied_tagged_restricted_model_a
     incoming_realm,
     header_realm,
 ):
-    """A restricted model behind a tag fails the run before any workflow setup, like a restricted default."""
+    """A restricted model behind a tag is replaced by the default model for that tag, and the run starts."""
     await _mint_flow_token(mock_context, incoming_issuer, incoming_realm, header_realm)
+    default = _gitlab_model("default_model", llm_definition)
+    resolved: dict = {}
 
     with _models_in_context(
-        _gitlab_model("default_model", llm_definition),
+        default,
         {
             "large": _gitlab_model(
                 fake_restricted_model.gitlab_identifier, fake_restricted_model
             )
         },
     ):
-        with pytest.raises(grpc.RpcError), capture_logs() as cap_logs:
+        with capture_logs() as cap_logs:
+            seen = await _execute_registry_flow(
+                "bl_security",
+                mock_context,
+                mock_resolve_flow,
+                mock_workflow_class,
+                on_build=lambda: resolved.update(large=get_model_metadata("large")),
+            )
+
+    mock_context.abort.assert_not_called()
+    assert seen == [None]
+    assert resolved["large"] is default
+    fallback = next(
+        e
+        for e in cap_logs
+        if e["event"] == "Restricted tagged model falls back to the default model"
+    )
+    assert fallback["log_level"] == "info"
+    assert fallback["tag"] == "large"
+    assert fallback["model"] == fake_restricted_model.gitlab_identifier
+    assert "feature_setting" in fallback
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+@patch.dict(os.environ, RESTRICTED_MODEL_ENV)
+async def test_execute_workflow_restricted_default_denied_even_when_tags_fall_back(
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_context,
+    fake_restricted_model,
+):
+    """Tag fallback never applies to the default model: a restricted default still refuses the run.
+
+    A refused run logs no tag fallback.
+    """
+    current_user.set(_workflow_token_user(flow_config_id="developer"))
+    restricted = _gitlab_model(
+        fake_restricted_model.gitlab_identifier, fake_restricted_model
+    )
+
+    with _models_in_context(restricted, {"large": restricted}):
+        with capture_logs() as cap_logs, pytest.raises(grpc.RpcError):
             await _execute_registry_flow(
-                "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+                "developer", mock_context, mock_resolve_flow, mock_workflow_class
             )
 
     mock_context.abort.assert_awaited_once_with(
@@ -7512,12 +7557,9 @@ async def test_unverified_restricted_flow_token_denied_tagged_restricted_model_a
     )
     mock_resolve_flow.assert_not_called()
     mock_workflow_class.assert_not_called()
-    denied = next(
-        e for e in cap_logs if e["event"] == "Restricted model denied at workflow start"
-    )
-    assert denied["flow_config_id"] is None
-    assert denied["workflow_definition"] == "bl_security/v1"
-    assert denied["restricted_flow_verified"] is False
+    events = [e["event"] for e in cap_logs]
+    assert "Restricted model denied at workflow start" in events
+    assert "Restricted tagged model falls back to the default model" not in events
 
 
 @pytest.mark.asyncio
@@ -7540,22 +7582,26 @@ async def test_execute_workflow_start_check_uses_authorized_flow_for_tagged_mode
     The token has no restricted_flow_verified claim, so only the authorized flow can allow the model, not the claims.
     """
     current_user.set(_workflow_token_user(restricted_flow_verified=False))
+    restricted = _gitlab_model(
+        fake_restricted_model.gitlab_identifier, fake_restricted_model
+    )
+    resolved: dict = {}
 
     with _models_in_context(
-        _gitlab_model("default_model", llm_definition),
-        {
-            "large": _gitlab_model(
-                fake_restricted_model.gitlab_identifier, fake_restricted_model
-            )
-        },
+        _gitlab_model("default_model", llm_definition), {"large": restricted}
     ):
         seen = await _execute_registry_flow(
-            "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+            "bl_security",
+            mock_context,
+            mock_resolve_flow,
+            mock_workflow_class,
+            on_build=lambda: resolved.update(large=get_model_metadata("large")),
         )
 
     mock_restricted_access_flow.assert_called_once()
     mock_context.abort.assert_not_called()
     assert seen == ["bl_security"]
+    assert resolved["large"] is restricted
 
 
 @pytest.mark.asyncio
@@ -7728,33 +7774,42 @@ def test_restricted_access_flow_ignores_malformed_instance_token_flow_claim(extr
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
 @patch.dict(os.environ, RESTRICTED_MODEL_ENV)
-async def test_execute_workflow_restricted_tag_model_is_denied_at_start(
+async def test_execute_workflow_restricted_tag_model_falls_back_for_another_flow(
     mock_resolve_flow,
     mock_workflow_class,
     mock_context,
     fake_restricted_model,
     llm_definition,
 ):
-    """A restricted model reachable only through a tag fails the run for another flow before any workflow setup."""
+    """A restricted model reachable only through a tag is replaced by the default model for another flow."""
     current_user.set(_workflow_token_user(flow_config_id="developer"))
+    default = _gitlab_model("default_model", llm_definition)
+    resolved: dict = {}
 
     with _models_in_context(
-        _gitlab_model("default_model", llm_definition),
+        default,
         {
             "large": _gitlab_model(
                 fake_restricted_model.gitlab_identifier, fake_restricted_model
-            )
+            ),
+            "small": default,
         },
     ):
-        with pytest.raises(grpc.RpcError):
-            await _execute_registry_flow(
-                "developer", mock_context, mock_resolve_flow, mock_workflow_class
-            )
+        seen = await _execute_registry_flow(
+            "developer",
+            mock_context,
+            mock_resolve_flow,
+            mock_workflow_class,
+            on_build=lambda: resolved.update(
+                large=get_model_metadata("large"),
+                tags=set(current_model_metadata_with_size_context.get().by_tag),
+            ),
+        )
 
-    mock_context.abort.assert_awaited_once_with(
-        grpc.StatusCode.PERMISSION_DENIED, "Model not available for this flow"
-    )
-    mock_resolve_flow.assert_not_called()
+    mock_context.abort.assert_not_called()
+    assert seen == ["developer"]
+    assert resolved["large"] is default
+    assert resolved["tags"] == {"small"}
 
 
 # Restricted-flow proofs from trusted restricted-flow issuers (named GitLab Dedicated instances).
@@ -7899,6 +7954,7 @@ async def test_execute_workflow_allows_restricted_tag_model_with_trusted_issuer_
     """A valid proof grants the restricted model reachable only through a tag, as it does the default model."""
     current_user.set(_dedicated_user())
     _with_proof(mock_context, _restricted_flow_proof())
+    resolved: dict = {}
 
     with _models_in_context(
         _gitlab_model("default_model", llm_definition),
@@ -7909,11 +7965,18 @@ async def test_execute_workflow_allows_restricted_tag_model_with_trusted_issuer_
         },
     ):
         seen = await _execute_registry_flow(
-            "bl_security", mock_context, mock_resolve_flow, mock_workflow_class
+            "bl_security",
+            mock_context,
+            mock_resolve_flow,
+            mock_workflow_class,
+            on_build=lambda: resolved.update(
+                tags=set(current_model_metadata_with_size_context.get().by_tag)
+            ),
         )
 
     mock_context.abort.assert_not_called()
     assert seen == ["bl_security"]
+    assert resolved["tags"] == {"large"}
 
 
 @pytest.mark.asyncio
