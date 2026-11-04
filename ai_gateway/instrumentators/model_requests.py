@@ -11,6 +11,7 @@ from prometheus_client import Counter, Gauge, Histogram
 
 from ai_gateway.api.feature_category import current_feature_category
 from ai_gateway.config import ModelLimits
+from ai_gateway.instrumentators.timeouts import is_timeout_error
 from ai_gateway.tracking.errors import log_exception
 from lib.billing_events.service import LLMOperationType
 from lib.context import (
@@ -42,6 +43,7 @@ ERROR_TYPE_HTTP_400 = "http_400"
 ERROR_TYPE_PERMISSION_ERROR = "permission_error"
 ERROR_TYPE_SERVICE_UNAVAILABLE = "service_unavailable"
 ERROR_TYPE_CONNECTION_ERROR = "connection_error"
+ERROR_TYPE_TIMEOUT = "timeout"
 ERROR_TYPE_OTHER = "other"
 
 
@@ -215,6 +217,13 @@ class ModelRequestInstrumentator:
             # LiteLLM: "Overloaded"
             if "overloaded" in error_message.lower():
                 self.error_type = ERROR_TYPE_OVERLOADED
+                return
+
+            # Check for timeouts before the connection-error and status-code checks:
+            # litellm.Timeout carries status_code=408, which would otherwise fall
+            # through to "other".
+            if is_timeout_error(exception):
+                self.error_type = ERROR_TYPE_TIMEOUT
                 return
 
             # Check for transient network/connection errors (e.g. httpx.ReadError)
