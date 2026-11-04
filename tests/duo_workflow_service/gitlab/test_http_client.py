@@ -295,6 +295,24 @@ def test_checkpoint_decoder():
     assert result == {"key": "value"}
 
 
+@pytest.mark.parametrize(
+    "headers,name,expected",
+    [
+        ({"Content-Type": "text/plain"}, "content-type", "text/plain"),
+        ({"content-type": "text/plain"}, "Content-Type", "text/plain"),
+        ({"X-Total": "5"}, "content-type", None),
+        ({}, "content-type", None),
+        (None, "content-type", None),
+    ],
+    ids=["canonical_key", "lowercase_key", "other_header", "empty", "none"],
+)
+def test_gitlab_http_response_headers_case_insensitive(headers, name, expected):
+    """Header lookups ignore the casing of the header name."""
+    response = GitLabHttpResponse(status_code=200, body="", headers=headers)
+
+    assert response.headers.get(name) == expected
+
+
 def test_parse_response():
     """Test the _parse_response method of GitlabHttpClient."""
     client = MockGitLabHttpClient()

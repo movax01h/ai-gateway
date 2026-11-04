@@ -512,6 +512,35 @@ async def test_get_discussion_id_from_note_rest_pagination(
 
 
 @pytest.mark.asyncio
+async def test_get_discussion_id_from_note_rest_pagination_lowercase_headers(
+    tool_with_client, gitlab_client_mock
+):
+    """Pagination follows lowercase header names, as the Node executor sends them when it runs HTTP actions."""
+    gitlab_client_mock.aget.side_effect = [
+        GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps([{"id": "discussion1", "notes": [{"id": 101}]}]),
+            headers={"x-next-page": "2"},
+        ),
+        GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps([{"id": "discussion2", "notes": [{"id": 201}]}]),
+            headers={"x-next-page": ""},
+        ),
+    ]
+
+    result = await tool_with_client._get_discussion_id_from_note_rest(
+        project_id="123",
+        resource_type="merge_requests",
+        resource_iid=42,
+        note_id=201,
+    )
+
+    assert result == {"discussionId": "discussion2"}
+    assert gitlab_client_mock.aget.call_count == 2
+
+
+@pytest.mark.asyncio
 async def test_get_discussion_id_from_note_rest_not_found(
     tool_with_client, gitlab_client_mock
 ):
