@@ -4,7 +4,11 @@ from typing import Annotated, Any, AsyncIterator, Callable, Optional
 
 from dependency_injector.providers import Configuration
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from gitlab_cloud_connector import GitLabFeatureCategory, WrongUnitPrimitives
+from gitlab_cloud_connector import (
+    CloudConnectorConfig,
+    GitLabFeatureCategory,
+    WrongUnitPrimitives,
+)
 from langchain_core.messages import BaseMessage
 from poetry.core.constraints.version.exceptions import ParseConstraintError
 from pydantic import BaseModel, Field, RootModel, model_validator
@@ -151,6 +155,7 @@ async def _invoke(
             prompt_id,
             prompt_request.prompt_version,
             internal_event_category=internal_event_category,
+            disallowed_issuers=[CloudConnectorConfig().service_name],
         )
     except ModelSelectionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))

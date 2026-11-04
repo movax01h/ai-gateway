@@ -366,6 +366,24 @@ class TestUnauthorizedScopes:
         assert _logged_feature_category(cap_logs) == "ai_abstraction_layer"
 
 
+@pytest.mark.usefixtures(
+    "frozen_datetime_now", "mock_ai_gateway_container", "mock_registry_get"
+)
+class TestTokenIssuer:
+    """The prompt routes serve GitLab-issued tokens only, not tokens the AI Gateway signs for direct access."""
+
+    @pytest.mark.parametrize(
+        ("issuer", "expected_status"),
+        [("gitlab.com", 200), ("gitlab-ai-gateway", 403)],
+    )
+    def test_issuer(self, mock_client, expected_status):
+        response = _post_prompt(mock_client)
+
+        assert response.status_code == expected_status
+        if expected_status == 403:
+            assert response.json() == {"detail": "Unauthorized to access 'test'"}
+
+
 @pytest.mark.usefixtures("frozen_datetime_now", "cloud_gateway")
 @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
 class TestModelsOfThePromptVersion:
