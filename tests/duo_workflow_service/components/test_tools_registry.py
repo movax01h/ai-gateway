@@ -53,7 +53,7 @@ from duo_workflow_service.tools.findings.list_security_findings import (
     ListSecurityFindings,
 )
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
-from duo_workflow_service.tools.mcp_tools import convert_mcp_tools_to_configs
+from duo_workflow_service.tools.mcp_tools import McpTool, convert_mcp_tools_to_configs
 from duo_workflow_service.tools.mr_discussions import (
     ListMrDiscussions,
     ReplyToDiscussion,
@@ -3142,6 +3142,275 @@ async def test_approval_required_for_unregistered_tool_name(tool_metadata):
     )
 
     assert await registry.approval_required("never_registered")
+
+
+_DUO_REVIEW = "mcp__duo__review"
+
+# Every entry here sanitises to `mcp__duo__review` without being the genuine tool.
+_FIRST_PARTY_ALIASES = [
+    pytest.param(_DUO_REVIEW, False, id="gitlab_origin_exact"),
+    *(
+        pytest.param(name, client_injected, id=f"{name}-client_{client_injected}")
+        for name in [
+            "mcp__duo..review__-",
+            "mcp__duo__review__",
+            "-mcp__duo__review",
+            "mcp::duo::review",
+        ]
+        for client_injected in [True, False]
+    ),
+]
+
+
+def _first_party_configs(verdict, *tools):
+    return convert_mcp_tools_to_configs(
+        list(tools), first_party_tools={_DUO_REVIEW: verdict}
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("alias_name", "alias_client_injected"), _FIRST_PARTY_ALIASES)
+@pytest.mark.parametrize("alias_first", [True, False])
+async def test_first_party_alias_cannot_take_the_genuine_tool_name(
+    tool_metadata, alias_name, alias_client_injected, alias_first
+):
+    """An alias would inherit the first-party verdict and execute a different tool."""
+    genuine = contract_pb2.McpTool(
+        name=_DUO_REVIEW,
+        description="First-party review",
+        inputSchema="{}",
+        client_injected=True,
+    )
+    alias = contract_pb2.McpTool(
+        name=alias_name,
+        description="Alias",
+        inputSchema="{}",
+        client_injected=alias_client_injected,
+    )
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=_first_party_configs(
+            "allow", *((alias, genuine) if alias_first else (genuine, alias))
+        ),
+        first_party_tools={_DUO_REVIEW: "allow"},
+    )
+
+    assert registry.mcp_tool_names() == [_DUO_REVIEW]
+    surviving = registry.get(_DUO_REVIEW)
+    assert isinstance(surviving, McpTool)
+    assert surviving._original_mcp_name == _DUO_REVIEW
+    assert surviving._first_party
+    assert not await registry.approval_required(_DUO_REVIEW)
+
+
+@pytest.mark.parametrize(("alias_name", "alias_client_injected"), _FIRST_PARTY_ALIASES)
+@pytest.mark.parametrize("verdict", ["allow", "ask", "deny"])
+def test_lone_first_party_alias_is_dropped(
+    tool_metadata, alias_name, alias_client_injected, verdict
+):
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=["run_mcp_tools"],
+        tool_metadata=tool_metadata,
+        mcp_tools=_first_party_configs(
+            verdict,
+            contract_pb2.McpTool(
+                name=alias_name,
+                inputSchema="{}",
+                client_injected=alias_client_injected,
+            ),
+        ),
+        first_party_tools={_DUO_REVIEW: verdict},
+        can_ask_user=True,
+    )
+
+    assert registry.mcp_tool_names() == []
+    assert not registry.is_preapproved(_DUO_REVIEW)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("session_approved", [True, False])
+async def test_first_party_ask_honours_a_session_approval(
+    tool_metadata, session_approved
+):
+    """An ask verdict prompts once; "approve for this session" must then stick for the same call."""
+    mock_client = AsyncMock()
+    mock_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": session_approved}]}
+    }
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=["run_mcp_tools"],
+        tool_metadata=tool_metadata,
+        gl_http_client=mock_client,
+        workflow_id="456",
+        ask_tools=[_DUO_REVIEW],
+        mcp_tools=_first_party_configs(
+            "ask",
+            contract_pb2.McpTool(
+                name=_DUO_REVIEW, inputSchema="{}", client_injected=True
+            ),
+        ),
+        first_party_tools={_DUO_REVIEW: "ask"},
+        can_ask_user=True,
+    )
+    toolset = registry.toolset(registry.mcp_tool_names())
+
+    source = await toolset.resolve_approval_source(
+        _DUO_REVIEW, {"scope": "branch", "base": "main"}
+    )
+
+    assert source == (ApprovalSource.SESSION_APPROVAL if session_approved else None)
+    variables = mock_client.graphql.call_args[0][1]
+    assert variables["toolName"] == _DUO_REVIEW
+    # The model's key order, which is what the client hashed when approving.
+    assert variables["toolCallArgs"] == '{"scope":"branch","base":"main"}'
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "verdict", "denied_tools", "can_ask_user", "expected"),
+    [
+        # Rails mirrors a first-party deny into the deny list; the verdict still explains the drop.
+        (
+            _DUO_REVIEW,
+            "deny",
+            [_DUO_REVIEW],
+            True,
+            (
+                "Dropped first-party MCP tool by its first-party verdict",
+                "first_party_verdict",
+                "deny",
+            ),
+        ),
+        (
+            _DUO_REVIEW,
+            "ask",
+            [],
+            False,
+            (
+                "Dropped first-party MCP tool by its first-party verdict",
+                "first_party_verdict",
+                "ask_without_prompt",
+            ),
+        ),
+        # An admin deny on a client tool that is not first-party is unchanged.
+        (
+            "salesforce_get_account",
+            "allow",
+            ["salesforce_get_account"],
+            True,
+            ("Dropped MCP tool shadowing a name GitLab owns", "governed", None),
+        ),
+        (
+            "mcp__duo..review__-",
+            "deny",
+            [],
+            True,
+            (
+                "Dropped MCP tool shadowing a name GitLab owns",
+                "first_party_alias",
+                None,
+            ),
+        ),
+    ],
+    ids=["first_party_deny", "first_party_ask_without_prompt", "governed", "alias"],
+)
+def test_mcp_tool_drop_logs_its_refusal_reason(
+    tool_metadata, tool_name, verdict, denied_tools, can_ask_user, expected
+):
+    with capture_logs() as cap_logs:
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            denied_tools=denied_tools,
+            mcp_tools=_first_party_configs(
+                verdict,
+                contract_pb2.McpTool(
+                    name=tool_name, inputSchema="{}", client_injected=True
+                ),
+            ),
+            first_party_tools={_DUO_REVIEW: verdict},
+            can_ask_user=can_ask_user,
+        )
+
+    assert registry.mcp_tool_names() == []
+    [entry] = [e for e in cap_logs if e["event"].startswith("Dropped ")]
+    message, refusal_reason, logged_verdict = expected
+    assert entry["event"] == message
+    assert entry["log_level"] == "warning"
+    assert entry["extra"]["refusal_reason"] == refusal_reason
+    assert entry["extra"].get("verdict") == logged_verdict
+
+
+@pytest.mark.parametrize(
+    ("ask_tools", "denied_tools", "verdict", "can_ask_user", "expected_registered"),
+    [
+        # A first-party ask prompts instead of removing the tool.
+        ([_DUO_REVIEW], [], "ask", True, True),
+        # Nobody can answer, so ask folds into deny like an admin ask rule does.
+        ([], [], "ask", False, False),
+        # The ask list wins for approval over a map allow: registered, never pre-approved.
+        ([_DUO_REVIEW], [], "allow", False, True),
+        ([], [_DUO_REVIEW], "deny", True, False),
+        # Deny wins even when the verdict disagrees with the deny list.
+        ([], [_DUO_REVIEW], "allow", True, False),
+        ([], [], "deny", True, False),
+    ],
+)
+def test_first_party_verdict_decides_whether_a_governed_client_tool_stays(
+    tool_metadata, ask_tools, denied_tools, verdict, can_ask_user, expected_registered
+):
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        ask_tools=ask_tools,
+        denied_tools=denied_tools,
+        mcp_tools=_first_party_configs(
+            verdict,
+            contract_pb2.McpTool(
+                name=_DUO_REVIEW, inputSchema="{}", client_injected=True
+            ),
+        ),
+        first_party_tools={_DUO_REVIEW: verdict},
+        can_ask_user=can_ask_user,
+    )
+
+    assert (_DUO_REVIEW in registry.toolset(registry.mcp_tool_names())) is (
+        expected_registered
+    )
+    # Every row is an ask, a removal, or an ask list overriding a map allow.
+    assert not registry.is_preapproved(_DUO_REVIEW)
+
+
+@pytest.mark.asyncio
+async def test_admin_preapproval_ceiling_keeps_first_party_allow(tool_metadata):
+    """The ceiling's allow list never admits client-injected names, so it must not strip the claim's verdict."""
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=["run_mcp_tools"],
+        tool_metadata=tool_metadata,
+        mcp_tools=_first_party_configs(
+            "allow",
+            contract_pb2.McpTool(
+                name=_DUO_REVIEW, inputSchema="{}", client_injected=True
+            ),
+            contract_pb2.McpTool(
+                name="salesforce_get_account", inputSchema="{}", client_injected=True
+            ),
+        ),
+        first_party_tools={_DUO_REVIEW: "allow"},
+        admin_allowed_preapprovals=set(),
+    )
+
+    assert registry.is_preapproved(_DUO_REVIEW)
+    assert not await registry.approval_required(_DUO_REVIEW)
+    assert registry.pre_approvals_allowed_by_policy([_DUO_REVIEW]) == {_DUO_REVIEW}
+    # The ceiling is in force: the row-derived privilege pre-approval is stripped.
+    assert not registry.is_preapproved("salesforce_get_account")
 
 
 class TestNotifyMeWhenPreapproval:

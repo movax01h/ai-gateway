@@ -54,6 +54,28 @@ class TestLanguageServer:
         assert subject.supports_node_executor_tools() == supports_node_executor_tools
 
     @pytest.mark.parametrize(
+        ("semver", "supports_first_party_mcp_tools"),
+        [
+            # A missing or unparsable header reads as 0.0.0 and fails closed.
+            (None, False),
+            ("invalid version", False),
+            ("9.32.1", False),
+            # A pre-release sorts before its release, so it fails closed too.
+            ("9.33.0-beta.1", False),
+            ("9.33.0", True),
+            ("9.33.1", True),
+            ("10.0.0", True),
+        ],
+    )
+    async def test_supports_first_party_mcp_tools(
+        self, semver, supports_first_party_mcp_tools
+    ):
+        subject = LanguageServerVersion.from_string(semver)
+        assert (
+            subject.supports_first_party_mcp_tools() == supports_first_party_mcp_tools
+        )
+
+    @pytest.mark.parametrize(
         ("semver", "ignore_broken_flow_schema_version"),
         [
             (None, True),

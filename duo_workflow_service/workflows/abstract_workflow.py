@@ -5,7 +5,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, NoReturn, Optional
+from typing import Any, Dict, NoReturn, Optional, get_args
 from uuid import uuid4
 
 import structlog
@@ -29,7 +29,7 @@ from langgraph.errors import (  # pylint: disable=no-langgraph-langchain-imports
 )
 from langgraph.types import Command, Durability
 from langsmith import traceable, tracing_context
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
@@ -109,6 +109,7 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
     GitLabStatusUpdater,
 )
 from duo_workflow_service.tools.mcp_tools import (
+    FirstPartyVerdict,
     McpToolConfig,
     convert_mcp_tools_to_configs,
 )
@@ -126,6 +127,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
 )
+from lib.context import client_type
 from lib.context.orbit import is_orbit_tool
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
@@ -190,6 +192,92 @@ class ToolAccessPolicies(BaseModel):
     # the registry baseline and start_flows stay pre-approved, not the read-only exemption.
     # The same holds whenever allow is empty.
     ceiling: bool = False
+    # Names Rails owns as first-party, with their verdict. Sent on ungoverned surfaces too, so it never counts towards
+    # whether governance is active.
+    first_party_tools: dict[str, FirstPartyVerdict] = {}
+
+    @field_validator("first_party_tools", mode="before")
+    @classmethod
+    def _drop_unknown_verdicts(cls, value: Any) -> Any:
+        """Drop entries with a verdict this service does not know, keeping the rest of the claim in force.
+
+        Rails and this service skew on self-managed instances, so a verdict added later must cost only that tool its
+        exemption, not fail the whole claim closed. A null map means no exemptions, like an absent one. A list, string
+        or other shape breaks the contract and fails the claim closed.
+        """
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            return value
+
+        known = {
+            name: verdict
+            for name, verdict in value.items()
+            if verdict in get_args(FirstPartyVerdict)
+        }
+        if len(known) != len(value):
+            structlog.stdlib.get_logger("workflow").warning(
+                "Ignoring first-party tools with unknown verdicts",
+                dropped=sorted(str(name) for name in value.keys() - known.keys()),
+            )
+        return known
+
+
+@dataclass(frozen=True)
+class _UnparsableClaim:
+    error: Exception
+    # The claim still asks for the ceiling, so the ceiling fails closed too.
+    requests_ceiling: bool
+
+
+def _parse_tool_access_policies(
+    user: CloudConnectorUser,
+) -> ToolAccessPolicies | _UnparsableClaim | None:
+    """Parse the tool_access_policies claim; None when the claim is absent or empty."""
+    claims = getattr(user, "claims", None)
+    if not claims or not claims.extra:
+        return None
+
+    raw = claims.extra.get("tool_access_policies")
+    if not raw:
+        return None
+
+    try:
+        if isinstance(raw, str):
+            return ToolAccessPolicies.model_validate_json(raw)
+        return ToolAccessPolicies.model_validate(raw)
+    except Exception as error:
+        return _UnparsableClaim(
+            error=error, requests_ceiling=_claim_requests_ceiling(raw)
+        )
+
+
+# The client type the Duo CLI and Language Server websocket send; only their releases reserve
+# the `duo` MCP server name for the first-party server.
+_FIRST_PARTY_CLIENT_TYPE = "node-websocket"
+
+
+def _first_party_untrusted_reason(
+    user: CloudConnectorUser,
+    request_client_type: Optional[str],
+    language_server_version: Optional[LanguageServerVersion],
+) -> Optional[str]:
+    """Why the client cannot be trusted with first-party tool names, or None when it can.
+
+    The claim names a first-party tool, but the client picks its tool names. Only a client that reserves the `duo`
+    server name can be held to the claim. A DWS-issued token reaches runner flows too, where every MCP tool counts as
+    client-injected.
+    """
+    if _token_issued_by_dws(user):
+        return "dws_issued_token"
+    if request_client_type != _FIRST_PARTY_CLIENT_TYPE:
+        return "client_type"
+    if not (
+        language_server_version
+        and language_server_version.supports_first_party_mcp_tools()
+    ):
+        return "language_server_version"
+    return None
 
 
 @dataclass(frozen=True)
@@ -274,10 +362,48 @@ class AbstractWorkflow(ABC):
         self._http_client = ExecutorGitLabHttpClient(self._outbox)
         self._workflow_type = workflow_type
         self._additional_context = additional_context
+        # Parsed once here because tool conversion needs the first-party names before
+        # _merge_jwt_governance_claims runs.
+        self._claimed_tool_access_policies = _parse_tool_access_policies(user)
+        claimed_first_party_tools: dict[str, FirstPartyVerdict] = (
+            self._claimed_tool_access_policies.first_party_tools
+            if isinstance(self._claimed_tool_access_policies, ToolAccessPolicies)
+            else {}
+        )
+        request_client_type = client_type.get()
+        untrusted_reason = _first_party_untrusted_reason(
+            user, request_client_type, language_server_version
+        )
+        self._first_party_tools: dict[str, FirstPartyVerdict] = (
+            {} if untrusted_reason else claimed_first_party_tools
+        )
+        if claimed_first_party_tools and untrusted_reason:
+            self.log.info(
+                "Ignoring first-party MCP tools from tool_access_policies claim",
+                reason=untrusted_reason,
+                client_type=request_client_type,
+                language_server_version=(
+                    str(language_server_version.version)
+                    if language_server_version
+                    else None
+                ),
+                first_party_tools=sorted(claimed_first_party_tools),
+            )
         self._mcp_tools = convert_mcp_tools_to_configs(
             mcp_tools=mcp_tools,
             force_client_injected=_token_issued_by_dws(user),
+            first_party_tools=self._first_party_tools,
         )
+        if self._first_party_tools:
+            self.log.info(
+                "Recognised first-party MCP tools from tool_access_policies claim",
+                first_party_tools=self._first_party_tools,
+                recognised_tool_names=sorted(
+                    tool["llm_name"]
+                    for tool in self._mcp_tools
+                    if tool.get("first_party", False)
+                ),
+            )
         self._approval = approval
         if approval is not None and approval.HasField("approval"):
             approved = approval.approval
@@ -472,13 +598,16 @@ class AbstractWorkflow(ABC):
         if self._mcp_enabled():
             return self._mcp_tools
 
-        if not strips_client_mcp_trust():
-            return []
-
+        orbit_permitted = strips_client_mcp_trust()
         return [
             tool
             for tool in self._mcp_tools
-            if tool.get("trusted", False) and is_orbit_tool(tool["llm_name"])
+            if tool.get("first_party", False)
+            or (
+                orbit_permitted
+                and tool.get("trusted", False)
+                and is_orbit_tool(tool["llm_name"])
+            )
         ]
 
     def _allow_client_injected_mcp_tools(self) -> bool:
@@ -510,67 +639,80 @@ class AbstractWorkflow(ABC):
         return tools_registry
 
     def _merge_jwt_governance_claims(self) -> None:
-        if self._user.claims and self._user.claims.extra:
-            raw = self._user.claims.extra.get("tool_access_policies")
-            if raw:
-                try:
-                    policies = (
-                        ToolAccessPolicies.model_validate_json(raw)
-                        if isinstance(raw, str)
-                        else ToolAccessPolicies.model_validate(raw)
-                    )
-                except Exception:
-                    # Fail closed: a present-but-unparsable claim must not leave the
-                    # client-supplied preapproved_tools in effect. Log it -- a malformed
-                    # governance claim is security-relevant and operators need visibility.
-                    self.log.warning(
-                        "tool_access_policies claim present but unparsable; "
-                        "failing closed and clearing client preapproved_tools",
-                        exc_info=True,
-                    )
-                    self._preapproved_tools = []
-                    if _claim_requests_ceiling(raw):
-                        self._admin_allowed_preapprovals = set()
-                        self._ceiling_claim_unparsable = True
-                    return
-                can_ask_user = self._workflow_config.get(
-                    "allow_agent_to_request_user", False
-                )
-                ask = set(policies.ask)
-                deny = set(policies.deny) if can_ask_user else set(policies.deny) | ask
-                self._ask_tools = list(ask) if can_ask_user else []
-                # The JWT allow-list is the ceiling: client-supplied preapproved_tools
-                # cannot widen it, else a custom container bypasses Ask/Deny governance.
-                # `ask` counts as active so an "ask everything" policy (empty allow and
-                # deny) still enforces the ceiling.
-                # A ceiling claim is active even when empty: Rails resolved the policy and it
-                # allowed nothing.
-                governance_active = (
-                    policies.ceiling
-                    or bool(policies.allow)
-                    or bool(deny)
-                    or bool(self._ask_tools)
-                )
-                if governance_active:
-                    # deny > ask > allow, matching Rails' resolution order, so a tool
-                    # named in both allow and ask still reaches the user.
-                    # Sorted so the order is stable across processes. A reorder makes the
-                    # checkpointer treat the list as a full replacement (compaction).
-                    self._preapproved_tools = sorted(set(policies.allow) - ask)
-                    self._governance_allowed_tools = list(self._preapproved_tools)
-                # Uses the raw ask list: `_ask_tools` is emptied for sessions that cannot ask,
-                # and an ask rule must still keep a tool out of pre-approval there.
-                if policies.ceiling:
-                    # An empty allow means Rails' read-only groups did not resolve to allow.
-                    self._admin_allowed_preapprovals = (
-                        set(policies.allow) - set(policies.ask)
-                    ) | ceiling_exempt_tool_names(
-                        set(policies.ask) | set(policies.deny),
-                        keep_read_only=bool(policies.allow),
-                    )
-                if deny:
-                    # Sorted for the same stable-order reason as _preapproved_tools above.
-                    self._denied_tools = sorted(set(self._denied_tools) | deny)
+        policies = self._claimed_tool_access_policies
+        if policies is None:
+            return
+        if isinstance(policies, _UnparsableClaim):
+            # Fail closed: a present-but-unparsable claim must not leave the
+            # client-supplied preapproved_tools in effect. Log it -- a malformed
+            # governance claim is security-relevant and operators need visibility.
+            self.log.warning(
+                "tool_access_policies claim present but unparsable; "
+                "failing closed and clearing client preapproved_tools",
+                exc_info=policies.error,
+            )
+            self._preapproved_tools = []
+            if policies.requests_ceiling:
+                self._admin_allowed_preapprovals = set()
+                self._ceiling_claim_unparsable = True
+            return
+        can_ask_user = self._workflow_config.get("allow_agent_to_request_user", False)
+        ask = set(policies.ask)
+        deny = set(policies.deny) if can_ask_user else set(policies.deny) | ask
+        self._ask_tools = list(ask) if can_ask_user else []
+        # The JWT allow-list is the ceiling: client-supplied preapproved_tools
+        # cannot widen it, else a custom container bypasses Ask/Deny governance.
+        # `ask` counts as active so an "ask everything" policy (empty allow and
+        # deny) still enforces the ceiling.
+        # A ceiling claim is active even when empty: Rails resolved the policy and it
+        # allowed nothing.
+        governance_active = (
+            policies.ceiling
+            or bool(policies.allow)
+            or bool(deny)
+            or bool(self._ask_tools)
+        )
+        if governance_active:
+            # deny > ask > allow, matching Rails' resolution order, so a tool
+            # named in both allow and ask still reaches the user.
+            # Sorted so the order is stable across processes. A reorder makes the
+            # checkpointer treat the list as a full replacement (compaction).
+            self._preapproved_tools = sorted(set(policies.allow) - ask)
+            self._governance_allowed_tools = list(self._preapproved_tools)
+        # An ungoverned claim leaves the client's own list in force, and the CLI pre-approves
+        # its first-party server there. Chat skips approval for any name on it, so an `ask`
+        # verdict would never reach the user.
+        first_party_ask = {
+            name
+            for name, verdict in self._first_party_tools.items()
+            if verdict == "ask"
+        }
+        if first_party_ask and self._preapproved_tools:
+            self._preapproved_tools = [
+                name for name in self._preapproved_tools if name not in first_party_ask
+            ]
+        # Uses the raw ask list: `_ask_tools` is emptied for sessions that cannot ask,
+        # and an ask rule must still keep a tool out of pre-approval there.
+        if policies.ceiling:
+            # Rails keeps first-party tools out of every privilege group, so a rule on one
+            # cannot have demoted a read-only group and must not cost those tools their exemption.
+            # That holds whatever the client, so this reads the signed map, not the gated one:
+            # it only keeps an exemption Rails' groups allow and marks no client tool first-party.
+            ruled = (set(policies.ask) | set(policies.deny)) - set(
+                policies.first_party_tools
+            )
+            # An empty allow means Rails' read-only groups did not resolve to allow.
+            self._admin_allowed_preapprovals = (
+                set(policies.allow) - set(policies.ask)
+            ) | ceiling_exempt_tool_names(ruled, keep_read_only=bool(policies.allow))
+        # The registry folds a first-party ask nobody can answer into deny. List it here too,
+        # so the prompt names it as unavailable. Kept out of `deny` above: a first-party map
+        # alone must not make the claim count as governance.
+        if not can_ask_user:
+            deny = deny | first_party_ask
+        if deny:
+            # Sorted for the same stable-order reason as _preapproved_tools above.
+            self._denied_tools = sorted(set(self._denied_tools) | deny)
 
     def _extract_trace_output(self, state: dict | None) -> str | None:
         """Extract the final response content from ui_chat_log for LangSmith tracing.
@@ -750,6 +892,7 @@ class AbstractWorkflow(ABC):
                     allowed_tools=self._governance_allowed_tools,
                     admin_allowed_preapprovals=self._admin_allowed_preapprovals,
                     registry_flow_id=self._registry_flow_id(),
+                    first_party_tools=self._first_party_tools,
                 )
             )
 
