@@ -1,14 +1,14 @@
 # pylint: disable=file-naming-for-tests
 """Tests for ai_gateway.prompts.config.base module."""
 
-from pathlib import Path
-
 import pytest
 import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from pydantic import ValidationError
 
 from ai_gateway.model_selection.models import CompletionLiteLLMParams, CompletionType
 from ai_gateway.prompts.config.base import InMemoryPromptConfig, PromptConfig
+from tests.prompts.prompt_dirs import REPO_ROOT, prompt_ids_by_dir, version_files
 
 
 class TestInMemoryPromptConfig:
@@ -45,6 +45,21 @@ class TestInMemoryPromptConfig:
             "system": "You are a helpful assistant.",
             "user": "{{user_input}}",
         }
+
+    def test_rejects_models_from(self):
+        """A custom flow client sends this config, so it must not choose the models of its own prompt.
+
+        Accepting `models_from` here needs a security decision first, see
+        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3413.
+        """
+        with pytest.raises(ValidationError, match="models_from"):
+            InMemoryPromptConfig(
+                prompt_id="test/prompt",
+                name="test_prompt",
+                unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                prompt_template={"user": "{{user_input}}"},
+                models_from="duo_chat",
+            )
 
     @pytest.mark.parametrize(
         "unit_primitives,expected_unit_primitive",
@@ -120,8 +135,6 @@ class TestInMemoryPromptConfig:
 
 
 class TestPromptConfig:
-    _repo_root = Path(__file__).parents[4]
-
     @staticmethod
     def _config(**fields) -> PromptConfig:
         return PromptConfig(
@@ -156,22 +169,20 @@ class TestPromptConfig:
             )
 
     def test_every_shipped_prompt_version_is_valid(self):
-        version_files = [
-            *(self._repo_root / "ai_gateway" / "prompts" / "definitions").rglob(
-                "*.yml"
-            ),
-            *(self._repo_root / "ai").glob("features/*/*/prompts/**/*.yml"),
-            *(self._repo_root / "ai").glob("shared/*/prompts/**/*.yml"),
+        shipped = [
+            version_file
+            for directory in sorted(prompt_ids_by_dir())
+            for version_file in version_files(directory)
         ]
 
         invalid = []
-        for version_file in sorted(version_files):
+        for version_file in shipped:
             try:
                 PromptConfig(**yaml.safe_load(version_file.read_text()))
             except ValueError as error:
-                invalid.append(f"{version_file.relative_to(self._repo_root)}: {error}")
+                invalid.append(f"{version_file.relative_to(REPO_ROOT)}: {error}")
 
-        assert version_files
+        assert shipped
         assert not invalid
 
 

@@ -5,6 +5,7 @@ model:
     temperature: 0.95
     max_tokens: 256
 unit_primitive: generate_code
+models_from: code_generations
 prompt_template:
   system: |
     {% include 'code_suggestions/generations/jinja_template/self_hosted/system_mistral/1.0.0.jinja' %}

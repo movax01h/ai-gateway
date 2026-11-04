@@ -5,6 +5,7 @@ model:
     temperature: 0.32
     max_tokens: 64
 unit_primitive: complete_code
+models_from: code_completions
 prompt_template:
   user: "{{prefix}}"
 params:
