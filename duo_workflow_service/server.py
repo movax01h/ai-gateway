@@ -54,7 +54,10 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
     MissingAdditionalContextError,
 )
 from duo_workflow_service.agent_platform.utils.validation import FlowValidator
-from duo_workflow_service.agent_platform.v1.catalog.errors import is_catalog_refusal
+from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogItemsFetchError,
+    is_catalog_refusal,
+)
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     discover_feature_flow_configs,
 )
@@ -210,6 +213,10 @@ WORKFLOW_ID_CLAIM = "workflow_id"
 BINDS_WORKFLOW_CLAIM = "binds_workflow"
 WORKFLOW_BINDING_DETAILS = "Workflow token is not authorized for the requested workflow"
 CATALOG_REFUSAL_DETAILS = "The AI Catalog agents for this flow are not available"
+# A fetch failure GitLab could not refuse (5xx with retries exhausted, or a 2xx with a
+# malformed body) is a server fault. Its message embeds GitLab's raw response body, so
+# the details are static like the refusal branch and the body stays in the server log.
+CATALOG_FETCH_FAILED_DETAILS = "The AI Catalog agents for this flow could not be loaded"
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
 # these get workflow tokens that unlock the restricted models of the flow they are
 # minted for, and ExecuteWorkflow accepts their instance token's flow claim for
@@ -1215,6 +1222,13 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 # The error text can hold GitLab's answer, so the details are static.
                 context.set_code(grpc.StatusCode.PERMISSION_DENIED)
                 context.set_details(CATALOG_REFUSAL_DETAILS)
+            elif isinstance(workflow.last_error, CatalogItemsFetchError):
+                # A fetch failure that is not a refusal (a 5xx with retries exhausted, or a 2xx
+                # with a malformed body) is a server fault, so INTERNAL. Its message embeds
+                # GitLab's raw response body via _message_of, so the details are static like the
+                # refusal branch; the body stays in the server log, never the gRPC status.
+                context.set_code(grpc.StatusCode.INTERNAL)
+                context.set_details(CATALOG_FETCH_FAILED_DETAILS)
             elif restricted_error := _find_restricted_model_access_error(
                 workflow.last_error
             ):
