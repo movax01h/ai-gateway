@@ -68,6 +68,26 @@ def litellm_supports_native_web_search(
     )
 
 
+@lru_cache(maxsize=64)
+def _litellm_maps_reasoning_effort(
+    model: Optional[str], custom_llm_provider: Optional[str]
+) -> bool:
+    """Whether the installed LiteLLM maps `reasoning_effort` for this model."""
+    try:
+        supported = litellm.get_supported_openai_params(
+            model=model, custom_llm_provider=custom_llm_provider
+        )
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        log.warning(
+            "litellm could not resolve supported params, allowing reasoning_effort through",
+            model=model,
+            custom_llm_provider=custom_llm_provider,
+            error=str(exc),
+        )
+        return False
+    return "reasoning_effort" in (supported or [])
+
+
 def _drop_unsupported_web_search(kwargs: Dict[str, Any]) -> None:
     """Drop `web_search_options` unless the model can run a hosted web search."""
     if kwargs.get("web_search_options") is None:
@@ -280,15 +300,20 @@ class ChatLiteLLM(_LChatLiteLLM):
 
     @model_validator(mode="after")
     def _apply_reasoning_effort(self) -> "ChatLiteLLM":
-        if self.reasoning_effort:
+        if not self.reasoning_effort:
+            return self
+
+        model_kwargs = {**self.model_kwargs, "reasoning_effort": self.reasoning_effort}
+        if not _litellm_maps_reasoning_effort(self.model, self.custom_llm_provider):
+            # litellm rejects the param for openai-compatible providers unless it is
+            # explicitly allowed through. Never allow it for providers that map it
+            # natively (Anthropic on Vertex/Bedrock): the raw key is then forwarded
+            # alongside the mapped `output_config` and the API rejects it.
             allowed = self.model_kwargs.get("allowed_openai_params", [])
-            self.model_kwargs = {
-                **self.model_kwargs,
-                "reasoning_effort": self.reasoning_effort,
-                # litellm rejects the param for openai-compatible providers
-                # unless it is explicitly allowed through.
-                "allowed_openai_params": sorted({*allowed, "reasoning_effort"}),
-            }
+            model_kwargs["allowed_openai_params"] = sorted(
+                {*allowed, "reasoning_effort"}
+            )
+        self.model_kwargs = model_kwargs
         return self
 
     def validate_endpoint_kwargs(self, kwargs: dict[str, Any]) -> None:

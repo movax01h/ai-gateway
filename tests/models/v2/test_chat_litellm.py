@@ -17,6 +17,7 @@ from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_core.runnables import Runnable
 from litellm.types.utils import Delta, PromptTokensDetailsWrapper
+from structlog.testing import capture_logs
 
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
@@ -26,6 +27,7 @@ from ai_gateway.models.v2.chat_litellm import (
     ChatLiteLLM,
     _drop_unsupported_web_search,
     _force_gpt_5_max_completion_tokens,
+    _litellm_maps_reasoning_effort,
     _litellm_maps_web_search,
     _remove_deprecated_temperature_parameters,
     _rewrite_trailing_assistant_prefill,
@@ -2171,6 +2173,42 @@ class TestReasoningEffort:
             "foo",
             "reasoning_effort",
         ]
+
+    @pytest.mark.parametrize(
+        ("model_name", "custom_llm_provider"),
+        [
+            ("claude-sonnet-5-5", "vertex_ai"),
+            ("bedrock/global.anthropic.claude-sonnet-5-5", "bedrock"),
+        ],
+    )
+    def test_does_not_allow_param_through_when_litellm_maps_it(
+        self, model_name: str, custom_llm_provider: str
+    ):
+        """Anthropic providers map `reasoning_effort` to `output_config`; allowing the raw key through as well makes the
+        API reject it as an extra input."""
+        model = ChatLiteLLM(
+            model=model_name,
+            custom_llm_provider=custom_llm_provider,
+            reasoning_effort="xhigh",
+        )
+
+        assert model.model_kwargs["reasoning_effort"] == "xhigh"
+        assert "allowed_openai_params" not in model.model_kwargs
+
+    def test_allows_param_through_when_litellm_cannot_resolve_the_model(self):
+        _litellm_maps_reasoning_effort.cache_clear()
+        with (
+            patch(
+                "ai_gateway.models.v2.chat_litellm.litellm.get_supported_openai_params",
+                side_effect=ValueError("unknown provider"),
+            ),
+            capture_logs() as logs,
+        ):
+            model = ChatLiteLLM(model="some-model", reasoning_effort="low")
+
+        assert model.model_kwargs["allowed_openai_params"] == ["reasoning_effort"]
+        assert [entry["log_level"] for entry in logs] == ["warning"]
+        assert logs[0]["model"] == "some-model"
 
 
 class TestNonStreamedModelName:
