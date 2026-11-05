@@ -90,6 +90,10 @@ message StartWorkflowRequest {
     // shipped with the service on schema version "v1"; sending items with any other request is an
     // error. A supported flow that declares no `include` section ignores them.
     optional CatalogItems catalog_items = 18 [json_name = "catalog_items"];
+    // fetch_flow_config, when true, makes the service fetch the flow definition for workflowID from
+    // GitLab and ignore flowConfig. Use it for a saved AI Catalog flow. It cannot be combined with
+    // flowConfigId.
+    optional bool fetch_flow_config = 19 [json_name = "fetch_flow_config"];
 }
 
 // CatalogItems is a versioned envelope for the catalog items carried by one workflow run.
