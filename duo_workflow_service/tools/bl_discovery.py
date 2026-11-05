@@ -334,6 +334,7 @@ class BlDiscoverAndCluster(DuoBaseTool):
             resolve_extra_anchor_patterns(extra_anchor_patterns)
         )
         n_anchor_patterns = len(extra_anchors)
+        anchor_regexes = [rx.pattern for rx in extra_anchors]
 
         per_glob: List[List[str]] = []
         found: Dict[str, List[str]] = {}
@@ -372,6 +373,7 @@ class BlDiscoverAndCluster(DuoBaseTool):
                 [p for p in hits[rx] if is_anchor(p, extra_anchors)] for rx in accepted
             )
             n_anchor_patterns = len(accepted)
+            anchor_regexes = [rx.pattern for rx in accepted]
         if incomplete:
             _log.warning(
                 "bl_discover file listing truncated by the executor; candidates are missing",
@@ -419,7 +421,9 @@ class BlDiscoverAndCluster(DuoBaseTool):
             branch=branch,
             globs=len(AUTHZ_GLOBS) + len(add_globs),
             extra_globs=len(add_globs),
+            extra_glob_patterns=add_globs,
             extra_anchor_patterns=n_anchor_patterns,
+            extra_anchor_regexes=anchor_regexes,
             candidates=len(candidates),
             anchors_total=anchors_total,
             anchors_reviewed=anchors_reviewed,
