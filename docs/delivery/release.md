@@ -21,7 +21,9 @@ In CI pipelines in AI Gateway:
   - `semantic_release_check` job runs to make sure the commits are releasable via semantic-release.
 - On `main` branch:
   - `semantic_release_base` job runs automatically to cut a new release and Git tag when conventional commits are detected.
-- On Git tags:
+- On `v1.x.y` Git tags in the canonical project:
+  - `release-docker-image:version-tag` job verifies the `cosign` signature of the image that `main` built for the tagged commit, then retags that digest. Lint, test and build jobs are skipped.
+- On other Git tags:
   - `release-docker-image:tag` job runs to pushes a new Docker image.
 - On Git tags with format `gitlab-*`:
   - `release-docker-hub-image:tag` job runs to push a new Docker image to DockerHub. Requires `$DOCKERHUB_USERNAME` and `$DOCKERHUB_PASSWORD` to be set as CI variables.

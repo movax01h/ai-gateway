@@ -87,7 +87,15 @@ variables:
 .if-not-canonical-nor-security-project: &if-not-canonical-nor-security-project
   if: $CI_PROJECT_ID != "39903947" && $CI_PROJECT_ID != "61869127"
 
-.skip-when-expedited-include: &skip-when-expedited-include
+# Canonical v1.x tags point at a commit main already built, so their pipeline
+# only retags that image. self-hosted-* tags and the fork keep full pipelines.
+# Only semantic-release creates tags that start with a "v".
+.if-version-tag: &if-version-tag
+  if: $CI_PROJECT_ID == "39903947" && $CI_COMMIT_TAG =~ /^v\d/
+
+.skip-when-expedited-or-version-tag-include: &skip-when-expedited-or-version-tag-include
+  - <<: *if-version-tag
+    when: never
   - <<: *if-merge-request-labels-pipeline-expedited
     when: never
   - <<: *if-commit-message-pipeline-expedited
@@ -112,12 +120,12 @@ variables:
 include:
   - local: .gitlab/ci/build.gitlab-ci.yml
   - local: .gitlab/ci/lint.gitlab-ci.yml
-    rules: *skip-when-expedited-include
+    rules: *skip-when-expedited-or-version-tag-include
   - local: .gitlab/ci/dependency-review.gitlab-ci.yml
   - local: .gitlab/ci/test.gitlab-ci.yml
-    rules: *skip-when-expedited-include
+    rules: *skip-when-expedited-or-version-tag-include
   - local: .gitlab/ci/performance.gitlab-ci.yml
-    rules: *skip-when-expedited-include
+    rules: *skip-when-expedited-or-version-tag-include
   - local: .gitlab/ci/release.gitlab-ci.yml
     rules:
       - <<: *if-not-canonical-nor-security-project
@@ -130,7 +138,7 @@ include:
   - local: .gitlab/ci/stable-tagging.gitlab-ci.yml
     rules: *skip-if-not-canonical-nor-security
   - local: .gitlab/ci/ingest.gitlab-ci.yml
-    rules: *skip-when-expedited-include
+    rules: *skip-when-expedited-or-version-tag-include
   - template: Jobs/Container-Scanning.latest.gitlab-ci.yml
   - template: Jobs/Dependency-Scanning.latest.gitlab-ci.yml
   - template: Jobs/SAST.latest.gitlab-ci.yml
@@ -142,6 +150,11 @@ include:
     ref: v4.45.0  # renovate:managed
     file: "semantic-release.yml"
     rules: *skip-if-not-canonical
+  # Overrides the job above, so it must stay after it. Only canonical main
+  # pipelines get the override; any other run uses the shared job unchanged.
+  - local: .gitlab/ci/semantic-release.gitlab-ci.yml
+    rules:
+      - if: $CI_PROJECT_ID == "39903947" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
   # Runway (Cloud Run)
   - project: "gitlab-com/gl-infra/platform/runway/runwayctl"
