@@ -13,16 +13,19 @@ from starlette.responses import StreamingResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ai_gateway.api.middleware.actor_limit import ActorLimitMiddleware
-from ai_gateway.config import ActorLimitMode, ConfigCodeSuggestions
+from ai_gateway.config import ActorLimitMode, ConfigActorLimits
 from lib.context import StarletteUser
 
 LIMIT = 2
 INSTANCE_LIMIT = 3
 NAMESPACE_LIMIT = 3
 CODE_PATHS = ("/v2/completions", "/v2/code/", "/v3/code/", "/v4/code/")
+PROMPT_PATHS = ("/v1/prompts/", "/v2/prompts/")
+CONTROL = "code_suggestions_actor_limit"
+PROMPTS_CONTROL = "prompts_actor_limit"
 GATEWAY_ISSUER = "gitlab-ai-gateway"
 REJECTION = {
-    "detail": "Too many concurrent code suggestion requests",
+    "detail": "Too many concurrent requests",
     "reason": "rate_limited",
 }
 
@@ -36,7 +39,7 @@ def limit_exceeded_event(
     author: str | None = "user-a",
 ) -> dict:
     return {
-        "event": "Code suggestions actor limit exceeded",
+        "event": "Actor limit exceeded",
         "log_level": "warning",
         "event_type": "security.rate_limit.block",
         "author_id": author,
@@ -46,7 +49,7 @@ def limit_exceeded_event(
         "path": "/v2/code/completions",
         "details": {"outcome": outcome, "reason": "rate_limited"},
         "gitlab": {
-            "control_name": "code_suggestions_actor_limit",
+            "control_name": CONTROL,
             "control_type": "rate_limit",
             "threshold": limit,
             "mode": mode,
@@ -54,7 +57,7 @@ def limit_exceeded_event(
     }
 
 
-def make_limits(mode: ActorLimitMode = "enforce", **overrides) -> ConfigCodeSuggestions:
+def make_limits(mode: ActorLimitMode = "enforce", **overrides) -> ConfigActorLimits:
     values = {
         "actor_limit_mode": mode,
         "user_limit": LIMIT,
@@ -62,7 +65,7 @@ def make_limits(mode: ActorLimitMode = "enforce", **overrides) -> ConfigCodeSugg
         "instance_limit_per_seat": 0,
         "namespace_limit": NAMESPACE_LIMIT,
     }
-    return ConfigCodeSuggestions(**{**values, **overrides})
+    return ConfigActorLimits(**{**values, **overrides})
 
 
 def make_user(
@@ -100,8 +103,12 @@ class UserFromHeaders:
         await self.app(scope, receive, send)
 
 
-def sample(name: str, labels: dict[str, str] | None = None) -> float:
-    return REGISTRY.get_sample_value(name, labels) or 0.0
+def sample(
+    name: str, labels: dict[str, str] | None = None, control: str = CONTROL
+) -> float:
+    return (
+        REGISTRY.get_sample_value(name, {"control": control, **(labels or {})}) or 0.0
+    )
 
 
 @pytest.fixture(name="mode")
@@ -122,14 +129,12 @@ def entered_fixture() -> list[str]:
 @pytest.fixture(name="limits")
 def limits_fixture(
     request: pytest.FixtureRequest, mode: ActorLimitMode
-) -> ConfigCodeSuggestions:
+) -> ConfigActorLimits:
     return make_limits(mode, **getattr(request, "param", {}))
 
 
-@pytest.fixture(name="limiter")
-def limiter_fixture(
-    limits: ConfigCodeSuggestions, gate: asyncio.Event, entered: list[str]
-) -> ActorLimitMiddleware:
+@pytest.fixture(name="held_app")
+def held_app_fixture(gate: asyncio.Event, entered: list[str]) -> FastAPI:
     app = FastAPI()
 
     @app.post("/v2/code/completions")
@@ -144,7 +149,16 @@ def limiter_fixture(
     async def failing() -> None:
         raise RuntimeError("boom")
 
-    return ActorLimitMiddleware(app, limits=limits, path_prefixes=CODE_PATHS)
+    return app
+
+
+@pytest.fixture(name="limiter")
+def limiter_fixture(
+    held_app: FastAPI, limits: ConfigActorLimits
+) -> ActorLimitMiddleware:
+    return ActorLimitMiddleware(
+        held_app, limits=limits, path_prefixes=CODE_PATHS, control_name=CONTROL
+    )
 
 
 @pytest.fixture(name="asgi_app")
@@ -274,7 +288,7 @@ def test_passes_through_without_counting(asgi_app, limiter, gate, path, headers)
 )
 def test_buckets(claims, expected):
     limiter = ActorLimitMiddleware(
-        FastAPI(), limits=make_limits(), path_prefixes=CODE_PATHS
+        FastAPI(), limits=make_limits(), path_prefixes=CODE_PATHS, control_name=CONTROL
     )
 
     assert limiter._buckets(make_user("user-a", claims)) == expected
@@ -298,7 +312,7 @@ def test_buckets(claims, expected):
 )
 def test_buckets_without_a_user_id(claims, expected):
     limiter = ActorLimitMiddleware(
-        FastAPI(), limits=make_limits(), path_prefixes=CODE_PATHS
+        FastAPI(), limits=make_limits(), path_prefixes=CODE_PATHS, control_name=CONTROL
     )
 
     assert limiter._buckets(make_user(None, claims)) == expected
@@ -314,6 +328,7 @@ def test_instance_limit_scales_with_the_seat_count(seats, expected):
         FastAPI(),
         limits=make_limits(instance_limit_per_seat=0.1),
         path_prefixes=CODE_PATHS,
+        control_name=CONTROL,
     )
     claims = UserClaims(
         gitlab_realm="self-managed", gitlab_instance_uid="uid-1", duo_seat_count=seats
@@ -325,7 +340,7 @@ def test_instance_limit_scales_with_the_seat_count(seats, expected):
 @pytest.mark.asyncio
 async def test_enforce_rejects_the_request_above_the_user_limit(client, limiter, gate):
     labels = {"mode": "enforce", "outcome": "rejected", "bucket": "user"}
-    rejected_before = sample("code_suggestions_actor_limit_total", labels)
+    rejected_before = sample("actor_limit_total", labels)
     async with client:
         held = [asyncio.create_task(post(client)) for _ in range(LIMIT)]
         await wait_until(
@@ -344,16 +359,16 @@ async def test_enforce_rejects_the_request_above_the_user_limit(client, limiter,
     assert rejected.json() == REJECTION
     assert rejected.headers["retry-after"] == "1"
     assert rejected.headers["connection"] == "close"
-    assert rejected.headers["x-gitlab-rate-limit"] == "code_suggestions_actor_limit"
+    assert rejected.headers["x-gitlab-rate-limit"] == CONTROL
     assert [r.status_code for r in responses] == [200, 200]
     assert not limiter._in_flight
-    assert sample("code_suggestions_actor_limit_total", labels) == rejected_before + 1
+    assert sample("actor_limit_total", labels) == rejected_before + 1
 
 
 @pytest.mark.asyncio
 async def test_enforce_rejects_rotating_users_on_one_instance(client, limiter, gate):
     labels = {"mode": "enforce", "outcome": "rejected", "bucket": "instance"}
-    rejected_before = sample("code_suggestions_actor_limit_total", labels)
+    rejected_before = sample("actor_limit_total", labels)
     async with client:
         held = [
             asyncio.create_task(post(client, user=f"user-{i}"))
@@ -385,7 +400,7 @@ async def test_enforce_rejects_rotating_users_on_one_instance(client, limiter, g
     ]
     assert [r.status_code for r in responses] == [200] * (INSTANCE_LIMIT + 1)
     assert not limiter._in_flight
-    assert sample("code_suggestions_actor_limit_total", labels) == rejected_before + 1
+    assert sample("actor_limit_total", labels) == rejected_before + 1
 
 
 @pytest.mark.asyncio
@@ -393,7 +408,7 @@ async def test_enforce_counts_requests_without_a_user_id_against_the_instance(
     client, limiter, gate
 ):
     labels = {"mode": "enforce", "outcome": "rejected", "bucket": "instance"}
-    rejected_before = sample("code_suggestions_actor_limit_total", labels)
+    rejected_before = sample("actor_limit_total", labels)
     async with client:
         held = [
             asyncio.create_task(post(client, user=None)) for _ in range(INSTANCE_LIMIT)
@@ -415,7 +430,7 @@ async def test_enforce_counts_requests_without_a_user_id_against_the_instance(
     ]
     assert [r.status_code for r in responses] == [200] * INSTANCE_LIMIT
     assert not limiter._in_flight
-    assert sample("code_suggestions_actor_limit_total", labels) == rejected_before + 1
+    assert sample("actor_limit_total", labels) == rejected_before + 1
 
 
 @pytest.mark.asyncio
@@ -441,8 +456,8 @@ async def test_enforce_records_every_exceeded_bucket(client, limiter, gate):
     user_labels = {"mode": "enforce", "outcome": "rejected", "bucket": "user"}
     instance_labels = {"mode": "enforce", "outcome": "rejected", "bucket": "instance"}
     before = {
-        "user": sample("code_suggestions_actor_limit_total", user_labels),
-        "instance": sample("code_suggestions_actor_limit_total", instance_labels),
+        "user": sample("actor_limit_total", user_labels),
+        "instance": sample("actor_limit_total", instance_labels),
     }
     async with client:
         held = [asyncio.create_task(post(client)) for _ in range(LIMIT)]
@@ -460,19 +475,14 @@ async def test_enforce_records_every_exceeded_bucket(client, limiter, gate):
         limit_exceeded_event("enforce", "failure", "user", "inst-1:user-a", LIMIT),
         limit_exceeded_event("enforce", "failure", "instance", "inst-1", LIMIT),
     ]
-    assert (
-        sample("code_suggestions_actor_limit_total", user_labels) == before["user"] + 1
-    )
-    assert (
-        sample("code_suggestions_actor_limit_total", instance_labels)
-        == before["instance"] + 1
-    )
+    assert sample("actor_limit_total", user_labels) == before["user"] + 1
+    assert sample("actor_limit_total", instance_labels) == before["instance"] + 1
 
 
 @pytest.mark.asyncio
 async def test_enforce_rejects_users_of_one_saas_root_namespace(client, limiter, gate):
     labels = {"mode": "enforce", "outcome": "rejected", "bucket": "namespace"}
-    rejected_before = sample("code_suggestions_actor_limit_total", labels)
+    rejected_before = sample("actor_limit_total", labels)
     async with client:
         held = [
             asyncio.create_task(
@@ -495,7 +505,49 @@ async def test_enforce_rejects_users_of_one_saas_root_namespace(client, limiter,
     assert rejected.status_code == 429
     assert [r.status_code for r in responses] == [200] * (NAMESPACE_LIMIT + 1)
     assert not limiter._in_flight
-    assert sample("code_suggestions_actor_limit_total", labels) == rejected_before + 1
+    assert sample("actor_limit_total", labels) == rejected_before + 1
+
+
+@pytest.mark.asyncio
+async def test_each_control_counts_only_its_own_routes(held_app, limiter, gate):
+    prompts_limiter = ActorLimitMiddleware(
+        held_app,
+        limits=make_limits(),
+        path_prefixes=PROMPT_PATHS,
+        control_name=PROMPTS_CONTROL,
+    )
+    limiter.app = prompts_limiter
+    labels = {"mode": "enforce", "outcome": "rejected", "bucket": "user"}
+    rejected_before = sample("actor_limit_total", labels, control=PROMPTS_CONTROL)
+    code_rejected_before = sample("actor_limit_total", labels)
+    transport = httpx.ASGITransport(
+        app=UserFromHeaders(limiter), raise_app_exceptions=False
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        held = [
+            asyncio.create_task(post(client, path="/v1/prompts/other"))
+            for _ in range(LIMIT)
+        ]
+        await wait_until(
+            lambda: prompts_limiter._in_flight.get(("user", "inst-1:user-a")) == LIMIT
+        )
+
+        rejected = await post(client, path="/v1/prompts/other")
+        completion = asyncio.create_task(post(client))
+        await wait_until(lambda: limiter._in_flight.get(("user", "inst-1:user-a")) == 1)
+        gate.set()
+        responses = await asyncio.gather(*held, completion)
+
+    assert rejected.status_code == 429
+    assert rejected.headers["x-gitlab-rate-limit"] == PROMPTS_CONTROL
+    assert [r.status_code for r in responses] == [200] * (LIMIT + 1)
+    assert not limiter._in_flight
+    assert not prompts_limiter._in_flight
+    assert (
+        sample("actor_limit_total", labels, control=PROMPTS_CONTROL)
+        == rejected_before + 1
+    )
+    assert sample("actor_limit_total", labels) == code_rejected_before
 
 
 @pytest.mark.asyncio
@@ -519,7 +571,7 @@ async def test_users_do_not_share_a_limit(client, limiter, gate):
 @pytest.mark.parametrize("mode", ["log"], indirect=True)
 async def test_log_mode_serves_and_records_the_excess_request(client, limiter, gate):
     labels = {"mode": "log", "outcome": "would_reject", "bucket": "user"}
-    would_reject_before = sample("code_suggestions_actor_limit_total", labels)
+    would_reject_before = sample("actor_limit_total", labels)
     async with client:
         held = [asyncio.create_task(post(client)) for _ in range(LIMIT)]
         await wait_until(
@@ -538,9 +590,7 @@ async def test_log_mode_serves_and_records_the_excess_request(client, limiter, g
     assert [log for log in logs if log["log_level"] == "warning"] == [
         limit_exceeded_event("log", "success", "user", "inst-1:user-a", LIMIT)
     ]
-    assert (
-        sample("code_suggestions_actor_limit_total", labels) == would_reject_before + 1
-    )
+    assert sample("actor_limit_total", labels) == would_reject_before + 1
 
 
 @pytest.mark.asyncio
@@ -569,8 +619,8 @@ async def test_releases_the_slot_when_the_handler_fails(client, limiter):
 async def test_observes_the_in_flight_count_of_every_bucket(client, gate):
     before = {
         bucket: (
-            sample("code_suggestions_actor_in_flight_count", {"bucket": bucket}),
-            sample("code_suggestions_actor_in_flight_sum", {"bucket": bucket}),
+            sample("actor_in_flight_count", {"bucket": bucket}),
+            sample("actor_in_flight_sum", {"bucket": bucket}),
         )
         for bucket in ("user", "instance")
     }
@@ -579,14 +629,8 @@ async def test_observes_the_in_flight_count_of_every_bucket(client, gate):
         await post(client)
 
     for bucket, (count, total) in before.items():
-        assert (
-            sample("code_suggestions_actor_in_flight_count", {"bucket": bucket})
-            == count + 1
-        )
-        assert (
-            sample("code_suggestions_actor_in_flight_sum", {"bucket": bucket})
-            == total + 1
-        )
+        assert sample("actor_in_flight_count", {"bucket": bucket}) == count + 1
+        assert sample("actor_in_flight_sum", {"bucket": bucket}) == total + 1
 
 
 @pytest.mark.asyncio
@@ -604,7 +648,9 @@ async def test_releases_the_slot_when_the_request_is_cancelled():
     async def send(_message: Message) -> None:
         pass
 
-    limiter = ActorLimitMiddleware(app, limits=make_limits(), path_prefixes=CODE_PATHS)
+    limiter = ActorLimitMiddleware(
+        app, limits=make_limits(), path_prefixes=CODE_PATHS, control_name=CONTROL
+    )
     task = asyncio.create_task(limiter(scope_for(make_user()), receive, send))
     await started.wait()
     assert limiter._in_flight == {("user", "user-a"): 1}
@@ -634,7 +680,9 @@ async def test_releases_the_slot_when_the_client_disconnects_mid_stream():
     async def send(message: Message) -> None:
         sent.append(message)
 
-    limiter = ActorLimitMiddleware(app, limits=make_limits(), path_prefixes=CODE_PATHS)
+    limiter = ActorLimitMiddleware(
+        app, limits=make_limits(), path_prefixes=CODE_PATHS, control_name=CONTROL
+    )
 
     await limiter(scope_for(make_user()), receive, send)
 

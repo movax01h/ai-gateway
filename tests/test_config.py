@@ -11,6 +11,7 @@ from pydantic import SecretStr, ValidationError
 
 from ai_gateway.config import (
     Config,
+    ConfigActorLimits,
     ConfigAmazonQ,
     ConfigAuditEvent,
     ConfigAuth,
@@ -31,6 +32,7 @@ from ai_gateway.config import (
     ConfigModelLimits,
     ConfigModelSelection,
     ConfigMtls,
+    ConfigPrompts,
     ConfigSnowplow,
     ConfigTLS,
     ConfigVertexSearch,
@@ -1013,10 +1015,11 @@ def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variab
 
 
 @pytest.mark.parametrize(
-    ("values", "expected"),
+    ("values", "field", "expected"),
     [
         (
             {},
+            "code_suggestions",
             ConfigCodeSuggestions(
                 actor_limit_mode="off",
                 user_limit=5,
@@ -1033,6 +1036,7 @@ def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variab
                 "AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "0.1",
                 "AIGW_CODE_SUGGESTIONS__NAMESPACE_LIMIT": "40",
             },
+            "code_suggestions",
             ConfigCodeSuggestions(
                 actor_limit_mode="enforce",
                 user_limit=3,
@@ -1041,13 +1045,53 @@ def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variab
                 namespace_limit=40,
             ),
         ),
+        (
+            {},
+            "prompts",
+            ConfigPrompts(
+                actor_limit_mode="off",
+                user_limit=5,
+                instance_limit=20,
+                instance_limit_per_seat=0.05,
+                namespace_limit=20,
+            ),
+        ),
+        (
+            {
+                "AIGW_PROMPTS__ACTOR_LIMIT_MODE": "log",
+                "AIGW_PROMPTS__USER_LIMIT": "10",
+                "AIGW_PROMPTS__INSTANCE_LIMIT": "50",
+                "AIGW_PROMPTS__INSTANCE_LIMIT_PER_SEAT": "0.2",
+                "AIGW_PROMPTS__NAMESPACE_LIMIT": "60",
+            },
+            "prompts",
+            ConfigPrompts(
+                actor_limit_mode="log",
+                user_limit=10,
+                instance_limit=50,
+                instance_limit_per_seat=0.2,
+                namespace_limit=60,
+            ),
+        ),
+        (
+            {"AIGW_CODE_SUGGESTIONS__USER_LIMIT": "3"},
+            "prompts",
+            ConfigPrompts(),
+        ),
+    ],
+    ids=[
+        "code suggestions defaults",
+        "code suggestions from env",
+        "prompts defaults",
+        "prompts from env",
+        "prompts do not read the code suggestions settings",
     ],
 )
-def test_config_code_suggestions(values: dict, expected: ConfigCodeSuggestions):
+def test_config_actor_limits(values: dict, field: str, expected: ConfigActorLimits):
     with mock.patch.dict(os.environ, values, clear=True):
         config = Config(_env_file=None)
 
-        assert config.code_suggestions == expected
+        assert getattr(config, field) == expected
 
 
 @pytest.mark.parametrize(
@@ -1060,9 +1104,14 @@ def test_config_code_suggestions(values: dict, expected: ConfigCodeSuggestions):
         {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "inf"},
         {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "nan"},
         {"AIGW_CODE_SUGGESTIONS__NAMESPACE_LIMIT": "0"},
+        {"AIGW_PROMPTS__ACTOR_LIMIT_MODE": "strict"},
+        {"AIGW_PROMPTS__USER_LIMIT": "0"},
+        {"AIGW_PROMPTS__INSTANCE_LIMIT": "0"},
+        {"AIGW_PROMPTS__INSTANCE_LIMIT_PER_SEAT": "-1"},
+        {"AIGW_PROMPTS__NAMESPACE_LIMIT": "0"},
     ],
 )
-def test_config_code_suggestions_rejects_invalid_values(values: dict):
+def test_config_actor_limits_reject_invalid_values(values: dict):
     with mock.patch.dict(os.environ, values, clear=True):
         with pytest.raises(ValidationError):
             Config(_env_file=None)

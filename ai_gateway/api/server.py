@@ -75,6 +75,10 @@ _CODE_SUGGESTIONS_PATH_PREFIXES = (
     "/v4/code/",
 )
 _CODE_SUGGESTIONS_MAX_BODY_BYTES = 600_000
+_PROMPTS_PATH_PREFIXES = (
+    "/v1/prompts/",
+    "/v2/prompts/",
+)
 CONTAINER_APPLICATION_MODULES = [
     "ai_gateway.api.v1.embeddings.code_embeddings",
     "ai_gateway.api.v1.search.docs",
@@ -218,6 +222,13 @@ def create_fast_api_server(config: Config):
                 ActorLimitMiddleware,
                 limits=config.code_suggestions,
                 path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
+                control_name="code_suggestions_actor_limit",
+            ),
+            Middleware(
+                ActorLimitMiddleware,
+                limits=config.prompts,
+                path_prefixes=_PROMPTS_PATH_PREFIXES,
+                control_name="prompts_actor_limit",
             ),
             Middleware(ModelConfigMiddleware, skip_endpoints=_SKIP_ENDPOINTS),
         ],

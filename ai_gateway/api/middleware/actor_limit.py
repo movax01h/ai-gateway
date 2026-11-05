@@ -8,28 +8,27 @@ from prometheus_client import Counter, Histogram
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from ai_gateway.config import ConfigCodeSuggestions
+from ai_gateway.config import ConfigActorLimits
 from lib.context import StarletteUser
 from lib.flow_enablement import SAAS_REALM
 from lib.jwt import root_namespace_id_from_claims_extra, trusted_instance_id
 
 __all__ = ["ActorLimitMiddleware"]
 
-log = structlog.stdlib.get_logger("code_suggestions_actor_limit")
+log = structlog.stdlib.get_logger("actor_limit")
 
 _ACTOR_LIMIT_COUNTER = Counter(
-    "code_suggestions_actor_limit_total",
-    "Code suggestion requests checked against the per-actor in-flight limits",
-    ["mode", "outcome", "bucket"],
+    "actor_limit_total",
+    "Requests checked against the per-actor in-flight limits of a control",
+    ["control", "mode", "outcome", "bucket"],
 )
 _ACTOR_IN_FLIGHT_HISTOGRAM = Histogram(
-    "code_suggestions_actor_in_flight",
-    "In-flight code suggestion requests of one actor when a request is admitted",
-    ["bucket"],
+    "actor_in_flight",
+    "In-flight requests of one actor on a control when a request is admitted",
+    ["control", "bucket"],
     buckets=(1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 60),
 )
 _SECURITY_EVENT_TYPE = "security.rate_limit.block"
-_CONTROL_NAME = "code_suggestions_actor_limit"
 
 
 class _Bucket(NamedTuple):
@@ -43,7 +42,7 @@ class _Bucket(NamedTuple):
 
 
 class ActorLimitMiddleware:
-    """Caps the in-flight code suggestion requests of one actor on this process.
+    """Caps the in-flight requests of one actor on this process for one group of routes.
 
     Every request counts against its user, keyed within the instance its token vouches for. A
     request from a self-managed instance also counts against that instance, with a limit scaled by
@@ -51,17 +50,22 @@ class ActorLimitMiddleware:
     admitted only when every counter it belongs to is under its limit. ``off`` disables the check,
     ``log`` serves every request but records the ones that would be rejected, and ``enforce``
     answers 429. A request without a user id counts only against its instance or namespace.
+
+    ``control_name`` names the control in the 429 header, the log event and the metrics, so one
+    process runs an instance per route group (code suggestions, prompts) with its own limits.
     """
 
     def __init__(
         self,
         app: ASGIApp,
-        limits: ConfigCodeSuggestions,
+        limits: ConfigActorLimits,
         path_prefixes: tuple[str, ...],
+        control_name: str,
     ):
         self.app = app
         self.limits = limits
         self.path_prefixes = path_prefixes
+        self.control_name = control_name
         self._in_flight: dict[tuple[str, str], int] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -84,7 +88,9 @@ class ActorLimitMiddleware:
 
         exceeded = [b for b in buckets if self._count(b) >= b.limit]
         if not exceeded:
-            _ACTOR_LIMIT_COUNTER.labels(mode=mode, outcome="allowed", bucket="").inc()
+            _ACTOR_LIMIT_COUNTER.labels(
+                control=self.control_name, mode=mode, outcome="allowed", bucket=""
+            ).inc()
         elif mode == "enforce":
             self._record_exceeded(
                 user, exceeded, scope["path"], outcome="failure", result="rejected"
@@ -98,7 +104,9 @@ class ActorLimitMiddleware:
 
         for bucket in buckets:
             in_flight = self._count(bucket) + 1
-            _ACTOR_IN_FLIGHT_HISTOGRAM.labels(bucket=bucket.scope).observe(in_flight)
+            _ACTOR_IN_FLIGHT_HISTOGRAM.labels(
+                control=self.control_name, bucket=bucket.scope
+            ).observe(in_flight)
             self._in_flight[bucket.key] = in_flight
         try:
             await self.app(scope, receive, send)
@@ -154,14 +162,17 @@ class ActorLimitMiddleware:
         for bucket in exceeded:
             self._log_limit_exceeded(user, bucket, path, outcome=outcome)
             _ACTOR_LIMIT_COUNTER.labels(
-                mode=self.limits.actor_limit_mode, outcome=result, bucket=bucket.scope
+                control=self.control_name,
+                mode=self.limits.actor_limit_mode,
+                outcome=result,
+                bucket=bucket.scope,
             ).inc()
 
     def _log_limit_exceeded(
         self, user: StarletteUser, exceeded: _Bucket, path: str, outcome: str
     ) -> None:
         log.warning(
-            "Code suggestions actor limit exceeded",
+            "Actor limit exceeded",
             event_type=_SECURITY_EVENT_TYPE,
             author_id=user.global_user_id,
             entity_id=exceeded.actor,
@@ -170,7 +181,7 @@ class ActorLimitMiddleware:
             path=path,
             details={"outcome": outcome, "reason": "rate_limited"},
             gitlab={
-                "control_name": _CONTROL_NAME,
+                "control_name": self.control_name,
                 "control_type": "rate_limit",
                 "threshold": exceeded.limit,
                 "mode": self.limits.actor_limit_mode,
@@ -187,18 +198,17 @@ class ActorLimitMiddleware:
         else:
             del self._in_flight[bucket.key]
 
-    @staticmethod
-    async def _reject(scope: Scope, receive: Receive, send: Send) -> None:
+    async def _reject(self, scope: Scope, receive: Receive, send: Send) -> None:
         response = JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content={
-                "detail": "Too many concurrent code suggestion requests",
+                "detail": "Too many concurrent requests",
                 "reason": "rate_limited",
             },
             headers={
                 "retry-after": "1",
                 "connection": "close",
-                "x-gitlab-rate-limit": _CONTROL_NAME,
+                "x-gitlab-rate-limit": self.control_name,
             },
         )
         await response(scope, receive, send)

@@ -214,7 +214,7 @@ def test_every_route_has_feature_category():
     )
 
 
-def test_code_suggestions_limits_run_after_authentication(fastapi_server_app):
+def test_actor_limits_run_after_authentication(fastapi_server_app):
     middleware = fastapi_server_app.user_middleware
     authentication = next(
         i for i, m in enumerate(middleware) if isinstance(m, MiddlewareAuthentication)
@@ -222,14 +222,51 @@ def test_code_suggestions_limits_run_after_authentication(fastapi_server_app):
     body_limit = next(
         i for i, m in enumerate(middleware) if m.cls is RequestBodyLimitMiddleware
     )
-    actor_limit = next(
+    actor_limits = [
         i for i, m in enumerate(middleware) if m.cls is ActorLimitMiddleware
-    )
+    ]
     model_config = next(
         i for i, m in enumerate(middleware) if m.cls is ModelConfigMiddleware
     )
 
-    assert authentication < body_limit < actor_limit < model_config
+    assert authentication < body_limit < min(actor_limits)
+    assert max(actor_limits) < model_config
+
+
+def test_each_route_group_has_its_own_actor_limit(fastapi_server_app):
+    controls = [
+        (m.kwargs["control_name"], m.kwargs["path_prefixes"], m.kwargs["limits"])
+        for m in fastapi_server_app.user_middleware
+        if m.cls is ActorLimitMiddleware
+    ]
+    config = fastapi_server_app.state.config
+
+    assert controls == [
+        (
+            "code_suggestions_actor_limit",
+            ("/v2/completions", "/v2/code/", "/v3/code/", "/v4/code/"),
+            config.code_suggestions,
+        ),
+        (
+            "prompts_actor_limit",
+            ("/v1/prompts/", "/v2/prompts/"),
+            config.prompts,
+        ),
+    ]
+
+
+def test_body_cap_applies_only_to_code_suggestion_routes(fastapi_server_app):
+    # Prompt bodies may exceed 600 KB, so the body cap must not inherit the prompt prefixes.
+    (body_limit,) = [
+        m.kwargs
+        for m in fastapi_server_app.user_middleware
+        if m.cls is RequestBodyLimitMiddleware
+    ]
+
+    assert body_limit == {
+        "max_bytes": 600_000,
+        "path_prefixes": ("/v2/completions", "/v2/code/", "/v3/code/", "/v4/code/"),
+    }
 
 
 def test_setup_prometheus_fastapi_instrumentator():
