@@ -32,14 +32,11 @@ from ai_gateway.prompts import LocalPromptRegistry, Prompt, feature_roots
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
-from ai_gateway.prompts.registry import (
-    PROMPT_ID_TO_FEATURE_SETTING,
-    feature_setting_for_prompt_id,
-    mapped_feature_setting_for_prompt_id,
-)
+from ai_gateway.prompts.registry import feature_setting_for_prompt_id
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from tests.prompts.prompt_dirs import (
+    FEATURE_SETTINGS_THAT_RAILS_SENDS,
     REPO_ROOT,
     prompt_dir,
     prompt_ids_by_dir,
@@ -1705,10 +1702,26 @@ class TestGetRequiredVariables:
 
     @pytest.mark.usefixtures("mock_fs")
     def test_non_graph_node_raises_for_unknown_feature_setting(
-        self, registry: LocalPromptRegistry
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
     ):
-        """Non-graph-node callers get a ValueError for unknown feature settings."""
-        with pytest.raises(ValueError, match="Invalid feature setting: unknown_step"):
+        """Non-graph-node callers get a ValueError when neither `models_from` nor the prompt ID names a feature."""
+        fs.create_file(
+            self._PROMPT_BASE_DIR / "unknown_step" / "base" / "1.0.0.yml",
+            contents="\n".join(
+                [
+                    "---",
+                    "name: Unknown step",
+                    "unit_primitive: duo_chat",
+                    "prompt_template:",
+                    "  user: Hello",
+                ]
+            ),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Prompt 'unknown_step' has no default model. Send `model_metadata` with a `feature_setting`.",
+        ):
             registry._default_model_metadata(
                 "unknown_step", "1.0.0", is_graph_node=False
             )
@@ -1792,8 +1805,7 @@ class TestGetRequiredVariables:
 
 # Prompt IDs that are exclusively invoked as DAP graph nodes (is_graph_node=True).
 # is_graph_node=True bypasses feature_setting_for_prompt_id entirely and provides
-# the duo_agent_platform feature setting directly, so these do not need an entry in
-# PROMPT_ID_TO_FEATURE_SETTING.
+# the duo_agent_platform feature setting directly, so these do not declare `models_from`.
 # When adding a new graph-node prompt with unit_primitive=duo_agent_platform, add its
 # ID here.
 _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
@@ -1855,7 +1867,7 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
 )
 
 # Prompt IDs that the Duo Workflow Service runs in-process, never over the prompt routes. It always passes model
-# metadata, so these do not need an entry in PROMPT_ID_TO_FEATURE_SETTING.
+# metadata, so these do not declare `models_from`.
 _IN_PROCESS_PROMPT_IDS: frozenset[str] = frozenset(
     {
         # The model routing step runs it with the model of the `classifier` or `small` tag.
@@ -1867,12 +1879,12 @@ _IN_PROCESS_PROMPT_IDS: frozenset[str] = frozenset(
 class TestDuoAgentPlatformPromptRegistration:
     """
     Safeguard: every prompt with unit_primitive=duo_agent_platform that is called
-    directly via HTTP from Rails (not as a DAP graph node) must appear in
-    PROMPT_ID_TO_FEATURE_SETTING so AIGW can route requests when model_metadata is
-    absent (e.g. self-managed instance with ai_gateway_url set but no model selected).
+    directly via HTTP from Rails (not as a DAP graph node) must declare `models_from`
+    so AIGW can route requests when model_metadata is absent (e.g. self-managed
+    instance with ai_gateway_url set but no model selected).
 
     When adding a new prompt with unit_primitive=duo_agent_platform you must do one of:
-    1. Add it to PROMPT_ID_TO_FEATURE_SETTING in ai_gateway/prompts/registry.py
+    1. Set `models_from` in each version of the prompt
         (for prompts called directly via HTTP without model_metadata).
     2. Add its ID to _GRAPH_NODE_PROMPT_IDS in this file
         (for prompts always invoked as DAP graph nodes via is_graph_node=True),
@@ -1932,8 +1944,8 @@ class TestDuoAgentPlatformPromptRegistration:
             # Passes if the prompt has its own feature setting in unit_primitives.yml
             if feature_setting_for_prompt_id(prompt_id) in valid_feature_settings:
                 continue
-            # Passes if explicitly registered for direct-HTTP routing
-            if prompt_id in PROMPT_ID_TO_FEATURE_SETTING:
+            # Passes if each version declares the models it runs on
+            if all(_declared_models(prompt_dir(prompt_id)).values()):
                 continue
             # Passes if acknowledged as a graph-node-only or in-process prompt
             if prompt_id in _GRAPH_NODE_PROMPT_IDS | _IN_PROCESS_PROMPT_IDS:
@@ -1948,9 +1960,24 @@ class TestDuoAgentPlatformPromptRegistration:
         )
 
 
-# Prompts besides `_GRAPH_NODE_PROMPT_IDS` and `_IN_PROCESS_PROMPT_IDS` that need no entry in PROMPT_ID_TO_FEATURE_SETTING,
-# because no GitLab client calls them on the prompt routes with a feature setting of its own.
-_PROMPTS_WITHOUT_AN_ENTRY: frozenset[str] = (
+def _declared_models(directory: Path) -> dict[Path, str | None]:
+    """Return the `models_from` of each version in `directory`, except the `amazon_q` versions.
+
+    The `amazon_q` versions set none: no feature setting lists their `amazon_q_integration` unit primitive, and the
+    allowlist check skips the Amazon Q model metadata that selects them.
+    """
+    return {
+        version_file.relative_to(REPO_ROOT): yaml.safe_load(
+            version_file.read_text()
+        ).get("models_from")
+        for version_file in version_files(directory)
+        if version_file.parent.name != "amazon_q"
+    }
+
+
+# Prompts besides `_GRAPH_NODE_PROMPT_IDS` and `_IN_PROCESS_PROMPT_IDS` that declare no `models_from`, because no
+# GitLab client calls them on the prompt routes with a feature setting of its own.
+_PROMPTS_WITHOUT_MODELS_FROM: frozenset[str] = (
     _GRAPH_NODE_PROMPT_IDS
     | _IN_PROCESS_PROMPT_IDS
     | frozenset(
@@ -1984,9 +2011,8 @@ _PROMPTS_WITHOUT_AN_ENTRY: frozenset[str] = (
 )
 
 
-# Prompt versions that declare a unit primitive that the feature setting of their entry doesn't list, with the feature
-# setting that they declare as `models_from`. The `amazon_q` versions need no entry here: the allowlist check skips the
-# Amazon Q model metadata that selects them.
+# Prompt versions that declare a unit primitive that the feature setting that GitLab Rails sends doesn't list, with the
+# feature setting that they declare as `models_from`.
 _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE: dict[Path, str] = {
     # The Agent Platform edition of the prompt. It declares `duo_agent_platform`. GitLab 18.9 to 18.11 call it from
     # the comment processing step of the Agent Platform code review flow (gitlab!218609). Later releases do not call it.
@@ -1997,133 +2023,88 @@ _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE: dict[Path, str] = {
 
 
 class TestPromptFeatureSettings:
-    """Safeguard: every prompt has an entry in PROMPT_ID_TO_FEATURE_SETTING or is listed as needing none.
+    """Safeguard: every prompt declares `models_from` in each version, or is listed as declaring none.
 
-    ModelConfigMiddleware checks client model metadata on the prompt routes against the feature
-    setting of the prompt's entry. For a prompt without an entry, the client's `feature_setting`
-    selects the allowlist. When you add a prompt that GitLab Rails or another client calls on the
-    prompt routes, add it to PROMPT_ID_TO_FEATURE_SETTING in ai_gateway/prompts/registry.py with
-    the feature setting that the client sends for it, and set `models_from` to that feature setting
-    in each version of the prompt. `models_from` is only for prompts that the AI Gateway serves over
-    HTTP. Otherwise add the prompt to `_GRAPH_NODE_PROMPT_IDS` (graph-node prompts) or
-    `_PROMPTS_WITHOUT_AN_ENTRY` in this file.
+    The prompt routes check client model metadata against the `models_from` of the prompt version that runs. For a
+    version without `models_from`, the client's `feature_setting` selects the allowlist. When you add a prompt that
+    GitLab Rails or another client calls on the prompt routes, set `models_from` in each version to the feature setting
+    that the client sends for it. `models_from` is only for prompts that the AI Gateway serves over HTTP. Otherwise add
+    the prompt to `_GRAPH_NODE_PROMPT_IDS` (graph-node prompts), `_IN_PROCESS_PROMPT_IDS` or
+    `_PROMPTS_WITHOUT_MODELS_FROM` in this file.
     """
 
-    def test_every_prompt_has_an_entry_or_is_listed(self) -> None:
-        classified = {
-            prompt_dir(prompt_id)
-            for prompt_id in [*PROMPT_ID_TO_FEATURE_SETTING, *_PROMPTS_WITHOUT_AN_ENTRY]
-        }
+    def test_every_prompt_declares_its_models_or_is_listed(self) -> None:
+        listed = {prompt_dir(prompt_id) for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM}
 
         unclassified = sorted(
             sorted(prompt_ids)
             for directory, prompt_ids in prompt_ids_by_dir().items()
-            if directory not in classified
+            if directory not in listed and not any(_declared_models(directory).values())
         )
 
         assert not unclassified, (
-            "These prompts have no entry in PROMPT_ID_TO_FEATURE_SETTING and are not listed as "
-            f"needing none: {unclassified}. See the TestPromptFeatureSettings docstring."
+            "These prompts declare no `models_from` and are not listed as declaring none: "
+            f"{unclassified}. See the TestPromptFeatureSettings docstring."
         )
 
-    def test_every_classified_prompt_exists(self) -> None:
+    def test_every_listed_prompt_exists(self) -> None:
         known_dirs = prompt_ids_by_dir()
 
         missing = sorted(
             prompt_id
-            for prompt_id in {*PROMPT_ID_TO_FEATURE_SETTING, *_PROMPTS_WITHOUT_AN_ENTRY}
+            for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM
             if prompt_dir(prompt_id) not in known_dirs
         )
 
         assert not missing
 
-    def test_every_spelling_of_a_prompt_with_an_entry_finds_it(self) -> None:
-        """The middleware gets the entry for each ID that loads the prompt, so another spelling can't skip it."""
-        feature_roots.discover_feature_prompts()
-        entries = {
-            prompt_dir(prompt_id): feature_setting
-            for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items()
-        }
+    def test_no_listed_prompt_declares_its_models(self) -> None:
+        """A listed prompt sets no `models_from` in any version.
 
-        missed = sorted(
-            spelling
-            for directory, prompt_ids in prompt_ids_by_dir().items()
-            if directory in entries
-            for prompt_id in prompt_ids
-            for spelling in (
-                prompt_id,
-                f"{prompt_id}/",
-                f"./{prompt_id}",
-                prompt_id.replace("/", "//"),
-            )
-            if mapped_feature_setting_for_prompt_id(spelling) != entries[directory]
-        )
-
-        assert not missed
-
-    def test_no_prompt_has_an_entry_and_is_listed(self) -> None:
-        with_entry = {prompt_dir(p) for p in PROMPT_ID_TO_FEATURE_SETTING}
-        listed = {prompt_dir(p) for p in _PROMPTS_WITHOUT_AN_ENTRY}
-
-        assert with_entry.isdisjoint(listed)
-
-    def test_every_entry_names_a_feature_setting(self) -> None:
-        feature_settings = (
-            ModelSelectionConfig.instance().get_unit_primitive_config_map()
-        )
-
-        unknown = sorted(
-            prompt_id
-            for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items()
-            if feature_setting not in feature_settings
-        )
-
-        assert not unknown
-
-    def test_every_entry_lists_the_unit_primitive_of_its_prompt(self) -> None:
-        feature_settings = (
-            ModelSelectionConfig.instance().get_unit_primitive_config_map()
-        )
-
-        unlisted = []
-        for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items():
-            for version_file in version_files(prompt_dir(prompt_id)):
-                version = version_file.relative_to(REPO_ROOT)
-                if (
-                    version_file.parent.name == "amazon_q"
-                    or version in _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE
-                ):
-                    continue
-                unit_primitive = yaml.safe_load(version_file.read_text())[
-                    "unit_primitive"
-                ]
-                if (
-                    unit_primitive
-                    not in feature_settings[feature_setting].unit_primitives
-                ):
-                    unlisted.append(f"{version}: {unit_primitive}")
-
-        assert not unlisted
-
-    def test_every_version_of_a_prompt_with_an_entry_declares_its_models(self) -> None:
-        """Each version sets `models_from` to the feature setting of its entry, or to the one listed for it in
-        `_VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE`.
-
-        The `amazon_q` versions set none: no feature setting lists their `amazon_q_integration` unit primitive.
+        A listed prompt is a graph-node or Duo Workflow Service prompt, or a prompt that a client calls on the prompt
+        routes without a feature setting of its own, like `generate_description`. A prompt that only runs in a flow
+        must never set `models_from`: the prompt routes would then serve it. The prompts that clients call get
+        `models_from` before the prompt routes reject versions without it.
         """
+        declared = sorted(
+            str(version)
+            for directory in {
+                prompt_dir(prompt_id) for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM
+            }
+            for version, models_from in _declared_models(directory).items()
+            if models_from is not None
+        )
+
+        assert not declared
+
+    def test_every_version_of_a_prompt_with_models_declares_them(self) -> None:
+        """A prompt that declares `models_from` declares it in each version.
+
+        The registry picks the default model of a version without `models_from` from the prompt ID, which does not
+        always name a feature setting. The prompt routes check such a version against the client's `feature_setting`.
+        """
+        listed = {prompt_dir(prompt_id) for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM}
+
+        undeclared = sorted(
+            str(version)
+            for directory in prompt_ids_by_dir()
+            if directory not in listed
+            for version, models_from in _declared_models(directory).items()
+            if models_from is None
+        )
+
+        assert not undeclared
+
+    def test_every_version_of_a_prompt_that_rails_calls_declares_the_feature_that_rails_sends(
+        self,
+    ) -> None:
+        """Each version sets `models_from` to the feature setting that GitLab Rails sends for the prompt, or to the one
+        listed for it in `_VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE`."""
         mismatched = []
-        for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items():
-            for version_file in version_files(prompt_dir(prompt_id)):
-                version = version_file.relative_to(REPO_ROOT)
-                expected = (
-                    None
-                    if version_file.parent.name == "amazon_q"
-                    else _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE.get(
-                        version, feature_setting
-                    )
-                )
-                models_from = yaml.safe_load(version_file.read_text()).get(
-                    "models_from"
+        for prompt_id, feature_setting in FEATURE_SETTINGS_THAT_RAILS_SENDS.items():
+            for version, models_from in _declared_models(prompt_dir(prompt_id)).items():
+                expected = _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE.get(
+                    version, feature_setting
                 )
                 if models_from != expected:
                     mismatched.append(
@@ -2131,26 +2112,48 @@ class TestPromptFeatureSettings:
                     )
 
         assert not mismatched
-
-    def test_no_version_of_a_prompt_without_an_entry_declares_its_models(self) -> None:
-        """Only the prompts with an entry set `models_from`.
-
-        A prompt without an entry is a graph-node or Duo Workflow Service prompt, or a prompt that a client calls on the
-        prompt routes without a feature setting of its own, like `generate_description`. A prompt that only runs in a
-        flow must never set `models_from`: the prompt routes would then serve it. The prompts that clients call get
-        `models_from` before the prompt routes reject versions without it.
-        """
-        with_entry = {prompt_dir(p) for p in PROMPT_ID_TO_FEATURE_SETTING}
-
-        declared = sorted(
-            str(version_file.relative_to(REPO_ROOT))
-            for directory in prompt_ids_by_dir()
-            if directory not in with_entry
-            for version_file in version_files(directory)
-            if "models_from" in yaml.safe_load(version_file.read_text())
+        assert all(
+            (REPO_ROOT / version).is_file()
+            for version in _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE
         )
 
-        assert not declared
+    def test_every_spelling_of_a_prompt_with_models_finds_them(
+        self, repo_registry: LocalPromptRegistry
+    ) -> None:
+        """Each ID that loads a prompt version gets the `models_from` of that version.
+
+        The prompt routes take `models_from` from the ID in the path, so another spelling of the ID must not skip it.
+        """
+        feature_roots.discover_feature_prompts()
+        listed = {prompt_dir(prompt_id) for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM}
+
+        missed = []
+        with patch.object(
+            LocalPromptRegistry,
+            "_build_prompt",
+            lambda self, **kwargs: kwargs["config"],
+        ):
+            for directory, prompt_ids in prompt_ids_by_dir().items():
+                if directory in listed:
+                    continue
+                for prompt_id in prompt_ids:
+                    for spelling in (
+                        prompt_id,
+                        f"{prompt_id}/",
+                        f"./{prompt_id}",
+                        prompt_id.replace("/", "//"),
+                    ):
+                        try:
+                            served = repo_registry.get(spelling, None)
+                        except ValueError:
+                            continue
+                        found = repo_registry.models_from(spelling, None)
+                        if found is None or found != served.models_from:
+                            missed.append(
+                                f"{spelling}: {found!r}, serves {served.models_from!r}"
+                            )
+
+        assert not missed
 
     def test_every_model_family_of_a_prompt_declares_the_same_models(self) -> None:
         """A prompt with more than one model family declares one `models_from` in all of them.
@@ -2202,18 +2205,32 @@ class TestModelsFrom:
     ):
         assert repo_registry.models_from("summarize_review", prompt_version) == expected
 
-    def test_resolves_the_version_in_the_folder_of_the_model_family(
-        self, repo_registry: LocalPromptRegistry
+    @pytest.mark.parametrize(
+        "model_metadata",
+        [
+            pytest.param(
+                {"provider": "gitlab", "identifier": "amazon_q"}, id="gitlab-model"
+            ),
+            pytest.param(
+                {"name": "amazon_q", "provider": "amazon_q", "role_arn": "role-arn"},
+                id="amazon-q-model",
+            ),
+        ],
+    )
+    def test_resolves_the_version_in_base_when_the_folder_of_the_model_family_declares_none(
+        self, repo_registry: LocalPromptRegistry, model_metadata
     ):
-        amazon_q = create_model_metadata(
-            {"name": "amazon_q", "provider": "amazon_q", "role_arn": "role-arn"}
-        )
+        """The `amazon_q` versions declare no `models_from`, and the `amazon_q` model family resolves their folder.
 
+        In fallback mode, the client's `feature_setting` would otherwise select the allowlist, and the request could
+        run on the default model of another feature.
+        """
         assert (
-            repo_registry.models_from("chat/explain_code", "1.0.0")
+            repo_registry.models_from(
+                "chat/explain_code", "1.0.0", create_model_metadata(model_metadata)
+            )
             == "duo_chat_explain_code"
         )
-        assert repo_registry.models_from("chat/explain_code", "1.0.0", amazon_q) is None
 
     @pytest.mark.parametrize(
         ("prompt_id", "prompt_version", "identifier", "expected"),
@@ -2281,6 +2298,32 @@ class TestDefaultModelOfAPromptVersion:
             .get_unit_primitive_config_map()[feature_setting]
             .default_model_identifiers[0]
         )
+
+    @pytest.mark.parametrize(
+        ("prompt_version", "message"),
+        [
+            ("^9.0.0", "No version matching '\\^9.0.0'"),
+            (
+                "not a version",
+                "Version 'not a version' is not a valid PEP 440 constraint",
+            ),
+        ],
+    )
+    def test_raises_for_an_unknown_version_before_the_feature_of_the_prompt_id(
+        self, repo_registry: LocalPromptRegistry, prompt_version, message
+    ):
+        """The ID of `classify_goal_tier` names no feature setting, so the version error must come first."""
+        with pytest.raises(ValueError, match=message):
+            repo_registry._default_model_metadata("classify_goal_tier", prompt_version)
+
+    def test_raises_for_a_version_without_models_from_whose_prompt_id_names_no_feature(
+        self, repo_registry: LocalPromptRegistry
+    ):
+        with pytest.raises(
+            ValueError,
+            match="Prompt 'classify_goal_tier' has no default model. Send `model_metadata` with a `feature_setting`.",
+        ):
+            repo_registry._default_model_metadata("classify_goal_tier", "^1.0.0")
 
     def test_serves_the_default_of_the_prompt_id_for_a_version_without_models_from(
         self, repo_registry: LocalPromptRegistry

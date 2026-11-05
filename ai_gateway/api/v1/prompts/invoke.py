@@ -24,10 +24,7 @@ from ai_gateway.feature_allowlist import (
 )
 from ai_gateway.model_selection import ModelSelectionError
 from ai_gateway.prompts import BasePromptRegistry, Prompt
-from ai_gateway.prompts.registry import (
-    feature_setting_for_prompt_id,
-    mapped_feature_setting_for_prompt_id,
-)
+from ai_gateway.prompts.registry import feature_setting_for_prompt_id
 from lib.context import (
     StarletteUser,
     current_model_metadata_context,
@@ -92,8 +89,8 @@ def check_prompt_model_metadata(
 ) -> None:
     """Check the client's model metadata against the models of the prompt version that runs.
 
-    The allowlist is the ``models_from`` of the version, then the ``PROMPT_ID_TO_FEATURE_SETTING`` entry of the prompt,
-    then the client's ``feature_setting``. The function returns nothing. It sets the checked metadata in
+    The allowlist is the ``models_from`` of the version, or the client's ``feature_setting`` for a version without
+    ``models_from``. The function returns nothing. It sets the checked metadata in
     ``current_model_metadata_context``, where the registry reads it. ``None`` there leaves the request on the prompt's
     own default model. A request without model metadata is not checked.
 
@@ -111,7 +108,7 @@ def check_prompt_model_metadata(
 
     feature_setting = prompt_registry.models_from(
         prompt_id, prompt_version, pending.metadata
-    ) or mapped_feature_setting_for_prompt_id(prompt_id)
+    )
     if feature_setting is None:
         note_prompt_feature(
             pending.request,

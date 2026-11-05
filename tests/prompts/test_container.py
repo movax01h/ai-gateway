@@ -134,7 +134,8 @@ def test_container(
 
         # Check that at least one version is available and loads for each selectable model
         unit_primitive_config = unit_primitive_config_map.get(
-            feature_setting_for_prompt_id(prompt_id)
+            registry.models_from(prompt_id, "*")
+            or feature_setting_for_prompt_id(prompt_id)
         )
         if unit_primitive_config is None:
             # Graph node prompts don't have their own unit primitive entries;
