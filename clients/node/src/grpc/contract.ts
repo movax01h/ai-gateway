@@ -107,7 +107,15 @@ export interface StartWorkflowRequest {
    * shipped with the service on schema version "v1"; sending items with any other request is an
    * error. A supported flow that declares no `include` section ignores them.
    */
-  catalog_items?: CatalogItems | undefined;
+  catalog_items?:
+    | CatalogItems
+    | undefined;
+  /**
+   * fetch_flow_config, when true, makes the service fetch the flow definition for workflowID from
+   * GitLab and ignore flowConfig. Use it for a saved AI Catalog flow. It cannot be combined with
+   * flowConfigId.
+   */
+  fetch_flow_config?: boolean | undefined;
 }
 
 /**
@@ -1038,6 +1046,7 @@ function createBaseStartWorkflowRequest(): StartWorkflowRequest {
     streaming: undefined,
     resume_checkpoint_ts: undefined,
     catalog_items: undefined,
+    fetch_flow_config: undefined,
   };
 }
 
@@ -1093,6 +1102,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     }
     if (message.catalog_items !== undefined) {
       CatalogItems.encode(message.catalog_items, writer.uint32(146).fork()).join();
+    }
+    if (message.fetch_flow_config !== undefined) {
+      writer.uint32(152).bool(message.fetch_flow_config);
     }
     return writer;
   },
@@ -1240,6 +1252,14 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
           message.catalog_items = CatalogItems.decode(reader, reader.uint32());
           continue;
         }
+        case 19: {
+          if (tag !== 152) {
+            break;
+          }
+
+          message.fetch_flow_config = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1278,6 +1298,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
         ? globalThis.String(object.resume_checkpoint_ts)
         : undefined,
       catalog_items: isSet(object.catalog_items) ? CatalogItems.fromJSON(object.catalog_items) : undefined,
+      fetch_flow_config: isSet(object.fetch_flow_config) ? globalThis.Boolean(object.fetch_flow_config) : undefined,
     };
   },
 
@@ -1334,6 +1355,9 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     if (message.catalog_items !== undefined) {
       obj.catalog_items = CatalogItems.toJSON(message.catalog_items);
     }
+    if (message.fetch_flow_config !== undefined) {
+      obj.fetch_flow_config = message.fetch_flow_config;
+    }
     return obj;
   },
 
@@ -1363,6 +1387,7 @@ export const StartWorkflowRequest: MessageFns<StartWorkflowRequest> = {
     message.catalog_items = (object.catalog_items !== undefined && object.catalog_items !== null)
       ? CatalogItems.fromPartial(object.catalog_items)
       : undefined;
+    message.fetch_flow_config = object.fetch_flow_config ?? undefined;
     return message;
   },
 };
