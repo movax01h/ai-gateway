@@ -1378,6 +1378,8 @@ class BasePromptRegistry(ABC):
     ) -> Optional[str]:
         """Return the ``models_from`` of the prompt version that ``get`` resolves for this model.
 
+        When the folder of the model's family has no matching version, the version in the ``base`` folder applies.
+
         Args:
             prompt_id: Identifier of the prompt.
             prompt_version: Version constraint of the request, or ``None`` for the default version.

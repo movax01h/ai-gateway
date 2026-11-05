@@ -2202,13 +2202,45 @@ class TestModelsFrom:
     def test_resolves_the_version_in_the_folder_of_the_model_family(
         self, repo_registry: LocalPromptRegistry
     ):
-        mistral = create_model_metadata({"provider": "gitlab", "identifier": "mistral"})
+        amazon_q = create_model_metadata(
+            {"name": "amazon_q", "provider": "amazon_q", "role_arn": "role-arn"}
+        )
 
         assert (
-            repo_registry.models_from("chat/write_tests", "1.2.0")
-            == "duo_chat_write_tests"
+            repo_registry.models_from("chat/explain_code", "1.0.0")
+            == "duo_chat_explain_code"
         )
-        assert repo_registry.models_from("chat/write_tests", "1.2.0", mistral) is None
+        assert repo_registry.models_from("chat/explain_code", "1.0.0", amazon_q) is None
+
+    @pytest.mark.parametrize(
+        ("prompt_id", "prompt_version", "identifier", "expected"),
+        [
+            (
+                "code_suggestions/generations",
+                "^2.0.0",
+                "codestral_2508_vertex",
+                "code_generations",
+            ),
+            ("chat/write_tests", "1.2.0", "mistral", "duo_chat_write_tests"),
+        ],
+    )
+    def test_resolves_the_version_in_base_when_the_folder_of_the_model_family_lacks_it(
+        self,
+        repo_registry: LocalPromptRegistry,
+        prompt_id,
+        prompt_version,
+        identifier,
+        expected,
+    ):
+        """In fallback mode, the allowlist check can serve another model whose family resolves `base`."""
+        model_metadata = create_model_metadata(
+            {"provider": "gitlab", "identifier": identifier}
+        )
+
+        assert (
+            repo_registry.models_from(prompt_id, prompt_version, model_metadata)
+            == expected
+        )
 
     @pytest.mark.parametrize(
         ("prompt_id", "prompt_version"),

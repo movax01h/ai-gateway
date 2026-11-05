@@ -593,7 +593,8 @@ payloads do not call the check yet.
 On the `/v1/prompts/<prompt_id>` and `/v2/prompts/<prompt_id>` routes, the allowlist depends on the prompt version,
 and only the route resolves the version. So the middleware sets no model metadata for these routes. The route runs the
 check before it builds the prompt, in `check_prompt_model_metadata` (`ai_gateway/api/v1/prompts/invoke.py`), and
-answers HTTP 403 in `enforce` mode. The check uses the `models_from` of the version that the client's model resolves
+answers HTTP 403 in `enforce` mode. The check uses the `models_from` of the version that the client's model resolves, or of the version
+in `base` when the folder of the model's family has no matching version
 (see [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http)). A version
 without `models_from` uses the feature setting of the prompt's entry in `PROMPT_ID_TO_FEATURE_SETTING`
 (`ai_gateway/prompts/registry.py`). For a prompt that GitLab Rails calls, the entry is the feature that Rails sends.

@@ -366,15 +366,20 @@ class LocalPromptRegistry(BasePromptRegistry):
         model_metadata: Optional[TypeModelMetadata] = None,
     ) -> Optional[str]:
         family = model_metadata.llm_definition.family if model_metadata else []
-        try:
-            prompt_path = self._resolve_id(prompt_id, family)
-            versions = self._load_prompt_definition(prompt_id, prompt_path).versions
-            config = self._get_prompt_config(
-                versions, prompt_version or self._DEFAULT_VERSION
-            )
-        except (FileNotFoundError, ValueError):
-            return None
-        return config.models_from
+        # The folder of a model family can lack versions that `base` has. In fallback mode, the allowlist check can
+        # serve another model whose family resolves `base`, so read the version from `base` too. The families of a
+        # prompt declare the same `models_from`.
+        for folders in [family, []] if family else [[]]:
+            try:
+                prompt_path = self._resolve_id(prompt_id, folders)
+                versions = self._load_prompt_definition(prompt_id, prompt_path).versions
+                config = self._get_prompt_config(
+                    versions, prompt_version or self._DEFAULT_VERSION
+                )
+            except (FileNotFoundError, ValueError):
+                continue
+            return config.models_from
+        return None
 
     def _adjust_tool_choice_for_model(
         self, tool_choice: Optional[str], model_metadata: Optional[TypeModelMetadata]
