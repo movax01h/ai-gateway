@@ -1,7 +1,7 @@
 # pylint: disable=too-many-lines
 import json
 from datetime import datetime, timezone
-from unittest.mock import ANY, AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, call, patch
 
 import pytest
 from anthropic import APIStatusError
@@ -1099,6 +1099,68 @@ async def test_unanswerable_halt_skips_preapproved_tools(input, mock_toolset):
         EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
         tool_name="tool_requiring_approval",
     )
+
+
+@pytest.mark.asyncio
+async def test_unanswerable_halt_includes_id_less_tool_calls(input, mock_toolset):
+    """A needs-approval call without an id must still reach the error's tool names and its UNAVAILABLE event.
+
+    The halt reads names from approval_messages, which hold every needs-approval call; matching against requested_ids
+    would silently drop id-less calls.
+    """
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    # None = a fresh human decision is required for both tools.
+    mock_toolset.resolve_approval_source = AsyncMock(return_value=None)
+    mock_tracker = Mock(spec=ToolEventTracker)
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+        tracker=mock_tracker,
+        allow_agent_to_request_user=False,
+    )
+
+    ai_message = AIMessage(
+        content="I need two tools",
+        tool_calls=[
+            {
+                "name": "tool_with_id",
+                "args": {},
+                "id": "call_1",
+                "type": "tool_call",
+            },
+            {
+                "name": "tool_without_id",
+                "args": {},
+                "id": None,
+                "type": "tool_call",
+            },
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    with pytest.raises(ToolApprovalUnavailableError) as exc_info:
+        await chat_agent.run(input)
+
+    assert exc_info.value.tool_names == ["tool_with_id", "tool_without_id"]
+    assert mock_tracker.track_tool_governance_event.call_args_list == [
+        call(
+            EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+            tool_name="tool_with_id",
+        ),
+        call(
+            EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+            tool_name="tool_without_id",
+        ),
+    ]
 
 
 @pytest.mark.asyncio
