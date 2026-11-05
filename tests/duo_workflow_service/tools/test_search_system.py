@@ -206,24 +206,33 @@ class TestGrep:
         grep_tool.metadata["project"] = self._project(exclusion_rules)
         return grep_tool
 
+    # Shaped like the node executor's formatter (gitlab-lsp workflow_executor grep.ts).
     snippet_output = (
         "Found 4 matches across 4 files\n"
         "src/app.py:3_4\n"
         "token = load()\n"
-        "check(token)\n"
+        "ratio = 1:16_9\n"
         "secrets/key.pem:1_1\n"
-        "token: abc:12:def\n"
-        ".env:2_2\n"
-        "TOKEN=xyz\n"
+        "token: abc:12_30\n"
+        "docs/internal/notes.md:2_2\n"
+        "token here\n"
         "lib/util.py:7_7\n"
         "return token\n"
     )
+    hidden_note = (
+        "Some matches are hidden by the project's file exclusion settings;"
+        " searching again will not return them.\n"
+    )
+    unfilterable = (
+        "Grep results from this client cannot be checked against the project's file exclusion"
+        " settings. Use find_files and read_file instead."
+    )
 
     @pytest.mark.asyncio
-    async def test_grep_drops_snippets_of_excluded_files(self):
-        grep_tool = self._setup_grep_tool_with_project(
-            self.snippet_output, ["secrets/"]
-        )
+    @pytest.mark.parametrize("tool_class", [Grep, GrepLiteral])
+    async def test_grep_drops_snippets_of_excluded_files(self, tool_class):
+        grep_tool = self._setup_grep_tool_with_mocks(self.snippet_output, tool_class)
+        grep_tool.metadata["project"] = self._project(["secrets/", "docs/internal/"])
 
         result = await grep_tool._arun(keywords="token")
 
@@ -231,25 +240,37 @@ class TestGrep:
             "Found 4 matches across 4 files\n"
             "src/app.py:3_4\n"
             "token = load()\n"
-            "check(token)\n"
+            "ratio = 1:16_9\n"
             "lib/util.py:7_7\n"
-            "return token\n"
-            "\n"
-            "Files excluded due to policy, continue without files:\n"
-            "secrets/key.pem\n"
-            ".env"
+            "return token\n" + self.hidden_note
         )
 
     @pytest.mark.asyncio
-    async def test_grep_reads_snippet_lines_by_their_count(self):
+    async def test_grep_drops_default_exclusions_without_project_rules(self):
+        output = (
+            "Found 2 matches across 2 files\n"
+            ".gitlab/duo/flows.yml:1_1\n"
+            "token\n"
+            ".gitlab/ci.yml:2_2\n"
+            "token\n"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, None)
+
+        result = await grep_tool._arun(keywords="token", search_directory=".gitlab")
+
+        assert result == (
+            "Found 2 matches across 2 files\n.gitlab/ci.yml:2_2\ntoken\n"
+            + self.hidden_note
+        )
+
+    @pytest.mark.asyncio
+    async def test_grep_ends_a_snippet_only_where_the_executor_trimmed(self):
+        long_line = "x" * 5000 + "... (trimmed)"
         output = (
             "Found 3 matches across 3 files (showing first 2)\n"
-            "secrets/a.pem:1_2\n"
-            "key\n"
-            "t = time:12_30\n"
-            "secrets/b.pem:4_6\n"
-            "longline... (trimmed)\n"
-            "src/b.py:4_4\n"
+            f"secrets/a.pem:1_3\n{long_line}\n"
+            "src/b.py:4_5\n"
+            "log(... (trimmed)\n"
             "ok\n"
             "(Results truncated: showing 2 of 3 matches (1 hidden).)\n"
         )
@@ -259,13 +280,30 @@ class TestGrep:
 
         assert result == (
             "Found 3 matches across 3 files (showing first 2)\n"
-            "src/b.py:4_4\n"
+            "src/b.py:4_5\n"
+            "log(... (trimmed)\n"
             "ok\n"
             "(Results truncated: showing 2 of 3 matches (1 hidden).)\n"
-            "\n"
-            "Files excluded due to policy, continue without files:\n"
-            "secrets/a.pem\n"
-            "secrets/b.pem"
+            + self.hidden_note
+        )
+
+    @pytest.mark.asyncio
+    async def test_grep_keeps_lines_ending_like_the_trim_note_as_content(self):
+        output = (
+            "Found 2 matches across 2 files\n"
+            "secrets/a.pem:1_3\n"
+            "log(... (trimmed)\n"
+            "SECRET=abc\n"
+            "more\n"
+            "src/b.py:4_4\n"
+            "ok\n"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == (
+            "Found 2 matches across 2 files\nsrc/b.py:4_4\nok\n" + self.hidden_note
         )
 
     @pytest.mark.asyncio
@@ -278,24 +316,46 @@ class TestGrep:
         result = await grep_tool._arun(keywords="token")
 
         assert result == (
-            "Found 2 matches across 2 files\nsrc/b.py:4_4\nok\n"
-            "Files excluded due to policy, continue without files:\nsecrets/a.pem"
+            "Found 2 matches across 2 files\nsrc/b.py:4_4\nok\n" + self.hidden_note
         )
 
     @pytest.mark.asyncio
-    async def test_grep_drops_excluded_match_lines(self):
+    @pytest.mark.parametrize(
+        "output",
+        [
+            pytest.param("src/a.py:token\nconfig/x.secret:token", id="path_preview"),
+            pytest.param(
+                "Snippet: config/x.secret?start_line=1&end_line=1\ntoken",
+                id="go_executor",
+            ),
+        ],
+    )
+    async def test_grep_refuses_other_formats_when_the_project_has_rules(self, output):
+        grep_tool = self._setup_grep_tool_with_project(output, ["*.secret"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == self.unfilterable
+
+    @pytest.mark.asyncio
+    async def test_grep_refuses_other_formats_that_name_a_default_exclusion(self):
         grep_tool = self._setup_grep_tool_with_project(
-            "src/a.py:1:token\nconfig/x.secret:2:token\nsrc/b.py:3:token",
-            ["*.secret"],
+            "src/a.py:token\n.ssh/id_rsa:token", None
         )
 
         result = await grep_tool._arun(keywords="token")
 
-        assert result == (
-            "src/a.py:1:token\nsrc/b.py:3:token\n"
-            "Files excluded due to policy, continue without files:\n"
-            "config/x.secret"
+        assert result == self.unfilterable
+
+    @pytest.mark.asyncio
+    async def test_grep_passes_no_matches_through_when_the_project_has_rules(self):
+        grep_tool = self._setup_grep_tool_with_project(
+            "No matches found.\n", ["secrets/"]
         )
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == "No matches found.\n"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("exclusion_rules", [None, []])
@@ -308,6 +368,25 @@ class TestGrep:
         result = await grep_tool._arun(keywords="token")
 
         assert result == output
+
+    @pytest.mark.asyncio
+    async def test_grep_refuses_an_absolute_search_directory(self):
+        grep_tool = self._setup_grep_tool_with_project("unused", None)
+
+        with pytest.raises(ToolException):
+            await grep_tool._arun(keywords="token", search_directory="/etc")
+
+        grep_tool.metadata[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_grep_searches_the_root_when_no_directory_is_given(self):
+        grep_tool = self._setup_grep_tool_with_project("No matches found.\n", None)
+
+        result = await grep_tool._arun(keywords="token", search_directory=None)
+
+        assert result == "No matches found.\n"
 
     @pytest.mark.asyncio
     async def test_grep_refuses_an_excluded_search_directory(self):

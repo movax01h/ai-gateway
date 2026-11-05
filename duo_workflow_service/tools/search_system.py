@@ -19,12 +19,20 @@ _OUTPUT_OVERFLOW_MESSAGE = (
     "Too many matches to return. Retry with a more distinctive search term,"
     " or set `search_directory` to a narrower directory."
 )
-# Executors print snippet headers (`path:start_end`) or one match per line (`path:line:text`).
-_SNIPPET_HEADER = re.compile(
-    r"^(?P<path>.+):(?P<start>\d+)_(?P<end>\d+)$", re.MULTILINE
-)
+# The node executor's result: a "Found N matches" line, then per snippet a `path:start_end` header and its lines.
+_RESULT_HEADER = re.compile(r"^Found \d+ match(?:es)? across \d+ files?\b")
+_SNIPPET_HEADER = re.compile(r"^(?P<path>.+):(?P<start>\d+)_(?P<end>\d+)$")
+# The executor cuts a snippet's text at this many UTF-16 units and appends the suffix.
+_MAX_SNIPPET_LENGTH = 5000
 _TRIMMED_SUFFIX = "... (trimmed)"
-_MATCH_LINE = re.compile(r"^(?P<path>[^:]+):\d+:")
+_HIDDEN_NOTE = (
+    "Some matches are hidden by the project's file exclusion settings;"
+    " searching again will not return them."
+)
+_UNFILTERABLE_MESSAGE = (
+    "Grep results from this client cannot be checked against the project's file exclusion"
+    " settings. Use find_files and read_file instead."
+)
 
 
 class GrepInput(BaseModel):
@@ -88,7 +96,8 @@ class Grep(DuoBaseTool):
         case_insensitive: bool = True,
     ) -> str:
         """Execute the standard grep command with the specified parameters."""
-        if search_directory and ".." in search_directory:
+        search_directory = search_directory or "."
+        if ".." in search_directory:
             return "Searching above the current directory is not allowed"
 
         if search_directory not in ("", ".", "./"):
@@ -134,45 +143,44 @@ class Grep(DuoBaseTool):
         return self._drop_excluded(result)
 
     def _drop_excluded(self, result: str) -> str:
-        """Drop snippets of files excluded by the project's Duo context exclusions or the denylist."""
-        policy = FileExclusionPolicy(self.project)
-        snippets = bool(_SNIPPET_HEADER.search(result))
+        """Drop snippets of files excluded by the project's Duo context exclusions or the defaults."""
         lines = result.split("\n")
-        kept: list[str] = []
-        excluded: list[str] = []
-        i = 0
+        if not _RESULT_HEADER.match(lines[0]):
+            return result if self._unparsed_allowed(lines) else _UNFILTERABLE_MESSAGE
+        policy = FileExclusionPolicy(self.project)
+        kept, hidden, i = [lines[0]], False, 1
         while i < len(lines):
-            match = (_SNIPPET_HEADER if snippets else _MATCH_LINE).match(lines[i])
+            match = _SNIPPET_HEADER.match(lines[i])
             block = [lines[i]]
-            if match and snippets:
-                # A header is followed by its snippet's lines; a trimmed snippet ends early.
+            if match:
                 for _ in range(int(match["end"]) - int(match["start"]) + 1):
                     if i + len(block) >= len(lines):
                         break
                     block.append(lines[i + len(block)])
-                    if block[-1].endswith(_TRIMMED_SUFFIX):
+                    if _is_trimmed("\n".join(block[1:])):
                         break
             i += len(block)
             if match and not self._is_allowed(policy, match["path"]):
-                if match["path"] not in excluded:
-                    excluded.append(match["path"])
+                hidden = True
                 continue
             kept.extend(block)
-        if not excluded:
+        if not hidden:
             return result
-        return (
-            "\n".join(kept)
-            + "\n"
-            + FileExclusionPolicy.format_llm_exclusion_message(excluded)
-        )
+        return "\n".join(kept).rstrip("\n") + "\n" + _HIDDEN_NOTE + "\n"
+
+    def _unparsed_allowed(self, lines: list[str]) -> bool:
+        """Output in another format passes only when no exclusion can apply to it."""
+        if lines[0].startswith("No matches found"):
+            return True
+        if self.project and self.project.get("exclusion_rules"):
+            return False
+        # Older formats start each line with the path (`path:text`, `Snippet: path?...`).
+        paths = (re.split(r"[:?]", line.removeprefix("Snippet: "))[0] for line in lines)
+        return all(_passes_default_exclusions(p) for p in paths if p)
 
     @staticmethod
     def _is_allowed(policy: FileExclusionPolicy, path: str) -> bool:
-        try:
-            validate_duo_context_exclusions(path)
-        except ToolException:
-            return False
-        return policy.is_allowed(path)
+        return _passes_default_exclusions(path) and policy.is_allowed(path)
 
     def format_display_message(
         self, args: GrepInput, _tool_response: Any = None
@@ -181,6 +189,20 @@ class Grep(DuoBaseTool):
             search_dir = "directory"
         message = f"Search for '{args.keywords}' in files in '{search_dir}'"
         return message
+
+
+def _passes_default_exclusions(path: str) -> bool:
+    try:
+        validate_duo_context_exclusions(path)
+    except ToolException:
+        return False
+    return True
+
+
+def _is_trimmed(content: str) -> bool:
+    """True only where the executor trimmed: the suffix right after the length limit."""
+    text = content.removesuffix(_TRIMMED_SUFFIX)
+    return text != content and len(text.encode("utf-16-le")) // 2 >= _MAX_SNIPPET_LENGTH
 
 
 class GrepLiteralInput(GrepInput):
