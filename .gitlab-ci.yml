@@ -304,6 +304,7 @@ merge-train-trigger:
   variables:
     # Selects merge-train's gitlab.com HTTPS job over its ops.gitlab.net SSH one.
     MERGE_RELEASE_PLATFORM: "1"
+    TRIGGER_TARGET_PIPELINE: "1"
     SOURCE_PROJECT: gitlab-org/modelops/applied-ml/code-suggestions/ai-assist
     SOURCE_BRANCH: main
     TARGET_PROJECT: $CI_PROJECT_PATH

@@ -126,7 +126,9 @@ Once an eligible confidential security issue is assigned to an engineer:
    merge-train schedule. The schedule sets `MERGE_TRAIN` to `true`, which runs
    the `merge-train-trigger` job in `.gitlab-ci.yml`. That job triggers
    [`gitlab-org/merge-train`](https://gitlab.com/gitlab-org/merge-train), which
-   copies new canonical commits into `security/main` on every run.
+   copies new canonical commits into `security/main` on every run. When a run
+   copies commits, merge-train also starts a pipeline on `security/main`, which
+   is what makes Runway deploy them.
 
    Deactivate the schedule again in the **Sync security fork → canonical** step,
    once the sync back to canonical completes. Leaving it active only wastes
