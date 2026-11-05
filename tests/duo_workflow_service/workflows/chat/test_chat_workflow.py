@@ -484,9 +484,10 @@ async def test_workflow_run(
                 web_search_enabled=False,
                 web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
-                allow_agent_to_request_user=workflow._workflow_config.get(
-                    "allow_agent_to_request_user", True
-                ),
+                # The conftest allow_agent_to_request_user fixture pins the
+                # fetched config to False, so the literal proves the config
+                # value reaches create_agent rather than a hardcoded default.
+                allow_agent_to_request_user=False,
             )
 
             # The workflow's own tracker must be bound to this workflow's identity
@@ -578,9 +579,8 @@ async def test_workflow_run_with_agent_name_override(
                 web_search_enabled=False,
                 web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
-                allow_agent_to_request_user=workflow._workflow_config.get(
-                    "allow_agent_to_request_user", True
-                ),
+                # False comes from the conftest allow_agent_to_request_user fixture.
+                allow_agent_to_request_user=False,
             )
 
 
@@ -2460,6 +2460,44 @@ class TestWebSearchTogglePropagation:
         assert (
             mock_create_agent.call_args.kwargs["web_search_allowed_for_group"]
             is web_search_allowed_for_group
+        )
+
+
+class TestAllowAgentToRequestUserPropagation:
+    """The flag gates the chat agent's unanswerable-approval halt, so create_agent must receive the config's own value,
+    not a constant."""
+
+    @pytest.mark.parametrize(
+        ("workflow_config_value", "expected"),
+        [
+            ({"allow_agent_to_request_user": False}, False),
+            ({"allow_agent_to_request_user": True}, True),
+            # An absent key falls back to True: legacy sessions keep prompting.
+            ({}, True),
+        ],
+    )
+    def test_compile_passes_config_value_to_create_agent(
+        self,
+        workflow_with_project,
+        mock_tools_registry,
+        workflow_config_value,
+        expected,
+    ):
+        workflow = workflow_with_project
+        workflow._workflow_config = workflow_config_value
+
+        with (
+            patch("duo_workflow_service.workflows.chat.workflow.StateGraph"),
+            patch(
+                "duo_workflow_service.workflows.chat.workflow.create_agent",
+                return_value=MagicMock(),
+            ) as mock_create_agent,
+        ):
+            workflow._compile("Test goal", mock_tools_registry, MagicMock())
+
+        assert (
+            mock_create_agent.call_args.kwargs["allow_agent_to_request_user"]
+            is expected
         )
 
 

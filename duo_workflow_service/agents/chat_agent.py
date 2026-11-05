@@ -483,12 +483,14 @@ class ChatAgent:
             # A session that cannot prompt has no one to answer, so halt with an
             # explicit error instead of parking in TOOL_CALL_APPROVAL_REQUIRED forever.
             if not self._allow_agent_to_request_user:
-                requested = set(requested_ids)
-                tool_names = [
-                    call["name"]
-                    for call in agent_response.tool_calls
-                    if call.get("id") in requested
-                ]
+                # approval_messages holds an entry for every call that needs
+                # approval, id-less calls included, which requested_ids would
+                # miss; the ToolsApprovalComponent halt reads names the same way.
+                tool_names = []
+                for message in approval_messages:
+                    info = message.get("tool_info")
+                    if info:
+                        tool_names.append(info["name"])
                 if self._tracker:
                     for tool_name in tool_names:
                         self._tracker.track_tool_governance_event(
