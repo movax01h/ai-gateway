@@ -51,15 +51,15 @@
 /tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham
 
 # Business Logic Security flows and tools (Code Security)
-/duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham
-/duo_workflow_service/agent_platform/experimental/flows/configs/business_context_security_guidelines/ @mbenayoun @philipcunningham
-/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham
-/duo_workflow_service/tools/bl_*.py @mbenayoun @philipcunningham
-/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_bl_security_*.py @mbenayoun @philipcunningham
-/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_business_context_security_guidelines_prompt.py @mbenayoun @philipcunningham
-/tests/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham
-/tests/duo_workflow_service/tools/test_bl_*.py @mbenayoun @philipcunningham
-/tests/model_selection/test_shipped_bl_security_setting.py @mbenayoun @philipcunningham
+/duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham @mtolpin
+/duo_workflow_service/agent_platform/experimental/flows/configs/business_context_security_guidelines/ @mbenayoun @philipcunningham @mtolpin
+/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham @mtolpin
+/duo_workflow_service/tools/bl_*.py @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_bl_security_*.py @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_business_context_security_guidelines_prompt.py @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/tools/test_bl_*.py @mbenayoun @philipcunningham @mtolpin
+/tests/model_selection/test_shipped_bl_security_setting.py @mbenayoun @philipcunningham @mtolpin
 
 # SAST vulnerability resolution flow and prompts
 /ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
@@ -153,15 +153,15 @@
 /tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham
 
 # Business Logic Security flows and tools (Code Security)
-/duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham
-/duo_workflow_service/agent_platform/experimental/flows/configs/business_context_security_guidelines/ @mbenayoun @philipcunningham
-/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham
-/duo_workflow_service/tools/bl_*.py @mbenayoun @philipcunningham
-/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_bl_security_*.py @mbenayoun @philipcunningham
-/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_business_context_security_guidelines_prompt.py @mbenayoun @philipcunningham
-/tests/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham
-/tests/duo_workflow_service/tools/test_bl_*.py @mbenayoun @philipcunningham
-/tests/model_selection/test_shipped_bl_security_setting.py @mbenayoun @philipcunningham
+/duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham @mtolpin
+/duo_workflow_service/agent_platform/experimental/flows/configs/business_context_security_guidelines/ @mbenayoun @philipcunningham @mtolpin
+/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham @mtolpin
+/duo_workflow_service/tools/bl_*.py @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_bl_security_*.py @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/agent_platform/experimental/flows/configs/test_business_context_security_guidelines_prompt.py @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/bl_security/ @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/tools/test_bl_*.py @mbenayoun @philipcunningham @mtolpin
+/tests/model_selection/test_shipped_bl_security_setting.py @mbenayoun @philipcunningham @mtolpin
 
 # SAST vulnerability resolution flow and prompts
 /ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
