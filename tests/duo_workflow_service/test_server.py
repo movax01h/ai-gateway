@@ -64,6 +64,10 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
     MissingAdditionalContextError,
     NotifiableAgentException,
 )
+from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogItemsError,
+    CatalogItemsFetchError,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
@@ -101,6 +105,8 @@ from duo_workflow_service.interceptors.trusted_restricted_issuers import (
 )
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.server import (
+    CATALOG_FETCH_FAILED_DETAILS,
+    CATALOG_REFUSAL_DETAILS,
     CONTAINER_APPLICATION_PACKAGES,
     DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S,
     DEFAULT_SHUTDOWN_KILL_DEADLINE_S,
@@ -1595,6 +1601,38 @@ def _cyclic_error() -> BaseException:
             grpc.StatusCode.PERMISSION_DENIED,
             "Workflow token is not authorized for the requested workflow",
         ),
+        (
+            CatalogItemsError("Item 'gid://gitlab/Ai::Catalog::Item/7' is not enabled"),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            CATALOG_REFUSAL_DETAILS,
+        ),
+        (
+            CatalogItemsFetchError("HTTP 404: not found", status_code=404),
+            False,
+            None,
+            grpc.StatusCode.PERMISSION_DENIED,
+            CATALOG_REFUSAL_DETAILS,
+        ),
+        (
+            # A 5xx with retries exhausted is a server fault, not a refusal. The message
+            # embeds GitLab's body ("upstream down"), so the details must stay static.
+            CatalogItemsFetchError("HTTP 503: upstream down", status_code=503),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            CATALOG_FETCH_FAILED_DETAILS,
+        ),
+        (
+            # A 2xx with a malformed body (no status) is a server fault too, never a refusal
+            # (see is_catalog_refusal). Its body must not reach the gRPC status details.
+            CatalogItemsFetchError("expected object, got list"),
+            False,
+            None,
+            grpc.StatusCode.INTERNAL,
+            CATALOG_FETCH_FAILED_DETAILS,
+        ),
     ],
 )
 @patch("duo_workflow_service.server.current_monitoring_context")
@@ -1644,6 +1682,12 @@ async def test_execute_workflow_status_codes(
     assert actual_detail.startswith(expected_detail_prefix)
     # Checkpoint content can carry conversation content and must never reach the details.
     assert "compressedCheckpoint" not in actual_detail
+    # A catalog fetch failure embeds GitLab's raw response body in its message; the gRPC
+    # status details are static, so that body must never appear in them.
+    if expected_detail_prefix == CATALOG_FETCH_FAILED_DETAILS:
+        assert actual_detail == CATALOG_FETCH_FAILED_DETAILS
+        assert "upstream down" not in actual_detail
+        assert "got list" not in actual_detail
 
 
 @pytest.mark.asyncio
