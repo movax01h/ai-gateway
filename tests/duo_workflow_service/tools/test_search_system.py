@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.tools import ToolException
 
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.tools.search_system import (
     ExtractLinesFromText,
     ExtractLinesFromTextInput,
@@ -187,6 +188,104 @@ class TestGrep:
 
         with pytest.raises(ToolException, match="ripgrep failed"):
             await grep_tool._arun(keywords="end")
+
+    @staticmethod
+    def _project(exclusion_rules):
+        return Project(
+            id=1,
+            name="test-project",
+            description="Test project",
+            http_url_to_repo="http://example.com/repo.git",
+            web_url="http://example.com/repo",
+            languages=[],
+            exclusion_rules=exclusion_rules,
+        )
+
+    def _setup_grep_tool_with_project(self, mock_response, exclusion_rules):
+        grep_tool = self._setup_grep_tool_with_mocks(mock_response)
+        grep_tool.metadata["project"] = self._project(exclusion_rules)
+        return grep_tool
+
+    snippet_output = (
+        "Found 4 matches across 4 files\n"
+        "src/app.py:3_4\n"
+        "token = load()\n"
+        "check(token)\n"
+        "secrets/key.pem:1_1\n"
+        "token: abc:12:def\n"
+        ".env:2_2\n"
+        "TOKEN=xyz\n"
+        "lib/util.py:7_7\n"
+        "return token\n"
+    )
+
+    @pytest.mark.asyncio
+    async def test_grep_drops_snippets_of_excluded_files(self):
+        grep_tool = self._setup_grep_tool_with_project(
+            self.snippet_output, ["secrets/"]
+        )
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == (
+            "Found 4 matches across 4 files\n"
+            "src/app.py:3_4\n"
+            "token = load()\n"
+            "check(token)\n"
+            "lib/util.py:7_7\n"
+            "return token\n"
+            "\n"
+            "Files excluded due to policy, continue without files:\n"
+            "secrets/key.pem\n"
+            ".env"
+        )
+
+    @pytest.mark.asyncio
+    async def test_grep_drops_excluded_match_lines(self):
+        grep_tool = self._setup_grep_tool_with_project(
+            "src/a.py:1:token\nconfig/x.secret:2:token\nsrc/b.py:3:token",
+            ["*.secret"],
+        )
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == (
+            "src/a.py:1:token\nsrc/b.py:3:token\n"
+            "Files excluded due to policy, continue without files:\n"
+            "config/x.secret"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exclusion_rules", [None, []])
+    async def test_grep_without_exclusion_rules_keeps_non_sensitive_output(
+        self, exclusion_rules
+    ):
+        output = "Found 1 match across 1 file\nsrc/app.py:3_3\ntoken = load()\n"
+        grep_tool = self._setup_grep_tool_with_project(output, exclusion_rules)
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == output
+
+    @pytest.mark.asyncio
+    async def test_grep_refuses_an_excluded_search_directory(self):
+        grep_tool = self._setup_grep_tool_with_project("unused", ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token", search_directory="secrets")
+
+        assert result == (
+            "Files excluded due to policy, continue without files:\nsecrets"
+        )
+        grep_tool.metadata[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_grep_refuses_a_sensitive_search_directory(self):
+        grep_tool = self._setup_grep_tool_with_project("unused", None)
+
+        with pytest.raises(ToolException, match="Duo Context Exclusion"):
+            await grep_tool._arun(keywords="token", search_directory=".ssh")
 
     @pytest.mark.asyncio
     async def test_grep_security_check(self):

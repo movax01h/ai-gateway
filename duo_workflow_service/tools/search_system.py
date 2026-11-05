@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, ClassVar, Optional, Type
 
 from langchain_core.tools import ToolException
@@ -6,14 +7,21 @@ from pydantic import BaseModel, Field
 
 from contract import contract_pb2
 from duo_workflow_service.executor.action import _execute_action
+from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-from duo_workflow_service.tools.filesystem import _format_no_matches_message
+from duo_workflow_service.tools.filesystem import (
+    _format_no_matches_message,
+    validate_duo_context_exclusions,
+)
 
 _OUTPUT_OVERFLOW_MARKER = "stdout maxBuffer length exceeded"
 _OUTPUT_OVERFLOW_MESSAGE = (
     "Too many matches to return. Retry with a more distinctive search term,"
     " or set `search_directory` to a narrower directory."
 )
+# Executors print snippet headers (`path:start_end`) or one match per line (`path:line:text`).
+_SNIPPET_HEADER = re.compile(r"^(?P<path>.+):\d+_\d+$", re.MULTILINE)
+_MATCH_LINE = re.compile(r"^(?P<path>[^:]+):\d+:")
 
 
 class GrepInput(BaseModel):
@@ -80,6 +88,16 @@ class Grep(DuoBaseTool):
         if search_directory and ".." in search_directory:
             return "Searching above the current directory is not allowed"
 
+        if search_directory not in ("", ".", "./"):
+            policy = FileExclusionPolicy(self.project)
+            # Directory rules such as `secrets/` match the files under it, not the bare name.
+            child = search_directory.rstrip("/") + "/_"
+            if not (policy.is_allowed(search_directory) and policy.is_allowed(child)):
+                return FileExclusionPolicy.format_llm_exclusion_message(
+                    [search_directory]
+                )
+            validate_duo_context_exclusions(search_directory)
+
         # Executors split on ","; an empty term matches every line, and not all trim.
         terms = [term.strip() for term in keywords.split(",")]
         keywords = ",".join(term for term in terms if term)
@@ -110,7 +128,36 @@ class Grep(DuoBaseTool):
         ):
             return _format_no_matches_message(keywords, search_directory)
 
-        return result
+        return self._drop_excluded(result)
+
+    def _drop_excluded(self, result: str) -> str:
+        """Drop snippets of files excluded by the project's Duo context exclusions or the denylist."""
+        policy = FileExclusionPolicy(self.project)
+        kept: list[str] = []
+        excluded: list[str] = []
+        keep = True
+        path_pattern = (
+            _SNIPPET_HEADER if _SNIPPET_HEADER.search(result) else _MATCH_LINE
+        )
+        for line in result.split("\n"):
+            if match := path_pattern.match(line):
+                path = match.group("path")
+                try:
+                    validate_duo_context_exclusions(path)
+                    keep = policy.is_allowed(path)
+                except ToolException:
+                    keep = False
+                if not keep and path not in excluded:
+                    excluded.append(path)
+            if keep:
+                kept.append(line)
+        if not excluded:
+            return result
+        return (
+            "\n".join(kept)
+            + "\n"
+            + FileExclusionPolicy.format_llm_exclusion_message(excluded)
+        )
 
     def format_display_message(
         self, args: GrepInput, _tool_response: Any = None
