@@ -10,6 +10,35 @@ from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInpu
 
 logger = structlog.stdlib.get_logger(__name__)
 
+# Upper bound on pages fetched by a single tool call when fetch_all_pages is true.
+MAX_AUDIT_EVENT_PAGES = 5
+
+
+def _read_pagination_headers(response: Any) -> Dict[str, str]:
+    """Return the response headers with lowercased keys.
+
+    Headers may be a dict or a protobuf map; a missing or None headers object is treated as empty.
+    """
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return {}
+
+    try:
+        items = headers.items()
+    except AttributeError:
+        return {}
+
+    return {
+        str(key).lower(): "" if value is None else str(value) for key, value in items
+    }
+
+
+def _parse_int(value: str) -> Optional[int]:
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
 
 class BaseAuditEventsInput(BaseModel):
     """Base model for audit events input parameters."""
@@ -35,7 +64,11 @@ class BaseAuditEventsInput(BaseModel):
     )
     fetch_all_pages: Optional[bool] = Field(
         default=False,
-        description="Whether to fetch all pages of results (default: False). Use with caution for large datasets.",
+        description=(
+            "Whether to fetch all pages of results (default: False). Use with caution for large datasets. "
+            f"At most {MAX_AUDIT_EVENT_PAGES} pages are fetched per call; when the response pagination has "
+            "truncated=true and has_more=true, narrow the time range or continue from the next page."
+        ),
     )
 
 
@@ -81,12 +114,21 @@ class BaseAuditEventsTool(DuoBaseTool):
     ) -> Tuple[list, Dict[str, Any]]:
         """Fetch audit events with pagination support.
 
+        When fetch_all_pages is true, at most MAX_AUDIT_EVENT_PAGES pages are fetched. The loop also stops on a short
+        page or when the x-next-page header is present and empty. x-total-pages is reported but never used to stop,
+        because GitLab omits it for queries with more than 10,000 records.
+
         Returns:
             Tuple of (audit_events_list, pagination_info)
         """
-        all_audit_events = []
+        all_audit_events: list = []
         current_page = initial_page
-        total_pages = None
+        last_fetched_page = initial_page
+        pages_fetched = 0
+        total_pages: Optional[int] = None
+        truncated = False
+        has_more = False
+        error: Optional[str] = None
         params["per_page"] = per_page
 
         while True:
@@ -97,42 +139,64 @@ class BaseAuditEventsTool(DuoBaseTool):
                 parse_json=True,
             )
 
-            audit_events = self._process_http_response(
-                identifier="audit events",
-                response=response,
-                logger=logger,
-            )
+            # Read headers from the raw response: _process_http_response returns only the body.
+            headers = _read_pagination_headers(response)
+
+            try:
+                # A later-page failure is logged once, with the page number, by the warning below, so only
+                # the first page lets _process_http_response log it.
+                audit_events = self._process_http_response(
+                    identifier="audit events",
+                    response=response,
+                    logger=logger if pages_fetched == 0 else None,
+                )
+            except ToolException as exc:
+                if pages_fetched == 0:
+                    raise
+                # The HTTP client retries transient failures such as 429, so a later-page failure only
+                # reaches here after those retries are exhausted. Keep the events collected so far.
+                logger.warning(
+                    "Audit events pagination stopped early",
+                    page=current_page,
+                    error=str(exc),
+                )
+                truncated = True
+                has_more = True
+                error = str(exc)
+                break
+
+            pages_fetched += 1
+            last_fetched_page = current_page
             all_audit_events.extend(audit_events)
 
-            # Get total pages from headers if available
-            if (
-                total_pages is None
-                and hasattr(self.gitlab_client, "last_response")
-                and self.gitlab_client.last_response
-            ):
-                try:
-                    total_pages = int(
-                        self.gitlab_client.last_response.headers.get("X-Total-Pages", 0)
-                    )
-                except (ValueError, TypeError):
-                    total_pages = None
+            if "x-total-pages" in headers:
+                total_pages = _parse_int(headers["x-total-pages"])
 
-            # Break if we're not fetching all pages or if we've reached the last page
-            if (
-                not fetch_all_pages
-                or len(audit_events) < per_page
-                or (total_pages and current_page >= total_pages)
-            ):
+            # x-next-page absent means unknown, so rely on the short-page check; present and empty means
+            # this is the last page. Never stop on a missing x-total-pages: GitLab omits it above 10,000 records.
+            next_page = headers.get("x-next-page")
+            is_last_page = next_page is not None and not next_page.strip()
+            has_more = len(audit_events) >= per_page and not is_last_page
+
+            if not fetch_all_pages or not has_more:
+                break
+
+            if pages_fetched >= MAX_AUDIT_EVENT_PAGES:
+                truncated = True
                 break
 
             current_page += 1
 
-        pagination_info = {
+        pagination_info: Dict[str, Any] = {
             "total_items": len(all_audit_events),
             "total_pages": total_pages,
-            "current_page": current_page,
+            "current_page": last_fetched_page,
             "per_page": per_page,
+            "truncated": truncated,
+            "has_more": has_more,
         }
+        if error is not None:
+            pagination_info["error"] = error
 
         return all_audit_events, pagination_info
 
