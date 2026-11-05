@@ -269,6 +269,20 @@ class TestGrep:
         )
 
     @pytest.mark.asyncio
+    async def test_grep_handles_output_that_ends_inside_a_snippet(self):
+        output = (
+            "Found 2 matches across 2 files\nsrc/b.py:4_4\nok\nsecrets/a.pem:1_3\nkey"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == (
+            "Found 2 matches across 2 files\nsrc/b.py:4_4\nok\n"
+            "Files excluded due to policy, continue without files:\nsecrets/a.pem"
+        )
+
+    @pytest.mark.asyncio
     async def test_grep_drops_excluded_match_lines(self):
         grep_tool = self._setup_grep_tool_with_project(
             "src/a.py:1:token\nconfig/x.secret:2:token\nsrc/b.py:3:token",
