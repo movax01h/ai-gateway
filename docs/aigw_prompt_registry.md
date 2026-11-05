@@ -181,7 +181,8 @@ The AI Gateway serves some prompts over HTTP, for example on the prompt routes (
 `/v2/prompts/<prompt_id>`) that GitLab Rails calls. For each version of such a prompt, `models_from` names the feature
 setting in `unit_primitives.yml` whose models the version can run on.
 
-- Set `models_from` only on prompts that the AI Gateway serves over HTTP.
+- Set `models_from` only on prompts that the AI Gateway serves over HTTP. For a feature under `ai/features/`, its
+  `serving.py` must declare `ServingSurface(transport="rest", deployable="aigw")`. A test checks this.
 - Do not set `models_from` on a prompt that only the Duo Workflow Service runs, for example the prompt of a flow
   component or `classify_goal_tier`. The flow selects the models of its prompts.
 - `InMemoryPromptConfig`, the inline prompt of a custom flow, does not accept `models_from`. A client must not select
