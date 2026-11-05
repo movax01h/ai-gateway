@@ -451,6 +451,31 @@ class TestUnauthorizedScopes:
         assert response.json() == {"detail": "Unauthorized to access 'test'"}
 
 
+@pytest.mark.usefixtures(
+    "frozen_datetime_now", "mock_ai_gateway_container", "mock_registry_get"
+)
+class TestTokenIssuer:
+    """The prompt routes serve GitLab-issued tokens only, not tokens the AI Gateway signs for direct access."""
+
+    @pytest.mark.parametrize(
+        ("issuer", "expected_status"),
+        [("gitlab.com", 200), ("gitlab-ai-gateway", 403)],
+    )
+    def test_issuer(self, mock_client, expected_status):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == expected_status
+        if expected_status == 403:
+            assert response.json() == {"detail": "Unauthorized to access 'test'"}
+
+
 class TestMisdirectedRequest:
     @pytest.fixture(name="mock_model_misdirection")
     def mock_model_misdirection_fixture(self):

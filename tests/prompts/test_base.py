@@ -2686,6 +2686,45 @@ class TestBaseRegistry:
         internal_event_client.track_event.assert_not_called()
 
     @pytest.mark.parametrize(
+        ("unit_primitive", "scopes", "issuer", "success"),
+        [
+            (GitLabUnitPrimitive.COMPLETE_CODE, ["complete_code"], "gitlab.com", True),
+            (
+                GitLabUnitPrimitive.COMPLETE_CODE,
+                ["complete_code"],
+                "gitlab-ai-gateway",
+                False,
+            ),
+        ],
+    )
+    def test_get_on_behalf_with_disallowed_issuers(
+        self,
+        internal_event_client: Mock,
+        registry: BasePromptRegistry,
+        user: StarletteUser,
+        prompt: Prompt,
+        success: bool,
+    ):
+        if success:
+            assert (
+                registry.get_on_behalf(
+                    user=user,
+                    prompt_id="test",
+                    disallowed_issuers=["gitlab-ai-gateway"],
+                )
+                == prompt
+            )
+        else:
+            with pytest.raises(WrongUnitPrimitives):
+                registry.get_on_behalf(
+                    user=user,
+                    prompt_id="test",
+                    disallowed_issuers=["gitlab-ai-gateway"],
+                )
+
+            internal_event_client.track_event.assert_not_called()
+
+    @pytest.mark.parametrize(
         ("model_metadata", "unit_primitive", "scopes"),
         [
             (
