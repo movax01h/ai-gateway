@@ -928,5 +928,29 @@ class TestLogging:
         out = next(e for e in logs if e["event"] == "bl_discover_and_cluster output")
         assert (out["project_id"], out["branch"]) == (42, "main")
 
+    def test_accepted_tuner_patterns_are_logged(self, monkeypatch):
+        bulk = "".join(f"bulk/b{i}.ext\n" for i in range(51))
+        _install(monkeypatch, "core/security/gate.ext\napp_main.ext\n" + bulk)
+        with structlog.testing.capture_logs() as logs:
+            _execute(
+                files_per_unit=8,
+                max_units=5,
+                extra_globs=["core/security/gate.ext", "off"],
+                extra_anchor_patterns=[r"(^|/)app_main\.ext$", "(", r"\Abulk/"],
+            )
+        out = next(e for e in logs if e["event"] == "bl_discover_and_cluster output")
+        assert out["extra_glob_patterns"] == ["core/security/gate.ext"]
+        assert out["extra_anchor_regexes"] == [r"(^|/)app_main\.ext$"]
+
+    def test_capped_anchor_patterns_are_logged_as_supplied(self, monkeypatch):
+        paths = [f"d{d}/f{i}.ext" for d in range(5) for i in range(45)]
+        patterns = [rf"\Ad{d}/f\d+\.ext\Z" for d in range(5)]
+        _install(monkeypatch, "\n".join(paths) + "\n")
+        with structlog.testing.capture_logs() as logs:
+            _execute(files_per_unit=8, max_units=5, extra_anchor_patterns=patterns)
+        out = next(e for e in logs if e["event"] == "bl_discover_and_cluster output")
+        assert out["extra_anchor_regexes"] == patterns
+        assert any("capped" in e["event"] for e in logs)
+
     def test_only_the_tool_class_is_exported(self):
         assert bl.__all__ == ["BlDiscoverAndCluster"]
