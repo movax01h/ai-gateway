@@ -28,6 +28,7 @@ from ai_gateway.model_selection import (
     LLMDefinition,
     ModelNotAllowedForFeatureError,
     ModelSelectionConfig,
+    ModelSelectionError,
     ProviderNotServedError,
     UnitPrimitiveConfig,
 )
@@ -581,6 +582,8 @@ class TestCheckClientModelMetadata:
                     "log_level": "warning",
                     "reason": "model_not_allowed",
                     "mode": "log",
+                    "outcome": "served",
+                    "enforce_outcome": "refused",
                     "surface": "http",
                     "feature_setting": FEATURE,
                     "client_feature_setting": FEATURE,
@@ -872,6 +875,169 @@ def _note_prompt_feature(raw: dict, prompt_feature_setting: str):
             log_context={"prompt_id": "test/prompt"},
         )
     return logs
+
+
+class TestOutcomeLogFields:
+    """Each event logs what its check does in the current mode, and what `enforce` mode would do."""
+
+    CASES = [
+        pytest.param(
+            "http",
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            MISMATCH,
+            "model_not_allowed",
+            id="http-model-not-allowed",
+        ),
+        pytest.param(
+            "dws",
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            MISMATCH,
+            "model_not_allowed",
+            id="dws-model-not-allowed",
+        ),
+        pytest.param(
+            "http",
+            {"provider": "gitlab", "name": "other_model"},
+            {},
+            MISMATCH,
+            "missing_feature_setting",
+            id="http-missing-feature",
+        ),
+        pytest.param(
+            "dws",
+            {"provider": "gitlab", "name": "other_model"},
+            {},
+            NOTE,
+            "missing_feature_setting",
+            id="dws-resume-replay",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": "nope",
+            },
+            {},
+            MISMATCH,
+            "unknown_feature",
+            id="http-unknown-feature",
+        ),
+        pytest.param(
+            "http",
+            {"provider": "gitlab", "feature_setting": OTHER_FEATURE},
+            {"feature_setting": FEATURE},
+            MISMATCH,
+            "feature_mismatch",
+            id="http-feature-mismatch",
+        ),
+        pytest.param(
+            "http",
+            {"provider": "gitlab", "feature_setting": OTHER_FEATURE},
+            {"feature_setting": "nope"},
+            MISMATCH,
+            "feature_mismatch",
+            id="http-feature-mismatch-with-an-unknown-call-site-feature",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "gitlab",
+                "name": "allowed_model",
+                "identifier": "vertex_ai/other-model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            MISMATCH,
+            "managed_identifier_override",
+            id="http-identifier-override",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "litellm",
+                "name": "allowed_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            MISMATCH,
+            "provider_not_served",
+            id="http-provider-not-served",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "gitlab",
+                "identifier": "dev_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            NOTE,
+            "dev_model",
+            id="http-dev-model",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "gitlab",
+                "identifier": "deprecated_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            NOTE,
+            "deprecated_model",
+            id="http-deprecated-model",
+        ),
+    ]
+
+    @staticmethod
+    def _run(monkeypatch, mode, surface, raw, kwargs):
+        """Run the check in `mode` and return what it did with the request, and its log entry."""
+        model_selection = get_config().model_selection
+        monkeypatch.setattr(model_selection, "feature_allowlist_mode_http", mode)
+        monkeypatch.setattr(model_selection, "feature_allowlist_mode_dws", mode)
+        request = ClientModelRequest.from_raw(raw)
+        metadata = (
+            _dws_metadata(raw) if surface == "dws" else create_model_metadata(dict(raw))
+        )
+        with structlog.testing.capture_logs() as logs:
+            try:
+                result = check_client_model_metadata(
+                    request, metadata, surface=surface, **kwargs
+                )
+                done = "served" if result is metadata else "replaced"
+            except ModelSelectionError:
+                done = "refused"
+        return done, logs
+
+    @pytest.mark.parametrize(("surface", "raw", "kwargs", "event", "reason"), CASES)
+    def test_the_logged_outcomes_match_what_each_mode_does(
+        self, monkeypatch, surface, raw, kwargs, event, reason
+    ):
+        done_in = {}
+        entries = {}
+        for mode in ALL_MODES:
+            done_in[mode], logs = self._run(monkeypatch, mode, surface, raw, kwargs)
+            [entries[mode]] = [
+                entry
+                for entry in logs
+                if entry["event"] == event and entry["reason"] == reason
+            ]
+
+        assert {mode: entry["outcome"] for mode, entry in entries.items()} == done_in
+        assert {entry["enforce_outcome"] for entry in entries.values()} == {
+            done_in["enforce"]
+        }
 
 
 @pytest.mark.usefixtures("feature_allowlist_mode")

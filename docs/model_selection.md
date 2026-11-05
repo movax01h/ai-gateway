@@ -674,8 +674,46 @@ rather than by event. Informational cases (`missing_feature_setting` on the Duo 
 `deprecated_model`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
 `Model allowlist note`.
 
+Each mismatch and note also has the `outcome` of the check in the current mode, and the `enforce_outcome` that
+`enforce` mode would have. The values are:
+
+- `served`: the request keeps its model.
+- `replaced`: the gateway serves another model, such as the feature's default or the prompt's default.
+- `refused`: the gateway rejects the request with HTTP 403 or gRPC `PERMISSION_DENIED`.
+
 To roll back a stricter mode, set the variable of that surface to `log`. For example, set
 `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP=log`.
+
+### Find the requests that `enforce` mode would refuse
+
+Before you move a surface to `enforce` mode, find the requests that it would refuse in the logs of the current mode.
+Production logs are in the Google Cloud project `gitlab-runway-production`. The AI Gateway runs as the Cloud Run
+service `ai-gateway`, and the Duo Workflow Service as `duo-workflow-svc`.
+
+1. Filter on the allowlist events that `enforce` mode would refuse. For example, in the Logs Explorer:
+
+   ```plaintext
+   resource.labels.service_name="ai-gateway"
+   jsonPayload.logger="feature_allowlist"
+   jsonPayload.enforce_outcome="refused"
+   ```
+
+   Use `duo-workflow-svc` for the Duo Workflow Service.
+1. Group the events by `reason`, `path` (HTTP) or `method` (gRPC), and `feature_setting`, to see which call sites the
+   change affects.
+1. Group them by `gitlab_realm`, `gitlab_instance_id` and `gitlab_version`, to see which clients would get an error.
+   `is_gitlab_team_member` shows requests from team members.
+1. Check `requested_name`, `requested_identifier` and `provider` to tell a stale client setting from a request that
+   was made by hand.
+1. For an HTTP request, find the user agent and the response status in the access log. Filter on the
+   `correlation_id` of the event, with `jsonPayload.logger="api.access"`.
+
+One request can log more than one event, so count requests by `correlation_id`. To see what `enforce` mode would do
+to the other requests, filter on `jsonPayload.enforce_outcome="replaced"`: these requests keep working, but get
+another model.
+
+On the Duo Workflow Service, the check uses the client's `feature_setting` until the service derives the feature from
+the flow. Until then, `enforce_outcome` shows what `enforce` mode would do with the client's feature only.
 
 ## Developer models
 
