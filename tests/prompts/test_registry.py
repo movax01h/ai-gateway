@@ -1854,6 +1854,15 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
     }
 )
 
+# Prompt IDs that the Duo Workflow Service runs in-process, never over the prompt routes. It always passes model
+# metadata, so these do not need an entry in PROMPT_ID_TO_FEATURE_SETTING.
+_IN_PROCESS_PROMPT_IDS: frozenset[str] = frozenset(
+    {
+        # The model routing step runs it with the model of the `classifier` or `small` tag.
+        "classify_goal_tier",
+    }
+)
+
 
 class TestDuoAgentPlatformPromptRegistration:
     """
@@ -1866,7 +1875,8 @@ class TestDuoAgentPlatformPromptRegistration:
     1. Add it to PROMPT_ID_TO_FEATURE_SETTING in ai_gateway/prompts/registry.py
         (for prompts called directly via HTTP without model_metadata).
     2. Add its ID to _GRAPH_NODE_PROMPT_IDS in this file
-        (for prompts always invoked as DAP graph nodes via is_graph_node=True).
+        (for prompts always invoked as DAP graph nodes via is_graph_node=True),
+        or to _IN_PROCESS_PROMPT_IDS (for prompts that the Duo Workflow Service runs in-process).
     3. Add a matching entry to ai_gateway/model_selection/unit_primitives.yml
         (if the prompt warrants its own standalone feature setting).
     """
@@ -1925,8 +1935,8 @@ class TestDuoAgentPlatformPromptRegistration:
             # Passes if explicitly registered for direct-HTTP routing
             if prompt_id in PROMPT_ID_TO_FEATURE_SETTING:
                 continue
-            # Passes if acknowledged as a graph-node-only prompt
-            if prompt_id in _GRAPH_NODE_PROMPT_IDS:
+            # Passes if acknowledged as a graph-node-only or in-process prompt
+            if prompt_id in _GRAPH_NODE_PROMPT_IDS | _IN_PROCESS_PROMPT_IDS:
                 continue
             missing.append(prompt_id)
 
@@ -1938,35 +1948,39 @@ class TestDuoAgentPlatformPromptRegistration:
         )
 
 
-# Prompts besides `_GRAPH_NODE_PROMPT_IDS` that need no entry in PROMPT_ID_TO_FEATURE_SETTING,
+# Prompts besides `_GRAPH_NODE_PROMPT_IDS` and `_IN_PROCESS_PROMPT_IDS` that need no entry in PROMPT_ID_TO_FEATURE_SETTING,
 # because no GitLab client calls them on the prompt routes with a feature setting of its own.
-_PROMPTS_WITHOUT_AN_ENTRY: frozenset[str] = _GRAPH_NODE_PROMPT_IDS | frozenset(
-    {
-        # GitLab Rails calls these on the prompt routes without a feature setting:
-        # `generate_description` sends no model metadata, and `model_configuration/check`
-        # sends self-hosted model metadata only.
-        "generate_description",
-        "model_configuration/check",
-        # Clients reach these through other routes.
-        "chat/agent",
-        "chat/react",
-        "embeddings_code",
-        # The Duo Workflow Service runs these.
-        "create_merge_request",
-        "create_repository_branch",
-        "list_available_tools",
-        "programming_agent",
-        "push_to_remote",
-        "recommend_reviewers_assign",
-        "recommend_reviewers_post",
-        "review_merge_request_dap",
-        "workflow/context_builder",
-        "workflow/convert_to_gitlab_ci",
-        "workflow/create_branch",
-        "workflow/executor",
-        "workflow/issue_to_merge_request",
-        "workflow/planner",
-    }
+_PROMPTS_WITHOUT_AN_ENTRY: frozenset[str] = (
+    _GRAPH_NODE_PROMPT_IDS
+    | _IN_PROCESS_PROMPT_IDS
+    | frozenset(
+        {
+            # GitLab Rails calls these on the prompt routes without a feature setting:
+            # `generate_description` sends no model metadata, and `model_configuration/check`
+            # sends self-hosted model metadata only.
+            "generate_description",
+            "model_configuration/check",
+            # Clients reach these through other routes.
+            "chat/agent",
+            "chat/react",
+            "embeddings_code",
+            # The Duo Workflow Service runs these.
+            "create_merge_request",
+            "create_repository_branch",
+            "list_available_tools",
+            "programming_agent",
+            "push_to_remote",
+            "recommend_reviewers_assign",
+            "recommend_reviewers_post",
+            "review_merge_request_dap",
+            "workflow/context_builder",
+            "workflow/convert_to_gitlab_ci",
+            "workflow/create_branch",
+            "workflow/executor",
+            "workflow/issue_to_merge_request",
+            "workflow/planner",
+        }
+    )
 )
 
 
@@ -1980,15 +1994,6 @@ _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE: dict[Path, str] = {
         "ai/features/review/summarize_review/prompts/base/3.0.0.yml"
     ): "duo_agent_platform",
 }
-
-# Prompts with an entry in PROMPT_ID_TO_FEATURE_SETTING that the AI Gateway does not serve over HTTP. `models_from` is
-# only for prompts served over HTTP, so their versions do not set it.
-_PROMPTS_WITH_AN_ENTRY_NOT_SERVED_OVER_HTTP: frozenset[str] = frozenset(
-    {
-        # The Duo Workflow Service runs it in-process to route a goal to a model.
-        "classify_goal_tier",
-    }
-)
 
 
 class TestPromptFeatureSettings:
@@ -2104,8 +2109,7 @@ class TestPromptFeatureSettings:
         """Each version sets `models_from` to the feature setting of its entry, or to the one listed for it in
         `_VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE`.
 
-        The versions of `_PROMPTS_WITH_AN_ENTRY_NOT_SERVED_OVER_HTTP` set none. The `amazon_q` versions set none
-        either: no feature setting lists their `amazon_q_integration` unit primitive.
+        The `amazon_q` versions set none: no feature setting lists their `amazon_q_integration` unit primitive.
         """
         mismatched = []
         for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items():
@@ -2113,8 +2117,7 @@ class TestPromptFeatureSettings:
                 version = version_file.relative_to(REPO_ROOT)
                 expected = (
                     None
-                    if prompt_id in _PROMPTS_WITH_AN_ENTRY_NOT_SERVED_OVER_HTTP
-                    or version_file.parent.name == "amazon_q"
+                    if version_file.parent.name == "amazon_q"
                     else _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE.get(
                         version, feature_setting
                     )
@@ -2247,14 +2250,14 @@ class TestDefaultModelOfAPromptVersion:
             .default_model_identifiers[0]
         )
 
-    def test_serves_the_default_of_the_entry_for_a_version_without_models_from(
+    def test_serves_the_default_of_the_prompt_id_for_a_version_without_models_from(
         self, repo_registry: LocalPromptRegistry
     ):
-        metadata = repo_registry._default_model_metadata("classify_goal_tier", "^1.0.0")
+        metadata = repo_registry._default_model_metadata("workflow/planner", "^1.0.0")
 
         assert (
             metadata.llm_definition.gitlab_identifier
             == ModelSelectionConfig.instance()
-            .get_unit_primitive_config_map()["duo_agent_platform"]
+            .get_unit_primitive_config_map()["workflow"]
             .default_model_identifiers[0]
         )

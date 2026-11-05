@@ -193,10 +193,11 @@ LEGACY_MODEL_MAPPING = {
 #   instance with a configured ai_gateway_url.
 # - The prompt routes check client model metadata in the same order: the `models_from` of the
 #   version, then this feature.
-# - Each version of a prompt here that the AI Gateway serves over HTTP declares `models_from`.
-#   It is this feature, except for a version that uses the unit primitive of another feature,
-#   such as `summarize_review` 3.0.0. A prompt that only the Duo Workflow Service runs does not
-#   set `models_from`.
+# - Each version of a prompt here declares `models_from`, except the `amazon_q` versions. It is
+#   this feature, except for a version that uses the unit primitive of another feature, such as
+#   `summarize_review` 3.0.0.
+# - A prompt that only the Duo Workflow Service runs, such as `classify_goal_tier`, has no entry
+#   here. The Duo Workflow Service passes its model metadata.
 PROMPT_ID_TO_FEATURE_SETTING: dict[str, str] = {
     "code_suggestions/completions": "code_completions",
     "code_suggestions/generations": "code_generations",
@@ -218,9 +219,6 @@ PROMPT_ID_TO_FEATURE_SETTING: dict[str, str] = {
     "classify_code_review_mention_intent": "duo_agent_platform",
     "generate_session_title": "duo_agent_platform",
     "summarize_duo_workflow": "duo_agent_platform",
-    # The Duo Workflow Service calls this one in-process, not over the prompt routes, so its versions
-    # do not set `models_from`.
-    "classify_goal_tier": "duo_agent_platform",
     "feature_discovery_search": "feature_discovery_search",
     "generate_commit_message": "generate_commit_message",
     "glab_ask_git_command": "glab_ask_git_command",
