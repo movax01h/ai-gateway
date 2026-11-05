@@ -7731,7 +7731,8 @@ async def test_unverified_restricted_flow_token_tagged_restricted_model_falls_ba
         for e in cap_logs
         if e["event"] == "Restricted tagged model falls back to the default model"
     )
-    assert fallback["log_level"] == "info"
+    assert fallback["log_level"] == "warning"
+    assert fallback["flow_config_id"] is None
     assert fallback["tag"] == "large"
     assert fallback["model"] == fake_restricted_model.gitlab_identifier
     assert "feature_setting" in fallback
@@ -8005,21 +8006,29 @@ async def test_execute_workflow_restricted_tag_model_falls_back_for_another_flow
             "small": default,
         },
     ):
-        seen = await _execute_registry_flow(
-            "developer",
-            mock_context,
-            mock_resolve_flow,
-            mock_workflow_class,
-            on_build=lambda: resolved.update(
-                large=get_model_metadata("large"),
-                tags=set(current_model_metadata_with_size_context.get().by_tag),
-            ),
-        )
+        with capture_logs() as cap_logs:
+            seen = await _execute_registry_flow(
+                "developer",
+                mock_context,
+                mock_resolve_flow,
+                mock_workflow_class,
+                on_build=lambda: resolved.update(
+                    large=get_model_metadata("large"),
+                    tags=set(current_model_metadata_with_size_context.get().by_tag),
+                ),
+            )
 
     mock_context.abort.assert_not_called()
     assert seen == ["developer"]
     assert resolved["large"] is default
     assert resolved["tags"] == {"small"}
+    fallback = next(
+        e
+        for e in cap_logs
+        if e["event"] == "Restricted tagged model falls back to the default model"
+    )
+    assert fallback["log_level"] == "warning"
+    assert fallback["flow_config_id"] == "developer"
 
 
 # Restricted-flow proofs from trusted restricted-flow issuers (named GitLab Dedicated instances).

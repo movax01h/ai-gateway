@@ -684,8 +684,9 @@ def _drop_denied_tagged_models(authorized_flow: Optional[str]) -> None:
         if allowed is None or authorized_flow in allowed:
             kept[tag] = metadata
             continue
-        log.info(
+        log.warning(
             "Restricted tagged model falls back to the default model",
+            flow_config_id=authorized_flow,
             feature_setting=by_tag_metadata.feature_setting,
             tag=tag,
             model=metadata.llm_definition.gitlab_identifier,
