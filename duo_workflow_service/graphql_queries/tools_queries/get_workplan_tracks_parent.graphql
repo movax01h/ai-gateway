@@ -1,0 +1,29 @@
+query getWorkplanTracksParent($fullPath: ID!, $iid: String!) {
+    project(fullPath: $fullPath) {
+        workItems(iid: $iid) {
+            nodes {
+                id
+                iid
+                webUrl
+                workItemType {
+                    name
+                }
+                widgets {
+                    ... on WorkItemWidgetHierarchy {
+                        children(first: 100) {
+                            count
+                            nodes {
+                                id
+                                iid
+                                title
+                                state
+                                webUrl
+                                description
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

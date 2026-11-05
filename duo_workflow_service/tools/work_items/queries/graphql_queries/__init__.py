@@ -44,6 +44,13 @@ GET_PROJECT_LABELS_QUERY = load_graphql_query(
     str(TOOLS_QUERIES_DIR / "get_project_labels.graphql")
 )
 
+GET_WORKPLAN_TRACKS_PARENT_QUERY = load_graphql_query(
+    str(TOOLS_QUERIES_DIR / "get_workplan_tracks_parent.graphql")
+)
+GET_WORKPLAN_TRACKS_LINKS_QUERY = load_graphql_query(
+    str(TOOLS_QUERIES_DIR / "get_workplan_tracks_links.graphql")
+)
+
 __all__ = [
     "CREATE_DISCUSSION_MUTATION",
     "CREATE_NOTE_MUTATION",
@@ -55,6 +62,8 @@ __all__ = [
     "GET_PROJECT_LABELS_QUERY",
     "GET_PROJECT_WORK_ITEM_NOTES_QUERY",
     "GET_PROJECT_WORK_ITEM_QUERY",
+    "GET_WORKPLAN_TRACKS_LINKS_QUERY",
+    "GET_WORKPLAN_TRACKS_PARENT_QUERY",
     "GET_WORK_ITEM_STATUSES_QUERY",
     "GET_WORK_ITEM_TYPE_BY_NAME_QUERY",
     "LIST_GROUP_WORK_ITEMS_QUERY",

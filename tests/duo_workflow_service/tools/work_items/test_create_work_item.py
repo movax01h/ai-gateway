@@ -793,3 +793,113 @@ class TestWorkItemInputValidation:
             hierarchy_widget={"parent_id": "some_value"},
         )
         assert input_data.hierarchy_widget == {"parent_id": "some_value"}
+
+
+class TestLinkedItemsWidget:
+    """linked_items_widget maps to workItemCreate's linkedItemsWidget input."""
+
+    def test_builds_blocked_by_links(self):
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(
+            {
+                "title": "Tail",
+                "type_name": "Task",
+                "linked_items_widget": {
+                    "link_type": "BLOCKED_BY",
+                    "work_items_ids": [
+                        "gid://gitlab/WorkItem/1",
+                        "gid://gitlab/WorkItem/2",
+                    ],
+                },
+            }
+        )
+
+        assert input_data["linkedItemsWidget"] == {
+            "linkType": "BLOCKED_BY",
+            "workItemsIds": ["gid://gitlab/WorkItem/1", "gid://gitlab/WorkItem/2"],
+        }
+        assert not warnings
+
+    @pytest.mark.parametrize(
+        "widget,warning",
+        [
+            (
+                {"link_type": "BLOCKED_BY", "work_items_ids": ["123"]},
+                "Invalid work_items_ids",
+            ),
+            (
+                {
+                    "link_type": "BLOCKED_BY",
+                    "work_items_ids": ["gid://gitlab/WorkItem/1\n"],
+                },
+                "Invalid work_items_ids",
+            ),
+            (
+                {
+                    "link_type": "DUPLICATES",
+                    "work_items_ids": ["gid://gitlab/WorkItem/1"],
+                },
+                "Invalid link_type",
+            ),
+            (
+                {"link_type": "BLOCKED_BY", "work_items_ids": []},
+                "must contain 'work_items_ids'",
+            ),
+            (
+                {
+                    "link_type": "BLOCKED_BY",
+                    "work_items_ids": [f"gid://gitlab/WorkItem/{i}" for i in range(11)],
+                },
+                "at most 10",
+            ),
+            ("BLOCKED_BY", "must be a dictionary"),
+        ],
+    )
+    def test_invalid_widget_adds_no_link(self, widget, warning):
+        input_data, warnings = WorkItemBaseTool._build_work_item_input_fields(
+            {"title": "Tail", "type_name": "Task", "linked_items_widget": widget}
+        )
+
+        assert "linkedItemsWidget" not in input_data
+        assert any(warning in w for w in warnings), warnings
+
+    def test_create_work_item_input_does_not_expose_the_widget(self):
+        # Only workplan_publish_tracks writes links, through _create_work_item.
+        assert "linked_items_widget" not in CreateWorkItemInput.model_fields
+
+    @pytest.mark.asyncio
+    async def test_create_sends_the_widget(
+        self,
+        gitlab_client_mock,
+        metadata,
+        created_work_item_data_fixture,
+        work_item_type_data_fixture,
+    ):
+        gitlab_client_mock.graphql.side_effect = [
+            work_item_type_data_fixture,
+            {
+                "workItemCreate": {
+                    "workItem": created_work_item_data_fixture,
+                    "errors": [],
+                }
+            },
+        ]
+
+        tool = CreateWorkItem(description="create work item", metadata=metadata)
+        await tool._create_work_item(
+            ResolvedParent(type="project", full_path="namespace/project"),
+            "Task",
+            {
+                "title": "Tail",
+                "type_name": "Task",
+                "linked_items_widget": {
+                    "link_type": "BLOCKED_BY",
+                    "work_items_ids": ["gid://gitlab/WorkItem/7"],
+                },
+            },
+        )
+
+        gql_input = gitlab_client_mock.graphql.call_args_list[1][0][1]["input"]
+        assert gql_input["linkedItemsWidget"] == {
+            "linkType": "BLOCKED_BY",
+            "workItemsIds": ["gid://gitlab/WorkItem/7"],
+        }
