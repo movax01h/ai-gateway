@@ -17,7 +17,7 @@ design, and some parts of that design are not implemented yet.
 | Flow configuration | `ai/features/<domain>/<feature>/config/<version>.yml` | flow ID `<feature>` |
 | Feature tools | `ai/features/<domain>/<feature>/components/__init__.py`, in `FEATURE_TOOLS` | tools in the tools registry |
 | Tests | `ai/features/<domain>/<feature>/tests/` | collected by `pytest` |
-| Serving surface | `ai/features/<domain>/<feature>/serving.py`, in `SERVING_SURFACE` | not read yet |
+| Serving surface | `ai/features/<domain>/<feature>/serving.py`, in `SERVING_SURFACE` | not read at runtime yet |
 
 Follow these rules:
 
@@ -96,7 +96,8 @@ lint rejects it, so move the feature first.
    SERVING_SURFACE = [ServingSurface(transport="rest", deployable="aigw")]
    ```
 
-   Nothing reads this declaration yet.
+   Nothing reads this declaration at runtime yet. A test checks that a feature whose prompt
+   versions set `models_from` declares it.
 
 1. Add the feature or its domain to `.gitlab/CODEOWNERS`.
 
