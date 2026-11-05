@@ -1982,10 +1982,7 @@ _PROMPTS_WITHOUT_MODELS_FROM: frozenset[str] = (
     | _IN_PROCESS_PROMPT_IDS
     | frozenset(
         {
-            # GitLab Rails calls these on the prompt routes without a feature setting:
-            # `generate_description` sends no model metadata, and `model_configuration/check`
-            # sends self-hosted model metadata only.
-            "generate_description",
+            # GitLab Rails calls this on the prompt routes with self-hosted model metadata only.
             "model_configuration/check",
             # Clients reach these through other routes.
             "chat/agent",
@@ -2062,7 +2059,7 @@ class TestPromptFeatureSettings:
         """A listed prompt sets no `models_from` in any version.
 
         A listed prompt is a graph-node or Duo Workflow Service prompt, or a prompt that a client calls on the prompt
-        routes without a feature setting of its own, like `generate_description`. A prompt that only runs in a flow
+        routes without a feature setting of its own, like `model_configuration/check`. A prompt that only runs in a flow
         must never set `models_from`: the prompt routes would then serve it. The prompts that clients call get
         `models_from` before the prompt routes reject versions without it.
         """
