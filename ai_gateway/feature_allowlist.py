@@ -92,6 +92,31 @@ _LOG_VALUE_MAX_LENGTH = 255
 _MISMATCH_EVENT = "Model allowlist mismatch"
 _NOTE_EVENT = "Model allowlist note"
 
+# What a check does with a request, for the `outcome` and `enforce_outcome` log fields: `served` keeps the request,
+# `replaced` serves another model, and `refused` rejects the request.
+Outcome = Literal["served", "replaced", "refused"]
+# The outcome of a check in each mode that runs it. `off` runs no check.
+_SERVED_IN_EVERY_MODE: Mapping[str, Outcome] = {
+    "log": "served",
+    "fallback": "served",
+    "enforce": "served",
+}
+_REPLACED_THEN_REFUSED: Mapping[str, Outcome] = {
+    "log": "served",
+    "fallback": "replaced",
+    "enforce": "refused",
+}
+_REPLACED_UNLESS_LOG: Mapping[str, Outcome] = {
+    "log": "served",
+    "fallback": "replaced",
+    "enforce": "replaced",
+}
+_REFUSED_UNLESS_LOG: Mapping[str, Outcome] = {
+    "log": "served",
+    "fallback": "refused",
+    "enforce": "refused",
+}
+
 
 @dataclass(frozen=True)
 class ClientModelRequest:
@@ -249,8 +274,13 @@ class _AllowlistCheck:
         """
         if self.feature is None or self.request.feature_setting == self.feature:
             return metadata
-        self._warn("feature_mismatch", metadata)
-        if self.mode == "log" or self._unit_primitive_config(self.feature) is None:
+        known_feature = self._unit_primitive_config(self.feature) is not None
+        self._warn(
+            "feature_mismatch",
+            metadata,
+            _REPLACED_UNLESS_LOG if known_feature else _SERVED_IN_EVERY_MODE,
+        )
+        if self.mode == "log" or not known_feature:
             return metadata
         return self._default_of(self.feature)
 
@@ -260,7 +290,7 @@ class _AllowlistCheck:
         ``log`` mode records the provider and runs the remaining checks, so the log shows what the
         request would meet once the provider is fixed.
         """
-        self._warn("provider_not_served", metadata)
+        self._warn("provider_not_served", metadata, _REFUSED_UNLESS_LOG)
         if self.mode != "log":
             raise ProviderNotServedError(self.request.provider or "")
 
@@ -274,7 +304,7 @@ class _AllowlistCheck:
             # covers it once the flow is known.
             self._note("missing_feature_setting", metadata)
             return metadata
-        self._warn("missing_feature_setting", metadata)
+        self._warn("missing_feature_setting", metadata, _REPLACED_THEN_REFUSED)
         return _outcome(
             self.mode,
             metadata,
@@ -286,7 +316,7 @@ class _AllowlistCheck:
         self, metadata: TypeModelMetadata, feature: str
     ) -> Optional[TypeModelMetadata]:
         """Handle a named model whose feature does not exist, on both surfaces: no resume replays this shape."""
-        self._warn("unknown_feature", metadata)
+        self._warn("unknown_feature", metadata, _REPLACED_THEN_REFUSED)
         return _outcome(
             self.mode,
             metadata,
@@ -336,7 +366,7 @@ class _AllowlistCheck:
             or metadata.provider in SERVER_KEYED_PROVIDERS
         ):
             return metadata
-        self._warn("managed_identifier_override", metadata)
+        self._warn("managed_identifier_override", metadata, _REPLACED_UNLESS_LOG)
         if self.mode == "log":
             return metadata
         return self._rebuild(
@@ -351,7 +381,7 @@ class _AllowlistCheck:
         feature = unit_primitive_config.feature_setting
         gitlab_identifier = metadata.llm_definition.gitlab_identifier
         if gitlab_identifier not in unit_primitive_config.allowed_model_identifiers:
-            self._warn("model_not_allowed", metadata)
+            self._warn("model_not_allowed", metadata, _REPLACED_THEN_REFUSED)
             return _outcome(
                 self.mode,
                 metadata,
@@ -392,8 +422,17 @@ class _AllowlistCheck:
             using_cache=self.using_cache,
         )
 
-    def _fields(self, reason: str, metadata: TypeModelMetadata) -> dict[str, Any]:
-        """Return the log fields; the event and the check's fields win over a caller key of the same name."""
+    def _fields(
+        self,
+        reason: str,
+        metadata: TypeModelMetadata,
+        outcomes: Mapping[str, Outcome],
+    ) -> dict[str, Any]:
+        """Return the log fields; the event and the check's fields win over a caller key of the same name.
+
+        ``outcome`` is what the current mode does with the request at this check, and ``enforce_outcome`` is what
+        ``enforce`` mode would do, so the logs of a less strict mode show which requests ``enforce`` would refuse.
+        """
         context = {
             key: value for key, value in self.log_context.items() if key != "event"
         }
@@ -401,6 +440,8 @@ class _AllowlistCheck:
             **context,
             "reason": reason,
             "mode": self.mode,
+            "outcome": outcomes[self.mode],
+            "enforce_outcome": outcomes["enforce"],
             "surface": self.surface,
             "feature_setting": self.feature,
             "client_feature_setting": self.request.feature_setting,
@@ -411,11 +452,17 @@ class _AllowlistCheck:
             "served_identifier": metadata.llm_definition.gitlab_identifier,
         }
 
-    def _warn(self, reason: str, metadata: TypeModelMetadata) -> None:
-        log.warning(_MISMATCH_EVENT, **self._fields(reason, metadata))
+    def _warn(
+        self,
+        reason: str,
+        metadata: TypeModelMetadata,
+        outcomes: Mapping[str, Outcome],
+    ) -> None:
+        log.warning(_MISMATCH_EVENT, **self._fields(reason, metadata, outcomes))
 
     def _note(self, reason: str, metadata: TypeModelMetadata) -> None:
-        log.info(_NOTE_EVENT, **self._fields(reason, metadata))
+        """Log a case that changes nothing, in any mode."""
+        log.info(_NOTE_EVENT, **self._fields(reason, metadata, _SERVED_IN_EVERY_MODE))
 
 
 def check_client_model_metadata(
