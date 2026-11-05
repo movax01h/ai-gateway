@@ -594,26 +594,25 @@ On the `/v1/prompts/<prompt_id>` and `/v2/prompts/<prompt_id>` routes, the allow
 and only the route resolves the version. So the middleware sets no model metadata for these routes. The route runs the
 check before it builds the prompt, in `check_prompt_model_metadata` (`ai_gateway/api/v1/prompts/invoke.py`), and
 answers HTTP 403 in `enforce` mode. The check uses the `models_from` of the version that the client's model resolves, or of the version
-in `base` when the folder of the model's family has no matching version
-(see [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http)). A version
-without `models_from` uses the feature setting of the prompt's entry in `PROMPT_ID_TO_FEATURE_SETTING`
-(`ai_gateway/prompts/registry.py`). For a prompt that GitLab Rails calls, the entry is the feature that Rails sends.
-Rails takes it from the unit primitive of the call, not from the prompt ID: for example, `chat/explain_code` uses
-`duo_chat_explain_code`, and `categorize_question` uses `duo_chat`. The registry picks the default model of a request
-without model metadata in the same order. The route finds the entry for each spelling of the prompt ID that loads the
-same prompt, for example `chat/explain_code/` or `review/review_merge_request`.
+in `base` when the folder of the model's family has no matching version or declares no `models_from`
+(see [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http)). For a prompt
+that GitLab Rails calls, `models_from` is the feature that Rails sends. Rails takes it from the unit primitive of the
+call, not from the prompt ID: for example, `chat/explain_code` uses `duo_chat_explain_code`, and `categorize_question`
+uses `duo_chat`. The registry picks the default model of a request without model metadata from the same `models_from`.
+The route reads `models_from` from the prompt that the ID loads, so each spelling of the ID that loads the prompt,
+for example `chat/explain_code/` or `review/review_merge_request`, gets the same allowlist.
 
-For a prompt with neither, the check still uses the client's `feature_setting`, and the route logs a
+For a version without `models_from`, the check still uses the client's `feature_setting`, and the route logs a
 `Model allowlist note` when a named model would not pass the allowlist of the feature that `feature_setting_for_prompt_id`
 derives from the first part of the prompt ID: `prompt_feature_unknown` when the derived feature does not exist, and
 `prompt_feature_model_not_allowed` when its allowlist does not have the model. The note has the `prompt_id`, and its
 `feature_setting` is the derived feature. It changes nothing in any mode, and a request whose `feature_setting` is the
 derived feature gets no note.
 
-When you add a prompt that GitLab Rails or another client calls on the prompt routes, add it to
-`PROMPT_ID_TO_FEATURE_SETTING` with the feature setting that the client sends for it. Otherwise add it to
-`_GRAPH_NODE_PROMPT_IDS` or `_PROMPTS_WITHOUT_AN_ENTRY` in `tests/prompts/test_registry.py`.
-`test_every_prompt_has_an_entry_or_is_listed` fails until you do.
+When you add a prompt that GitLab Rails or another client calls on the prompt routes, set `models_from` in each of its
+versions to the feature setting that the client sends for it. Otherwise add it to `_GRAPH_NODE_PROMPT_IDS`,
+`_IN_PROCESS_PROMPT_IDS` or `_PROMPTS_WITHOUT_MODELS_FROM` in `tests/prompts/test_registry.py`.
+`test_every_prompt_declares_its_models_or_is_listed` fails until you do.
 
 On the Duo Workflow Service, `ModelMetadataInterceptor` runs the check on the default model that it resolves from the
 `x-gitlab-agent-platform-model-metadata` header. It passes no feature, so the client's `feature_setting` selects the

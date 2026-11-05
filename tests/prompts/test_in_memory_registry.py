@@ -481,7 +481,7 @@ class TestInMemoryPromptRegistry:
         Regression test: when is_graph_node=True is passed for a flow-node prompt
         that has no entry in unit_primitives.yml, InMemoryPromptRegistry must relay
         the flag so that LocalPromptRegistry._default_model_metadata can fall back to
-        duo_agent_platform instead of raising "Invalid feature setting: <prompt_id>".
+        duo_agent_platform instead of raising for a prompt ID that names no feature setting.
         """
         mock_shared_registry.get.return_value = prompt
 

@@ -8,11 +8,10 @@ header, and the routes that build metadata from their own payload, such as the l
 
 The allowlist is the one of the feature that the call site serves. A call site that passes no feature
 uses the client's ``feature_setting``, so the client can name the feature whose allowlist suits it.
-The HTTP prompt routes pass the ``models_from`` of the prompt version that runs. A version without
-``models_from`` uses the entry of its prompt in ``PROMPT_ID_TO_FEATURE_SETTING``. The client's feature
-stays for a prompt with neither, and on the Duo Workflow Service until it derives the feature from the
-flow. For a prompt with neither, ``note_prompt_feature`` logs where the feature derived from the prompt
-ID would not allow the requested model.
+The HTTP prompt routes pass the ``models_from`` of the prompt version that runs. The client's feature
+stays for a version without ``models_from``, and on the Duo Workflow Service until it derives the feature
+from the flow. For a version without ``models_from``, ``note_prompt_feature`` logs where the feature
+derived from the prompt ID would not allow the requested model.
 
 A gateway without custom models serves GitLab-managed models only. Over HTTP it accepts ``gitlab``
 and ``amazon_q``, which GitLab Rails sends, and ``anthropic``, ``vertex-ai`` and ``fireworks_ai``,
@@ -477,12 +476,10 @@ def note_prompt_feature(
 ) -> None:
     """Log a note when a named model would not pass the allowlist of an HTTP prompt's own feature.
 
-    The prompt routes call it for a prompt version without ``models_from`` whose prompt has no entry in
-    ``PROMPT_ID_TO_FEATURE_SETTING``. For such a prompt, ``check_client_model_metadata`` still uses the
-    client's ``feature_setting``,
-    because the feature derived from a prompt ID does not always match the one that GitLab Rails
-    sends. The note shows where the two differ, so the prompt can get an entry. It changes nothing,
-    in any mode.
+    The prompt routes call it for a prompt version without ``models_from``. For such a version,
+    ``check_client_model_metadata`` still uses the client's ``feature_setting``, because the feature derived
+    from a prompt ID does not always match the one that GitLab Rails sends. The note shows where the two
+    differ, so the version can declare ``models_from``. It changes nothing, in any mode.
 
     Args:
         request: What the client asked for, read with ``ClientModelRequest.from_raw`` before the

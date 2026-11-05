@@ -17,6 +17,7 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import (
     ChatAmazonQDefinition,
     ChatLiteLLMDefinition,
@@ -416,6 +417,77 @@ class TestModelsOfThePromptVersion:
             "detail": "Model 'claude_fable_5_1_vertex' is not available for 'summarize_review'"
         }
         mock_registry_get.assert_not_called()
+
+
+@pytest.mark.usefixtures("frozen_datetime_now", "cloud_gateway")
+@pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+class TestModelsOfThePromptInFallbackMode:
+    """A model that the prompt version does not allow runs on the default of the version's models.
+
+    The client claims another feature. Its default must not run the prompt.
+    """
+
+    @pytest.fixture(name="fast_api_router", scope="class")
+    def fast_api_router_fixture(self):
+        # ModelConfigMiddleware leaves the check to the route only under the `/v1/prompts/` path.
+        router = APIRouter()
+        router.include_router(api_router, prefix="/v1")
+        return router
+
+    @pytest.mark.parametrize(
+        ("prompt_id", "prompt_version", "identifier", "models_from"),
+        [
+            pytest.param(
+                "code_suggestions/generations",
+                "^2.0.0",
+                "codestral_2508_vertex",
+                "code_generations",
+                id="version-only-in-base",
+            ),
+            pytest.param(
+                "chat/summarize_comments",
+                None,
+                "amazon_q",
+                "duo_chat_summarize_comments",
+                id="family-folder-without-models-from",
+            ),
+        ],
+    )
+    def test_serves_the_default_of_the_version_models(
+        self,
+        mock_client,
+        mock_registry_get,
+        feature_allowlist_mode,
+        prompt_id,
+        prompt_version,
+        identifier,
+        models_from,
+    ):
+        response = mock_client.post(
+            f"/v1/prompts/{prompt_id}",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "inputs": {"name": "John", "age": 20},
+                "prompt_version": prompt_version,
+                "model_metadata": {
+                    "provider": "gitlab",
+                    "identifier": identifier,
+                    "feature_setting": "duo_agent_platform",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        served = mock_registry_get.call_args.args[2]
+        assert (
+            served.llm_definition.gitlab_identifier
+            == ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()[models_from]
+            .default_model_identifiers[0]
+        )
 
 
 class TestMisdirectedRequest:

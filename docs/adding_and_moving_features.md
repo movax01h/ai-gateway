@@ -84,6 +84,9 @@ lint rejects it, so move the feature first.
        {% include '<feature>/system/1.0.0.jinja' %}
    ```
 
+   A prompt that the AI Gateway serves over HTTP sets `models_from` in each version. See
+   [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http).
+
 1. Declare the serving surface in `serving.py`. For a prompt that the AI Gateway serves
    over REST:
 
@@ -125,6 +128,9 @@ lint rejects it, so move the feature first.
      config/1.0.0.yml          # prompt_id: "<flow>"
      prompts/base/1.0.0.yml
    ```
+
+   Do not set `models_from` in this prompt: the flow selects its models. See
+   [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http).
 
 1. Put the tools that only this flow uses in `components/`. Export them from
    `components/__init__.py` in a `FEATURE_TOOLS` mapping, keyed by the agent privilege that

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 __all__ = [
+    "FEATURE_SETTINGS_THAT_RAILS_SENDS",
     "REPO_ROOT",
     "feature_prompt_dirs",
     "prompt_dir",
@@ -14,6 +15,39 @@ REPO_ROOT = Path(__file__).parents[2]
 _LEGACY_DIR = REPO_ROOT / "ai_gateway" / "prompts" / "definitions"
 _FEATURES_DIR = REPO_ROOT / "ai" / "features"
 _SHARED_DIR = REPO_ROOT / "ai" / "shared"
+
+
+# The feature setting that GitLab Rails sends for each prompt that it calls on the prompt routes. Each version of the
+# prompt declares it as `models_from`, except the versions that `tests/prompts/test_registry.py` lists.
+FEATURE_SETTINGS_THAT_RAILS_SENDS = {
+    "code_suggestions/completions": "code_completions",
+    "code_suggestions/generations": "code_generations",
+    "categorize_question": "duo_chat",
+    "chat/build_reader": "duo_chat",
+    "chat/commit_reader": "duo_chat",
+    "chat/documentation_search": "duo_chat",
+    "chat/epic_reader": "duo_chat",
+    "chat/issue_reader": "duo_chat",
+    "chat/merge_request_reader": "duo_chat",
+    "chat/work_item_reader": "duo_chat",
+    "chat/explain_code": "duo_chat_explain_code",
+    "chat/explain_vulnerability": "duo_chat_explain_vulnerability",
+    "chat/fix_code": "duo_chat_fix_code",
+    "chat/refactor_code": "duo_chat_refactor_code",
+    "chat/summarize_comments": "duo_chat_summarize_comments",
+    "chat/troubleshoot_job": "duo_chat_troubleshoot_job",
+    "chat/write_tests": "duo_chat_write_tests",
+    "classify_code_review_mention_intent": "duo_agent_platform",
+    "generate_session_title": "duo_agent_platform",
+    "summarize_duo_workflow": "duo_agent_platform",
+    "feature_discovery_search": "feature_discovery_search",
+    "generate_commit_message": "generate_commit_message",
+    "glab_ask_git_command": "glab_ask_git_command",
+    "resolve_vulnerability": "resolve_vulnerability",
+    "review_merge_request": "review_merge_request",
+    "summarize_new_merge_request": "summarize_new_merge_request",
+    "summarize_review": "summarize_review",
+}
 
 
 def version_files(prompts_dir: Path) -> list[Path]:

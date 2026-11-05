@@ -190,13 +190,14 @@ setting in `unit_primitives.yml` whose models the version can run on.
   `amazon_q_integration`.
 
 The prompt routes check the client's model against the `models_from` of the version that runs, and the registry picks
-the default model of a request without model metadata from it. A version without `models_from` uses the entry of its
-prompt in `PROMPT_ID_TO_FEATURE_SETTING` (`ai_gateway/prompts/registry.py`).
+the default model of a request without model metadata from it. For a version without `models_from`, the check uses the
+client's `feature_setting`, and the default model comes from the first part of the prompt ID.
 
 - A prompt with more than one model family must declare one `models_from` in all of them. In `fallback` mode the
   check can serve another model, and its family can resolve another version. A test checks this.
-- When the folder of the client's model family has no matching version, the check uses the `models_from` of the
-  version in `base`. For example, `code_suggestions/generations` has 2.0.0 only in `base`, so a Codestral model
+- When the folder of the client's model family has no matching version, or its version declares no `models_from`
+  like the `amazon_q` versions, the check uses the `models_from` of the same version in `base`, or else of the
+  version that the constraint resolves in `base`. For example, `code_suggestions/generations` has 2.0.0 only in `base`, so a Codestral model
   with `^2.0.0` gets the `models_from` of `base/2.0.0`.
 
 ### Message Placeholders

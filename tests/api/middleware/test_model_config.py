@@ -20,11 +20,9 @@ from ai_gateway.model_selection import (
     UnitPrimitiveConfig,
 )
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
-from ai_gateway.prompts.registry import (
-    PROMPT_ID_TO_FEATURE_SETTING,
-    LocalPromptRegistry,
-)
+from ai_gateway.prompts.registry import LocalPromptRegistry
 from lib.context import StarletteUser, current_model_metadata_context
+from tests.prompts.prompt_dirs import FEATURE_SETTINGS_THAT_RAILS_SENDS
 
 
 @pytest.fixture(name="model_metadata_context")
@@ -704,9 +702,9 @@ class TestFeatureAllowlist:
             }
 
     class TestPromptRoutes:
-        """A prompt in `PROMPT_ID_TO_FEATURE_SETTING` is checked against its feature; any other prompt gets a note."""
+        """A prompt version with `models_from` is checked against it; any other prompt gets a note."""
 
-        class TestMappedPrompts:
+        class TestPromptsThatRailsCalls:
             PATHS = ["/v1/prompts/chat/explain_code", "/v2/prompts/chat/explain_code"]
 
             @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
@@ -743,7 +741,7 @@ class TestFeatureAllowlist:
             def test_fallback_mode_serves_the_default_of_the_feature_rails_sends(
                 self, middleware_test_client, path
             ):
-                # The client's feature allows the model, so only the mapped feature replaces it.
+                # The client's feature allows the model, so only the `models_from` of the version replaces it.
                 assert (
                     "codestral_2508_fireworks"
                     in _feature("code_completions").allowed_model_identifiers
@@ -810,7 +808,7 @@ class TestFeatureAllowlist:
             )
             @pytest.mark.parametrize(
                 ("prompt_id", "feature_setting"),
-                sorted(PROMPT_ID_TO_FEATURE_SETTING.items()),
+                sorted(FEATURE_SETTINGS_THAT_RAILS_SENDS.items()),
             )
             def test_enforce_mode_serves_what_rails_sends(
                 self, middleware_test_client, prompt_id, feature_setting
