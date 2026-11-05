@@ -21,6 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 __all__ = [
     "ActorLimitMode",
     "Config",
+    "ConfigActorLimits",
     "ConfigAuditEvent",
     "ConfigAuth",
     "ConfigBedrockGuardrail",
@@ -40,6 +41,7 @@ __all__ = [
     "ConfigModelLimits",
     "ConfigModelSelection",
     "ConfigMtls",
+    "ConfigPrompts",
     "ConfigProxyEndpoints",
     "ConfigSnowplow",
     "ConfigTLS",
@@ -538,33 +540,33 @@ class ConfigModelSelection(BaseModel):
     )
 
 
-class ConfigCodeSuggestions(BaseModel):
+class ConfigActorLimits(BaseModel):
+    """Per-actor limits on in-flight requests for one route group, counted per gateway process."""
+
     actor_limit_mode: ActorLimitMode = Field(
         default="off",
         description=(
-            "How the per-actor limits on in-flight code suggestion requests are applied on "
-            "each gateway process. Every request counts against its user; a request from a "
-            "self-managed instance also counts against that instance, and a GitLab.com "
-            "request against its root namespace. 'off': no check. 'log': log and count the "
-            "requests that would be rejected, then serve them. 'enforce': answer HTTP 429 "
-            "when any of those counters is at its limit. A request without a user id counts "
-            "only against its instance or namespace."
+            "How the per-actor limits on in-flight requests are applied on each gateway "
+            "process. Every request counts against its user; a request from a self-managed "
+            "instance also counts against that instance, and a GitLab.com request against "
+            "its root namespace. 'off': no check. 'log': log and count the requests that "
+            "would be rejected, then serve them. 'enforce': answer HTTP 429 when any of "
+            "those counters is at its limit. A request without a user id counts only "
+            "against its instance or namespace."
         ),
     )
     user_limit: int = Field(
         default=5,
         ge=1,
-        description=(
-            "Maximum in-flight code suggestion requests per user on one gateway process."
-        ),
+        description="Maximum in-flight requests per user on one gateway process.",
     )
     instance_limit: int = Field(
         default=20,
         ge=1,
         description=(
-            "Maximum in-flight code suggestion requests per self-managed instance on one "
-            "gateway process; the token's duo_seat_count times instance_limit_per_seat "
-            "applies instead when it is larger."
+            "Maximum in-flight requests per self-managed instance on one gateway process; "
+            "the token's duo_seat_count times instance_limit_per_seat applies instead when "
+            "it is larger."
         ),
     )
     instance_limit_per_seat: float = Field(
@@ -572,18 +574,25 @@ class ConfigCodeSuggestions(BaseModel):
         ge=0,
         allow_inf_nan=False,
         description=(
-            "In-flight code suggestion requests granted per Duo seat of a self-managed "
-            "instance when that exceeds instance_limit."
+            "In-flight requests granted per Duo seat of a self-managed instance when that "
+            "exceeds instance_limit."
         ),
     )
     namespace_limit: int = Field(
         default=20,
         ge=1,
         description=(
-            "Maximum in-flight code suggestion requests per GitLab.com root namespace on "
-            "one gateway process."
+            "Maximum in-flight requests per GitLab.com root namespace on one gateway process."
         ),
     )
+
+
+class ConfigCodeSuggestions(ConfigActorLimits):
+    """Limits on the code suggestion routes (/v2/completions, /v2/code/, /v3/code/, /v4/code/)."""
+
+
+class ConfigPrompts(ConfigActorLimits):
+    """Limits on the prompt routes: /v1/prompts/ and /v2/prompts/."""
 
 
 class ConfigFeatureFlags(BaseModel):
@@ -825,6 +834,7 @@ class Config(BaseSettings):
     code_suggestions: Annotated[
         ConfigCodeSuggestions, Field(default_factory=ConfigCodeSuggestions)
     ]
+    prompts: Annotated[ConfigPrompts, Field(default_factory=ConfigPrompts)]
     bind_tools_cache: Annotated[
         ConfigBindToolsCache, Field(default_factory=ConfigBindToolsCache)
     ]
