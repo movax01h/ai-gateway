@@ -295,6 +295,7 @@ _outbox = MagicMock(spec=Outbox)
                 "evaluate_vuln_fp_status",
                 "resolve_vulnerability_target_branch",
                 "update_work_item",
+                "workplan_publish_tracks",
                 "revert_to_detected_vulnerability",
                 "create_vulnerability_issue",
                 "get_work_item",
@@ -651,6 +652,9 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
             metadata=expected_metadata
         ),
         "update_work_item": tools.UpdateWorkItem(metadata=expected_metadata),
+        "workplan_publish_tracks": tools.WorkplanPublishTracks(
+            metadata=expected_metadata
+        ),
         "revert_to_detected_vulnerability": tools.RevertToDetectedVulnerability(
             metadata=expected_metadata
         ),

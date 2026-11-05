@@ -252,6 +252,7 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.LinkVulnerabilityToIssue,
         tools.LinkVulnerabilityToMergeRequest,
         tools.UpdateWorkItem,
+        tools.WorkplanPublishTracks,
         tools.RevertToDetectedVulnerability,
         tools.CreateVulnerabilityIssue,
         tools.PostSastFpAnalysisToGitlab,

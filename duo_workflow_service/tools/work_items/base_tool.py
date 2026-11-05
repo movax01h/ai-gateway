@@ -52,6 +52,9 @@ log = structlog.stdlib.get_logger(__name__)
 
 # Supported group work item types in GitLab.
 GROUP_ONLY_TYPES = {"Epic", "Objective", "Key Result"}
+# WorkItemWidgetLinkedItemsCreateInput.MAX_WORK_ITEMS in GitLab.
+LINKED_ITEMS_MAX_IDS = 10
+_LINKED_ITEMS_LINK_TYPES = {"RELATED", "BLOCKED_BY", "BLOCKS"}
 STATE_EVENT_MAPPING = {
     "closed": "CLOSE",
     "opened": "REOPEN",
@@ -391,6 +394,13 @@ class WorkItemBaseTool(DuoBaseTool):
         if hierarchy_widget:
             input_data["hierarchyWidget"] = hierarchy_widget
 
+        linked_items_widget = WorkItemBaseTool._build_linked_items_widget(
+            kwargs, warnings
+        )
+
+        if linked_items_widget:
+            input_data["linkedItemsWidget"] = linked_items_widget
+
         todo_widget = WorkItemBaseTool._build_todo_widget(kwargs, warnings)
 
         if todo_widget:
@@ -579,6 +589,75 @@ class WorkItemBaseTool(DuoBaseTool):
             return None
 
         return {"parentId": parent_id}  # Note: GraphQL expects camelCase
+
+    @staticmethod
+    def _build_linked_items_widget(
+        kwargs: Dict[str, Any], warnings: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Build the linkedItemsWidget input of workItemCreate.
+
+        workItemUpdate has no input for this widget. workItemAddLinkedItems
+        adds links to an existing item, but it does not accept the
+        ai_workflows token scope. So a flow can link an item only when it
+        creates it.
+
+        GitLab writes the links in a callback after the save. When the
+        caller cannot set work item metadata, the callback writes nothing and
+        the mutation still succeeds, so a caller that relies on a link must
+        read it back.
+
+        Args:
+            kwargs: Input parameters that may contain linked_items_widget
+            warnings: List to collect validation warnings
+
+        Returns:
+            Dictionary with the linkedItemsWidget input, or None when no
+            valid link was supplied.
+        """
+        widget = kwargs.get("linked_items_widget")
+
+        if not widget:
+            return None
+
+        if not isinstance(widget, dict):
+            warnings.append("linked_items_widget must be a dictionary")
+            return None
+
+        link_type = widget.get("link_type") or "RELATED"
+        ids = widget.get("work_items_ids") or []
+        invalid = [
+            gid
+            for gid in ids
+            if not (
+                isinstance(gid, str)
+                and re.fullmatch(r"gid://gitlab/WorkItem/[0-9]+", gid)
+            )
+        ]
+
+        problem = None
+        if link_type not in _LINKED_ITEMS_LINK_TYPES:
+            problem = (
+                f"Invalid link_type: {link_type}. Expected one of "
+                f"{', '.join(sorted(_LINKED_ITEMS_LINK_TYPES))}."
+            )
+        elif invalid:
+            problem = (
+                f"Invalid work_items_ids: {invalid}. Expected GitLab GIDs. "
+                "No link was created."
+            )
+        elif not ids:
+            problem = "linked_items_widget must contain 'work_items_ids'"
+        elif len(ids) > LINKED_ITEMS_MAX_IDS:
+            problem = (
+                f"linked_items_widget takes at most {LINKED_ITEMS_MAX_IDS} "
+                "work_items_ids. No link was created."
+            )
+
+        if problem:
+            warnings.append(problem)
+            return None
+
+        return {"linkType": link_type, "workItemsIds": list(ids)}
 
     @staticmethod
     def _build_todo_widget(

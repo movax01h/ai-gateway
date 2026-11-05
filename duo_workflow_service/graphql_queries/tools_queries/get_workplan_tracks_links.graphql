@@ -1,0 +1,21 @@
+query getWorkplanTracksLinks($fullPath: ID!, $iids: [String!]) {
+    project(fullPath: $fullPath) {
+        workItems(iids: $iids) {
+            nodes {
+                id
+                widgets {
+                    ... on WorkItemWidgetLinkedItems {
+                        linkedItems {
+                            nodes {
+                                linkType
+                                workItem {
+                                    id
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

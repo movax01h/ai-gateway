@@ -48,6 +48,7 @@ from .vulnerabilities import *
 from .web_search import *
 from .wiki import *
 from .work_item import *
+from .workplan_tracks import *
 
 # Tools that live in their feature package under ai/features/ (see
 # docs/module_boundaries.md). Resolve the old attribute access lazily to
