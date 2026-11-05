@@ -8,6 +8,13 @@ from pydantic import ValidationError as PydanticValidationError
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry as LocalPromptRegistry
+from duo_workflow_service.agent_platform.v1.catalog import (
+    AiCatalogAgent,
+    CatalogItemRef,
+    CatalogItems,
+    CatalogItemSource,
+    CatalogItemType,
+)
 from duo_workflow_service.agent_platform.v1.components.base import (
     ExtraInputVariablesError,
     MissingInputVariablesError,
@@ -131,6 +138,7 @@ class FlowValidator:
                     config=config,
                     prompt_registry=self._prompt_registry,
                     internal_event_client=_DISABLED_INTERNAL_EVENT_CLIENT,
+                    catalog_items=placeholder_items_for(config.include),
                 ).validate()
             case _:
                 raise NotImplementedError(
@@ -149,3 +157,33 @@ class FlowValidator:
                     f"Flow config has {count} components; the maximum is {self._max_components}"
                 ]
             )
+
+
+def placeholder_items_for(include: list[CatalogItemRef] | None) -> CatalogItems:
+    """Return one placeholder agent for each AI Catalog entry a flow declares.
+
+    GitLab resolves the real agents when the flow runs. The dry run still builds the supervisor and one subagent for
+    each entry, so a flow that cannot build them fails validation at save.
+
+    Args:
+        include: The flow's include entries, or None when it declares none.
+
+    Returns:
+        The catalog items, with one placeholder agent for each AI Catalog agent entry that names an id and a version.
+    """
+    return CatalogItems(
+        ai_catalog_agents=[
+            AiCatalogAgent(
+                item_id=ref.item_id,
+                version=ref.version or "",
+                name=f"placeholder {ref.item_id}",
+                description="Stands in for the agent GitLab resolves when the flow runs.",
+                prompt="Stands in for the agent GitLab resolves when the flow runs.",
+            )
+            for ref in include or []
+            if ref.source == CatalogItemSource.AI_CATALOG
+            and ref.item_type == CatalogItemType.AGENT
+            and ref.item_id.strip()
+            and (ref.version or "").strip()
+        ]
+    )

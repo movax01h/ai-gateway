@@ -349,23 +349,92 @@ class TestBindCatalogItems:
         with pytest.raises(CatalogItemConfigError, match="does not declare them"):
             expand(_components(), None, items)
 
-    def test_a_component_claiming_two_references_raises(self, expand):
-        """Binding serves one claim and removes the rest, so a second would go unnoticed.
+    def test_a_component_claiming_two_references_binds_both(self, expand):
+        """Each claimed reference is bound in turn, and the promotions compose.
 
-        Here the first claim is the AI Catalog entry, so the workspace reference is the one removed. The workspace items
-        in the request are then dropped with neither an error nor a log.
+        The AI Catalog claim binds the pushed catalog agent and the workspace claim
+        binds the pushed workspace agent: the claimant ends up supervising both, with
+        one synthesized component each.
         """
         components = [
             {
                 "name": "developer_agent",
                 "type": "AgentComponent",
+                "prompt_id": "developer_agent_prompt",
+                "inputs": [{"from": "context:goal", "as": "goal"}],
                 "subagents": [dict(AI_CATALOG_REFERENCE), dict(REFERENCE)],
             }
         ]
         include = _include() + [CatalogItemRef.model_validate(AI_CATALOG_REFERENCE)]
+        items = CatalogItems.model_validate(
+            {
+                "workspace_agents": _items({"name": "tester"}).workspace_agents,
+                "ai_catalog_agents": [
+                    {
+                        "item_id": "42",
+                        "version": "1.0.0",
+                        "name": "linter",
+                        "description": "Lints.",
+                        "toolset": ["run_command"],
+                        "prompt": "You are a linter.",
+                    }
+                ],
+            }
+        )
 
-        with pytest.raises(CatalogItemConfigError, match="can claim only one entry"):
-            expand(components, include, _items({"name": "tester"}))
+        expanded = _by_name(expand(components, include, items))
+        subagent_names = {
+            entry["name"] for entry in expanded["developer_agent"]["subagents"]
+        }
+        assert subagent_names == {
+            "ai-catalog/agents/linter (42)",
+            _catalog_name("tester"),
+        }
+        assert {"ai-catalog/agents/linter (42)", _catalog_name("tester")} <= set(
+            expanded
+        )
+
+    def test_a_component_claiming_two_ai_catalog_agents_supervises_both(self, expand):
+        references = [
+            {**AI_CATALOG_REFERENCE, "item_id": item_id} for item_id in ("42", "43")
+        ]
+        components = [
+            {
+                "name": "developer_agent",
+                "type": "AgentComponent",
+                "prompt_id": "developer_agent_prompt",
+                "inputs": [{"from": "context:goal", "as": "goal"}],
+                "subagents": [dict(reference) for reference in references],
+            }
+        ]
+        include = [CatalogItemRef.model_validate(reference) for reference in references]
+        items = CatalogItems.model_validate(
+            {
+                "ai_catalog_agents": [
+                    {
+                        "item_id": item_id,
+                        "version": "1.0.0",
+                        "name": name,
+                        "description": f"{name} agent.",
+                        "prompt": f"You are a {name}.",
+                    }
+                    for item_id, name in (("42", "linter"), ("43", "tester"))
+                ]
+            }
+        )
+
+        expanded = _by_name(expand(components, include, items))
+
+        assert [
+            entry["name"] for entry in expanded["developer_agent"]["subagents"]
+        ] == [
+            "ai-catalog/agents/linter (42)",
+            "ai-catalog/agents/tester (43)",
+        ]
+        assert {
+            "ai-catalog/agents/linter (42)",
+            "ai-catalog/agents/tester (43)",
+        } <= set(expanded)
 
     def test_a_claim_differing_only_by_version_is_not_satisfied(self, expand):
         """A claim repeats a declared entry exactly, so a stray version is a mismatch."""
@@ -610,6 +679,87 @@ class TestBindCatalogItems:
         )
 
         assert by_name["developer_agent"]["subagents"] == [{"name": "static_helper"}]
+
+
+class TestAgentsNobodyClaims:
+    """GitLab resolved these for nothing.
+
+    The run still proceeds, and the drop is logged.
+    """
+
+    @staticmethod
+    def _agent(item_id: str) -> dict:
+        return {
+            "item_id": item_id,
+            "version": "1.0.0",
+            "name": f"agent {item_id}",
+            "description": "An agent.",
+            "prompt": "You are an agent.",
+        }
+
+    def _claiming(self, *references: dict) -> list[dict]:
+        return [
+            {
+                "name": "developer_agent",
+                "type": "AgentComponent",
+                "prompt_id": "developer_agent_prompt",
+                "inputs": [{"from": "context:goal", "as": "goal"}],
+                "subagents": [dict(ref) for ref in references],
+            }
+        ]
+
+    def test_a_declared_entry_no_component_claims_is_dropped_with_a_warning(
+        self, expand
+    ):
+        second = {**AI_CATALOG_REFERENCE, "item_id": "43"}
+        include = [CatalogItemRef(**AI_CATALOG_REFERENCE), CatalogItemRef(**second)]
+        items = CatalogItems(ai_catalog_agents=[self._agent("42"), self._agent("43")])
+
+        with capture_logs() as logs:
+            bound = expand(self._claiming(AI_CATALOG_REFERENCE), include, items)
+
+        assert [c["name"] for c in bound] == [
+            "developer_agent",
+            "ai-catalog/agents/agent 42 (42)",
+        ]
+        assert any(
+            log["event"].startswith("Dropping AI Catalog agents")
+            and log["dropped"] == ["43@1.0.0"]
+            for log in logs
+        )
+
+    def test_an_agent_the_flow_never_declared_is_dropped_with_a_warning(self, expand):
+        """The dependency rows and the flow disagree.
+
+        Binding trusts the flow.
+        """
+        include = [CatalogItemRef(**AI_CATALOG_REFERENCE)]
+        items = CatalogItems(ai_catalog_agents=[self._agent("42"), self._agent("99")])
+
+        with capture_logs() as logs:
+            bound = expand(self._claiming(AI_CATALOG_REFERENCE), include, items)
+
+        assert len(bound) == 2
+        assert any(log.get("dropped") == ["99@1.0.0"] for log in logs)
+
+    def test_nothing_is_logged_when_every_agent_is_claimed(self, expand):
+        include = [CatalogItemRef(**AI_CATALOG_REFERENCE)]
+        items = CatalogItems(ai_catalog_agents=[self._agent("42")])
+
+        with capture_logs() as logs:
+            expand(self._claiming(AI_CATALOG_REFERENCE), include, items)
+
+        assert not any("dropped" in log for log in logs)
+
+    def test_a_reference_with_spaces_around_its_id_counts_as_a_claim(self, expand):
+        padded = {**AI_CATALOG_REFERENCE, "item_id": " 42 ", "version": " 1.0.0 "}
+        include = [CatalogItemRef(**padded)]
+        items = CatalogItems(ai_catalog_agents=[self._agent("42")])
+
+        with capture_logs() as logs:
+            expand(self._claiming(padded), include, items)
+
+        assert not any("dropped" in log for log in logs)
 
 
 class TestCatalogItemValidation:
