@@ -47,7 +47,7 @@ log = structlog.stdlib.get_logger("trusted_restricted_issuers")
 TRUSTED_RESTRICTED_ISSUERS_ENV = "DUO_WORKFLOW_AUTH__TRUSTED_RESTRICTED_ISSUERS"
 
 # Host names GitLab owns. Custom domains are not accepted.
-TRUSTED_ISSUER_HOST_SUFFIXES = (".gitlab-dedicated.com",)
+TRUSTED_ISSUER_HOST_SUFFIXES = (".gitlab-dedicated.com", ".gitlab-private.org")
 _HOST_LABEL = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
 _KEYS_PATH = "/-/cloud_connector/keys"

@@ -129,6 +129,13 @@ def test_parses_trusted_issuers():
     assert issuers[TENANT_A].keys_url == TENANT_A + "/-/cloud_connector/keys"
 
 
+def test_accepts_gitlab_private_test_tenants():
+    url = "https://dapcurrent.gitlab-private.org"
+    raw = json.dumps({url: {"uid": UID_A, "flows": ["bl_security"]}})
+
+    assert list(parse_trusted_restricted_issuers(raw)) == [url]
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -146,6 +153,9 @@ def test_parses_trusted_issuers():
         "https://tenant.gitlab-dedicated.com.evil.example",
         "https://gitlab.example.com",
         " https://tenant-a.gitlab-dedicated.com",
+        "https://gitlab-private.org",
+        "https://a.b.gitlab-private.org",
+        "https://tenant.gitlab-private.org.evil.example",
     ],
 )
 def test_rejects_issuer_urls(url):
