@@ -241,6 +241,34 @@ class TestGrep:
         )
 
     @pytest.mark.asyncio
+    async def test_grep_reads_snippet_lines_by_their_count(self):
+        output = (
+            "Found 3 matches across 3 files (showing first 2)\n"
+            "secrets/a.pem:1_2\n"
+            "key\n"
+            "t = time:12_30\n"
+            "secrets/b.pem:4_6\n"
+            "longline... (trimmed)\n"
+            "src/b.py:4_4\n"
+            "ok\n"
+            "(Results truncated: showing 2 of 3 matches (1 hidden).)\n"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == (
+            "Found 3 matches across 3 files (showing first 2)\n"
+            "src/b.py:4_4\n"
+            "ok\n"
+            "(Results truncated: showing 2 of 3 matches (1 hidden).)\n"
+            "\n"
+            "Files excluded due to policy, continue without files:\n"
+            "secrets/a.pem\n"
+            "secrets/b.pem"
+        )
+
+    @pytest.mark.asyncio
     async def test_grep_drops_excluded_match_lines(self):
         grep_tool = self._setup_grep_tool_with_project(
             "src/a.py:1:token\nconfig/x.secret:2:token\nsrc/b.py:3:token",

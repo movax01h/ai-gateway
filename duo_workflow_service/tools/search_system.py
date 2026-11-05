@@ -20,7 +20,10 @@ _OUTPUT_OVERFLOW_MESSAGE = (
     " or set `search_directory` to a narrower directory."
 )
 # Executors print snippet headers (`path:start_end`) or one match per line (`path:line:text`).
-_SNIPPET_HEADER = re.compile(r"^(?P<path>.+):\d+_\d+$", re.MULTILINE)
+_SNIPPET_HEADER = re.compile(
+    r"^(?P<path>.+):(?P<start>\d+)_(?P<end>\d+)$", re.MULTILINE
+)
+_TRIMMED_SUFFIX = "... (trimmed)"
 _MATCH_LINE = re.compile(r"^(?P<path>[^:]+):\d+:")
 
 
@@ -133,24 +136,28 @@ class Grep(DuoBaseTool):
     def _drop_excluded(self, result: str) -> str:
         """Drop snippets of files excluded by the project's Duo context exclusions or the denylist."""
         policy = FileExclusionPolicy(self.project)
+        snippets = bool(_SNIPPET_HEADER.search(result))
+        lines = result.split("\n")
         kept: list[str] = []
         excluded: list[str] = []
-        keep = True
-        path_pattern = (
-            _SNIPPET_HEADER if _SNIPPET_HEADER.search(result) else _MATCH_LINE
-        )
-        for line in result.split("\n"):
-            if match := path_pattern.match(line):
-                path = match.group("path")
-                try:
-                    validate_duo_context_exclusions(path)
-                    keep = policy.is_allowed(path)
-                except ToolException:
-                    keep = False
-                if not keep and path not in excluded:
-                    excluded.append(path)
-            if keep:
-                kept.append(line)
+        i = 0
+        while i < len(lines):
+            match = (_SNIPPET_HEADER if snippets else _MATCH_LINE).match(lines[i])
+            block = [lines[i]]
+            if match and snippets:
+                # A header is followed by its snippet's lines; a trimmed snippet ends early.
+                for _ in range(int(match["end"]) - int(match["start"]) + 1):
+                    if i + len(block) >= len(lines):
+                        break
+                    block.append(lines[i + len(block)])
+                    if block[-1].endswith(_TRIMMED_SUFFIX):
+                        break
+            i += len(block)
+            if match and not self._is_allowed(policy, match["path"]):
+                if match["path"] not in excluded:
+                    excluded.append(match["path"])
+                continue
+            kept.extend(block)
         if not excluded:
             return result
         return (
@@ -158,6 +165,14 @@ class Grep(DuoBaseTool):
             + "\n"
             + FileExclusionPolicy.format_llm_exclusion_message(excluded)
         )
+
+    @staticmethod
+    def _is_allowed(policy: FileExclusionPolicy, path: str) -> bool:
+        try:
+            validate_duo_context_exclusions(path)
+        except ToolException:
+            return False
+        return policy.is_allowed(path)
 
     def format_display_message(
         self, args: GrepInput, _tool_response: Any = None
