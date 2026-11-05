@@ -970,8 +970,8 @@ class TestFeatureAllowlist:
 
         class TestOtherPrompts:
             PATHS = [
-                "/v1/prompts/generate_description",
-                "/v2/prompts/generate_description",
+                "/v1/prompts/security_review",
+                "/v2/prompts/security_review",
             ]
 
             @pytest.mark.parametrize(
@@ -981,7 +981,7 @@ class TestFeatureAllowlist:
             def test_notes_the_model_and_serves_it(self, middleware_test_client, path):
                 assert (
                     "codestral_2508_fireworks"
-                    not in _feature("generate_description").allowed_model_identifiers
+                    not in _feature("security_review").allowed_model_identifiers
                 )
 
                 with capture_logs() as logs:
@@ -992,14 +992,14 @@ class TestFeatureAllowlist:
 
                 assert response.status_code == 200
                 assert response.json() == {
-                    "prompt_id": "generate_description",
+                    "prompt_id": "security_review",
                     "name": "codestral_2508_fireworks",
                 }
                 assert _allowlist_logs(logs, "Model allowlist note") == [
                     (
                         "prompt_feature_model_not_allowed",
-                        "generate_description",
-                        "generate_description",
+                        "security_review",
+                        "security_review",
                         path,
                     )
                 ]
@@ -1012,7 +1012,7 @@ class TestFeatureAllowlist:
                         {
                             "provider": "gitlab",
                             "identifier": "codestral_2508_fireworks",
-                            "feature_setting": "generate_description",
+                            "feature_setting": "security_review",
                         },
                         id="client-sends-the-prompt-feature",
                     ),
