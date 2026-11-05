@@ -186,9 +186,10 @@ run `poetry install`, which needs network
 access. In network-restricted environments (e.g. agent sandboxes) with a
 pre-installed `.venv`, prefix the make target with `CI=true` (e.g.
 `CI=true make check-mypy ...`) — the Makefile skips the install step when
-`CI=true` and `.venv` exists. The same prefix fixes lefthook hooks that
-fail in the install step (`CI=true git commit ...`); prefer it over
-`LEFTHOOK=0`, which skips the checks entirely.
+`CI=true` and `.venv` exists. This also applies to other targets that run
+`poetry install`. The same prefix fixes lefthook hooks that fail in the
+install step (`CI=true git commit ...`); prefer it over `LEFTHOOK=0`, which
+skips the checks entirely.
 
 The pre-installed `.venv` matches the `poetry.lock` of the commit the session
 started on. After you check out or rebase onto another ref, run
@@ -233,7 +234,8 @@ LEFTHOOK=0 git commit ...
 Don't pipe `git commit` output (`| tail`): the pipeline reports `tail`'s exit
 status and hides a lefthook failure. If a commit's outcome is unclear, never
 `sleep` and retry blind: verify with `git log --oneline -1` (and
-`ls .git/MERGE_HEAD` during a merge) before retrying or pushing.
+`git rev-parse -q --verify MERGE_HEAD` during a merge) before retrying or
+pushing.
 
 ### Protocol Buffers
 
@@ -284,12 +286,14 @@ make duo-workflow-docs
 poetry run validate-model-selection-config
 ```
 
-`docs/duo_workflow_service_graphs.md` is generated from the flow configs and
-the legacy workflows in `duo_workflow_service/workflows/`, so never hand-edit
-it: run `make duo-workflow-docs` after changing either. To resolve merge
-conflicts in this doc, first resolve any conflicts in those sources, then run
-`make duo-workflow-docs`; either side of the conflicted doc works as a starting
-point, since regeneration overwrites it.
+`docs/duo_workflow_service_graphs.md` is generated from the flow configs in
+`duo_workflow_service/agent_platform/{v1,experimental}/flows/configs/` and
+`ai/features/*/*/config/`, and from the legacy workflows in
+`duo_workflow_service/workflows/`, so never hand-edit it: run
+`make duo-workflow-docs` after changing any of these sources. To resolve merge
+conflicts in the generated doc, first resolve any conflicts in those sources,
+then run `make duo-workflow-docs`. Regeneration replaces the doc, so either
+conflicted version is fine as a starting point.
 
 ## Code Style
 
