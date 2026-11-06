@@ -279,6 +279,7 @@ configurable_unit_primitives:
       - "gpt_6_luna"
       - "gpt_6_sol"
       - "kimi_k3_fireworks"
+      - "kimi_k3_1_pro_fireworks"
       - "minimax_m3_fireworks"
 
     dev:
@@ -365,6 +366,7 @@ configurable_unit_primitives:
       - "gpt_6_luna"
       - "gpt_6_sol"
       - "kimi_k3_fireworks"
+      - "kimi_k3_1_pro_fireworks"
       - "minimax_m3_fireworks"
 
     dev:
@@ -469,6 +471,7 @@ configurable_unit_primitives:
       - "gpt_6_luna"
       - "gpt_6_sol"
       - "kimi_k3_fireworks"
+      - "kimi_k3_1_pro_fireworks"
       - "minimax_m3_fireworks"
 
     dev:

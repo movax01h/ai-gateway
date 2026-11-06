@@ -39,6 +39,7 @@ from duo_workflow_service.workflows.registry import (
     _load_flow_from_inline_config,
     _load_flow_from_registry,
     _normalize_prompt_template_order,
+    flow_config_from_fetched_definition,
     flow_factory,
     list_configs,
     resolve_flow,
@@ -1151,3 +1152,86 @@ class TestRegistryIdentity:
         factory = _load_flow_from_inline_config(struct, schema_version)
 
         assert factory.keywords["config"].config_id is None
+
+
+# Building a config from a fetched definition.
+
+
+def _fetched_definition(**overrides) -> dict:
+    return {
+        "version": "v1",
+        "environment": "ambient",
+        "components": [
+            {
+                "name": "agent",
+                "type": "AgentComponent",
+                "prompt_id": "fetched_prompt",
+                "toolset": [],
+            }
+        ],
+        "routers": [{"from": "agent", "to": "end"}],
+        "flow": {"entry_point": "agent"},
+        "prompts": [
+            {
+                "prompt_id": "fetched_prompt",
+                "name": "Fetched prompt",
+                "unit_primitives": ["duo_agent_platform"],
+                # A stored definition loses the author's key order, like an inline Struct.
+                "prompt_template": {"user": "{{goal}}", "system": "You help."},
+            }
+        ],
+        **overrides,
+    }
+
+
+def test_a_v1_definition_builds_a_config():
+    config = flow_config_from_fetched_definition(_fetched_definition())
+
+    assert isinstance(config, FlowConfig)
+    assert config.environment == "ambient"
+
+
+def test_prompt_roles_get_the_canonical_order():
+    config = flow_config_from_fetched_definition(_fetched_definition())
+
+    template = config.prompts[0].prompt_template
+    assert list(template) == ["system", "user"]
+
+
+def test_the_served_definition_is_not_changed():
+    definition = _fetched_definition()
+
+    flow_config_from_fetched_definition(definition)
+
+    assert list(definition["prompts"][0]["prompt_template"]) == ["user", "system"]
+
+
+@pytest.mark.parametrize("version", ["experimental", None, "v2"])
+def test_only_v1_definitions_are_accepted(version):
+    with pytest.raises(ValueError, match="must have version 'v1'"):
+        flow_config_from_fetched_definition(_fetched_definition(version=version))
+
+
+def test_a_chat_partial_definition_is_rejected():
+    with pytest.raises(ValueError, match=CHAT_PARTIAL_ENVIRONMENT):
+        flow_config_from_fetched_definition(
+            _fetched_definition(environment=CHAT_PARTIAL_ENVIRONMENT)
+        )
+
+
+def test_an_invalid_definition_raises_a_value_error():
+    with pytest.raises(ValueError):
+        flow_config_from_fetched_definition(
+            _fetched_definition(components="not-a-list")
+        )
+
+
+def test_prompts_pass_the_security_check():
+    with patch(
+        "duo_workflow_service.workflows.registry._validate_flow_config_prompts",
+        side_effect=SecurityException("dangerous content"),
+    ) as validate:
+        with pytest.raises(SecurityException):
+            flow_config_from_fetched_definition(_fetched_definition())
+
+    validate.assert_called_once()
