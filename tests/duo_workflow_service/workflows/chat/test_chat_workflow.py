@@ -45,6 +45,7 @@ from duo_workflow_service.errors.typing import (
     NotifiableException,
     ToolApprovalUnavailableError,
 )
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.toolset import Toolset
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.chat.commands import (
@@ -2610,6 +2611,84 @@ class TestChatAttachments:
         message = result.update["conversation_history"]["test_prompt"][0]
         assert message.content[0]["text"] == "what is in this screenshot?"
         assert image_blocks(message)[0]["base64"] == PNG_B64
+
+    @pytest.mark.asyncio
+    async def test_a_session_file_reference_is_sent_as_the_image(
+        self, workflow_with_project, workflow_id
+    ):
+        url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"
+        workflow_with_project._additional_context = [
+            AdditionalContext(
+                category="attachments",
+                content=json.dumps({"url": url, "filename": "screenshot.png"}),
+            )
+        ]
+        workflow_with_project._http_client.aget = AsyncMock(
+            return_value=GitLabHttpResponse(
+                status_code=200, body={"content_type": "image/png", "data": PNG_B64}
+            )
+        )
+
+        result = await self._later_turn(workflow_with_project)
+
+        workflow_with_project._http_client.aget.assert_awaited_once_with(
+            path=url, parse_json=True
+        )
+        message = result.update["conversation_history"]["test_prompt"][0]
+        (image,) = image_blocks(message)
+        assert image["base64"] == PNG_B64
+        assert image["mime_type"] == "image/png"
+
+    @pytest.fixture(name="workflow_with_session_file")
+    def workflow_with_session_file_fixture(self, workflow_with_project, workflow_id):
+        url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"
+        workflow_with_project._additional_context = [
+            AdditionalContext(
+                category="attachments",
+                content=json.dumps({"url": url, "filename": "screenshot.png"}),
+            )
+        ]
+        workflow_with_project._http_client.aget = AsyncMock()
+        return workflow_with_project
+
+    @pytest.mark.asyncio
+    async def test_a_session_file_is_not_fetched_when_attachments_are_not_allowed(
+        self, workflow_with_session_file
+    ):
+        workflow_with_session_file._workflow_config = {
+            **workflow_with_session_file._workflow_config,
+            "file_attachments_allowed": False,
+        }
+
+        with pytest.raises(AttachmentsNotAllowedError):
+            await self._later_turn(workflow_with_session_file)
+
+        workflow_with_session_file._http_client.aget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "approval",
+        [
+            pytest.param(
+                contract_pb2.Approval(approval=contract_pb2.Approval.Approved()),
+                id="approval_turn",
+            ),
+            pytest.param(
+                contract_pb2.Approval(
+                    rejection=contract_pb2.Approval.Rejected(message="no")
+                ),
+                id="rejection_turn",
+            ),
+        ],
+    )
+    async def test_a_session_file_is_not_fetched_for_a_decision_turn(
+        self, workflow_with_session_file, approval
+    ):
+        workflow_with_session_file._approval = approval
+
+        await self._later_turn(workflow_with_session_file)
+
+        workflow_with_session_file._http_client.aget.assert_not_awaited()
 
     def test_every_attachment_becomes_its_own_block(self, workflow_with_project):
         workflow_with_project._additional_context = [
