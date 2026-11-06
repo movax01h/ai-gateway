@@ -3702,3 +3702,38 @@ async def test_a_tool_the_model_chose_still_returns_to_it(
 
     assert visited == ["run_tools", "agent"]
     assert state.next == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("max_tool_calls", "expected_kwargs"),
+    [(2, {"max_tool_calls": 2}), (None, {})],
+    ids=["limit", "no_limit"],
+)
+async def test_run_tools_applies_the_limit_stored_for_the_response(
+    workflow_with_project, max_tool_calls, expected_kwargs
+):
+    """The stored limit applies with the flag off too, so turning it off after an approval cannot run more calls."""
+    workflow_with_project._agent = MagicMock()
+    workflow_with_project._agent.name = "test_prompt"
+    workflow_with_project._tools_executor = MagicMock(run=AsyncMock(return_value=[]))
+    state = ChatWorkflowState(
+        conversation_history={
+            "test_prompt": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "read_file", "args": {}, "id": f"call-{index}"}
+                        for index in range(3)
+                    ],
+                )
+            ]
+        },
+        max_tool_calls=max_tool_calls,
+    )
+
+    await workflow_with_project._run_tools(state)
+
+    workflow_with_project._tools_executor.run.assert_awaited_once_with(
+        state, **expected_kwargs
+    )

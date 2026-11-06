@@ -240,6 +240,7 @@ CHAT_WEB_SEARCH_TOOLS = ["web_search"]
 class Workflow(AbstractWorkflow):
     _stream: bool = True
     _agent: ChatAgent
+    _tools_executor: ToolsExecutor
     _tools_override: list[str]
     _workflow_id: str
     _workflow_type: GLReportingEventContext
@@ -365,6 +366,25 @@ class Workflow(AbstractWorkflow):
             return Routes.STOP
 
         return Routes.CONTINUE
+
+    async def _run_tools(self, state: ChatWorkflowState) -> list[Any]:
+        """Run the requested tool calls, skipping those past the limit ``ChatAgent`` stored for the response."""
+        max_tool_calls = state.get("max_tool_calls")
+        if max_tool_calls is None:
+            return await self._tools_executor.run(state)
+
+        last_message = state["conversation_history"][self._agent.name][-1]
+        # Malformed calls never run, so the limit does not count them.
+        requested = len(getattr(last_message, "tool_calls", []))
+        if requested > max_tool_calls:
+            logger.warning(
+                "Skipping chat tool calls over the limit",
+                workflow_id=self._workflow_id,
+                requested=requested,
+                limit=max_tool_calls,
+            )
+
+        return await self._tools_executor.run(state, max_tool_calls=max_tool_calls)
 
     def _turn_completed_a_forced_call(self, state: ChatWorkflowState) -> bool:
         """Whether the tool results just written answer a call the client chose, and that call succeeded.
@@ -896,16 +916,16 @@ class Workflow(AbstractWorkflow):
             ),
         )
 
-        tools_runner = ToolsExecutor(
+        self._tools_executor = ToolsExecutor(
             tools_agent_name=self._agent.name,
             toolset=agents_toolset,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
             skip_agent_msg=True,
-        ).run
+        )
 
         graph.add_node("agent", self._agent.run)
-        graph.add_node("run_tools", tools_runner)
+        graph.add_node("run_tools", self._run_tools)
         graph.add_node("forced_call_complete", self._forced_call_complete)
 
         graph.set_conditional_entry_point(

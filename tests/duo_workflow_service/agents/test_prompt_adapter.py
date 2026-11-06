@@ -19,7 +19,11 @@ from duo_workflow_service.agents.prompt_adapter import (
     DefaultPromptAdapter,
 )
 from duo_workflow_service.agents.web_search import WebSearchState
-from duo_workflow_service.entities.state import ChatWorkflowState, WorkflowStatusEnum
+from duo_workflow_service.entities.state import (
+    MAX_TOOL_CALLS_PER_MODEL_CALL,
+    ChatWorkflowState,
+    WorkflowStatusEnum,
+)
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -27,7 +31,9 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.context import gitlab_version
 from lib.feature_flags import current_feature_flag_context
+from lib.feature_flags.context import FeatureFlag
 
 REPO_ROOT = Path(__file__).parents[3]
 ORBIT_AGENT_CONFIG = (
@@ -335,6 +341,51 @@ def test_chat_agent_prompt_template_denied_tools_message(
             assert "create_issue," not in denied_tools_message.content
     else:
         assert denied_tools_message is None
+
+
+@pytest.mark.parametrize(
+    ("flag_enabled", "version", "expected"),
+    [(True, "19.6.0", True), (True, "19.5.3", False), (False, "19.6.0", False)],
+    ids=["flag_on", "flag_on_old_gitlab", "flag_off"],
+)
+@patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+def test_chat_agent_prompt_template_states_the_tool_call_limit(
+    mock_get_model_metadata,
+    sample_chat_workflow_state: ChatWorkflowState,
+    flag_enabled,
+    version,
+    expected,
+):
+    mock_get_model_metadata.return_value = None
+    prompt_config = PromptConfig(
+        name="Chat Agent",
+        unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
+        prompt_template={
+            "system_static": "Base system prompt.",
+            "user": "{{ message.content }}",
+        },
+    )
+    template = ChatAgentPromptTemplate(
+        model_provider=ModelClassProvider.ANTHROPIC, config=prompt_config
+    )
+
+    token = current_feature_flag_context.set(
+        {FeatureFlag.DUO_CHAT_TOOL_CALL_LIMITS.value} if flag_enabled else set()
+    )
+    version_token = gitlab_version.set(version)
+    try:
+        result = template.invoke(sample_chat_workflow_state, agent_name="test_agent")
+    finally:
+        gitlab_version.reset(version_token)
+        current_feature_flag_context.reset(token)
+
+    system_messages = [m for m in result.to_messages() if isinstance(m, SystemMessage)]
+    limit_text = (
+        f"Request at most {MAX_TOOL_CALLS_PER_MODEL_CALL} tool calls in one response."
+    )
+    assert any(limit_text in m.content for m in system_messages) is expected
+    # The static prompt stays first, where the prompt cache breakpoint sits.
+    assert str(system_messages[0].content).startswith("Base system prompt.")
 
 
 @pytest.mark.parametrize(

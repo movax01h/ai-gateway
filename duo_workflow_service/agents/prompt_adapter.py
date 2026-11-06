@@ -20,7 +20,10 @@ from duo_workflow_service.entities.message_ingestion import (
     non_blank_text_block,
     split_text_blocks,
 )
-from duo_workflow_service.entities.state import ChatWorkflowState
+from duo_workflow_service.entities.state import (
+    MAX_TOOL_CALLS_PER_MODEL_CALL,
+    ChatWorkflowState,
+)
 from duo_workflow_service.gitlab.gitlab_api import Namespace, Project
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
 from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceContext
@@ -29,6 +32,9 @@ from duo_workflow_service.slash_commands.error_handler import (
 )
 from duo_workflow_service.slash_commands.goal_parser import is_slash_command
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
+from duo_workflow_service.tools.version_compatibility import (
+    supports_chat_tool_call_limits,
+)
 from lib.context import get_model_metadata
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.prompts.utilities import render_security_block
@@ -188,6 +194,13 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             "this action has been blocked by an administrator."
         )
 
+    @staticmethod
+    def _build_tool_call_limit_text() -> str:
+        return (
+            f"Request at most {MAX_TOOL_CALLS_PER_MODEL_CALL} tool calls in one response. "
+            "Calls past that are skipped, so split larger batches across responses."
+        )
+
     def _build_split_system_messages(
         self,
         static_template_context: dict[str, Any],
@@ -231,6 +244,12 @@ class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
             messages.append(
                 SystemMessage(content=self._build_denied_tools_text(denied_tools))
             )
+
+        if (
+            is_feature_enabled(FeatureFlag.DUO_CHAT_TOOL_CALL_LIMITS)
+            and supports_chat_tool_call_limits()
+        ):
+            messages.append(SystemMessage(content=self._build_tool_call_limit_text()))
 
         if "system_dynamic" in self.prompt_template:
             dynamic_content = jinja2_formatter(
