@@ -1,3 +1,4 @@
+import copy
 import inspect
 from dataclasses import dataclass
 from functools import partial
@@ -133,6 +134,9 @@ _FLOW_BY_VERSIONS: Dict[
     ),
     "v1": (V1FlowConfig, V1PartialFlowConfig, V1Flow),
 }
+
+# A saved AI Catalog flow is always a full v1 flow.
+_FETCHED_FLOW_SCHEMA_VERSION = "v1"
 
 _FLOW_CONFIGS_BY_VERSION = {
     "experimental": experimental_list_configs,
@@ -541,6 +545,35 @@ def _load_flow_from_inline_config(
         raise
     except Exception as e:
         raise ValueError(f"Failed to create flow from FlowConfig protobuf: {e}") from e
+
+
+def flow_config_from_fetched_definition(definition: Dict[str, Any]) -> V1FlowConfig:
+    """Build a v1 flow config from a saved flow definition that GitLab served.
+
+    The checks match an inline v1 flow: the prompt roles get the same canonical order, because the stored
+    definition does not keep the author's key order either, and every prompt passes the security check. Only a
+    full v1 flow can be fetched.
+
+    Raises:
+        ValueError: If the definition is not a v1 flow, is a chat-partial flow, or does not validate.
+        SecurityException: If a prompt contains dangerous content.
+    """
+    config_dict = copy.deepcopy(definition)
+    _normalize_prompt_template_order(config_dict)
+
+    if config_dict.get("version") != _FETCHED_FLOW_SCHEMA_VERSION:
+        raise ValueError(
+            f"Fetched flow definitions must have version "
+            f"'{_FETCHED_FLOW_SCHEMA_VERSION}', but received: {config_dict.get('version')!r}"
+        )
+    if config_dict.get("environment") == CHAT_PARTIAL_ENVIRONMENT:
+        raise ValueError(
+            f"Fetched flow definitions cannot use the '{CHAT_PARTIAL_ENVIRONMENT}' environment"
+        )
+
+    config = V1FlowConfig(**config_dict)
+    _validate_flow_config_prompts(config)
+    return config
 
 
 def resolve_flow(flow_request: FlowRequest) -> ResolvedFlow:

@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, NoReturn, Optional, override
+from typing import Any, Dict, NoReturn, Optional, cast, override
 from uuid import uuid4
 
 import jsonschema
@@ -184,7 +184,7 @@ class Flow(AbstractWorkflow):
         workflow_metadata: Dict[str, Any],
         workflow_type: GLReportingEventContext,
         user: CloudConnectorUser,
-        config: FlowConfig,
+        config: Optional[FlowConfig],
         streaming: bool = False,
         mcp_tools: list[contract_pb2.McpTool] = [],
         additional_context: Optional[list[AdditionalContext]] = None,
@@ -213,15 +213,30 @@ class Flow(AbstractWorkflow):
             internal_event_client=internal_event_client,
             **kwargs,
         )
-        self._config = config
         self._stream = streaming
         self._catalog_items = catalog_items or CatalogItems()
-
         self._flow_prompt_registry = InMemoryPromptRegistry(prompt_registry)
+        self._flow_schema_registry = InlineResponseSchemaRegistry(schema_registry)
+        # None only for a flow that fetches its config before the graph is compiled.
+        if config is not None:
+            self._use_config(config)
+
+        self._set_tracking_context_from_additional_context()
+
+    # pylint: enable=dangerous-default-value
+
+    def _use_config(self, config: FlowConfig) -> None:
+        """Set the flow config and register its prompts and response schemas."""
+        self._config = config
+        # Both are the in-memory registries made in __init__. Self-hosted billing may wrap
+        # the prompt registry, and the wrapper forwards these calls to it.
+        prompt_registry = cast(InMemoryPromptRegistry, self._flow_prompt_registry)
+        schema_registry = cast(InlineResponseSchemaRegistry, self._flow_schema_registry)
+
         if self._config.prompts:
             for prompt_config in self._config.prompts:
                 prompt_id = prompt_config.prompt_id
-                self._flow_prompt_registry.register_prompt(
+                prompt_registry.register_prompt(
                     prompt_id=prompt_id,
                     prompt_data=prompt_config.to_prompt_data(),
                 )
@@ -231,21 +246,16 @@ class Flow(AbstractWorkflow):
         # flow's own, so one of these cannot be shadowed; overriding them is a later
         # phase.
         for catalog_prompt in default_prompts():
-            self._flow_prompt_registry.register_prompt(
+            prompt_registry.register_prompt(
                 prompt_id=catalog_prompt.prompt_id,
                 prompt_data=catalog_prompt.to_prompt_data(),
             )
 
-        self._flow_schema_registry = InlineResponseSchemaRegistry(schema_registry)
         if self._config.response_schemas:
             for schema_config in self._config.response_schemas:
-                self._flow_schema_registry.register_schema(
+                schema_registry.register_schema(
                     schema_config.schema_id, schema_config.to_schema_dict()
                 )
-
-        self._set_tracking_context_from_additional_context()
-
-    # pylint: enable=dangerous-default-value
 
     def _set_tracking_context_from_additional_context(self) -> None:
         """Set merge_request_url and pipeline_source ContextVars from additional context."""
