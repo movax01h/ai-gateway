@@ -6,6 +6,9 @@ with an error that says why it was refused. When a setting turns the sub-items o
 ``sub_items_skipped_reason`` names the setting. The run then proceeds without them.
 
 Only ``agent`` sub-items are read here. ``flow`` sub-items are left for a later iteration.
+
+For a saved flow that the client asked the service to fetch, the root item's ``definition`` is the flow itself.
+:func:`fetch_catalog_flow` reads it and the agents from the same response, so the run makes one request.
 """
 
 from dataclasses import dataclass, field
@@ -15,13 +18,19 @@ import structlog
 from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogFlowUnavailableError,
     CatalogItemsError,
     CatalogItemsFetchError,
 )
 from duo_workflow_service.agent_platform.v1.catalog.items import AiCatalogAgent
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 
-__all__ = ["FetchedCatalogAgents", "fetch_catalog_agents"]
+__all__ = [
+    "FetchedCatalogAgents",
+    "FetchedCatalogFlow",
+    "fetch_catalog_agents",
+    "fetch_catalog_flow",
+]
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -41,6 +50,19 @@ class FetchedCatalogAgents:
     skipped_reason: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class FetchedCatalogFlow:
+    """A saved flow and its agents, read from one catalog items response.
+
+    Attributes:
+        definition: The root item's ``definition``, which is the flow config.
+        agents: The agents and skip reason from the same response.
+    """
+
+    definition: dict[str, Any]
+    agents: FetchedCatalogAgents
+
+
 async def fetch_catalog_agents(
     client: GitlabHttpClient, workflow_id: str
 ) -> FetchedCatalogAgents:
@@ -58,6 +80,62 @@ async def fetch_catalog_agents(
         CatalogItemsFetchError: If GitLab answers with an error status, or the body is not an object.
         CatalogItemsError: If a sub-item was refused, or an agent does not pass field validation.
     """
+    item = await _fetch_root_item(client, workflow_id)
+    return _agents_of(item, workflow_id)
+
+
+async def fetch_catalog_flow(
+    client: GitlabHttpClient, workflow_id: str
+) -> FetchedCatalogFlow:
+    """Return the saved flow of the run and its AI Catalog agents, from one request.
+
+    Args:
+        client: The run's GitLab client.
+        workflow_id: The run. GitLab reads the flow version from the workflow record.
+
+    Returns:
+        The root definition and the agents.
+
+    Raises:
+        CatalogFlowUnavailableError: If GitLab answers 404, or the response has no root definition.
+        CatalogItemsFetchError: If GitLab answers with another error status, or the body is not an object.
+        CatalogItemsError: If a sub-item was refused, or an agent does not pass field validation.
+    """
+    try:
+        item = await _fetch_root_item(client, workflow_id)
+    except _NotFoundError as exc:
+        raise CatalogFlowUnavailableError(str(exc)) from exc
+
+    definition = item.get("definition")
+    if not isinstance(definition, dict) or not definition:
+        # A 2xx that structurally lacks the root definition is a malformed body, not a
+        # clean 404 "no saved flow". Raise with a CatalogItemsFetchError cause (no status,
+        # so is_catalog_refusal is False) so the server maps it to INTERNAL. Without a cause
+        # the NotifiableAgentException leaves last_error None and the run ends as UNKNOWN.
+        raise CatalogFlowUnavailableError(
+            f"Catalog items response for workflow {workflow_id} has no root definition"
+        ) from CatalogItemsFetchError(
+            f"Catalog items response for workflow {workflow_id} has no root definition"
+        )
+
+    return FetchedCatalogFlow(
+        definition=definition, agents=_agents_of(item, workflow_id)
+    )
+
+
+class _NotFoundError(CatalogItemsFetchError):
+    """GitLab answered 404: an older GitLab without the endpoint, or a workflow it does not serve."""
+
+
+async def _fetch_root_item(
+    client: GitlabHttpClient, workflow_id: str
+) -> dict[str, Any]:
+    """Send the one GET and return the root ``item``, or an empty dict when the body has none.
+
+    Raises:
+        _NotFoundError: If GitLab answers 404.
+        CatalogItemsFetchError: If GitLab answers with another error status, or the body is not an object.
+    """
     # No timeout of our own: the client retries 401 and 429 for up to 39 seconds to ride out replica lag.
     response = await client.aget(
         path=f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/catalog_items",
@@ -70,7 +148,10 @@ async def fetch_catalog_agents(
             workflow_id=workflow_id,
             status_code=response.status_code,
         )
-        raise CatalogItemsFetchError(
+        error_cls = (
+            _NotFoundError if response.status_code == 404 else CatalogItemsFetchError
+        )
+        raise error_cls(
             f"GitLab refused the catalog items request for workflow {workflow_id}: "
             f"HTTP {response.status_code}: {_message_of(response.body)}",
             status_code=response.status_code,
@@ -83,8 +164,15 @@ async def fetch_catalog_agents(
         )
 
     item = response.body.get("item")
-    if not isinstance(item, dict):
-        item = {}
+    return item if isinstance(item, dict) else {}
+
+
+def _agents_of(item: dict[str, Any], workflow_id: str) -> FetchedCatalogAgents:
+    """Build the agents from the root item's ``sub_items``.
+
+    Raises:
+        CatalogItemsError: If a sub-item was refused, or an agent does not pass field validation.
+    """
     sub_items = item.get("sub_items")
     if not isinstance(sub_items, list):
         sub_items = []
