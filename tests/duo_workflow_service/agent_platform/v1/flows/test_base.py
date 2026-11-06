@@ -11,6 +11,9 @@ from langgraph.graph import StateGraph
 from langgraph.types import Command
 from structlog.testing import capture_logs
 
+from ai_gateway.prompts.config.base import InMemoryPromptConfig
+from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
+from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
@@ -62,6 +65,9 @@ from duo_workflow_service.errors.typing import (
 )
 from duo_workflow_service.gitlab.gitlab_api import Namespace
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
+from duo_workflow_service.interceptors.route.usage_billing import (
+    PromptRegistrySelfHostedBillingSupport,
+)
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
@@ -1224,6 +1230,113 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 "allow_agent_to_request_user", False
             ),
         }
+
+    def test_inline_response_schemas_are_registered_with_the_flow(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        flow_type: GLReportingEventContext,
+    ):
+        config = sample_flow_config.model_copy(
+            update={
+                "response_schemas": [
+                    InlineResponseSchemaConfig(
+                        schema_id="verdict",
+                        definition={
+                            "type": "object",
+                            "properties": {"approved": {"type": "boolean"}},
+                            "required": ["approved"],
+                        },
+                    )
+                ]
+            }
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-schemas",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=config,
+            )
+
+        schema = flow._flow_schema_registry.get("verdict", "")
+        assert "approved" in schema.model_fields
+
+    @pytest.mark.parametrize("wrap_registry_in_billing_support", [False, True])
+    def test_use_config_registers_inline_prompts_and_schemas(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        flow_type: GLReportingEventContext,
+        wrap_registry_in_billing_support,
+    ):
+        """Cover the deferred-config path a fetched flow takes.
+
+        A flow that fetches its config is built with ``config=None`` and calls
+        ``_use_config`` later. Self-hosted billing may wrap the prompt registry
+        before that call, so this also pins that the wrapper forwards
+        ``register_prompt`` to the wrapped in-memory registry through
+        ``__getattr__``.
+        """
+        config = sample_flow_config.model_copy(
+            update={
+                "prompts": [
+                    InMemoryPromptConfig(
+                        prompt_id="test/prompt",
+                        name="test/prompt",
+                        unit_primitives=["duo_agent_platform"],
+                        prompt_template={"system": "You help with {{goal}}"},
+                    )
+                ],
+                "response_schemas": [
+                    InlineResponseSchemaConfig(
+                        schema_id="verdict",
+                        definition={
+                            "type": "object",
+                            "properties": {"approved": {"type": "boolean"}},
+                            "required": ["approved"],
+                        },
+                    )
+                ],
+            }
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-deferred-config",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=None,
+            )
+
+        in_memory_registry = flow._flow_prompt_registry
+        assert isinstance(in_memory_registry, InMemoryPromptRegistry)
+        if wrap_registry_in_billing_support:
+            flow._flow_prompt_registry = PromptRegistrySelfHostedBillingSupport(
+                instance=in_memory_registry,
+                workflow_id="test-workflow-deferred-config",
+                gl_feat_context=flow_type,
+                outbox=AsyncMock(),
+            )
+
+        flow._use_config(config)
+
+        # The wrapper has no storage of its own; it forwards register_prompt to the
+        # in-memory registry, so the inline prompt must land in its raw store.
+        assert "test/prompt" in in_memory_registry._raw_prompt_data
+        schema = flow._flow_schema_registry.get("verdict", "")
+        assert "approved" in schema.model_fields
 
     def test_registry_flow_id_comes_from_the_registry_load(
         self, flow_instance, sample_flow_config

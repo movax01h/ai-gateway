@@ -3,7 +3,6 @@ import ast
 import asyncio
 import contextvars
 import functools
-import hashlib
 import hmac
 import json
 import os
@@ -77,6 +76,7 @@ from duo_workflow_service.executor.outbox import (
     OutboxSignal,
     OutgoingMessageTooLargeError,
 )
+from duo_workflow_service.flow_config_digest import flow_config_digest
 from duo_workflow_service.flow_request import (
     FlowRequest,
     InlineFlowRequest,
@@ -288,11 +288,7 @@ def _workflow_binding_matches(bound: Any, requested: str) -> bool:
     )
 
 
-def _flow_config_digest(flow_config: Struct) -> str:
-    canonical_json = json.dumps(
-        MessageToDict(flow_config), sort_keys=True, separators=(",", ":")
-    )
-    return hashlib.sha256(canonical_json.encode()).hexdigest()
+_flow_config_digest = flow_config_digest
 
 
 async def _require_registry_claim(
