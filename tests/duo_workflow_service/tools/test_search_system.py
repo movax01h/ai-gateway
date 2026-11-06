@@ -435,6 +435,7 @@ class TestGrep:
             ("src/a.py:1_000\n.ssh/id_rsa:token\n", None),
             ("src/a.py:1_1\nhome/.ssh/id_rsa:token", None),
             ("src/a.py:1_1\nhome/.ssh/id_rsa:token\n", None),
+            ("a.txt:x:1_1\nconfig/x.secret:token\n", ["*.secret"]),
         ],
     )
     async def test_grep_refuses_match_rows_that_look_like_a_snippet_header(
@@ -458,6 +459,57 @@ class TestGrep:
         result = await grep_tool._arun(keywords="token")
 
         assert result == self.unfilterable
+
+    @pytest.mark.parametrize("lsp_version", ["8.60.0"], indirect=True)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "output",
+        [
+            pytest.param(
+                "Found 2 matches across 2 files\nsrc/a.py:1_1\nok\nconfig/x.secret:token\n",
+                id="result_header",
+            ),
+            pytest.param("src/a.py:1_1\nok\nconfig/x.secret:token\n", id="headerless"),
+            pytest.param(
+                "a.txt:x:1_1\nsrc/b.py:token\nconfig/x.secret:token\n",
+                id="match_rows_with_a_header_like_first_row",
+            ),
+            pytest.param(
+                "Found 2 matches across 2 files\nsrc/a.py:1_1\nok\n\nconfig/x.secret:token\n",
+                id="empty_line_between_snippets",
+            ),
+            pytest.param(
+                "Found 2 matches across 2 files (showing first 1)\nsrc/a.py:1_1\nok\n"
+                "(Results truncated: showing 1 of 2 matches (1 hidden).)\nconfig/x.secret:token\n",
+                id="lines_after_the_truncation_footer",
+            ),
+            pytest.param(
+                "src/a.py:1_1\nok\n(Results truncated: showing 1 of 2 matches (1 hidden).)\n",
+                id="truncation_footer_without_a_result_header",
+            ),
+        ],
+    )
+    async def test_grep_refuses_lines_outside_snippet_blocks(self, lsp_version, output):
+        grep_tool = self._setup_grep_tool_with_project(output, ["*.secret"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == self.unfilterable
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exclusion_rules", [None, ["secrets/"]])
+    async def test_grep_keeps_the_truncation_footer_after_the_last_snippet(
+        self, exclusion_rules
+    ):
+        output = (
+            "Found 2 matches across 2 files (showing first 1)\nsrc/a.py:1_1\nok\n"
+            "(Results truncated: showing 1 of 2 matches (1 hidden).)\n"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, exclusion_rules)
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == output
 
     @pytest.mark.asyncio
     async def test_grep_refuses_an_absolute_search_directory(self):

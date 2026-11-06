@@ -31,6 +31,7 @@ _HEADERLESS_SNIPPETS_BEFORE = Version("8.77.0")
 # The executor cuts a snippet's text at this many UTF-16 units and appends the suffix.
 _MAX_SNIPPET_LENGTH = 5000
 _TRIMMED_SUFFIX = "... (trimmed)"
+_TRUNCATED_FOOTER = "(Results truncated: "
 _HIDDEN_NOTE = (
     "Some matches are hidden by the project's file exclusion settings;"
     " searching again will not return them."
@@ -160,6 +161,10 @@ class Grep(DuoBaseTool):
         kept, hidden, i = lines[:start], False, start
         while i < len(lines):
             match = _SNIPPET_HEADER.match(lines[i])
+            if not match and not _is_tail(lines[i:], start):
+                return (
+                    result if self._unparsed_allowed(lines) else _UNFILTERABLE_MESSAGE
+                )
             block = [lines[i]]
             if match:
                 for _ in range(int(match["end"]) - int(match["start"]) + 1):
@@ -199,6 +204,17 @@ class Grep(DuoBaseTool):
             search_dir = "directory"
         message = f"Search for '{args.keywords}' in files in '{search_dir}'"
         return message
+
+
+def _is_tail(rest: list[str], has_result_header: int) -> bool:
+    """The final empty line, or the truncation footer the executor adds after the last snippet."""
+    if rest == [""]:
+        return True
+    return (
+        bool(has_result_header)
+        and rest[0].startswith(_TRUNCATED_FOOTER)
+        and rest[1:] in ([], [""])
+    )
 
 
 def _sends_headerless_snippets() -> bool:
