@@ -41,6 +41,7 @@ from duo_workflow_service.entities.attachments import (
     attachment_content_blocks,
     attachment_rejection_block,
     partition_attachment_envelopes,
+    resolve_attachment_envelopes,
     split_attachment_envelopes,
     with_attachment_references,
 )
@@ -509,6 +510,19 @@ class Workflow(AbstractWorkflow):
         # looks like a turn that never carried additional context at all.
         return remaining or None, attachments, None
 
+    async def _resolve_attachments(self) -> None:
+        """Inline the session files this turn references, for a turn that builds a user message.
+
+        Skipped when the session does not allow attachments: ``_turn_context`` refuses the turn anyway, and
+        the user's files should not be read first.
+        """
+        if not self._workflow_config.get("file_attachments_allowed", False):
+            return
+
+        self._additional_context = await resolve_attachment_envelopes(
+            self._additional_context, self._http_client, self._workflow_id
+        )
+
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
         additional_context, attachments, rejection = self._turn_context()
 
@@ -571,6 +585,7 @@ class Workflow(AbstractWorkflow):
 
         match status_event:
             case WorkflowStatusEventEnum.START:
+                await self._resolve_attachments()
                 return self.get_workflow_state(goal)
 
             case _ if checkpoint_tuple is None:
@@ -583,6 +598,7 @@ class Workflow(AbstractWorkflow):
                     workflow_id=self._workflow_id,
                     status_event=str(status_event),
                 )
+                await self._resolve_attachments()
                 return self.get_workflow_state(goal)
 
             case _:
@@ -603,6 +619,7 @@ class Workflow(AbstractWorkflow):
                     attachments = []
                     rejection = None
                 else:
+                    await self._resolve_attachments()
                     additional_context, attachments, rejection = self._turn_context()
                     dropped = []
 
