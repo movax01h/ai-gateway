@@ -8,6 +8,20 @@ a JSON object::
 
     {"mime_type": "image/png", "data": "<base64>", "filename": "screenshot.png"}
 
+An envelope may instead reference a file GitLab is holding for the session, which
+:func:`resolve_attachment_envelopes` swaps for the inline form above before anything
+else reads it::
+
+    {
+        "url": "/api/v4/ai/duo_workflows/workflows/1/session_files/2",
+        "filename": "screenshot.png"
+    }
+
+The URL is a GitLab API path fetched through the executor like any other request, so
+it carries the user's own credentials and GitLab authorizes it against the session it
+belongs to. ``mime_type`` comes from that response rather than from the client, which
+is why the reference form does not carry one.
+
 Legacy chat claims the ``attachments`` category before the ordinary
 additional-context machinery runs, so there it needs no flow-config declaration
 and no unit primitive.
@@ -41,15 +55,19 @@ name what the user attached. It is transport in the same sense as the inbound
 envelope, which is why it lives here rather than with the block shape.
 """
 
+import asyncio
 import base64
 import binascii
 import json
+import re
 from typing import Any, Callable, Iterable, Optional, Sequence
 
+import structlog
 from pydantic import BaseModel
 
 from duo_workflow_service.entities.image_blocks import image_content_block
 from duo_workflow_service.errors.typing import NotifiableException
+from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 __all__ = [
@@ -66,9 +84,19 @@ __all__ = [
     "parse_attachments",
     "partition_attachment_envelopes",
     "payload_matches_mime_type",
+    "resolve_attachment_envelopes",
     "split_attachment_envelopes",
     "with_attachment_references",
 ]
+
+log = structlog.stdlib.get_logger("attachments")
+
+# The only path a reference may point at. It is client-supplied, so it is matched
+# rather than trusted: nothing else in the API can be fetched through this seam and
+# rendered to the model as an image.
+_SESSION_FILE_PATH = re.compile(
+    r"/api/v4/ai/duo_workflows/workflows/(?P<workflow_id>[0-9]+)/session_files/[0-9]+"
+)
 
 # Engine-level built-in category for the attachments envelope: claimed by the
 # engine rather than declared by a flow config.
@@ -281,6 +309,13 @@ def _parse_one(item: AdditionalContext, index: int) -> Attachment:
     mime_type = payload.get("mime_type")
     data = payload.get("data")
 
+    # Set by resolve_attachment_envelopes when a reference could not be fetched. It
+    # travels on the envelope so resolution needs no error channel of its own: the
+    # turn-level rejection path already tells both the user and the model.
+    error = payload.get("error")
+    if error:
+        raise ValueError(f"attachment '{label}' could not be read: {error}")
+
     if not isinstance(mime_type, str) or not mime_type:
         raise ValueError(f"attachment '{label}' is missing 'mime_type'.")
     if not isinstance(data, str) or not data:
@@ -401,6 +436,161 @@ def partition_attachment_envelopes(
     for item in items:
         (envelopes if item.category == ATTACHMENTS_CATEGORY else remaining).append(item)
     return remaining, envelopes
+
+
+async def resolve_attachment_envelopes(
+    items: Optional[Sequence[AdditionalContext]],
+    gitlab_client: GitlabHttpClient,
+    workflow_id: str,
+) -> Optional[list[AdditionalContext]]:
+    """Replace every attachment reference in *items* with the inline payload it names.
+
+    Runs once per turn, before anything reads the envelopes, so the rest of this module
+    only ever sees the inline form. A reference that cannot be fetched comes back as an
+    ``error`` on the envelope rather than raising: a fetch failure is a rejected file,
+    not a failed turn, and :func:`parse_attachments` already turns a bad envelope into a
+    message for the user and the model.
+
+    Args:
+        items: The turn's raw ``AdditionalContext`` list, possibly ``None``.
+        gitlab_client: Client for the GitLab API, proxied through the executor.
+        workflow_id: The session being run. A reference to any other session's file is
+            refused here rather than fetched and found missing.
+
+    Returns:
+        A new list with references resolved and everything else unchanged, or ``None``
+        when *items* is ``None``.
+    """
+    if items is None:
+        return None
+
+    # parse_attachments rejects a turn over the count cap anyway, so fetch nothing for it.
+    if sum(item.category == ATTACHMENTS_CATEGORY for item in items) > MAX_ATTACHMENTS:
+        return list(items)
+
+    return list(
+        await asyncio.gather(
+            *(_resolve_item(item, gitlab_client, workflow_id) for item in items)
+        )
+    )
+
+
+async def _resolve_item(
+    item: AdditionalContext,
+    gitlab_client: GitlabHttpClient,
+    workflow_id: str,
+) -> AdditionalContext:
+    if item.category != ATTACHMENTS_CATEGORY:
+        return item
+
+    return await _resolve_one_envelope(item, gitlab_client, workflow_id)
+
+
+async def _resolve_one_envelope(
+    item: AdditionalContext,
+    gitlab_client: GitlabHttpClient,
+    workflow_id: str,
+) -> AdditionalContext:
+    """Resolve a single attachment envelope, leaving inline ones untouched."""
+    try:
+        payload = json.loads(item.content or "")
+    except json.JSONDecodeError:
+        # Malformed content is parse_attachments' to report, with its own message.
+        return item
+
+    if not isinstance(payload, dict) or payload.get("data"):
+        return item
+
+    url = payload.get("url")
+    if not isinstance(url, str) or not url:
+        return item
+
+    try:
+        fetched = await _fetch_session_file(url, gitlab_client, workflow_id)
+    except ValueError as exc:
+        return _with_payload(item, {**payload, "error": str(exc)})
+
+    return _with_payload(
+        item,
+        {
+            "mime_type": fetched.get("content_type"),
+            "filename": payload.get("filename") or fetched.get("filename"),
+            "data": fetched.get("data"),
+        },
+    )
+
+
+async def _fetch_session_file(
+    url: str,
+    gitlab_client: GitlabHttpClient,
+    workflow_id: str,
+) -> dict[str, Any]:
+    """Fetch the session file *url* names.
+
+    Raises:
+        ValueError: If *url* is not a session-file path of this session, GitLab could
+            not be reached, or it returned no usable file. The message is quoted to the
+            user.
+    """
+    match = _SESSION_FILE_PATH.fullmatch(url)
+    if not match:
+        # The URL is client-supplied and unmatched, so it is not logged.
+        log.warning(
+            "Refused a session file reference",
+            workflow_id=workflow_id,
+            reason="not_a_session_file_path",
+        )
+        raise ValueError("it is not a file uploaded to this session")
+
+    # A matched URL holds only numeric IDs, so it is safe to log from here on.
+    if match.group("workflow_id") != str(workflow_id):
+        log.warning(
+            "Refused a session file reference",
+            workflow_id=workflow_id,
+            url=url,
+            reason="other_session",
+        )
+        raise ValueError("it is not a file uploaded to this session")
+
+    try:
+        response = await gitlab_client.aget(path=url, parse_json=True)
+    # The executor can raise timeouts, network errors or ToolException once its retries
+    # run out; any of them is one unreadable file, not a reason to fail the turn.
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        log.warning(
+            "Could not fetch a session file",
+            workflow_id=workflow_id,
+            url=url,
+            exception_class=type(exc).__name__,
+        )
+        raise ValueError("GitLab could not be reached") from exc
+
+    if not response.is_success():
+        log.warning(
+            "Could not fetch a session file",
+            workflow_id=workflow_id,
+            url=url,
+            status_code=response.status_code,
+        )
+        raise ValueError(f"GitLab returned HTTP {response.status_code}")
+
+    body = response.body
+    if not isinstance(body, dict) or not body.get("data"):
+        log.warning(
+            "Could not fetch a session file",
+            workflow_id=workflow_id,
+            url=url,
+            reason="empty_body",
+        )
+        raise ValueError("GitLab returned no content for it")
+
+    return body
+
+
+def _with_payload(
+    item: AdditionalContext, payload: dict[str, Any]
+) -> AdditionalContext:
+    return item.model_copy(update={"content": json.dumps(payload)})
 
 
 def attachment_content_blocks(

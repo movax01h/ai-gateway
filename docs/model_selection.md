@@ -645,12 +645,19 @@ The check looks at:
   model has this shape.
 - A named GitLab-managed model with a `feature_setting` that does not exist. Both surfaces handle it the way HTTP
   handles a named model with no `feature_setting`.
-- `identifier` sent together with `name` for a GitLab-managed model. `name` resolves the model the allowlist checks,
-  but the raw `identifier` becomes the wire model: `{"name": "claude_sonnet_4_6_vertex", "identifier":
-  "vertex_ai/claude-opus-4-8"}` passes as Sonnet and runs Opus on the gateway's Vertex AI credentials. Only `fallback`
-  and `enforce` mode rebuild the model from its definition. In `off` and `log` mode the override stays until
-  GitLab-managed models are resolved by their GitLab identifier only. A client `endpoint` or `api_key` is not handled
-  here; `validate_custom_endpoint` rejects both on a gateway without custom models.
+- `identifier` sent together with `name` for a GitLab-managed model.
+  - For `provider: gitlab`, the gateway resolves the model from `identifier`, the GitLab identifier that GitLab clients
+    send, and ignores `name`. The request is logged as a `name_ignored` note. An `identifier` that is not in
+    `models.yml`, such as `vertex_ai/claude-opus-4-8`, is not a model, so the gateway does not build the metadata. A
+    route that takes the metadata from `ModelConfigMiddleware` runs the request without it and logs a
+    `Model metadata not applied` warning, and code embeddings returns HTTP 422. A bare `name` still resolves the model, because the Duo Workflow Service resume replays a
+    checkpointed model in this shape.
+  - For another provider string, `name` resolves the model the allowlist checks, but the raw `identifier` becomes the
+    wire model: `{"provider": "vertex-ai", "name": "claude_sonnet_4_6_vertex", "identifier":
+    "vertex_ai/claude-opus-4-8"}` passes as Sonnet and runs Opus on the gateway's Vertex AI credentials. Only
+    `fallback` and `enforce` mode rebuild the model from its definition. In `off` and `log` mode the override stays.
+  - A client `endpoint` or `api_key` is not handled here; `validate_custom_endpoint` rejects both on a gateway without
+    custom models.
 - A `dev` model or a deprecated model (logged only).
 
 `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP` selects the behavior on the AI Gateway HTTP routes, and
@@ -671,7 +678,7 @@ the client's), the `client_feature_setting` as the client sent it, the `requeste
 the client sent them, the `served_identifier` and the caller's context such as the request `path`. Endpoint and key
 values are never logged. One request can log more than one mismatch, so count by `reason` or by correlation ID
 rather than by event. Informational cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
-`deprecated_model`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
+`deprecated_model`, `name_ignored`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
 `Model allowlist note`.
 
 Each mismatch and note also has the `outcome` of the check in the current mode, and the `enforce_outcome` that

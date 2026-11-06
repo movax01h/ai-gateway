@@ -226,6 +226,14 @@ class _AllowlistCheck:
         if self.request.provider not in SERVED_PROVIDERS[self.surface]:
             self._provider_not_served(metadata)
 
+        if (
+            self.request.provider == "gitlab"
+            and self.request.name
+            and self.request.identifier
+        ):
+            # The metadata resolved `identifier` and ignored `name`. No GitLab client sends both.
+            self._note("name_ignored", metadata)
+
         metadata = self._drop_identifier_override(metadata)
         if not self.request.pinned:
             return self._feature_default(metadata)
@@ -339,7 +347,7 @@ class _AllowlistCheck:
         The allowlist checks the model that ``name`` resolved to, but a request such as::
 
             {
-                "provider": "gitlab",
+                "provider": "vertex-ai",
                 "name": "claude_sonnet_4_6_vertex",
                 "identifier": "vertex_ai/claude-opus-4-8",
             }
@@ -351,9 +359,9 @@ class _AllowlistCheck:
         custom models ``validate_custom_endpoint`` already rejects both when the model is built.
 
         The override is read from the resolved metadata, so the resolution of each surface decides:
-        ``create_model_metadata`` keeps a raw ``identifier`` only next to ``name``, and the Duo
-        Workflow Service resolves a ``gitlab`` request by its ``identifier`` instead. The Mistral
-        builder sets ``identifier`` itself, which is not an override.
+        ``create_model_metadata`` resolves a ``gitlab`` request by its ``identifier`` and keeps a raw
+        ``identifier`` only next to ``name`` for another provider string, such as ``vertex-ai``. The
+        Mistral builder sets ``identifier`` itself, which is not an override.
 
         In ``fallback`` and ``enforce`` mode the metadata is rebuilt from the pristine model
         definition, so only the server decides the wire model and its limits:
