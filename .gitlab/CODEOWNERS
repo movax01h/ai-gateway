@@ -45,10 +45,10 @@
 /ai/features/pipeline/ @gitlab-org/maintainers/duo-workflow-service
 
 # Security Review flow and prompts (Code Security)
-/duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham
-/ai_gateway/prompts/definitions/security_review*/ @mbenayoun @philipcunningham
-/ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham
-/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham
+/duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham @mtolpin
+/ai_gateway/prompts/definitions/security_review*/ @mbenayoun @philipcunningham @mtolpin
+/ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham @mtolpin
 
 # Business Logic Security flows and tools (Code Security)
 /duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham @mtolpin
@@ -147,10 +147,10 @@
 /ai/features/pipeline/ @gitlab-org/maintainers/duo-workflow-service
 
 # Security Review flow and prompts (Code Security)
-/duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham
-/ai_gateway/prompts/definitions/security_review*/ @mbenayoun @philipcunningham
-/ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham
-/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham
+/duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham @mtolpin
+/ai_gateway/prompts/definitions/security_review*/ @mbenayoun @philipcunningham @mtolpin
+/ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham @mtolpin
+/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham @mtolpin
 
 # Business Logic Security flows and tools (Code Security)
 /duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham @mtolpin
