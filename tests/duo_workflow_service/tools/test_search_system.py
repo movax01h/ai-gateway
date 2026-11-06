@@ -370,6 +370,46 @@ class TestGrep:
         assert result == output
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("exclusion_rules", [None, []])
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "src/app.js:3_3\n// token here\n",
+            "src/app.ts:7_7\n  emit(...tokens)\n",
+            "src/app.rb:2_2\n  (1..token).each\n",
+        ],
+    )
+    async def test_grep_keeps_snippets_without_a_result_header(
+        self, output, exclusion_rules
+    ):
+        grep_tool = self._setup_grep_tool_with_project(output, exclusion_rules)
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "output,expected",
+        [
+            pytest.param(
+                "src/app.js:3_3\nconst token = 1\nsecrets/key.pem:1_1\ntoken=abc\n",
+                "src/app.js:3_3\nconst token = 1\n",
+                id="some_hidden",
+            ),
+            pytest.param("secrets/key.pem:1_1\ntoken=abc\n", "", id="all_hidden"),
+        ],
+    )
+    async def test_grep_drops_excluded_snippets_without_a_result_header(
+        self, output, expected
+    ):
+        grep_tool = self._setup_grep_tool_with_project(output, ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == expected + self.hidden_note
+
+    @pytest.mark.asyncio
     async def test_grep_refuses_an_absolute_search_directory(self):
         grep_tool = self._setup_grep_tool_with_project("unused", None)
 

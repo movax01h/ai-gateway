@@ -145,10 +145,12 @@ class Grep(DuoBaseTool):
     def _drop_excluded(self, result: str) -> str:
         """Drop snippets of files excluded by the project's Duo context exclusions or the defaults."""
         lines = result.split("\n")
-        if not _RESULT_HEADER.match(lines[0]):
+        # Executors before the "Found N matches" line send the snippets alone.
+        start = 1 if _RESULT_HEADER.match(lines[0]) else 0
+        if not start and not _SNIPPET_HEADER.match(lines[0]):
             return result if self._unparsed_allowed(lines) else _UNFILTERABLE_MESSAGE
         policy = FileExclusionPolicy(self.project)
-        kept, hidden, i = [lines[0]], False, 1
+        kept, hidden, i = lines[:start], False, start
         while i < len(lines):
             match = _SNIPPET_HEADER.match(lines[i])
             block = [lines[i]]
@@ -166,7 +168,8 @@ class Grep(DuoBaseTool):
             kept.extend(block)
         if not hidden:
             return result
-        return "\n".join(kept).rstrip("\n") + "\n" + _HIDDEN_NOTE + "\n"
+        body = "\n".join(kept).rstrip("\n")
+        return f"{body}\n{_HIDDEN_NOTE}\n".lstrip("\n")
 
     def _unparsed_allowed(self, lines: list[str]) -> bool:
         """Output in another format passes only when no exclusion can apply to it."""
