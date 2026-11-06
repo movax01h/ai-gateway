@@ -692,10 +692,13 @@ class TestCheckClientModelMetadata:
             assert _reasons(logs, NOTE) == ["missing_feature_setting"]
 
     class TestIdentifierOverrideOnManagedModel:
-        """`name` resolves an allowed model while the raw `identifier` rewrites the wire model."""
+        """`name` resolves an allowed model while the raw `identifier` rewrites the wire model.
+
+        A `gitlab` request resolves `identifier` and ignores `name`, so the override takes another provider string.
+        """
 
         RAW = {
-            "provider": "gitlab",
+            "provider": "vertex-ai",
             "name": "allowed_model",
             "identifier": "vertex_ai/other-model",
             "feature_setting": FEATURE,
@@ -811,6 +814,59 @@ class TestCheckClientModelMetadata:
             assert bool(getattr(metadata, "identifier", None)) is carries_identifier
             assert result is metadata
             assert _reasons(logs) == []
+
+    class TestGitLabModelByIdentifier:
+        """A `gitlab` request resolves its model from `identifier`, which is the field that GitLab clients send."""
+
+        @pytest.mark.parametrize("feature_allowlist_mode", ALL_MODES, indirect=True)
+        @pytest.mark.parametrize("surface", ["http", "dws"])
+        def test_checks_the_identifier_and_notes_the_ignored_name(self, surface):
+            metadata, _, logs = _check(
+                {
+                    "provider": "gitlab",
+                    "name": "other_model",
+                    "identifier": "allowed_model",
+                    "feature_setting": FEATURE,
+                },
+                surface=surface,
+            )
+
+            assert metadata.llm_definition.gitlab_identifier == "allowed_model"
+            assert getattr(metadata, "identifier", None) is None
+            assert _reasons(logs) == []
+            assert _reasons(logs, NOTE) == ["name_ignored"]
+
+        @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+        def test_an_allowed_name_does_not_pass_a_model_that_is_not_allowed(self):
+            with pytest.raises(ModelNotAllowedForFeatureError):
+                _check(
+                    {
+                        "provider": "gitlab",
+                        "name": "allowed_model",
+                        "identifier": "other_model",
+                        "feature_setting": FEATURE,
+                    }
+                )
+
+        def test_a_raw_identifier_is_not_a_model(self):
+            with pytest.raises(ValueError, match="vertex_ai/other-model"):
+                create_model_metadata(
+                    {
+                        "provider": "gitlab",
+                        "name": "allowed_model",
+                        "identifier": "vertex_ai/other-model",
+                        "feature_setting": FEATURE,
+                    }
+                )
+
+        @pytest.mark.parametrize("feature_allowlist_mode", ALL_MODES, indirect=True)
+        def test_the_resume_replay_still_resolves_its_name(self):
+            metadata, _, logs = _check(
+                {"provider": "gitlab", "name": "allowed_model"}, surface="dws"
+            )
+
+            assert metadata.llm_definition.gitlab_identifier == "allowed_model"
+            assert "name_ignored" not in _reasons(logs, NOTE)
 
     class TestRebuiltMetadata:
         """Metadata that the check builds keeps the request settings that the server builders set."""
@@ -952,7 +1008,7 @@ class TestOutcomeLogFields:
         pytest.param(
             "http",
             {
-                "provider": "gitlab",
+                "provider": "vertex-ai",
                 "name": "allowed_model",
                 "identifier": "vertex_ai/other-model",
                 "feature_setting": FEATURE,

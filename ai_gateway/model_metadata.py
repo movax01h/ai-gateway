@@ -536,10 +536,15 @@ def _apply_matched_definition(
 def _create_gitlab_metadata(data: dict[str, Any]) -> ModelMetadata:
     configs = ModelSelectionConfig.instance()
 
+    if data["provider"] == "gitlab" and data.get("identifier"):
+        # GitLab clients name a GitLab-managed model by its GitLab identifier only. Ignore a `name` next to it, so the
+        # model always comes from models.yml and a client value never becomes the wire model.
+        data.pop("name", None)
+
     if name := data.get("name"):
         llm_definition = configs.get_model(name)
-        # Only self-hosted requests send `name` (the family). `.com` requests
-        # have no `name`, so they never reach this match.
+        # Self-hosted requests send `name` (the family) with the operator's `identifier`. A `gitlab` request sends a
+        # bare `name` only when the Duo Workflow Service resume replays a checkpointed model.
         if identifier := data.get("identifier"):
             llm_definition = _apply_matched_definition(
                 configs, llm_definition, identifier

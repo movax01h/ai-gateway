@@ -1,6 +1,7 @@
 import json
 from typing import Optional
 
+import structlog
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette_context import context as starlette_context
@@ -15,6 +16,8 @@ from ai_gateway.feature_allowlist import (
 from ai_gateway.model_metadata import IamRoleNotAllowedError, create_model_metadata
 from ai_gateway.model_selection import ModelSelectionError
 from lib.context import StarletteUser, current_model_metadata_context
+
+log = structlog.stdlib.get_logger("model_config")
 
 # Routes that serve one feature. The allowlist check uses this feature, so the client's
 # `feature_setting` does not select the allowlist on these routes. GitLab Rails sends code
@@ -85,6 +88,7 @@ class ModelConfigMiddleware:
             if b"model_metadata" not in full_body:
                 return replay
 
+            request: Optional[ClientModelRequest] = None
             try:
                 body_str = full_body.decode("utf-8")
                 data = json.loads(body_str)
@@ -124,8 +128,21 @@ class ModelConfigMiddleware:
                 return JSONResponse(status_code=422, content={"detail": str(exc)})
             except ModelSelectionError as exc:
                 return JSONResponse(status_code=403, content={"detail": str(exc)})
-            except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
+            except ValueError as error:
+                # The request runs without the client's model metadata, for example when a `gitlab` request names
+                # an identifier that is not in models.yml. Never log the raw metadata or the error text: both can
+                # carry a provider API key.
+                log.warning(
+                    "Model metadata not applied",
+                    path=scope.get("path", ""),
+                    error_type=type(error).__name__,
+                    provider=request.provider if request else None,
+                    requested_name=request.name if request else None,
+                    requested_identifier=request.identifier if request else None,
+                    feature_setting=request.feature_setting if request else None,
+                )
 
             return replay
 
