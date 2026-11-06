@@ -12,6 +12,7 @@ from duo_workflow_service.errors.typing import NotifiableAgentException
 
 __all__ = [
     "CatalogAgentsUnavailableError",
+    "CatalogFlowUnavailableError",
     "CatalogItemConfigError",
     "CatalogItemError",
     "CatalogItemsError",
@@ -124,3 +125,19 @@ def is_catalog_refusal(error: Optional[BaseException]) -> bool:
     if isinstance(error, CatalogItemsFetchError):
         return error.status_code is not None and not error.retryable
     return isinstance(error, CatalogItemsError)
+
+
+class CatalogFlowUnavailableError(NotifiableAgentException):
+    """GitLab did not serve a flow definition for a run that asked the service to fetch it.
+
+    An older GitLab has no catalog items endpoint and answers 404. A newer one answers 404 when the workflow has no
+    saved flow. The UI message is static. The status and GitLab's message stay server-side.
+    """
+
+    UI_MESSAGE = (
+        "GitLab did not return the flow definition for this session. The GitLab instance might be "
+        "too old to serve AI Catalog flows to the Duo Workflow Service, or the session has no saved flow."
+    )
+
+    def __init__(self, internal_detail: str) -> None:
+        super().__init__(self.UI_MESSAGE, internal_detail=internal_detail)
