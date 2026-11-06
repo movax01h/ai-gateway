@@ -3,6 +3,7 @@ import re
 from typing import Any, ClassVar, Optional, Type
 
 from langchain_core.tools import ToolException
+from packaging.version import Version
 from pydantic import BaseModel, Field
 
 from contract import contract_pb2
@@ -13,6 +14,7 @@ from duo_workflow_service.tools.filesystem import (
     _format_no_matches_message,
     validate_duo_context_exclusions,
 )
+from lib.context import language_server_version
 
 _OUTPUT_OVERFLOW_MARKER = "stdout maxBuffer length exceeded"
 _OUTPUT_OVERFLOW_MESSAGE = (
@@ -22,6 +24,10 @@ _OUTPUT_OVERFLOW_MESSAGE = (
 # The node executor's result: a "Found N matches" line, then per snippet a `path:start_end` header and its lines.
 _RESULT_HEADER = re.compile(r"^Found \d+ match(?:es)? across \d+ files?\b")
 _SNIPPET_HEADER = re.compile(r"^(?P<path>.+):(?P<start>\d+)_(?P<end>\d+)$")
+# gitlab-lsp in this range sends the snippets without the "Found N matches" line;
+# earlier versions send one `path:matched-line` row per match, which can look like a header.
+_HEADERLESS_SNIPPETS_FROM = Version("8.51.0")
+_HEADERLESS_SNIPPETS_BEFORE = Version("8.77.0")
 # The executor cuts a snippet's text at this many UTF-16 units and appends the suffix.
 _MAX_SNIPPET_LENGTH = 5000
 _TRIMMED_SUFFIX = "... (trimmed)"
@@ -145,9 +151,10 @@ class Grep(DuoBaseTool):
     def _drop_excluded(self, result: str) -> str:
         """Drop snippets of files excluded by the project's Duo context exclusions or the defaults."""
         lines = result.split("\n")
-        # Executors before the "Found N matches" line send the snippets alone.
         start = 1 if _RESULT_HEADER.match(lines[0]) else 0
-        if not start and not _SNIPPET_HEADER.match(lines[0]):
+        if not start and not (
+            _sends_headerless_snippets() and _SNIPPET_HEADER.match(lines[0])
+        ):
             return result if self._unparsed_allowed(lines) else _UNFILTERABLE_MESSAGE
         policy = FileExclusionPolicy(self.project)
         kept, hidden, i = lines[:start], False, start
@@ -192,6 +199,13 @@ class Grep(DuoBaseTool):
             search_dir = "directory"
         message = f"Search for '{args.keywords}' in files in '{search_dir}'"
         return message
+
+
+def _sends_headerless_snippets() -> bool:
+    lsp_version = language_server_version.get()
+    return lsp_version is not None and (
+        _HEADERLESS_SNIPPETS_FROM <= lsp_version.version < _HEADERLESS_SNIPPETS_BEFORE
+    )
 
 
 def _passes_default_exclusions(path: str) -> bool:

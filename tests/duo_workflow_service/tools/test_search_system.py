@@ -13,9 +13,19 @@ from duo_workflow_service.tools.search_system import (
     GrepLiteral,
     GrepLiteralInput,
 )
+from lib.context import language_server_version
+from lib.language_server import LanguageServerVersion
 from tests.duo_workflow_service.tools.conftest import (
     create_mock_client_event_with_response,
 )
+
+
+@pytest.fixture(name="lsp_version")
+def lsp_version_fixture(request):
+    version = request.param and LanguageServerVersion.from_string(request.param)
+    token = language_server_version.set(version)
+    yield
+    language_server_version.reset(token)
 
 
 class TestGrep:
@@ -325,6 +335,9 @@ class TestGrep:
         [
             pytest.param("src/a.py:token\nconfig/x.secret:token", id="path_preview"),
             pytest.param(
+                "src/a.py:1_5\nconfig/x.secret:token", id="path_preview_header_like"
+            ),
+            pytest.param(
                 "Snippet: config/x.secret?start_line=1&end_line=1\ntoken",
                 id="go_executor",
             ),
@@ -369,6 +382,7 @@ class TestGrep:
 
         assert result == output
 
+    @pytest.mark.parametrize("lsp_version", ["8.60.0"], indirect=True)
     @pytest.mark.asyncio
     @pytest.mark.parametrize("exclusion_rules", [None, []])
     @pytest.mark.parametrize(
@@ -380,7 +394,7 @@ class TestGrep:
         ],
     )
     async def test_grep_keeps_snippets_without_a_result_header(
-        self, output, exclusion_rules
+        self, lsp_version, output, exclusion_rules
     ):
         grep_tool = self._setup_grep_tool_with_project(output, exclusion_rules)
 
@@ -388,6 +402,7 @@ class TestGrep:
 
         assert result == output
 
+    @pytest.mark.parametrize("lsp_version", ["8.60.0"], indirect=True)
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "output,expected",
@@ -401,13 +416,48 @@ class TestGrep:
         ],
     )
     async def test_grep_drops_excluded_snippets_without_a_result_header(
-        self, output, expected
+        self, lsp_version, output, expected
     ):
         grep_tool = self._setup_grep_tool_with_project(output, ["secrets/"])
 
         result = await grep_tool._arun(keywords="token")
 
         assert result == expected + self.hidden_note
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("lsp_version", [None, "8.50.0"], indirect=True)
+    @pytest.mark.parametrize(
+        "output,exclusion_rules",
+        [
+            ("cfg/app.yml:  timeout:30_000\nsecrets/key.pem:token=abc\n", ["secrets/"]),
+            ("src/a.py:1_000\nsecrets/key.pem:token=abc\n", ["secrets/"]),
+            ("src/a.py:2_5\nsecrets/key.pem:token=abc\n", ["secrets/"]),
+            ("src/a.py:1_000\n.ssh/id_rsa:token\n", None),
+            ("src/a.py:1_1\nhome/.ssh/id_rsa:token", None),
+            ("src/a.py:1_1\nhome/.ssh/id_rsa:token\n", None),
+        ],
+    )
+    async def test_grep_refuses_match_rows_that_look_like_a_snippet_header(
+        self, lsp_version, output, exclusion_rules
+    ):
+        grep_tool = self._setup_grep_tool_with_project(output, exclusion_rules)
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == self.unfilterable
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("lsp_version", [None, "8.80.0"], indirect=True)
+    async def test_grep_refuses_headerless_snippets_from_other_clients(
+        self, lsp_version
+    ):
+        grep_tool = self._setup_grep_tool_with_project(
+            "src/app.js:3_3\nconst token = 1\n", ["secrets/"]
+        )
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == self.unfilterable
 
     @pytest.mark.asyncio
     async def test_grep_refuses_an_absolute_search_directory(self):
