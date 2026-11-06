@@ -3,10 +3,14 @@ from unittest.mock import AsyncMock
 import pytest
 
 from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogFlowUnavailableError,
     CatalogItemsError,
     CatalogItemsFetchError,
 )
-from duo_workflow_service.agent_platform.v1.catalog.fetch import fetch_catalog_agents
+from duo_workflow_service.agent_platform.v1.catalog.fetch import (
+    fetch_catalog_agents,
+    fetch_catalog_flow,
+)
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 WORKFLOW_ID = "44"
@@ -324,3 +328,111 @@ class TestMalformedResponses:
 
         with pytest.raises(ConnectionError):
             await fetch_catalog_agents(client, WORKFLOW_ID)
+
+
+FLOW_DEFINITION = {
+    "version": "v1",
+    "environment": "ambient",
+    "components": [],
+}
+
+
+def _flow_body(definition, sub_items=()) -> dict:
+    body = _body(list(sub_items))
+    body["item"]["definition"] = definition
+    return body
+
+
+@pytest.mark.asyncio
+async def test_flow_fetch_reads_the_definition_and_agents_from_one_request():
+    client = _client(200, _flow_body(FLOW_DEFINITION, [_agent_node()]))
+
+    fetched = await fetch_catalog_flow(client, WORKFLOW_ID)
+
+    client.aget.assert_called_once_with(
+        path="/api/v4/ai/duo_workflows/workflows/44/catalog_items",
+        parse_json=True,
+    )
+    assert fetched.definition == FLOW_DEFINITION
+    assert [agent.item_id for agent in fetched.agents.agents] == ["53"]
+    assert fetched.agents.skipped_reason is None
+
+
+@pytest.mark.asyncio
+async def test_flow_fetch_keeps_the_skip_reason():
+    body = _flow_body(FLOW_DEFINITION)
+    body["item"]["sub_items_skipped_reason"] = "custom_agents_disabled"
+    client = _client(200, body)
+
+    fetched = await fetch_catalog_flow(client, WORKFLOW_ID)
+
+    assert fetched.agents.agents == []
+    assert fetched.agents.skipped_reason == "custom_agents_disabled"
+
+
+@pytest.mark.asyncio
+async def test_flow_fetch_on_a_gitlab_without_the_endpoint_fails_clearly():
+    """An older GitLab answers 404 for the unknown route."""
+    client = _client(404, {"message": "404 Not Found"})
+
+    with pytest.raises(CatalogFlowUnavailableError) as exc_info:
+        await fetch_catalog_flow(client, WORKFLOW_ID)
+
+    error = exc_info.value
+    assert error.ui_message == CatalogFlowUnavailableError.UI_MESSAGE
+    assert "too old" in error.ui_message
+    assert "HTTP 404" in error.internal_detail
+    assert "404" not in error.ui_message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("definition", [None, {}, "v1", []])
+async def test_flow_fetch_without_a_root_definition_fails_clearly(definition):
+    client = _client(200, _flow_body(definition))
+
+    with pytest.raises(CatalogFlowUnavailableError, match="too old") as exc_info:
+        await fetch_catalog_flow(client, WORKFLOW_ID)
+
+    assert "no root definition" in exc_info.value.internal_detail
+    # The server reads last_error from __cause__; a cause with no status maps the run to
+    # INTERNAL (a malformed 2xx body is a server fault) instead of leaving it UNKNOWN.
+    cause = exc_info.value.__cause__
+    assert isinstance(cause, CatalogItemsFetchError)
+    assert cause.status_code is None
+
+
+@pytest.mark.asyncio
+async def test_flow_fetch_without_an_item_fails_clearly():
+    client = _client(200, {"schema_version": 1})
+
+    with pytest.raises(CatalogFlowUnavailableError):
+        await fetch_catalog_flow(client, WORKFLOW_ID)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [403, 500])
+async def test_flow_fetch_keeps_gitlab_refusals_other_than_404(status_code):
+    client = _client(status_code, {"message": "nope"})
+
+    with pytest.raises(CatalogItemsFetchError, match=f"HTTP {status_code}: nope"):
+        await fetch_catalog_flow(client, WORKFLOW_ID)
+
+
+@pytest.mark.asyncio
+async def test_flow_fetch_refuses_a_refused_agent():
+    node = _agent_node(error={"code": "not_found", "message": "Agent not found"})
+    client = _client(200, _flow_body(FLOW_DEFINITION, [node]))
+
+    with pytest.raises(CatalogItemsError, match="Agent not found"):
+        await fetch_catalog_flow(client, WORKFLOW_ID)
+
+
+@pytest.mark.asyncio
+async def test_agent_fetch_keeps_404_as_a_fetch_error():
+    """The agent fetch of an inline flow does not change: a 404 is not a missing flow there."""
+    client = _client(404, {"message": "404 Not Found"})
+
+    with pytest.raises(CatalogItemsFetchError) as exc_info:
+        await fetch_catalog_agents(client, WORKFLOW_ID)
+
+    assert not isinstance(exc_info.value, CatalogFlowUnavailableError)
