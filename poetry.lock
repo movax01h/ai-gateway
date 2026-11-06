@@ -5821,14 +5821,14 @@ dev = ["argcomplete", "asynctest ; python_version < \"3.11\"", "attrs (>=23.1)",
 
 [[package]]
 name = "pytest-asyncio"
-version = "1.4.0"
+version = "1.4.1"
 description = "Pytest support for asyncio"
 optional = false
 python-versions = ">=3.10"
 groups = ["test"]
 files = [
-    {file = "pytest_asyncio-1.4.0-py3-none-any.whl", hash = "sha256:933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1"},
-    {file = "pytest_asyncio-1.4.0.tar.gz", hash = "sha256:c6c0d2259945122819f171a32ecea2c349ead889ee28176caaf492143424be42"},
+    {file = "pytest_asyncio-1.4.1-py3-none-any.whl", hash = "sha256:507afa78ec77c6661164ef1a2368bc7820383fd1a14b2a7f813de8b5a92949cc"},
+    {file = "pytest_asyncio-1.4.1.tar.gz", hash = "sha256:e8266eb094e5ee9ffdb2068c9836f33e209ea77a970eb846933d416b5602669b"},
 ]
 
 [package.dependencies]
@@ -6933,14 +6933,14 @@ sqlcipher = ["sqlcipher3_binary"]
 
 [[package]]
 name = "sse-starlette"
-version = "3.5.0"
+version = "3.6.0"
 description = "SSE plugin for Starlette"
 optional = false
-python-versions = ">=3.10"
+python-versions = ">=3.11"
 groups = ["main"]
 files = [
-    {file = "sse_starlette-3.5.0-py3-none-any.whl", hash = "sha256:3e6e1070df3f0f5d9cea81496de92dbb72f6721871d99748ece67441dd8b7997"},
-    {file = "sse_starlette-3.5.0.tar.gz", hash = "sha256:75de713aa8a9441513cc283220826da079d982770965b951e9437720e8bafdb2"},
+    {file = "sse_starlette-3.6.0-py3-none-any.whl", hash = "sha256:e4dfa4d237d2712cb2b4d4918eda9b457cd6b44bbecdc838af75de836565bafd"},
+    {file = "sse_starlette-3.6.0.tar.gz", hash = "sha256:623151d6c20dc0eebf1b3379c27faae91fff883bac7ab6665f16f46440a88b3a"},
 ]
 
 [package.dependencies]
