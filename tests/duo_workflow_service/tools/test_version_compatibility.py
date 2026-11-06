@@ -9,6 +9,7 @@ from duo_workflow_service.tools.version_compatibility import (
     AGENT_PLAN_READINESS_VERSION,
     AGENT_PLAN_WIDGET_VERSION,
     BASE_DISCUSSION_ID_FIELD_VERSION,
+    CHAT_TOOL_CALL_LIMITS_VERSION,
     CREATE_DISCUSSION_AI_WORKFLOWS_SCOPE_VERSION,
     DEFAULT_FALLBACK_VERSION,
     DEVELOPMENT_WIDGET_VERSION,
@@ -23,6 +24,7 @@ from duo_workflow_service.tools.version_compatibility import (
     supports_agent_plan_readiness,
     supports_agent_plan_widget,
     supports_ascp_security_boundary,
+    supports_chat_tool_call_limits,
     supports_create_discussion_mutation,
     supports_development_widget,
     supports_discussion_id_field,
@@ -300,6 +302,27 @@ class TestVersionCompatibilityFunctions:
         mock_gitlab_version.get.return_value = reported
         assert supports_create_discussion_mutation() is expected
 
+    @pytest.mark.parametrize(
+        "reported,expected",
+        [
+            ("19.6.0", True),
+            ("19.7.1", True),
+            # Pre-release builds, as GitLab.com reports them, pass the floor.
+            ("19.6.0-pre", True),
+            ("19.6.0-pre-g1234abcd", True),
+            ("19.5.3", False),
+            # Unknown version fails closed.
+            (None, False),
+            ("", False),
+        ],
+    )
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
+    def test_chat_tool_call_limits_reads_raw_version_strings(
+        self, mock_gitlab_version, reported, expected
+    ):
+        mock_gitlab_version.get.return_value = reported
+        assert supports_chat_tool_call_limits() is expected
+
 
 class TestVersionConstants:
     """Tests for version constants."""
@@ -371,3 +394,7 @@ class TestVersionConstants:
     def test_create_discussion_ai_workflows_scope_version_constant(self):
         """The scope landed in gitlab!250861, milestone 19.4."""
         assert CREATE_DISCUSSION_AI_WORKFLOWS_SCOPE_VERSION == Version("19.4.0")
+
+    def test_chat_tool_call_limits_version_constant(self):
+        """The Rails decode fix, gitlab!267049, is in milestone 19.6."""
+        assert CHAT_TOOL_CALL_LIMITS_VERSION == Version("19.6.0")

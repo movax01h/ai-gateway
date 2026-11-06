@@ -31,6 +31,7 @@ class FeatureFlag(StrEnum):
     DEPENDENCY_BUMP_WEB_SEARCH = "dependency_bump_web_search"
     DUO_CHAT_CLARIFICATION_QUESTION_TOOL = "duo_chat_clarification_question_tool"
     DUO_CHAT_GENERATIVE_UI = "duo_chat_generative_ui"
+    DUO_CHAT_TOOL_CALL_LIMITS = "duo_chat_tool_call_limits"
     DUO_DEVELOPER_MODEL_ROUTING = "duo_developer_model_routing"
     AI_MODEL_RELEASE = "ai_model_release"
     CAP_CODE_COMPLETION_CONTEXT = "cap_code_completion_context"
