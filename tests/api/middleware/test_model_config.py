@@ -323,6 +323,49 @@ def test_ignores_model_metadata_that_is_not_an_object(middleware_test_client, bo
     assert response.json() is None
 
 
+class TestMetadataNotApplied:
+    UNKNOWN_IDENTIFIER = {
+        "provider": "gitlab",
+        "name": "claude_sonnet_4_6_vertex",
+        "identifier": "vertex_ai/claude-opus-4-8",
+        "api_key": "client-api-key",
+    }
+
+    def test_logs_the_model_the_client_asked_for(self, middleware_test_client):
+        with capture_logs() as logs:
+            response = middleware_test_client.post(
+                "/test", json={"model_metadata": self.UNKNOWN_IDENTIFIER}
+            )
+
+        assert response.json() is None
+        assert [
+            entry for entry in logs if entry["event"] == "Model metadata not applied"
+        ] == [
+            {
+                "event": "Model metadata not applied",
+                "log_level": "warning",
+                "path": "/test",
+                "error_type": "ValueError",
+                "provider": "gitlab",
+                "requested_name": "claude_sonnet_4_6_vertex",
+                "requested_identifier": "vertex_ai/claude-opus-4-8",
+                "feature_setting": None,
+            }
+        ]
+
+    def test_does_not_log_a_body_that_is_not_json(self, middleware_test_client):
+        with capture_logs() as logs:
+            middleware_test_client.post(
+                "/test",
+                content=b'{"model_metadata": {"name": "test"}, "invalid": json}',
+                headers={"content-type": "application/json"},
+            )
+
+        assert [
+            entry for entry in logs if entry["event"] == "Model metadata not applied"
+        ] == []
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("custom_models_gateway")
 async def test_handles_unicode_in_large_body(middleware_test_client):
