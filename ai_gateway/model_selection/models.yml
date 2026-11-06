@@ -16,6 +16,22 @@ models:
       top_p: 0.95
       max_tokens: 32_768
 
+  - name: "Kimi K3.1 Pro"
+    provider: "Fireworks"
+    gitlab_identifier: "kimi_k3_1_pro_fireworks"
+    requires_paid_credits: false
+    description: "Open-weight 2.8T MoE multimodal model with 1M context for coding and agentic tasks."
+    cost_indicator: "$"
+    max_context_tokens: 1_048_576
+    supports_vision: true  # https://fireworks.ai/models/fireworks/kimi-k3p1-pro
+    model_class_provider: litellm
+    params:
+      model: "accounts/fireworks/models/kimi-k3p1-pro"
+      custom_llm_provider: "fireworks_ai"
+      temperature: 1.0
+      top_p: 0.95
+      max_tokens: 32_768
+
   - name: "Minimax M3"
     provider: "Fireworks"
     gitlab_identifier: "minimax_m3_fireworks"
