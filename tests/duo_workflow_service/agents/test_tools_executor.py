@@ -2,6 +2,7 @@
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any, Dict, List, Type, cast
 from unittest.mock import ANY, AsyncMock, MagicMock, Mock, call, patch
 
@@ -22,6 +23,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from contract import contract_pb2
 from duo_workflow_service.agents import ToolsExecutor
+from duo_workflow_service.agents.tools_executor import SKIPPED_TOOL_CALL_TEMPLATE
 from duo_workflow_service.entities.state import (
     TOOL_RESPONSE_MAX_DISPLAY_MSG,
     MessageTypeEnum,
@@ -1093,9 +1095,8 @@ async def test_run_error_handling(
     }
 
     assert len(result) == 2
-    assert result[0]["conversation_history"]["planner"][0].content.startswith(
-        expected_response
-    )
+    response = cast(dict, result[0])["conversation_history"]["planner"][0]
+    assert response.content.startswith(expected_response)
 
     updates = cast(Command, result[1]).update
 
@@ -1260,7 +1261,10 @@ async def test_run_tool_exception_messages(
 
     result = await tools_executor.run(workflow_state)
 
-    assert result[0]["conversation_history"]["planner"][0].content == expected_response
+    assert (
+        cast(dict, result[0])["conversation_history"]["planner"][0].content
+        == expected_response
+    )
     tool_log = cast(Command, result[1]).update["ui_chat_log"][1]  # type: ignore[index]
     assert tool_log["content"] == expected_card
     assert tool_log["status"] == ToolStatus.FAILURE
@@ -1332,12 +1336,13 @@ async def test_run_error_max_tokens(
         "shell_command",
     }
     assert len(result) == 2
-    assert result[0]["conversation_history"]["planner"][0].content.startswith(
+    response = cast(dict, result[0])["conversation_history"]["planner"][0]
+    assert response.content.startswith(
         "Tool read_file raised ToolException: Max tokens reached for tool read_file. "
         "Try a simpler request or using a different tool."
     )
 
-    ui_chat_logs = result[1].update["ui_chat_log"]
+    ui_chat_logs = cast(Command, result[1]).update["ui_chat_log"]  # type: ignore[index]
     assert len(ui_chat_logs) == 2
 
     tool_log = ui_chat_logs[1]
@@ -1703,6 +1708,55 @@ async def test_multiple_tool_calls(workflow_state, graph):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "all_tools",
+    [
+        {
+            "a": mock_tool(name="a", content="tool a"),
+            "b": mock_tool(name="b", content="tool b"),
+        }
+    ],
+)
+async def test_tool_calls_past_max_tool_calls_are_answered_without_running(
+    workflow_state, tools_executor, all_tools
+):
+    """Each skipped call still gets a result and a failed card, so the provider accepts the history and no card
+    spins."""
+    graph_builder = StateGraph(WorkflowState)
+    graph_builder.add_node(
+        "exec",
+        partial(tools_executor.run, max_tool_calls=1),
+    )
+    graph_builder.set_entry_point("exec")
+    graph_builder.set_finish_point("exec")
+    workflow_state["conversation_history"]["planner"] = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"id": "call-a", "name": "a", "args": {}},
+                {"id": "call-b", "name": "b", "args": {}},
+            ],
+        )
+    ]
+
+    result = await graph_builder.compile().ainvoke(workflow_state)
+
+    all_tools["a"].ainvoke.assert_awaited_once()
+    all_tools["b"].ainvoke.assert_not_called()
+    assert result["conversation_history"]["planner"][-1] == ToolMessage(
+        content=SKIPPED_TOOL_CALL_TEMPLATE.format(max_tool_calls=1),
+        tool_call_id="call-b",
+    )
+    card = result["ui_chat_log"][-1]
+    assert card["message_id"] == "call-b"
+    assert card["status"] == ToolStatus.FAILURE
+    assert card["tool_info"]["error"]["message"] == SKIPPED_TOOL_CALL_TEMPLATE.format(
+        max_tool_calls=1
+    )
+    assert_client_valid_tool_info(card["tool_info"])
+
+
+@pytest.mark.asyncio
 async def test_run_with_missing_plan_key(tools_executor):
     state_without_plan = {
         "conversation_history": {
@@ -1963,7 +2017,7 @@ async def test_invalid_tool_call_handling(
 
     # Verify conversation history contains error response
     assert len(result) == 2
-    error_response = result[0]["conversation_history"]["planner"][0]
+    error_response = cast(dict, result[0])["conversation_history"]["planner"][0]
     assert isinstance(error_response, ToolMessage)
     assert error_response.tool_call_id == "invalid-call-1"
     assert (
@@ -2054,13 +2108,13 @@ async def test_invalid_tool_call_with_valid_tool_calls(
     assert len(result) == 3  # valid tool response + invalid tool response + Command
 
     # Verify valid tool response
-    valid_response = result[0]["conversation_history"]["planner"][0]
+    valid_response = cast(dict, result[0])["conversation_history"]["planner"][0]
     assert isinstance(valid_response, ToolMessage)
     # The mock tool returns a hardcoded tool_call_id, so we just verify it's a ToolMessage with content
     assert valid_response.content == "test_tool result"
 
     # Verify invalid tool response
-    invalid_response = result[1]["conversation_history"]["planner"][0]
+    invalid_response = cast(dict, result[1])["conversation_history"]["planner"][0]
     assert isinstance(invalid_response, ToolMessage)
     assert invalid_response.tool_call_id == "invalid-call-1"
     assert (
@@ -2448,7 +2502,7 @@ async def test_denied_tool_call_tracks_block_event(
     )
     # Response text stays byte-identical
     assert (
-        result[0]["conversation_history"]["planner"][0].content
+        cast(dict, result[0])["conversation_history"]["planner"][0].content
         == "Tool denied_tool not found"
     )
 
@@ -2473,7 +2527,7 @@ async def test_unknown_tool_call_does_not_track_block_event(
 
     internal_event_client.track_event.assert_not_called()
     assert (
-        result[0]["conversation_history"]["planner"][0].content
+        cast(dict, result[0])["conversation_history"]["planner"][0].content
         == "Tool hallucinated_tool not found"
     )
 

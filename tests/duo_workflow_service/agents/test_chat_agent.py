@@ -57,13 +57,15 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.tools import MalformedToolCallError, Toolset
-from lib.context import current_model_metadata_context
+from lib.context import current_model_metadata_context, gitlab_version
 from lib.context.approval_sources import (
     approval_sources,
     get_approval_source,
     init_approval_sources,
 )
 from lib.events import GLReportingEventContext
+from lib.feature_flags import current_feature_flag_context
+from lib.feature_flags.context import FeatureFlag
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum
 from tests.duo_workflow_service.ui_chat_log_contract import (
@@ -3002,3 +3004,60 @@ class TestToolApprovalRequestTracking:
 
         assert result["status"] == WorkflowStatusEnum.EXECUTION
         internal_event_client.track_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("flag_enabled", "version", "expected_limit", "expected_requested"),
+    [
+        (True, "19.6.0", 2, ["call_0", "call_1"]),
+        (True, "19.5.3", None, ["call_0", "call_1", "call_2", "call_3"]),
+        (True, None, None, ["call_0", "call_1", "call_2", "call_3"]),
+        (False, "19.6.0", None, ["call_0", "call_1", "call_2", "call_3"]),
+    ],
+    ids=["flag_on", "flag_on_old_gitlab", "flag_on_unknown_gitlab", "flag_off"],
+)
+@patch("duo_workflow_service.agents.chat_agent.MAX_TOOL_CALLS_PER_MODEL_CALL", 2)
+async def test_approval_is_requested_only_for_tool_calls_that_will_run(
+    input, mock_toolset, flag_enabled, version, expected_limit, expected_requested
+):
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    mock_toolset.resolve_approval_source = AsyncMock(return_value=None)
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=Mock(spec=ToolsRegistry),
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "tool_requiring_approval",
+                    "args": {"param": index},
+                    "id": f"call_{index}",
+                    "type": "tool_call",
+                }
+                for index in range(4)
+            ],
+        )
+    )
+
+    token = current_feature_flag_context.set(
+        {FeatureFlag.DUO_CHAT_TOOL_CALL_LIMITS.value} if flag_enabled else set()
+    )
+    version_token = gitlab_version.set(version)
+    try:
+        result = await chat_agent.run(input)
+    finally:
+        gitlab_version.reset(version_token)
+        current_feature_flag_context.reset(token)
+
+    assert result["max_tool_calls"] == expected_limit
+    assert result["tool_call_approval_requested"] == expected_requested

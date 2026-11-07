@@ -420,6 +420,10 @@ class ApprovalStateRejection(BaseModel):
     message: Optional[str]
 
 
+# Agentic Chat runs at most this many of the tool calls in one model response.
+MAX_TOOL_CALLS_PER_MODEL_CALL = 25
+
+
 class ChatWorkflowState(TypedDict):
     plan: Plan
     status: WorkflowStatusEnum
@@ -439,6 +443,9 @@ class ChatWorkflowState(TypedDict):
     # approval-resume path attributes the client's approval source to exactly
     # those calls, leaving already-attributed skips in a mixed batch untouched.
     tool_call_approval_requested: NotRequired[list[str] | None]
+    # How many tool calls of the latest model response run, or None for all. Stored so the approval and the
+    # resumed run agree even if the flag changes in between.
+    max_tool_calls: NotRequired[Optional[int]]
 
 
 DuoWorkflowStateType = Union[WorkflowState, ChatWorkflowState]

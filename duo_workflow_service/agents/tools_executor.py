@@ -30,6 +30,7 @@ from duo_workflow_service.entities.state import (
     render_for_display,
 )
 from duo_workflow_service.errors.typing import TierAccessDeniedException
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.security.prompt_security import SecurityException
 from duo_workflow_service.security.scanner_factory import apply_security_scanning
@@ -47,6 +48,11 @@ MALFORMED_TOOL_CALL_ERROR_TEMPLATE = (
     "While processing your request, GitLab Duo Chat encountered a problem making a call to the "
     "{tool_name} tool. Try again, or rephrase your request. If the problem "
     "persists, start a new chat, and/or select a different model for your request."
+)
+
+SKIPPED_TOOL_CALL_TEMPLATE = (
+    "Skipped: only the first {max_tool_calls} tool calls in a response run. "
+    "Request fewer tool calls at once."
 )
 
 TIER_ACCESS_DENIED_LEARN_MORE_URL = "https://docs.gitlab.com/user/duo_agent_platform/"
@@ -99,7 +105,11 @@ class ToolsExecutor:
         self._skip_agent_msg = skip_agent_msg
         self._internal_event_client = internal_event_client
 
-    async def run(self, state: DuoWorkflowStateType):
+    async def run(
+        self,
+        state: DuoWorkflowStateType,
+        max_tool_calls: Optional[int] = None,
+    ) -> list[dict[str, Any] | Command]:
         last_message = state["conversation_history"][self._tools_agent_name][-1]
         tool_calls: list[ToolCall] = getattr(last_message, "tool_calls", [])
         invalid_tool_calls: list[InvalidToolCall] = getattr(
@@ -114,7 +124,7 @@ class ToolsExecutor:
 
         project = state.get("project")
 
-        for tool_call in tool_calls:
+        for tool_call in tool_calls[:max_tool_calls]:
             tool_name = tool_call["name"]
 
             if tool_name not in self._toolset:
@@ -228,6 +238,15 @@ class ToolsExecutor:
                 state_updates["status"] = WorkflowStatusEnum.ERROR
                 break
 
+        responses.extend(
+            self._skip_tool_calls(
+                tool_calls,
+                max_tool_calls,
+                project,
+                ui_chat_logs,
+            )
+        )
+
         for invalid_tool_call in invalid_tool_calls:
             tool_name = invalid_tool_call.get("name") or "unknown"
             error_content = MALFORMED_TOOL_CALL_ERROR_TEMPLATE.format(
@@ -297,6 +316,34 @@ class ToolsExecutor:
             )
         )
 
+        return responses
+
+    def _skip_tool_calls(
+        self,
+        tool_calls: list[ToolCall],
+        max_tool_calls: Optional[int],
+        project: Optional[Project],
+        ui_chat_logs: List[UiChatLog],
+    ) -> list[Command | dict[str, Any]]:
+        """Answer every call past ``max_tool_calls`` with a skipped notice and a failed card, without running it.
+
+        The provider rejects a tool call without a result, and the client would keep its card spinning.
+        """
+        if max_tool_calls is None:
+            return []
+
+        message = SKIPPED_TOOL_CALL_TEMPLATE.format(max_tool_calls=max_tool_calls)
+        responses = []
+        for tool_call in tool_calls[max_tool_calls:]:
+            self._add_tool_ui_chat_log(
+                tool_call=tool_call,
+                status=ToolStatus.FAILURE,
+                ui_chat_logs=ui_chat_logs,
+                error_message="Skipped",
+                project_name=resolve_project_name_for_tool(project, tool_call),
+                tool_error=build_tool_error(message, tool_call["name"]),
+            )
+            responses.append(self._process_response(tool_call, message))
         return responses
 
     def _process_response(self, tool_call, response) -> Command | dict[str, Any]:
