@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -28,6 +29,7 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_VERSION_HEADER,
 )
 from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
+from ai_gateway.config import get_config
 from lib.context import StarletteUser
 from lib.internal_events import EventContext
 
@@ -1052,3 +1054,237 @@ async def test_feature_enablement_type_resolved_from_jwt_claim(
 
     set_context = mock_event_context.set.call_args[0][0]
     assert set_context.feature_enablement_type == expected
+
+
+_UNIT_PRIMITIVE_HEADER = (b"x-gitlab-unit-primitive", b"complete_code")
+
+
+def _billing_middleware(
+    monkeypatch,
+    mock_app,
+    mode,
+    billing_enabled=True,
+    enforced_feature_qualified_names=frozenset({"code_suggestions"}),
+):
+    billing_config = get_config().billing_event
+    monkeypatch.setattr(billing_config, "enabled", billing_enabled)
+    monkeypatch.setattr(billing_config, "validation_mode_http", mode)
+    monkeypatch.setattr(
+        "lib.billing_events.validation._ENFORCED_FEATURE_QUALIFIED_NAMES",
+        enforced_feature_qualified_names,
+    )
+    return InternalEventMiddleware(
+        mock_app, skip_endpoints=["/health"], environment="test"
+    )
+
+
+def _http_scope(user, headers):
+    return Request(
+        {
+            "type": "http",
+            "path": "/api/endpoint",
+            "headers": headers,
+            "user": user,
+        }
+    ).scope
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [["complete_code"]])
+@pytest.mark.parametrize(
+    ("jwt_realm", "expected_missing"),
+    [
+        ("saas", ["ultimate_parent_namespace_id"]),
+        ("self-managed", ["instance_id"]),
+        ("", ["realm"]),
+    ],
+    indirect=["jwt_realm"],
+)
+async def test_middleware_logs_missing_billing_fields_before_processing(
+    monkeypatch, mock_app, user, expected_missing
+):
+    """In log mode, missing billing fields are logged before the app runs and the request is processed."""
+    middleware = _billing_middleware(monkeypatch, mock_app, "log")
+    scope = _http_scope(user, [_UNIT_PRIMITIVE_HEADER])
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    call_order = []
+    mock_app.side_effect = lambda *_: call_order.append("app")
+
+    with (
+        request_cycle_context({}),
+        patch("lib.billing_events.validation.log") as mock_log,
+    ):
+        mock_log.warning.side_effect = lambda *_, **__: call_order.append("warning")
+
+        await middleware(scope, receive, send)
+
+    mock_log.error.assert_not_called()
+    mock_log.warning.assert_called_once()
+    kwargs = mock_log.warning.call_args.kwargs
+    assert kwargs["missing_fields"] == expected_missing
+    assert kwargs["endpoint"] == "/api/endpoint"
+    assert kwargs["unit_primitive"] == "complete_code"
+    assert kwargs["feature_qualified_name"] == "code_suggestions"
+    assert kwargs["enforced"] is False
+    assert call_order == ["warning", "app"]
+    mock_app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [["complete_code"]])
+@pytest.mark.parametrize(
+    ("jwt_realm", "headers"),
+    [
+        ("saas", [(X_GITLAB_ROOT_NAMESPACE_ID.lower().encode(), b"99")]),
+        (
+            "self-managed",
+            [(X_GITLAB_INSTANCE_ID_HEADER.lower().encode(), b"inst-123")],
+        ),
+    ],
+    indirect=["jwt_realm"],
+)
+async def test_middleware_does_not_log_when_billing_fields_are_present(
+    monkeypatch, mock_app, user, headers
+):
+    """In log mode, a request with every mandatory billing field is processed without a billing log."""
+    middleware = _billing_middleware(monkeypatch, mock_app, "log")
+    scope = _http_scope(user, headers + [_UNIT_PRIMITIVE_HEADER])
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    with (
+        request_cycle_context({}),
+        patch("lib.billing_events.validation.log") as mock_log,
+    ):
+        await middleware(scope, receive, send)
+
+    mock_log.warning.assert_not_called()
+    mock_log.error.assert_not_called()
+    mock_app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [["complete_code"]])
+@pytest.mark.parametrize("jwt_realm", ["saas"], indirect=True)
+async def test_middleware_rejects_request_when_billing_validation_enforced(
+    monkeypatch, mock_app, user
+):
+    """When enforced, a request with missing billing fields is rejected before the app is called."""
+    middleware = _billing_middleware(monkeypatch, mock_app, "enforce")
+    send = AsyncMock()
+
+    with request_cycle_context({}):
+        await middleware(_http_scope(user, [_UNIT_PRIMITIVE_HEADER]), AsyncMock(), send)
+
+    mock_app.assert_not_called()
+
+    start_message = send.call_args_list[0].args[0]
+    body_message = send.call_args_list[1].args[0]
+    assert start_message["type"] == "http.response.start"
+    assert start_message["status"] == 422
+    assert json.loads(body_message["body"]) == {
+        "detail": "Missing mandatory billing fields",
+        "missing_fields": ["ultimate_parent_namespace_id"],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [["complete_code"]])
+@pytest.mark.parametrize("jwt_realm", ["saas"], indirect=True)
+async def test_middleware_does_not_reject_valid_request_when_billing_validation_enforced(
+    monkeypatch, mock_app, user
+):
+    middleware = _billing_middleware(monkeypatch, mock_app, "enforce")
+    scope = _http_scope(
+        user,
+        [
+            (X_GITLAB_ROOT_NAMESPACE_ID.lower().encode(), b"99"),
+            _UNIT_PRIMITIVE_HEADER,
+        ],
+    )
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    with request_cycle_context({}):
+        await middleware(scope, receive, send)
+
+    mock_app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [["complete_code"]])
+@pytest.mark.parametrize("jwt_realm", ["saas"], indirect=True)
+async def test_middleware_logs_without_rejecting_when_feature_is_not_enforced(
+    monkeypatch, mock_app, user
+):
+    """In enforce mode, a feature that is not in the enforced list is only logged."""
+    middleware = _billing_middleware(
+        monkeypatch, mock_app, "enforce", enforced_feature_qualified_names=frozenset()
+    )
+    scope = _http_scope(user, [_UNIT_PRIMITIVE_HEADER])
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    with (
+        request_cycle_context({}),
+        patch("lib.billing_events.validation.log") as mock_log,
+    ):
+        await middleware(scope, receive, send)
+
+    mock_log.error.assert_not_called()
+    mock_log.warning.assert_called_once()
+    assert mock_log.warning.call_args.kwargs["enforced"] is False
+    mock_app.assert_called_once_with(scope, receive, send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("jwt_realm", ["saas"], indirect=True)
+@pytest.mark.parametrize(
+    ("scopes", "mode", "billing_enabled", "headers"),
+    [
+        pytest.param(
+            ["complete_code"],
+            "enforce",
+            False,
+            [_UNIT_PRIMITIVE_HEADER],
+            id="billing_disabled",
+        ),
+        pytest.param(["complete_code"], "enforce", True, [], id="no_unit_primitive"),
+        pytest.param(
+            ["duo_chat"],
+            "enforce",
+            True,
+            [(b"x-gitlab-unit-primitive", b"duo_chat")],
+            id="non_billable_unit_primitive",
+        ),
+        pytest.param(
+            [],
+            "enforce",
+            True,
+            [_UNIT_PRIMITIVE_HEADER],
+            id="unit_primitive_not_in_token",
+        ),
+    ],
+)
+async def test_middleware_skips_billing_validation(
+    monkeypatch, mock_app, user, mode, billing_enabled, headers
+):
+    """Requests that cannot emit a billing event are neither validated nor rejected."""
+    middleware = _billing_middleware(
+        monkeypatch, mock_app, mode, billing_enabled=billing_enabled
+    )
+    scope = _http_scope(user, headers)
+    receive = AsyncMock()
+    send = AsyncMock()
+
+    with (
+        request_cycle_context({}),
+        patch("lib.billing_events.validation.log") as mock_log,
+    ):
+        await middleware(scope, receive, send)
+
+    mock_log.warning.assert_not_called()
+    mock_log.error.assert_not_called()
+    mock_app.assert_called_once_with(scope, receive, send)
