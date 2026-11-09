@@ -1,7 +1,7 @@
 from typing import Any, Literal, Optional, Type
 
 import structlog
-from jsonschema import Draft7Validator, ValidationError
+from jsonschema import Draft7Validator, SchemaError, ValidationError
 from jsonschema.validators import validator_for
 from pydantic import ConfigDict, Field, create_model
 
@@ -90,7 +90,7 @@ def json_schema_to_pydantic(
             validator_for(schema) if "$schema" in schema else Draft7Validator
         )
         validator_class.check_schema(schema)
-    except ValidationError as e:
+    except (ValidationError, SchemaError) as e:
         raise ValueError(f"Invalid JSON schema: {e}")
 
     schema = _resolve_schema_title(schema, title_fallback, _depth)
