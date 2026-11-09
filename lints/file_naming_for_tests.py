@@ -12,7 +12,6 @@ EXCLUDED_FILES = {
     "/tests/code_suggestions/test_logging.py",
     "/tests/prompts/test_litellm_prompt.py",
     "/tests/duo_workflow_service/agent_platform/test_configs.py",
-    "/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py",
     "/tests/duo_workflow_service/agent_platform/v1/flows/test_readiness_score_config.py",
     "/tests/duo_workflow_service/agent_platform/experimental/components/for_each/test_docs_example.py",
 }

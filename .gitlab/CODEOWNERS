@@ -44,11 +44,8 @@
 # Pipeline features under ai/features/pipeline/ (team ownership still under discussion)
 /ai/features/pipeline/ @gitlab-org/maintainers/duo-workflow-service
 
-# Security Review flow and prompts (Code Security)
-/duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham @mtolpin
-/ai_gateway/prompts/definitions/security_review*/ @mbenayoun @philipcunningham @mtolpin
+# Security Review response schema (Code Security)
 /ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham @mtolpin
-/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham @mtolpin
 
 # Business Logic Security flows and tools (Code Security)
 /duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham @mtolpin
@@ -92,6 +89,9 @@
 
 # Security features under ai/features/
 /ai/features/security/ @gitlab-org/maintainers/duo-workflow-service
+
+# Security Review flow and prompts (Code Security)
+/ai/features/security/security_review*/ @mbenayoun @philipcunningham @mtolpin
 
 # SkillGuard flow and prompts (Code Security)
 /ai/features/security/skillguard_scan/ @mbenayoun @mtolpin @philipcunningham
@@ -146,11 +146,8 @@
 # Pipeline features under ai/features/pipeline/ (team ownership still under discussion)
 /ai/features/pipeline/ @gitlab-org/maintainers/duo-workflow-service
 
-# Security Review flow and prompts (Code Security)
-/duo_workflow_service/agent_platform/v1/flows/configs/security_review/ @mbenayoun @philipcunningham @mtolpin
-/ai_gateway/prompts/definitions/security_review*/ @mbenayoun @philipcunningham @mtolpin
+# Security Review response schema (Code Security)
 /ai_gateway/response_schemas/definitions/security_review/ @mbenayoun @philipcunningham @mtolpin
-/tests/duo_workflow_service/agent_platform/v1/flows/test_security_review_config.py @mbenayoun @philipcunningham @mtolpin
 
 # Business Logic Security flows and tools (Code Security)
 /duo_workflow_service/agent_platform/experimental/flows/configs/bl_security/ @mbenayoun @philipcunningham @mtolpin
@@ -191,6 +188,9 @@
 /ai_gateway/prompts/definitions/resolve_dep_bump_pipeline_fix/ @mbenayoun @gitlab-org/govern/agentic-security-flows
 /tests/duo_workflow_service/agent_platform/v1/flows/test_resolve_dependency_bump_config.py @mbenayoun @gitlab-org/govern/agentic-security-flows
 /tests/ai_gateway/prompts/test_resolve_dep_bump_templates.py @mbenayoun @gitlab-org/govern/agentic-security-flows
+
+# Security Review flow and prompts (Code Security)
+/ai/features/security/security_review*/ @mbenayoun @philipcunningham @mtolpin
 
 # SkillGuard flow and prompts (Code Security)
 /ai/features/security/skillguard_scan/ @mbenayoun @mtolpin @philipcunningham
