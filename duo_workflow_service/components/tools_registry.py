@@ -2,6 +2,7 @@ import copy
 import importlib.util
 import json
 import keyword
+from collections import Counter
 from functools import cached_property
 from pathlib import Path
 from typing import (
@@ -537,7 +538,7 @@ def _drop_shadowing_mcp_tools(
     first_party_names: Collection[str],
     first_party_drops: Mapping[str, str],
 ) -> list[McpToolConfig]:
-    """Drop MCP tools that would answer for a tool GitLab owns.
+    """Drop MCP tools that would answer for a tool GitLab owns, or for a shared name.
 
     A reserved name is refused whatever the entry claims about its origin, because
     client_injected is only trustworthy behind Workhorse. Tools from a server GitLab
@@ -545,8 +546,8 @@ def _drop_shadowing_mcp_tools(
 
     A first-party name is held only by the entry whose raw name matched the claim exactly
     (`first_party`). Any other entry sanitising to it, GitLab-origin or a client alias such
-    as `mcp__duo..review__-`, is refused even though GitLab-origin otherwise wins a
-    collision: it would inherit the first-party verdict and execute a different tool.
+    as `mcp__duo..review__-`, is refused: it would inherit the first-party verdict and
+    execute a different tool.
 
     The first-party tool itself is refused when its own verdict removes it (`first_party_drops`,
     name to `deny` or `ask_without_prompt`), logged as such rather than as a GitLab-owned name.
@@ -554,13 +555,25 @@ def _drop_shadowing_mcp_tools(
     A governed name is refused only for client-injected entries: an admin rule naming a
     GitLab MCP tool must make it prompt, not remove it.
 
-    On a name collision the non-client-injected entry wins. Workhorse already orders the
-    lists so that it does, but that contract lives in another repo, so enforce it here
-    rather than depend on it.
+    Workhorse routes a call by name alone, and it runs any name it registered on its own
+    server. When a client tool and a GitLab-side tool share a name, the GitLab copy is the one
+    that runs, so only the client copy is refused. When two GitLab-side tools share a name,
+    or two client tools do, DWS cannot tell which one a call is for, so every copy is refused.
+
+    First-party aliases do not count toward a name: the claim names the genuine tool by its
+    raw name, so an alias cannot take the genuine tool down with it.
     """
-    kept: dict[str, McpToolConfig] = {}
+    counted = [
+        config
+        for config in mcp_tools
+        if config["first_party"] or config["llm_name"] not in first_party_names
+    ]
+    name_counts = Counter(config["llm_name"] for config in counted)
+    gitlab_counts = Counter(
+        config["llm_name"] for config in counted if not config["client_injected"]
+    )
+    kept: list[McpToolConfig] = []
     for config in mcp_tools:
-        incumbent = kept.get(config["llm_name"])
         if config["llm_name"] in reserved:
             refusal_reason = "reserved"
         elif config["llm_name"] in first_party_names and not config["first_party"]:
@@ -569,12 +582,10 @@ def _drop_shadowing_mcp_tools(
             refusal_reason = "first_party_verdict"
         elif config["client_injected"] and config["llm_name"] in governed_names:
             refusal_reason = "governed"
-        elif (
-            incumbent is not None
-            and config["client_injected"]
-            and not incumbent["client_injected"]
-        ):
+        elif config["client_injected"] and name_counts[config["llm_name"]] > 1:
             refusal_reason = "collision"
+        elif gitlab_counts[config["llm_name"]] > 1:
+            refusal_reason = "duplicate"
         else:
             refusal_reason = None
 
@@ -585,14 +596,14 @@ def _drop_shadowing_mcp_tools(
                 "client_injected": config["client_injected"],
                 "refusal_reason": refusal_reason,
             }
-            message = "Dropped MCP tool shadowing a name GitLab owns"
+            message = "Dropped MCP tool"
             if refusal_reason == "first_party_verdict":
                 message = "Dropped first-party MCP tool by its first-party verdict"
                 extra["verdict"] = first_party_drops[config["llm_name"]]
             log.warning(message, extra=extra)
             continue
-        kept[config["llm_name"]] = config
-    return list(kept.values())
+        kept.append(config)
+    return kept
 
 
 TOOL_CALL_APPROVED_QUERY = """
