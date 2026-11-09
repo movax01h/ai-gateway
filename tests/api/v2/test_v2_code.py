@@ -1520,7 +1520,10 @@ class TestCodeCompletions:
 
         with patch(
             "ai_gateway.api.v2.code.completions.create_model_metadata",
-            wraps=create_model_metadata,
+            # The builder consumes the mapping it gets, so pass it a copy and keep the payload of the route.
+            side_effect=lambda data, **kwargs: create_model_metadata(
+                dict(data), **kwargs
+            ),
         ) as mock_create_model_metadata:
             response = self._send_code_completions_request(mock_client, params)
 

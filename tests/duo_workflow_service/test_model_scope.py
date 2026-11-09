@@ -216,8 +216,8 @@ class TestModelAllowed:
         assert current_model_metadata_with_size_context.get().feature_setting is None
 
     @pytest.mark.asyncio
-    async def test_drops_a_raw_identifier_that_rewrites_the_wire_model(self):
-        """`name` resolves an allowed model, but a raw `identifier` next to it would become the wire model."""
+    async def test_a_raw_identifier_never_becomes_the_wire_model(self):
+        """`name` resolves an allowed model, and the raw `identifier` next to it is ignored."""
         await _resolve_header(
             {
                 "provider": "anthropic",
@@ -225,9 +225,7 @@ class TestModelAllowed:
                 "identifier": "vertex_ai/other-model",
             }
         )
-        assert (
-            current_model_metadata_context.get().identifier == "vertex_ai/other-model"
-        )
+        assert current_model_metadata_context.get().identifier is None
 
         scope_flat_rate_flow_models(CODE_REVIEW, USER)
 

@@ -18,7 +18,7 @@ from langchain_core.runnables import (
 from pydantic import BaseModel, HttpUrl
 from pyfakefs.fake_filesystem import FakeFilesystem
 
-from ai_gateway.config import ConfigModelLimits
+from ai_gateway.config import ConfigModelLimits, get_config
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
@@ -523,7 +523,10 @@ def registry_fixture(
     model_limits: ConfigModelLimits,
     custom_models_enabled: bool,
     disable_streaming: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    # The model metadata builders read the global config, so it serves custom models exactly when the registry does.
+    monkeypatch.setattr(get_config().custom_models, "enabled", custom_models_enabled)
     # Use from_local_yaml for lazy loading version
     return LocalPromptRegistry.from_local_yaml(
         prompt_template_factories={},

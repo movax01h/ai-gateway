@@ -652,10 +652,11 @@ The check looks at:
     route that takes the metadata from `ModelConfigMiddleware` runs the request without it and logs a
     `Model metadata not applied` warning, and code embeddings returns HTTP 422. A bare `name` still resolves the model, because the Duo Workflow Service resume replays a
     checkpointed model in this shape.
-  - For another provider string, `name` resolves the model the allowlist checks, but the raw `identifier` becomes the
-    wire model: `{"provider": "vertex-ai", "name": "claude_sonnet_4_6_vertex", "identifier":
-    "vertex_ai/claude-opus-4-8"}` passes as Sonnet and runs Opus on the gateway's Vertex AI credentials. Only
-    `fallback` and `enforce` mode rebuild the model from its definition. In `off` and `log` mode the override stays.
+  - For another provider string on a gateway without custom models, the gateway resolves the model from `name` and
+    ignores the raw `identifier` in every mode, so the `identifier` never becomes the wire model. For example,
+    `{"provider": "vertex-ai", "name": "claude_sonnet_4_6_vertex", "identifier": "vertex_ai/claude-opus-4-8"}` runs
+    Claude Sonnet 4.6. The request is logged as an `identifier_ignored` note. A gateway with custom models keeps both,
+    because a self-hosted model sends its family as `name` and the operator's model as `identifier`.
   - A client `endpoint` or `api_key` is not handled here; `validate_custom_endpoint` rejects both on a gateway without
     custom models.
 - A `dev` model or a deprecated model (logged only).
@@ -668,17 +669,17 @@ variable, so you can set both in the same environment:
 |------|-----------|
 | `off` | No check. |
 | `log` | Log mismatches, change nothing. |
-| `fallback` | Serve the feature's default model instead of a model that is not allowed. Rebuild a GitLab-managed model from its definition when a raw `identifier` would rewrite it. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. This is the default on both surfaces. |
-| `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. Rebuild a raw `identifier` override as `fallback` does. |
+| `fallback` | Serve the feature's default model instead of a model that is not allowed. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. This is the default on both surfaces. |
+| `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. |
 
 Every mismatch is logged as `Model allowlist mismatch` with a `reason` (`provider_not_served`, `model_not_allowed`,
-`feature_mismatch`, `missing_feature_setting`, `unknown_feature`, `managed_identifier_override`), the `mode`, the
+`feature_mismatch`, `missing_feature_setting`, `unknown_feature`), the `mode`, the
 `surface` (`http` or `dws`), the `feature_setting` the check used (the route's feature when the route passes one, else
 the client's), the `client_feature_setting` as the client sent it, the `requested_name` and `requested_identifier` as
 the client sent them, the `served_identifier` and the caller's context such as the request `path`. Endpoint and key
 values are never logged. One request can log more than one mismatch, so count by `reason` or by correlation ID
 rather than by event. Informational cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
-`deprecated_model`, `name_ignored`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
+`deprecated_model`, `name_ignored`, `identifier_ignored`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
 `Model allowlist note`.
 
 Each mismatch and note also has the `outcome` of the check in the current mode, and the `enforce_outcome` that
