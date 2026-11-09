@@ -1013,8 +1013,8 @@ def test_config_bedrock_guardrail_identifier_at_max_length():
             ConfigModelSelection(feature_allowlist_mode_http="enforce"),
         ),
         (
-            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS": "fallback"},
-            ConfigModelSelection(feature_allowlist_mode_dws="fallback"),
+            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS": "log"},
+            ConfigModelSelection(feature_allowlist_mode_dws="log"),
         ),
     ],
 )
@@ -1030,7 +1030,7 @@ def test_config_model_selection_feature_allowlist_modes_default_per_surface():
         config = Config(_env_file=None)
 
         assert config.model_selection.feature_allowlist_mode_http == "fallback"
-        assert config.model_selection.feature_allowlist_mode_dws == "log"
+        assert config.model_selection.feature_allowlist_mode_dws == "fallback"
 
 
 @pytest.mark.parametrize(

@@ -28,8 +28,8 @@ altogether.
 ``AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS`` on the Duo Workflow Service:
 
 - ``off``: no check.
-- ``log``: log mismatches, change nothing (the Duo Workflow Service default).
-- ``fallback``: serve the feature's default model instead of a model that is not allowed (the HTTP default).
+- ``log``: log mismatches, change nothing.
+- ``fallback``: serve the feature's default model instead of a model that is not allowed (the default on both surfaces).
 - ``enforce``: reject a model that is not allowed (HTTP 403, gRPC ``PERMISSION_DENIED``).
 
 ``fallback`` and ``enforce`` also rebuild a GitLab-managed model from its definition when a raw
