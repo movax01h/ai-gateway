@@ -39,10 +39,14 @@ from duo_workflow_service.agent_platform.experimental.state import (
     RuntimeIOKey,
     merge_nested_dict,
 )
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent as V1BaseComponent,
 )
 from duo_workflow_service.entities.state import WorkflowStatusEnum
+from lib.usage_quota import InsufficientCredits, recheck_usage_quota
 
 __all__ = [
     "BRANCHES_SUBKEY",
@@ -109,6 +113,9 @@ _NOT_INHERITED = ("status", "ui_chat_log")
 #: state it did not expect. The body then meets the input as missing inside
 #: its branch.
 _UNREADABLE = (KeyError, TypeError, AttributeError)
+
+#: What the user sees when the namespace runs out of credits mid-run.
+_OUT_OF_CREDITS = "This flow stopped because the namespace ran out of GitLab Credits."
 
 #: How much of an offending value an error message quotes back.
 _PREVIEW_CHARS = 100
@@ -485,6 +492,14 @@ class ForEachComponent(BaseComponent):
         index = self._index_key.value_from_state(state)
 
         async with self._concurrency_gate():
+            # Credits are checked once when the flow starts; a long fan-out
+            # re-checks before each item so it stops once a check denies.
+            if (recheck := recheck_usage_quota.get()) is not None:
+                try:
+                    await recheck()
+                except InsufficientCredits as error:
+                    raise NotifiableAgentException(_OUT_OF_CREDITS) from error
+
             unit = compile_as_unit(self.component)
 
             try:

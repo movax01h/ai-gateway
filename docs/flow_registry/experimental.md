@@ -713,7 +713,7 @@ sibling is about to hit the same thing, so they propagate and fail the flow with
 | `ModelError` | The provider failed after its retries ran out, or failed non-retryably: authentication, permission, invalid request, context too large. |
 | `NotifiableAgentException`, `NotifiableException` | Both carry a message meant for the user, which an error record buries. |
 | `SecurityException` | Prompt injection and its relatives. The result must never reach a model again. |
-| `InsufficientCredits`, `UsageQuotaError` | Out of credits or entitlements, or the quota check is unavailable. Every sibling fails the same way. |
+| `InsufficientCredits`, `UsageQuotaError` | Out of credits or entitlements, or the quota check is unavailable. Every sibling fails the same way. The fan-out's own credit re-check raises these too; see [Credits are re-checked per item](#limitations). |
 | `CheckpointAccessDeniedError` | GitLab refused a checkpoint with 401 or 403: the session lost access, for example because GitLab Duo was turned off. No sibling can save its work either. |
 
 ##### Every item failing is a bug, not a result
@@ -730,6 +730,12 @@ flow continues.
 
 #### Limitations
 
+- **Credits are re-checked per item, not per model call.** When the flow's start-of-run credit check ran, each
+  item re-checks the same quota once it has a concurrency slot, before its body runs. A denial ends the whole
+  fan-out: out of credits shows the user "This flow stopped because the namespace ran out of GitLab Credits.",
+  while an unavailable check or a missing entitlement ends it with the generic error. Most re-checks are cache
+  hits; each one still increments the quota metrics. A single long item, and parallel subagents outside
+  `for_each`, are not re-checked.
 - **The concurrency cap is per fan-out, not fleet-wide.** `max_concurrency` bounds the branches of one
   component. It says nothing about what the rest of the flow, other flows, or other instances are asking of the
   same model at the same time, so it is a blast-radius control rather than a rate limit.

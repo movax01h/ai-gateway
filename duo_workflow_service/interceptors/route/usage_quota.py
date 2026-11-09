@@ -24,6 +24,7 @@ from lib.usage_quota import (
     UsageQuotaCheckUnavailable,
     UsageQuotaEvent,
     UsageQuotaService,
+    recheck_usage_quota,
 )
 from lib.usage_quota.client import should_skip_usage_quota_for_user
 
@@ -111,6 +112,9 @@ def _process_execute_workflow_stream(func: Callable, event: UsageQuotaEvent):
 
             if not should_skip_usage_quota_for_user(current_user):
                 await service.execute(gl_events_context, event)
+                recheck_usage_quota.set(
+                    functools.partial(service.execute, gl_events_context, event)
+                )
 
             async for item in func(obj, _chained(), grpc_context, *args, **kwargs):
                 yield item
