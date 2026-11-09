@@ -33,7 +33,10 @@ class CatalogItemConfigError(CatalogItemError):
 
 
 class CatalogItemsError(CatalogItemError):
-    """The items the client sent cannot be used with this flow."""
+    """The items the client sent cannot be used with this flow.
+
+    A workspace agent message reaches the user as is, so it names items as the user declared them.
+    """
 
     @classmethod
     def from_validation_error(cls, exc: ValidationError) -> "CatalogItemsError":
