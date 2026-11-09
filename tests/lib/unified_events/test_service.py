@@ -1,5 +1,6 @@
 """Tests for UnifiedEventService."""
 
+import threading
 import uuid
 from datetime import datetime
 from unittest.mock import Mock
@@ -23,6 +24,26 @@ class InlineExecutor:
 
     def submit(self, fn, *args, **kwargs):
         fn(*args, **kwargs)
+
+
+class DeferredExecutor:
+    """Queues submitted work so tests can control when it runs."""
+
+    def __init__(self):
+        self.queued = []
+
+    def submit(self, fn, *args, **kwargs):
+        self.queued.append((fn, args, kwargs))
+
+    def run_all(self):
+        while self.queued:
+            fn, args, kwargs = self.queued.pop(0)
+            fn(*args, **kwargs)
+
+
+class ShutDownExecutor:
+    def submit(self, fn, *args, **kwargs):
+        raise RuntimeError("cannot schedule new futures after shutdown")
 
 
 def _find_context(body, schema):
@@ -352,3 +373,66 @@ class TestUnifiedEventServiceTrack:
         service.track("request_duo_chat")
 
         assert mock_session.post.call_count == 1
+
+    def test_unexpected_error_while_building_is_logged_not_raised(
+        self, service, mock_session, event_context, tracked_events
+    ):
+        service._build_event_construct = Mock(side_effect=RuntimeError("boom"))
+
+        service.track("request_duo_chat")
+
+        mock_session.post.assert_not_called()
+        assert "request_duo_chat" not in tracked_events
+
+    def test_unexpected_send_error_is_logged_not_raised(
+        self, service, mock_session, event_context, tracked_events
+    ):
+        mock_session.post.side_effect = ValueError("boom")
+
+        service.track("request_duo_chat")
+        service.track("request_duo_chat")
+
+        assert mock_session.post.call_count == 2
+
+    def test_shut_down_executor_is_logged_not_raised(
+        self, service, mock_session, event_context, tracked_events
+    ):
+        service._executor = ShutDownExecutor()
+        service._pending = threading.BoundedSemaphore(1)
+
+        service.track("request_duo_chat")
+        service._executor = InlineExecutor()
+        service.track("request_duo_chat")
+
+        assert mock_session.post.call_count == 1
+
+    def test_drops_events_when_too_many_are_pending(
+        self, service, mock_session, event_context, tracked_events
+    ):
+        executor = DeferredExecutor()
+        service._executor = executor
+        service._pending = threading.BoundedSemaphore(1)
+
+        service.track("first_event")
+        service.track("dropped_event")
+        executor.run_all()
+        service.track("after_drain_event")
+        executor.run_all()
+
+        posted = [
+            c.kwargs["json"]["event_type"] for c in mock_session.post.call_args_list
+        ]
+        assert posted == ["first_event", "after_drain_event"]
+        assert "dropped_event" not in tracked_events
+
+    def test_failing_log_call_releases_the_pending_slot(
+        self, service, mock_session, event_context, tracked_events
+    ):
+        service._pending = threading.BoundedSemaphore(1)
+        service._logger = Mock()
+        service._logger.info.side_effect = RuntimeError("bad log processor")
+
+        service.track("request_duo_chat")
+
+        mock_session.post.assert_not_called()
+        assert service._pending.acquire(blocking=False)
