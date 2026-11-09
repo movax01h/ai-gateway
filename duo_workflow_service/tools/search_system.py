@@ -22,7 +22,9 @@ _OUTPUT_OVERFLOW_MESSAGE = (
     " or set `search_directory` to a narrower directory."
 )
 # The node executor's result: a "Found N matches" line, then per snippet a `path:start_end` header and its lines.
-_RESULT_HEADER = re.compile(r"^Found \d+ match(?:es)? across \d+ files?\b")
+_RESULT_HEADER = re.compile(
+    r"^Found \d+ match(?:es)? across \d+ files?(?: \(showing first \d+\))?$"
+)
 _SNIPPET_HEADER = re.compile(r"^(?P<path>.+):(?P<start>\d+)_(?P<end>\d+)$")
 # gitlab-lsp in this range sends the snippets without the "Found N matches" line;
 # earlier versions send one `path:matched-line` row per match, which can look like a header.

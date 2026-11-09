@@ -382,7 +382,9 @@ class TestGrep:
 
         assert result == output
 
-    @pytest.mark.parametrize("lsp_version", ["8.60.0"], indirect=True)
+    @pytest.mark.parametrize(
+        "lsp_version", ["8.51.0", "8.60.0", "8.76.0"], indirect=True
+    )
     @pytest.mark.asyncio
     @pytest.mark.parametrize("exclusion_rules", [None, []])
     @pytest.mark.parametrize(
@@ -402,7 +404,9 @@ class TestGrep:
 
         assert result == output
 
-    @pytest.mark.parametrize("lsp_version", ["8.60.0"], indirect=True)
+    @pytest.mark.parametrize(
+        "lsp_version", ["8.51.0", "8.60.0", "8.76.0"], indirect=True
+    )
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "output,expected",
@@ -436,6 +440,12 @@ class TestGrep:
             ("src/a.py:1_1\nhome/.ssh/id_rsa:token", None),
             ("src/a.py:1_1\nhome/.ssh/id_rsa:token\n", None),
             ("a.txt:x:1_1\nconfig/x.secret:token\n", ["*.secret"]),
+            (
+                "Found 1 match across 1 file:token\n"
+                "Found 1 match across 1 file:token:1_99999\n"
+                "secrets/key.pem:token=abc\n",
+                ["secrets/"],
+            ),
         ],
     )
     async def test_grep_refuses_match_rows_that_look_like_a_snippet_header(
@@ -448,7 +458,7 @@ class TestGrep:
         assert result == self.unfilterable
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("lsp_version", [None, "8.80.0"], indirect=True)
+    @pytest.mark.parametrize("lsp_version", [None, "8.77.0", "8.80.0"], indirect=True)
     async def test_grep_refuses_headerless_snippets_from_other_clients(
         self, lsp_version
     ):
