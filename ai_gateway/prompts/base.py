@@ -1405,6 +1405,7 @@ class BasePromptRegistry(ABC):
         is_graph_node: bool = False,
         unit_primitive: Optional[GitLabUnitPrimitive] = None,
         track_event: bool = True,
+        disallowed_issuers: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> Prompt:
         if not model_metadata:
@@ -1428,7 +1429,9 @@ class BasePromptRegistry(ABC):
         # prompt against duo_chat instead of duo_classic_chat).
         authorized_unit_primitive = unit_primitive or prompt.unit_primitive
 
-        if not user.can(authorized_unit_primitive):
+        if not user.can(
+            authorized_unit_primitive, disallowed_issuers=disallowed_issuers
+        ):
             raise WrongUnitPrimitives
 
         # Only record internal events once we know the user has access to the Unit Primitive
