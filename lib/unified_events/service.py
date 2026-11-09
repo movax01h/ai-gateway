@@ -1,3 +1,4 @@
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
@@ -31,6 +32,7 @@ class UnifiedEventService:
     ENDPOINT_PATH = "/v1/events"
     REQUEST_TIMEOUT = (5.0, 10.0)  # requests' (connect, read) timeouts, in seconds
     MAX_SE_FIELD_LENGTH = 255
+    MAX_PENDING_EVENTS = 1000
     AI_CONTEXT_TOKEN_KWARGS = frozenset(
         {"input_tokens", "output_tokens", "total_tokens"}
     )
@@ -45,6 +47,7 @@ class UnifiedEventService:
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="unified_events"
         )
+        self._pending = threading.BoundedSemaphore(self.MAX_PENDING_EVENTS)
 
     def track(
         self,
@@ -53,10 +56,29 @@ class UnifiedEventService:
         category: Optional[str] = "default_category",
         **kwargs: Any,
     ) -> None:
-        """Track an event by POSTing it to the events sidecar."""
+        """Track an event by POSTing it to the events sidecar.
+
+        Never raises: a failure here must not fail the request being tracked.
+        """
         if not self._enabled:
             return
 
+        try:
+            self._track(event_name, additional_properties, category, **kwargs)
+        except Exception as e:
+            self._logger.error(
+                "Failed to track unified event",
+                event_name=event_name,
+                error=str(e),
+            )
+
+    def _track(
+        self,
+        event_name: str,
+        additional_properties: Optional[InternalEventAdditionalProperties],
+        category: Optional[str],
+        **kwargs: Any,
+    ) -> None:
         if additional_properties is None:
             additional_properties = InternalEventAdditionalProperties()
 
@@ -119,21 +141,37 @@ class UnifiedEventService:
             {"schema": self.AI_CONTEXT_SCHEMA, "data": asdict(ai_context)},
         ]
 
-        self._logger.info("Tracking unified event", event_name=event_name)
-        self._executor.submit(self._post_event, event_name, body)
+        if not self._pending.acquire(blocking=False):
+            self._logger.error(
+                "Dropped unified event, too many pending sidecar requests",
+                event_name=event_name,
+                max_pending=self.MAX_PENDING_EVENTS,
+            )
+            return
+
+        try:
+            self._logger.info("Tracking unified event", event_name=event_name)
+            self._executor.submit(self._post_event, event_name, body)
+        except Exception:
+            self._pending.release()
+            raise
         tracked_internal_events.get().add(event_name)
 
     def _post_event(self, event_name: str, body: Dict[str, Any]) -> None:
-        url = f"{self._sidecar_url}{self.ENDPOINT_PATH}"
         try:
-            response = self._session.post(url, json=body, timeout=self.REQUEST_TIMEOUT)
-        except requests.RequestException as e:
+            self._send(event_name, body)
+        except Exception as e:
             self._logger.error(
                 "Failed to send unified event to sidecar",
                 event_name=event_name,
                 error=str(e),
             )
-            return
+        finally:
+            self._pending.release()
+
+    def _send(self, event_name: str, body: Dict[str, Any]) -> None:
+        url = f"{self._sidecar_url}{self.ENDPOINT_PATH}"
+        response = self._session.post(url, json=body, timeout=self.REQUEST_TIMEOUT)
 
         if response.status_code == 202:
             self._logger.info(
