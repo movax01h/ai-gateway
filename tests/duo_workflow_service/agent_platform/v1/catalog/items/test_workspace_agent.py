@@ -118,3 +118,27 @@ class TestWorkspaceAgent:
         agent = WorkspaceAgent(**_agent())
 
         assert agent.toolset == []
+
+
+class TestDisplayName:
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("reviewer", "reviewer"),
+            ("workspace/agents/reviewer", "reviewer"),
+            ("  reviewer ", "reviewer"),
+            ("r" * 40, "r" * 40),
+            (
+                "code-reviewer-for-the-frontend-application",
+                "code-reviewer-for-…ontend-application",
+            ),
+            ("é" * 30, "é" * 9 + "…" + "é" * 9),
+        ],
+        ids=["plain", "namespaced", "padded", "at_the_limit", "long", "multibyte"],
+    )
+    def test_the_name_is_shown_as_declared_and_bounded(self, name, expected):
+        """Quoted in errors the user reads, whose length Workhorse caps in bytes.
+
+        A long name keeps its start and end, which tell similar names apart.
+        """
+        assert WorkspaceAgent(**_agent(name=name)).display_name == expected

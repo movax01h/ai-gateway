@@ -482,7 +482,7 @@ class TestNormalizeCatalogItems:
         """Proto3 sends no key for an empty scalar, so a blank prompt arrives as a missing one."""
         req = _start_request(_agent(prompt=""))
 
-        with pytest.raises(CatalogItemsError, match=r"workspace_agents\.0\.prompt"):
+        with pytest.raises(CatalogItemsError, match="the prompt is missing"):
             _normalize(req)
 
     def test_an_envelope_without_a_known_version_is_rejected(self):
@@ -493,14 +493,31 @@ class TestNormalizeCatalogItems:
         with pytest.raises(CatalogItemsError, match="no schema version"):
             _normalize(req)
 
-    def test_an_invalid_agent_raises_an_items_error(self):
-        """The model's own failure reaches the caller with its field location intact."""
-        req = _start_request(contract_pb2.WorkspaceAgent(name="tester"))
+    @pytest.mark.parametrize(
+        ("agent", "message"),
+        [
+            (
+                {"description": "x" * 1184},
+                "Workspace agent 'tester': the description has 1184 characters, "
+                "the limit is 1024.",
+            ),
+            ({"name": ""}, "Workspace agent 1: the name is missing."),
+            ({"prompt": ""}, "Workspace agent 'tester': the prompt is missing."),
+            (
+                {"toolset": ["read_file", ""]},
+                "Workspace agent 'tester': tool 2 has no name.",
+            ),
+        ],
+        ids=["description_too_long", "empty_name", "empty_prompt", "empty_tool"],
+    )
+    def test_an_invalid_agent_is_reported_in_the_users_terms(self, agent, message):
+        """Proto3 drops empty strings, so blank fields reach validation as missing ones."""
+        req = _start_request(_agent(**agent))
 
-        with pytest.raises(
-            CatalogItemsError, match=r"workspace_agents\.0\.description"
-        ):
+        with pytest.raises(CatalogItemsError) as exc_info:
             _normalize(req)
+
+        assert str(exc_info.value) == message
 
     def test_items_are_rejected_for_an_inline_config(self):
         """Inline configs cannot declare an `include` section, so items could never bind."""
