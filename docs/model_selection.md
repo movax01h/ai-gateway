@@ -667,8 +667,8 @@ variable, so you can set both in the same environment:
 | Mode | Behavior |
 |------|-----------|
 | `off` | No check. |
-| `log` | Log mismatches, change nothing. This is the default on the Duo Workflow Service. |
-| `fallback` | Serve the feature's default model instead of a model that is not allowed. Rebuild a GitLab-managed model from its definition when a raw `identifier` would rewrite it. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. This is the default on HTTP. |
+| `log` | Log mismatches, change nothing. |
+| `fallback` | Serve the feature's default model instead of a model that is not allowed. Rebuild a GitLab-managed model from its definition when a raw `identifier` would rewrite it. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. This is the default on both surfaces. |
 | `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. Rebuild a raw `identifier` override as `fallback` does. |
 
 Every mismatch is logged as `Model allowlist mismatch` with a `reason` (`provider_not_served`, `model_not_allowed`,
@@ -689,7 +689,7 @@ Each mismatch and note also has the `outcome` of the check in the current mode, 
 - `refused`: the gateway rejects the request with HTTP 403 or gRPC `PERMISSION_DENIED`.
 
 To roll back a stricter mode, set the variable of that surface to `log`. For example, set
-`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP=log`.
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS=log`.
 
 ### Find the requests that `enforce` mode would refuse
 

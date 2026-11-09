@@ -551,7 +551,7 @@ class ConfigModelSelection(BaseModel):
         ),
     )
     feature_allowlist_mode_dws: FeatureAllowlistMode = Field(
-        default="log",
+        default="fallback",
         description=(
             "The same check on the Duo Workflow Service, with the same modes. 'enforce' "
             "rejects the call with gRPC PERMISSION_DENIED."
