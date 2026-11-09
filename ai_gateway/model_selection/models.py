@@ -1,9 +1,11 @@
 from enum import StrEnum
-from typing import Iterable, Mapping, Optional
+from typing import Iterable, Literal, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
+    "AnthropicBlockBindingParams",
+    "AnthropicThinkingParams",
     "AnthropicWorkloadIdentityParams",
     "BaseModelParams",
     "ChatAmazonQParams",
@@ -142,8 +144,30 @@ class AnthropicWorkloadIdentityParams(BaseModel):
     """The `aud` claim requested on the identity token; must match the rule's `match.audience`."""
 
 
+class AnthropicBlockBindingParams(BaseModel):
+    """What Anthropic does with a replayed thinking block whose earlier conversation changed ("preserved thinking").
+
+    `error` returns a 400; `drop_block` drops that block and every later one, then answers the request.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    prefix_mismatch_behavior: Literal["error", "drop_block"]
+
+
+class AnthropicThinkingParams(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["adaptive"] = "adaptive"
+    block_binding: AnthropicBlockBindingParams | None = None
+
+
 class ChatAnthropicParams(BaseModelParams):
     default_headers: Mapping[str, str] | None = None
+
+    # Set per model in models.yml, e.g. `thinking.block_binding` with the matching `anthropic-beta` value in `betas`.
+    thinking: AnthropicThinkingParams | None = None
+    betas: list[str] | None = None
 
     # This allows us to override the API key per model via `AIGW_MODEL_SELECTION__MODEL_PARAMS`, which enable us to
     # switch between Anthropic organizations/workspaces when needed.
