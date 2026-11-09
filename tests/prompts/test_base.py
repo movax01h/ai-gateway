@@ -3311,18 +3311,36 @@ configurable_unit_primitives:
         registry: BasePromptRegistry,
     ):
         """Test that exceptions from prompt invocation are propagated."""
-        with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+        validations = []
+        validate_model = registry.validate_model
+
+        async def track_validation(model: str):
+            validation = asyncio.ensure_future(validate_model(model))
+            validations.append(validation)
+            await validation
+
+        async def settle():
+            # gather() raises on the first failure and leaves the other
+            # validations running, so wait for them before counting calls
+            await asyncio.gather(*validations, return_exceptions=True)
+
+        with (
+            mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke,
+            mock.patch.object(registry, "validate_model", side_effect=track_validation),
+        ):
             mock_ainvoke.side_effect = Exception("Model validation failed")
 
             with pytest.raises(Exception, match="Model validation failed"):
                 await registry.validate_default_models()
 
+            await settle()
             # Tried to validate all three models independently, all failed
             assert mock_ainvoke.call_count == 3
 
             with pytest.raises(Exception, match="Model validation failed"):
                 await registry.validate_default_models()
 
+            await settle()
             # Doesn't cache the failed results, tries to validate all models again
             assert mock_ainvoke.call_count == 6
 
