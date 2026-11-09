@@ -145,3 +145,9 @@ class DuoWorkflowServicer(contract_pb2_grpc.DuoWorkflowServicer):
     async def GenerateToken(self, request, context):
         ...
 ```
+
+### Re-check during a run
+
+The `ExecuteWorkflow` check runs once, when the stream opens. When it ran, the decorator also stores a re-check
+of the same quota in the `recheck_usage_quota` context variable. A `for_each` fan-out awaits it before each
+item, so a long fan-out stops once a check denies. Requests whose start check was skipped get no re-check.

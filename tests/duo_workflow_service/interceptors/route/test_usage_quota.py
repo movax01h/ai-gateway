@@ -18,6 +18,7 @@ from lib.usage_quota import (
     InsufficientEntitlements,
     UsageQuotaCheckUnavailable,
     UsageQuotaEvent,
+    recheck_usage_quota,
 )
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
@@ -356,6 +357,64 @@ async def test_execute_workflow_runs_quota_check_for_skip_claim_user_with_flag(
 
     assert results == ["ok"]
     mock_usage_quota_service.execute.assert_awaited_once()
+
+
+async def _recheck_seen_by_execute_workflow(duo_service, mock_context, service):
+    """Run a decorated ExecuteWorkflow and return the re-check its body sees."""
+    from duo_workflow_service.interceptors.route.usage_quota import (
+        has_sufficient_usage_quota,
+    )
+
+    async def inner_impl(*_args, **_kwargs):
+        yield recheck_usage_quota.get()
+
+    inner_impl.__name__ = "ExecuteWorkflow"
+    inner_impl.__qualname__ = "DuoWorkflowServicer.ExecuteWorkflow"
+
+    decorated = has_sufficient_usage_quota(event=UsageQuotaEvent.DAP_FLOW_ON_EXECUTE)(
+        inner_impl
+    )
+    seen = [
+        item
+        async for item in decorated(
+            duo_service, mock_request_generator(), mock_context, service=service
+        )
+    ]
+    return seen[0]
+
+
+@pytest.mark.asyncio
+async def test_execute_workflow_hands_the_flow_a_re_check_of_the_same_quota(
+    mock_usage_quota_service, duo_service, mock_context
+) -> None:
+    current_user.set(CloudConnectorUser(authenticated=True, claims=UserClaims()))
+
+    recheck = await _recheck_seen_by_execute_workflow(
+        duo_service, mock_context, mock_usage_quota_service
+    )
+    assert recheck is not None
+    await recheck()
+
+    assert mock_usage_quota_service.execute.await_count == 2
+    first, second = mock_usage_quota_service.execute.await_args_list
+    assert first == second
+
+
+@pytest.mark.asyncio
+async def test_execute_workflow_hands_no_re_check_when_the_quota_is_skipped(
+    mock_usage_quota_service,
+    mock_user_with_skip_usage_cutoff,
+    duo_service,
+    mock_context,
+) -> None:
+    current_user.set(mock_user_with_skip_usage_cutoff)
+
+    recheck = await _recheck_seen_by_execute_workflow(
+        duo_service, mock_context, mock_usage_quota_service
+    )
+
+    assert recheck is None
+    mock_usage_quota_service.execute.assert_not_awaited()
 
 
 class TestGenerateTokenVersionBasedQuotaCheck:
