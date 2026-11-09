@@ -691,10 +691,11 @@ class TestCheckClientModelMetadata:
             assert _reasons(logs) == []
             assert _reasons(logs, NOTE) == ["missing_feature_setting"]
 
-    class TestIdentifierOverrideOnManagedModel:
-        """`name` resolves an allowed model while the raw `identifier` rewrites the wire model.
+    class TestRawIdentifierOnManagedModel:
+        """A raw `identifier` next to `name` would rewrite the wire model of a GitLab-managed request.
 
-        A `gitlab` request resolves `identifier` and ignores `name`, so the override takes another provider string.
+        A `gitlab` request resolves `identifier` and ignores `name`, so the shape takes another provider string. The
+        gateway resolves `name` and ignores the raw `identifier` when it builds the metadata, in every mode.
         """
 
         RAW = {
@@ -704,41 +705,29 @@ class TestCheckClientModelMetadata:
             "feature_setting": FEATURE,
         }
 
-        @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
-        def test_log_mode_keeps_the_override_and_warns(self):
+        @pytest.mark.parametrize("feature_allowlist_mode", ALL_MODES, indirect=True)
+        def test_every_mode_checks_the_name_and_notes_the_ignored_identifier(self):
             metadata, result, logs = _check(self.RAW)
 
             assert result is metadata
-            assert result.identifier == "vertex_ai/other-model"
-            assert result.to_params()["model"] == "other-model"
-            assert _reasons(logs) == ["managed_identifier_override"]
-
-        @pytest.mark.parametrize(
-            "feature_allowlist_mode", ["fallback", "enforce"], indirect=True
-        )
-        def test_stricter_modes_rebuild_the_model_from_its_definition(self):
-            metadata, result, _ = _check(self.RAW)
-
-            assert result is not metadata
             assert isinstance(result, ModelMetadata)
             assert result.llm_definition.gitlab_identifier == "allowed_model"
             assert result.identifier is None
             # No wire model override is left: the model comes from the definition.
             assert "model" not in result.to_params()
+            assert _reasons(logs) == []
+            assert _reasons(logs, NOTE) == ["identifier_ignored"]
 
-        @pytest.mark.parametrize(
-            "feature_allowlist_mode", ["fallback", "enforce"], indirect=True
-        )
-        def test_stricter_modes_discard_limits_copied_from_the_identifier(self):
-            """`_create_gitlab_metadata` copies limits and tuning from the model the identifier matched."""
+        @pytest.mark.parametrize("feature_allowlist_mode", ALL_MODES, indirect=True)
+        def test_no_limits_are_copied_from_the_identifier(self):
+            """A self-hosted model copies limits and tuning from the models.yml entry its identifier matches."""
             with patch.object(
                 ModelSelectionConfig,
                 "find_by_identifier",
                 return_value=MODELS["matched_model"],
             ):
-                metadata, result, _ = _check(self.RAW)
+                _, result, _ = _check(self.RAW)
 
-            assert metadata.llm_definition.max_context_tokens == 1_000_000
             assert result.llm_definition.gitlab_identifier == "allowed_model"
             assert result.llm_definition.max_context_tokens == 200000
             assert result.llm_definition.params.max_tokens is None
@@ -814,6 +803,7 @@ class TestCheckClientModelMetadata:
             assert bool(getattr(metadata, "identifier", None)) is carries_identifier
             assert result is metadata
             assert _reasons(logs) == []
+            assert _reasons(logs, NOTE) == []
 
     class TestGitLabModelByIdentifier:
         """A `gitlab` request resolves its model from `identifier`, which is the field that GitLab clients send."""
@@ -1014,9 +1004,9 @@ class TestOutcomeLogFields:
                 "feature_setting": FEATURE,
             },
             {},
-            MISMATCH,
-            "managed_identifier_override",
-            id="http-identifier-override",
+            NOTE,
+            "identifier_ignored",
+            id="http-identifier-ignored",
         ),
         pytest.param(
             "http",
