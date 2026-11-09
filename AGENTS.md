@@ -455,6 +455,9 @@ Use `glab` for MR/issue CLI operations (or the GitLab MCP tools, if available).
   single call with a long `sleep`. Instead, request a longer timeout if
   your tool supports it, and poll in a bounded loop with an early break:
   `for i in $(seq 1 5); do glab ci get ... | grep -q '^status:.*success' && break; sleep 30; done`.
+  Budget the timeout when looping tests (`for i in $(seq 1 30); do pytest ...`): a run of
+  ~10s each already exceeds 300s. Use fewer iterations or a longer timeout, and split a
+  loop's pass/fail tally from a full output capture run.
 
 ### Branch Naming
 
@@ -544,6 +547,16 @@ the intended diff is committed, pushed, and included in the MR's latest commit;
 a working-tree diff alone is not enough. Don't guess remote state: check
 `git branch -a` or `glab` rather than enabling `push.autoSetupRemote` or
 retrying blindly.
+
+Never force push the shared default branch. When a force push is the agreed fix
+(for example dropping an out-of-scope commit from your own MR branch after review
+feedback):
+
+1. Push a backup first: `git push origin <branch>:refs/heads/duo-developer-backup/<branch>`
+   (push a named ref; pushing a raw `<sha>:refs/heads/...` fails with `not our ref`
+   on remotes configured to reject fetching arbitrary SHAs).
+1. `git push --force-with-lease origin <branch>` — never plain `--force`.
+1. Post a comment on the MR explaining what was rewritten and where the backup is.
 
 ### MR Template
 

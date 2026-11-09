@@ -161,6 +161,7 @@ from lib.context.model import (
 from lib.events import GLReportingEventContext
 from lib.events.contextvar import X_GITLAB_SELF_HOSTED_DAP_BILLING_ENABLED
 from lib.internal_events.context import (
+    EventContext,
     InternalEventAdditionalProperties,
     current_event_context,
 )
@@ -8881,3 +8882,100 @@ async def test_generate_token_propagates_feature_enablement_type(
         )
     else:
         assert "feature_enablement_type" not in extra_claims
+
+
+def _set_billing_validation(
+    monkeypatch, mode, enabled=True, enforced_feature_qualified_names=()
+):
+    billing_config = get_config().billing_event
+    monkeypatch.setattr(billing_config, "enabled", enabled)
+    monkeypatch.setattr(billing_config, "validation_mode_dws", mode)
+    monkeypatch.setattr(
+        "lib.billing_events.validation._ENFORCED_FEATURE_QUALIFIED_NAMES",
+        frozenset(enforced_feature_qualified_names),
+    )
+
+
+_BILLING_ABORT = call(
+    grpc.StatusCode.INVALID_ARGUMENT,
+    "Missing mandatory billing fields: ultimate_parent_namespace_id",
+)
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_rejects_enforced_feature_with_missing_billing_fields(
+    mock_resolve_flow, monkeypatch, mock_context, servicer
+):
+    """A rejected request is aborted before the flow is resolved, so no workflow or LLM call runs."""
+    _set_billing_validation(monkeypatch, "enforce", True, {"software_development"})
+    current_event_context.set(EventContext(realm="saas"))
+
+    with patch("lib.billing_events.validation.log") as mock_log:
+        await _execute_workflow_with_id(servicer, mock_context, "42")
+
+    assert _BILLING_ABORT in mock_context.abort.await_args_list
+    mock_resolve_flow.assert_not_called()
+    mock_log.error.assert_called_once()
+    assert (
+        mock_log.error.call_args.kwargs["feature_qualified_name"]
+        == "software_development"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "enforced_feature_qualified_names"),
+    [
+        pytest.param("enforce", {"fix_pipeline"}, id="feature_not_enforced"),
+        pytest.param("log", {"software_development"}, id="log_mode"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_logs_missing_billing_fields_without_rejecting(
+    mock_resolve_flow,
+    monkeypatch,
+    mock_context,
+    servicer,
+    mode,
+    enforced_feature_qualified_names,
+):
+    _set_billing_validation(monkeypatch, mode, True, enforced_feature_qualified_names)
+    current_event_context.set(EventContext(realm="saas"))
+
+    with patch("lib.billing_events.validation.log") as mock_log:
+        await _execute_workflow_with_id(servicer, mock_context, "42")
+
+    assert _BILLING_ABORT not in mock_context.abort.await_args_list
+    mock_resolve_flow.assert_called_once()
+    mock_log.error.assert_not_called()
+    mock_log.warning.assert_called_once()
+    assert mock_log.warning.call_args.kwargs["enforced"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enabled", "event_context"),
+    [
+        pytest.param(
+            True,
+            EventContext(realm="saas", ultimate_parent_namespace_id=1),
+            id="fields_present",
+        ),
+        pytest.param(False, EventContext(realm="saas"), id="billing_disabled"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_skips_billing_log_and_rejection(
+    mock_resolve_flow, monkeypatch, mock_context, servicer, enabled, event_context
+):
+    _set_billing_validation(monkeypatch, "enforce", enabled, {"software_development"})
+    current_event_context.set(event_context)
+
+    with patch("lib.billing_events.validation.log") as mock_log:
+        await _execute_workflow_with_id(servicer, mock_context, "42")
+
+    assert _BILLING_ABORT not in mock_context.abort.await_args_list
+    mock_resolve_flow.assert_called_once()
+    mock_log.error.assert_not_called()
+    mock_log.warning.assert_not_called()

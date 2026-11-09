@@ -36,6 +36,9 @@ class FlowConfig(BaseFlowConfig):
     version: Literal["experimental"]
     prompts: Optional[list[InMemoryPromptConfig]] = None
     response_schemas: Optional[list[InlineResponseSchemaConfig]] = None
+    # A registry flow that cannot work without its ``for_each`` fan-outs runs them
+    # whether or not the ``dap_for_each`` feature flag is on.
+    requires_for_each: bool = False
 
     def should_auto_inject_mcp_tools(self) -> bool:
         """Return whether MCP tools should be automatically injected into this flow's toolset.

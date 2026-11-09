@@ -9,7 +9,7 @@ from gitlab_cloud_connector import CloudConnectorUser
 from pydantic import SecretStr
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
 
-from lib.billing_events.context import BillingEventContext
+from lib.billing_events.context import BillingEventContext, normalize_realm
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import (
     EventContext,
@@ -196,15 +196,7 @@ class BillingEventsClient:
             "is_gitlab_team_member": should_skip_usage_quota_for_user(user),
         }
 
-        realm_mapping = {
-            "self-managed": "SM",
-            "saas": "SaaS",
-            "SaaS": "SaaS",
-            "SM": "SM",
-        }
-        mapped_realm = realm_mapping.get(
-            internal_context.realm or "", internal_context.realm
-        )
+        mapped_realm = normalize_realm(internal_context.realm)
         unique_instance_id = user.claims.gitlab_instance_uid if user.claims else None
 
         # Pass the feature_enablement_type (if present) as a list. This could be expanded in the future.
