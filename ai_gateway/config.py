@@ -545,9 +545,8 @@ class ConfigModelSelection(BaseModel):
             "How the HTTP routes check client-supplied model metadata that names a "
             "GitLab-managed model against the feature's allowlist (default, selectable, beta, "
             "dev and tag models). 'off': no check. 'log': log mismatches only. 'fallback': "
-            "serve the feature's default model instead, and rebuild a managed model whose raw "
-            "identifier would rewrite it. 'enforce': reject a model that is not allowed "
-            "(HTTP 403), and rebuild an identifier override as in 'fallback'."
+            "serve the feature's default model instead. 'enforce': reject a model that is not "
+            "allowed (HTTP 403)."
         ),
     )
     feature_allowlist_mode_dws: FeatureAllowlistMode = Field(

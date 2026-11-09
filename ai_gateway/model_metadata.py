@@ -540,6 +540,11 @@ def _create_gitlab_metadata(data: dict[str, Any]) -> ModelMetadata:
         # GitLab clients name a GitLab-managed model by its GitLab identifier only. Ignore a `name` next to it, so the
         # model always comes from models.yml and a client value never becomes the wire model.
         data.pop("name", None)
+    elif data.get("name") and not get_config().custom_models.enabled:
+        # A gateway without custom models serves GitLab-managed models only, so `name` selects the model. Ignore a raw
+        # `identifier` next to it: it is the operator's model on a self-hosted gateway, and would otherwise become the
+        # wire model of a GitLab-managed one.
+        data.pop("identifier", None)
 
     if name := data.get("name"):
         llm_definition = configs.get_model(name)

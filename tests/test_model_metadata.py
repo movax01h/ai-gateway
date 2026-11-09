@@ -191,6 +191,7 @@ def test_create_amazon_q_model_metadata():
     assert result.role_arn == "arn:aws:iam::123456789012:role/example-role"
 
 
+@pytest.mark.usefixtures("custom_models_gateway")
 def test_create_regular_model_metadata():
     # Arrange
     data = {
@@ -298,6 +299,7 @@ def test_create_model_metadata_invalid_data():
         create_model_metadata(invalid_data)
 
 
+@pytest.mark.usefixtures("custom_models_gateway")
 class TestModelMetadataToParams:
     def test_without_identifier(self):
         model_metadata = create_model_metadata(
@@ -595,6 +597,7 @@ class TestModelMetadataToParams:
         assert remap_logs[0]["log_level"] == "warning"
 
 
+@pytest.mark.usefixtures("custom_models_gateway")
 class TestModelMetadataResolvedIdentifier:
     @pytest.mark.parametrize(
         ("identifier", "expected_identifier"),
@@ -1944,6 +1947,34 @@ class TestCompletionContextMaxPercentForModelMetadata:
         assert completion_context_max_percent_for_model_metadata(metadata) is None
 
 
+class TestRawIdentifierNextToName:
+    """A raw `identifier` next to `name` is the operator's model, so only a gateway that serves custom models keeps
+    it."""
+
+    RAW = {
+        "provider": "vertex-ai",
+        "name": "claude_sonnet_4_6_vertex",
+        "identifier": "vertex_ai/claude-opus-4-8",
+    }
+
+    @pytest.mark.usefixtures("cloud_gateway")
+    def test_a_gateway_without_custom_models_ignores_it(self):
+        metadata = create_model_metadata(dict(self.RAW))
+
+        assert isinstance(metadata, ModelMetadata)
+        assert metadata.llm_definition.gitlab_identifier == "claude_sonnet_4_6_vertex"
+        assert metadata.identifier is None
+        assert "claude-opus-4-8" not in str(metadata.to_params())
+
+    @pytest.mark.usefixtures("custom_models_gateway")
+    def test_a_gateway_with_custom_models_keeps_it(self):
+        metadata = create_model_metadata(dict(self.RAW))
+
+        assert isinstance(metadata, ModelMetadata)
+        assert metadata.identifier == "vertex_ai/claude-opus-4-8"
+
+
+@pytest.mark.usefixtures("custom_models_gateway")
 class TestSelfHostedIdentifierMatching:
     @pytest.fixture(name="family")
     def family_fixture(self):

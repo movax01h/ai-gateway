@@ -109,6 +109,8 @@ def test_only_claude_entries_use_cache_breakpoints(shipped_config):
         ({"provider": "gitlab", "identifier": "gpt_5_5"}, True),
     ],
 )
+# The self-hosted shapes above reach only a gateway that serves custom models.
+@pytest.mark.usefixtures("custom_models_gateway")
 def test_layout_for_shipped_models(data, expected):
     metadata = create_model_metadata(data)
     llm_definition = metadata.llm_definition

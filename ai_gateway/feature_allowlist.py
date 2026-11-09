@@ -32,9 +32,9 @@ altogether.
 - ``fallback``: serve the feature's default model instead of a model that is not allowed (the default on both surfaces).
 - ``enforce``: reject a model that is not allowed (HTTP 403, gRPC ``PERMISSION_DENIED``).
 
-``fallback`` and ``enforce`` also rebuild a GitLab-managed model from its definition when a raw
-``identifier`` would rewrite its wire model. ``off`` and ``log`` leave that override in place until
-GitLab-managed models are resolved by their GitLab identifier only.
+In every mode, the model of a GitLab-managed request comes from ``models.yml``: on a gateway without
+custom models, ``create_model_metadata`` ignores a raw ``identifier`` next to ``name``, so no client
+value becomes the wire model.
 """
 
 from contextvars import ContextVar
@@ -47,7 +47,6 @@ from pydantic import BaseModel
 from ai_gateway.config import FeatureAllowlistMode, get_config
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
-    ModelMetadata,
     TypeModelMetadata,
     resolve_provider_aware_metadata,
 )
@@ -226,15 +225,15 @@ class _AllowlistCheck:
         if self.request.provider not in SERVED_PROVIDERS[self.surface]:
             self._provider_not_served(metadata)
 
-        if (
-            self.request.provider == "gitlab"
-            and self.request.name
-            and self.request.identifier
-        ):
-            # The metadata resolved `identifier` and ignored `name`. No GitLab client sends both.
-            self._note("name_ignored", metadata)
+        if self.request.name and self.request.identifier:
+            if self.request.provider == "gitlab":
+                # The metadata resolved `identifier` and ignored `name`. No GitLab client sends both.
+                self._note("name_ignored", metadata)
+            elif self.request.provider not in SERVER_KEYED_PROVIDERS:
+                # The metadata resolved `name` and ignored the raw `identifier`, so it is not the wire model. The
+                # Mistral builder sets `identifier` itself, which is not a client value.
+                self._note("identifier_ignored", metadata)
 
-        metadata = self._drop_identifier_override(metadata)
         if not self.request.pinned:
             return self._feature_default(metadata)
 
@@ -338,50 +337,6 @@ class _AllowlistCheck:
     def _unit_primitive_config(feature: str) -> Optional[UnitPrimitiveConfig]:
         configs = ModelSelectionConfig.instance()
         return configs.get_resolved_unit_primitive_config_map().get(feature)
-
-    def _drop_identifier_override(
-        self, metadata: TypeModelMetadata
-    ) -> TypeModelMetadata:
-        """Drop a raw ``identifier`` that would rewrite the wire model of a GitLab-managed request.
-
-        The allowlist checks the model that ``name`` resolved to, but a request such as::
-
-            {
-                "provider": "vertex-ai",
-                "name": "claude_sonnet_4_6_vertex",
-                "identifier": "vertex_ai/claude-opus-4-8",
-            }
-
-        passes the allowlist as Sonnet and then runs Opus on the gateway's Vertex AI credentials, because
-        ``to_params`` turns the identifier into ``custom_llm_provider="vertex_ai"`` and
-        ``model="claude-opus-4-8"``. There is no endpoint or key for ``validate_custom_endpoint``
-        to refuse. A client ``endpoint`` or ``api_key`` is not handled here: on a gateway without
-        custom models ``validate_custom_endpoint`` already rejects both when the model is built.
-
-        The override is read from the resolved metadata, so the resolution of each surface decides:
-        ``create_model_metadata`` resolves a ``gitlab`` request by its ``identifier`` and keeps a raw
-        ``identifier`` only next to ``name`` for another provider string, such as ``vertex-ai``. The
-        Mistral builder sets ``identifier`` itself, which is not an override.
-
-        In ``fallback`` and ``enforce`` mode the metadata is rebuilt from the pristine model
-        definition, so only the server decides the wire model and its limits:
-        ``_create_gitlab_metadata`` copies limits and tuning from the models.yml entry the raw
-        identifier matched into the resolved definition. ``log`` mode only records the attempt.
-        """
-        if (
-            not isinstance(metadata, ModelMetadata)
-            or not metadata.identifier
-            or metadata.provider in SERVER_KEYED_PROVIDERS
-        ):
-            return metadata
-        self._warn("managed_identifier_override", metadata, _REPLACED_UNLESS_LOG)
-        if self.mode == "log":
-            return metadata
-        return self._rebuild(
-            ModelSelectionConfig.instance().get_model(
-                metadata.llm_definition.gitlab_identifier
-            )
-        )
 
     def _check_allowlist(
         self, metadata: TypeModelMetadata, unit_primitive_config: UnitPrimitiveConfig
