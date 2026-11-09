@@ -139,7 +139,8 @@ each one uses. Callers don't branch on format:
 ### 6. The tail renders the messages, and `goal` stays the session's purpose
 
 - The tail gets every variable the prefix gets, plus `inbound_messages` and `cancelled_turn`. `inbound_messages` holds
-  the messages claimed together, each with its `type`, `text` and parts, and `inbound_messages.text` joins their text.
+  the messages claimed together, each with the same keys whatever its kind (`type`, `text`, `content` and
+  `decision`), and `inbound_messages.text` joins their text.
 - Per-turn values, such as plan mode, stay out of the prefix, so it stays stable. A tail can render them as user-role
   content, frozen when the message renders, or the client can send a change once, as its own message.
 - ADR-002 defines the message, and ADR-003 delivers it. The `inputs` follow-up decides how authors reference it. The

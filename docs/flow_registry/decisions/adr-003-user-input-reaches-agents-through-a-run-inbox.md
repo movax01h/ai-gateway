@@ -132,13 +132,15 @@ Two of the concerns in that note need more than tests:
 
 ### 5. Rows carry an address the engine never reads
 
-`to` names the component the client was showing when the user hit send. The engine never reads or writes it.
+`recipient` names the component the client was showing when the user hit send. The engine never reads or writes it.
 
 - A node claims the rows addressed to its own name.
 - A row with no address goes to the component the turn is at: the flow's entry on a new turn and mid-run, and the
   component that paused on an interrupt resume. When several components paused in one turn, the first to resume takes
   it. That's the limit of unaddressed rows, and the client capability removes it.
-- A row with an `in_reply_to` is never claimed by address: only a lookup by that ID reads it (§6).
+- A row with an `in_reply_to` is never claimed by address: only a lookup by that ID reads it (§6). So an answer
+  ignores any `recipient` (ADR-002 §1). Forwarding a `HumanInputComponent` answer to its receiver would add one to
+  answers, as an additive field (see the open question on how that answer reaches its receiver).
 
 ### 6. Every decision is a row with one claimer
 
@@ -194,12 +196,13 @@ resume doesn't rewrite `goal`.
   the server-side queue (epic 23954) to put Rails in the delivery path: today the client sends `goal` and `approval` on
   the stream and Rails never sees them. So every rule here that has Rails consume a row is a Rails prerequisite, not
   something the gateway can do. A DWS older than its Rails isn't supported, so only older Rails needs a fallback.
-- **Client capability.** Clients that stamp `to`, `in_reply_to` and a typed reply's `decision` advertise it. Without
-  it, rows are unaddressed, and decisions ride the resume as today, a typed reply included, which the gate takes as a
-  rejection with feedback. The gate puts that text into the inbox as a `feedback` message, with an engine ID
-  (ADR-002 §2) and the guarded `AIMessage` ID as `in_reply_to`, so the agent claims and renders it as it would a row
-  (§6). Like a delegation, it isn't a row, so it's never acked. For those clients a crash mid-resume asks again. Rails consumes such a decision's row before
-  the resume reaches the gateway, so nothing claims it a second time.
+- **Client capability.** Clients that stamp `recipient`, `in_reply_to` and a typed reply's `decision` advertise it.
+  Without it, rows are unaddressed, and decisions ride the resume as today, a typed reply included, which the gate
+  takes as a rejection with feedback. The gate puts that text into the inbox as the user's `answer` with a reject
+  `decision`, an engine ID (ADR-002 §2) and the guarded `AIMessage` ID as `in_reply_to`, so the agent claims and
+  renders it as it would a row (§6). Like a delegation, it isn't a row, so it's never acked. For those clients a crash
+  mid-resume asks again. Rails consumes such a decision's row before the resume reaches the gateway, so nothing claims
+  it a second time.
 - **Bridge.** Where GitLab doesn't declare the mailbox, which is every GitLab version until the server-side queue
   ships, the engine seeds the inbox from the graph input, with an engine ID (ADR-002 §2), and the entry claims and
   renders it as it would a row. It's the first production path for a version that opts in. The bridged
@@ -217,7 +220,7 @@ resume doesn't rewrite `goal`.
   - every input becomes a row, including turn-start messages and, in a second step, text-less decisions. Approvals
     travel on the gRPC request today, so text-less approvals as rows are new client and Rails scope, bought so that a
     crash mid-resume doesn't ask again;
-  - clients with the capability stamp `to`, `in_reply_to` and a typed reply's `decision`;
+  - clients with the capability stamp `recipient`, `in_reply_to` and a typed reply's `decision`;
   - the checkpoint POST gains the consumed row IDs;
   - GitLab declares the mailbox capability.
 
