@@ -3,7 +3,11 @@ from typing import Any
 
 import pytest
 
-from lib.billing_events.context import BillingEventContext, UsageQuotaEventContext
+from lib.billing_events.context import (
+    BillingEventContext,
+    UsageQuotaEventContext,
+    normalize_realm,
+)
 from lib.internal_events.context import EventContext
 
 
@@ -268,3 +272,20 @@ class TestUsageQuotaContext:
         context_b = UsageQuotaEventContext(**kwargs)
 
         assert context_a.to_cache_key() == context_b.to_cache_key()
+
+
+@pytest.mark.parametrize(
+    ("realm", "expected"),
+    [
+        ("saas", "SaaS"),
+        ("SaaS", "SaaS"),
+        ("self-managed", "SM"),
+        ("SM", "SM"),
+        ("dedicated", "dedicated"),
+        ("unknown", "unknown"),
+        ("", ""),
+        (None, None),
+    ],
+)
+def test_normalize_realm(realm, expected):
+    assert normalize_realm(realm) == expected

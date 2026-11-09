@@ -197,6 +197,9 @@ class ConfigInternalEvent(BaseModel):
     )
 
 
+BillingValidationMode = Literal["log", "enforce"]
+
+
 class ConfigBillingEvent(BaseModel):
     enabled: bool = False
     app_id: str = "gitlab_ai_gateway-billing"
@@ -205,6 +208,22 @@ class ConfigBillingEvent(BaseModel):
     api_key: Optional[SecretStr] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
+    validation_mode_http: BillingValidationMode = Field(
+        default="log",
+        description=(
+            "How the HTTP routes handle billable requests that miss fields required by billing events. "
+            "'log': log the missing fields only. 'enforce': reject the request (HTTP 422) "
+            "before any LLM call when its feature is in the enforced features list, "
+            "and log otherwise."
+        ),
+    )
+    validation_mode_dws: BillingValidationMode = Field(
+        default="log",
+        description=(
+            "The same check on the Duo Workflow Service ExecuteWorkflow RPC, with the same modes. "
+            "'enforce' rejects the call with gRPC INVALID_ARGUMENT."
+        ),
+    )
 
 
 class ConfigAuditEvent(BaseModel):

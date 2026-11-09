@@ -159,6 +159,10 @@ from lib.billing_events import (
     ExecutionEnvironment,
     SelfHostedLLMOperations,
 )
+from lib.billing_events.validation import (
+    is_billing_validation_enforced,
+    validate_billing_event_context,
+)
 from lib.container_wiring import wire_and_validate
 from lib.context import client_capabilities, language_server_version
 from lib.context.model import (
@@ -183,6 +187,7 @@ from lib.flow_enablement import (
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
     InternalEventAdditionalProperties,
+    current_event_context,
     merge_event_context_extra,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
@@ -949,6 +954,28 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         gl_event_context = GLReportingEventContext.from_workflow_definition(
             workflow_definition, bool(flow_config)
         )
+
+        # Validate billing mandatory fields once the flow is known and before the
+        # workflow runs, so an invalid request is rejected before any LLM call.
+        # See https://gitlab.com/gitlab-org/gitlab/-/work_items/605103
+        billing_config = get_config().billing_event
+        if billing_config.enabled:
+            feature = gl_event_context.feature_qualified_name
+            enforce = is_billing_validation_enforced(
+                billing_config.validation_mode_dws, feature
+            )
+            missing_billing_fields = validate_billing_event_context(
+                current_event_context.get(),
+                feature,
+                enforce=enforce,
+                grpc_method="/DuoWorkflow/ExecuteWorkflow",
+            )
+            if missing_billing_fields and enforce:
+                await context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    "Missing mandatory billing fields: "
+                    + ", ".join(missing_billing_fields),
+                )
 
         duo_workflow_metrics.count_agent_platform_receive_start_counter(
             flow_type=gl_event_context.value

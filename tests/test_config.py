@@ -600,6 +600,16 @@ def test_config_model_limits(values: dict, expected: ConfigModelLimits):
                 endpoint="endpoint.test",
             ),
         ),
+        (
+            {
+                "AIGW_BILLING_EVENT__VALIDATION_MODE_HTTP": "enforce",
+                "AIGW_BILLING_EVENT__VALIDATION_MODE_DWS": "enforce",
+            },
+            ConfigBillingEvent(
+                validation_mode_http="enforce",
+                validation_mode_dws="enforce",
+            ),
+        ),
     ],
 )
 def test_config_billing_event(values: dict, expected: ConfigBillingEvent):
@@ -607,6 +617,28 @@ def test_config_billing_event(values: dict, expected: ConfigBillingEvent):
         config = Config(_env_file=None)
 
         assert config.billing_event == expected
+
+
+def test_config_billing_event_validation_modes_default_to_log():
+    with mock.patch.dict(os.environ, {}, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.billing_event.validation_mode_http == "log"
+        assert config.billing_event.validation_mode_dws == "log"
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "AIGW_BILLING_EVENT__VALIDATION_MODE_HTTP",
+        "AIGW_BILLING_EVENT__VALIDATION_MODE_DWS",
+    ],
+)
+@pytest.mark.parametrize("value", ["off", "strict"])
+def test_config_billing_event_rejects_an_unknown_validation_mode(variable, value):
+    with mock.patch.dict(os.environ, {variable: value}, clear=True):
+        with pytest.raises(ValidationError):
+            Config(_env_file=None)
 
 
 @pytest.mark.parametrize(
