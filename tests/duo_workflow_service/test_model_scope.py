@@ -35,8 +35,15 @@ USER = CloudConnectorUser(
 
 @pytest.fixture(autouse=True)
 def cloud_gateway(monkeypatch):
-    """Run as GitLab's own gateway: a gateway that serves custom models keeps the client's models."""
+    """Run as GitLab's own gateway: a gateway that serves custom models keeps the client's models.
+
+    The allowlist runs in `log` mode, so the header reaches the flat-rate check unchanged. The flat-rate check must
+    hold on its own, also when the allowlist is rolled back to `log`.
+    """
     monkeypatch.setattr(get_config().custom_models, "enabled", False)
+    monkeypatch.setattr(
+        get_config().model_selection, "feature_allowlist_mode_dws", "log"
+    )
 
 
 async def _resolve_header(raw: dict) -> None:

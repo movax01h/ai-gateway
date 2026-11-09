@@ -41,7 +41,7 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
                 {
                     "model": "claude-3-5-sonnet-20240620",
                     "version": "1.0",
-                    "provider": "anthropic",
+                    "provider": "gitlab",
                 }
             ),
         ),
@@ -82,7 +82,7 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
             {
                 "model": "claude-3-5-sonnet-20240620",
                 "version": "1.0",
-                "provider": "anthropic",
+                "provider": "gitlab",
                 "provider_keys": {"fireworks_provider_api_key": "fw"},
                 "fireworks_api_base_url": "https://fw",
             }
@@ -406,12 +406,14 @@ async def test_stickiness_replay_of_fireworks_model_still_gets_a_working_key(moc
     ],
 )
 async def test_self_hosted_identifier_sets_matched_context_limit(
-    mock_user, identifier, expected_limit
+    monkeypatch, mock_user, identifier, expected_limit
 ):
     """A self-hosted request gets the context window of the matched models.yml entry.
 
-    Uses the real ModelSelectionConfig and context vars, from the header to the limit that DWS reads.
+    Uses the real ModelSelectionConfig and context vars, from the header to the limit that DWS reads. Self-hosted models
+    reach only a gateway that serves custom models.
     """
+    monkeypatch.setattr(get_config().custom_models, "enabled", True)
     current_user.set(mock_user)
     interceptor = ModelMetadataInterceptor()
 

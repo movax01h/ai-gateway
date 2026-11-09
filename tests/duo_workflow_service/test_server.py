@@ -7318,7 +7318,7 @@ async def test_execute_workflow_denies_replayed_restricted_model_header(
     details.invocation_metadata = [
         (
             ModelMetadataInterceptor.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA,
-            json.dumps({"provider": "anthropic", "name": "fake_restricted_model"}),
+            json.dumps({"provider": "gitlab", "name": "fake_restricted_model"}),
         )
     ]
     await ModelMetadataInterceptor().intercept_service(AsyncMock(), details)
