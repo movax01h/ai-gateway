@@ -820,7 +820,7 @@ class TestCatalogItemValidation:
 
         with pytest.raises(
             CatalogItemsError,
-            match=r"'workspace/agents/tester'.*unknown tool 'nope'",
+            match=r"^Workspace agent 'tester' declares an unusable tool: unknown tool 'nope'$",
         ):
             expand(
                 _components(),

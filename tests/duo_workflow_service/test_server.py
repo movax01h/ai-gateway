@@ -3728,7 +3728,9 @@ async def test_execute_workflow_rejects_invalid_catalog_items(
     mock_resolve_flow.assert_not_called()
     mock_context.abort.assert_called_once()
     assert mock_context.abort.call_args[0][0] == grpc.StatusCode.INVALID_ARGUMENT
-    assert "Invalid catalog items" in mock_context.abort.call_args[0][1]
+    assert mock_context.abort.call_args[0][1] == (
+        "Workspace agent 'tester': the description is missing."
+    )
 
 
 @pytest.mark.parametrize(

@@ -224,6 +224,17 @@ class TestConverter:
         with pytest.raises(ValueError, match="Schema type must be 'object'"):
             json_schema_to_pydantic(invalid_schema)
 
+    def test_malformed_schema_raises_value_error(self):
+        """Test that a malformed schema is normalized to a ValueError."""
+        invalid_schema = {
+            "title": "bogus_tool",
+            "type": "object",
+            "properties": {"field": {"type": "bogus"}},
+        }
+
+        with pytest.raises(ValueError, match="Invalid JSON schema"):
+            json_schema_to_pydantic(invalid_schema)
+
     def test_schema_without_title_raises_error(self):
         """Test that schema without title raises error."""
         invalid_schema = {
