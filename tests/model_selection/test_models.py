@@ -174,6 +174,40 @@ class TestChatAnthropicParams:
                 model="claude-fable-5-1", api_key="sk-ant-x", workload_identity=self.WIF
             )
 
+    def test_block_binding_dumps_to_the_api_request_shape(self):
+        params = ChatAnthropicParams(
+            thinking={
+                "type": "adaptive",
+                "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+            },
+            betas=["thinking-binding-controls-2026-08-01"],
+        )
+
+        dumped = params.model_dump(exclude_none=True)
+
+        assert dumped["thinking"] == {
+            "type": "adaptive",
+            "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+        }
+        assert dumped["betas"] == ["thinking-binding-controls-2026-08-01"]
+
+    @pytest.mark.parametrize(
+        "thinking",
+        [
+            {"type": "disabled"},
+            {"type": "adaptive", "budget_tokens": 1024},
+            {
+                "type": "adaptive",
+                "block_binding": {"prefix_mismatch_behavior": "ignore"},
+            },
+        ],
+    )
+    def test_thinking_rejects_unsupported_shapes(self, thinking):
+        with pytest.raises(ValidationError):
+            ChatAnthropicParams(
+                thinking=thinking, betas=["thinking-binding-controls-2026-08-01"]
+            )
+
 
 # Each params class with the fields it requires besides max_retries.
 _PARAMS_CLASSES = [

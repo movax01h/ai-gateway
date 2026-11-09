@@ -303,6 +303,31 @@ models:
       model: "claude-fable-5-1"
       max_tokens: 128_000
 
+  - name: "Claude Fable 5.2"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_fable_5_2"
+    description: "Anthropic's most capable generally available model for autonomous knowledge work and coding."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    proxy_provider: anthropic
+    model_class_provider: anthropic
+    uses_cache_breakpoints: true
+    family:
+      - claude
+    params:
+      model: "claude-fable-5-2"
+      max_tokens: 128_000
+      # Fable 5.2 enforces preserved thinking, and DWS edits history (model switch, trim, compaction).
+      # Drop stale thinking blocks instead of failing the turn with a 400.
+      thinking:
+        type: "adaptive"
+        block_binding:
+          prefix_mismatch_behavior: "drop_block"
+      # Replaces the container's default betas, so keep context-1m-2025-08-07 listed.
+      betas:
+        - "context-1m-2025-08-07"
+        - "thinking-binding-controls-2026-08-01"
+
   - name: "Claude Mythos 5.1"
     provider: "Anthropic"
     gitlab_identifier: "claude_mythos_5_1"
