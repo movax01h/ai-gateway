@@ -30,6 +30,10 @@ _ROUTE_FEATURE_SETTINGS = {
 # route resolves, so the route checks the model metadata of these requests (`PromptModelCheck`).
 _PROMPT_ROUTES = ("/v1/prompts/", "/v2/prompts/")
 
+# Routes that forward the body to a model provider. They do not use `model_metadata`, so the middleware does not parse
+# their body. It still reads the body, so the access log records its size.
+_PROXY_ROUTES = ("/v1/proxy/",)
+
 
 class ModelConfigMiddleware:
     def __init__(self, app: ASGIApp, skip_endpoints: Optional[list[str]] = None):
@@ -85,7 +89,10 @@ class ModelConfigMiddleware:
                 "more_body": False,
             }
 
-            if b"model_metadata" not in full_body:
+            if (
+                scope["path"].startswith(_PROXY_ROUTES)
+                or b"model_metadata" not in full_body
+            ):
                 return replay
 
             request: Optional[ClientModelRequest] = None

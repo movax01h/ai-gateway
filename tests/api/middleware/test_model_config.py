@@ -44,6 +44,7 @@ def middleware_test_client_fixture(model_metadata_context):
     @app.get("/body")
     @app.post("/body")
     @app.post("/skipped")
+    @app.post("/v1/proxy/anthropic/{path:path}")
     async def body(request: Request):
         return {
             "body": await request.json(),
@@ -202,6 +203,42 @@ def test_does_not_log_the_body_size_when_it_does_not_read_the_body(
     fields = access_logger.info.call_args.kwargs
     assert "request_body_bytes" not in fields
     assert "request_body_has_model_metadata" not in fields
+
+
+@pytest.mark.usefixtures("custom_models_gateway")
+def test_does_not_parse_model_metadata_on_the_proxy_routes(middleware_test_client):
+    payload = {
+        "model_metadata": {
+            "name": "gpt",
+            "provider": "custom_openai",
+            "endpoint": "http://test_model.com/",
+            "api_key": "test_api_key",
+            "identifier": "test_model_identifier",
+        }
+    }
+
+    response = middleware_test_client.post(
+        "/v1/proxy/anthropic/v1/messages", json=payload
+    )
+
+    assert response.json() == {"body": payload, "model_metadata_set": False}
+
+
+def test_logs_the_body_size_of_a_proxy_request(middleware_test_client):
+    body = b'{"model_metadata": null}'
+
+    with patch("ai_gateway.api.middleware.access_log.access_logger") as access_logger:
+        middleware_test_client.post(
+            "/v1/proxy/anthropic/v1/messages",
+            content=body,
+            headers={"content-type": "application/json"},
+        )
+
+    fields = access_logger.info.call_args.kwargs
+    assert {
+        "request_body_bytes": fields["request_body_bytes"],
+        "request_body_has_model_metadata": fields["request_body_has_model_metadata"],
+    } == {"request_body_bytes": len(body), "request_body_has_model_metadata": False}
 
 
 @pytest.mark.asyncio
