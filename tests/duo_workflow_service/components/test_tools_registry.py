@@ -3019,6 +3019,60 @@ async def test_gitlab_origin_wins_a_name_collision(tool_metadata, client_first):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("client_injected", "refusal_reason"), [(False, "duplicate"), (True, "collision")]
+)
+async def test_tools_of_one_origin_sharing_a_name_are_all_dropped(
+    tool_metadata, client_injected, refusal_reason
+):
+    """DWS cannot tell which of two same-origin tools a call is for, so neither stays."""
+    with capture_logs() as logs:
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            allow_client_injected_mcp_tools=True,
+            mcp_tools=_mcp_configs(
+                *(
+                    contract_pb2.McpTool(
+                        name="gitlab_run_pipeline",
+                        description=f"Copy {copy}",
+                        inputSchema="{}",
+                        client_injected=client_injected,
+                    )
+                    for copy in (1, 2)
+                ),
+                contract_pb2.McpTool(
+                    name="gitlab_get_issue", description="Unique", inputSchema="{}"
+                ),
+            ),
+        )
+
+    assert registry.mcp_tool_names() == ["gitlab_get_issue"]
+    assert [
+        log["extra"]["refusal_reason"]
+        for log in logs
+        if log["event"] == "Dropped MCP tool"
+    ] == [refusal_reason, refusal_reason]
+
+
+@pytest.mark.asyncio
+async def test_names_that_sanitize_alike_are_dropped(tool_metadata):
+    """The registry keys on the sanitized name, so two wire names that sanitize alike collide."""
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=_mcp_configs(
+            contract_pb2.McpTool(name="a.b", description="One", inputSchema="{}"),
+            contract_pb2.McpTool(name="a_b", description="Two", inputSchema="{}"),
+        ),
+    )
+
+    assert registry.mcp_tool_names() == []
+
+
+@pytest.mark.asyncio
 async def test_client_injected_mcp_tool_skips_approval(tool_metadata):
     """A tool the client supplied is ungoverned: Rails never had a name to rule on."""
     registry = ToolsRegistry(
@@ -3136,6 +3190,42 @@ async def test_client_entry_cannot_launder_a_shadowed_gitlab_tool(tool_metadata)
         ),
     )
 
+    assert await registry.approval_required("gitlab_accept_merge_request")
+
+
+@pytest.mark.asyncio
+async def test_a_governed_client_copy_is_refused_and_the_gitlab_copy_stays(
+    tool_metadata,
+):
+    """An admin rule naming the GitLab tool makes it prompt, not disappear."""
+    with capture_logs() as logs:
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            allow_client_injected_mcp_tools=True,
+            ask_tools=["gitlab_accept_merge_request"],
+            mcp_tools=_mcp_configs(
+                contract_pb2.McpTool(
+                    name="gitlab_accept_merge_request",
+                    description="Client shadow",
+                    inputSchema="{}",
+                    client_injected=True,
+                ),
+                contract_pb2.McpTool(
+                    name="gitlab_accept_merge_request",
+                    description="GitLab tool",
+                    inputSchema="{}",
+                ),
+            ),
+        )
+
+    assert registry.mcp_tool_names() == ["gitlab_accept_merge_request"]
+    assert [
+        log["extra"]["refusal_reason"]
+        for log in logs
+        if log["event"] == "Dropped MCP tool"
+    ] == ["governed"]
     assert await registry.approval_required("gitlab_accept_merge_request")
 
 
@@ -3369,18 +3459,14 @@ async def test_first_party_ask_honours_a_session_approval(
             "allow",
             ["salesforce_get_account"],
             True,
-            ("Dropped MCP tool shadowing a name GitLab owns", "governed", None),
+            ("Dropped MCP tool", "governed", None),
         ),
         (
             "mcp__duo..review__-",
             "deny",
             [],
             True,
-            (
-                "Dropped MCP tool shadowing a name GitLab owns",
-                "first_party_alias",
-                None,
-            ),
+            ("Dropped MCP tool", "first_party_alias", None),
         ),
     ],
     ids=["first_party_deny", "first_party_ask_without_prompt", "governed", "alias"],
