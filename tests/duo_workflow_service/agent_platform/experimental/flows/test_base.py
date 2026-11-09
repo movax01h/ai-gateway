@@ -45,6 +45,7 @@ from duo_workflow_service.flow_request import RegistryFlowRequest
 from duo_workflow_service.workflows import abstract_workflow
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.registry import (
+    _convert_struct_to_flow_config,
     _load_flow_from_inline_config,
     resolve_flow,
 )
@@ -1563,6 +1564,49 @@ class TestFlow:  # pylint: disable=too-many-public-methods
             "component": "review_one",
             "feature_flag": "dap_for_each",
         }
+
+    def test_a_flow_requiring_for_each_fans_out_while_the_feature_flag_is_off(
+        self, flow_instance, fannable
+    ):
+        flow_instance._config = flow_instance._config.model_copy(
+            update={"requires_for_each": True}
+        )
+        flow_instance._config._config_id = "bl_security"
+
+        components, _ = self.instantiate(
+            flow_instance, fannable, {"for_each": self.FOR_EACH}
+        )
+
+        assert isinstance(components["review_one"], ForEachComponent)
+        assert components["review_one"].component is fannable
+
+    def test_an_inline_flow_requiring_for_each_still_obeys_the_feature_flag(
+        self, flow_instance, fannable
+    ):
+        """Only a registry config can opt out of the flag, so a client cannot."""
+        struct = struct_pb2.Struct()
+        struct.update(
+            {
+                "version": "experimental",
+                "environment": "ambient",
+                "requires_for_each": True,
+                "flow": {"entry_point": "review_one"},
+                "components": [{"name": "review_one", "type": "AgentComponent"}],
+                "routers": [{"from": "review_one", "to": "end"}],
+            }
+        )
+        flow_instance._config = _convert_struct_to_flow_config(
+            struct=struct,
+            flow_config_schema_version="experimental",
+            flow_config_cls=FlowConfig,
+        )
+
+        components, _ = self.instantiate(
+            flow_instance, fannable, {"for_each": self.FOR_EACH}
+        )
+
+        assert flow_instance._config.requires_for_each is True
+        assert components["review_one"] is fannable
 
     @pytest.mark.usefixtures("dap_for_each_flag")
     def test_a_component_without_for_each_is_left_alone(self, flow_instance, fannable):

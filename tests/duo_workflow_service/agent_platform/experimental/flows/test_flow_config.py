@@ -888,3 +888,23 @@ class TestRegistryIdentity:
         assert config.config_id is None
         assert "config_id" not in config.model_dump()
         assert "_config_id" not in config.model_dump()
+
+
+class TestRequiresForEach:
+    """A flow can declare that its ``for_each`` fan-outs must run."""
+
+    def test_bl_security_requires_for_each(self):
+        config = FlowConfig.from_yaml_config("bl_security", "1.0.0")
+
+        assert config.requires_for_each is True
+
+    def test_a_flow_does_not_require_for_each_by_default(self):
+        config = FlowConfig(
+            flow={},
+            components=[],
+            routers=[],
+            environment="ambient",
+            version="experimental",
+        )
+
+        assert config.requires_for_each is False

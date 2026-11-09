@@ -6,6 +6,8 @@ description: |
 product_group: code_security
 version: "experimental"
 environment: ambient
+# Without the fan-out each scan stage runs once and the flow fails at map_reviews_collect.
+requires_for_each: true
 
 # BL Security Analyzer: whole-repository business-logic security scan.
 #
