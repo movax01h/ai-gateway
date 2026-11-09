@@ -5,12 +5,24 @@ tool options, input declarations, routing) rather than on ``FlowConfig`` machine
 generic ``FlowConfig`` behavior is covered in ``test_flow_config.py``.
 """
 
+from unittest.mock import patch
+
 import pytest
 
+from duo_workflow_service.agent_platform.v1.flows import flow_config
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.tools.mr_review import SubmitMrReviewInput
 
 VERSIONS = ["1.0.0", "2.0.0"]
+
+
+@pytest.fixture(name="discover_flow_configs", autouse=True)
+def discover_flow_configs_fixture():
+    # The flow lives under ai/features/, which the service registers at startup.
+    # Restore the registry so tests that list flow configs never see these roots.
+    with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
+        flow_config.discover_feature_flow_configs()
+        yield
 
 
 class TestSecurityReviewToolOptions:
