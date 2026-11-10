@@ -1255,6 +1255,7 @@ def test_toolset_method(
 
         mock_toolset_class.assert_called_once_with(
             pre_approved=expected_preapproved,
+            promoted=set(),
             all_tools=expected_all_tools,
             tool_options={},
             approval_policy=registry,
@@ -4075,3 +4076,171 @@ def test_privilege_tool_names_skips_mcp_configs_and_unnamed_tools():
 
     with patch.object(tools_registry, "_AGENT_PRIVILEGES", privileges):
         assert tools_registry._privilege_tool_names("read_only_gitlab") == {"read_file"}
+
+
+def _promotion_registry(tool_metadata, promoted_tools, **kwargs):
+    """A session whose row pre-approves nothing, so every write tool is a default ask."""
+    kwargs.setdefault("enabled_tools", list(_ROW_PRIVILEGES))
+    kwargs.setdefault("preapproved_tools", [])
+    kwargs.setdefault("can_ask_user", True)
+    return ToolsRegistry(
+        tool_metadata=tool_metadata, promoted_tools=promoted_tools, **kwargs
+    )
+
+
+def test_promoted_tools_are_pre_approved(tool_metadata):
+    registry = _promotion_registry(tool_metadata, ["edit_file"])
+
+    assert registry.is_preapproved("edit_file")
+    assert "edit_file" in registry._promoted_tool_names
+    assert not registry.is_preapproved("run_command")
+    assert "run_command" not in registry._promoted_tool_names
+
+
+def test_ask_outranks_promotion(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata, ["edit_file", "run_command"], ask_tools=["run_command"]
+    )
+
+    assert not registry.is_preapproved("run_command")
+    assert "run_command" not in registry._promoted_tool_names
+    assert "edit_file" in registry._promoted_tool_names
+
+
+def test_denied_tool_is_never_promoted(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata, ["edit_file"], denied_tools=["edit_file"]
+    )
+
+    assert "edit_file" not in registry._promoted_tool_names
+    assert "edit_file" not in registry.toolset(["edit_file"])
+
+
+def test_promotion_ignores_names_outside_the_enabled_tools(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata, ["create_merge_request", "not_a_tool"]
+    )
+
+    assert registry.get("create_merge_request") is None
+    assert not registry.is_preapproved("create_merge_request")
+    assert "not_a_tool" not in registry._promoted_tool_names
+
+
+@pytest.mark.parametrize(
+    ("client_injected", "expected"),
+    [
+        # Rails cannot rule on a tool the client names itself.
+        (True, False),
+        # A GitLab-origin MCP tool may carry a catalog tool's GitLab MCP spelling.
+        (False, True),
+    ],
+)
+def test_promotion_reaches_only_gitlab_origin_mcp_tools(
+    tool_metadata, client_injected, expected
+):
+    registry = _promotion_registry(
+        tool_metadata,
+        ["gitlab_create_issue"],
+        enabled_tools=["run_mcp_tools"],
+        mcp_tools=_mcp_configs(
+            contract_pb2.McpTool(
+                name="gitlab_create_issue",
+                description="MCP tool",
+                inputSchema="{}",
+                client_injected=client_injected,
+            )
+        ),
+    )
+
+    assert registry.get("gitlab_create_issue") is not None
+    assert ("gitlab_create_issue" in registry._promoted_tool_names) is expected
+    assert registry.is_preapproved("gitlab_create_issue") is expected
+
+
+def test_ceiling_with_an_empty_allow_still_promotes(tool_metadata):
+    """Promotion runs after the ceiling, which would otherwise strip names Rails never puts in allow."""
+    registry = _promotion_registry(
+        tool_metadata,
+        ["edit_file"],
+        preapproved_tools=list(_ROW_PRIVILEGES),
+        admin_allowed_preapprovals=set(),
+    )
+
+    assert registry.is_preapproved("edit_file")
+    assert "edit_file" in registry._promoted_tool_names
+    # The row's other pre-approvals are still capped, and so is a flow's own list.
+    assert not registry.is_preapproved("run_command")
+    assert registry.pre_approvals_allowed_by_policy(["edit_file"]) == set()
+
+
+def test_a_name_pre_approved_another_way_is_not_reported_as_promoted(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata,
+        ["edit_file", "read_file", "run_command"],
+        preapproved_tools=["read_write_files"],
+        allowed_tools=["run_command"],
+    )
+
+    for name in ("edit_file", "read_file", "run_command"):
+        assert registry.is_preapproved(name)
+        assert name not in registry._promoted_tool_names
+
+
+@pytest.mark.asyncio
+async def test_configure_passes_promoted_tools(gl_http_client, project_mock):
+    registry = await ToolsRegistry.configure(
+        workflow_config={
+            "workflow_id": "test_workflow",
+            "agent_privileges_names": ["read_write_files"],
+            "pre_approved_agent_privileges_names": [],
+            "gitlab_host": "gitlab.example.com",
+            "allow_agent_to_request_user": True,
+        },
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        promoted_tools=["edit_file"],
+    )
+
+    assert "edit_file" in registry._promoted_tool_names
+    assert not await registry.approval_required("edit_file")
+
+
+def test_toolset_passes_the_promoted_subset(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata,
+        ["edit_file", "run_command"],
+        preapproved_tools=["run_commands"],
+    )
+
+    toolset = registry.toolset(["edit_file", "read_file", "run_command"])
+
+    assert toolset._promoted == {"edit_file"}
+    assert {"edit_file", "run_command"} <= toolset._pre_approved
+
+
+def test_a_session_that_cannot_prompt_is_never_promoted(tool_metadata):
+    registry = _promotion_registry(tool_metadata, ["edit_file"], can_ask_user=False)
+
+    assert "edit_file" not in registry._promoted_tool_names
+    assert not registry.is_preapproved("edit_file")
+
+
+def test_removed_tools_log_omits_tools_promotion_re_adds(tool_metadata):
+    with capture_logs() as logs:
+        _promotion_registry(
+            tool_metadata,
+            ["edit_file"],
+            preapproved_tools=list(_ROW_PRIVILEGES),
+            admin_allowed_preapprovals=set(),
+        )
+
+    removed = [
+        entry
+        for entry in logs
+        if entry["event"]
+        == "Removed tools from pre-approval: not permitted by admin policy"
+    ]
+    assert len(removed) == 1
+    assert "edit_file" not in removed[0]["tool_names"]
+    assert "run_command" in removed[0]["tool_names"]

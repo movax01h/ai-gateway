@@ -576,7 +576,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         default."""
         approval = contract_pb2.Approval(
             approval=contract_pb2.Approval.Approved(
-                approval_source=contract_pb2.Approval.APPROVAL_SOURCE_AUTO_MODE,
+                approval_source=contract_pb2.Approval.APPROVAL_SOURCE_PRETOOLUSE_HOOK,
                 policy_ref=contract_pb2.Approval.PolicyRef(
                     origin="gitlab_default",
                     file=".gitlab/duo/pretooluse.rego",
@@ -605,7 +605,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
             assert isinstance(input, Command)
             assert input.resume["event_type"] == FlowEventType.APPROVE  # type: ignore[index]
-            assert input.resume["approval_source"] == "auto_mode"  # type: ignore[index]
+            assert input.resume["approval_source"] == "pretooluse_hook"  # type: ignore[index]
             assert input.resume["policy_ref"] == {  # type: ignore[index]
                 "origin": "gitlab_default",
                 "file": ".gitlab/duo/pretooluse.rego",

@@ -66,6 +66,10 @@ from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.checkpointer.write_mode import (
     incremental_checkpoints_enabled,
 )
+from duo_workflow_service.client_capabilities import (
+    AUTO_MODE_CAPABILITY,
+    is_client_capable,
+)
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.components.tools_registry import ceiling_exempt_tool_names
 from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
@@ -195,6 +199,32 @@ class ToolAccessPolicies(BaseModel):
     # Names Rails owns as first-party, with their verdict. Sent on ungoverned surfaces too, so it never counts towards
     # whether governance is active.
     first_party_tools: dict[str, FirstPartyVerdict] = {}
+    # Tools left at the built-in default of ask that Rails lets auto mode run without a
+    # prompt. Applied only on a turn whose client declared auto mode and can prompt.
+    promote: list[str] = []
+
+    @field_validator("promote", mode="before")
+    @classmethod
+    def _coerce_promote(cls, value: Any) -> list[str]:
+        """Degrade a malformed list to none.
+
+        Promotion only ever adds pre-approvals, so dropping it is the safe direction and must not fail the rest of the
+        claim closed.
+        """
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            structlog.stdlib.get_logger("workflow").warning(
+                "Ignoring a promote list that is not a list",
+                value_type=type(value).__name__,
+            )
+            return []
+        if not all(isinstance(name, str) for name in value):
+            structlog.stdlib.get_logger("workflow").warning(
+                "Ignoring a promote list with entries that are not tool names",
+            )
+            return []
+        return value
 
     @field_validator("first_party_tools", mode="before")
     @classmethod
@@ -439,6 +469,9 @@ class AbstractWorkflow(ABC):
         self._governance_allowed_tools: list[str] = []
         # `None` means the ceiling is off; an empty set means it is on and permits nothing.
         self._admin_allowed_preapprovals: Optional[set[str]] = None
+        # Kept apart from _preapproved_tools: chat state checkpoints that list, and
+        # promotion holds for this turn only.
+        self._promoted_tools: list[str] = []
         self._ceiling_claim_unparsable = False
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
@@ -713,6 +746,37 @@ class AbstractWorkflow(ABC):
         if deny:
             # Sorted for the same stable-order reason as _preapproved_tools above.
             self._denied_tools = sorted(set(self._denied_tools) | deny)
+        self._apply_auto_mode_promotion(policies, governance_active, can_ask_user)
+
+    def _apply_auto_mode_promotion(
+        self,
+        policies: ToolAccessPolicies,
+        governance_active: bool,
+        can_ask_user: bool,
+    ) -> None:
+        """Pre-approve the claim's `promote` list for this turn when the user engaged auto mode.
+
+        Rails decides which tools may be promoted; only the client knows whether this turn is in auto mode. A session
+        that cannot prompt keeps halting on those tools instead.
+        """
+        requested = set(policies.promote) - set(policies.ask) - set(policies.deny)
+        if not requested:
+            return
+        engaged = is_client_capable(AUTO_MODE_CAPABILITY)
+        if not (governance_active and can_ask_user and engaged):
+            self.log.debug(
+                "Not promoting default-ask tools for this turn",
+                governance_active=governance_active,
+                can_ask_user=can_ask_user,
+                auto_mode_engaged=engaged,
+            )
+            return
+        self._promoted_tools = sorted(requested)
+        self.log.info(
+            "Promoting default-ask tools for this auto mode turn",
+            promoted_count=len(self._promoted_tools),
+        )
+        self.log.debug("Promoted default-ask tools", tool_names=self._promoted_tools)
 
     def _extract_trace_output(self, state: dict | None) -> str | None:
         """Extract the final response content from ui_chat_log for LangSmith tracing.
@@ -891,6 +955,7 @@ class AbstractWorkflow(ABC):
                     allow_client_injected_mcp_tools=self._allow_client_injected_mcp_tools(),
                     allowed_tools=self._governance_allowed_tools,
                     admin_allowed_preapprovals=self._admin_allowed_preapprovals,
+                    promoted_tools=self._promoted_tools,
                     registry_flow_id=self._registry_flow_id(),
                     first_party_tools=self._first_party_tools,
                 )

@@ -89,6 +89,7 @@ class ApprovalSource(StrEnum):
 
     USER_EXPLICIT = "user_explicit"
     PRETOOLUSE_HOOK = "pretooluse_hook"
+    # Server-produced only: the skip was granted by a promote list in the signed claim.
     AUTO_MODE = "auto_mode"
     PREAPPROVED_CONFIG = "preapproved_config"
     # Server-produced only (never client-reported): the skip was granted by a
@@ -115,13 +116,17 @@ class ApprovalSource(StrEnum):
     def from_approval(cls, approved: Optional[contract_pb2.Approval.Approved]) -> str:
         """Resolve the loggable approval source from an ``Approved`` message.
 
-        Clamps a client-sent ``SESSION_APPROVAL`` to ``user_explicit``: that value is
-        server-produced only, granted exclusively by the silent-reuse path, so a client
-        cannot fabricate cache-reuse provenance on a fresh decision.
+        Clamps a client-sent server-only value to ``user_explicit``: ``SESSION_APPROVAL``
+        is granted exclusively by the silent-reuse path and ``AUTO_MODE`` by a signed
+        promote list, so a client cannot fabricate either on a decision a person made.
         """
         if approved is not None and approved.HasField("approval_source"):
             source = cls.from_proto(approved.approval_source)
-            if source == cls.SESSION_APPROVAL.value:
+            if source in (cls.SESSION_APPROVAL.value, cls.AUTO_MODE.value):
+                logger.info(
+                    "Recording a client-sent server-only approval source as user_explicit",
+                    claimed_approval_source=source,
+                )
                 return cls.USER_EXPLICIT.value
             return source
         return cls.USER_EXPLICIT.value

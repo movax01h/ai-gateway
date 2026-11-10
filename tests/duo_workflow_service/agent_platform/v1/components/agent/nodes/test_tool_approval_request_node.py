@@ -29,6 +29,7 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
 )
+from duo_workflow_service.components.tools_registry import ToolsRegistry
 from duo_workflow_service.entities import (
     ApprovalSource,
     MessageTypeEnum,
@@ -596,6 +597,49 @@ class TestToolApprovalRequestNodePreApproved:
         # Component-level pre-approval must short-circuit before any toolset check.
         if pre_approved_tools:
             mock_toolset.resolve_approval_source.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_promoted_tool_skips_approval_as_auto_mode(
+        self,
+        conversation_history_key,
+        status_key,
+        ui_history,
+        base_flow_state,
+        component_name,
+        tool_metadata,
+    ):
+        """A tool only auto mode promoted runs unprompted and is attributed to it, through a real registry."""
+        registry = ToolsRegistry(
+            enabled_tools=["read_write_files"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            promoted_tools=["edit_file"],
+            can_ask_user=True,
+        )
+        node = ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=registry.toolset(["edit_file"]),
+            pre_approved_tools=[],
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=ui_history,
+        )
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [
+            {"id": "call_promoted", "name": "edit_file", "args": {"file_path": "x"}},
+        ]
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        init_approval_sources()
+        try:
+            result = await node.run(state)
+            assert result["status"] == WorkflowStatusEnum.EXECUTION.value
+            assert get_approval_source("call_promoted") == "auto_mode"
+        finally:
+            approval_sources.set(None)
 
 
 class TestToolApprovalRequestNodeSessionApprovals:
