@@ -40,6 +40,10 @@ ai-gateway-eks:
       # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3404
       AIGW_REQUEST_BODY_LIMIT__MAX_BYTES: "16777216"
       GOOGLE_APPLICATION_CREDENTIALS: "/secrets/gcp-service-account/credentials.json"
+      # Per-actor in-flight limits, log mode: serve every request and record which ones the
+      # current limits would reject. Switch to "enforce" once a week of data has sized the limits.
+      AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE: "log"
+      AIGW_PROMPTS__ACTOR_LIMIT_MODE: "log"
 
   workloadSecrets:
     - name: env-vars
