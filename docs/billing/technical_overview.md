@@ -4,7 +4,7 @@ AI Gateway emits a structured event to the Data Insights Platform after each bil
 
 ## `BillingEvent` types
 
-`BillingEvent` is a `StrEnum` defined in `lib/billing_events/client.py`. The event type determines what billing action CustomersDot applies to the target feature. Always pick the value that matches the feature boundary where the LLM call originates.
+`BillingEvent` is a `StrEnum` defined in `lib/billing_events/events.py` (also importable from `lib.billing_events.client`). The event type determines what billing action CustomersDot applies to the target feature. Always pick the value that matches the feature boundary where the LLM call originates.
 
 ## `BillingEventContext`
 

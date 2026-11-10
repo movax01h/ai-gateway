@@ -1,17 +1,25 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pydantic
 import pytest
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
-from lib.billing_events import BillingEvent
+from lib.billing_events import (
+    BillingEvent,
+    BillingEventDropReason,
+    BillingEventsClient,
+)
 from lib.billing_events.service import (
     BILL_ONCE_PER_WORKFLOW_FEATURES,
+    BillingEventService,
     ExecutionEnvironment,
     LLMOperation,
     LLMOperationType,
     SelfHostedLLMOperations,
 )
 from lib.events import GLReportingEventContext
+from lib.internal_events.client import InternalEventsClient
+from lib.internal_events.context import EventContext, current_event_context
 
 
 def test_bill_once_per_workflow_features_matches_expected_prefixes():
@@ -55,7 +63,7 @@ def mock_llm_operation():
 
 def get_call_metadata(mock_client):
     """Helper to extract metadata from billing client call."""
-    return mock_client.track_billing_event.call_args[1]["metadata"]
+    return mock_client.send_billing_event.call_args[1]["metadata"]
 
 
 class TestBillingEventService:
@@ -82,7 +90,7 @@ class TestBillingEventService:
             llm_ops=[llm_operation],
         )
 
-        billing_event_client.track_billing_event.assert_called_once_with(
+        billing_event_client.send_billing_event.assert_called_once_with(
             user,
             BillingEvent.DAP_FLOW_ON_COMPLETION,
             "test_category",
@@ -134,7 +142,7 @@ class TestBillingEventService:
             source=source,
         )
 
-        metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+        metadata = billing_event_client.send_billing_event.call_args.kwargs["metadata"]
         assert metadata.get("source") == source
 
     def test_track_billing_with_multiple_operations(
@@ -188,7 +196,7 @@ class TestBillingEventService:
             llm_ops=[llm_operation],
         )
 
-        call_args = billing_event_client.track_billing_event.call_args
+        call_args = billing_event_client.send_billing_event.call_args
         assert call_args[1]["unit_of_measure"] == "request"
         assert call_args[1]["quantity"] == 1
 
@@ -205,9 +213,7 @@ class TestBillingEventService:
         llm_operation,
     ):
         """Test that exceptions during billing propagate."""
-        billing_event_client.track_billing_event.side_effect = Exception(
-            "Billing error"
-        )
+        billing_event_client.send_billing_event.side_effect = Exception("Billing error")
 
         with pytest.raises(Exception, match="Billing error"):
             billing_event_service.track_billing(
@@ -220,7 +226,7 @@ class TestBillingEventService:
                 llm_ops=[llm_operation],
             )
 
-        billing_event_client.track_billing_event.assert_called_once()
+        billing_event_client.send_billing_event.assert_called_once()
 
     @patch("lib.billing_events.service.get_llm_operations")
     def test_track_billing_with_context_operations(
@@ -438,7 +444,7 @@ class TestBillingEventService:
             llm_ops=[llm_operation],
         )
 
-        billing_event_client.track_billing_event.assert_called_once()
+        billing_event_client.send_billing_event.assert_called_once()
         metadata = get_call_metadata(billing_event_client)
         assert "workflow_id" not in metadata
         assert metadata["feature_qualified_name"] == "software_development"
@@ -456,7 +462,7 @@ class TestBillingEventService:
         client_result,
     ):
         """Test that track_billing reports whether the client actually tracked the event."""
-        billing_event_client.track_billing_event.return_value = client_result
+        billing_event_client.send_billing_event.return_value = client_result
 
         tracked = billing_event_service.track_billing(
             user,
@@ -500,7 +506,7 @@ class TestBillingEventService:
             llm_ops=[compaction_op],
         )
 
-        billing_event_client.track_billing_event.assert_called_once()
+        billing_event_client.send_billing_event.assert_called_once()
         metadata = get_call_metadata(billing_event_client)
         assert metadata["llm_operations"][0]["operation_type"] == "compaction_auto"
 
@@ -541,7 +547,7 @@ class TestBillingEventService:
             llm_ops=[compaction_op, standard_op],
         )
 
-        billing_event_client.track_billing_event.assert_called_once()
+        billing_event_client.send_billing_event.assert_called_once()
         metadata = get_call_metadata(billing_event_client)
         assert len(metadata["llm_operations"]) == 2
         assert metadata["llm_operations"][0]["operation_type"] == "compaction_auto"
@@ -689,3 +695,148 @@ class TestSelfHostedLLMOperations:
         assert op.token_count == 1
         assert op.prompt_tokens == 1
         assert op.completion_tokens == 1
+
+
+@pytest.fixture(name="metered_service")
+def metered_service_fixture(metered_client):
+    return BillingEventService(client=metered_client)
+
+
+@pytest.fixture(name="cloud_connector_user")
+def cloud_connector_user_fixture():
+    return CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_instance_uid="abc")
+    )
+
+
+def _sample(registry, name, **labels):
+    return registry.get_sample_value(name, labels)
+
+
+class TestBillingEventServiceMetrics:
+    """The service owns the emitted count, so failures before the client is reached still lower the ratio."""
+
+    EVENT = BillingEvent.DAP_FLOW_ON_COMPLETION
+
+    @patch("lib.billing_events.service.get_llm_operations")
+    @pytest.mark.parametrize(
+        "context_ops",
+        [
+            pytest.param(None, id="no_llm_operations"),
+            pytest.param(
+                [{"model_id": "missing-token-counts"}], id="invalid_llm_operation"
+            ),
+        ],
+    )
+    def test_failure_before_client_counts_emitted_and_missing_field(
+        self,
+        mock_get_llm_operations,
+        metered_service,
+        cloud_connector_user,
+        gl_context,
+        registry,
+        context_ops,
+    ):
+        mock_get_llm_operations.return_value = context_ops
+
+        with (
+            patch.object(
+                metered_service.client, "send_billing_event"
+            ) as mock_send_billing_event,
+            pytest.raises(ValueError),
+        ):
+            metered_service.track_billing(
+                cloud_connector_user,
+                gl_context,
+                event=self.EVENT,
+                execution_env=ExecutionEnvironment.DAP,
+                category="test_category",
+            )
+
+        mock_send_billing_event.assert_not_called()
+        labels = {"event_type": self.EVENT.value}
+        assert _sample(registry, "billing_events_emitted_total", **labels) == 1
+        assert (
+            _sample(
+                registry,
+                "billing_events_dropped_total",
+                reason=BillingEventDropReason.MISSING_FIELD.value,
+                **labels,
+            )
+            == 1
+        )
+        # delivered / emitted is 0 / 1, so the reconciliation alert can fire.
+        assert _sample(registry, "billing_events_delivered_total", **labels) == 0
+
+    def test_successful_attempt_counts_emitted_once(
+        self, metered_service, cloud_connector_user, gl_context, llm_operation, registry
+    ):
+        current_event_context.set(EventContext())
+
+        with patch("snowplow_tracker.Tracker.track") as mock_track:
+            tracked = metered_service.track_billing(
+                cloud_connector_user,
+                gl_context,
+                event=self.EVENT,
+                execution_env=ExecutionEnvironment.DAP,
+                category="test_category",
+                llm_ops=[llm_operation],
+            )
+
+        assert tracked is True
+        mock_track.assert_called_once()
+        labels = {"event_type": self.EVENT.value}
+        assert _sample(registry, "billing_events_emitted_total", **labels) == 1
+        assert all(
+            _sample(
+                registry,
+                "billing_events_dropped_total",
+                reason=reason.value,
+                **labels,
+            )
+            == 0
+            for reason in BillingEventDropReason
+        )
+
+    @patch("lib.billing_events.service.get_llm_operations", return_value=None)
+    def test_disabled_client_counts_nothing(
+        self,
+        _mock_get_llm_operations,
+        metrics,
+        registry,
+        cloud_connector_user,
+        gl_context,
+    ):
+        service = BillingEventService(
+            client=BillingEventsClient(
+                enabled=False,
+                endpoint="https://billing.local",
+                app_id="gitlab_ai_gateway-billing",
+                namespace="gl",
+                batch_size=1,
+                thread_count=1,
+                internal_event_client=MagicMock(spec=InternalEventsClient),
+                metrics=metrics,
+            )
+        )
+
+        with pytest.raises(ValueError):
+            service.track_billing(
+                cloud_connector_user,
+                gl_context,
+                event=self.EVENT,
+                execution_env=ExecutionEnvironment.DAP,
+                category="test_category",
+            )
+
+        labels = {"event_type": self.EVENT.value}
+        assert _sample(registry, "billing_events_emitted_total", **labels) == 0
+        assert (
+            _sample(
+                registry,
+                "billing_events_dropped_total",
+                reason=BillingEventDropReason.MISSING_FIELD.value,
+                **labels,
+            )
+            == 0
+        )

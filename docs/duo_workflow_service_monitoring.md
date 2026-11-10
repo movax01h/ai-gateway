@@ -130,6 +130,66 @@ have no metadata labels.
 | `duo_workflow_audit_events_payload_bytes` | Histogram | none | A batch is POSTed. Measures the UTF-8 serialized payload size. Buckets: 512 B to 3 MiB. |
 | `duo_workflow_audit_events_auto_flush_skipped_total` | Counter | none | A buffer-full auto-flush is skipped because no event loop is running. |
 
+## Billing event metrics
+
+Emitted from `BillingEventService` in [`lib/billing_events/service.py`](../lib/billing_events/service.py) and
+`BillingEventsClient` in [`lib/billing_events/client.py`](../lib/billing_events/client.py), and declared in
+[`lib/billing_events/metrics.py`](../lib/billing_events/metrics.py). Both the AI Gateway (code completions, code
+generations, proxy) and the Duo Workflow Service (flow completion) send billing events, so these counters live in shared
+`lib/` code on the default `prometheus_client` registry and both services expose them. Wire them through
+`ContainerBillingEvent.metrics` rather than instantiating `BillingEventsMetrics` again.
+
+These metrics have no metadata labels. Delivery is reported from Snowplow emitter worker threads, where `<metadata>`
+labels would resolve to `unknown`. `event_type` is the `BillingEvent` value (for example `code_completions` or
+`duo_agent_platform_workflow_completion`), set when the event is enqueued and read back from the event payload, so it
+matches across all three counters. Unexpected values are recorded as `unknown`.
+
+| Metric | Type | Labels | Emitted when |
+|---|---|---|---|
+| `billing_events_emitted_total` | Counter | `event_type` | A billing attempt starts while billing events are enabled, counted once per attempt. This is the expected count. See the following ownership list. |
+| `billing_events_delivered_total` | Counter | `event_type` | The billing endpoint accepts an event (`on_success`). An event that succeeds after a retry is counted once. |
+| `billing_events_dropped_total` | Counter | `reason`, `event_type` | An event is lost before delivery. `reason` is `missing_field` or `http_error`. See the following list. |
+
+Each billing attempt is counted in `billing_events_emitted_total` exactly once, by its entry point:
+
+- `BillingEventService.track_billing`, used by the AI Gateway (code completions, code generations, proxy) and the Duo
+  Workflow Service, counts the attempt before it resolves LLM operations, then calls
+  `BillingEventsClient.send_billing_event`, which does not count it again. A failure in the service, before the client
+  is reached, still lowers the ratio.
+- `BillingEventsClient.track_billing_event`, for callers that use the client directly, counts the attempt and then calls
+  `send_billing_event`.
+
+`billing_events_delivered_total` and the `http_error` drops are always counted by the client.
+
+`reason` values for `billing_events_dropped_total`:
+
+- `missing_field`: the event is rejected before it is handed to Snowplow. In `BillingEventService.track_billing`, no
+  LLM operations are available or an operation from the request context fails validation. In the client, `quantity` is
+  not positive or the `BillingEventContext` fails validation. The error is still raised to the caller.
+- `http_error`: the endpoint returns a status code that Snowplow does not retry (`400`, `401`, `403`, `410`, or `422`).
+  Retryable failures (other non-2xx codes and request exceptions) go back into the buffer for another attempt and are
+  not counted.
+
+Every known series is initialized at 0 when the counters are created: each `BillingEvent` value for emitted, each
+`BillingEvent` value and `unknown` for delivered, and each `reason` and `event_type` combination (including `unknown`)
+for dropped. The series exist from process start, so if the billing endpoint is down from the time a pod starts, the
+ratio returns 0 rather than no data and the alert can fire.
+
+The reconciliation ratio is delivered divided by emitted:
+
+```promql
+sum by (event_type) (rate(billing_events_delivered_total[1h]))
+/
+sum by (event_type) (rate(billing_events_emitted_total[1h]))
+```
+
+`snowplow-tracker` retries retryable failures with backoff and no attempt limit, so there is no "retries exhausted" drop.
+A sustained billing endpoint outage shows up only as a falling ratio, not as `billing_events_dropped_total`. The gap
+between emitted and delivered includes every event that has no drop reason: events still waiting for a retry, events
+dropped when the 10,000-event emitter buffer is full (Snowplow only logs these), events pending when the process shuts
+down, and events where `snowplow_tracker.track()` raises. Use the ratio over a window longer than the retry backoff (up
+to 60 seconds) to avoid alerting on in-flight retries.
+
 ## gRPC metrics
 
 Emitted from `MonitoringInterceptor` in

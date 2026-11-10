@@ -5,6 +5,7 @@ from gitlab_cloud_connector import CloudConnectorUser
 from pydantic import BaseModel
 
 from lib.billing_events.client import BillingEvent, BillingEventsClient
+from lib.billing_events.metrics import BillingEventDropReason
 from lib.context.llm_operations import get_llm_operations
 from lib.context.tool_executions import ToolExecutions
 from lib.events.base import GLReportingEventContext
@@ -107,6 +108,19 @@ class BillingEventService:
     def __init__(self, client: BillingEventsClient):
         self.client = client
 
+    @staticmethod
+    def _resolve_llm_operations(
+        llm_ops: list[LLMOperation] | None,
+    ) -> list[dict[str, Any]]:
+        if llm_ops:
+            return [ops.model_dump() for ops in llm_ops]
+
+        if raw_ops := get_llm_operations():
+            # Context-based: validate raw dicts from request context and convert to serializable format
+            return [LLMOperation.model_validate(ops).model_dump() for ops in raw_ops]
+
+        raise ValueError("No LLM operations available for billing tracking")
+
     def track_billing(
         self,
         user: CloudConnectorUser,
@@ -151,21 +165,24 @@ class BillingEventService:
             events are disabled).
 
         Raises:
-            ValueError: If no LLM operations are available from any source
+            ValueError: If no LLM operations are available from any source. The attempt is still counted in
+                ``billing_events_emitted_total`` and ``billing_events_dropped_total{reason="missing_field"}``.
 
         Note:
             For self-hosted deployments, standardized placeholder operations are used since
             actual token counts and model details are not available from self-hosted providers.
         """
-        if llm_ops:
-            llm_operations = [ops.model_dump() for ops in llm_ops]
-        elif raw_ops := get_llm_operations():
-            # Context-based: validate raw dicts from request context and convert to serializable format
-            llm_operations = [
-                LLMOperation.model_validate(ops).model_dump() for ops in raw_ops
-            ]
-        else:
-            raise ValueError("No LLM operations available for billing tracking")
+        # This service owns the emitted count for every attempt that goes through it: count before anything that can
+        # fail, so a failure here still lowers the delivered / emitted ratio. send_billing_event does not count it
+        # again.
+        self.client.record_emitted(event)
+
+        try:
+            llm_operations = self._resolve_llm_operations(llm_ops)
+        except ValueError:
+            # Also covers pydantic.ValidationError, raised for malformed operations in the request context.
+            self.client.record_dropped(BillingEventDropReason.MISSING_FIELD, event)
+            raise
 
         metadata: dict[str, Any] = {
             "feature_qualified_name": gl_context.feature_qualified_name,
@@ -180,7 +197,7 @@ class BillingEventService:
         if source:
             metadata["source"] = source
 
-        return self.client.track_billing_event(
+        return self.client.send_billing_event(
             user,
             event,
             category,

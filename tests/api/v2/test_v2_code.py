@@ -2597,7 +2597,7 @@ class TestCodeGenerations:
     def test_billing_event(
         self,
         mock_client,
-        mock_track_billing_event,
+        mock_send_billing_event,
     ):
         """Verify a generations request results in a billing event reaching the underlying BillingEventsClient with the
         expected payload."""
@@ -2641,7 +2641,7 @@ class TestCodeGenerations:
 
         assert response.status_code == 200
 
-        mock_track_billing_event.assert_called_once_with(
+        mock_send_billing_event.assert_called_once_with(
             ANY,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             "CodeGenerations",
