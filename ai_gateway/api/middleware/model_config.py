@@ -13,7 +13,11 @@ from ai_gateway.feature_allowlist import (
     check_client_model_metadata,
     prompt_model_check_context,
 )
-from ai_gateway.model_metadata import IamRoleNotAllowedError, create_model_metadata
+from ai_gateway.model_metadata import (
+    IamRoleNotAllowedError,
+    create_model_metadata,
+    drop_default_model_ref,
+)
 from ai_gateway.model_selection import ModelSelectionError
 from lib.context import StarletteUser, current_model_metadata_context
 
@@ -106,6 +110,8 @@ class ModelConfigMiddleware:
                 if "model_metadata" in data:
                     starlette_context["request_body_has_model_metadata"] = True
                     raw_metadata = data["model_metadata"]
+                    # The load-balanced default is no model choice, so the check sees an unpinned request.
+                    drop_default_model_ref(raw_metadata)
                     # Read the request first: create_model_metadata changes the mapping it gets.
                     request = ClientModelRequest.from_raw(raw_metadata)
                     client_model_metadata = create_model_metadata(raw_metadata)

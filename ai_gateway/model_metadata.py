@@ -36,6 +36,27 @@ BEDROCK_PROVIDERS = frozenset({"bedrock", "bedrock_converse"})
 
 IAM_ROLE_USAGE_ERROR = "iam_role_usage"
 
+# `/v1/models/definitions` lists `__default__<feature_setting>` as the default model of a feature with more than one
+# default model. It is not a model in models.yml: it stands for the feature's load-balanced default.
+DEFAULT_MODEL_REF_PREFIX = "__default__"
+
+
+def drop_default_model_ref(data: Any) -> None:
+    """Remove a ``gitlab`` identifier that names the load-balanced default of ``/v1/models/definitions``.
+
+    Clients send that identifier back when the user selects the default model. Without it, the request serves the
+    default of its ``feature_setting``, which is what the user selected.
+
+    Args:
+        data: The ``model_metadata`` that the client sent. The function changes it in place.
+    """
+    if not isinstance(data, dict) or data.get("provider") != "gitlab":
+        return
+
+    identifier = data.get("identifier")
+    if isinstance(identifier, str) and identifier.startswith(DEFAULT_MODEL_REF_PREFIX):
+        del data["identifier"]
+
 
 class IamRoleNotAllowedError(ValueError):
     """``iam_role`` was sent to a gateway that does not serve custom models."""
@@ -634,6 +655,7 @@ def create_model_metadata(
     if data.get("iam_role") and not get_config().custom_models.enabled:
         raise IamRoleNotAllowedError()
 
+    drop_default_model_ref(data)
     configs = ModelSelectionConfig.instance()
     data.pop("is_custom_model", None)
     provider = data["provider"]

@@ -7,6 +7,7 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from structlog.testing import capture_logs
 
 from ai_gateway.config import get_config
+from ai_gateway.model_metadata import DEFAULT_MODEL_REF_PREFIX
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from duo_workflow_service.entities.state import (
@@ -447,6 +448,7 @@ async def test_self_hosted_identifier_sets_matched_context_limit(
 
 
 AGENT_PLATFORM = "duo_agent_platform"
+AGENTIC_CHAT = "duo_agent_platform_agentic_chat"
 METHOD = "/DuoWorkflow/ExecuteWorkflow"
 NOT_ALLOWED_FOR_AGENT_PLATFORM = {
     "provider": "gitlab",
@@ -607,6 +609,33 @@ class TestFeatureAllowlist:
             for entry in logs
             if entry["event"] == "Model allowlist note"
         ] == [("missing_feature_setting", "dws", METHOD)]
+
+    @pytest.mark.parametrize(
+        "feature_allowlist_mode", ["log", "fallback", "enforce"], indirect=True
+    )
+    async def test_serves_the_feature_default_for_the_load_balanced_default(self):
+        defaults = (
+            ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()[AGENTIC_CHAT]
+            .default_model_identifiers
+        )
+        # `/v1/models/definitions` lists the load-balanced default for a feature with several default models.
+        assert len(defaults) > 1
+
+        with capture_logs() as logs:
+            result, seen = await _intercept(
+                {
+                    "provider": "gitlab",
+                    "identifier": f"{DEFAULT_MODEL_REF_PREFIX}{AGENTIC_CHAT}",
+                    "feature_setting": AGENTIC_CHAT,
+                }
+            )
+
+        assert result == "continued"
+        assert seen["default"].llm_definition.gitlab_identifier in defaults
+        # Model routing can rewrite the default, as for a request without an identifier.
+        assert seen["by_tag"].feature_setting == AGENTIC_CHAT
+        assert [entry for entry in logs if entry["log_level"] == "warning"] == []
 
     @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
     async def test_enforce_mode_rejects_a_provider_the_gateway_does_not_serve(self):

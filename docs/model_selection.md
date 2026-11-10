@@ -29,6 +29,10 @@ primarily by model metadata requesting a custom model.
 This is the case applicable to users selecting "GitLab default model" in the UI
 - If `identifier` is provided, the model definition with the matching `gitlab_identifier` is fetched. This is triggered
 when the user has selected a GitLab-provided model other than "GitLab default model" in the UI
+- If a `gitlab` request has an `identifier` that starts with `__default__`, the identifier is ignored. For a feature
+with more than one default model, `/v1/models/definitions` lists `__default__<feature_setting>` as the default model,
+and clients send it back when the user selects it. The request then gets one of the `default_models` of its
+`feature_setting`, as without an `identifier`.
 
 If none of these values is given to `create_model_metadata`, a `ValueError` is raised. Once the model definition has
 been established, the Prompt Registry determines the prompt definition to use based on the following logic:

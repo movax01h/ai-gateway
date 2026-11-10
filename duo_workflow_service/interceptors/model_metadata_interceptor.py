@@ -14,6 +14,7 @@ from ai_gateway.model_metadata import (
     build_default_feature_setting_metadata,
     build_model_metadata_by_tag,
     create_model_metadata_by_tag,
+    drop_default_model_ref,
 )
 from ai_gateway.model_selection import ModelSelectionError
 from duo_workflow_service.interceptors import abort_handler
@@ -41,6 +42,8 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
         dws_client_model_request_context.set(None)
         try:
             data = json.loads(raw_metadata)
+            # The load-balanced default is no model choice, so the check and model routing see an unpinned request.
+            drop_default_model_ref(data)
             # Read the request first: the builders below change the mapping they get.
             request = ClientModelRequest.from_raw(data)
 
