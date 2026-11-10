@@ -547,6 +547,41 @@ class TestBillingEventService:
         assert metadata["llm_operations"][0]["operation_type"] == "compaction_auto"
         assert metadata["llm_operations"][1]["operation_type"] == "standard"
 
+    @patch("lib.billing_events.service.get_llm_operations")
+    def test_track_billing_with_decision_operation(
+        self,
+        mock_get_llm_operations,
+        billing_event_service,
+        billing_event_client,
+        user,
+        gl_context,
+    ):
+        """Decision calls reach the billing event as their own operation type."""
+        mock_get_llm_operations.return_value = [
+            {
+                "model_id": "gpt-6-luna",
+                "model_engine": "openai_decisions",
+                "model_provider": "openai_decisions",
+                "model_vendor": "openai",
+                "token_count": 120,
+                "prompt_tokens": 120,
+                "completion_tokens": 0,
+                "operation_type": "decision",
+            }
+        ]
+
+        billing_event_service.track_billing(
+            user,
+            gl_context,
+            workflow_id="workflow-decision",
+            event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+            execution_env=ExecutionEnvironment.DAP,
+            category="test_category",
+        )
+
+        metadata = get_call_metadata(billing_event_client)
+        assert metadata["llm_operations"][0]["operation_type"] == "decision"
+
     def test_llm_operation_defaults_for_operation_type(self):
         """Test that LLMOperation defaults operation_type to 'standard'."""
         op = LLMOperation(
@@ -574,7 +609,20 @@ class TestBillingEventService:
 
 
 class TestLLMOperationType:
-    """Test suite for LLMOperationType Literal type."""
+    """Test suite for the LLMOperationType enum."""
+
+    def test_string_values_become_enum_members(self):
+        """Prompt YAML and raw billing dicts pass strings; they validate to the enum member."""
+        op = LLMOperation(
+            model_id="gpt-6-luna",
+            model_engine="openai",
+            model_provider="openai",
+            token_count=120,
+            prompt_tokens=120,
+            completion_tokens=0,
+            operation_type="decision",
+        )
+        assert op.operation_type is LLMOperationType.DECISION
 
     def test_llm_operation_accepts_standard(self):
         """Test that LLMOperation accepts 'standard' as operation_type."""

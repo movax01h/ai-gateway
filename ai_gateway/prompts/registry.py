@@ -18,12 +18,14 @@ from ai_gateway.prompts.base import BasePromptRegistry, Prompt, TemplateNotFound
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.completion import completion_prompt_template_factory
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig, PromptConfig
+from ai_gateway.prompts.decision import decision_prompt_template_factory
 from ai_gateway.prompts.embedding import embedding_prompt_template_factory
 from ai_gateway.prompts.feature_roots import (
     discover_feature_prompts,
     feature_prompt_root,
 )
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
+from lib.billing_events.service import LLMOperationType
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import current_event_context
 from lib.version import resolve_version
@@ -212,10 +214,15 @@ class LocalPromptRegistry(BasePromptRegistry):
         custom_models_extra_headers: dict[str, str] | None = None,
         bind_tools_cache: Optional[BindToolsCacheProtocol] = None,
         duo_chat_max_tokens: Optional[int] = None,
+        decision_model_factories: Optional[
+            dict[ModelClassProvider, TypeModelFactory]
+        ] = None,
     ):
         super().__init__(internal_event_client, model_limits)
         self.prompt_template_factories = prompt_template_factories
         self.model_factories = model_factories
+        # Providers that also serve a Decisions endpoint, used by prompts with `operation_type: decision`.
+        self.decision_model_factories = decision_model_factories or {}
         self.custom_models_enabled = custom_models_enabled
         self.disable_streaming = disable_streaming
         self.custom_models_extra_headers = custom_models_extra_headers
@@ -418,7 +425,9 @@ class LocalPromptRegistry(BasePromptRegistry):
         prompt_template_override = self.prompt_template_factories.get(prompt_id, None)
 
         if not prompt_template_override:
-            if model_class_provider == ModelClassProvider.LITE_LLM_COMPLETION:
+            if config.operation_type == LLMOperationType.DECISION:
+                prompt_template_override = decision_prompt_template_factory
+            elif model_class_provider == ModelClassProvider.LITE_LLM_COMPLETION:
                 prompt_template_override = completion_prompt_template_factory
             elif model_class_provider == ModelClassProvider.LITE_LLM_EMBEDDING:
                 prompt_template_override = embedding_prompt_template_factory
@@ -534,7 +543,14 @@ class LocalPromptRegistry(BasePromptRegistry):
         tool_choice: Optional[str],
         **kwargs,
     ) -> Prompt:
-        model_factory = self.model_factories.get(model_class_provider, None)
+        if config.operation_type == LLMOperationType.DECISION:
+            model_factory = self.decision_model_factories.get(model_class_provider)
+            if not model_factory:
+                raise ValueError(
+                    f"`{model_class_provider}` models have no decision endpoint (prompt '{config.name}')."
+                )
+        else:
+            model_factory = self.model_factories.get(model_class_provider, None)
 
         if not model_factory:
             raise ValueError(
@@ -568,6 +584,9 @@ class LocalPromptRegistry(BasePromptRegistry):
         custom_models_extra_headers: dict[str, str] | None = None,
         bind_tools_cache: Optional[BindToolsCacheProtocol] = None,
         duo_chat_max_tokens: Optional[int] = None,
+        decision_model_factories: Optional[
+            dict[ModelClassProvider, TypeModelFactory]
+        ] = None,
     ) -> "LocalPromptRegistry":
         """Create a LocalPromptRegistry with lazy loading enabled.
 
@@ -593,6 +612,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             custom_models_extra_headers,
             bind_tools_cache,
             duo_chat_max_tokens,
+            decision_model_factories,
         )
 
     @classmethod

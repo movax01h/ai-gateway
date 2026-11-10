@@ -13,9 +13,10 @@ from langchain_core.runnables import (
     Runnable,
     RunnableBinding,
     RunnableLambda,
+    RunnableParallel,
     RunnableSequence,
 )
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, SecretStr
 from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.config import ConfigModelLimits, get_config
@@ -28,6 +29,7 @@ from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
+from ai_gateway.models.v2.openai_decisions import OpenAIDecisionsModel
 from ai_gateway.prompts import LocalPromptRegistry, Prompt, feature_roots
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
@@ -179,6 +181,13 @@ models:
     params:
         model: embedding_test
         custom_llm_provider: vertex_ai
+  - name: OpenAI Test
+    gitlab_identifier: openai_test
+    max_context_tokens: 200000
+    model_class_provider: openai
+    params:
+        model: openai_test
+        max_tokens: 128000
 """,
     )
     fs.create_file(
@@ -448,6 +457,17 @@ params:
     - Bar
 """,
     )
+    fs.create_file(
+        prompts_definitions_dir / "decision_test" / "base" / "1.0.0.yml",
+        contents="""
+---
+name: Decision test
+unit_primitive: duo_agent_platform
+operation_type: decision
+prompt_template:
+  user: "{{request}}"
+""",
+    )
     # embeddings_code lives under ai/features/, so fake it at the moved root.
     fs.create_file(
         ai_gateway_dir.parent
@@ -535,6 +555,11 @@ def registry_fixture(
         model_limits=model_limits,
         custom_models_enabled=custom_models_enabled,
         disable_streaming=disable_streaming,
+        decision_model_factories={
+            ModelClassProvider.OPENAI: lambda model, **kwargs: OpenAIDecisionsModel(
+                model=model, api_key=SecretStr("test-key"), **kwargs
+            ),
+        },
     )
 
 
@@ -1352,6 +1377,38 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
 
         assert isinstance(prompt, Prompt)
         assert isinstance(prompt.prompt_tpl, RunnableLambda)
+
+    def test_decision_prompt_calls_the_models_decision_endpoint(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        prompt = registry.get(
+            "decision_test",
+            "^1.0.0",
+            model_metadata=create_model_metadata(
+                {"provider": "gitlab", "identifier": "openai_test"}
+            ),
+        )
+
+        assert isinstance(prompt.prompt_tpl, RunnableParallel)
+        assert isinstance(prompt.model, OpenAIDecisionsModel)
+        assert prompt.model_name == "openai_test"
+        assert prompt.operation_type == "decision"
+        assert prompt.model_provider == "openai"
+        assert prompt.model_vendor == "openai"
+
+    def test_decision_prompt_needs_a_provider_with_a_decision_endpoint(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        with pytest.raises(ValueError, match="no decision endpoint"):
+            registry.get(
+                "decision_test",
+                "^1.0.0",
+                model_metadata=create_model_metadata(
+                    {"provider": "gitlab", "identifier": "haiku"}
+                ),
+            )
 
     @pytest.mark.usefixtures("mock_fs")
     def test_build_prompt_with_azure_model_adjusts_tool_choice(

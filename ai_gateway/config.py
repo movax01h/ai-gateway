@@ -29,6 +29,7 @@ __all__ = [
     "ConfigCodeSuggestions",
     "ConfigCustomModels",
     "ConfigCustomersDot",
+    "ConfigDecision",
     "ConfigDuoChat",
     "ConfigDuoWorkflow",
     "ConfigFastApi",
@@ -338,6 +339,36 @@ class ConfigDuoChat(BaseModel):
             "value. Increase this for long-running agentic prompts against "
             "slower self-hosted models. "
             "Set via AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT."
+        ),
+    )
+
+
+class ConfigDecision(BaseModel):
+    """OpenAI Decisions classification calls.
+
+    A decision is a fast classification that callers fall back from, so it must fail quickly rather than retry or wait
+    out a slow request.
+    """
+
+    request_timeout: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "Timeout in seconds for a single OpenAI Decisions request on the "
+            "AI Gateway -> model leg. Decision calls classify and are meant to "
+            "fail fast so callers can fall back, so this is far shorter than "
+            "the chat model request timeout. "
+            "Set via AIGW_DECISION__REQUEST_TIMEOUT."
+        ),
+    )
+    max_retries: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Retries the OpenAI client attempts for a failed Decisions request. "
+            "Defaults to 0 so a classification fails fast and the caller can "
+            "fall back instead of waiting on retries. "
+            "Set via AIGW_DECISION__MAX_RETRIES."
         ),
     )
 
@@ -853,6 +884,7 @@ class Config(BaseSettings):
     ]
     mtls: Annotated[ConfigMtls, Field(default_factory=ConfigMtls)]
     duo_chat: Annotated[ConfigDuoChat, Field(default_factory=ConfigDuoChat)]
+    decision: Annotated[ConfigDecision, Field(default_factory=ConfigDecision)]
     model_keys: Annotated[ConfigModelKeys, Field(default_factory=ConfigModelKeys)]
     vertex_text_model: Annotated[
         ConfigVertexTextModel, Field(default_factory=ConfigVertexTextModel)
