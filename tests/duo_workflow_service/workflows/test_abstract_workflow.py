@@ -732,10 +732,8 @@ async def test_compile_and_run_graph_orders_governance_tools_deterministically(
     mock_gitlab_workflow,
     _mock_convert_mcp_tools,
 ):
-    # Set iteration order is randomized per process, so building these lists with
-    # list(set(...)) made an approval resume on another gateway process look like a
-    # reordered list, falsely triggering a full-snapshot compaction that dropped
-    # approved tool results on reload. The lists must come out in a stable order.
+    # These lists are persisted in state and rendered into the system prompt, so
+    # their order must not depend on the process's hash seed.
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
     mock_checkpointer.initial_status_event = "START"
