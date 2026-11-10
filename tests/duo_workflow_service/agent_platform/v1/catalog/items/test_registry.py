@@ -162,7 +162,8 @@ class TestFromPayload:
             ),
             (
                 [_agent(name="a"), _agent(name="b"), _agent(name="n" * 70)],
-                "Workspace agent 3: the name has 70 characters, the limit is 64.",
+                f"Workspace agent '{'n' * 18}…{'n' * 18}': "
+                "the name has 70 characters, the limit is 64.",
             ),
             (["not-an-agent"], "Workspace agent 1 is not valid."),
             ("not-a-list", "The workspace agents are not valid."),
@@ -175,7 +176,7 @@ class TestFromPayload:
             "malformed_tools",
             "duplicate_names",
             "over_the_ceiling",
-            "name_too_long_falls_back_to_position",
+            "name_too_long_is_quoted_shortened",
             "malformed_agent",
             "malformed_shape",
         ],
@@ -220,10 +221,16 @@ class TestFromPayload:
             }
         ]
 
-    def test_the_longest_message_fits_a_websocket_close_frame(self):
+    @pytest.mark.parametrize(
+        "agent",
+        [
+            _agent(name="é" * MAX_NAME_LENGTH, description="x" * 9_999_999),
+            _agent(name="é" * 9_999_999),
+        ],
+        ids=["description_too_long", "name_too_long"],
+    )
+    def test_the_longest_message_fits_a_websocket_close_frame(self, agent):
         """Workhorse forwards the message as a close reason, which it cuts at 123 bytes."""
-        agent = _agent(name="é" * MAX_NAME_LENGTH, description="x" * 9_999_999)
-
         with pytest.raises(CatalogItemsError) as exc_info:
             CatalogItems.from_payload({"workspace_agents": [agent]})
 
