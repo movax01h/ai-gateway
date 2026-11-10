@@ -37,12 +37,14 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
 )
 from duo_workflow_service.agent_platform.v1 import list_configs as v1_list_configs
 from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
+from duo_workflow_service.agent_platform.v1.flows import FetchedFlow
 from duo_workflow_service.agent_platform.v1.flows import Flow as V1Flow
 from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowConfig
 from duo_workflow_service.agent_platform.v1.flows import (
     PartialFlowConfig as V1PartialFlowConfig,
 )
 from duo_workflow_service.flow_request import (
+    FetchedFlowRequest,
     FlowRequest,
     InlineFlowRequest,
     LegacyWorkflowRequest,
@@ -597,6 +599,15 @@ def resolve_flow(flow_request: FlowRequest) -> ResolvedFlow:
         return ResolvedFlow(
             factory=factory,
             schema_version=flow_request.schema_version,
+        )
+
+    if isinstance(flow_request, FetchedFlowRequest):
+        # The definition is fetched and checked by the flow, once the run's stream is open.
+        return ResolvedFlow(
+            factory=partial(
+                FetchedFlow, config_builder=flow_config_from_fetched_definition
+            ),
+            schema_version=_FETCHED_FLOW_SCHEMA_VERSION,
         )
 
     if isinstance(flow_request, LegacyWorkflowRequest):

@@ -100,7 +100,8 @@ def _process_execute_workflow_stream(func: Callable, event: UsageQuotaEvent):
         try:
             gl_events_context = GLReportingEventContext.from_workflow_definition(
                 workflow_definition_key_from_proto(message.startRequest),
-                is_ai_catalog_item=bool(message.startRequest.flowConfig),
+                is_ai_catalog_item=bool(message.startRequest.flowConfig)
+                or message.startRequest.fetch_flow_config,
             )
 
             async def _chained():

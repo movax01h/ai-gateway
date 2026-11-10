@@ -9,6 +9,7 @@ from duo_workflow_service.agent_platform.utils.flow import VALID_SCHEMA_VERSIONS
 from duo_workflow_service.agent_platform.v1.catalog import CatalogItemsError
 from duo_workflow_service.flow_request import (
     _LEGACY_WORKFLOW_NAMES,
+    FetchedFlowRequest,
     InlineFlowRequest,
     LegacyWorkflowRequest,
     RegistryFlowRequest,
@@ -558,3 +559,129 @@ def test_valid_schema_versions_match_flow_registries():
     """Guard against VALID_SCHEMA_VERSIONS drifting from the resolution registries."""
     assert VALID_SCHEMA_VERSIONS == set(_FLOW_BY_VERSIONS.keys())
     assert VALID_SCHEMA_VERSIONS == set(_FLOW_CONFIGS_BY_VERSION.keys())
+
+
+# fetch_flow_config: the start request field and the request kind it maps to.
+
+
+def _fetch_struct(value: dict) -> Struct:
+    struct = Struct()
+    struct.update(value)
+    return struct
+
+
+class TestFetchFlowConfigProto:
+    def test_the_field_is_number_19_and_optional(self):
+        field = contract_pb2.StartWorkflowRequest.DESCRIPTOR.fields_by_name[
+            "fetch_flow_config"
+        ]
+
+        assert field.number == 19
+        assert field.has_presence
+
+    def test_the_field_survives_a_round_trip(self):
+        req = contract_pb2.StartWorkflowRequest(workflowID="44", fetch_flow_config=True)
+
+        parsed = contract_pb2.StartWorkflowRequest.FromString(req.SerializeToString())
+
+        assert parsed.HasField("fetch_flow_config")
+        assert parsed.fetch_flow_config is True
+
+    def test_an_older_client_leaves_the_field_unset(self):
+        req = contract_pb2.StartWorkflowRequest(workflowID="44")
+
+        assert not req.HasField("fetch_flow_config")
+        assert req.fetch_flow_config is False
+
+
+class TestNormalizeFetchedFlowRequest:
+    def test_the_field_maps_to_a_fetched_request(self):
+        req = contract_pb2.StartWorkflowRequest(
+            workflowID="44", workflowDefinition="my_flow/v1", fetch_flow_config=True
+        )
+
+        result = normalize_flow_request(req, Mock())
+
+        assert result == FetchedFlowRequest(workflow_definition="my_flow/v1")
+        assert result.to_legacy_identifier() == "my_flow/v1"
+
+    @pytest.mark.parametrize("schema_version", ["v1", ""])
+    def test_the_cli_fetch_request_takes_priority(self, schema_version):
+        """The CLI in fetch mode still sends a schema version and a workflowDefinition."""
+        req = contract_pb2.StartWorkflowRequest(
+            workflowID="44",
+            workflowDefinition="my_flow/v1",
+            flowConfigSchemaVersion=schema_version,
+            fetch_flow_config=True,
+        )
+
+        result = normalize_flow_request(req, Mock())
+
+        assert result == FetchedFlowRequest(workflow_definition="my_flow/v1")
+        assert workflow_definition_key_from_proto(req) == "my_flow/v1"
+
+    def test_an_inline_config_is_ignored(self):
+        req = contract_pb2.StartWorkflowRequest(
+            workflowID="44",
+            fetch_flow_config=True,
+            flowConfig=_fetch_struct({"version": "v1", "environment": "ambient"}),
+            flowConfigSchemaVersion="v1",
+        )
+
+        assert isinstance(normalize_flow_request(req, Mock()), FetchedFlowRequest)
+
+    def test_false_keeps_the_inline_path(self):
+        req = contract_pb2.StartWorkflowRequest(
+            workflowID="44",
+            fetch_flow_config=False,
+            flowConfig=_fetch_struct({"version": "v1", "environment": "ambient"}),
+            flowConfigSchemaVersion="v1",
+        )
+
+        assert not isinstance(normalize_flow_request(req, Mock()), FetchedFlowRequest)
+
+    def test_a_registry_flow_cannot_be_fetched(self):
+        req = contract_pb2.StartWorkflowRequest(
+            fetch_flow_config=True,
+            flowConfigId="developer",
+            flowConfigSchemaVersion="v1",
+            flowVersion="1.0.0",
+        )
+
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            normalize_flow_request(req, Mock())
+
+    def test_a_flow_version_cannot_be_fetched(self):
+        req = contract_pb2.StartWorkflowRequest(
+            fetch_flow_config=True, flowVersion="1.0.0"
+        )
+
+        with pytest.raises(ValueError, match="flowVersion"):
+            normalize_flow_request(req, Mock())
+
+
+class TestFetchedFlowCatalogItems:
+    def test_a_fetched_request_supports_catalog_items(self):
+        assert FetchedFlowRequest().supports_catalog_items() is True
+
+    def test_workspace_agents_are_accepted(self):
+        req = contract_pb2.StartWorkflowRequest(
+            fetch_flow_config=True,
+            catalog_items=contract_pb2.CatalogItems(
+                catalog_items_v1=contract_pb2.CatalogItemsV1(
+                    workspace_agents=[
+                        contract_pb2.WorkspaceAgent(
+                            name="tester",
+                            description="Runs tests.",
+                            prompt="You run tests.",
+                        )
+                    ]
+                )
+            ),
+        )
+
+        items = normalize_catalog_items(req, normalize_flow_request(req, Mock()))
+
+        assert [agent.name for agent in items.workspace_agents] == [
+            "workspace/agents/tester"
+        ]

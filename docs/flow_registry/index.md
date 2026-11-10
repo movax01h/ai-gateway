@@ -150,6 +150,7 @@ Set `workflowDefinition` to `"<flow_name>/<api_version>"` (e.g. `"developer/v1"`
 
 When a request arrives, the server resolves the flow in this order:
 
+1. If `fetch_flow_config` is true → fetches the saved AI Catalog flow for `workflowID` from GitLab before the graph is built, and ignores `flowConfig`, `flowConfigSchemaVersion` and `workflowDefinition` for resolution. The same request returns the flow's AI Catalog agents. The token must be bound to `workflowID` and hold a `flow_config_digest` claim, which the fetched definition must match. The request cannot also set `flowConfigId` or `flowVersion`. A GitLab that does not serve the definition fails the run.
 1. If `flowConfigId` + `flowConfigSchemaVersion` + `flowVersion` are set → loads `configs/{flowConfigId}/{flowVersion}.yml`
 1. If `flowConfig` + `flowConfigSchemaVersion` are set → uses the inline config struct directly
 1. If `workflowDefinition` matches a known legacy workflow name (`software_development`, `chat`, etc.) → uses that workflow class directly. Otherwise, parses it as `"flow_name/api_version"` and loads `configs/{flow_name}/1.0.0.yml`
