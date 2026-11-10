@@ -266,7 +266,9 @@ class ModelRequestInstrumentator:
 
             extra = internal_event_extra or {}
             agent_name = extra.get("agent_name")
-            operation_type: LLMOperationType = extra.get("operation_type", "standard")
+            operation_type: LLMOperationType = extra.get(
+                "operation_type", LLMOperationType.STANDARD
+            )
             self._update_llm_operations(model, usage, agent_name, operation_type)
             self._track_usage(model, usage, extra)
 
@@ -414,7 +416,7 @@ class ModelRequestInstrumentator:
             model: str,
             usage: UsageMetadata,
             agent_name: str | None = None,
-            operation_type: LLMOperationType = "standard",
+            operation_type: LLMOperationType = LLMOperationType.STANDARD,
         ) -> None:
             current_llm_operations = llm_operations.get()
 

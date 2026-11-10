@@ -395,14 +395,8 @@
           "default": null
         },
         "operation_type": {
-          "default": "standard",
-          "enum": [
-            "standard",
-            "compaction_auto",
-            "compaction_manual"
-          ],
-          "title": "Operation Type",
-          "type": "string"
+          "$ref": "#/$defs/LLMOperationType",
+          "default": "standard"
         },
         "tool_output_security": {
           "default": true,
@@ -446,6 +440,16 @@
       ],
       "title": "InlineResponseSchemaConfig",
       "type": "object"
+    },
+    "LLMOperationType": {
+      "enum": [
+        "standard",
+        "compaction_auto",
+        "compaction_manual",
+        "decision"
+      ],
+      "title": "LLMOperationType",
+      "type": "string"
     },
     "LiteLLMProviderParams": {
       "additionalProperties": false,

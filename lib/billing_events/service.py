@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from gitlab_cloud_connector import CloudConnectorUser
 from pydantic import BaseModel
@@ -18,9 +18,13 @@ __all__ = [
     "SelfHostedLLMOperations",
 ]
 
-# Literal type for all valid operation types.
-# When a new operation type is needed, add it here.
-LLMOperationType = Literal["standard", "compaction_auto", "compaction_manual"]
+
+# All valid operation types. When a new operation type is needed, add it here.
+class LLMOperationType(StrEnum):
+    STANDARD = "standard"
+    COMPACTION_AUTO = "compaction_auto"
+    COMPACTION_MANUAL = "compaction_manual"
+    DECISION = "decision"
 
 
 BILL_ONCE_PER_WORKFLOW_FEATURES: frozenset[str] = frozenset(
@@ -68,7 +72,7 @@ class LLMOperation(BaseModel):
     agent_name: str | None = None
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
-    operation_type: LLMOperationType = "standard"
+    operation_type: LLMOperationType = LLMOperationType.STANDARD
 
 
 class SelfHostedLLMOperations:

@@ -71,7 +71,7 @@ class PromptConfig(BaseModel):
     models_from: str | None = None
     prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
-    operation_type: LLMOperationType = "standard"
+    operation_type: LLMOperationType = LLMOperationType.STANDARD
     tool_output_security: bool = True
 
     @model_validator(mode="after")
@@ -107,7 +107,7 @@ class InMemoryPromptConfig(BaseModel):
     unit_primitives: list[GitLabUnitPrimitive]
     prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
-    operation_type: LLMOperationType = "standard"
+    operation_type: LLMOperationType = LLMOperationType.STANDARD
     tool_output_security: bool = True
 
     def to_prompt_data(self) -> dict:

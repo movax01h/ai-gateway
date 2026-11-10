@@ -786,7 +786,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     model_vendor: Optional[str] = None
     model: Model
     unit_primitive: GitLabUnitPrimitive
-    operation_type: LLMOperationType = "standard"
+    operation_type: LLMOperationType = LLMOperationType.STANDARD
     prompt_tpl: Runnable[Any, PromptValue]
     internal_event_client: Optional[InternalEventsClient] = None
     limits: Optional[ModelLimits] = None
@@ -885,7 +885,11 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 model_metadata,
             )
         )
-        if merges_system_messages(model_provider, llm_definition):
+        # A decision template returns the `{"input", "questions"}` request, not chat messages, so it has none to merge.
+        if (
+            config.operation_type != LLMOperationType.DECISION
+            and merges_system_messages(model_provider, llm_definition)
+        ):
             prompt_tpl = prompt_tpl | RunnableLambda(merge_leading_system_messages)
 
         prompt = self._chain_cache_control_injection_points_converter(
@@ -1168,10 +1172,15 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 *[cb.on_before_llm_call() for cb in self.internal_callbacks]
             )
 
-            # super() cannot be used inside a lambda; call RunnableBinding.ainvoke directly
-            result = await _ainvoke_with_retry(
-                lambda: RunnableBinding.ainvoke(self, input, config, **kwargs)
-            )
+            async def invoke() -> BaseMessage:
+                # super() cannot be used inside a closure; call RunnableBinding.ainvoke directly
+                return await RunnableBinding.ainvoke(self, input, config, **kwargs)
+
+            # A decision fails fast so its caller can fall back (see `ConfigDecision`), so it skips this retry too.
+            if self.operation_type == LLMOperationType.DECISION:
+                result = await invoke()
+            else:
+                result = await _ainvoke_with_retry(invoke)
 
             watcher.register_message(result)
             self.handle_usage_metadata(watcher, usage_cb.usage_metadata)

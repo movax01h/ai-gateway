@@ -735,6 +735,41 @@ another model.
 On the Duo Workflow Service, the check uses the client's `feature_setting` until the service derives the feature from
 the flow. Until then, `enforce_outcome` shows what `enforce` mode would do with the client's feature only.
 
+## Decision models
+
+The [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions) answers typed questions about an input instead of generating text, with a probability for each possible answer.
+Use it to classify, route, or gate a request.
+It's in beta, and `gpt-6-luna` is the only model it accepts.
+
+A decision runs on the model's normal entry, `gpt_6_luna`. Give the prompt `operation_type: decision`, and the
+registry calls the model's Decisions endpoint instead of chat:
+
+```yaml
+name: Classify request
+unit_primitive: duo_agent_platform
+operation_type: decision
+prompt_template:
+  user: "{{request}}"
+```
+
+The `prompt_template` renders the input, so use a `user` message: other roles reach the Decisions API as JSON text.
+Pass the questions with the call, and read the answers with `decision_response`:
+
+```python
+message = await prompt.ainvoke({"request": text, "questions": {"category": Choice(...)}})
+decision_response(message).choices["category"].choice
+```
+
+A question can be a `Choice`, a `Predicate` (the probability that a condition is true), or a `Score` (a position on ordered levels).
+
+`operation_type: decision` marks the call as a classification rather than a generation. It's billed as `gpt-6-luna`
+like any other call, and the billing entry and token usage event both carry `operation_type: decision`, so
+CustomersDot can leave it out of credit consumption.
+
+A decision classifies so the caller can fall back, so it fails fast instead of retrying or waiting out a slow request.
+The OpenAI client makes a single attempt (`max_retries: 0`) under a short request timeout, both set on the model
+factory. Tune them with `AIGW_DECISION__MAX_RETRIES` and `AIGW_DECISION__REQUEST_TIMEOUT` (seconds, default 10).
+
 ## Developer models
 
 The `dev` configuration allows you to test experimental models with internal team members before rolling them out to everyone.

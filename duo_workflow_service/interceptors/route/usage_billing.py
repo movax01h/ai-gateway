@@ -5,6 +5,7 @@ import structlog
 from ai_gateway.prompts import BasePromptCallbackHandler, BasePromptRegistry, Prompt
 from contract import contract_pb2
 from duo_workflow_service.executor.outbox import Outbox
+from lib.billing_events.service import LLMOperationType
 from lib.events import GLReportingEventContext
 from lib.events.contextvar import llm_call_is_retry, self_hosted_dap_billing_enabled
 
@@ -75,7 +76,7 @@ class PromptRegistrySelfHostedBillingSupport(BasePromptRegistry):
         hosted deployments do not trigger billing events.
         """
         prompt = self.instance.get(*args, **kwargs)
-        if prompt.operation_type != "compaction_auto":
+        if prompt.operation_type != LLMOperationType.COMPACTION_AUTO:
             prompt.internal_callbacks.append(self.callback)
 
         return prompt

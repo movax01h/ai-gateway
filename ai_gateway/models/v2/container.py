@@ -2,6 +2,7 @@ from typing import Any
 
 import httpx
 import litellm
+import openai
 from dependency_injector import containers, providers
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
@@ -25,6 +26,7 @@ from ai_gateway.models.v2.completion_litellm import (
 )
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.models.v2.openai import ChatOpenAI
+from ai_gateway.models.v2.openai_decisions import OpenAIDecisionsModel
 
 __all__ = [
     "ContainerModels",
@@ -88,6 +90,9 @@ class ContainerModels(containers.DeclarativeContainer):
 
     http_async_client_anthropic = providers.Singleton(init_anthropic_client)
 
+    # Shared by every OpenAIDecisions instance, which otherwise opens its own pool.
+    http_async_client_openai = providers.Singleton(openai.DefaultAsyncHttpxClient)
+
     google_gen_vertex_ai_http_client = providers.Singleton(
         init_google_gen_vertex_ai_http_client
     )
@@ -126,6 +131,16 @@ class ContainerModels(containers.DeclarativeContainer):
         output_version="responses/v1",
         custom_models_enabled=config.custom_models.enabled,
         request_timeout=config.duo_chat.model_request_timeout,
+    )
+
+    openai_decisions_fn = providers.Factory(
+        OpenAIDecisionsModel,
+        model="gpt-6-luna",  # The only Decisions model today; callers can pass another.
+        http_async_client=http_async_client_openai,
+        # A decision classifies so a caller can fall back, so it must fail fast:
+        # no client retries and a short request timeout, both configurable.
+        max_retries=config.decision.max_retries,
+        timeout=config.decision.request_timeout,
     )
 
     google_chat_gen_vertex_ai_global_fn = providers.Factory(
