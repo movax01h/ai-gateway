@@ -331,3 +331,5 @@ tmp/
 ai/features/foundational_agents/*
 !ai/features/foundational_agents/.gitkeep
 !ai/features/foundational_agents/README.md
+!ai/features/foundational_agents/config
+!ai/features/foundational_agents/config/ai-catalog-agents.yml

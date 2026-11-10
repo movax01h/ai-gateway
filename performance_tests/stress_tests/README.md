@@ -35,7 +35,6 @@ The `api_v4_duo_workflow_chat_graphql_api.js` test can be run directly with k6 (
     poetry run fetch-foundational-agents \
       "https://gitlab.test" \
       "$GITLAB_API_TOKEN" \
-      "duo_planner:348,security_analyst_agent:356" \
       --flow-registry-version v1
     ```
 
@@ -43,8 +42,10 @@ The `api_v4_duo_workflow_chat_graphql_api.js` test can be run directly with k6 (
 
     - GitLab instance URL
     - GitLab API token with read access to the agent repository
-    - Comma-separated list of `agent_name:version_id` pairs
+    - Comma-separated list of `reference:catalog_id` pairs (optional): replaces the agents file when given
     - Flow registry version (`v1` or `experimental`)
+    - `--agents-file <path>` (optional): YAML file that lists the agents to fetch. Defaults to
+      `ai/features/foundational_agents/config/ai-catalog-agents.yml`; pass your own file when the catalog IDs on the target instance differ.
 
     The fetched configurations land in `ai/features/foundational_agents/<agent>/config/` and DWS uses them during the test. Without this step, tests using foundational agents may fail or use incorrect versions.
 1. A project with appropriate feature flags enabled (such as one created by `rake gitlab:duo:setup` in GDK)
