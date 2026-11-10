@@ -257,7 +257,6 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.RevertToDetectedVulnerability,
         tools.CreateVulnerabilityIssue,
         tools.PostSastFpAnalysisToGitlab,
-        tools.PostSecretFpAnalysisToGitlab,
         tools.PostDuoCodeReview,
         tools.PostDuoCodeReviewFindings,
         SubmitMrReview,
