@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
 )
 from duo_workflow_service.scripts import fetch_foundational_agents as script
 from duo_workflow_service.scripts.fetch_foundational_agents import (
+    DEFAULT_AGENTS_FILE,
     FETCH_AGENT_OPERATION_NAME,
     FETCH_AGENT_QUERY,
     FETCH_FLOW_DEFINITION,
@@ -23,6 +25,8 @@ from duo_workflow_service.scripts.fetch_foundational_agents import (
     fetch_agents,
     fetch_foundational_agent,
     graphql_request,
+    load_agents,
+    parse_agent_list,
     parse_arguments,
     save_workflow_to_file,
 )
@@ -169,7 +173,7 @@ class TestFetchFoundationalAgent:
         mock_graphql_request.side_effect = [agent_response, flow_response]
 
         name, flow_config = fetch_foundational_agent(
-            "http://test.com", "token", "agent_1:123"
+            "http://test.com", "token", "agent_1", 123
         )
 
         # Verify both GraphQL calls were made
@@ -218,7 +222,7 @@ class TestFetchFoundationalAgent:
 
         mock_graphql_request.side_effect = [agent_response, flow_response]
 
-        fetch_foundational_agent("http://test.com/", "token", "agent_1:123")
+        fetch_foundational_agent("http://test.com/", "token", "agent_1", 123)
 
         # Should strip trailing slash for both calls
         mock_graphql_request.assert_any_call(
@@ -236,7 +240,7 @@ class TestFetchFoundationalAgent:
         mock_graphql_request.return_value = mock_response
 
         with pytest.raises(RuntimeError) as exc_info:
-            fetch_foundational_agent("http://test.com", "token", "agent_1:123")
+            fetch_foundational_agent("http://test.com", "token", "agent_1", 123)
 
         assert exc_info.value.args[0] == [{"message": "Agent not found"}]
 
@@ -255,7 +259,7 @@ class TestFetchFoundationalAgent:
         mock_graphql_request.return_value = agent_response
 
         with pytest.raises(RuntimeError, match="Version not found"):
-            fetch_foundational_agent("http://test.com", "token", "agent_1:123")
+            fetch_foundational_agent("http://test.com", "token", "agent_1", 123)
 
 
 _V1_FLOW_DEF = (
@@ -418,15 +422,136 @@ class TestSaveWorkflowToFile:
         )
 
 
+_AGENTS_YAML = (
+    "agents:\n"
+    "  - reference: agent_1\n"
+    "    catalog_id: 123\n"
+    "  - reference: agent_2\n"
+    "    catalog_id: 456\n"
+)
+
+
+class TestLoadAgents:
+    """Test cases for load_agents function."""
+
+    def test_returns_the_entries(self, tmp_path):
+        """The entries come back in file order."""
+        agents_file = tmp_path / "agents.yml"
+        agents_file.write_text(_AGENTS_YAML)
+
+        agents = load_agents(agents_file)
+
+        assert [(a.reference, a.catalog_id) for a in agents] == [
+            ("agent_1", 123),
+            ("agent_2", 456),
+        ]
+
+    def test_bundled_file_is_valid(self):
+        """The file the Docker images read must always load."""
+        agents = load_agents(DEFAULT_AGENTS_FILE)
+
+        assert agents
+        assert all(a.reference and a.catalog_id > 0 for a in agents)
+
+    def test_bundled_file_is_tracked_and_shipped(self):
+        """Fetched agents are ignored under foundational_agents/, the list must not be."""
+        repo_root = default_features_dir().parents[1]
+        relative = DEFAULT_AGENTS_FILE.relative_to(repo_root).as_posix()
+        assert (
+            relative == "ai/features/foundational_agents/config/ai-catalog-agents.yml"
+        )
+
+        for ignore_file in (".gitignore", ".dockerignore"):
+            assert f"!{relative}\n" in (repo_root / ignore_file).read_text(), (
+                f"{ignore_file} excludes {relative}"
+            )
+
+    @pytest.mark.parametrize(
+        ("content", "match"),
+        [
+            ("agents: []\n", "at least 1 item"),
+            ("agents:\n  - reference: agent_1\n", "catalog_id"),
+            ("agents:\n  - catalog_id: 123\n", "reference"),
+            (
+                "agents:\n  - reference: agent_1\n    catalog_id: abc\n",
+                "catalog_id",
+            ),
+            (
+                "agents:\n  - reference: agent_1\n    catalog_id: 1\n    id: 2\n",
+                "id",
+            ),
+            ("other: []\n", "agents"),
+            (
+                "agents:\n"
+                "  - reference: a\n    catalog_id: 1\n"
+                "  - reference: a\n    catalog_id: 2\n",
+                "Duplicate agent references",
+            ),
+        ],
+    )
+    def test_rejects_invalid_files(self, tmp_path, content, match):
+        """Schema violations raise before anything is fetched."""
+        agents_file = tmp_path / "agents.yml"
+        agents_file.write_text(content)
+
+        with pytest.raises(ValidationError, match=match):
+            load_agents(agents_file)
+
+    def test_missing_file(self, tmp_path):
+        """A missing file is reported as such, not as invalid."""
+        with pytest.raises(FileNotFoundError):
+            load_agents(tmp_path / "missing.yml")
+
+    @pytest.mark.parametrize("dockerfile", ["Dockerfile", "docker/fips/Dockerfile"])
+    def test_dockerfile_list_matches_the_bundled_file(self, dockerfile):
+        """GDK reads the agent list from the Dockerfile, so it must not drift from the file."""
+        repo_root = default_features_dir().parents[1]
+        # Same shape GDK's support/gitlab-ai-gateway-fetch-foundational-agents matches.
+        match = re.search(
+            r'fetch-foundational-agents "[^"]*" "[^"]*" "([^"]*)"',
+            (repo_root / dockerfile).read_text(),
+        )
+        assert match, f"{dockerfile} has no line GDK can read the agent list from"
+
+        assert parse_agent_list(match.group(1)) == load_agents(DEFAULT_AGENTS_FILE)
+
+
+class TestParseAgentList:
+    """Test cases for parse_agent_list function."""
+
+    def test_returns_the_pairs(self):
+        """Pairs come back in the given order with integer catalog IDs."""
+        agents = parse_agent_list("agent_1:123,agent_2:456")
+
+        assert [(a.reference, a.catalog_id) for a in agents] == [
+            ("agent_1", 123),
+            ("agent_2", 456),
+        ]
+
+    @pytest.mark.parametrize(
+        ("value", "match"),
+        [
+            ("agent_1", "catalog_id"),
+            ("agent_1:abc", "catalog_id"),
+            (":123", "reference"),
+            ("", "reference"),
+            ("a:1,a:2", "Duplicate agent references"),
+        ],
+    )
+    def test_rejects_invalid_lists(self, value, match):
+        """The list is validated with the same schema as the agents file."""
+        with pytest.raises(ValidationError, match=match):
+            parse_agent_list(value)
+
+
 class TestParseArguments:
     """Test cases for parse_arguments function."""
 
     def test_parse_required_arguments(self):
         """Test parsing with required arguments."""
         test_args = [
-            "http://test.com/graphql",
+            "http://test.com",
             "test-token",
-            "agent_1:123,agent_2:456,agent_3:789",
             "--flow-registry-version",
             "v1",
         ]
@@ -434,18 +559,18 @@ class TestParseArguments:
         with patch("sys.argv", ["script.py"] + test_args):
             args = parse_arguments()
 
-        assert args.gitlab_url == "http://test.com/graphql"
+        assert args.gitlab_url == "http://test.com"
         assert args.gitlab_token == "test-token"
-        assert args.foundational_agent_ids == "agent_1:123,agent_2:456,agent_3:789"
         assert args.flow_registry_version == "v1"
+        assert args.agents is None
+        assert args.agents_file == str(DEFAULT_AGENTS_FILE)
         assert args.dry_run is None
 
     def test_parse_with_experimental_version(self):
         """Test parsing with experimental flow registry version."""
         test_args = [
-            "http://test.com/graphql",
+            "http://test.com",
             "test-token",
-            "agent_1:123,agent_2:456,agent_3:789",
             "--flow-registry-version",
             "experimental",
         ]
@@ -453,19 +578,17 @@ class TestParseArguments:
         with patch("sys.argv", ["script.py"] + test_args):
             args = parse_arguments()
 
-        assert args.gitlab_url == "http://test.com/graphql"
-        assert args.gitlab_token == "test-token"
-        assert args.foundational_agent_ids == "agent_1:123,agent_2:456,agent_3:789"
         assert args.flow_registry_version == "experimental"
 
-    def test_parse_with_dry_run(self):
-        """Test parsing with dry-run flag."""
+    def test_parse_with_agents_file_and_dry_run(self):
+        """Test parsing with an explicit agents file and the dry-run flag."""
         test_args = [
-            "http://test.com/graphql",
+            "http://test.com",
             "test-token",
-            "agent_1:123,agent_2:456,agent_3:789",
             "--flow-registry-version",
             "v1",
+            "--agents-file",
+            "my_agents.yml",
             "--dry-run",
             "true",
         ]
@@ -473,15 +596,35 @@ class TestParseArguments:
         with patch("sys.argv", ["script.py"] + test_args):
             args = parse_arguments()
 
-        assert args.gitlab_url == "http://test.com/graphql"
-        assert args.gitlab_token == "test-token"
-        assert args.foundational_agent_ids == "agent_1:123,agent_2:456,agent_3:789"
-        assert args.flow_registry_version == "v1"
+        assert args.agents_file == "my_agents.yml"
         assert args.dry_run == "true"
+
+    def test_parse_with_positional_agent_list(self):
+        """The `reference:id` list is still accepted as a third positional argument."""
+        test_args = [
+            "http://test.com",
+            "test-token",
+            "agent_1:123,agent_2:456",
+            "--flow-registry-version",
+            "v1",
+        ]
+
+        with patch("sys.argv", ["script.py"] + test_args):
+            args = parse_arguments()
+
+        assert args.agents == "agent_1:123,agent_2:456"
+        assert args.agents_file == str(DEFAULT_AGENTS_FILE)
 
 
 class TestFetchAgents:
     """Test cases for fetch_agents main function."""
+
+    @pytest.fixture
+    def agents_file(self, tmp_path):
+        """A two-entry agents file on disk."""
+        path = tmp_path / "agents.yml"
+        path.write_text(_AGENTS_YAML)
+        return str(path)
 
     @patch("duo_workflow_service.scripts.fetch_foundational_agents.parse_arguments")
     @patch(
@@ -489,38 +632,37 @@ class TestFetchAgents:
     )
     @patch("builtins.print")
     def test_fetch_agents_dry_run_output(
-        self, mock_print, mock_fetch_agent, mock_parse_args
+        self, mock_print, mock_fetch_agent, mock_parse_args, agents_file
     ):
         """Test fetch_agents with dry-run output."""
-        # Mock arguments
         mock_args = Mock()
         mock_args.gitlab_url = "http://test.com"
         mock_args.gitlab_token = "token"
-        mock_args.foundational_agent_ids = "agent_1:123,agent_2:456"
+        mock_args.agents_file = agents_file
+        mock_args.agents = None
         mock_args.flow_registry_version = "v1"
         mock_args.dry_run = True
         mock_parse_args.return_value = mock_args
 
-        # Mock workflow definitions - now returns tuples (name, flow_config)
         mock_fetch_agent.side_effect = [
-            ("agent1", "version: v1\ncomponents:\n  - name: agent1"),
-            ("agent2", "version: v1\ncomponents:\n  - name: agent2"),
+            ("agent_1", "version: v1\ncomponents:\n  - name: agent1"),
+            ("agent_2", "version: v1\ncomponents:\n  - name: agent2"),
         ]
 
         fetch_agents()
 
-        # Verify fetch_foundational_agent was called for each ID
+        # One fetch per entry in the agents file
         assert mock_fetch_agent.call_count == 2
-        mock_fetch_agent.assert_any_call("http://test.com", "token", "agent_1:123")
-        mock_fetch_agent.assert_any_call("http://test.com", "token", "agent_2:456")
+        mock_fetch_agent.assert_any_call("http://test.com", "token", "agent_1", 123)
+        mock_fetch_agent.assert_any_call("http://test.com", "token", "agent_2", 456)
 
         # Verify output to stdout - should print separator, name, and flow config for each workflow
         expected_calls = [
             unittest.mock.call("-----"),
-            unittest.mock.call("agent1"),
+            unittest.mock.call("agent_1"),
             unittest.mock.call("version: v1\ncomponents:\n  - name: agent1"),
             unittest.mock.call("-----"),
-            unittest.mock.call("agent2"),
+            unittest.mock.call("agent_2"),
             unittest.mock.call("version: v1\ncomponents:\n  - name: agent2"),
         ]
         mock_print.assert_has_calls(expected_calls)
@@ -539,18 +681,21 @@ class TestFetchAgents:
         mock_save_workflow,
         mock_fetch_agent,
         mock_parse_args,
+        tmp_path,
     ):
         """Test fetch_agents with file output."""
-        # Mock arguments
+        agents_file = tmp_path / "agents.yml"
+        agents_file.write_text("agents:\n  - reference: agent_1\n    catalog_id: 123\n")
+
         mock_args = Mock()
         mock_args.gitlab_url = "http://test.com"
         mock_args.gitlab_token = "token"
-        mock_args.foundational_agent_ids = "agent_1:123"
+        mock_args.agents_file = str(agents_file)
+        mock_args.agents = None
         mock_args.flow_registry_version = "v1"
         mock_args.dry_run = None
         mock_parse_args.return_value = mock_args
 
-        # Mock workflow definition - now returns tuple (name, flow_config)
         mock_fetch_agent.return_value = (
             "agent_1",
             "version: v1\ncomponents:\n  - name: agent1",
@@ -576,13 +721,15 @@ class TestFetchAgents:
         )
 
     @patch("duo_workflow_service.scripts.fetch_foundational_agents.parse_arguments")
-    def test_fetch_agents_invalid_flow_registry_version(self, mock_parse_args):
+    def test_fetch_agents_invalid_flow_registry_version(
+        self, mock_parse_args, agents_file
+    ):
         """Test fetch_agents raises error for invalid flow registry version."""
-        # Mock arguments with invalid flow_registry_version
         mock_args = Mock()
         mock_args.gitlab_url = "http://test.com"
         mock_args.gitlab_token = "token"
-        mock_args.foundational_agent_ids = "agent_1:123"
+        mock_args.agents_file = agents_file
+        mock_args.agents = None
         mock_args.flow_registry_version = "invalid"
         mock_parse_args.return_value = mock_args
 
@@ -590,3 +737,51 @@ class TestFetchAgents:
             ValueError, match="Flow Registry version 'invalid' is not supported"
         ):
             fetch_agents()
+
+    @patch("duo_workflow_service.scripts.fetch_foundational_agents.parse_arguments")
+    @patch(
+        "duo_workflow_service.scripts.fetch_foundational_agents.fetch_foundational_agent"
+    )
+    def test_fetch_agents_invalid_agents_file_fetches_nothing(
+        self, mock_fetch_agent, mock_parse_args, tmp_path
+    ):
+        """The agents file is validated before any catalog request."""
+        agents_file = tmp_path / "agents.yml"
+        agents_file.write_text("agents: []\n")
+
+        mock_args = Mock()
+        mock_args.gitlab_url = "http://test.com"
+        mock_args.gitlab_token = "token"
+        mock_args.agents_file = str(agents_file)
+        mock_args.agents = None
+        mock_args.flow_registry_version = "v1"
+        mock_parse_args.return_value = mock_args
+
+        with pytest.raises(ValidationError):
+            fetch_agents()
+
+        mock_fetch_agent.assert_not_called()
+
+    @patch("duo_workflow_service.scripts.fetch_foundational_agents.parse_arguments")
+    @patch(
+        "duo_workflow_service.scripts.fetch_foundational_agents.fetch_foundational_agent"
+    )
+    def test_fetch_agents_positional_list_replaces_the_file(
+        self, mock_fetch_agent, mock_parse_args, agents_file
+    ):
+        """A positional list is fetched and the agents file is not read."""
+        mock_args = Mock()
+        mock_args.gitlab_url = "http://test.com"
+        mock_args.gitlab_token = "token"
+        mock_args.agents = "agent_3:789"
+        mock_args.agents_file = agents_file
+        mock_args.flow_registry_version = "v1"
+        mock_args.dry_run = True
+        mock_parse_args.return_value = mock_args
+        mock_fetch_agent.return_value = ("agent_3", "flow: 3")
+
+        fetch_agents()
+
+        mock_fetch_agent.assert_called_once_with(
+            "http://test.com", "token", "agent_3", 789
+        )

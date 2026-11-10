@@ -1,0 +1,16 @@
+# Foundational agents that `fetch-foundational-agents` pulls from the GitLab.com
+# AI Catalog when the Docker images build. Each entry is written to
+# ai/features/foundational_agents/<reference>/config/1.0.0.yml.
+#
+# `reference` must match the agent's `reference` in the GitLab monolith
+# (ee/lib/ai/foundational_chat_agents_definitions.rb) and `catalog_id` its
+# `global_catalog_id`.
+agents:
+  - reference: duo_planner
+    catalog_id: 348
+  - reference: security_analyst_agent
+    catalog_id: 356
+  - reference: ci_expert_agent
+    catalog_id: 1004583
+  - reference: onboarding_guide
+    catalog_id: 1003979

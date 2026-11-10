@@ -1,9 +1,23 @@
-"""Locating ai/features with and without the pyproject.toml marker."""
+"""Locating the project root and ai/features with and without the pyproject.toml marker."""
 
 from pathlib import Path
 
 from lib import feature_roots
-from lib.feature_roots import default_features_dir
+from lib.feature_roots import default_features_dir, default_project_root
+
+
+class TestDefaultProjectRoot:
+    def test_is_the_repo_root(self):
+        root = default_project_root()
+        assert (root / "pyproject.toml").is_file()
+        assert (root / "ai" / "features").is_dir()
+
+    def test_falls_back_without_marker(self, monkeypatch, tmp_path: Path):
+        orphan = tmp_path / "a" / "b" / "feature_roots.py"
+        orphan.parent.mkdir(parents=True)
+        monkeypatch.setattr(feature_roots, "__file__", str(orphan))
+
+        assert default_project_root() == (tmp_path / "a").resolve()
 
 
 class TestDefaultFeaturesDir:
