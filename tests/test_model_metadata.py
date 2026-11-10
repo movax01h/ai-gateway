@@ -20,6 +20,7 @@ from ai_gateway.model_metadata import (
     completion_context_max_percent_for_model_metadata,
     create_model_metadata,
     create_model_metadata_by_tag,
+    drop_default_model_ref,
 )
 from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
 from ai_gateway.model_selection.model_selection_config import (
@@ -253,6 +254,19 @@ class TestCreateModelMetadata:
 
         assert result.llm_definition == gitlab_model1
 
+    def test_create_gitlab_model_metadata_with_the_load_balanced_default(
+        self, gitlab_model1
+    ):
+        data = {
+            "provider": "gitlab",
+            "identifier": "__default__duo_chat",
+            "feature_setting": "duo_chat",
+        }
+
+        result = create_model_metadata(data)
+
+        assert result.llm_definition == gitlab_model1
+
     def test_create_gitlab_model_metadata_with_identifier_and_feature_setting(
         self, gitlab_model2
     ):
@@ -285,6 +299,53 @@ class TestCreateModelMetadata:
 
         with pytest.raises(ValueError):
             create_model_metadata(data)
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        pytest.param(
+            {
+                "provider": "gitlab",
+                "identifier": "__default__duo_chat",
+                "feature_setting": "duo_chat",
+            },
+            {"provider": "gitlab", "feature_setting": "duo_chat"},
+            id="load-balanced-default",
+        ),
+        pytest.param(
+            {
+                "provider": "gitlab",
+                "identifier": "gitlab_model1",
+                "feature_setting": "duo_chat",
+            },
+            {
+                "provider": "gitlab",
+                "identifier": "gitlab_model1",
+                "feature_setting": "duo_chat",
+            },
+            id="model",
+        ),
+        pytest.param(
+            {
+                "provider": "openai",
+                "name": "gitlab_model1",
+                "identifier": "__default__duo_chat",
+            },
+            {
+                "provider": "openai",
+                "name": "gitlab_model1",
+                "identifier": "__default__duo_chat",
+            },
+            id="self-hosted-model",
+        ),
+        pytest.param(None, None, id="no-metadata"),
+    ],
+)
+def test_drop_default_model_ref(data, expected):
+    drop_default_model_ref(data)
+
+    assert data == expected
 
 
 def test_create_model_metadata_invalid_data():

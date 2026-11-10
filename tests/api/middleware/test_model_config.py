@@ -14,6 +14,7 @@ from ai_gateway.api.middleware.access_log import AccessLogMiddleware
 from ai_gateway.api.middleware.model_config import ModelConfigMiddleware
 from ai_gateway.api.v1.prompts.invoke import check_prompt_model_metadata
 from ai_gateway.config import ConfigModelLimits
+from ai_gateway.model_metadata import DEFAULT_MODEL_REF_PREFIX
 from ai_gateway.model_selection import (
     ModelSelectionConfig,
     ModelSelectionError,
@@ -562,6 +563,7 @@ async def test_parses_iam_role_into_context_var(middleware_test_client):
 
 FABLE = "claude_fable_5"
 CHAT = "duo_chat"
+GIT_COMMAND = "glab_ask_git_command"
 NOT_ALLOWED_FOR_CHAT = {
     "provider": "gitlab",
     "identifier": FABLE,
@@ -627,6 +629,32 @@ class TestFeatureAllowlist:
 
         assert response.status_code == 200
         assert response.json()["name"] == allowed
+
+    @pytest.mark.parametrize(
+        "feature_allowlist_mode", ["log", "fallback", "enforce"], indirect=True
+    )
+    def test_serves_the_feature_default_for_the_load_balanced_default(
+        self, middleware_test_client
+    ):
+        defaults = _feature(GIT_COMMAND).default_model_identifiers
+        # `/v1/models/definitions` lists the load-balanced default for a feature with several default models.
+        assert len(defaults) > 1
+
+        with capture_logs() as logs:
+            response = middleware_test_client.post(
+                "/test",
+                json={
+                    "model_metadata": {
+                        "provider": "gitlab",
+                        "identifier": f"{DEFAULT_MODEL_REF_PREFIX}{GIT_COMMAND}",
+                        "feature_setting": GIT_COMMAND,
+                    }
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json()["name"] in defaults
+        assert [entry for entry in logs if entry["log_level"] == "warning"] == []
 
     @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
     def test_log_mode_serves_the_model_and_logs_the_mismatch(

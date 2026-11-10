@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
 from ai_gateway.api.feature_category import feature_category
+from ai_gateway.model_metadata import DEFAULT_MODEL_REF_PREFIX
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.types import (
     DeprecationInfo,
@@ -13,13 +14,13 @@ from ai_gateway.model_selection.types import (
 
 router = APIRouter()
 
-# Identifier used for the pseudo-model created when a unit primitive has multiple default models.
+# A unit primitive with multiple default models gets a pseudo-model, `DEFAULT_MODEL_REF_PREFIX` + its feature setting.
 # The pseudo-model represents the load-balanced default. Its provider is reported as
 # "Multiple providers" since requests are distributed across providers transparently.
+# A client that sends the pseudo-model back as its `identifier` gets the feature default (`drop_default_model_ref`).
 # NOTE: Multiple default models should only be used for the same model across different providers,
 # because a single model name (from the first default model) will be used when displaying the
 # default model to the user.
-_PSEUDO_DEFAULT_MODEL_IDENTIFIER = "__default__"
 
 # Provider label for the load-balanced pseudo-model.
 _LOAD_BALANCED_PROVIDER = "Multiple providers"
@@ -92,9 +93,7 @@ async def get_models():
             first_definition = llm_definitions.get(first_model_id)
             pseudo_name = first_definition.name if first_definition else first_model_id
             # Use a feature-setting-scoped identifier for the pseudo-model
-            pseudo_identifier = (
-                f"{_PSEUDO_DEFAULT_MODEL_IDENTIFIER}{primitive.feature_setting}"
-            )
+            pseudo_identifier = f"{DEFAULT_MODEL_REF_PREFIX}{primitive.feature_setting}"
             pseudo_models[pseudo_identifier] = _GetModelResponseModel(
                 name=pseudo_name,
                 identifier=pseudo_identifier,
