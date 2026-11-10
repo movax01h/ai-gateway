@@ -98,20 +98,27 @@ def _display_name(name: str) -> str:
     A long name loses its middle, keeping the start and the end that tell similar names apart.
     """
     name = name.strip().removeprefix(_NAME_PREFIX)
-    encoded = name.encode()
-    if len(encoded) <= _MAX_DISPLAY_NAME_BYTES:
+    # Checked on characters first, so an over-limit name is never encoded whole.
+    if (
+        len(name) <= _MAX_DISPLAY_NAME_BYTES
+        and len(name.encode()) <= _MAX_DISPLAY_NAME_BYTES
+    ):
         return name
     keep = (_MAX_DISPLAY_NAME_BYTES - len("…".encode())) // 2
-    # Cut on bytes; a character split at either cut is dropped.
-    head = encoded[:keep].decode(errors="ignore")
-    tail = encoded[-keep:].decode(errors="ignore")
+    # Cut on bytes; a character split at either cut is dropped. Every character is at
+    # least one byte, so encoding `keep` characters from each end covers the cut.
+    head = name[:keep].encode()[:keep].decode(errors="ignore")
+    tail = name[-keep:].encode()[-keep:].decode(errors="ignore")
     return f"{head}…{tail}"
 
 
 def _subject(agent: Any, position: int) -> str:
-    """Name an agent by its declared name, or by its position when the name is unusable."""
+    """Name an agent by its declared name, or by its position when it has no name to quote.
+
+    A name over the limit is still quoted, shortened, so the user can tell which agent to fix.
+    """
     name = agent.get("name") if isinstance(agent, Mapping) else None
-    if isinstance(name, str) and 0 < len(name.strip()) <= MAX_NAME_LENGTH:
+    if isinstance(name, str) and name.strip():
         return f"Workspace agent '{_display_name(name)}'"
     return f"Workspace agent {position}"
 
@@ -177,7 +184,7 @@ class WorkspaceAgent(BaseModel):
             position: The agent's 1-based position in the request.
 
         Returns:
-            The agent, by name or by position when the name is unusable, and its problem.
+            The agent, by name or by position when it has no name to quote, and its problem.
         """
         subject = _subject(agent, position)
 

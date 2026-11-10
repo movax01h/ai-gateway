@@ -133,8 +133,19 @@ class TestDisplayName:
                 "code-reviewer-for-…ontend-application",
             ),
             ("é" * 30, "é" * 9 + "…" + "é" * 9),
+            ("a" + "é" * 30, "a" + "é" * 8 + "…" + "é" * 9),
+            ("😀" * 12, "😀" * 4 + "…" + "😀" * 4),
         ],
-        ids=["plain", "namespaced", "padded", "at_the_limit", "long", "multibyte"],
+        ids=[
+            "plain",
+            "namespaced",
+            "padded",
+            "at_the_limit",
+            "long",
+            "multibyte",
+            "multibyte_split_at_the_cut",
+            "four_byte_split_at_both_cuts",
+        ],
     )
     def test_the_name_is_shown_as_declared_and_bounded(self, name, expected):
         """Quoted in errors the user reads, whose length Workhorse caps in bytes.
