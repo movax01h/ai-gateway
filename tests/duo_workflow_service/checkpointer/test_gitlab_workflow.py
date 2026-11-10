@@ -1193,7 +1193,7 @@ async def test_infra_stop_still_emits_billing_event(
     assert WorkflowStatusEventEnum.STOP not in status_calls
     assert WorkflowStatusEventEnum.DROP not in status_calls
 
-    billing_event_client.track_billing_event.assert_called_once_with(
+    billing_event_client.send_billing_event.assert_called_once_with(
         mock_user,
         BillingEvent.DAP_FLOW_ON_COMPLETION,
         "GitLabWorkflow",
@@ -2919,9 +2919,9 @@ async def test_handle_completion_cached_terminal_status_end_to_end(
     status_handler.get_workflow_status.assert_not_called()
 
     # Every cached event in this table is billable.
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
     assert (
-        billing_event_client.track_billing_event.call_args.args[1]
+        billing_event_client.send_billing_event.call_args.args[1]
         == BillingEvent.DAP_FLOW_ON_COMPLETION
     )
 
@@ -3063,7 +3063,7 @@ async def test_handle_completion_bills_when_executor_never_answers(
         await _wait_until_awaited(stalled)
         # Still stuck on the PATCH, yet already billed.
         assert not task.done()
-        billing_event_client.track_billing_event.assert_called_once()
+        billing_event_client.send_billing_event.assert_called_once()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -3072,9 +3072,9 @@ async def test_handle_completion_bills_when_executor_never_answers(
         await task
         stalled.assert_not_awaited()
 
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
     assert (
-        billing_event_client.track_billing_event.call_args.args[1]
+        billing_event_client.send_billing_event.call_args.args[1]
         == BillingEvent.DAP_FLOW_ON_COMPLETION
     )
 
@@ -3097,7 +3097,7 @@ async def test_handle_completion_bills_when_finish_patch_times_out(
     with pytest.raises(ExecutorRequestTimeoutError):
         await billing_workflow._handle_completion()
 
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
     status_handler.get_workflow_status.assert_not_called()
     # The entry stays parked, as before, when its PATCH fails.
     assert WorkflowStatusEventEnum.FINISH in billing_workflow._deferred_statuses
@@ -3134,7 +3134,7 @@ async def test_aexit_bills_require_input_turn_despite_spoofed_running_get(
 
     await billing_workflow.__aexit__(None, None, None)
 
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
     status_handler.get_workflow_status.assert_not_called()
     assert [c.args for c in status_handler.update_workflow_status.await_args_list] == [
         (workflow_id, WorkflowStatusEventEnum.REQUIRE_INPUT) for _ in deferred_statuses
@@ -3197,9 +3197,9 @@ async def test_aexit_bills_interrupted_turn_on_client_cancel(
         asyncio.CancelledError, asyncio.CancelledError(), None
     )
 
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
     assert (
-        billing_event_client.track_billing_event.call_args.args[1]
+        billing_event_client.send_billing_event.call_args.args[1]
         == BillingEvent.DAP_FLOW_ON_COMPLETION
     )
     # Billing is settled from DWS state alone, so the executor-relayed GET is never sent.
@@ -3248,9 +3248,9 @@ async def test_aexit_bills_interrupted_turn_when_drop_patch_never_answers(
 
     # Still stuck on the DROP PATCH, yet already billed from DWS state.
     assert not task.done()
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
     assert (
-        billing_event_client.track_billing_event.call_args.args[1]
+        billing_event_client.send_billing_event.call_args.args[1]
         == BillingEvent.DAP_FLOW_ON_COMPLETION
     )
     assert status_handler.update_workflow_status.await_args.args == (
@@ -3261,7 +3261,7 @@ async def test_aexit_bills_interrupted_turn_when_drop_patch_never_answers(
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -3295,7 +3295,7 @@ async def test_aexit_client_cancel_without_billable_status_falls_back_to_remote(
         asyncio.CancelledError, asyncio.CancelledError(), None
     )
 
-    billing_event_client.track_billing_event.assert_not_called()
+    billing_event_client.send_billing_event.assert_not_called()
     status_handler.update_workflow_status.assert_awaited_once_with(
         workflow_id, WorkflowStatusEventEnum.DROP
     )
@@ -3446,7 +3446,7 @@ async def test_completion_bills_exactly_once(
             assert aexit_args[0] is None
             assert error in (patch_error, track_error)
 
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
     status_handler.update_workflow_status.assert_awaited_once()
     status_handler.get_workflow_status.assert_not_called()
 
@@ -4034,7 +4034,7 @@ async def test_track_workflow_completion_with_billing_event(
 
     await gitlab_workflow._track_workflow_completion(status)
 
-    billing_event_client.track_billing_event.assert_called_once_with(
+    billing_event_client.send_billing_event.assert_called_once_with(
         mock_user,
         BillingEvent.DAP_FLOW_ON_COMPLETION,
         "GitLabWorkflow",
@@ -4063,7 +4063,7 @@ async def test_track_workflow_completion_with_non_billable_status(
 
     await gitlab_workflow._track_workflow_completion("some_other_status")
 
-    billing_event_client.track_billing_event.assert_not_called()
+    billing_event_client.send_billing_event.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -4084,12 +4084,12 @@ async def test_track_workflow_completion_logs_success_only_when_tracked(
     events are disabled."""
     current_user.set(mock_user)
     gitlab_workflow._billing_event_service = billing_event_service
-    billing_event_client.track_billing_event.return_value = tracked
+    billing_event_client.send_billing_event.return_value = tracked
 
     with capture_logs() as cap_logs:
         await gitlab_workflow._track_workflow_completion(WorkflowStatusEnum.FINISHED)
 
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
     success_logs = [
         log
         for log in cap_logs
@@ -4129,7 +4129,7 @@ async def test_track_workflow_completion_with_orbit_called(
     mock_llm_operations = [
         LLMOperation.model_validate(op).model_dump() for op in operations
     ]
-    billing_event_client.track_billing_event.assert_called_once_with(
+    billing_event_client.send_billing_event.assert_called_once_with(
         mock_user,
         BillingEvent.DAP_FLOW_ON_COMPLETION,
         "GitLabWorkflow",
@@ -4174,7 +4174,7 @@ async def test_track_workflow_completion_with_source_type(
 
     await gitlab_workflow._track_workflow_completion(WorkflowStatusEnum.FINISHED)
 
-    metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+    metadata = billing_event_client.send_billing_event.call_args.kwargs["metadata"]
     assert metadata["source"] == "merge_request_code_conflict"
 
 
@@ -4674,7 +4674,7 @@ async def test_track_workflow_completion_with_billing_event_includes_tool_names(
 
     await gitlab_workflow._track_workflow_completion(status)
 
-    billing_event_client.track_billing_event.assert_called_once_with(
+    billing_event_client.send_billing_event.assert_called_once_with(
         mock_user,
         BillingEvent.DAP_FLOW_ON_COMPLETION,
         "GitLabWorkflow",

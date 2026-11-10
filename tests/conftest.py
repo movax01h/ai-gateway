@@ -914,10 +914,10 @@ def mock_acompletion_with_retry_fixture(request, acompletion_response_fixture):
         yield mock
 
 
-@pytest.fixture(name="mock_track_billing_event")
-def mock_track_billing_event_fixture():
+@pytest.fixture(name="mock_send_billing_event")
+def mock_send_billing_event_fixture():
     with patch(
-        "lib.billing_events.client.BillingEventsClient.track_billing_event"
+        "lib.billing_events.client.BillingEventsClient.send_billing_event"
     ) as mock:
         yield mock
 

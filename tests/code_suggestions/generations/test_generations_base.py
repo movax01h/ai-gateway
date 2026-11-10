@@ -521,7 +521,7 @@ class TestCodeGeneration:
                 user=mock_user,
             )
 
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             "CodeGenerations",
@@ -565,7 +565,7 @@ class TestCodeGeneration:
         async for _ in result:
             pass
 
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             "CodeGenerations",
@@ -594,7 +594,7 @@ class TestCodeGeneration:
                 # No user provided
             )
 
-        mock_billing_client.track_billing_event.assert_not_called()
+        mock_billing_client.send_billing_event.assert_not_called()
 
     async def test_billing_event_exception_handling(
         self,
@@ -616,7 +616,7 @@ class TestCodeGeneration:
         )
 
         # Make billing service raise an exception
-        mock_billing_client.track_billing_event.side_effect = Exception(
+        mock_billing_client.send_billing_event.side_effect = Exception(
             "Billing service unavailable"
         )
 
@@ -630,7 +630,7 @@ class TestCodeGeneration:
             )
 
         assert result.text == expected_output
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             "CodeGenerations",
@@ -659,7 +659,7 @@ class TestCodeGeneration:
         )
 
         # Make billing service raise an exception
-        mock_billing_client.track_billing_event.side_effect = Exception(
+        mock_billing_client.send_billing_event.side_effect = Exception(
             "Billing service unavailable"
         )
 
@@ -677,7 +677,7 @@ class TestCodeGeneration:
             chunks.append(chunk.text)
 
         assert "".join(chunks) == "hello world!"
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             "CodeGenerations",
@@ -717,7 +717,7 @@ class TestCodeGeneration:
             )
 
         # Should still track billing event even with 0 tokens for consistency
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             "CodeGenerations",
@@ -757,7 +757,7 @@ class TestCodeGeneration:
                 user=mock_user,
             )
 
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             "CodeGenerations",
@@ -800,7 +800,7 @@ class TestCodeGeneration:
 
         assert "".join(chunks) == "hello world!"
 
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             "CodeGenerations",
@@ -861,8 +861,8 @@ class TestCodeGenerationsWithPrompt:
 
     @staticmethod
     def _billed_operations(mock_billing_client):
-        mock_billing_client.track_billing_event.assert_called_once()
-        call = mock_billing_client.track_billing_event.call_args
+        mock_billing_client.send_billing_event.assert_called_once()
+        call = mock_billing_client.send_billing_event.call_args
         return call.kwargs["metadata"]["llm_operations"]
 
     async def test_task_cancelled_before_provider_usage_is_billed_with_prompt_identifiers(

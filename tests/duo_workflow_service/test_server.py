@@ -1047,7 +1047,7 @@ async def test_execute_workflow_emits_billing_event(
     simple_flow_config,
     servicer,
     auth_user,
-    mock_track_billing_event,
+    mock_send_billing_event,
 ):
     auth_user.can = MagicMock(return_value=True)
 
@@ -1099,7 +1099,7 @@ async def test_execute_workflow_emits_billing_event(
     else:
         mock_on_before_llm_call.assert_not_called()
 
-    mock_track_billing_event.assert_called_once_with(
+    mock_send_billing_event.assert_called_once_with(
         auth_user,
         BillingEvent.DAP_FLOW_ON_COMPLETION,
         "GitLabWorkflow",
@@ -3964,7 +3964,7 @@ async def test_track_self_hosted_execute_workflow_billing_event(
     assert len(actions) == 1
     assert actions[0].requestID == "test-req-id"
 
-    billing_event_client.track_billing_event.assert_called_once_with(
+    billing_event_client.send_billing_event.assert_called_once_with(
         auth_user,
         BillingEvent.DAP_FLOW_ON_COMPLETION,
         "DuoWorkflowService",
@@ -4039,7 +4039,7 @@ async def test_track_self_hosted_execute_workflow_billing_event_source(
 
     _ = [action async for action in result]
 
-    metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+    metadata = billing_event_client.send_billing_event.call_args.kwargs["metadata"]
     assert metadata.get("source") == expected_source
 
 
@@ -4062,7 +4062,7 @@ async def test_track_self_hosted_execute_workflow_logs_success_only_when_tracked
     """The success log is only emitted when the billing event was actually tracked, e.g. not when billing events are
     disabled."""
     auth_user.can = MagicMock(return_value=True)
-    billing_event_client.track_billing_event.return_value = tracked
+    billing_event_client.send_billing_event.return_value = tracked
 
     async def mock_request_iterator() -> AsyncIterable[
         contract_pb2.TrackSelfHostedClientEvent
@@ -4083,7 +4083,7 @@ async def test_track_self_hosted_execute_workflow_logs_success_only_when_tracked
         actions = [action async for action in result]
 
     assert [a.requestID for a in actions] == ["test-req-id"]
-    billing_event_client.track_billing_event.assert_called_once()
+    billing_event_client.send_billing_event.assert_called_once()
     success_logs = [
         log
         for log in cap_logs
@@ -4136,8 +4136,8 @@ async def test_track_self_hosted_execute_workflow_bills_once_per_workflow_featur
     actions = [action async for action in result]
 
     assert [a.requestID for a in actions] == ["req-1", "req-2", "req-3"]
-    assert billing_event_client.track_billing_event.call_count == 1
-    metadata = billing_event_client.track_billing_event.call_args.kwargs["metadata"]
+    assert billing_event_client.send_billing_event.call_count == 1
+    metadata = billing_event_client.send_billing_event.call_args.kwargs["metadata"]
     assert metadata["feature_qualified_name"] == feature_qualified_name
 
 
@@ -4174,7 +4174,7 @@ async def test_track_self_hosted_execute_workflow_bills_per_call_for_other_featu
     actions = [action async for action in result]
 
     assert [a.requestID for a in actions] == ["req-1", "req-2", "req-3"]
-    assert billing_event_client.track_billing_event.call_count == 3
+    assert billing_event_client.send_billing_event.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -4231,10 +4231,10 @@ async def test_track_self_hosted_execute_workflow_mixes_bill_once_and_per_call_f
         "req-6",
     ]
     # 1 (code_review) + 2 (software_development per call) + 1 (sast_fp_detection)
-    assert billing_event_client.track_billing_event.call_count == 4
+    assert billing_event_client.send_billing_event.call_count == 4
     billed_features = [
         c.kwargs["metadata"]["feature_qualified_name"]
-        for c in billing_event_client.track_billing_event.call_args_list
+        for c in billing_event_client.send_billing_event.call_args_list
     ]
     assert billed_features == [
         "code_review/v1",
@@ -4285,7 +4285,7 @@ async def test_track_self_hosted_execute_workflow_dedups_across_feature_versions
     actions = [action async for action in result]
 
     assert [a.requestID for a in actions] == ["req-1", "req-2", "req-3"]
-    assert billing_event_client.track_billing_event.call_count == 1
+    assert billing_event_client.send_billing_event.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -4305,7 +4305,7 @@ async def test_track_self_hosted_execute_workflow_failure_does_not_consume_once_
     auth_user.can = MagicMock(return_value=True)
     # First emission raises; the second one succeeds and consumes the budget;
     # the third would be suppressed and never hits the client.
-    billing_event_client.track_billing_event.side_effect = [
+    billing_event_client.send_billing_event.side_effect = [
         RuntimeError("snowplow down"),
         None,
     ]
@@ -4333,7 +4333,7 @@ async def test_track_self_hosted_execute_workflow_failure_does_not_consume_once_
     assert [a.requestID for a in actions] == ["req-1", "req-2", "req-3"]
     # Two attempts: req-1 raised (budget not consumed), req-2 succeeded
     # (budget consumed), req-3 was suppressed.
-    assert billing_event_client.track_billing_event.call_count == 2
+    assert billing_event_client.send_billing_event.call_count == 2
 
 
 @pytest.mark.asyncio

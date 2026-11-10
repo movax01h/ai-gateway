@@ -891,7 +891,7 @@ class TestCodeCompletions:
             user=mock_user,
         )
 
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             "CodeCompletions",
@@ -922,7 +922,7 @@ class TestCodeCompletions:
             # No user provided
         )
 
-        mock_billing_client.track_billing_event.assert_not_called()
+        mock_billing_client.send_billing_event.assert_not_called()
 
     async def test_billing_event_exception_handling(
         self,
@@ -942,7 +942,7 @@ class TestCodeCompletions:
             )
         )
 
-        mock_billing_client.track_billing_event.side_effect = Exception(
+        mock_billing_client.send_billing_event.side_effect = Exception(
             "Billing service unavailable"
         )
 
@@ -955,7 +955,7 @@ class TestCodeCompletions:
         )
 
         assert result.text == "generated code"
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             "CodeCompletions",
@@ -992,7 +992,7 @@ class TestCodeCompletions:
         )
 
         # Should still track billing event even with 0 tokens for consistency
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             "CodeCompletions",
@@ -1043,7 +1043,7 @@ class TestCodeCompletions:
         assert chunks == ["hello ", "world!"]
 
         # Billing events should be tracked for streaming responses
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             "CodeCompletions",
@@ -1117,7 +1117,7 @@ class TestCodeCompletions:
         with pytest.raises(asyncio.CancelledError):
             await task
 
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             "CodeCompletions",
@@ -1134,7 +1134,7 @@ class TestCodeCompletions:
 
         assert [chunk.text async for chunk in result] == ["a", "b", "c"]
 
-        mock_billing_client.track_billing_event.assert_not_called()
+        mock_billing_client.send_billing_event.assert_not_called()
 
     async def test_no_fallback_billing_when_provider_fails_mid_stream(
         self, use_case_with_billing, mock_user, mock_billing_client
@@ -1154,7 +1154,7 @@ class TestCodeCompletions:
             async for _chunk in result:
                 pass
 
-        mock_billing_client.track_billing_event.assert_not_called()
+        mock_billing_client.send_billing_event.assert_not_called()
 
     async def test_billing_event_exception_handling_streaming(
         self,
@@ -1181,7 +1181,7 @@ class TestCodeCompletions:
         )
 
         # Make billing service raise an exception
-        mock_billing_client.track_billing_event.side_effect = Exception(
+        mock_billing_client.send_billing_event.side_effect = Exception(
             "Billing service unavailable"
         )
 
@@ -1200,7 +1200,7 @@ class TestCodeCompletions:
             chunks.append(chunk.text)
 
         assert chunks == ["hello ", "world!"]
-        mock_billing_client.track_billing_event.assert_called_once_with(
+        mock_billing_client.send_billing_event.assert_called_once_with(
             mock_user,
             BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
             "CodeCompletions",
@@ -1581,8 +1581,8 @@ class TestCodeCompletionsWithPrompt:
 
     @staticmethod
     def _billed_operations(mock_billing_client):
-        mock_billing_client.track_billing_event.assert_called_once()
-        call = mock_billing_client.track_billing_event.call_args
+        mock_billing_client.send_billing_event.assert_called_once()
+        call = mock_billing_client.send_billing_event.call_args
         return call.kwargs["metadata"]["llm_operations"]
 
     async def test_task_cancelled_before_provider_usage_is_billed_with_prompt_identifiers(
@@ -1619,7 +1619,7 @@ class TestCodeCompletionsWithPrompt:
         await anext(result)
         await result.aclose()
 
-        mock_billing_client.track_billing_event.assert_not_called()
+        mock_billing_client.send_billing_event.assert_not_called()
 
     async def test_completed_stream_is_billed_with_provider_usage(
         self, use_case, mock_billing_client

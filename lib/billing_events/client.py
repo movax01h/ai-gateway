@@ -1,15 +1,23 @@
+import threading
 import uuid
 from datetime import datetime
-from enum import StrEnum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import requests
 import structlog
 from gitlab_cloud_connector import CloudConnectorUser
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from snowplow_tracker import AsyncEmitter, SelfDescribingJson, StructuredEvent, Tracker
 
 from lib.billing_events.context import BillingEventContext, normalize_realm
+from lib.billing_events.events import BillingEvent
+from lib.billing_events.metrics import (
+    KNOWN_EVENT_TYPES,
+    UNKNOWN_EVENT_TYPE,
+    BillingEventDropReason,
+    BillingEventsMetrics,
+    billing_events_metrics,
+)
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import (
     EventContext,
@@ -22,11 +30,37 @@ from lib.usage_quota.client import should_skip_usage_quota_for_user
 __all__ = ["BillingEvent", "BillingEventsClient"]
 
 
-class BillingEvent(StrEnum):
-    DAP_FLOW_ON_COMPLETION = "duo_agent_platform_workflow_completion"
-    AIGW_PROXY_USE = "ai_gateway_proxy_use"
-    CODE_SUGGESTIONS_CODE_COMPLETIONS = "code_completions"
-    CODE_SUGGESTIONS_CODE_GENERATIONS = "code_generations"
+def _event_type_label(payload: Mapping[str, Any]) -> str:
+    """Return the billing event type carried by a Snowplow payload, for use as a metric label.
+
+    The structured event action (``se_ac``) is set to the ``BillingEvent`` value at enqueue time, so it is available on
+    emitter worker threads without reading request context. Unexpected values map to ``unknown`` to bound cardinality.
+    """
+    value = payload.get("se_ac")
+    return value if value in KNOWN_EVENT_TYPES else UNKNOWN_EVENT_TYPE
+
+
+class _BillingAsyncEmitter(AsyncEmitter):
+    """AsyncEmitter that can tell whether the last failed request on the current thread will be retried.
+
+    Snowplow calls ``on_failure`` after every failed attempt, before it decides whether to retry, and does not pass the
+    HTTP status. ``send_events`` runs ``http_post`` and then the callbacks on the same emitter worker thread, so the
+    status is recorded per thread.
+
+    ``last_failure_is_retryable`` relies on the private ``Emitter._should_retry``, so that it follows Snowplow's own retry
+    rules (including ``custom_retry_codes``). Re-check it when upgrading ``snowplow-tracker``.
+    """
+
+    _last_request = threading.local()
+
+    def http_post(self, data: str) -> int:
+        status_code = super().http_post(data)
+        self._last_request.status_code = status_code
+        return status_code
+
+    def last_failure_is_retryable(self) -> bool:
+        # http_post returns -1 when the request raises (for example a connection error); Snowplow retries those.
+        return self._should_retry(getattr(self._last_request, "status_code", -1))
 
 
 class BillingEventsClient:
@@ -44,10 +78,12 @@ class BillingEventsClient:
         thread_count: int,
         internal_event_client: InternalEventsClient,
         api_key: Optional[SecretStr] = None,
+        metrics: BillingEventsMetrics = billing_events_metrics,
     ) -> None:
         self._logger = structlog.stdlib.get_logger("billing_events_client")
         self.enabled = enabled
         self.internal_event_client = internal_event_client
+        self._metrics = metrics
 
         self._logger.info(
             "Initializing BillingEventsClient",
@@ -64,7 +100,7 @@ class BillingEventsClient:
             self._logger.info("Creating AsyncEmitter and Tracker for billing events")
             self._session = requests.Session()
             set_bearer_token(self._session, api_key)
-            self._emitter = AsyncEmitter(
+            self._emitter = _BillingAsyncEmitter(
                 batch_size=batch_size,
                 thread_count=thread_count,
                 endpoint=endpoint,
@@ -121,18 +157,28 @@ class BillingEventsClient:
 
         for event in sent_events:
             self._log_event(event, success=True)
+            self._metrics.count_delivered(_event_type_label(event))
 
     def _on_failure(
         self, succeeded_count: int, failed_events: List[Dict[str, Any]]
     ) -> None:
+        # Runs on an emitter worker thread: labels come from the event payloads, not from request context.
+        will_retry = self._emitter.last_failure_is_retryable()
         self._logger.warning(
             "Failed to track billing events",
             succeeded_count=succeeded_count,
             failed_count=len(failed_events),
+            will_retry=will_retry,
         )
 
         for event in failed_events:
             self._log_event(event, success=False)
+            # Retryable failures go back into the buffer and are not lost yet, so they are not counted as dropped. They
+            # stay in the emitted - delivered gap until a retry succeeds.
+            if not will_retry:
+                self._metrics.count_dropped(
+                    BillingEventDropReason.HTTP_ERROR, _event_type_label(event)
+                )
 
     def _log_event(self, event_payload: Dict[str, Any], success: bool) -> None:
         log_method = self._logger.info if success else self._logger.error
@@ -149,6 +195,22 @@ class BillingEventsClient:
             property=event_payload.get("se_pr"),
         )
 
+    def record_emitted(self, event: BillingEvent) -> None:
+        """Count one billing attempt in ``billing_events_emitted_total`` while billing events are enabled.
+
+        Call this exactly once per billing attempt, before anything that can fail, then hand the event to
+        ``send_billing_event``. ``track_billing_event`` does both.
+        """
+        if self.enabled:
+            self._metrics.count_emitted(event.value)
+
+    def record_dropped(
+        self, reason: BillingEventDropReason, event: BillingEvent
+    ) -> None:
+        """Count a billing event dropped before it reached the Snowplow tracker, while billing events are enabled."""
+        if self.enabled:
+            self._metrics.count_dropped(reason, event.value)
+
     def track_billing_event(
         self,
         user: CloudConnectorUser,
@@ -158,7 +220,36 @@ class BillingEventsClient:
         quantity: float = 1.0,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Send billing event to Data Insights Platform.
+        """Count a billing attempt as emitted, then send it to Data Insights Platform.
+
+        Entry point for callers that use the client directly. ``BillingEventService.track_billing`` counts the attempt
+        itself and calls ``send_billing_event``, so each attempt is counted as emitted exactly once on either path.
+
+        Args and return value are the same as ``send_billing_event``.
+        """
+        self.record_emitted(event)
+        return self.send_billing_event(
+            user,
+            event,
+            category,
+            unit_of_measure=unit_of_measure,
+            quantity=quantity,
+            metadata=metadata,
+        )
+
+    def send_billing_event(
+        self,
+        user: CloudConnectorUser,
+        event: BillingEvent,
+        category: str,
+        unit_of_measure: str = "tokens",
+        quantity: float = 1.0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Send billing event to Data Insights Platform, without counting it as emitted.
+
+        The caller must already have counted the attempt with ``record_emitted``. Use ``track_billing_event`` unless
+        you own that count, as ``BillingEventService.track_billing`` does.
 
         Args:
             user: CloudConnectorUser object containing user claims and authentication information.
@@ -183,6 +274,7 @@ class BillingEventsClient:
 
         if quantity <= 0:
             self._logger.warning("Invalid quantity", quantity=quantity)
+            self.record_dropped(BillingEventDropReason.MISSING_FIELD, event)
             return False
 
         internal_context: EventContext = current_event_context.get()
@@ -207,29 +299,34 @@ class BillingEventsClient:
             else None
         )
 
-        billing_context = BillingEventContext(
-            event_id=event_id,
-            event_type=event.value,
-            unit_of_measure=unit_of_measure,
-            quantity=quantity,
-            metadata=metadata,
-            subject=internal_context.user_id,
-            global_user_id=internal_context.global_user_id,
-            realm=mapped_realm,
-            timestamp=datetime.now().isoformat(),
-            instance_id=internal_context.instance_id,
-            unique_instance_id=unique_instance_id,
-            host_name=internal_context.host_name,
-            project_id=internal_context.project_id,
-            namespace_id=internal_context.namespace_id,
-            root_namespace_id=internal_context.ultimate_parent_namespace_id,
-            correlation_id=internal_context.correlation_id,
-            deployment_type=internal_context.deployment_type,
-            subject_type=internal_context.user_type,
-            assignments=assignments,
-            instance_version=internal_context.instance_version,
-            organization_id=internal_context.organization_id,
-        )
+        try:
+            billing_context = BillingEventContext(
+                event_id=event_id,
+                event_type=event.value,
+                unit_of_measure=unit_of_measure,
+                quantity=quantity,
+                metadata=metadata,
+                subject=internal_context.user_id,
+                global_user_id=internal_context.global_user_id,
+                realm=mapped_realm,
+                timestamp=datetime.now().isoformat(),
+                instance_id=internal_context.instance_id,
+                unique_instance_id=unique_instance_id,
+                host_name=internal_context.host_name,
+                project_id=internal_context.project_id,
+                namespace_id=internal_context.namespace_id,
+                root_namespace_id=internal_context.ultimate_parent_namespace_id,
+                correlation_id=internal_context.correlation_id,
+                deployment_type=internal_context.deployment_type,
+                subject_type=internal_context.user_type,
+                assignments=assignments,
+                instance_version=internal_context.instance_version,
+                organization_id=internal_context.organization_id,
+            )
+        except ValidationError:
+            # Count the rejected event, then re-raise so callers see the same error as before.
+            self.record_dropped(BillingEventDropReason.MISSING_FIELD, event)
+            raise
 
         structured_event = StructuredEvent(
             context=[

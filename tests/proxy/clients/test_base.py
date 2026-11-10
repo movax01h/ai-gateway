@@ -154,7 +154,7 @@ async def test_valid_proxy_request_billing_event_callback(
 
     # The service forwards to BillingEventsClient with positional event/category and
     # an enriched metadata dict (execution_environment, tool_names, orbit_called).
-    billing_event_client.track_billing_event.assert_called_once_with(
+    billing_event_client.send_billing_event.assert_called_once_with(
         proxy_client.user,
         BillingEvent.AIGW_PROXY_USE,
         "ai_gateway.proxy.clients.base",
