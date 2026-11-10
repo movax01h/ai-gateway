@@ -4,6 +4,9 @@ A flow in ``BILL_ONCE_PER_WORKFLOW_FEATURES`` is billed once per workflow, whate
 those models through the ``x-gitlab-agent-platform-model-metadata`` header, so the header alone could run any model at
 the flat rate. This module takes the feature from the name the workflow is billed as, not from the client, and keeps
 every model of the request inside that feature's allowlist.
+
+For every other flow, the allowlist still uses the client's feature. ``log_flow_model_feature`` logs that feature next to
+the flow, so the move to the flow's own feature can be measured before it changes anything.
 """
 
 from typing import Optional
@@ -12,6 +15,7 @@ import structlog
 from gitlab_cloud_connector import CloudConnectorUser
 
 from ai_gateway.config import get_config
+from ai_gateway.feature_allowlist import dws_client_model_request_context
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadataByTag,
@@ -25,7 +29,11 @@ from lib.context.model import (
     current_model_metadata_with_size_context,
 )
 
-__all__ = ["FLAT_RATE_FLOW_FEATURE_SETTINGS", "scope_flat_rate_flow_models"]
+__all__ = [
+    "FLAT_RATE_FLOW_FEATURE_SETTINGS",
+    "log_flow_model_feature",
+    "scope_flat_rate_flow_models",
+]
 
 log = structlog.stdlib.get_logger("model_scope")
 
@@ -109,3 +117,35 @@ def scope_flat_rate_flow_models(
     metadata_by_tag.add_user(user)
     current_model_metadata_context.set(metadata_by_tag.default)
     current_model_metadata_with_size_context.set(metadata_by_tag)
+
+
+def log_flow_model_feature(
+    feature_qualified_name: Optional[str], workflow_definition: Optional[str]
+) -> None:
+    """Log the feature of the client's model metadata next to the flow that runs.
+
+    The allowlist checks the model against the client's ``feature_setting``. This line shows, for each flow, which
+    feature clients send and which model passed the check. It changes nothing.
+
+    Nothing is logged for a request without model metadata, and on a gateway that serves custom models.
+
+    Args:
+        feature_qualified_name: The name the workflow is billed as, such as ``code_review/v1``.
+        workflow_definition: The workflow definition of the start request.
+    """
+    request = dws_client_model_request_context.get()
+    if request is None or get_config().custom_models.enabled:
+        return
+
+    served = current_model_metadata_context.get()
+    log.info(
+        "Flow model feature",
+        flow=feature_qualified_name,
+        workflow_definition=workflow_definition,
+        client_feature_setting=request.feature_setting,
+        provider=request.provider,
+        pinned=request.pinned,
+        requested_name=request.name,
+        requested_identifier=request.identifier,
+        served_identifier=served.llm_definition.gitlab_identifier if served else None,
+    )

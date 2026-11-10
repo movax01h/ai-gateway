@@ -7341,6 +7341,40 @@ async def test_execute_workflow_denies_replayed_restricted_model_header(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("flow_enabled")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_logs_the_client_feature_of_the_flow(
+    mock_resolve_flow, mock_workflow_class, mock_context
+):
+    current_user.set(_workflow_token_user(flow_config_id="developer"))
+    details = MagicMock()
+    details.invocation_metadata = [
+        (
+            ModelMetadataInterceptor.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA,
+            json.dumps(
+                {
+                    "provider": "gitlab",
+                    "identifier": "claude_sonnet_5_5_vertex",
+                    "feature_setting": "duo_agent_platform_agentic_chat",
+                }
+            ),
+        )
+    ]
+    await ModelMetadataInterceptor().intercept_service(AsyncMock(), details)
+
+    with capture_logs() as logs:
+        await _execute_registry_flow(
+            "developer", mock_context, mock_resolve_flow, mock_workflow_class
+        )
+
+    [entry] = [entry for entry in logs if entry["event"] == "Flow model feature"]
+    assert entry["client_feature_setting"] == "duo_agent_platform_agentic_chat"
+    assert entry["served_identifier"] == "claude_sonnet_5_5_vertex"
+    assert entry["flow"] == "developer/v1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled")
 @patch("duo_workflow_service.server.resolve_flow")
 @patch.dict(os.environ, RESTRICTED_MODEL_ENV)
 async def test_execute_workflow_denies_checkpoint_resume_on_restricted_model(
