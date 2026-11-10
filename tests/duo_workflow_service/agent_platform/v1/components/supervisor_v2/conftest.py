@@ -371,15 +371,26 @@ class RoutingMockSubagentComponent:
     component-scoped ``final_answer`` and conversation history, and marks the
     subsession ``COMPLETED`` the way the real graph's ``EndComponent`` does,
     mirroring the contract ``AgentComponent.compile_as_subagent`` documents.
+    With ``error``, the node raises it instead, the way a real subagent's
+    ``AgentNode`` raises out of its subgraph.
     """
 
-    def __init__(self, name: str, description: str = "A test subagent.", answer=None):
+    def __init__(
+        self,
+        name: str,
+        description: str = "A test subagent.",
+        answer=None,
+        error: Exception | None = None,
+    ):
         self.name = name
         self.description = description
         self._answer = answer or f"{name} finished the task."
+        self._error = error
 
     def compile_as_subagent(self):
         def _run(state):
+            if self._error is not None:
+                raise self._error
             return {
                 "status": WorkflowStatusEnum.COMPLETED,
                 "conversation_history": {self.name: [AIMessage(content=self._answer)]},

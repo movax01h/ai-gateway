@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Overwrite
 
 from ai_gateway.prompts import Prompt
+from duo_workflow_service.agent_platform.utils.exceptions import ModelRefusalError
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     _LITELLM_EMPTY_CONTENT_PLACEHOLDER,
     AgentFinalOutput,
@@ -1330,6 +1331,43 @@ class TestAgentNodeTruncation:
 
         result_history = result[FlowStateKeys.CONVERSATION_HISTORY][component_name]
         assert result_history == [content_filter_message]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("response_metadata", "expected_category"),
+        [
+            (
+                {"stop_reason": "refusal", "stop_details": {"category": "cyber"}},
+                "cyber",
+            ),
+            ({"stop_reason": "refusal"}, "unknown"),
+            ({"stop_reason": "refusal", "stop_details": None}, "unknown"),
+        ],
+    )
+    async def test_run_refusal_raises_model_refusal_error_without_retry(
+        self,
+        mock_ai_message,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        response_metadata,
+        expected_category,
+    ):
+        """A refused turn stops the flow at once: no retry would get past the same content."""
+        refused = copy.copy(mock_ai_message)
+        refused.content = [{"type": "thinking", "thinking": "", "signature": "sig"}]
+        refused.response_metadata = response_metadata
+        refused.tool_calls = []
+        mock_prompt.ainvoke = AsyncMock(return_value=refused)
+
+        with pytest.raises(ModelRefusalError) as exc_info:
+            await agent_node.run(base_flow_state)
+
+        assert mock_prompt.ainvoke.call_count == 1
+        assert exc_info.value.ui_message == ModelRefusalError.UI_MESSAGE
+        assert (
+            f"refusal category: {expected_category}" in exc_info.value.internal_detail
+        )
 
     @pytest.mark.asyncio
     async def test_run_raises_agent_stuck_error_after_max_truncation_retries(

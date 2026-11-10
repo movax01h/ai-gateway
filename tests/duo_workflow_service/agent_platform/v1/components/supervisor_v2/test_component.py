@@ -6,6 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.graph import END
 
+from duo_workflow_service.agent_platform.utils.exceptions import ModelRefusalError
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponentBase,
     MaxCyclesConfig,
@@ -569,6 +570,53 @@ class TestSupervisorExecutionFlow:
         assert len(tool_messages) == 1
         assert "Implementation complete." in tool_messages[0].content
         assert "<status>completed</status>" in tool_messages[0].content
+
+    @pytest.mark.asyncio
+    async def test_subagent_refusal_fails_the_whole_flow(
+        self,
+        mock_agent_node_cls,
+        mock_tool_node_cls,
+        mock_final_response_node_cls,
+        mock_router,
+        base_flow_state,
+        supervisor_name,
+        developer_name,
+        tester_name,
+        delegate_tool_call,
+        make_supervisor,
+    ):
+        """A refused subagent ends the session: the supervisor gets no "refused" result to re-delegate on."""
+        nodes = {
+            "agent": mock_agent_node_cls.return_value,
+            "tools": mock_tool_node_cls.return_value,
+            "final_response": mock_final_response_node_cls.return_value,
+        }
+        refusal = ModelRefusalError(internal_detail="refused in test")
+        supervisor = make_supervisor(
+            subagent_components={
+                developer_name: RoutingMockSubagentComponent(
+                    name=developer_name, error=refusal
+                ),
+                tester_name: MockSubagentComponent(name=tester_name),
+            }
+        )
+        nodes["agent"].run.return_value = {
+            **base_flow_state,
+            FlowStateKeys.CONVERSATION_HISTORY: {
+                supervisor_name: [
+                    AIMessage(content="", tool_calls=[delegate_tool_call])
+                ]
+            },
+        }
+        mock_router.route.return_value = END
+
+        compiled = _compile(supervisor, mock_router)
+        with pytest.raises(ModelRefusalError) as exc_info:
+            await compiled.ainvoke(base_flow_state)
+
+        assert exc_info.value is refusal
+        assert nodes["agent"].run.call_count == 1
+        nodes["final_response"].run.assert_not_called()
 
 
 class TestSupervisorMaxCycles:

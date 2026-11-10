@@ -19,6 +19,7 @@ from ai_gateway.response_schemas.base import BaseAgentOutput
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
+    ModelRefusalError,
     NotifiableAgentException,
     ToolApprovalUnavailableError,
 )
@@ -790,6 +791,24 @@ class TestResponseSchemaDefinition:
             text_turns == 3
         )
 
+    @pytest.mark.asyncio
+    async def test_refusal_stops_a_schema_agent(self, request, base_flow_state):
+        """In schema mode a turn without tool calls loops back to the agent, so the refusal must stop it there."""
+        refused = AIMessage(
+            content=[{"type": "thinking", "thinking": "", "signature": "sig"}],
+            response_metadata={"stop_reason": "refusal"},
+        )
+        with pytest.raises(ModelRefusalError):
+            await self._run_graph_with_replies(
+                [refused for _ in range(10)],
+                **self._graph_fixtures(request),
+                base_flow_state=base_flow_state,
+            )
+        prompt = request.getfixturevalue(
+            "mock_prompt_registry"
+        ).get_on_behalf.return_value
+        assert prompt.ainvoke.await_count == 1
+
     @staticmethod
     def _graph_fixtures(request):
         return {
@@ -805,6 +824,85 @@ class TestResponseSchemaDefinition:
                 "inline_schema_registry",
             )
         }
+
+
+class TestAgentComponentModelRefusal:
+    """A refused turn through a real compiled graph: the component, AgentNode and FinalResponseNode are real.
+
+    Only the model call is faked, with the shape of a real refusal from session 10869437 (gitlab-lsp#3537): an empty
+    thinking block and ``stop_reason: "refusal"``.
+    """
+
+    @staticmethod
+    def _empty_turn(response_metadata: dict) -> AIMessage:
+        return AIMessage(
+            content=[{"type": "thinking", "thinking": "", "signature": "sig"}],
+            response_metadata=response_metadata,
+        )
+
+    @staticmethod
+    async def _run(make_agent_component, mock_prompt_registry, base_flow_state, reply):
+        prompt = mock_prompt_registry.get_on_behalf.return_value
+        prompt.ainvoke = AsyncMock(return_value=reply)
+        component = make_agent_component(inputs=["context:user_input"])
+        router = Mock()
+        router.route.return_value = END
+        graph = StateGraph(FlowState)
+        component.attach(graph, router)
+        graph.set_entry_point(component.__entry_hook__())
+        compiled = graph.compile()
+        return (
+            prompt,
+            router,
+            compiled.ainvoke(
+                base_flow_state, config={"recursion_limit": RECURSION_LIMIT}
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_refusal_stops_the_flow(
+        self, make_agent_component, mock_prompt_registry, base_flow_state
+    ):
+        """The refusal raises ModelRefusalError: no retry, no final answer, the router is never reached."""
+        prompt, router, run = await self._run(
+            make_agent_component,
+            mock_prompt_registry,
+            base_flow_state,
+            self._empty_turn(
+                {
+                    "stop_reason": "refusal",
+                    "stop_details": {"type": "refusal", "category": "cyber"},
+                }
+            ),
+        )
+
+        with pytest.raises(ModelRefusalError) as exc_info:
+            await run
+
+        assert "refusal category: cyber" in exc_info.value.internal_detail
+        prompt.ainvoke.assert_awaited_once()
+        router.route.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_empty_turn_without_refusal_still_ends_the_turn(
+        self,
+        make_agent_component,
+        mock_prompt_registry,
+        base_flow_state,
+        component_name,
+    ):
+        """Control: only the refusal changes behavior; the same empty turn with end_turn still completes."""
+        _, router, run = await self._run(
+            make_agent_component,
+            mock_prompt_registry,
+            base_flow_state,
+            self._empty_turn({"stop_reason": "end_turn"}),
+        )
+
+        result = await run
+
+        assert result["context"][component_name]["final_answer"] == ""
+        router.route.assert_called_once()
 
 
 class TestAgentComponentInitialization:

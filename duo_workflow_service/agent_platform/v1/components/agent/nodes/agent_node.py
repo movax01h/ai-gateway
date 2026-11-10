@@ -51,6 +51,7 @@ from duo_workflow_service.errors.error_handler import (
     ModelErrorHandler,
     ModelErrorType,
 )
+from duo_workflow_service.errors.typing import ModelRefusalError
 from duo_workflow_service.tracking.langsmith_tags import tag_current_run
 from lib.context import LLMFinishReason, extract_finish_reason
 from lib.events import GLReportingEventContext
@@ -660,6 +661,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     )
                 retrying_failed_call = False
                 finish_reason = extract_finish_reason(completion.response_metadata)
+                # Before any retry: a refused turn carries no answer, and a retry would
+                # resend the content the model refused.
+                if finish_reason == LLMFinishReason.REFUSAL:
+                    raise self._refusal_error(completion)
                 if finish_reason in LLMFinishReason.truncation_values():
                     truncation_retries = self._count_truncation(
                         truncation_retries, finish_reason
@@ -789,6 +794,18 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 if recovered is not None:
                     history, image_limit_retries = recovered, image_limit_retries + 1
                 retrying_failed_call = True
+
+    def _refusal_error(self, completion: AIMessage) -> ModelRefusalError:
+        stop_details = completion.response_metadata.get("stop_details")
+        category = (
+            stop_details.get("category") if isinstance(stop_details, dict) else None
+        ) or "unknown"
+        log.warning(
+            "Model refused to answer", agent=self.name, refusal_category=category
+        )
+        return ModelRefusalError(
+            internal_detail=f"The model refused (refusal category: {category}) for agent {self.name}"
+        )
 
     def _deliberates_in_text(self) -> bool:
         return (
