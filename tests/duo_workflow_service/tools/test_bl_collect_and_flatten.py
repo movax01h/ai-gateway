@@ -277,7 +277,7 @@ async def test_what_collect_publishes_is_what_dedup_reads():
     published = json.loads(collected["final_answer"])
     deduped = await BlDedupFindings(metadata={})._execute(collected["final_answer"])
 
-    assert _flatten_findings(published) == published
+    assert [f.to_dict() for f in _flatten_findings(published)] == published
     assert sorted(f["file"] for f in deduped) == ["a.py", "b.py"]
 
 
