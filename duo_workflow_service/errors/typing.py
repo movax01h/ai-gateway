@@ -213,3 +213,24 @@ class ToolApprovalUnavailableError(NotifiableAgentException):
             internal_detail=f"Tools needing approval with no approver: {', '.join(tool_names)}",
         )
         self.tool_names = tool_names
+
+
+class ModelRefusalError(NotifiableAgentException):
+    """Raised when the model ends its turn with a refusal (``stop_reason: "refusal"``).
+
+    A refused turn carries no answer, so treating it as the final answer reports an empty success. The content that
+    triggered the refusal stays in the conversation history, so a reply in the same session is refused again: the flow
+    halts with a static UI message instead.
+
+    Args:
+        internal_detail: Where the refusal happened and its category, if the provider sent one. Logged server-side
+            only.
+    """
+
+    UI_MESSAGE = (
+        "The model declined to continue this conversation, so this session stopped. "
+        "Start a new session, and leave out the content that may have caused the refusal."
+    )
+
+    def __init__(self, internal_detail: str) -> None:
+        super().__init__(self.UI_MESSAGE, internal_detail=internal_detail)
