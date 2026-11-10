@@ -40,7 +40,9 @@ const (
 	Approval_APPROVAL_SOURCE_USER_EXPLICIT Approval_ApprovalSource = 1
 	// APPROVAL_SOURCE_PRETOOLUSE_HOOK indicates the approval was granted automatically by a PreToolUse hook.
 	Approval_APPROVAL_SOURCE_PRETOOLUSE_HOOK Approval_ApprovalSource = 2
-	// APPROVAL_SOURCE_AUTO_MODE indicates the approval was granted automatically by auto-mode.
+	// APPROVAL_SOURCE_AUTO_MODE is produced server-side when a tool call skips the
+	// prompt because auto mode promotion pre-approved it. Clients must never stamp this
+	// value themselves: a client-sent one is recorded as user_explicit.
 	Approval_APPROVAL_SOURCE_AUTO_MODE Approval_ApprovalSource = 3
 	// APPROVAL_SOURCE_PREAPPROVED_CONFIG indicates the approval was granted via a pre-approved tool/pattern configuration.
 	Approval_APPROVAL_SOURCE_PREAPPROVED_CONFIG Approval_ApprovalSource = 4

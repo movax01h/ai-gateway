@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.entities.state import (
@@ -68,9 +69,12 @@ class TestApprovalSourceFromApproval:
 
     def test_uses_client_reported_source_when_present(self):
         approved = contract_pb2.Approval.Approved(
-            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_AUTO_MODE
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_PRETOOLUSE_HOOK
         )
-        assert ApprovalSource.from_approval(approved) == ApprovalSource.AUTO_MODE.value
+        assert (
+            ApprovalSource.from_approval(approved)
+            == ApprovalSource.PRETOOLUSE_HOOK.value
+        )
 
     def test_defaults_to_user_explicit_when_source_unset(self):
         # An Approved message with no approval_source field (never sent) defaults
@@ -99,6 +103,29 @@ class TestApprovalSourceFromApproval:
         )
         assert (
             ApprovalSource.from_approval(approved) == ApprovalSource.USER_EXPLICIT.value
+        )
+
+    def test_clamps_client_sent_auto_mode_to_user_explicit(self):
+        """AUTO_MODE is server-produced only: it means a signed promote list skipped the prompt."""
+        approved = contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_AUTO_MODE
+        )
+        with capture_logs() as logs:
+            source = ApprovalSource.from_approval(approved)
+
+        assert source == ApprovalSource.USER_EXPLICIT.value
+        assert {
+            "event": "Recording a client-sent server-only approval source as user_explicit",
+            "claimed_approval_source": "auto_mode",
+            "log_level": "info",
+        } in logs
+
+    def test_from_proto_itself_still_reports_auto_mode_unclamped(self):
+        assert (
+            ApprovalSource.from_proto(
+                contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_AUTO_MODE
+            )
+            == ApprovalSource.AUTO_MODE.value
         )
 
     def test_from_proto_itself_still_reports_session_approval_unclamped(self):

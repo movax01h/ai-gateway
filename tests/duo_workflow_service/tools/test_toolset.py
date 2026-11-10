@@ -308,6 +308,29 @@ class TestToolset:
         policy.approval_required.assert_not_awaited()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("pre_approved", "promoted", "expected_source"),
+        [
+            ({"mock_tool"}, {"mock_tool"}, ApprovalSource.AUTO_MODE),
+            # Pre-approved another way too: the registry leaves it out of `promoted`.
+            ({"mock_tool"}, set(), ApprovalSource.PREAPPROVED_CONFIG),
+        ],
+    )
+    async def test_resolve_approval_source_reports_auto_mode_for_promoted_only(
+        self, mock_all_tools, pre_approved, promoted, expected_source
+    ):
+        policy = Mock()
+        policy.approval_required = AsyncMock(return_value=True)
+        toolset = Toolset(
+            pre_approved=pre_approved,
+            promoted=promoted,
+            all_tools=mock_all_tools,
+            approval_policy=policy,
+        )
+
+        assert await toolset.resolve_approval_source("mock_tool") == expected_source
+
+    @pytest.mark.asyncio
     async def test_resolve_approval_source_without_policy(self, toolset):
         """Non-pre-approved tools require approval (None) when no policy is set."""
         assert await toolset.resolve_approval_source("mock_tool") is None

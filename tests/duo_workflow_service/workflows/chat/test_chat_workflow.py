@@ -47,7 +47,10 @@ from duo_workflow_service.errors.typing import (
 )
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.toolset import Toolset
-from duo_workflow_service.workflows.abstract_workflow import TraceableException
+from duo_workflow_service.workflows.abstract_workflow import (
+    ToolAccessPolicies,
+    TraceableException,
+)
 from duo_workflow_service.workflows.chat.commands import (
     CHAT_COMMAND_CATEGORY,
     forced_tool_call_message_id,
@@ -66,6 +69,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     _resolve_additional_context_vars,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.context import client_capabilities, gitlab_version
 from lib.context.approval_sources import (
     approval_sources,
     get_approval_policy_ref,
@@ -798,13 +802,13 @@ async def test_record_approved_tool_sources_defaults_to_user_explicit(
 
 @pytest.mark.asyncio
 async def test_record_approved_tool_sources_uses_client_source(workflow_with_project):
-    """A client-sent approval source (e.g. auto_mode) overrides the default."""
+    """A client-sent approval source (e.g. pretooluse_hook) overrides the default."""
     workflow = workflow_with_project
     workflow._agent = Mock()
     workflow._agent.name = "test_prompt"
     workflow._approval = contract_pb2.Approval(
         approval=contract_pb2.Approval.Approved(
-            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_AUTO_MODE,
+            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_PRETOOLUSE_HOOK,
             policy_ref=contract_pb2.Approval.PolicyRef(origin="policy"),
         )
     )
@@ -818,7 +822,7 @@ async def test_record_approved_tool_sources_uses_client_source(workflow_with_pro
     init_approval_sources()
     try:
         workflow._record_approved_tool_sources(checkpoint_tuple)
-        assert get_approval_source("c1") == "auto_mode"
+        assert get_approval_source("c1") == "pretooluse_hook"
         assert get_approval_policy_ref("c1") == {"origin": "policy"}
     finally:
         approval_sources.set(None)
@@ -1519,6 +1523,31 @@ async def test_agent_resume_with_updated_preapproved_tools(workflow_with_project
         "tool_2",
         "tool_3",
     ]
+
+
+@pytest.mark.asyncio
+async def test_promoted_tools_never_reach_chat_state(workflow_with_project):
+    """Promotion holds for one turn, so it must not ride the checkpointed preapproved_tools list."""
+    workflow = workflow_with_project
+    workflow._claimed_tool_access_policies = ToolAccessPolicies(
+        allow=["read_file"], promote=["edit_file"]
+    )
+    workflow._workflow_config = {"allow_agent_to_request_user": True}
+    caps_token = client_capabilities.set({"auto_mode"})
+    version_token = gitlab_version.set("19.6.0")
+    try:
+        workflow._merge_jwt_governance_claims()
+    finally:
+        client_capabilities.reset(caps_token)
+        gitlab_version.reset(version_token)
+
+    assert workflow._promoted_tools == ["edit_file"]
+    start_state = workflow.get_workflow_state("goal")
+    resumed = await workflow.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
+    )
+    assert start_state["preapproved_tools"] == ["read_file"]
+    assert resumed.update["preapproved_tools"] == ["read_file"]
 
 
 @pytest.mark.asyncio

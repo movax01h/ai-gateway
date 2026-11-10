@@ -163,10 +163,13 @@ class Decision(BaseModel):
 
     @field_validator("approval_source")
     @classmethod
-    def _not_a_session_approval(cls, approval_source: Optional[str]) -> Optional[str]:
-        # Only the server grants a session approval, so a writer's claim of one is the
-        # user's own decision, as `ApprovalSource.from_approval` resolves it.
-        if approval_source == ApprovalSource.SESSION_APPROVAL:
+    def _not_a_server_source(cls, approval_source: Optional[str]) -> Optional[str]:
+        # Only the server grants a session approval or an auto mode skip; a writer's
+        # claim of either is recorded as the user's own decision instead.
+        if approval_source in (
+            ApprovalSource.SESSION_APPROVAL,
+            ApprovalSource.AUTO_MODE,
+        ):
             return ApprovalSource.USER_EXPLICIT.value
         return approval_source
 

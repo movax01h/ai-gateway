@@ -36,6 +36,7 @@ class MalformedToolCallError(Exception):
 class Toolset(collections.abc.Mapping):
     _all_tools: dict[str, ToolType]
     _pre_approved: set[str]
+    _promoted: set[str]
     _executable_tools: dict[str, BaseTool]
     _tool_options: dict[str, dict[str, Any]]
     _approval_policy: Optional[ApprovalPolicy]
@@ -48,6 +49,7 @@ class Toolset(collections.abc.Mapping):
         tool_options: Optional[dict[str, dict[str, Any]]] = None,
         approval_policy: Optional[ApprovalPolicy] = None,
         denied_tools: Optional[set[str]] = None,
+        promoted: Optional[set[str]] = None,
     ):
         """Initialize a Toolset with pre-approved tools and all available tools.
 
@@ -61,9 +63,12 @@ class Toolset(collections.abc.Mapping):
                 governance deny rules. Agent platform v1 tool nodes halt the flow with
                 ToolBlockedByAdministratorError when the LLM calls one. Legacy executors
                 only track the call.
+            promoted: Optional subset of ``pre_approved`` that only auto mode promotion
+                pre-approved this turn.
         """
         self._all_tools = all_tools
         self._pre_approved = pre_approved
+        self._promoted = set(promoted or set())
         self._tool_options = tool_options or {}
         self._approval_policy = approval_policy
         self._denied_tools = set(denied_tools or set())
@@ -152,10 +157,11 @@ class Toolset(collections.abc.Mapping):
     ) -> Optional[ApprovalSource]:
         """Resolve the source that lets a specific tool call skip human approval.
 
-        Pre-approved tools skip approval on registry grounds: a privilege group
-        or an admin `allow` rule. Other tools are checked against the approval
-        policy, which may consult session approvals persisted on the GitLab
-        instance. See `approved` for the name-only pre-approval check.
+        Pre-approved tools skip approval on registry grounds: a privilege group,
+        an admin `allow` rule, or auto mode promotion. Other tools are checked
+        against the approval policy, which may consult session approvals
+        persisted on the GitLab instance. See `approved` for the name-only
+        pre-approval check.
 
         Args:
             tool_name: The name of the tool to check.
@@ -163,8 +169,9 @@ class Toolset(collections.abc.Mapping):
 
         Returns:
             None if the tool call requires human approval; otherwise the source
-            of the skip: `ApprovalSource.PREAPPROVED_CONFIG` for a registry
-            pre-approval (privilege group or admin `allow` rule), or
+            of the skip: `ApprovalSource.AUTO_MODE` for a tool only auto mode
+            promotion pre-approved, `ApprovalSource.PREAPPROVED_CONFIG` for any
+            other registry pre-approval (privilege group or admin `allow` rule), or
             `ApprovalSource.SESSION_APPROVAL` when the approval policy (a
             session approval persisted on the GitLab instance) grants it.
 
@@ -177,6 +184,13 @@ class Toolset(collections.abc.Mapping):
         # Pre-approval is decided here so it holds even without a policy;
         # the policy (ToolsRegistry) re-checking it is redundant, not a
         # separate approval layer.
+        if tool_name in self._promoted:
+            log.debug(
+                "Tool call approval skipped: auto mode promotion",
+                tool_name=tool_name,
+            )
+            return ApprovalSource.AUTO_MODE
+
         if tool_name in self._pre_approved:
             log.debug(
                 "Tool call approval skipped: registry pre-approval",

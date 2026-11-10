@@ -1253,6 +1253,51 @@ async def test_preapproved_tool_records_preapproved_source(input, mock_toolset):
 
 
 @pytest.mark.asyncio
+async def test_promoted_tool_records_auto_mode_source(input, tool_metadata):
+    """Chat reaches the toolset for a promoted tool, since promotion never joins the state's preapproved_tools."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        promoted_tools=["edit_file"],
+        can_ask_user=True,
+    )
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=registry,
+        system_template_override=None,
+        toolset=registry.toolset(["edit_file"]),
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    ai_message = AIMessage(
+        content="promoted",
+        tool_calls=[
+            {
+                "name": "edit_file",
+                "args": {"file_path": "/a", "old_str": "a", "new_str": "b"},
+                "id": "call_promoted",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    init_approval_sources()
+    try:
+        result = await chat_agent.run({**input, "preapproved_tools": []})
+        assert result["status"] == WorkflowStatusEnum.EXECUTION
+        assert get_approval_source("call_promoted") == "auto_mode"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
 async def test_resolution_failure_requires_approval_instead_of_skipping(
     input, mock_toolset
 ):

@@ -696,7 +696,11 @@ export enum Approval_ApprovalSource {
   APPROVAL_SOURCE_USER_EXPLICIT = 1,
   /** APPROVAL_SOURCE_PRETOOLUSE_HOOK - APPROVAL_SOURCE_PRETOOLUSE_HOOK indicates the approval was granted automatically by a PreToolUse hook. */
   APPROVAL_SOURCE_PRETOOLUSE_HOOK = 2,
-  /** APPROVAL_SOURCE_AUTO_MODE - APPROVAL_SOURCE_AUTO_MODE indicates the approval was granted automatically by auto-mode. */
+  /**
+   * APPROVAL_SOURCE_AUTO_MODE - APPROVAL_SOURCE_AUTO_MODE is produced server-side when a tool call skips the
+   * prompt because auto mode promotion pre-approved it. Clients must never stamp this
+   * value themselves: a client-sent one is recorded as user_explicit.
+   */
   APPROVAL_SOURCE_AUTO_MODE = 3,
   /** APPROVAL_SOURCE_PREAPPROVED_CONFIG - APPROVAL_SOURCE_PREAPPROVED_CONFIG indicates the approval was granted via a pre-approved tool/pattern configuration. */
   APPROVAL_SOURCE_PREAPPROVED_CONFIG = 4,

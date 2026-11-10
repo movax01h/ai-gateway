@@ -1,5 +1,6 @@
 # pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
+import contextlib
 import contextvars
 import json
 import os
@@ -63,7 +64,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
-from lib.context import client_type
+from lib.context import client_capabilities, client_type, gitlab_version
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
@@ -602,6 +603,7 @@ async def test_compile_and_run_graph(
         allowed_tools=[],
         registry_flow_id=None,
         admin_allowed_preapprovals=None,
+        promoted_tools=[],
         first_party_tools={},
     )
 
@@ -4630,3 +4632,221 @@ async def test_first_party_claim_errors_with_the_ceiling_on(
         else set()
     )
     assert kwargs["first_party_tools"] == expected_map
+
+
+@contextlib.contextmanager
+def _client_capabilities(capabilities, gl_version="19.6.0"):
+    caps_token = client_capabilities.set(set(capabilities))
+    version_token = gitlab_version.set(gl_version)
+    try:
+        yield
+    finally:
+        client_capabilities.reset(caps_token)
+        gitlab_version.reset(version_token)
+
+
+async def _run_with_promotion(
+    claim, workflow_config, capabilities, can_ask=True, gl_version="19.6.0"
+):
+    """Run the graph on an auto mode turn and return what ToolsRegistry.configure received and the workflow."""
+    workflow_config["allow_agent_to_request_user"] = can_ask
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={"tool_access_policies": claim},
+        ),
+    )
+    with (
+        _client_capabilities(capabilities, gl_version),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs"
+        ),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow"
+        ) as mock_gitlab_workflow,
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure"
+        ) as mock_configure,
+    ):
+        mock_configure.return_value = MagicMock()
+        mock_checkpointer = AsyncMock()
+        mock_checkpointer.initial_status_event = "START"
+        mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+        workflow = MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("software_development"),
+            user,
+            preapproved_tools=["run_command"],
+        )
+        await workflow._compile_and_run_graph("Test goal")
+
+    return mock_configure.call_args.kwargs, workflow
+
+
+_PROMOTE_CLAIM = {
+    "allow": ["read_file"],
+    "ask": [],
+    "deny": [],
+    "promote": ["edit_file", "create_file_with_contents"],
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("ceiling", [False, True])
+@pytest.mark.parametrize(
+    ("capabilities", "can_ask", "expected"),
+    [
+        (["auto_mode"], True, ["create_file_with_contents", "edit_file"]),
+        # Build mode: the client did not engage auto mode this turn.
+        ([], True, []),
+        # A session that cannot prompt keeps halting instead.
+        (["auto_mode"], False, []),
+        ([], False, []),
+    ],
+)
+async def test_promote_applies_only_on_an_auto_mode_turn_that_can_prompt(
+    workflow_config, capabilities, can_ask, expected, ceiling
+):
+    claim = {**_PROMOTE_CLAIM, "ceiling": ceiling}
+
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(claim), workflow_config, capabilities, can_ask=can_ask
+    )
+
+    assert kwargs["promoted_tools"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_promote_needs_a_gitlab_that_forwards_capabilities(workflow_config):
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(_PROMOTE_CLAIM),
+        workflow_config,
+        ["auto_mode"],
+        gl_version="18.6.0",
+    )
+
+    assert kwargs["promoted_tools"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_promote_never_overrides_an_explicit_ask_or_deny(workflow_config):
+    claim = {
+        "allow": ["read_file"],
+        "ask": ["run_command"],
+        "deny": ["create_commit"],
+        "promote": ["edit_file", "run_command", "create_commit"],
+    }
+
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(claim), workflow_config, ["auto_mode"]
+    )
+
+    assert kwargs["promoted_tools"] == ["edit_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    ("promote", "expected"),
+    [
+        (None, []),
+        ("edit_file", []),
+        ({"edit_file": True}, []),
+        ([1, "edit_file", None], []),
+        ([], []),
+    ],
+)
+async def test_malformed_promote_keeps_the_rest_of_the_claim(
+    workflow_config, promote, expected
+):
+    claim = {"allow": ["read_file"], "ask": ["grep"], "deny": [], "promote": promote}
+
+    kwargs, workflow = await _run_with_promotion(
+        json.dumps(claim), workflow_config, ["auto_mode"]
+    )
+
+    assert kwargs["promoted_tools"] == expected
+    assert kwargs["allowed_tools"] == ["read_file"]
+    assert kwargs["ask_tools"] == ["grep"]
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_unparsable_claim_promotes_nothing(workflow_config):
+    claim = '{"allow": 5, "promote": ["edit_file"], "ceiling": true}'
+
+    kwargs, workflow = await _run_with_promotion(claim, workflow_config, ["auto_mode"])
+
+    assert kwargs["promoted_tools"] == []
+    assert kwargs["admin_allowed_preapprovals"] == set()
+    assert workflow._preapproved_tools == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("ceiling", [False, True])
+async def test_promote_leaves_every_other_pre_approval_input_unchanged(
+    workflow_config, ceiling
+):
+    """Promoted names reach the registry only as promoted_tools, never through a list chat state or the ceiling
+    reads."""
+    without = {"allow": ["read_file"], "ask": ["grep"], "deny": [], "ceiling": ceiling}
+
+    baseline, baseline_workflow = await _run_with_promotion(
+        json.dumps(without), workflow_config, ["auto_mode"]
+    )
+    promoted, promoted_workflow = await _run_with_promotion(
+        json.dumps({**without, "promote": ["edit_file"]}),
+        workflow_config,
+        ["auto_mode"],
+    )
+
+    assert promoted["promoted_tools"] == ["edit_file"]
+    for key in ("allowed_tools", "admin_allowed_preapprovals", "ask_tools"):
+        assert promoted[key] == baseline[key]
+    assert promoted_workflow._preapproved_tools == baseline_workflow._preapproved_tools
+    assert "edit_file" not in promoted_workflow._preapproved_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("capabilities", [[], ["auto_mode"]])
+async def test_a_promote_only_claim_stays_ungoverned(workflow_config, capabilities):
+    """A promote list alone does not make the claim governance, so the client's own list stays in force."""
+    claim = {"allow": [], "ask": [], "deny": [], "promote": ["edit_file"]}
+
+    kwargs, workflow = await _run_with_promotion(
+        json.dumps(claim), workflow_config, capabilities
+    )
+
+    assert kwargs["promoted_tools"] == []
+    assert workflow._preapproved_tools == ["run_command"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_promotion_logs_the_count_at_info_and_the_names_at_debug(workflow_config):
+    with capture_logs() as logs:
+        await _run_with_promotion(
+            json.dumps(_PROMOTE_CLAIM), workflow_config, ["auto_mode"]
+        )
+
+    info = next(
+        entry
+        for entry in logs
+        if entry["event"] == "Promoting default-ask tools for this auto mode turn"
+    )
+    debug = next(
+        entry for entry in logs if entry["event"] == "Promoted default-ask tools"
+    )
+    assert info["log_level"] == "info"
+    assert info["promoted_count"] == 2
+    assert "tool_names" not in info
+    assert debug["log_level"] == "debug"
+    assert debug["tool_names"] == ["create_file_with_contents", "edit_file"]

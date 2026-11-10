@@ -620,6 +620,7 @@ class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
     _ask_tool_names: set[str]
+    _promoted_tool_names: set[str]
     _policy_permitted_preapprovals: Optional[set[str]]
     _mcp_tool_names: list[str]
     _enabled_privileges: set[str]
@@ -641,6 +642,7 @@ class ToolsRegistry:
         admin_allowed_preapprovals: Optional[set[str]] = None,
         registry_flow_id: Optional[str] = None,
         first_party_tools: Optional[Mapping[str, FirstPartyVerdict]] = None,
+        promoted_tools: Optional[list[str]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -676,6 +678,7 @@ class ToolsRegistry:
             allowed_tools=allowed_tools or [],
             admin_allowed_preapprovals=admin_allowed_preapprovals,
             first_party_tools=first_party_tools or {},
+            promoted_tools=promoted_tools or [],
             can_ask_user=workflow_config.get("allow_agent_to_request_user", False),
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
@@ -699,6 +702,7 @@ class ToolsRegistry:
         registry_flow_id: Optional[str] = None,
         first_party_tools: Optional[Mapping[str, FirstPartyVerdict]] = None,
         can_ask_user: bool = False,
+        promoted_tools: Optional[list[str]] = None,
     ):
         """Build the tools a workflow can use.
 
@@ -826,18 +830,34 @@ class ToolsRegistry:
         removed = self._preapproved_tool_names - self.pre_approvals_allowed_by_policy(
             self._preapproved_tool_names
         )
-        if removed:
+        self._preapproved_tool_names -= removed
+
+        # The workflow already gates on this; kept here so no caller can skip a prompt
+        # a headless session would otherwise halt on.
+        if not can_ask_user:
+            promoted_tools = []
+        # Applied after the ceiling, which would otherwise strip these (never in the
+        # admin allow list). Client-injected names are dropped: Rails cannot rule on them.
+        self._promoted_tool_names = {
+            name
+            for name in promoted_tools or []
+            if name in self._enabled_tools
+            and name not in self._denied_tools
+            and not getattr(self._enabled_tools[name], "_client_injected", False)
+        } - self._preapproved_tool_names
+        self._preapproved_tool_names |= self._promoted_tool_names
+        if removed - self._promoted_tool_names:
             log.info(
                 "Removed tools from pre-approval: not permitted by admin policy",
                 workflow_id=workflow_id,
-                tool_names=sorted(removed),
+                tool_names=sorted(removed - self._promoted_tool_names),
             )
-        self._preapproved_tool_names -= removed
 
         # Applied last so it outranks every pre-approval source above. Only binds where
         # a user can be prompted: headless sessions arrive with `ask_tools` already
         # emptied upstream, so an ask rule cannot force a prompt there.
         self._preapproved_tool_names -= self._ask_tool_names
+        self._promoted_tool_names -= self._ask_tool_names
 
     def _add_capability_dependent_tools(
         self, tool_metadata: ToolMetadata, baseline_preapproved: set[str]
@@ -949,8 +969,8 @@ class ToolsRegistry:
         """Check if a tool is preapproved (no approval ever needed).
 
         This is a local check against the registry's pre-approved names, which come from privilege groups, capability
-        tools, admin `allow` rules, first-party `allow` verdicts, and client-injected tools where a session opted in. Use
-        this for routing decisions where you don't need per-call checks.
+        tools, admin `allow` rules, first-party `allow` verdicts, auto mode promotion, and client-injected tools where a
+        session opted in. Use this for routing decisions where you don't need per-call checks.
         """
         return tool_name in self._preapproved_tool_names
 
@@ -1119,6 +1139,7 @@ class ToolsRegistry:
 
         return Toolset(
             pre_approved=pre_approved,
+            promoted=pre_approved & self._promoted_tool_names,
             all_tools=all_tools,
             tool_options=tool_options or {},
             approval_policy=self,

@@ -130,6 +130,13 @@ class TestInboundMessageTypeDerivation:
     def test_fields_carry_over(self, content, fields, expected):
         assert inbound_message("row-1", content, **fields) == expected
 
+    @pytest.mark.parametrize("claimed", ["session_approval", "auto_mode"])
+    def test_a_writer_cannot_claim_a_server_only_source(self, claimed):
+        decision = Decision.optional("approve", claimed, None)
+
+        assert decision is not None
+        assert decision.approval_source == "user_explicit"
+
     @pytest.mark.parametrize(
         ("content", "text", "argument"),
         [
