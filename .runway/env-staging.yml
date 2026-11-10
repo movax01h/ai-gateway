@@ -29,3 +29,6 @@ AIGW_AMAZON_Q__REGION: "us-east-1"
 AIGW_AMAZON_Q__ENDPOINT_URL: "https://us-east-1.prod.integration.qdev.ai.aws.dev"
 AIGW_FEATURE_FLAGS__FIREWORKS_SCORE_THRESHOLD: '{"qwen2p5-coder-7b": -1.5}'
 AIGW_BIND_TOOLS_CACHE__ENABLED: "false"
+# Answer HTTP 413 for request bodies over 16 MiB on the HTTP routes, except /v1/proxy/.
+# https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3404
+AIGW_REQUEST_BODY_LIMIT__MAX_BYTES: "16777216"

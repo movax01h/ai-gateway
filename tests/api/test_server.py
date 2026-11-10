@@ -41,6 +41,7 @@ from ai_gateway.config import (
     ConfigAuth,
     ConfigGoogleCloudPlatform,
     ConfigInternalEvent,
+    ConfigRequestBodyLimit,
 )
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_selection import RestrictedModelAccessError
@@ -267,6 +268,48 @@ def test_body_cap_applies_only_to_code_suggestion_routes(fastapi_server_app):
         "max_bytes": 600_000,
         "path_prefixes": ("/v2/completions", "/v2/code/", "/v3/code/", "/v4/code/"),
     }
+
+
+@pytest.mark.parametrize(
+    ("max_bytes", "general_limits"),
+    [
+        (0, []),
+        (
+            16_777_216,
+            [
+                {
+                    "max_bytes": 16_777_216,
+                    "path_prefixes": ("/",),
+                    "excluded_prefixes": ("/v1/proxy/",),
+                }
+            ],
+        ),
+    ],
+    ids=["off by default", "set"],
+)
+def test_request_body_limit_covers_every_route_except_the_proxy_routes(
+    max_bytes, general_limits
+):
+    config = Config(
+        _env_file=None, request_body_limit=ConfigRequestBodyLimit(max_bytes=max_bytes)
+    )
+
+    app = create_fast_api_server(config)
+
+    body_limits = [
+        m.kwargs for m in app.user_middleware if m.cls is RequestBodyLimitMiddleware
+    ]
+    code_suggestions_limit = {
+        "max_bytes": 600_000,
+        "path_prefixes": ("/v2/completions", "/v2/code/", "/v3/code/", "/v4/code/"),
+    }
+    assert body_limits == [code_suggestions_limit, *general_limits]
+
+
+def test_request_body_limit_reads_its_environment_variable(monkeypatch):
+    monkeypatch.setenv("AIGW_REQUEST_BODY_LIMIT__MAX_BYTES", "16777216")
+
+    assert Config(_env_file=None).request_body_limit.max_bytes == 16_777_216
 
 
 def test_setup_prometheus_fastapi_instrumentator():

@@ -29,6 +29,9 @@ ai-gateway-eks:
       AIGW_BILLING_EVENT__BATCH_SIZE: 1
       AIGW_BILLING_EVENT__THREAD_COUNT: "5"
       AIGW_FEATURE_FLAGS__FIREWORKS_SCORE_THRESHOLD: '{"qwen2p5-coder-7b": -1.5}'
+      # Answer HTTP 413 for request bodies over 16 MiB on the HTTP routes, except /v1/proxy/.
+      # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3404
+      AIGW_REQUEST_BODY_LIMIT__MAX_BYTES: "16777216"
       GOOGLE_APPLICATION_CREDENTIALS: "/secrets/gcp-service-account/credentials.json"
     scalability:
       min_instances: 1
