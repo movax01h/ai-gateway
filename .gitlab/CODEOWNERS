@@ -76,12 +76,8 @@
 /duo_workflow_service/tools/vulnerabilities/post_sast_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis @gitlab-org/maintainers/duo-workflow-service
 /tests/duo_workflow_service/tools/vulnerabilities/test_post_sast_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 
-# Secret false positive detection flow, tools, and prompts
-/duo_workflow_service/agent_platform/v1/flows/configs/secrets_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
-/ai_gateway/prompts/definitions/secret_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+# Secret false positive detection response schema
 /ai_gateway/response_schemas/definitions/secret_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
-/duo_workflow_service/tools/vulnerabilities/post_secret_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection @gitlab-org/maintainers/duo-workflow-service
-/tests/duo_workflow_service/tools/vulnerabilities/test_post_secret_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
 
 # Dependency bump resolution flows and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump/ @mbenayoun @gitlab-org/govern/agentic-security-flows
@@ -105,6 +101,10 @@
 # SAST vulnerability resolution flow and prompts (Code Security)
 /ai/features/security/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai/features/security/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+
+# Secret false positive detection flow, tool, and prompts
+/ai/features/security/secrets_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+/ai/features/security/secret_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
 
 ^[Development]
 # https://gitlab.com/groups/gitlab-org/maintainers/duo-workflow-service/-/group_members?with_inherited_permissions=exclude
@@ -181,12 +181,8 @@
 /duo_workflow_service/tools/vulnerabilities/post_sast_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis @gitlab-org/maintainers/duo-workflow-service
 /tests/duo_workflow_service/tools/vulnerabilities/test_post_sast_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 
-# Secret false positive detection flow, tools, and prompts
-/duo_workflow_service/agent_platform/v1/flows/configs/secrets_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
-/ai_gateway/prompts/definitions/secret_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+# Secret false positive detection response schema
 /ai_gateway/response_schemas/definitions/secret_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
-/duo_workflow_service/tools/vulnerabilities/post_secret_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection @gitlab-org/maintainers/duo-workflow-service
-/tests/duo_workflow_service/tools/vulnerabilities/test_post_secret_fp_analysis_to_gitlab.py @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
 
 # Dependency bump resolution flows and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump/ @mbenayoun @gitlab-org/govern/agentic-security-flows
@@ -207,6 +203,10 @@
 # SAST vulnerability resolution flow and prompts (Code Security)
 /ai/features/security/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
 /ai/features/security/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
+
+# Secret false positive detection flow, tool, and prompts
+/ai/features/security/secrets_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
+/ai/features/security/secret_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
 
 # Fix Pipeline prompts and response schemas
 /ai_gateway/prompts/definitions/fix_pipeline_*/ @gitlab-org/maintainers/cicd-verify @gitlab-org/ci-cd/verify/frontend
