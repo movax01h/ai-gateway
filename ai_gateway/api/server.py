@@ -75,6 +75,9 @@ _CODE_SUGGESTIONS_PATH_PREFIXES = (
     "/v4/code/",
 )
 _CODE_SUGGESTIONS_MAX_BODY_BYTES = 600_000
+# Proxy requests are larger than the others (up to about 17 MiB) and never carry
+# model_metadata, so the general request body limit leaves them out.
+_PROXY_PATH_PREFIXES = ("/v1/proxy/",)
 _PROMPTS_PATH_PREFIXES = (
     "/v1/prompts/",
     "/v2/prompts/",
@@ -155,6 +158,27 @@ def _oidc_providers(config: Config) -> dict[str, str]:
     return oidc_providers
 
 
+def _request_body_limit(config: Config) -> list[Middleware]:
+    """Return the request body limit for every HTTP route except the proxy routes.
+
+    The limit is off (an empty list) unless ``AIGW_REQUEST_BODY_LIMIT__MAX_BYTES`` is set. GitLab.com sets it, so a
+    caller cannot make the gateway buffer and parse a very large body on these routes. Self-hosted gateways keep the
+    default.
+    """
+    max_bytes = config.request_body_limit.max_bytes
+    if not max_bytes:
+        return []
+
+    return [
+        Middleware(
+            RequestBodyLimitMiddleware,
+            max_bytes=max_bytes,
+            path_prefixes=("/",),
+            excluded_prefixes=_PROXY_PATH_PREFIXES,
+        )
+    ]
+
+
 def create_fast_api_server(config: Config):
     auth_provider = CompositeProvider(
         [
@@ -218,6 +242,7 @@ def create_fast_api_server(config: Config):
                 max_bytes=_CODE_SUGGESTIONS_MAX_BODY_BYTES,
                 path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
             ),
+            *_request_body_limit(config),
             Middleware(
                 ActorLimitMiddleware,
                 limits=config.code_suggestions,

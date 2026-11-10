@@ -43,6 +43,7 @@ __all__ = [
     "ConfigMtls",
     "ConfigPrompts",
     "ConfigProxyEndpoints",
+    "ConfigRequestBodyLimit",
     "ConfigSnowplow",
     "ConfigTLS",
     "ConfigVertexTextModel",
@@ -613,6 +614,22 @@ class ConfigPrompts(ConfigActorLimits):
     """Limits on the prompt routes: /v1/prompts/ and /v2/prompts/."""
 
 
+class ConfigRequestBodyLimit(BaseModel):
+    """A size limit on request bodies for the HTTP routes, except the proxy routes (/v1/proxy/)."""
+
+    max_bytes: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Answer HTTP 413 for a request body larger than this many bytes, before the gateway "
+            "buffers it. It applies to every HTTP route except /v1/proxy/, where legitimate "
+            "bodies are larger. The code suggestion routes keep their own 600 KB limit. "
+            "0 (the default) turns the limit off. GitLab.com sets it; self-hosted gateways "
+            "do not need it."
+        ),
+    )
+
+
 class ConfigFeatureFlags(BaseModel):
     disallowed_flags: dict[str, Set[str]] = {}
     excl_post_process: list[str] = []
@@ -853,6 +870,9 @@ class Config(BaseSettings):
         ConfigCodeSuggestions, Field(default_factory=ConfigCodeSuggestions)
     ]
     prompts: Annotated[ConfigPrompts, Field(default_factory=ConfigPrompts)]
+    request_body_limit: Annotated[
+        ConfigRequestBodyLimit, Field(default_factory=ConfigRequestBodyLimit)
+    ]
     bind_tools_cache: Annotated[
         ConfigBindToolsCache, Field(default_factory=ConfigBindToolsCache)
     ]
