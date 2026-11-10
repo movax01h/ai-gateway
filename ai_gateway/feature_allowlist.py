@@ -192,19 +192,6 @@ def _use_prompt_default() -> None:
     return None
 
 
-def _outcome(
-    mode: FeatureAllowlistMode,
-    metadata: TypeModelMetadata,
-    error: ModelSelectionError,
-    fallback: Callable[[], Optional[TypeModelMetadata]],
-) -> Optional[TypeModelMetadata]:
-    if mode == "log":
-        return metadata
-    if mode == "fallback":
-        return fallback()
-    raise error
-
-
 @dataclass(frozen=True)
 class _AllowlistCheck:
     """One check of a managed model request, in a given mode."""
@@ -282,14 +269,18 @@ class _AllowlistCheck:
         if self.feature is None or self.request.feature_setting == self.feature:
             return metadata
         known_feature = self._unit_primitive_config(self.feature) is not None
+        served = (
+            metadata
+            if self.mode == "log" or not known_feature
+            else self._default_of(self.feature)
+        )
         self._warn(
             "feature_mismatch",
             metadata,
             _REPLACED_UNLESS_LOG if known_feature else _SERVED_IN_EVERY_MODE,
+            served=served,
         )
-        if self.mode == "log" or not known_feature:
-            return metadata
-        return self._default_of(self.feature)
+        return served
 
     def _provider_not_served(self, metadata: TypeModelMetadata) -> None:
         """Refuse a provider this gateway does not serve; there is nothing valid to fall back to.
@@ -297,8 +288,14 @@ class _AllowlistCheck:
         ``log`` mode records the provider and runs the remaining checks, so the log shows what the
         request would meet once the provider is fixed.
         """
-        self._warn("provider_not_served", metadata, _REFUSED_UNLESS_LOG)
-        if self.mode != "log":
+        refused = self.mode != "log"
+        self._warn(
+            "provider_not_served",
+            metadata,
+            _REFUSED_UNLESS_LOG,
+            served=None if refused else metadata,
+        )
+        if refused:
             raise ProviderNotServedError(self.request.provider or "")
 
     def _missing_feature(
@@ -311,9 +308,8 @@ class _AllowlistCheck:
             # covers it once the flow is known.
             self._note("missing_feature_setting", metadata)
             return metadata
-        self._warn("missing_feature_setting", metadata, _REPLACED_THEN_REFUSED)
-        return _outcome(
-            self.mode,
+        return self._replace_or_refuse(
+            "missing_feature_setting",
             metadata,
             FeatureSettingRequiredError(metadata.llm_definition.gitlab_identifier),
             _use_prompt_default,
@@ -323,15 +319,41 @@ class _AllowlistCheck:
         self, metadata: TypeModelMetadata, feature: str
     ) -> Optional[TypeModelMetadata]:
         """Handle a named model whose feature does not exist, on both surfaces: no resume replays this shape."""
-        self._warn("unknown_feature", metadata, _REPLACED_THEN_REFUSED)
-        return _outcome(
-            self.mode,
+        return self._replace_or_refuse(
+            "unknown_feature",
             metadata,
             ModelNotAllowedForFeatureError(
                 feature, metadata.llm_definition.gitlab_identifier
             ),
             _use_prompt_default,
         )
+
+    def _replace_or_refuse(
+        self,
+        reason: str,
+        metadata: TypeModelMetadata,
+        error: ModelSelectionError,
+        fallback: Callable[[], Optional[TypeModelMetadata]],
+    ) -> Optional[TypeModelMetadata]:
+        """Log a mismatch that ``fallback`` mode replaces and ``enforce`` mode refuses, and apply the mode.
+
+        The mismatch is logged after ``fallback`` chooses the model, so that the log names the model that runs.
+
+        Returns:
+            The request's own metadata in ``log`` mode, and the result of ``fallback`` in ``fallback`` mode.
+
+        Raises:
+            ModelSelectionError: In ``enforce`` mode.
+        """
+        served: Optional[TypeModelMetadata] = None
+        if self.mode == "log":
+            served = metadata
+        elif self.mode == "fallback":
+            served = fallback()
+        self._warn(reason, metadata, _REPLACED_THEN_REFUSED, served=served)
+        if self.mode not in ("log", "fallback"):
+            raise error
+        return served
 
     @staticmethod
     def _unit_primitive_config(feature: str) -> Optional[UnitPrimitiveConfig]:
@@ -344,9 +366,8 @@ class _AllowlistCheck:
         feature = unit_primitive_config.feature_setting
         gitlab_identifier = metadata.llm_definition.gitlab_identifier
         if gitlab_identifier not in unit_primitive_config.allowed_model_identifiers:
-            self._warn("model_not_allowed", metadata, _REPLACED_THEN_REFUSED)
-            return _outcome(
-                self.mode,
+            return self._replace_or_refuse(
+                "model_not_allowed",
                 metadata,
                 ModelNotAllowedForFeatureError(feature, gitlab_identifier),
                 lambda: self._default_of(feature),
@@ -390,11 +411,15 @@ class _AllowlistCheck:
         reason: str,
         metadata: TypeModelMetadata,
         outcomes: Mapping[str, Outcome],
+        served: Optional[TypeModelMetadata],
     ) -> dict[str, Any]:
         """Return the log fields; the event and the check's fields win over a caller key of the same name.
 
         ``outcome`` is what the current mode does with the request at this check, and ``enforce_outcome`` is what
         ``enforce`` mode would do, so the logs of a less strict mode show which requests ``enforce`` would refuse.
+        ``checked_identifier`` is the model that the check got, and ``served_identifier`` is the model that the check
+        serves. ``served_identifier`` is empty when the check refuses the request, or leaves it on the prompt's own
+        default model.
         """
         context = {
             key: value for key, value in self.log_context.items() if key != "event"
@@ -412,7 +437,10 @@ class _AllowlistCheck:
             "requested_name": self.request.name,
             "requested_identifier": self.request.identifier,
             "pinned": self.request.pinned,
-            "served_identifier": metadata.llm_definition.gitlab_identifier,
+            "checked_identifier": metadata.llm_definition.gitlab_identifier,
+            "served_identifier": (
+                served.llm_definition.gitlab_identifier if served else None
+            ),
         }
 
     def _warn(
@@ -420,12 +448,21 @@ class _AllowlistCheck:
         reason: str,
         metadata: TypeModelMetadata,
         outcomes: Mapping[str, Outcome],
+        *,
+        served: Optional[TypeModelMetadata],
     ) -> None:
-        log.warning(_MISMATCH_EVENT, **self._fields(reason, metadata, outcomes))
+        log.warning(_MISMATCH_EVENT, **self._fields(reason, metadata, outcomes, served))
 
     def _note(self, reason: str, metadata: TypeModelMetadata) -> None:
-        """Log a case that changes nothing, in any mode."""
-        log.info(_NOTE_EVENT, **self._fields(reason, metadata, _SERVED_IN_EVERY_MODE))
+        """Log a case that changes nothing, in any mode.
+
+        The note logs the model at this point as ``served_identifier``. A later check of the same request can still
+        replace that model, and then logs a mismatch.
+        """
+        log.info(
+            _NOTE_EVENT,
+            **self._fields(reason, metadata, _SERVED_IN_EVERY_MODE, metadata),
+        )
 
 
 def check_client_model_metadata(

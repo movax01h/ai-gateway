@@ -1,7 +1,7 @@
 import asyncio
 import json
 from datetime import date
-from typing import Optional
+from typing import Any, Mapping, NamedTuple, Optional
 from unittest.mock import Mock, patch
 
 import pytest
@@ -560,6 +560,7 @@ class TestCheckClientModelMetadata:
             assert entry["feature_setting"] == FEATURE
             assert entry["requested_name"] is None
             assert entry["requested_identifier"] == "other_model"
+            assert entry["checked_identifier"] == "other_model"
             assert entry["served_identifier"] == "other_model"
             assert entry["pinned"] is True
             assert entry["path"] == "/v1/prompts/chat/react"
@@ -591,6 +592,7 @@ class TestCheckClientModelMetadata:
                     "requested_name": None,
                     "requested_identifier": "other_model",
                     "pinned": True,
+                    "checked_identifier": "other_model",
                     "served_identifier": "other_model",
                     "path": "/v1/prompts/chat/react",
                 }
@@ -604,6 +606,9 @@ class TestCheckClientModelMetadata:
             assert result.llm_definition.gitlab_identifier == "allowed_model"
             assert result.provider == "gitlab"
             assert _reasons(logs) == ["model_not_allowed"]
+            entry = next(e for e in logs if e["event"] == MISMATCH)
+            assert entry["checked_identifier"] == "other_model"
+            assert entry["served_identifier"] == "allowed_model"
 
         @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
         @pytest.mark.parametrize("surface", ["http", "dws"])
@@ -923,6 +928,19 @@ def _note_prompt_feature(raw: dict, prompt_feature_setting: str):
     return logs
 
 
+class _Run(NamedTuple):
+    """What one check did with a request, and the log entry of the case under test.
+
+    `served` is the model that runs: the result of the check, or None when the check refuses the request or leaves it
+    on the prompt's own default model.
+    """
+
+    checked: str
+    done: str
+    served: Optional[str]
+    entry: Mapping[str, Any]
+
+
 class TestOutcomeLogFields:
     """Each event logs what its check does in the current mode, and what `enforce` mode would do."""
 
@@ -1047,8 +1065,8 @@ class TestOutcomeLogFields:
     ]
 
     @staticmethod
-    def _run(monkeypatch, mode, surface, raw, kwargs):
-        """Run the check in `mode` and return what it did with the request, and its log entry."""
+    def _run(monkeypatch, mode, surface, raw, kwargs, event, reason) -> _Run:
+        """Run the check in `mode`, and return what it did with the request and the log entry of `reason`."""
         model_selection = get_config().model_selection
         monkeypatch.setattr(model_selection, "feature_allowlist_mode_http", mode)
         monkeypatch.setattr(model_selection, "feature_allowlist_mode_dws", mode)
@@ -1056,6 +1074,10 @@ class TestOutcomeLogFields:
         metadata = (
             _dws_metadata(raw) if surface == "dws" else create_model_metadata(dict(raw))
         )
+        assert metadata is not None, (
+            "the Duo Workflow Service does not resolve this shape"
+        )
+        result: Optional[TypeModelMetadata] = None
         with structlog.testing.capture_logs() as logs:
             try:
                 result = check_client_model_metadata(
@@ -1064,26 +1086,45 @@ class TestOutcomeLogFields:
                 done = "served" if result is metadata else "replaced"
             except ModelSelectionError:
                 done = "refused"
-        return done, logs
+        [entry] = [
+            entry
+            for entry in logs
+            if entry["event"] == event and entry["reason"] == reason
+        ]
+        return _Run(
+            checked=metadata.llm_definition.gitlab_identifier,
+            done=done,
+            served=result.llm_definition.gitlab_identifier if result else None,
+            entry=entry,
+        )
 
     @pytest.mark.parametrize(("surface", "raw", "kwargs", "event", "reason"), CASES)
     def test_the_logged_outcomes_match_what_each_mode_does(
         self, monkeypatch, surface, raw, kwargs, event, reason
     ):
-        done_in = {}
-        entries = {}
-        for mode in ALL_MODES:
-            done_in[mode], logs = self._run(monkeypatch, mode, surface, raw, kwargs)
-            [entries[mode]] = [
-                entry
-                for entry in logs
-                if entry["event"] == event and entry["reason"] == reason
-            ]
-
-        assert {mode: entry["outcome"] for mode, entry in entries.items()} == done_in
-        assert {entry["enforce_outcome"] for entry in entries.values()} == {
-            done_in["enforce"]
+        runs = {
+            mode: self._run(monkeypatch, mode, surface, raw, kwargs, event, reason)
+            for mode in ALL_MODES
         }
+
+        assert {mode: run.entry["outcome"] for mode, run in runs.items()} == {
+            mode: run.done for mode, run in runs.items()
+        }
+        assert {run.entry["enforce_outcome"] for run in runs.values()} == {
+            runs["enforce"].done
+        }
+
+    @pytest.mark.parametrize("mode", ALL_MODES)
+    @pytest.mark.parametrize(("surface", "raw", "kwargs", "event", "reason"), CASES)
+    def test_the_logged_identifiers_name_the_checked_and_the_served_model(
+        self, monkeypatch, mode, surface, raw, kwargs, event, reason
+    ):
+        run = self._run(monkeypatch, mode, surface, raw, kwargs, event, reason)
+
+        assert {
+            "checked_identifier": run.entry["checked_identifier"],
+            "served_identifier": run.entry["served_identifier"],
+        } == {"checked_identifier": run.checked, "served_identifier": run.served}
 
 
 @pytest.mark.usefixtures("feature_allowlist_mode")

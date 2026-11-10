@@ -676,11 +676,14 @@ Every mismatch is logged as `Model allowlist mismatch` with a `reason` (`provide
 `feature_mismatch`, `missing_feature_setting`, `unknown_feature`), the `mode`, the
 `surface` (`http` or `dws`), the `feature_setting` the check used (the route's feature when the route passes one, else
 the client's), the `client_feature_setting` as the client sent it, the `requested_name` and `requested_identifier` as
-the client sent them, the `served_identifier` and the caller's context such as the request `path`. Endpoint and key
-values are never logged. One request can log more than one mismatch, so count by `reason` or by correlation ID
-rather than by event. Informational cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
+the client sent them, the `checked_identifier` of the model that the check got, the `served_identifier` of the model
+that the check serves, and the caller's context such as the request `path`. The `served_identifier` is empty when the
+gateway refuses the request, or serves the prompt's default model. Endpoint and key values are never logged. One
+request can log more than one mismatch, so count by `reason` or by correlation ID rather than by event. Informational
+cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
 `deprecated_model`, `name_ignored`, `identifier_ignored`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
-`Model allowlist note`.
+`Model allowlist note`. A note changes nothing, so its `served_identifier` is the model at the point of the note. A
+later mismatch of the same request can still replace that model.
 
 Each mismatch and note also has the `outcome` of the check in the current mode, and the `enforce_outcome` that
 `enforce` mode would have. The values are:
