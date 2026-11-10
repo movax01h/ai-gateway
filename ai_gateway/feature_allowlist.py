@@ -67,6 +67,7 @@ __all__ = [
     "ClientModelRequest",
     "PromptModelCheck",
     "check_client_model_metadata",
+    "dws_client_model_request_context",
     "note_prompt_feature",
     "prompt_model_check_context",
 ]
@@ -178,6 +179,12 @@ class PromptModelCheck:
 
 prompt_model_check_context: ContextVar[Optional[PromptModelCheck]] = ContextVar(
     "prompt_model_check_context", default=None
+)
+
+# What the client asked for in the Duo Workflow Service model metadata header, for the rest of the call. The workflow
+# reads it once the flow is known.
+dws_client_model_request_context: ContextVar[Optional[ClientModelRequest]] = ContextVar(
+    "dws_client_model_request_context", default=None
 )
 
 

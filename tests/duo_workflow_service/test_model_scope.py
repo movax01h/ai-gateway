@@ -14,6 +14,7 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
 )
 from duo_workflow_service.model_scope import (
     FLAT_RATE_FLOW_FEATURE_SETTINGS,
+    log_flow_model_feature,
     scope_flat_rate_flow_models,
 )
 from lib.billing_events import BILL_ONCE_PER_WORKFLOW_FEATURES
@@ -46,7 +47,7 @@ def cloud_gateway(monkeypatch):
     )
 
 
-async def _resolve_header(raw: dict) -> None:
+async def _resolve_header(raw: object) -> None:
     """Set the request's model metadata with the real Duo Workflow Service interceptor."""
     current_user.set(USER)
     details = MagicMock()
@@ -305,5 +306,108 @@ class TestNothingChanges:
         before = current_model_metadata_with_size_context.get()
 
         scope_flat_rate_flow_models(CODE_REVIEW, USER)
+
+        assert current_model_metadata_with_size_context.get() is before
+
+
+class TestLogFlowModelFeature:
+    """One line per workflow start with the client's feature next to the flow, which changes nothing."""
+
+    FLOW_MODEL_FEATURE = "Flow model feature"
+
+    def _logged(self, logs):
+        return [entry for entry in logs if entry["event"] == self.FLOW_MODEL_FEATURE]
+
+    @pytest.mark.asyncio
+    async def test_logs_the_client_feature_and_the_model_that_passed(self):
+        await _resolve_header(
+            {
+                "provider": "gitlab",
+                "identifier": FABLE,
+                "feature_setting": "duo_agent_platform",
+            }
+        )
+
+        with capture_logs() as logs:
+            log_flow_model_feature("security_review/v1", "security_review/v1")
+
+        assert self._logged(logs) == [
+            {
+                "event": self.FLOW_MODEL_FEATURE,
+                "log_level": "info",
+                "flow": "security_review/v1",
+                "workflow_definition": "security_review/v1",
+                "client_feature_setting": "duo_agent_platform",
+                "provider": "gitlab",
+                "pinned": True,
+                "requested_name": None,
+                "requested_identifier": FABLE,
+                "served_identifier": FABLE,
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_logs_a_resume_replay_without_a_feature(self):
+        await _resolve_header({"provider": "gitlab", "name": FABLE})
+
+        with capture_logs() as logs:
+            log_flow_model_feature("developer/v1", "developer/v1")
+
+        [entry] = self._logged(logs)
+        assert entry["client_feature_setting"] is None
+        assert entry["pinned"] is True
+        assert entry["requested_name"] == FABLE
+
+    @pytest.mark.asyncio
+    async def test_logs_nothing_for_a_request_without_model_metadata(self):
+        await _resolve_header({"provider": "gitlab", "identifier": FABLE})
+        details = MagicMock()
+        details.invocation_metadata = []
+        await ModelMetadataInterceptor().intercept_service(AsyncMock(), details)
+
+        with capture_logs() as logs:
+            log_flow_model_feature("chat", "chat")
+
+        assert self._logged(logs) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "raw",
+        [None, [], {}, {"name": FABLE}],
+        ids=["null", "list", "empty", "no-provider"],
+    )
+    async def test_logs_nothing_for_model_metadata_that_is_not_applied(self, raw):
+        await _resolve_header({"provider": "gitlab", "identifier": FABLE})
+        await _resolve_header(raw)
+
+        with capture_logs() as logs:
+            log_flow_model_feature("chat", "chat")
+
+        assert self._logged(logs) == []
+
+    @pytest.mark.asyncio
+    async def test_logs_nothing_on_a_gateway_that_serves_custom_models(
+        self, monkeypatch
+    ):
+        await _resolve_header({"provider": "gitlab", "identifier": FABLE})
+        monkeypatch.setattr(get_config().custom_models, "enabled", True)
+
+        with capture_logs() as logs:
+            log_flow_model_feature("chat", "chat")
+
+        assert self._logged(logs) == []
+
+    @pytest.mark.asyncio
+    async def test_changes_no_model(self):
+        await _resolve_header(
+            {
+                "provider": "gitlab",
+                "identifier": FABLE,
+                "feature_setting": "duo_agent_platform",
+            }
+        )
+        before = current_model_metadata_with_size_context.get()
+
+        log_flow_model_feature(CODE_REVIEW, CODE_REVIEW)
 
         assert current_model_metadata_with_size_context.get() is before

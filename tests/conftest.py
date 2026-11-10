@@ -35,6 +35,7 @@ from ai_gateway.api.middleware.route import usage_quota
 from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
 from ai_gateway.config import Config, ConfigModelLimits, get_config
 from ai_gateway.container import ContainerApplication
+from ai_gateway.feature_allowlist import dws_client_model_request_context
 from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
@@ -661,6 +662,7 @@ def reset_context_vars():
     current_feature_flag_context.set(set[str]())
     current_model_metadata_with_size_context.set(None)
     current_model_metadata_context.set(None)
+    dws_client_model_request_context.set(None)
     token_usage.set(None)
     llm_operations.set(None)
     current_prompt_cache_context.set(None)

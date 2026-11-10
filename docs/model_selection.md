@@ -692,6 +692,11 @@ Each mismatch and note also has the `outcome` of the check in the current mode, 
 To roll back a stricter mode, set the variable of that surface to `log`. For example, set
 `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS=log`.
 
+At each workflow start, the Duo Workflow Service also logs `Flow model feature` (logger `model_scope`) with the `flow`,
+the `client_feature_setting` and `pinned` value of the request, and the `served_identifier` that passed the check. It
+shows which feature the clients of each flow send, and changes nothing. A request without model metadata is not
+logged.
+
 ### Find the requests that `enforce` mode would refuse
 
 Before you move a surface to `enforce` mode, find the requests that it would refuse in the logs of the current mode.
