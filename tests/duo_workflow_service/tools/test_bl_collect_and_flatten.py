@@ -114,42 +114,6 @@ class TestResolveEntry:
 
 
 @pytest.mark.asyncio
-async def test_a_garbled_unit_answer_is_counted_unread_not_reviewed():
-    """An answer that does not parse as a structured answer must not pass as a reviewed unit with no findings."""
-    tool = BlCollectAndFlatten(metadata={})
-    results = [
-        {"final_answer": '{"explanation": "r", "findings": [{'},
-        {
-            "final_answer": '{"explanation": "r", "findings": [{"id": "ok"}]}',
-        },
-    ]
-
-    out = await tool._execute(results=results)
-    cov = out["coverage"]
-
-    assert cov["summary"] == "Reviewed 1 of 2 units."
-    assert "1 returned an answer that could not be read" in cov["loss"]
-
-
-@pytest.mark.asyncio
-class TestAUnitWithNoAnswer:
-    """A unit that completed without an answer contributes nothing, so it must not be counted as reviewed."""
-
-    async def test_it_is_reported_as_lost_not_reviewed(self):
-        tool = BlCollectAndFlatten(metadata={})
-        results = [
-            {},
-            {"final_answer": _unit({"id": "ok"})},
-        ]
-
-        cov = (await tool._execute(results=results))["coverage"]
-
-        assert cov["summary"] == "Reviewed 1 of 2 units."
-        assert "1 of 2 units are missing from the results" in cov["loss"]
-        assert "1 returned an answer that could not be read" in cov["loss"]
-
-
-@pytest.mark.asyncio
 class TestADictFinalAnswer:
     """In schema mode the plain AgentComponent stores `final_answer` as the decoded dict, not its JSON string."""
 
@@ -163,17 +127,6 @@ class TestADictFinalAnswer:
         assert out["coverage"]["completed"] == 1
         assert out["coverage"]["summary"] == "Reviewed 1 of 1 units."
         assert "loss" not in out["coverage"]
-
-    @pytest.mark.parametrize("answer", [None, {}])
-    async def test_an_empty_answer_is_completed_but_unread(self, answer):
-        tool = BlCollectAndFlatten(metadata=None)
-
-        out = await tool._execute(results=[{"final_answer": answer}])
-        cov = out["coverage"]
-
-        assert cov["completed"] == 1
-        assert cov["summary"] == "Reviewed 0 of 1 units."
-        assert "1 returned an answer that could not be read" in cov["loss"]
 
 
 class TestCoverageSentencesReachTheReport:
@@ -375,29 +328,6 @@ class TestTriageVerdictMerge:
         assert merged == [{"verdict": "DROP", "clause": "c", "evidence": "e"}]
         assert any("item is not a finding" in log["event"] for log in logs)
 
-    @pytest.mark.parametrize("answer", ['["a", "list"]', "not json"])
-    async def test_a_verdict_that_is_not_an_object_is_counted_unread(self, answer):
-        out = await BlCollectAndFlatten(metadata=None)._execute(
-            results=[{"final_answer": answer}],
-            verdict_items=[dict(_FINDING)],
-        )
-        cov = out["coverage"]
-
-        assert json.loads(out["final_answer"]) == []
-        assert cov["summary"] == "Reviewed 0 of 1 units."
-        assert "1 returned an answer that could not be read" in cov["loss"]
-
-    async def test_a_verdict_with_no_verdict_field_is_counted_unread(self):
-        out = await BlCollectAndFlatten(metadata=None)._execute(
-            results=[
-                {"final_answer": json.dumps({"explanation": "x", "error": "oops"})}
-            ],
-            verdict_items=[dict(_FINDING)],
-        )
-
-        assert json.loads(out["final_answer"]) == []
-        assert out["coverage"]["summary"] == "Reviewed 0 of 1 units."
-
     async def test_a_failed_unit_does_not_shift_the_items(self):
         results = [
             _failed(),
@@ -424,29 +354,29 @@ _ONE_FINDING = {
 class TestUnitFindings:
     """What one unit answer contributes: its finding dicts, ``[]`` for an honest empty answer, ``None`` when lost."""
 
-    def test_the_findings_are_the_dicts_under_findings(self):
-        assert _unit_findings(_unit(_ONE_FINDING, {"cwe": "CWE-862"})) == [
-            _ONE_FINDING,
-            {"cwe": "CWE-862"},
-        ]
-
-    def test_empty_findings_is_an_answer_not_a_loss(self):
-        # A unit that honestly found nothing; re-asking would pay for a second
-        # model run to be told the same.
-        assert _unit_findings(_unit()) == []
-
-    def test_an_already_decoded_answer_is_read_too(self):
-        assert _unit_findings(json.loads(_unit(_ONE_FINDING))) == [_ONE_FINDING]
-
-    def test_findings_holding_no_finding_dict_is_lost(self):
-        answer = json.dumps({"explanation": "r", "findings": [1, "prose"]})
-
-        assert _unit_findings(answer) is None
-
-    def test_non_dict_items_beside_a_finding_are_not_counted(self):
-        answer = json.dumps({"explanation": "r", "findings": [_ONE_FINDING, "x", None]})
-
-        assert _unit_findings(answer) == [_ONE_FINDING]
+    @pytest.mark.parametrize(
+        ("answer", "expected"),
+        [
+            pytest.param(
+                _unit(_ONE_FINDING, {"cwe": "CWE-862"}),
+                [_ONE_FINDING, {"cwe": "CWE-862"}],
+                id="the-dicts-under-findings",
+            ),
+            # A unit that honestly found nothing; re-asking would pay for a
+            # second model run to be told the same.
+            pytest.param(_unit(), [], id="empty-findings-is-an-answer"),
+            pytest.param(
+                json.loads(_unit(_ONE_FINDING)), [_ONE_FINDING], id="already-decoded"
+            ),
+            pytest.param(
+                json.dumps({"explanation": "r", "findings": [_ONE_FINDING, "x", None]}),
+                [_ONE_FINDING],
+                id="non-dicts-beside-a-finding-are-skipped",
+            ),
+        ],
+    )
+    def test_a_findings_list_is_read(self, answer, expected):
+        assert _unit_findings(answer) == expected
 
     @pytest.mark.parametrize(
         "answer",
@@ -457,6 +387,10 @@ class TestUnitFindings:
             pytest.param(json.dumps({"findings": None}), id="null-findings"),
             pytest.param(json.dumps({"findings": "none"}), id="string-findings"),
             pytest.param(None, id="none"),
+            pytest.param(
+                json.dumps({"explanation": "r", "findings": [1, "prose"]}),
+                id="no-finding-dict-in-findings",
+            ),
         ],
     )
     def test_anything_but_a_findings_list_is_lost(self, answer):
@@ -487,7 +421,7 @@ class TestFlatten:
 
         assert json.loads(out["final_answer"]) == [_ONE_FINDING, {"cwe": "CWE-862"}]
 
-    async def test_an_unreadable_unit_contributes_nothing_and_is_unread(self):
+    async def test_unread_units_are_counted_beside_the_readable_ones(self):
         results = [
             {"final_answer": "prose"},
             {"final_answer": {"explanation": "r"}},
@@ -503,3 +437,54 @@ class TestFlatten:
         assert (
             "3 returned an answer that could not be read" in (out["coverage"]["loss"])
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("entry", "verdict_items"),
+    [
+        pytest.param({}, None, id="no-answer"),
+        pytest.param({"final_answer": None}, None, id="null-answer"),
+        pytest.param({"final_answer": {}}, None, id="empty-dict"),
+        pytest.param({"final_answer": {"explanation": "r"}}, None, id="no-findings"),
+        pytest.param({"final_answer": "prose"}, None, id="prose"),
+        pytest.param(
+            {"final_answer": '{"explanation": "r", "findings": [{'},
+            None,
+            id="truncated-json",
+        ),
+        pytest.param(
+            {"final_answer": "Result: " + _unit(_ONE_FINDING)},
+            None,
+            id="json-wrapped-in-text",
+        ),
+        pytest.param(
+            {"final_answer": '["a", "list"]'}, [_FINDING], id="verdict-not-object"
+        ),
+        pytest.param({"final_answer": "not json"}, [_FINDING], id="verdict-not-json"),
+        pytest.param(
+            {"final_answer": json.dumps({"explanation": "x", "error": "oops"})},
+            [_FINDING],
+            id="verdict-missing",
+        ),
+    ],
+)
+async def test_a_completed_unit_with_no_readable_answer_is_counted_unread(
+    entry, verdict_items
+):
+    """What counts as unread: a unit that completed, but whose answer is not a findings list we can read."""
+    out = await BlCollectAndFlatten(metadata=None)._execute(
+        results=[entry], verdict_items=verdict_items
+    )
+
+    assert json.loads(out["final_answer"]) == []
+    assert out["coverage"] == {
+        "emitted": None,
+        "dispatched": 1,
+        "completed": 1,
+        "errored": 0,
+        "unit_noun": None,
+        "summary": "Reviewed 0 of 1 units.",
+        "loss": "1 of 1 units are missing from the results "
+        "(1 returned an answer that could not be read).",
+    }
