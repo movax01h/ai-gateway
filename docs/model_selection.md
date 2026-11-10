@@ -70,7 +70,7 @@ configurable_unit_primitives:
 ```
 
 ```yaml
-# ai_gateway/prompts/definitions/code_suggestions/completions/mistral/1.0.0.yml
+# ai/features/code_suggestions/completions/prompts/mistral/1.0.0.yml
 name: Mistral Code Suggestions
 model:
   params:
@@ -96,10 +96,10 @@ steps will occur:
   picked (with a single entry, `codestral` is always selected)
 - `models.yml` will be searched for `gitlab_identifier: codestral`, and its `family` and parameters retrieved
 - Each `value` from `family` will be checked in order for a corresponding prompt definition folder, so first the path
-`ai_gateway/prompts/definitions/code_suggestions/completions/codestral` is checked. Assuming it doesn't exist, next
-`ai_gateway/prompts/definitions/code_suggestions/completions/mistral` is checked. Since it exists, the version file is
+`ai/features/code_suggestions/completions/prompts/codestral` is checked. Assuming it doesn't exist, next
+`ai/features/code_suggestions/completions/prompts/mistral` is checked. Since it exists, the version file is
 searched in that folder
-- The prompt definition `ai_gateway/prompts/definitions/code_suggestions/completions/mistral/1.0.0.yml` is loaded
+- The prompt definition `ai/features/code_suggestions/completions/prompts/mistral/1.0.0.yml` is loaded
 
 Thus, the resulting values will be:
 

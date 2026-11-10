@@ -34,7 +34,6 @@
 /ai/features/semantic_search/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/semantic-code-search
 
 # Code Suggestions prompts (AI Coding)
-/ai_gateway/prompts/definitions/code_suggestions/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-engineering/ai-coding/engineers
 /ai/features/code_suggestions/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-engineering/ai-coding/engineers
 
 # Legacy non-agentic Duo features
@@ -140,7 +139,6 @@
 /ai/features/semantic_search/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/semantic-code-search
 
 # Code Suggestions prompts (AI Coding)
-/ai_gateway/prompts/definitions/code_suggestions/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-engineering/ai-coding/engineers
 /ai/features/code_suggestions/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-engineering/ai-coding/engineers
 
 # Legacy non-agentic Duo features
