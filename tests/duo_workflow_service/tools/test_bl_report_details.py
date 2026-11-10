@@ -13,7 +13,7 @@ def test_no_anchor_state_reaches_the_report():
             {
                 "file": "a.go",
                 "new_line": 3,
-                "anchor_status": bl.ANCHOR_CORRECTED,
+                "anchor_status": bl._ANCHOR_CORRECTED,
                 "anchor_claimed_line": 4,
                 "claimed_file": "x/a.go",
             }
@@ -31,21 +31,21 @@ def test_an_unverified_line_is_stated_in_that_findings_description():
                 "file": "a.go",
                 "new_line": 3,
                 "body": "Leaks the token.",
-                "anchor_status": bl.ANCHOR_VERIFIED,
+                "anchor_status": bl._ANCHOR_VERIFIED,
             },
             {
                 "file": "b.go",
                 "new_line": 4,
                 "body": "Leaks the key.",
-                "anchor_status": bl.ANCHOR_CORRECTED,
+                "anchor_status": bl._ANCHOR_CORRECTED,
             },
             {
                 "file": "c.go",
                 "new_line": 5,
                 "body": "Leaks the id.",
-                "anchor_status": bl.ANCHOR_UNVERIFIED,
+                "anchor_status": bl._ANCHOR_UNVERIFIED,
             },
-            {"file": "d.go", "new_line": 6, "anchor_status": bl.ANCHOR_UNVERIFIED},
+            {"file": "d.go", "new_line": 6, "anchor_status": bl._ANCHOR_UNVERIFIED},
         ],
     )
     descriptions = [v["description"] for v in report["vulnerabilities"]]
@@ -60,7 +60,7 @@ def test_an_unverified_line_is_stated_in_that_findings_description():
     assert descriptions[2].endswith(f"Leaks the id.\n\n{bl.UNVERIFIED_LINE_NOTE}")
     assert descriptions[3].endswith(bl.UNVERIFIED_LINE_NOTE)
     # The plain sentence, never the internal state name.
-    assert bl.ANCHOR_UNVERIFIED not in json.dumps(report["vulnerabilities"])
+    assert bl._ANCHOR_UNVERIFIED not in json.dumps(report["vulnerabilities"])
 
 
 def test_a_finding_the_check_never_saw_also_carries_the_note():
@@ -74,7 +74,7 @@ def test_a_secret_in_the_triage_clause_is_redacted_in_the_audit_log():
     (audit,) = _audit(
         [{"file": "a.go", "new_line": 3, "verdict": "KEEP", "clause": f"KEEP {token}"}]
     )
-    clause = audit[bl.TRIAGE_CLAUSE_DETAIL_KEY]
+    clause = audit[bl._TRIAGE_CLAUSE_DETAIL_KEY]
 
     assert token not in clause
     assert "[REDACTED]" in clause
