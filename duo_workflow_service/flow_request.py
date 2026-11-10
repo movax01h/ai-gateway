@@ -1,6 +1,6 @@
 """Typed flow request models and normalization.
 
-All incoming StartWorkflowRequest proto messages are normalized into one of three FlowRequest types at the boundary.
+All incoming StartWorkflowRequest proto messages are normalized into one of four FlowRequest types at the boundary.
 Downstream code works only with these types — it never re-examines raw proto fields.
 """
 
@@ -117,6 +117,24 @@ class InlineFlowRequest(BaseFlowRequest):
         return self.workflow_definition
 
 
+class FetchedFlowRequest(BaseFlowRequest):
+    """Fetch a saved AI Catalog flow from GitLab by workflow ID, then build it like an inline v1 flow.
+
+    The service cannot call GitLab until the run's stream is open, so this request carries no config. The flow fetches
+    its definition before the graph is compiled, in the same request that returns its AI Catalog agents.
+    """
+
+    workflow_definition: str = ""
+
+    def to_legacy_identifier(self) -> str:
+        return self.workflow_definition
+
+    @override
+    def supports_catalog_items(self) -> bool:
+        # A saved catalog flow is always a v1 flow.
+        return True
+
+
 class LegacyWorkflowRequest(BaseFlowRequest):
     """Pre-registry Python workflow class (software_development, chat, etc.)."""
 
@@ -126,7 +144,9 @@ class LegacyWorkflowRequest(BaseFlowRequest):
         return self.workflow_definition
 
 
-FlowRequest = Union[RegistryFlowRequest, InlineFlowRequest, LegacyWorkflowRequest]
+FlowRequest = Union[
+    RegistryFlowRequest, InlineFlowRequest, FetchedFlowRequest, LegacyWorkflowRequest
+]
 
 
 def normalize_flow_request(
@@ -151,6 +171,21 @@ def normalize_flow_request(
     has_flow_version = start_req.HasField("flowVersion") and bool(start_req.flowVersion)
     has_flow_config = start_req.HasField("flowConfig")
     flow_config_schema_version = start_req.flowConfigSchemaVersion or None
+
+    # ── Path F: saved flow fetched from GitLab by workflow ID, checked first ──
+    # flowConfig, flowConfigSchemaVersion and the legacy workflowDefinition do not choose the
+    # flow here: GitLab is the source of the definition.
+    if start_req.fetch_flow_config:
+        if has_flow_config_id:
+            raise ValueError(
+                "fetch_flow_config and flowConfigId are mutually exclusive — "
+                "set one or the other, not both."
+            )
+        if has_flow_version:
+            raise ValueError("flowVersion cannot be combined with fetch_flow_config.")
+        return FetchedFlowRequest(
+            workflow_definition=start_req.workflowDefinition or ""
+        )
 
     # ── Path A: new structured fields ──
     if has_flow_config_id:

@@ -78,6 +78,7 @@ from duo_workflow_service.executor.outbox import (
 )
 from duo_workflow_service.flow_config_digest import flow_config_digest
 from duo_workflow_service.flow_request import (
+    FetchedFlowRequest,
     FlowRequest,
     InlineFlowRequest,
     RegistryFlowRequest,
@@ -217,11 +218,14 @@ WORKFLOW_ID_CLAIM = "workflow_id"
 # Rails sets this on every token it self-signs for DWS, so with no workflow_id the token is unbound.
 BINDS_WORKFLOW_CLAIM = "binds_workflow"
 WORKFLOW_BINDING_DETAILS = "Workflow token is not authorized for the requested workflow"
-CATALOG_REFUSAL_DETAILS = "The AI Catalog agents for this flow are not available"
+CATALOG_REFUSAL_DETAILS = "The AI Catalog items for this flow are not available"
 # A fetch failure GitLab could not refuse (5xx with retries exhausted, or a 2xx with a
 # malformed body) is a server fault. Its message embeds GitLab's raw response body, so
 # the details are static like the refusal branch and the body stays in the server log.
-CATALOG_FETCH_FAILED_DETAILS = "The AI Catalog agents for this flow could not be loaded"
+CATALOG_FETCH_FAILED_DETAILS = "The AI Catalog items for this flow could not be loaded"
+FETCHED_FLOW_BINDING_DETAILS = (
+    "fetch_flow_config requires a plain workflow ID and a workflow token bound to it"
+)
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
 # these get workflow tokens that unlock the restricted models of the flow they are
 # minted for, and ExecuteWorkflow accepts their instance token's flow claim for
@@ -841,7 +845,22 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 "Workflow token is not authorized for the requested flow schema version",
             )
 
-        if (
+        # A fetched flow has no inline config to compare yet. Its token must hold a
+        # digest, which the flow compares with the definition GitLab serves, so a client
+        # that answers the fetch itself cannot change the flow.
+        authorized_fetched_digest: Optional[str] = None
+        if isinstance(flow_request, FetchedFlowRequest) and not user.is_debug:
+            authorized_fetched_digest = (claims_extra or {}).get(
+                FLOW_CONFIG_DIGEST_CLAIM
+            )
+            if not isinstance(authorized_fetched_digest, str) or not (
+                authorized_fetched_digest
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    "Workflow token is not authorized for the supplied flow config",
+                )
+        elif (
             not user.is_debug
             and claims_extra is not None
             and FLOW_CONFIG_DIGEST_CLAIM in claims_extra
@@ -859,6 +878,21 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     grpc.StatusCode.PERMISSION_DENIED,
                     "Workflow token is not authorized for the supplied flow config",
                 )
+
+        # The flow of a fetched request is chosen by workflow ID alone, so its token must
+        # be bound to a workflow. The match itself is checked below with every other
+        # request. The ID goes into the fetch path, so only a plain ID is accepted.
+        if isinstance(flow_request, FetchedFlowRequest) and (
+            not _names_a_session(start_req.workflowID)
+            or (not user.is_debug and WORKFLOW_ID_CLAIM not in (claims_extra or {}))
+        ):
+            log.warning(
+                "Fetched flow requested without a plain workflow ID and a bound token",
+                requested_workflow_id=start_req.workflowID[:64],
+            )
+            await context.abort(
+                grpc.StatusCode.PERMISSION_DENIED, FETCHED_FLOW_BINDING_DETAILS
+            )
 
         token_rejection: WorkflowTokenRejectedError | None = None
         if not user.is_debug and claims_extra is not None:
@@ -959,7 +993,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         flow_config = start_req.flowConfig
         gl_event_context = GLReportingEventContext.from_workflow_definition(
-            workflow_definition, bool(flow_config)
+            workflow_definition,
+            bool(flow_config) or isinstance(flow_request, FetchedFlowRequest),
         )
         # A flat-rate flow is billed once whatever models it runs, so its models come from the allowlist of the
         # feature it is billed as, not from the client's choice.
@@ -1053,13 +1088,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         # structured logs already use (structured_logging.add_workflow_identity).
         merge_event_context_extra(**monitoring_context.event_context_fields())
 
-        # Only some request shapes can carry items; the workflow classes behind the rest
+        # Only some request shapes can carry items or a digest; the workflow classes behind the rest
         # do not accept the argument.
-        catalog_kwargs = (
+        flow_kwargs: dict[str, Any] = (
             {"catalog_items": catalog_items}
             if flow_request.supports_catalog_items()
             else {}
         )
+        if isinstance(flow_request, FetchedFlowRequest):
+            flow_kwargs["authorized_flow_config_digest"] = authorized_fetched_digest
 
         workflow: AbstractWorkflow = resolved_flow.factory(
             workflow_id=workflow_id,
@@ -1078,7 +1115,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             # the workflow only pins a checkpoint when one was actually requested.
             resume_checkpoint_ts=start_workflow_request.startRequest.resume_checkpoint_ts
             or None,
-            **catalog_kwargs,
+            **flow_kwargs,
         )
         workflow.token_rejection = token_rejection
 

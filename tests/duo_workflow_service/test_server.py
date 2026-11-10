@@ -88,6 +88,7 @@ from duo_workflow_service.executor.outbox import (
     OutgoingMessageTooLargeError,
 )
 from duo_workflow_service.flow_request import (
+    FetchedFlowRequest,
     InlineFlowRequest,
     LegacyWorkflowRequest,
     RegistryFlowRequest,
@@ -110,6 +111,7 @@ from duo_workflow_service.server import (
     CONTAINER_APPLICATION_PACKAGES,
     DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_S,
     DEFAULT_SHUTDOWN_KILL_DEADLINE_S,
+    FETCHED_FLOW_BINDING_DETAILS,
     WORKFLOW_TASK_NAME_PREFIX,
     DuoWorkflowService,
     _extract_error_message,
@@ -8955,6 +8957,77 @@ async def test_execute_workflow_logs_missing_billing_fields_without_rejecting(
     assert mock_log.warning.call_args.kwargs["enforced"] is False
 
 
+FETCHED_FLOW_BINDING_ABORT = (
+    grpc.StatusCode.PERMISSION_DENIED,
+    FETCHED_FLOW_BINDING_DETAILS,
+)
+
+
+async def _execute_fetched_flow(servicer, mock_context, workflow_id):
+    """Run ExecuteWorkflow with fetch_flow_config set, far enough to pass or trip the token checks."""
+    mock_context.abort = AsyncMock(side_effect=grpc.RpcError("Aborted"))
+
+    async def mock_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID=workflow_id,
+                workflowDefinition="catalog-flow",
+                flowConfigSchemaVersion="v1",
+                fetch_flow_config=True,
+                goal="test goal",
+            )
+        )
+
+    result = servicer.ExecuteWorkflow(
+        mock_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    try:
+        await anext(result)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
+def _aborted_with(mock_context) -> list[tuple]:
+    return [c.args for c in mock_context.abort.await_args_list]
+
+
+FETCHED_DIGEST = "a" * 64
+FETCHED_CLAIMS = {"workflow_id": "44", "flow_config_digest": FETCHED_DIGEST}
+DIGEST_ABORT = (
+    grpc.StatusCode.PERMISSION_DENIED,
+    "Workflow token is not authorized for the supplied flow config",
+)
+
+
+def _factory_kwargs(mock_resolve_flow) -> dict:
+    return mock_resolve_flow.return_value.factory.call_args.kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [FETCHED_CLAIMS])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_fetched_flow_passes_the_digest_to_the_flow(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    """There is no inline flow to compare yet, so the flow compares the digest after the fetch."""
+    await _execute_fetched_flow(servicer, mock_context, "44")
+
+    assert _aborted_with(mock_context) == []
+    mock_resolve_flow.assert_called_once_with(
+        FetchedFlowRequest(workflow_definition="catalog-flow")
+    )
+    assert (
+        _factory_kwargs(mock_resolve_flow)["authorized_flow_config_digest"]
+        == FETCHED_DIGEST
+    )
+    assert _recorded_token_rejection(mock_resolve_flow) is None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("enabled", "event_context"),
@@ -8981,3 +9054,122 @@ async def test_execute_workflow_skips_billing_log_and_rejection(
     mock_resolve_flow.assert_called_once()
     mock_log.error.assert_not_called()
     mock_log.warning.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        None,
+        {},
+        {"workflow_id": "44"},
+        {"workflow_id": "44", "flow_config_digest": ""},
+        {"workflow_id": "44", "flow_config_digest": None},
+        {"workflow_id": "44", "flow_config_digest": 123},
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_fetched_flow_requires_the_digest_claim(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    await _execute_fetched_flow(servicer, mock_context, "44")
+
+    assert _aborted_with(mock_context) == [DIGEST_ABORT]
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {"flow_config_digest": FETCHED_DIGEST},
+        {"flow_config_digest": FETCHED_DIGEST, "binds_workflow": True},
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_fetched_flow_requires_a_workflow_bound_token(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    await _execute_fetched_flow(servicer, mock_context, "44")
+
+    assert _aborted_with(mock_context) == [FETCHED_FLOW_BINDING_ABORT]
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra,workflow_id",
+    [
+        (FETCHED_CLAIMS, "#44"),
+        (FETCHED_CLAIMS, "gid://gitlab/Ai::DuoWorkflows::Workflow/44"),
+        (FETCHED_CLAIMS, "044"),
+    ],
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_fetched_flow_requires_a_plain_workflow_id(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+    workflow_id,
+):
+    """The ID goes into the fetch path, where a `#` or a global ID would not name the workflow."""
+    await _execute_fetched_flow(servicer, mock_context, workflow_id)
+
+    assert _aborted_with(mock_context) == [FETCHED_FLOW_BINDING_ABORT]
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra", [{"workflow_id": "42", "flow_config_digest": FETCHED_DIGEST}]
+)
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_fetched_flow_rejects_a_token_for_another_workflow(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    """A mismatch is rejected the same way as for every other request, before the run can fetch anything."""
+    await _execute_fetched_flow(servicer, mock_context, "44")
+
+    rejection = _recorded_token_rejection(mock_resolve_flow)
+    assert isinstance(rejection, WorkflowTokenRejectedError)
+    assert rejection.details == WORKFLOW_BINDING_ABORT[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_is_debug,claims_extra", [(True, None)])
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_fetched_flow_allows_a_debug_user_without_binding(
+    mock_resolve_flow,
+    mock_context,
+    servicer,
+):
+    await _execute_fetched_flow(servicer, mock_context, "44")
+
+    assert _aborted_with(mock_context) == []
+    mock_resolve_flow.assert_called_once()
+    assert _factory_kwargs(mock_resolve_flow)["authorized_flow_config_digest"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claims_extra", [FETCHED_CLAIMS])
+@patch("duo_workflow_service.server.GLReportingEventContext.from_workflow_definition")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_fetched_flow_is_tracked_as_a_catalog_item(
+    mock_resolve_flow,
+    mock_from_workflow_definition,
+    mock_context,
+    servicer,
+):
+    await _execute_fetched_flow(servicer, mock_context, "44")
+
+    # Once in the usage quota check and once in the handler.
+    assert mock_from_workflow_definition.call_args_list == [
+        call(ANY, is_ai_catalog_item=True),
+        call(ANY, True),
+    ]

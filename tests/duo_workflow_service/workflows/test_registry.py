@@ -20,11 +20,13 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     PartialFlowConfig as ExperimentalPartialFlowConfig,
 )
 from duo_workflow_service.agent_platform.v1.chat_engine import ChatFlow
+from duo_workflow_service.agent_platform.v1.flows import FetchedFlow
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     FlowConfig,
     PartialFlowConfig,
 )
 from duo_workflow_service.flow_request import (
+    FetchedFlowRequest,
     InlineFlowRequest,
     LegacyWorkflowRequest,
     RegistryFlowRequest,
@@ -1154,7 +1156,7 @@ class TestRegistryIdentity:
         assert factory.keywords["config"].config_id is None
 
 
-# Building a config from a fetched definition.
+# Resolving a fetched flow request, and building a config from a fetched definition.
 
 
 def _fetched_definition(**overrides) -> dict:
@@ -1182,6 +1184,17 @@ def _fetched_definition(**overrides) -> dict:
         ],
         **overrides,
     }
+
+
+def test_resolve_builds_a_fetched_flow_with_the_definition_builder():
+    resolved = resolve_flow(FetchedFlowRequest(workflow_definition="my_flow/v1"))
+
+    assert resolved.factory.func is FetchedFlow
+    assert (
+        resolved.factory.keywords["config_builder"]
+        is flow_config_from_fetched_definition
+    )
+    assert resolved.tracking_fields() == {"schema_version": "v1"}
 
 
 def test_a_v1_definition_builds_a_config():
