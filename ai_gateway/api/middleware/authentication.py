@@ -26,6 +26,10 @@ from starlette_context import context as starlette_context
 from ai_gateway.api.middleware.base import _PathResolver
 from ai_gateway.api.timing import timing
 from lib.context import StarletteUser, cloud_connector_token_context_var
+from lib.jwt import (
+    MISSING_SAAS_ROOT_NAMESPACE_CLAIM_ERROR,
+    lacks_saas_root_namespace_claim,
+)
 
 log = logging.getLogger("authentication")
 
@@ -102,6 +106,9 @@ class MiddlewareAuthentication(Middleware):
 
             if cloud_connector_error:
                 raise AuthenticationError(cloud_connector_error.error_message)
+
+            if lacks_saas_root_namespace_claim(cloud_connector_user.claims):
+                raise AuthenticationError(MISSING_SAAS_ROOT_NAMESPACE_CLAIM_ERROR)
 
             auth_header = conn.headers.get(AUTH_HEADER)
 

@@ -305,6 +305,7 @@ class TestReservedClaimsAreNotForwarded:
                 "iat": long_ago,
                 "jti": "caller-jti",
                 SKIP_USAGE_CUTOFF_CLAIM: "true",
+                "gitlab_root_namespace_id": "3456",
             },
         )
         return CloudConnectorUser(authenticated=True, claims=claims)
@@ -558,7 +559,12 @@ class TestSaasExtraClaims:
 
     @pytest.mark.parametrize(
         "auth_user",
-        [{"gitlab_allowed_model_refs": ["claude_haiku_4_5_20251001"]}],
+        [
+            {
+                "gitlab_root_namespace_id": "3456",
+                "gitlab_allowed_model_refs": ["claude_haiku_4_5_20251001"],
+            }
+        ],
         indirect=True,
     )
     def test_user_access_token_keeps_allowed_model_refs(self, mock_client: TestClient):
@@ -584,41 +590,6 @@ class TestSaasExtraClaims:
         assert decoded_token["gitlab_allowed_model_refs"] == [
             "claude_haiku_4_5_20251001"
         ]
-
-    @pytest.mark.parametrize(
-        ("auth_user", "header", "expected"),
-        [
-            pytest.param({}, "3456", 3456, id="no_claim_falls_back_to_header"),
-            pytest.param(
-                {"gitlab_root_namespace_id": "not-a-number"},
-                "3456",
-                3456,
-                id="invalid_claim_falls_back_to_header",
-            ),
-            pytest.param({}, None, None, id="no_claim_and_no_header"),
-            pytest.param({}, "not-a-number", None, id="invalid_header_rejected"),
-            pytest.param({}, "-1", None, id="negative_header_rejected"),
-            pytest.param({}, "0", None, id="zero_header_rejected"),
-        ],
-        indirect=["auth_user"],
-    )
-    def test_root_namespace_id_header_fallback(
-        self, mock_client: TestClient, header, expected
-    ):
-        headers = {
-            "X-Gitlab-Global-User-Id": GLOBAL_USER_ID,
-            "Authorization": "Bearer 12345",
-            "X-Gitlab-Authentication-Type": "oidc",
-            "X-Gitlab-Instance-Id": "1234",
-            "X-Gitlab-Realm": "saas",
-        }
-        if header is not None:
-            headers["X-Gitlab-Root-Namespace-Id"] = header
-
-        response = mock_client.post("/code/user_access_token", headers=headers)
-
-        assert response.status_code == status.HTTP_200_OK
-        assert _decode_token(response)["gitlab_root_namespace_id"] == expected
 
 
 def _decode_token(response):

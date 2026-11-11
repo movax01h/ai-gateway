@@ -54,6 +54,7 @@ def auth_user_fixture(instance_uid, issuer, realm):
             issuer=issuer,
             gitlab_realm=realm,
             gitlab_instance_uid=instance_uid,
+            extra={"gitlab_root_namespace_id": 42} if realm == "saas" else None,
         ),
     )
 
