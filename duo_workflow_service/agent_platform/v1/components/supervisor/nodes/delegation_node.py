@@ -1,7 +1,8 @@
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional, Self
 
 import structlog
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from pydantic import ValidationError
 
 from duo_workflow_service.agent_platform.v1.components.supervisor.delegate_task import (
     DelegateTask,
@@ -28,6 +29,9 @@ from duo_workflow_service.tracking.subagent_delegation import (
 SubsessionHistoryKeyFactory = Callable[[str, int], IOKey]
 
 SUBSESSION_KEY_SEPARATOR = "__"
+
+# UI log text for a rejected delegate_task call the LLM can correct by itself.
+_DELEGATION_FAILED_UI_MESSAGE = "The task could not be delegated due to an error."
 
 log = structlog.stdlib.get_logger("delegation_node")
 
@@ -84,6 +88,10 @@ class DelegationError(Exception):
 
     Also carries ``reason``, the coarse cause reported to analytics, so the
     emit site does not have to re-derive it from the message text.
+
+    The message is the content of the ToolMessage the LLM receives.
+    ``ui_message`` is the content of the UI log entry: a short text for the
+    user, without the LLM's instructions.
     """
 
     def __init__(
@@ -91,10 +99,57 @@ class DelegationError(Exception):
         message: str,
         call_ids: list[str],
         reason: DelegationRejectionReason,
+        ui_message: str,
     ) -> None:
         super().__init__(message)
         self.call_ids = call_ids
         self.reason = reason
+        self.ui_message = ui_message
+
+    @classmethod
+    def from_invalid_args(
+        cls,
+        error: ValidationError | TypeError,
+        call_id: str,
+        available_subagents: list[str],
+    ) -> Self:
+        """Build the error for delegate_task arguments that fail to parse.
+
+        When the only problem is a subagent name that is not available, the LLM is told the available names, and the
+        UI log entry's content names the unavailable subagent. Any other failure is passed to the LLM in pydantic's words,
+        and the UI log entry's content is ``_DELEGATION_FAILED_UI_MESSAGE``.
+
+        Args:
+            error: The failure raised while building the delegate_task model from the call's arguments.
+            call_id: ID of the delegate_task tool call.
+            available_subagents: Names of the subagents the supervisor can delegate to.
+
+        Returns:
+            The error to raise for the call.
+        """
+        errors = error.errors() if isinstance(error, ValidationError) else []
+        if (
+            len(errors) == 1
+            and errors[0]["loc"] == ("subagent_name",)
+            and errors[0]["type"] == "enum"
+        ):
+            unavailable = (
+                f"Subagent '{errors[0]['input']}' is not available in this session."
+            )
+            available = ", ".join(f"'{name}'" for name in available_subagents)
+            return cls(
+                f"{unavailable} The available subagents are: {available}.",
+                call_ids=[call_id],
+                reason=DelegationRejectionReason.INVALID_ARGS,
+                ui_message=unavailable,
+            )
+
+        return cls(
+            f"Invalid delegate_task arguments: {error}",
+            call_ids=[call_id],
+            reason=DelegationRejectionReason.INVALID_ARGS,
+            ui_message=_DELEGATION_FAILED_UI_MESSAGE,
+        )
 
 
 class DelegationNode:  # pylint: disable=too-many-instance-attributes
@@ -181,6 +236,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                     f"You must call final_response_tool to complete the workflow.",
                     call_ids=[call_id],
                     reason=DelegationRejectionReason.LIMIT_REACHED,
+                    ui_message="The delegation limit was reached.",
                 )
 
             subagent_name = str(delegation.subagent_name)
@@ -218,10 +274,10 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
             # message counter past the reasoning entry, preventing it from
             # being re-emitted as a new message on every streaming checkpoint.
             self._ui_history.log.error(
-                str(e),
+                e.ui_message,
                 event=UILogEventsSupervisor.ON_DELEGATION_ERROR,
                 message_sub_type=self.MESSAGE_SUB_TYPE_ERROR,
-                tool_info=build_tool_info(delegate_tool_title, {}, str(e)),
+                tool_info=build_tool_info(delegate_tool_title, {}),
                 message_id=e.call_ids[0],
                 subsession_id=None,
             )
@@ -350,6 +406,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"call. Please retry using only {tool_title}.",
                 call_ids=all_tool_call_ids,
                 reason=DelegationRejectionReason.MIXED_TOOL_CALLS,
+                ui_message=_DELEGATION_FAILED_UI_MESSAGE,
             )
 
         if len(delegate_calls) > 1:
@@ -363,6 +420,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"Please call {tool_title} again with a single delegation.",
                 call_ids=all_tool_call_ids,
                 reason=DelegationRejectionReason.PARALLEL_CALL,
+                ui_message=_DELEGATION_FAILED_UI_MESSAGE,
             )
 
         raw_call = delegate_calls[0]
@@ -370,11 +428,9 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
         call_id: str = raw_call["id"]
         try:
             delegation = self._delegate_task_cls(**raw_call["args"])
-        except Exception as e:
-            raise DelegationError(
-                f"Invalid delegate_task arguments: {e}",
-                call_ids=[call_id],
-                reason=DelegationRejectionReason.INVALID_ARGS,
+        except (ValidationError, TypeError) as e:
+            raise DelegationError.from_invalid_args(
+                e, call_id, self._delegate_task_cls.subagent_names()
             ) from e
 
         return ExtractedDelegateCall(call_id=call_id, delegation=delegation)
@@ -434,6 +490,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"Valid range: 1 to {max_subsession_id}",
                 call_ids=[call_id],
                 reason=DelegationRejectionReason.INVALID_SUBSESSION,
+                ui_message=_DELEGATION_FAILED_UI_MESSAGE,
             )
 
         subsession_history_iokey = self._subsession_history_key_factory(
@@ -450,6 +507,7 @@ class DelegationNode:  # pylint: disable=too-many-instance-attributes
                 f"a different subagent.",
                 call_ids=[call_id],
                 reason=DelegationRejectionReason.INVALID_SUBSESSION,
+                ui_message=_DELEGATION_FAILED_UI_MESSAGE,
             )
 
         return SubsessionResult(
