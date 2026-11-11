@@ -66,6 +66,21 @@ class TestCodeReviewAbortsOnUnresolvedMergeRequest:
         assert routes["default_route"] == "abort"
 
 
+def test_unpublished_review_aborts_the_flow():
+    """A publish step that fails without posting must not end as a success.
+
+    See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2789
+    """
+    config = FlowConfig.from_yaml_config(FLOW, "4.0.0")
+    router = next(r for r in config.routers if r.get("from") == "publish_review")
+
+    assert router["condition"]["input"] == "context:publish_review.execution_result"
+    assert router["condition"]["routes"] == {
+        "success": "end",
+        "default_route": "abort",
+    }
+
+
 @pytest.mark.parametrize("version", shipped_versions())
 def test_explore_step_reads_the_checkout(version):
     """list_repository_tree without a ref reads the default branch, not the merge request."""

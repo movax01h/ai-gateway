@@ -1,9 +1,10 @@
 """Guards for the shipped deep_code_review flow config.
 
 These tests assert on the content of ``deep_code_review/1.0.0.yml`` (the
-seven-step pipeline and the router that skips the discussion fetch on a first
-review, the reviewer's schema id, toolset and ``max_cycles``, the fetch step's
-pinned inputs, and the publish step's schema-validated answer and
+seven-step pipeline, the router that skips the discussion fetch on a first
+review and the router that aborts when the review is not published, the
+reviewer's schema id, toolset and ``max_cycles``, the fetch step's pinned
+inputs, and the publish step's schema-validated answer and
 ``min_confidence`` literal), plus the reviewer response schema those inputs
 read from, rather than on ``FlowConfig`` machinery, which is covered in
 ``test_flow_config.py``.
@@ -134,6 +135,21 @@ class TestDeepCodeReviewConfig:
         assert condition["routes"] == {
             "None": "review",
             "default_route": "fetch_existing_discussions",
+        }
+
+    def test_unpublished_review_aborts_the_flow(self):
+        """A publish step that fails without posting must not end as a success.
+
+        See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2789
+        """
+        router = next(
+            r for r in self._config().routers if r["from"] == "publish_review"
+        )
+
+        assert router["condition"]["input"] == "context:publish_review.execution_result"
+        assert router["condition"]["routes"] == {
+            "success": "end",
+            "default_route": "abort",
         }
 
     def test_reviewer_receives_the_re_review_inputs(self):
