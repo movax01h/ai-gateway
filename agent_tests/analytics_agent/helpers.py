@@ -5,10 +5,21 @@ Provides GLQL mock data and response builders for analytics agent tests.
 
 import json
 import re
-from typing import Any, Callable
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Callable, cast
 from unittest.mock import AsyncMock
 
+import yaml
+
+from ai_gateway.model_selection.models import ModelClassProvider
+from ai_gateway.prompts.config.base import PromptConfig
+from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
+from duo_workflow_service.entities.message_ingestion import assemble_user_message
+from duo_workflow_service.entities.state import ChatWorkflowState
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
+from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.version import resolve_version
 
 # Real production error from the GLQL compiler when a Pipeline query uses a
 # group filter (POST api/v4/glql returns it with HTTP 400). Captured verbatim
@@ -188,16 +199,17 @@ def glql_http_error(message: str, status_code: int = 400) -> GitLabHttpResponse:
 
 def mock_glql_responder(
     mock_gitlab_client: AsyncMock,
-    fn: Callable[[str], GitLabHttpResponse],
+    fn: Callable[[str, str | None], GitLabHttpResponse],
 ) -> None:
     """Configure the mock GitLab client to answer each GLQL call via `fn`.
 
-    `fn` receives the posted glql_yaml string and returns a GitLabHttpResponse,
-    so a test can make the response depend on the query. Example: return the
-    400 group-scope error when the query uses a group filter, success
-    otherwise:
+    `fn` receives the posted glql_yaml string and `after` cursor (None for the
+    first page) and returns a GitLabHttpResponse, so a test can make the
+    response depend on the query, or serve real pages of one result. Example:
+    return the 400 group-scope error when the query uses a group filter,
+    success otherwise:
 
-        def respond(glql_yaml: str) -> GitLabHttpResponse:
+        def respond(glql_yaml: str, _after: str | None) -> GitLabHttpResponse:
             if has_group_filter(glql_yaml):
                 return glql_http_error(PIPELINES_GROUP_SCOPE_ERROR)
             return GitLabHttpResponse(
@@ -208,13 +220,13 @@ def mock_glql_responder(
 
     Args:
         mock_gitlab_client: The mocked GitLab client
-        fn: Callable mapping the posted glql_yaml string to a response
+        fn: Callable mapping the posted glql_yaml string and `after` cursor to a response
     """
 
     async def apost(path: str, body: str, **_kwargs: Any) -> GitLabHttpResponse:
         del path  # unused - the mock answers every GLQL POST
         request = json.loads(body)
-        return fn(request["glql_yaml"])
+        return fn(request["glql_yaml"], request.get("after"))
 
     mock_gitlab_client.apost = AsyncMock(side_effect=apost)
 
@@ -231,6 +243,117 @@ IDE_ADDITIONAL_CONTEXT = (
     "    </agent_user_environment_shell_info>\n"
     "</additional_context>\n\n"
 )
+
+
+_DAP_QUERY = 'type = DuoWorkflow and created >= "2026-09-02" and created <= "2026-10-02" and group = "gitlab-org"'
+
+# A representative dashboard_context, shaped like what the "Analyze with Duo" button sends. It carries no
+# additional_instructions, so tests measure what the agent prompt does on its own.
+DASHBOARD_CONTEXT: dict[str, Any] = {
+    "dashboard_scope": {"groups": ["gitlab-org"], "projects": []},
+    "date_range": {
+        "option": "30d",
+        "start_date": "2026-09-02",
+        "end_date": "2026-10-02",
+        "previous": {"start_date": "2026-08-02", "end_date": "2026-09-01"},
+    },
+    "panels": [
+        {
+            "title": "Active projects",
+            "description": "Distinct projects with at least one GitLab Duo Agent Platform (DAP) session in the selected date "
+            "range. Sessions not scoped to a project are not counted.",
+            "glql": f"display: stat\nmode: analytics\nquery: {_DAP_QUERY}\nmetrics: projectsCount\n"
+            "displayConfig:\n  description: Projects with at least one DAP session\n",
+        },
+        {
+            "title": "Active users",
+            "description": "Distinct users who ran at least one GitLab Duo Agent Platform (DAP) session in the selected "
+            "date range.",
+            "glql": f"display: stat\nmode: analytics\nquery: {_DAP_QUERY}\nmetrics: usersCount\n"
+            "displayConfig:\n  description: Distinct users with at least one DAP session\n",
+        },
+        {
+            # Not a dap_impact.yaml panel. It sets up the ranking case, where sessions outside any project rank second.
+            "title": "Users by project",
+            "description": "Distinct users per project.",
+            "glql": f"display: table\nmode: analytics\nquery: {_DAP_QUERY}\ndimensions: project\nmetrics: usersCount\n"
+            "sort: usersCount desc\n",
+        },
+        {
+            # barList is a dashboard panel display, as in dap_impact.yaml, not a GLQL embedded view display type.
+            "title": "Where credits went",
+            "description": "Credits consumed by each GitLab Duo Agent Platform (DAP) flow type, such as Chat or Software "
+            "Development, in the selected date range. Credits are fetched from billing after a session is billed and can "
+            "lag behind the session counts, so recent totals can understate spend.",
+            "glql": f"display: barList\nmode: analytics\nquery: {_DAP_QUERY}\ndimensions: flowType\n"
+            "metrics: creditsUsedSum\nsort: creditsUsedSum desc\ndisplayConfig:\n  maxRows: 30\n",
+        },
+    ],
+}
+
+# Duo Chat renders the user turn with the chat/agent prompt, resolved as chat_agent_factory.py resolves it. The tests
+# run on Claude, so this takes the claude family's definition.
+_CHAT_PROMPT_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "ai_gateway"
+    / "prompts"
+    / "definitions"
+    / "chat"
+    / "agent"
+    / "claude"
+)
+_CHAT_PROMPT_VERSION = "^1.0.0"
+
+
+@lru_cache(maxsize=1)
+def _chat_prompt_template() -> ChatAgentPromptTemplate:
+    versions = {path.stem: path for path in _CHAT_PROMPT_DIR.glob("*.yml")}
+    version = resolve_version(versions, _CHAT_PROMPT_VERSION)
+    config = PromptConfig(**yaml.safe_load(versions[version].read_text()))
+    return ChatAgentPromptTemplate(ModelClassProvider.ANTHROPIC, config)
+
+
+def dashboard_question(
+    question: str,
+    context: dict[str, Any] | None = None,
+    *,
+    orbit_enabled: bool = True,
+) -> str:
+    """Return a question asked from a dashboard, as the agent receives it.
+
+    Args:
+        question: The question the user asks
+        context: The dashboard_context the button sends. Defaults to DASHBOARD_CONTEXT.
+        orbit_enabled: The value the orbit_context item reports
+
+    Returns:
+        The user turn Duo Chat's prompt template renders, with both context items before the question.
+    """
+    # The button sends no ids, so neither item gets tags of its own. orbit_context comes first, as in
+    # duo_agentic_chat_state_manager.vue.
+    additional_context = [
+        AdditionalContext(
+            category="orbit_context",
+            content=json.dumps({"orbit_enabled": orbit_enabled}),
+        ),
+        AdditionalContext(
+            category="dashboard_context",
+            content=json.dumps(DASHBOARD_CONTEXT if context is None else context),
+        ),
+    ]
+    # The template reads only the conversation history from the state.
+    state = cast(
+        ChatWorkflowState,
+        {
+            "conversation_history": {
+                "chat": [assemble_user_message(question, additional_context)]
+            }
+        },
+    )
+    *_system, turn = (
+        _chat_prompt_template().invoke(state, agent_name="chat").to_messages()
+    )
+    return str(turn.content)
 
 
 SAMPLE_ISSUES = [
