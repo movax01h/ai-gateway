@@ -47,11 +47,22 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.entities import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.entities.image_blocks import (
+    IMAGE_LIMIT_LATEST_MESSAGE,
+    IMAGE_LIMIT_SEEN_MESSAGE,
+    IMAGE_REJECTED_LATEST_CUSTOM_MESSAGE,
+    IMAGE_REJECTED_LATEST_MESSAGE,
+    IMAGE_REJECTED_SEEN_CUSTOM_MESSAGE,
+    IMAGE_REJECTED_SEEN_MESSAGE,
+    IMAGE_REJECTED_UI_MESSAGE,
+    IMAGE_SUPPORT_HELP_ANCHOR,
+    IMAGE_SUPPORT_HELP_PATH,
+    IMAGE_TOO_LARGE_MESSAGE,
     image_content_block,
     is_image_content_block,
 )
 from duo_workflow_service.errors.error_handler import ModelError, ModelErrorType
 from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.gitlab.help_links import gitlab_web_url
 from duo_workflow_service.interceptors.route.usage_billing import (
     SelfHostedBillingPromptCallbackHandler,
 )
@@ -3359,13 +3370,17 @@ _MANY_IMAGES_MESSAGE = (
     "messages.1.content.5.image.source.base64.data: At least one of the image "
     "dimensions exceed max allowed size for many-image requests: 2000 pixels"
 )
-_UNCLASSIFIED_MESSAGE = (
+_IMAGE_INPUT_MESSAGE = (
     "Error code: 400 - {'error': {'message': 'The image data you provided does not "
     "represent a valid image. Please check your input and try again.', 'type': "
     "'invalid_request_error', 'param': 'input', 'code': 'invalid_value'}}"
 )
 _INVENTED_MESSAGE = (
     "Error code: 400 - the request was declined for a reason worded tomorrow"
+)
+_CONTEXT_WINDOW_MESSAGE = (
+    "This model's maximum context length is 16384 tokens. However, you requested "
+    "17000 tokens. Please reduce the length of the messages."
 )
 _ONE_IMAGE_MESSAGE = (
     "messages.1.content.3.image.source.base64.data: At least one of the image "
@@ -3463,7 +3478,7 @@ class TestAgentNodeImageLimitFallback:
             "text": "[image/png omitted from history]",
         }
         assert saved[2].content[1]["type"] == "text"
-        assert saved[-2] == HumanMessage(content=AgentNode._IMAGE_LIMIT_SEEN_MESSAGE)
+        assert saved[-2] == HumanMessage(content=IMAGE_LIMIT_SEEN_MESSAGE)
         assert saved[-1] == mock_ai_message
 
     @pytest.mark.asyncio
@@ -3490,14 +3505,14 @@ class TestAgentNodeImageLimitFallback:
         assert mock_prompt.ainvoke.call_count == 3
         assert _live_images(saved) == 0
         assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
-            AgentNode._IMAGE_LIMIT_SEEN_MESSAGE,
-            AgentNode._IMAGE_LIMIT_LATEST_MESSAGE,
+            IMAGE_LIMIT_SEEN_MESSAGE,
+            IMAGE_LIMIT_LATEST_MESSAGE,
         ]
 
     @pytest.mark.parametrize(
         "message",
         [
-            pytest.param(_UNCLASSIFIED_MESSAGE, id="known_wording"),
+            pytest.param(_IMAGE_INPUT_MESSAGE, id="known_wording"),
             pytest.param(_INVENTED_MESSAGE, id="wording_never_seen"),
         ],
     )
@@ -3527,9 +3542,7 @@ class TestAgentNodeImageLimitFallback:
         assert mock_prompt.ainvoke.call_count == 2
         assert _live_images(saved) == 2
         assert saved[4].content[1]["type"] == "text"
-        assert saved[-2] == HumanMessage(
-            content=AgentNode._IMAGE_REJECTED_LATEST_MESSAGE
-        )
+        assert saved[-2] == HumanMessage(content=IMAGE_REJECTED_LATEST_MESSAGE)
 
     @pytest.mark.asyncio
     async def test_an_unclassified_rejection_then_takes_the_seen_images(
@@ -3559,8 +3572,8 @@ class TestAgentNodeImageLimitFallback:
         assert mock_prompt.ainvoke.call_count == 3
         assert _live_images(saved) == 0
         assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
-            AgentNode._IMAGE_REJECTED_LATEST_MESSAGE,
-            AgentNode._IMAGE_REJECTED_SEEN_MESSAGE,
+            IMAGE_REJECTED_LATEST_MESSAGE,
+            IMAGE_REJECTED_SEEN_MESSAGE,
         ]
 
     @pytest.mark.asyncio
@@ -3614,9 +3627,7 @@ class TestAgentNodeImageLimitFallback:
         assert is_image_content_block(saved[2].content[1])
         assert saved[4].content[1]["type"] == "text"
         assert saved[-2] == HumanMessage(
-            content=AgentNode._IMAGE_TOO_LARGE_MESSAGE.format(
-                limit=" (one side is over 8000 px)"
-            )
+            content=IMAGE_TOO_LARGE_MESSAGE.format(limit=" (one side is over 8000 px)")
         )
 
     @pytest.mark.asyncio
@@ -3649,10 +3660,8 @@ class TestAgentNodeImageLimitFallback:
         assert mock_prompt.ainvoke.call_count == 3
         assert _live_images(saved) == 0
         assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
-            AgentNode._IMAGE_LIMIT_SEEN_MESSAGE,
-            AgentNode._IMAGE_TOO_LARGE_MESSAGE.format(
-                limit=" (one side is over 8000 px)"
-            ),
+            IMAGE_LIMIT_SEEN_MESSAGE,
+            IMAGE_TOO_LARGE_MESSAGE.format(limit=" (one side is over 8000 px)"),
         ]
 
     @pytest.mark.asyncio
@@ -3680,7 +3689,7 @@ class TestAgentNodeImageLimitFallback:
         saved = result["conversation_history"][component_name]
         assert mock_prompt.ainvoke.call_count == 2
         assert _live_images(saved) == 0
-        assert saved[1] == HumanMessage(content=AgentNode._IMAGE_LIMIT_LATEST_MESSAGE)
+        assert saved[1] == HumanMessage(content=IMAGE_LIMIT_LATEST_MESSAGE)
 
     @pytest.mark.asyncio
     async def test_a_third_rejection_raises(
@@ -3743,6 +3752,339 @@ class TestAgentNodeImageLimitFallback:
         assert mock_prompt.ainvoke.call_count == 1
 
 
+_HELP_PATH = f"/help/{IMAGE_SUPPORT_HELP_PATH}#{IMAGE_SUPPORT_HELP_ANCHOR}"
+# The default instance when neither OIDC nor gateway URL is configured.
+_HELP_URL = f"https://gitlab.com{_HELP_PATH}"
+
+
+class TestAgentNodeImageRejectionSignal:
+    """A customer-configured model that rejects images gets one UI pointer to the docs; every rejection is counted."""
+
+    _METRICS = (
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node."
+        "duo_workflow_metrics"
+    )
+    _VISION = (
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node."
+        "model_supports_vision"
+    )
+
+    @pytest.fixture(name="vision_verdict", autouse=True)
+    def vision_verdict_fixture(self):
+        """Unknown image support by default, so no test depends on LiteLLM's registry."""
+        with patch(self._VISION, return_value=None) as verdict:
+            yield verdict
+
+    @pytest.fixture(name="one_round")
+    def one_round_fixture(self):
+        return [
+            HumanMessage(content="describe the screenshot"),
+            AIMessage(
+                content="", tool_calls=[{"id": "a", "name": "read_file", "args": {}}]
+            ),
+            _image_tool_message("a"),
+        ]
+
+    @staticmethod
+    def _as_custom_model(mock_prompt):
+        """A self-hosted model: the LiteLLM model class with the customer's provider on the model object."""
+        mock_prompt.requested_model = "Mistral-7B-Instruct-v0.3"
+        mock_prompt.reported_model_name = "Mistral-7B-Instruct-v0.3"
+        mock_prompt.model_provider = "litellm"
+        mock_prompt.model_vendor = "custom_openai"
+
+    @staticmethod
+    def _run(agent_node, base_flow_state, component_name, history):
+        base_flow_state["conversation_history"] = {component_name: history}
+        return agent_node.run(base_flow_state)
+
+    @pytest.mark.asyncio
+    async def test_custom_model_rejection_writes_one_ui_line_and_links_the_docs(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        one_round,
+        monkeypatch,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """The link follows the configured instance: its bundled docs, or the docs host the admin set."""
+        self._as_custom_model(mock_prompt)
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_IMAGE_INPUT_MESSAGE), mock_ai_message]
+        )
+        monkeypatch.delenv("DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL", raising=False)
+        monkeypatch.setenv("AIGW_GITLAB_URL", "https://gitlab.example.test/")
+        url = f"https://gitlab.example.test{_HELP_PATH}"
+
+        with patch(self._METRICS):
+            result = await self._run(
+                agent_node, base_flow_state, component_name, one_round
+            )
+
+        ui_logs = result[FlowStateKeys.UI_CHAT_LOG]
+        assert len(ui_logs) == 1
+        assert ui_logs[0]["message_type"] == "agent"
+        assert ui_logs[0]["message_sub_type"] == "image_rejected"
+        assert ui_logs[0]["content"] == IMAGE_REJECTED_UI_MESSAGE.format(url=url)
+        assert ui_logs[0]["component_name"] == "test_agent_node"
+
+        saved = result["conversation_history"][component_name]
+        assert saved[-2] == HumanMessage(
+            content=IMAGE_REJECTED_LATEST_CUSTOM_MESSAGE.format(url=url)
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_link_uses_the_url_the_browser_opened(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        one_round,
+        monkeypatch,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """The service may reach GitLab through an internal address that a browser cannot open."""
+        self._as_custom_model(mock_prompt)
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_IMAGE_INPUT_MESSAGE), mock_ai_message]
+        )
+        monkeypatch.delenv("DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL", raising=False)
+        monkeypatch.setenv("AIGW_GITLAB_URL", "http://gitlab.internal:8080")
+        token = gitlab_web_url.set("https://gitlab.example.test/group/project")
+        try:
+            with patch(self._METRICS):
+                result = await self._run(
+                    agent_node, base_flow_state, component_name, one_round
+                )
+        finally:
+            gitlab_web_url.reset(token)
+
+        url = f"https://gitlab.example.test{_HELP_PATH}"
+        ui_logs = result[FlowStateKeys.UI_CHAT_LOG]
+        assert ui_logs[0]["content"] == IMAGE_REJECTED_UI_MESSAGE.format(url=url)
+
+    @pytest.mark.parametrize(
+        "verdict",
+        [
+            pytest.param(True, id="known_to_read_images"),
+            pytest.param(False, id="declared_text_only"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_known_image_support_gets_the_file_advice_not_the_pointer(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        one_round,
+        vision_verdict,
+        verdict,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """A model known to read images rejected the file; a declared one needs no pointer."""
+        self._as_custom_model(mock_prompt)
+        vision_verdict.return_value = verdict
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_IMAGE_INPUT_MESSAGE), mock_ai_message]
+        )
+
+        with patch(self._METRICS):
+            result = await self._run(
+                agent_node, base_flow_state, component_name, one_round
+            )
+
+        vision_verdict.assert_called_once_with(
+            "Mistral-7B-Instruct-v0.3", "custom_openai"
+        )
+        assert FlowStateKeys.UI_CHAT_LOG not in result
+        saved = result["conversation_history"][component_name]
+        assert saved[-2] == HumanMessage(content=IMAGE_REJECTED_LATEST_MESSAGE)
+
+    @pytest.mark.asyncio
+    async def test_managed_model_rejection_is_counted_but_stays_silent(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        one_round,
+        vision_verdict,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """``requested_model`` is unset for a GitLab-managed model: no declaration exists, so no pointer."""
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_IMAGE_INPUT_MESSAGE), mock_ai_message]
+        )
+
+        with patch(self._METRICS) as metrics:
+            result = await self._run(
+                agent_node, base_flow_state, component_name, one_round
+            )
+
+        vision_verdict.assert_not_called()
+        assert FlowStateKeys.UI_CHAT_LOG not in result
+        saved = result["conversation_history"][component_name]
+        assert saved[-2] == HumanMessage(content=IMAGE_REJECTED_LATEST_MESSAGE)
+        assert metrics.count_image_fallback.call_count == 1
+        assert metrics.count_image_fallback.call_args.kwargs["kind"] == "image_input"
+
+    @pytest.mark.asyncio
+    async def test_a_wrap_up_rejection_looks_up_the_wrap_up_model(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        component_name,
+        one_round,
+        vision_verdict,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Past max_cycles the wrap-up prompt makes the call, so its model decides the pointer."""
+        self._as_custom_model(mock_prompt)
+        wrap_up_prompt = Mock(spec=Prompt)
+        wrap_up_prompt.requested_model = "wrap-up-model"
+        wrap_up_prompt.reported_model_name = "wrap-up-model"
+        wrap_up_prompt.model_vendor = "hosted_vllm"
+        final_message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "final",
+                    "name": "final_response_tool",
+                    "args": {"final_response": "Done"},
+                }
+            ],
+        )
+        final_message.response_metadata = {}
+        wrap_up_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_IMAGE_INPUT_MESSAGE), final_message]
+        )
+        state_at_limit["conversation_history"] = {component_name: one_round}
+
+        with patch(self._METRICS):
+            await make_agent_node(
+                response_schema=AgentFinalOutput, wrap_up_prompt=wrap_up_prompt
+            ).run(state_at_limit)
+
+        vision_verdict.assert_called_once_with("wrap-up-model", "hosted_vllm")
+
+    @pytest.mark.asyncio
+    async def test_a_rejection_that_does_not_name_images_gets_no_pointer(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        one_round,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """A context-window 400 clears once the images are gone, yet says nothing about image support."""
+        self._as_custom_model(mock_prompt)
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_CONTEXT_WINDOW_MESSAGE), mock_ai_message]
+        )
+
+        with patch(self._METRICS) as metrics:
+            result = await self._run(
+                agent_node, base_flow_state, component_name, one_round
+            )
+
+        assert FlowStateKeys.UI_CHAT_LOG not in result
+        saved = result["conversation_history"][component_name]
+        assert saved[-2] == HumanMessage(content=IMAGE_REJECTED_LATEST_MESSAGE)
+        assert metrics.count_image_fallback.call_args.kwargs["kind"] == "unclassified"
+
+    @pytest.mark.asyncio
+    async def test_size_limit_rejection_is_counted_without_a_pointer(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        one_round,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """A many-image or oversize limit is a provider rule, not a missing declaration, even on a custom model."""
+        self._as_custom_model(mock_prompt)
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_ONE_IMAGE_MESSAGE), mock_ai_message]
+        )
+
+        with patch(self._METRICS) as metrics:
+            result = await self._run(
+                agent_node, base_flow_state, component_name, one_round
+            )
+
+        assert FlowStateKeys.UI_CHAT_LOG not in result
+        saved = result["conversation_history"][component_name]
+        assert "/help/" not in saved[-2].content
+        assert metrics.count_image_fallback.call_args.kwargs["kind"] == "single_image"
+
+    @pytest.mark.asyncio
+    async def test_a_second_rejection_in_the_same_node_adds_no_second_line(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        self._as_custom_model(mock_prompt)
+        two_rounds = [
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "fix what the screenshot shows"},
+                    image_content_block(base64="aW1n", mime_type="image/png"),
+                ]
+            ),
+            AIMessage(
+                content="", tool_calls=[{"id": "a", "name": "read_file", "args": {}}]
+            ),
+            _image_tool_message("a"),
+        ]
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[
+                _image_limit_error(_IMAGE_INPUT_MESSAGE),
+                _image_limit_error(_IMAGE_INPUT_MESSAGE),
+                mock_ai_message,
+            ]
+        )
+
+        with patch(self._METRICS) as metrics:
+            result = await self._run(
+                agent_node, base_flow_state, component_name, two_rounds
+            )
+
+        assert mock_prompt.ainvoke.call_count == 3
+        assert len(result[FlowStateKeys.UI_CHAT_LOG]) == 1
+        assert metrics.count_image_fallback.call_count == 2
+        assert agent_node._pending_ui_logs == []
+        saved = result["conversation_history"][component_name]
+        assert [m.content for m in saved if isinstance(m, HumanMessage)][1:] == [
+            IMAGE_REJECTED_LATEST_CUSTOM_MESSAGE.format(url=_HELP_URL),
+            IMAGE_REJECTED_SEEN_CUSTOM_MESSAGE.format(url=_HELP_URL),
+        ]
+
+
 class TestAgentNodeImageFallbackCounter:
     _METRICS = (
         "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node."
@@ -3772,7 +4114,12 @@ class TestAgentNodeImageFallbackCounter:
                 _image_limit_error(_ONE_IMAGE_MESSAGE), "single_image", id="one_image"
             ),
             pytest.param(
-                _image_limit_error(_UNCLASSIFIED_MESSAGE),
+                _image_limit_error(_IMAGE_INPUT_MESSAGE),
+                "image_input",
+                id="image_input",
+            ),
+            pytest.param(
+                _image_limit_error(_INVENTED_MESSAGE),
                 "unclassified",
                 id="unclassified",
             ),

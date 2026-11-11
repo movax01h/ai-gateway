@@ -98,6 +98,7 @@ from duo_workflow_service.gitlab.gitlab_api import (
     empty_workflow_config,
     fetch_workflow_and_container_data,
 )
+from duo_workflow_service.gitlab.help_links import gitlab_web_url
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import (
@@ -700,6 +701,18 @@ class AbstractWorkflow(ABC):
             ]
         return tools_registry
 
+    def _record_container_urls(self) -> None:
+        """Keep the session link and the browser URL that user-facing links are built from.
+
+        Both come from the container's web URL, which is the address the user's browser opened. The service may reach
+        GitLab through an internal address instead.
+        """
+        project_url = self._project.get("web_url", "") if self._project else ""
+        if project_url:
+            self._session_url = f"{project_url}{SESSION_URL_PATH}{self._workflow_id}"
+        namespace_url = self._namespace.get("web_url", "") if self._namespace else ""
+        gitlab_web_url.set(project_url or namespace_url)
+
     def _merge_jwt_governance_claims(self) -> bool:
         """Apply the policy claim, and return whether the token carried one."""
         policies = self._claimed_tool_access_policies
@@ -1019,10 +1032,7 @@ class AbstractWorkflow(ABC):
                 )
             )
 
-            if self._project and self._project.get("web_url"):
-                self._session_url = (
-                    f"{self._project['web_url']}{SESSION_URL_PATH}{self._workflow_id}"
-                )
+            self._record_container_urls()
 
             if self._namespace and self._support_namespace_level_workflow() is False:
                 raise NamespaceLevelWorkflowNotSupportedException()

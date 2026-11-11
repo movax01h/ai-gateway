@@ -48,6 +48,8 @@ from duo_workflow_service.errors.typing import (
     WorkflowAlreadyFinishedException,
     WorkflowTokenRejectedError,
 )
+from duo_workflow_service.gitlab.help_links import gitlab_web_url
+from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.tracking import (
     MonitoringContext,
@@ -5125,3 +5127,41 @@ async def test_promotion_logs_the_count_at_info_and_the_names_at_debug(workflow_
     assert "tool_names" not in info
     assert debug["log_level"] == "debug"
     assert debug["tool_names"] == ["create_file_with_contents", "edit_file"]
+
+
+@pytest.mark.parametrize(
+    ("project", "namespace", "with_session", "browser_url"),
+    [
+        (
+            {"web_url": "https://gitlab.example.test/group/project"},
+            None,
+            True,
+            "https://gitlab.example.test/group/project",
+        ),
+        (
+            None,
+            {"web_url": "https://gitlab.example.test/groups/group"},
+            False,
+            "https://gitlab.example.test/groups/group",
+        ),
+        (None, None, False, ""),
+    ],
+    ids=["project", "namespace_only", "nothing_fetched"],
+)
+def test_container_urls_feed_the_session_link_and_user_facing_links(
+    workflow, project, namespace, with_session, browser_url
+):
+    workflow._project = project
+    workflow._namespace = namespace
+    workflow._session_url = None
+
+    def record() -> str:
+        workflow._record_container_urls()
+        return gitlab_web_url.get()
+
+    assert contextvars.copy_context().run(record) == browser_url
+    assert workflow._session_url == (
+        f"{browser_url}{SESSION_URL_PATH}{workflow._workflow_id}"
+        if with_session
+        else None
+    )

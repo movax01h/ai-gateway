@@ -1,8 +1,8 @@
-import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any, ClassVar, Literal, NamedTuple, Optional, Sequence, Type, cast
+from uuid import uuid4
 
 import structlog
 from anthropic import APIStatusError as AnthropicAPIStatusError
@@ -12,6 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from openai import APIStatusError as OpenAIAPIStatusError
 from pydantic import ConfigDict, Field, ValidationError
 
+from ai_gateway.models.v2._model_compat import model_supports_vision
 from ai_gateway.prompts import Prompt
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from duo_workflow_service.agent_platform.node_naming import component_name_from_node
@@ -39,19 +40,28 @@ from duo_workflow_service.conversation.history_optimizer.optimizers.compaction i
 from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
+from duo_workflow_service.conversation.history_optimizer.schema import (
+    OptimizationResult,
+)
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.image_blocks import (
+    IMAGE_REJECTED_UI_MESSAGE,
+    IMAGE_SUPPORT_HELP_ANCHOR,
+    IMAGE_SUPPORT_HELP_PATH,
     ImageLimitKind,
     ImageScope,
     image_limit_kind,
+    image_rejection_note,
     without_image_payloads,
 )
+from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.errors.error_handler import (
     ModelError,
     ModelErrorHandler,
     ModelErrorType,
 )
 from duo_workflow_service.errors.typing import ModelRefusalError
+from duo_workflow_service.gitlab.help_links import help_page_url
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.langsmith_tags import tag_current_run
 from lib.context import LLMFinishReason, extract_finish_reason
@@ -232,6 +242,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _cycle_budget: CycleBudget
     _response_schema_tool_choice: Literal["any", "auto"]
     _wrap_up_prompt: Prompt
+    _pending_ui_logs: list[UiChatLog]
+    _image_rejection_notified: bool
 
     def __init__(
         self,
@@ -268,6 +280,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._invoke_config = invoke_config
         self._cycle_budget = cycle_budget
         self._response_schema_tool_choice = response_schema_tool_choice
+        self._pending_ui_logs = []
+        self._image_rejection_notified = False
         self._trim_ui_chat_log = trim_ui_chat_log
         self._wrap_up_prompt = wrap_up_prompt or prompt
         # Build-time template variables (e.g. which optional tools/capabilities are
@@ -294,36 +308,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
     _MAX_TRUNCATION_RETRIES: int = 5
 
-    _IMAGE_LIMIT_SEEN_MESSAGE = (
-        "Older images were removed because the request exceeded the provider's "
-        "image limit. Rely on what you noted about them."
-    )
-
-    _IMAGE_LIMIT_LATEST_MESSAGE = (
-        "The images from the latest step were removed because the request exceeded "
-        "the provider's image limit. Reading them again will hit the same limit. "
-        "Continue without them."
-    )
-
-    _IMAGE_TOO_LARGE_MESSAGE = (
-        "The images from the latest step were removed: one of them is larger than "
-        "the provider accepts{limit}. Reading it again will hit the same limit. "
-        "If the user needs it read, ask for a smaller copy."
-    )
-
-    _IMAGE_REJECTED_SEEN_MESSAGE = (
-        "Older images were removed because the provider rejected the request "
-        "while they were in it. Rely on what you noted about them."
-    )
-
-    _IMAGE_REJECTED_LATEST_MESSAGE = (
-        "The images from the latest step were removed because the provider "
-        "rejected the request while they were in it. Reading them again will fail "
-        "the same way. If the user needs one read, ask for a smaller or re-saved "
-        "copy of the file."
-    )
-
     _MAX_IMAGE_LIMIT_RETRIES: int = 2
+    MESSAGE_SUB_TYPE_IMAGE_REJECTED = "image_rejected"
     # Consecutive text-only turns in schema mode under "auto" before the wrap-up is sent,
     # independent of max_cycles; a text-only reply to that wrap-up raises AgentStuckError.
     _MAX_TEXT_ONLY_TURNS: int = 3
@@ -738,27 +724,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 # Append new completion to existing history for replace-based reducer.
                 # The reducer will replace this component's conversation history with
                 # the complete list returned here.
-                ui_updates = (
-                    self._ui_history.pop_state_updates() if self._ui_history else {}
+                ui_updates = self._with_extra_ui_logs(
+                    self._ui_history.pop_state_updates() if self._ui_history else {},
+                    optimization_results,
                 )
-                # Surface optimizer UI entries (e.g. the compaction tool card)
-                # when optimization ran and produced any.  Entries are appended
-                # *after* the base ui_chat_log entries (reasoning logs, etc.) so
-                # the front end renders them in the correct order.  Prepending
-                # causes the compaction card to be silently dropped by the
-                # client — see ChatAgent._append_optimizer_ui_logs for the same
-                # convention.
-                optimizer_ui_logs = [
-                    entry
-                    for result in optimization_results
-                    for entry in result.ui_chat_logs
-                ]
-                if optimizer_ui_logs:
-                    base_logs: list = ui_updates.get(FlowStateKeys.UI_CHAT_LOG, [])
-                    ui_updates = {
-                        **ui_updates,
-                        FlowStateKeys.UI_CHAT_LOG: [*base_logs, *optimizer_ui_logs],
-                    }
                 if self._trim_ui_chat_log and any(
                     result.was_modified for result in optimization_results
                 ):
@@ -942,29 +911,80 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             model_name=prompt.reported_model_name,
             model_vendor=prompt.model_vendor or "unknown",
         )
+        suggest_declaration = self._suggests_declaration(kind, prompt)
+        if suggest_declaration:
+            self._queue_image_rejected_notice()
         return restore_message_consistency(
             [
                 *recovered,
-                HumanMessage(content=self._image_limit_note(scope, kind, message)),
+                HumanMessage(
+                    content=image_rejection_note(
+                        kind,
+                        scope,
+                        message,
+                        suggest_declaration=suggest_declaration,
+                        help_url=self._image_support_url(),
+                    )
+                ),
             ]
         )
 
-    def _image_limit_note(
-        self, scope: ImageScope, kind: ImageLimitKind, message: str
-    ) -> str:
-        if kind is ImageLimitKind.UNCLASSIFIED:
-            return (
-                self._IMAGE_REJECTED_SEEN_MESSAGE
-                if scope is ImageScope.SEEN
-                else self._IMAGE_REJECTED_LATEST_MESSAGE
+    @staticmethod
+    def _suggests_declaration(kind: ImageLimitKind, prompt: Prompt) -> bool:
+        """Point at the image support declaration only where it can be the fix.
+
+        The rejection names images, the model is customer-configured (only those set ``requested_model``), and its
+        image support is neither declared nor known. For a model known to read images, the error is about the file.
+        """
+        model = getattr(prompt, "requested_model", None)
+        if kind is not ImageLimitKind.IMAGE_INPUT or model is None:
+            return False
+        return model_supports_vision(model, prompt.model_vendor) is None
+
+    @staticmethod
+    def _image_support_url() -> str:
+        return help_page_url(IMAGE_SUPPORT_HELP_PATH, IMAGE_SUPPORT_HELP_ANCHOR)
+
+    def _with_extra_ui_logs(
+        self, ui_updates: dict, optimization_results: list[OptimizationResult]
+    ) -> dict:
+        """Append the queued image notice and the optimizer cards after the base entries.
+
+        Appending keeps the client's order; a prepended compaction card is silently dropped (see
+        ChatAgent._append_optimizer_ui_logs).
+        """
+        extra_logs = [
+            *self._pending_ui_logs,
+            *(
+                entry
+                for result in optimization_results
+                for entry in result.ui_chat_logs
+            ),
+        ]
+        self._pending_ui_logs = []
+        if not extra_logs:
+            return ui_updates
+        base_logs: list = ui_updates.get(FlowStateKeys.UI_CHAT_LOG, [])
+        return {**ui_updates, FlowStateKeys.UI_CHAT_LOG: [*base_logs, *extra_logs]}
+
+    def _queue_image_rejected_notice(self) -> None:
+        if self._image_rejection_notified:
+            return
+        self._image_rejection_notified = True
+        self._pending_ui_logs.append(
+            UiChatLog(
+                message_type=MessageTypeEnum.AGENT,
+                message_sub_type=self.MESSAGE_SUB_TYPE_IMAGE_REJECTED,
+                content=IMAGE_REJECTED_UI_MESSAGE.format(url=self._image_support_url()),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                status=ToolStatus.SUCCESS,
+                correlation_id=None,
+                tool_info=None,
+                additional_context=[],
+                message_id=f"agent-{uuid4()!s}",
+                component_name=component_name_from_node(self.name),
             )
-        if scope is ImageScope.SEEN:
-            return self._IMAGE_LIMIT_SEEN_MESSAGE
-        if kind is not ImageLimitKind.SINGLE_IMAGE:
-            return self._IMAGE_LIMIT_LATEST_MESSAGE
-        pixels = re.search(r"(\d[\d,]*) pixels", message)
-        limit = f" (one side is over {pixels.group(1)} px)" if pixels else ""
-        return self._IMAGE_TOO_LARGE_MESSAGE.format(limit=limit)
+        )
 
     def _agent_context_limits_update(self, history_iokey: IOKey) -> dict:
         """Stamp ``{agent_key: max_context_tokens}`` keyed off ``history_iokey``.

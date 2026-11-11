@@ -228,20 +228,45 @@ class TestImageLimitKind:
                 "Error code: 400 - {'error': {'message': 'The image data you provided does not "
                 "represent a valid image. Please check your input and try again.', 'type': "
                 "'invalid_request_error', 'param': 'input', 'code': 'invalid_value'}}",
-                ImageLimitKind.UNCLASSIFIED,
+                ImageLimitKind.IMAGE_INPUT,
                 id="openai_invalid_image",
             ),
             pytest.param(
                 400,
                 "Could not process image",
-                ImageLimitKind.UNCLASSIFIED,
+                ImageLimitKind.IMAGE_INPUT,
                 id="anthropic_invalid_image",
             ),
             pytest.param(
                 400,
                 "Invalid 'input[2].content[1].image_url': image is too large (max 50 MB)",
-                ImageLimitKind.UNCLASSIFIED,
+                ImageLimitKind.IMAGE_INPUT,
                 id="openai_size_wording_is_not_anthropics",
+            ),
+            pytest.param(
+                400,
+                "At most 0 image(s) may be provided in one request.",
+                ImageLimitKind.IMAGE_INPUT,
+                id="vllm_text_only_model",
+            ),
+            pytest.param(
+                400,
+                "This model's maximum context length is 16384 tokens. However, you "
+                "requested 17000 tokens. Please reduce the length of the messages.",
+                ImageLimitKind.UNCLASSIFIED,
+                id="context_window_says_nothing_about_images",
+            ),
+            pytest.param(
+                400,
+                "ValidationException: The provisioned throughput for this model is exceeded",
+                ImageLimitKind.UNCLASSIFIED,
+                id="vision_inside_a_word_is_not_an_image",
+            ),
+            pytest.param(
+                400,
+                "Unknown model revision: main",
+                ImageLimitKind.UNCLASSIFIED,
+                id="revision_is_not_an_image",
             ),
             pytest.param(
                 400,
