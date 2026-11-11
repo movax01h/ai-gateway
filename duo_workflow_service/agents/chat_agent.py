@@ -22,7 +22,6 @@ from duo_workflow_service.agents.tool_call_validator import (
     retry_malformed_tool_calls,
     validate_tool_calls,
 )
-from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.audit_events.web_tools import capture_native_web_calls
 from duo_workflow_service.checkpointer.write_mode import (
     compaction_ui_chat_log_update,
@@ -72,6 +71,7 @@ from duo_workflow_service.tools import Toolset
 from duo_workflow_service.tools.version_compatibility import (
     supports_chat_tool_call_limits,
 )
+from duo_workflow_service.tools.web_search import WebSearchState
 from duo_workflow_service.tracking.errors import log_exception
 from lib.context import (
     LLMFinishReason,

@@ -26,7 +26,7 @@ from pydantic import (
 )
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.model_variables import MODEL_TEMPLATE_VARIABLES
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
@@ -50,6 +50,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
     ToolApprovalFetchNode,
     ToolApprovalRequestNode,
     ToolNode,
+    WrapUpPrompt,
     approval_requests_key_for,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
@@ -90,7 +91,6 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.entities.state import get_model_max_context_token_limit
 from duo_workflow_service.tools.toolset import Toolset
-from duo_workflow_service.tools.web_search import native_web_search_available
 from lib.context import get_model_metadata
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventsClient
@@ -534,28 +534,26 @@ class AgentComponentBase(BaseComponent):
         )
 
     def _web_search_enabled(self) -> bool:
-        """Whether the provider-native web-search tool is active for this build.
+        """Whether this build offers the provider-native web search (`enable_web_search`).
 
-        Requires the per-flow opt-in AND the runtime feature flag AND the client's
-        `web_search` capability AND a component model cleared to search natively.
-        Used both to bind the tool and to tell the prompt (via `tools_enabled`) so it
-        can branch its web-search guidance.
+        Requires the per-flow opt-in, the flow's kill switch (`dependency_bump_web_search`) and the
+        client's `web_search` capability. Binding drops the offer for models that can't search
+        natively or whose provider isn't cleared for it (`web_search_policy`).
         """
         return (
             self.enable_web_search
             and is_feature_enabled(FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH)
             and is_client_capable("web_search")
-            and native_web_search_available(get_model_metadata(self.model_tags))
         )
 
-    def _tools_enabled(self) -> dict[str, bool]:
+    def _tools_enabled(self, prompt: Prompt) -> dict[str, bool]:
         """Map of optional tool/capability -> active, exposed to the prompt template.
 
-        The keys are not computed the same way: `web_search` is a capability gate for the
-        provider-native search route, `run_command` is toolset membership.
+        The keys are not computed the same way: `web_search` is what binding gave `prompt` (the
+        provider's own search or the fallback tool), `run_command` is toolset membership.
         """
         return {
-            "web_search": self._web_search_enabled(),
+            "web_search": prompt.binds_web_search,
             # Presence is the whole answer: `run_command` reaches the toolset only if the
             # `run_commands` privilege was granted and no tool policy denied it. Checked
             # by name because RunCommand and ShellCommand both register under it.
@@ -568,7 +566,7 @@ class AgentComponentBase(BaseComponent):
         tool_choice: str,
         track_event: bool = True,
         web_search: bool = True,
-    ) -> Any:
+    ) -> Prompt:
         """Build the agent prompt with the given tool list and tool choice."""
         model_metadata = get_model_metadata(self.model_tags)
         extra_params: dict[str, Any] = {}
@@ -1133,16 +1131,18 @@ class AgentComponent(AgentComponentBase):
         prompt = self._build_prompt(tools=tools, tool_choice=tool_choice)
         # Past max_cycles only the schema tool stays bound, so the agent can't keep exploring.
         # Not tracked: it stands in for `prompt`, which already recorded the request.
-        wrap_up_prompt = (
-            self._build_prompt(
+        wrap_up_prompt: Optional[WrapUpPrompt] = None
+        if self._response_schema is not None:
+            wrap_up = self._build_prompt(
                 tools=[self._response_schema],
                 tool_choice=tool_choice,
                 track_event=False,
                 web_search=False,
             )
-            if self._response_schema is not None
-            else None
-        )
+            wrap_up_prompt = WrapUpPrompt(
+                prompt=wrap_up,
+                template_inputs={"tools_enabled": self._tools_enabled(wrap_up)},
+            )
 
         node_agent = AgentNode(
             name=self.__entry_hook__(),
@@ -1165,7 +1165,7 @@ class AgentComponent(AgentComponentBase):
             cycle_budget=self._cycle_budget,
             response_schema_tool_choice=tool_choice,
             trim_ui_chat_log=self._trim_ui_chat_log,
-            prompt_template_inputs={"tools_enabled": self._tools_enabled()},
+            prompt_template_inputs={"tools_enabled": self._tools_enabled(prompt)},
             wrap_up_prompt=wrap_up_prompt,
         )
         tracker = ToolEventTracker(

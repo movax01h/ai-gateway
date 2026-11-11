@@ -18,7 +18,6 @@ from duo_workflow_service.agents.prompt_adapter import (
     ChatAgentPromptTemplate,
     DefaultPromptAdapter,
 )
-from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.entities.state import (
     MAX_TOOL_CALLS_PER_MODEL_CALL,
     ChatWorkflowState,
@@ -30,6 +29,7 @@ from duo_workflow_service.gitlab.gitlab_service_context import GitLabServiceCont
 from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
+from duo_workflow_service.tools.web_search import WebSearchState
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.context import gitlab_version
 from lib.feature_flags import current_feature_flag_context

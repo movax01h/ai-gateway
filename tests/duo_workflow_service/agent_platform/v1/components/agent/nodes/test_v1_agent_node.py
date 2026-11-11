@@ -20,6 +20,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
     AgentNode,
     AgentStuckError,
     CycleBudget,
+    WrapUpPrompt,
     _AnswerCheck,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
@@ -3002,11 +3003,47 @@ class TestAgentNodeWrapUpRetries:
         )
 
         await make_agent_node(
-            response_schema=AgentFinalOutput, wrap_up_prompt=wrap_up_prompt
+            response_schema=AgentFinalOutput,
+            wrap_up_prompt=WrapUpPrompt(prompt=wrap_up_prompt),
         ).run(state_at_limit)
 
         assert wrap_up_prompt.ainvoke.call_count == 2
         mock_prompt.ainvoke.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_wrap_up_turns_use_the_wrap_up_template_inputs(
+        self,
+        make_agent_node,
+        state_at_limit,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """The wrap-up prompt binds only the schema tool, so it gets its own `tools_enabled`."""
+        wrap_up_prompt = Mock(spec=Prompt)
+        final_message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "tc1",
+                    "name": "final_response_tool",
+                    "args": {"final_response": "Done"},
+                }
+            ],
+        )
+        final_message.response_metadata = {}
+        wrap_up_prompt.ainvoke = AsyncMock(return_value=final_message)
+
+        await make_agent_node(
+            response_schema=AgentFinalOutput,
+            wrap_up_prompt=WrapUpPrompt(
+                prompt=wrap_up_prompt,
+                template_inputs={"tools_enabled": {"web_search": False}},
+            ),
+            prompt_template_inputs={"tools_enabled": {"web_search": True}},
+        ).run(state_at_limit)
+
+        invoke_input = wrap_up_prompt.ainvoke.call_args.kwargs["input"]
+        assert invoke_input["tools_enabled"] == {"web_search": False}
 
     @pytest.mark.asyncio
     async def test_turns_below_max_cycles_use_the_main_prompt(
@@ -3021,7 +3058,9 @@ class TestAgentNodeWrapUpRetries:
         wrap_up_prompt = Mock(spec=Prompt)
         wrap_up_prompt.ainvoke = AsyncMock()
 
-        await make_agent_node(wrap_up_prompt=wrap_up_prompt).run(base_flow_state)
+        await make_agent_node(wrap_up_prompt=WrapUpPrompt(prompt=wrap_up_prompt)).run(
+            base_flow_state
+        )
 
         mock_prompt.ainvoke.assert_called_once()
         wrap_up_prompt.ainvoke.assert_not_called()
@@ -3983,7 +4022,8 @@ class TestAgentNodeImageRejectionSignal:
 
         with patch(self._METRICS):
             await make_agent_node(
-                response_schema=AgentFinalOutput, wrap_up_prompt=wrap_up_prompt
+                response_schema=AgentFinalOutput,
+                wrap_up_prompt=WrapUpPrompt(prompt=wrap_up_prompt),
             ).run(state_at_limit)
 
         vision_verdict.assert_called_once_with("wrap-up-model", "hosted_vllm")
@@ -4235,7 +4275,8 @@ class TestAgentNodeImageFallbackCounter:
 
         with patch(self._METRICS) as metrics:
             await make_agent_node(
-                response_schema=AgentFinalOutput, wrap_up_prompt=wrap_up_prompt
+                response_schema=AgentFinalOutput,
+                wrap_up_prompt=WrapUpPrompt(prompt=wrap_up_prompt),
             ).run(state_at_limit)
 
         mock_prompt.ainvoke.assert_not_called()

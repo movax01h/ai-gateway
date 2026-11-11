@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any, ClassVar, Literal, NamedTuple, Optional, Sequence, Type, cast
@@ -70,7 +70,13 @@ from lib.events.contextvar import mark_llm_call_retry
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
 
-__all__ = ["AgentFinalOutput", "AgentNode", "AgentStuckError", "CycleBudget"]
+__all__ = [
+    "AgentFinalOutput",
+    "AgentNode",
+    "AgentStuckError",
+    "CycleBudget",
+    "WrapUpPrompt",
+]
 
 log = structlog.stdlib.get_logger("agent_node")
 
@@ -98,6 +104,18 @@ class AgentStuckError(Exception):
     Raised when the LLM, despite recovery attempts, repeatedly produces truncated responses, keeps making tool calls
     after the wrap-up instruction, or keeps sending a final answer that is rejected.
     """
+
+
+@dataclass(frozen=True, kw_only=True)
+class WrapUpPrompt:
+    """The prompt used once ``max_cycles`` is reached, and its build-time template variables.
+
+    It binds fewer tools than the main prompt, so the template can be told different things (for example that it can't
+    search).
+    """
+
+    prompt: Prompt
+    template_inputs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -219,8 +237,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             in schema mode, so it decides whether such a turn is a wrap-up retry or
             a routing error. Defaults to ``"any"``, today's behaviour.
         wrap_up_prompt: Prompt used once ``max_cycles`` is reached, bound to the
-            response schema tool only so the agent cannot keep exploring. When
-            ``None``, wrap-up turns use ``prompt``.
+            response schema tool only so the agent cannot keep exploring, with its own
+            template variables. When ``None``, wrap-up turns use ``prompt`` and
+            ``prompt_template_inputs``.
     """
 
     name: str
@@ -263,7 +282,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         prompt_template_inputs: Optional[dict[str, Any]] = None,
         response_schema_tool_choice: Literal["any", "auto"] = "any",
         trim_ui_chat_log: bool = True,
-        wrap_up_prompt: Optional[Prompt] = None,
+        wrap_up_prompt: Optional[WrapUpPrompt] = None,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -283,11 +302,16 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._pending_ui_logs = []
         self._image_rejection_notified = False
         self._trim_ui_chat_log = trim_ui_chat_log
-        self._wrap_up_prompt = wrap_up_prompt or prompt
+        self._wrap_up_prompt = wrap_up_prompt.prompt if wrap_up_prompt else prompt
         # Build-time template variables (e.g. which optional tools/capabilities are
         # active) that the prompt can branch on. Merged into every prompt invocation
         # alongside the runtime variables below.
         self._prompt_template_inputs = prompt_template_inputs or {}
+        self._wrap_up_prompt_template_inputs = (
+            wrap_up_prompt.template_inputs
+            if wrap_up_prompt
+            else self._prompt_template_inputs
+        )
 
     _TRUNCATION_RECOVERY_MESSAGE = (
         "Your response was too long and got cut off. "
@@ -623,6 +647,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             history, cycle_count
         )
         prompt = self._wrap_up_prompt if wrap_up_active else self._prompt
+        template_inputs = (
+            self._wrap_up_prompt_template_inputs
+            if wrap_up_active
+            else self._prompt_template_inputs
+        )
 
         wrap_up_retries: int = 0
         truncation_retries: int = 0
@@ -638,7 +667,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                         AIMessage,
                         await prompt.ainvoke(
                             input={
-                                **self._prompt_template_inputs,
+                                **template_inputs,
                                 **variables,
                                 "history": history,
                                 **self._predefined_runtime_variables(),

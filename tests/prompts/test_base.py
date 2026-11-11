@@ -1851,6 +1851,49 @@ configurable_unit_primitives:
 
         assert kwargs["tool_choice"] == tool_choice
 
+    def test_bind_tools_turns_web_search_into_the_models_route(
+        self,
+        model_provider: ModelClassProvider,
+        prompt_config: PromptConfig,
+        model_factory: TypeModelFactory,
+        model: FakeModel,
+    ):
+        """The binding swaps a `web_search` tool for the provider's own search; see `bind_web_search`."""
+        with mock.patch.object(FakeModel, "bind_tools") as mock_bind_tool:
+            mock_bind_tool.return_value = model
+            web_search = mock.Mock(spec=BaseTool)
+            web_search.name = "web_search"
+            web_search.description = "Search the web"
+
+            prompt = Prompt(
+                model_provider=model_provider,
+                model_factory=model_factory,
+                config=prompt_config,
+                model_metadata=None,
+                tools=[web_search],
+            )
+
+        assert mock_bind_tool.call_args.args[0] == []
+        assert mock_bind_tool.call_args.kwargs["web_search_options"] == {}
+        assert prompt.binds_web_search is True
+
+    def test_web_search_options_without_tools_do_not_count_as_search(
+        self,
+        model_provider: ModelClassProvider,
+        prompt_config: PromptConfig,
+        model_factory: TypeModelFactory,
+    ):
+        """Nothing is bound without tools, so the prompt must not be told it can search."""
+        prompt = Prompt(
+            model_provider=model_provider,
+            model_factory=model_factory,
+            config=prompt_config,
+            model_metadata=None,
+            bind_tools_params={"web_search_options": {}},
+        )
+
+        assert prompt.binds_web_search is False
+
     @pytest.mark.parametrize(
         ("model_metadata_identifier", "config_model_name", "expected_model_id_suffix"),
         [

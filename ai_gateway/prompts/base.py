@@ -793,6 +793,8 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     internal_event_extra: dict[str, Any] = {}
     internal_callbacks: list[BasePromptCallbackHandler] = []
     requested_model: Optional[str] = None
+    binds_web_search: bool = False
+    """Whether binding gave the model a web search route (native or the fallback tool)."""
 
     def __init__(
         self,
@@ -851,6 +853,25 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         factory_timeout = _model_request_timeout(model)
         base_model = model
 
+        # Decided here because only the binding knows the model: a `web_search` tool becomes the
+        # provider's own search for models that run it, and stays a local tool otherwise.
+        bound_tools: list[BaseTool] = list(tools or [])
+        binds_web_search = False
+        if bound_tools:
+            # Imported here: `ai_gateway.models.v2` imports the prompts package while it loads.
+            from ai_gateway.models.v2.web_search_support import (  # pylint: disable=import-outside-toplevel
+                WEB_SEARCH_TOOL_NAME,
+                bind_web_search,
+            )
+
+            bound_tools, bind_tools_params = bind_web_search(
+                bound_tools, llm_definition, bind_tools_params
+            )
+            binds_web_search = "web_search_options" in (bind_tools_params or {}) or any(
+                getattr(tool, "name", None) == WEB_SEARCH_TOOL_NAME
+                for tool in bound_tools
+            )
+
         if tools and isinstance(model, BaseChatModel):
             if bind_tools_cache:
                 # Use cached bind_tools to avoid expensive repeated operations
@@ -864,14 +885,14 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 model = bind_tools_cache.get_or_bind(  # type: ignore[assignment]
                     model=model,
                     model_id=model_id,
-                    tools=tools,
+                    tools=bound_tools,
                     tool_choice=tool_choice,
                     model_provider=model_provider,
                     **(bind_tools_params or {}),
                 )
             else:
                 model = model.bind_tools(  # type: ignore[assignment]
-                    tools,
+                    bound_tools,
                     tool_choice=tool_choice,
                     **(bind_tools_params or {}),
                 )
@@ -951,6 +972,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 if model_metadata and model_metadata.is_custom_model
                 else None
             ),
+            binds_web_search=binds_web_search,
             **kwargs,
         )  # type: ignore[call-arg]
 

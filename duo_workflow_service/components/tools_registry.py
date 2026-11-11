@@ -205,7 +205,11 @@ _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
 
 # Why ``ToolsRegistry.toolset`` dropped a requested tool; see ``_unavailable_reason``.
 UnavailableReason = Literal[
-    "flow_restricted", "missing_privilege", "unsupported_client", "unknown"
+    "flow_restricted",
+    "missing_privilege",
+    "unsupported_client",
+    "session_disabled",
+    "unknown",
 ]
 
 # Using Sequence instead of list because it's covariant, allowing subclasses
@@ -683,6 +687,7 @@ class ToolsRegistry:
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
             registry_flow_id=registry_flow_id,
+            workflow_config=workflow_config,
         )
 
     def __init__(
@@ -702,11 +707,13 @@ class ToolsRegistry:
         registry_flow_id: Optional[str] = None,
         first_party_tools: Optional[Mapping[str, FirstPartyVerdict]] = None,
         can_ask_user: bool = False,
+        workflow_config: Optional[Mapping[str, Any]] = None,
         promoted_tools: Optional[list[str]] = None,
     ):
         """Build the tools a workflow can use.
 
         ``registry_flow_id`` is the Flow Registry id of the config the workflow runs, ``None`` for any other config.
+        ``workflow_config`` is the session's settings, for tools whose ``is_available`` depends on them.
         """
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
         first_party_tools = first_party_tools or {}
@@ -760,6 +767,8 @@ class ToolsRegistry:
         self._gl_http_client = gl_http_client
         self._workflow_id = workflow_id
         self._approved_cache: set[tuple[str, str]] = set()
+        # Tools whose own `is_available` ruled them out for this session, for the dropped-tool log.
+        self._session_disabled_tool_names: set[str] = set()
 
         self._registry_flow_id = registry_flow_id
         for privilege in enabled_tools:
@@ -788,7 +797,9 @@ class ToolsRegistry:
                 if privilege in preapproved_tools:
                     self._preapproved_tool_names.add(tool.name)
 
-        self._add_capability_dependent_tools(tool_metadata, baseline_preapproved)
+        self._add_capability_dependent_tools(
+            tool_metadata, baseline_preapproved, workflow_config or {}
+        )
 
         if allow_client_injected_mcp_tools:
             client_injected = {
@@ -860,11 +871,14 @@ class ToolsRegistry:
         self._promoted_tool_names -= self._ask_tool_names
 
     def _add_capability_dependent_tools(
-        self, tool_metadata: ToolMetadata, baseline_preapproved: set[str]
+        self,
+        tool_metadata: ToolMetadata,
+        baseline_preapproved: set[str],
+        workflow_config: Mapping[str, Any],
     ) -> None:
         """Add the tools whose presence depends on what the client declared.
 
-        Split out of ``__init__`` as is; the body is unchanged.
+        Split out of ``__init__``. ``workflow_config`` is for tools whose ``is_available`` depends on it.
         """
         # Add capability-dependent tools if condition is met.
         # Each tool's required_capability frozenset encodes all capabilities needed,
@@ -884,9 +898,10 @@ class ToolsRegistry:
                 continue
 
             # Skip tool if it declares additional runtime conditions that are not met,
-            # such as a feature flag or a fallback that only applies for some models.
+            # such as a feature flag or a session setting.
             is_available = getattr(tool_cls, "is_available", None)
-            if is_available is not None and not is_available():
+            if is_available is not None and not is_available(workflow_config):
+                self._session_disabled_tool_names.add(_tool_name(tool_cls))
                 continue
 
             # Don't add capability dependent tool if it supersedes another tool
@@ -1154,8 +1169,12 @@ class ToolsRegistry:
         enabled, typically a flow asking for more than its privileges in gitlab-org/gitlab allow.
         ``unsupported_client``:
         the privilege was enabled (or none is needed), but the client cannot run the tool.
+        ``session_disabled``: the client can run the tool, but the tool's own ``is_available`` ruled
+        it out for this session, such as web search without the user's opt-in.
         ``unknown``: the registry does not know the name, typically a typo in a custom flow.
         """
+        if tool_name in self._session_disabled_tool_names:
+            return "session_disabled"
         grant = self._tool_grants.get(tool_name)
         if grant is None:
             if tool_name in self._capability_dependent_tool_names:
@@ -1207,6 +1226,7 @@ def _report_unavailable_tools(
         "flow_restricted_tools": tools_with("flow_restricted"),
         "missing_privilege_tools": missing_privilege_tools,
         "unsupported_client_tools": tools_with("unsupported_client"),
+        "session_disabled_tools": tools_with("session_disabled"),
         "unknown_tools": tools_with("unknown"),
         "granting_privileges": sorted(
             {
