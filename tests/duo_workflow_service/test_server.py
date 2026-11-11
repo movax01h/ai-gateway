@@ -2438,6 +2438,71 @@ async def test_generate_token_propagates_tool_access_policies(
 @pytest.mark.parametrize(
     "claims_extra",
     [
+        {"gitlab_paid_credit_models_allowed": False},
+        {"gitlab_paid_credit_models_allowed": True},
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_propagates_paid_credit_models_allowed(
+    _mock_generate_token_response,
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claims_extra,
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert (
+        extra_claims["gitlab_paid_credit_models_allowed"]
+        is claims_extra["gitlab_paid_credit_models_allowed"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
+        {},  # no gitlab_paid_credit_models_allowed
+        None,  # no extra claims
+    ],
+)
+@patch("duo_workflow_service.server.TokenAuthority")
+@patch("contract.contract_pb2.GenerateTokenResponse")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+async def test_generate_token_omits_absent_paid_credit_models_allowed(
+    _mock_generate_token_response,
+    mock_token_authority,
+    mock_context,
+    servicer,
+    claims_extra,
+):
+    one_hour_later = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    mock_token_authority.return_value.encode = MagicMock(
+        return_value=("token", one_hour_later)
+    )
+
+    await servicer.GenerateToken(contract_pb2.GenerateTokenRequest(), mock_context)
+
+    extra_claims = mock_token_authority.return_value.encode.call_args.kwargs[
+        "extra_claims"
+    ]
+    assert "gitlab_paid_credit_models_allowed" not in extra_claims
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims_extra",
+    [
         {"gitlab_root_namespace_id": "123"},
         {},  # no gitlab_root_namespace_id
         None,  # no extra claims
