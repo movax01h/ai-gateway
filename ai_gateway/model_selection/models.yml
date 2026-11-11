@@ -806,7 +806,7 @@ models:
       max_retries: 1
     deprecation:
       deprecation_date: "2026-09-30"
-      removal_version: "19.6"
+      removal_version: "19.7"
 
   - name: "Claude Haiku 4.5"
     provider: "Anthropic"

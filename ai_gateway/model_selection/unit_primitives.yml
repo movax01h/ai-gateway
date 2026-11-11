@@ -567,10 +567,9 @@ configurable_unit_primitives:
     unit_primitives:
       - "review_merge_request"
     default_models:
-      - identifier: "claude_sonnet_4_5_20250929_vertex"
+      - identifier: "claude_sonnet_4_5_20250929_bedrock"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
+      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
 

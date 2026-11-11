@@ -159,11 +159,11 @@ LEGACY_MODEL_MAPPING = {
         "1.0.2": "claude_sonnet_4_5_20250929",
     },
     "review_merge_request": {
-        "0.9.0": "claude_sonnet_4_5_20250929",
-        "1.0.0": "claude_sonnet_4_5_20250929",
-        "1.1.0": "claude_sonnet_4_5_20250929",
-        "1.2.0": "claude_sonnet_4_5_20250929",
-        "1.3.0": "claude_sonnet_4_5_20250929",
+        "0.9.0": "claude_sonnet_4_5_20250929_bedrock",
+        "1.0.0": "claude_sonnet_4_5_20250929_bedrock",
+        "1.1.0": "claude_sonnet_4_5_20250929_bedrock",
+        "1.2.0": "claude_sonnet_4_5_20250929_bedrock",
+        "1.3.0": "claude_sonnet_4_5_20250929_bedrock",
     },
     "summarize_new_merge_request": {
         "1.0.0": "claude_sonnet_4_5_20250929",
