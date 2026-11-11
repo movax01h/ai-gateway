@@ -14,14 +14,15 @@ from lib.jwt import trusted_instance_id
 
 # JSON object mapping a gated flow to the instance UUIDs it is enabled for, e.g. {"bl_security": ["<uuid>"]}.
 ENABLED_FLOW_INSTANCE_UIDS_ENV = "DUO_WORKFLOW_AUTH__ENABLED_FLOW_INSTANCE_UIDS"
-# Off by default: gated flows are for GitLab.com only and the allowlist is not read. GenerateToken refuses other
-# callers; ExecuteWorkflow refuses other callers using their own token (see refused_while_not_enforced). Debug users
+# Off by default: the allowlist is not read and gated flows are refused to callers other than GitLab.com. GenerateToken
+# refuses them; ExecuteWorkflow refuses them using their own token (see refused_while_not_enforced). Debug users
 # (Duo Workflow Service authentication disabled) are exempt from both.
 ENFORCE_FLOW_ENABLEMENT_ENV = "DUO_WORKFLOW_AUTH__ENFORCE_FLOW_ENABLEMENT"
-# Flows refused to callers other than GitLab.com unless their instance UID is listed for the flow in
-# ENABLED_FLOW_INSTANCE_UIDS_ENV (when enforcement is on). Every other instance is refused, Self-Managed included,
-# so only flows that run only on GitLab.com belong here. To gate another flow, add its id here and set the
-# flow's `available_on` in GitLab to use `:dedicated_enabled_instances` (e.g. `%i[gitlab_com dedicated_enabled_instances]`).
+# Flows refused to callers other than GitLab.com unless enforcement is on and the caller's signed instance UID is
+# listed for the flow in ENABLED_FLOW_INSTANCE_UIDS_ENV, which GitLab sets per Dedicated or Self-Managed instance.
+# To gate another flow, add its id here and set the flow's `available_on` in GitLab to use
+# `:dedicated_enabled_instances`, plus `:self_managed` to offer it on Self-Managed
+# (e.g. `%i[gitlab_com self_managed dedicated_enabled_instances]`).
 GATED_FLOWS = frozenset({"bl_security"})
 # Set only by this service, in tokens it mints for a caller that is_gitlab_com_caller accepted.
 GITLAB_COM_VERIFIED_CLAIM = "gitlab_com_verified"
