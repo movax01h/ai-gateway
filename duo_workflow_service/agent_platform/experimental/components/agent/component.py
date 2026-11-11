@@ -79,6 +79,7 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
+from duo_workflow_service.tools.web_search import native_web_search_available
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventsClient
 
@@ -151,8 +152,8 @@ class AgentComponentBase(BaseComponent):
     max_wrap_up_retries: int = 3
     # Opt-in (per flow config): bind the provider-native web-search tool so the
     # agent can look up e.g. changelogs / migration guides. Still gated at runtime
-    # by the dependency_bump_web_search flag and the client's "web_search"
-    # capability, and only honored by native-Anthropic models (LiteLLM discards it).
+    # by the dependency_bump_web_search flag, the client's "web_search"
+    # capability, and a model cleared to search natively.
     enable_web_search: bool = False
 
     @field_validator("max_cycles")
@@ -284,13 +285,15 @@ class AgentComponentBase(BaseComponent):
         """Whether the provider-native web-search tool is active for this build.
 
         Requires the per-flow opt-in AND the runtime feature flag AND the client's
-        `web_search` capability. Used both to bind the tool and to tell the prompt
-        (via `tools_enabled`) so it can branch its web-search guidance.
+        `web_search` capability AND a model cleared to search natively. Used both to
+        bind the tool and to tell the prompt (via `tools_enabled`) so it can branch
+        its web-search guidance.
         """
         return (
             self.enable_web_search
             and is_feature_enabled(FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH)
             and is_client_capable("web_search")
+            and native_web_search_available()
         )
 
     def _tools_enabled(self) -> dict[str, bool]:

@@ -38,6 +38,7 @@ from packaging.version import Version
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.models.v2.web_search_support import supports_native_web_search
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import WebSearchInvokedEvent
@@ -155,16 +156,20 @@ class WebSearchResult(BaseModel):
     published_date: Optional[str] = None
 
 
-def native_web_search_available() -> bool:
-    """Whether the currently selected model runs web search itself.
+def native_web_search_available(
+    model_metadata: Optional[TypeModelMetadata] = None,
+) -> bool:
+    """Whether the currently selected model runs web search itself and its provider is cleared for it.
 
     When it does, this tool must stay out of the toolset: the model would be offered two ways to search, and every
     AgentCore call is separately billed.
 
+    Pass `model_metadata` to check a specific model, such as a flow component's tagged model, instead of the request's.
+
     Defaults to True when no model has been resolved. The default chat model is Anthropic-backed and searches natively,
     so assuming native is the conservative choice — it risks no search rather than a duplicated, billable one.
     """
-    metadata = current_model_metadata_context.get()
+    metadata = model_metadata or current_model_metadata_context.get()
     definition = getattr(metadata, "llm_definition", None)
 
     if definition is None:
