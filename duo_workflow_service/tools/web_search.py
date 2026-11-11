@@ -42,7 +42,12 @@ from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.models.v2.web_search_support import supports_native_web_search
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import WebSearchInvokedEvent
-from duo_workflow_service.audit_events.web_tools import current_model
+from duo_workflow_service.audit_events.web_tools import (
+    AGENTCORE_SEARCH_SOURCE,
+    WEB_SEARCH_TOOL_NAME,
+    current_model,
+)
+from duo_workflow_service.internal_events.events_utils import track_web_tool_invoked
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from lib.context import current_model_metadata_context
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
@@ -519,7 +524,13 @@ class AgentCoreWebSearch(DuoBaseTool):
         self._audit_web_search()
 
         started_at = time.monotonic()
-        results = await self._call_tool(arguments)
+        try:
+            results = await self._call_tool(arguments)
+        except Exception:
+            # Any error once the call is outbound, including an unreadable body, is a failed search.
+            self._track_web_search(succeeded=False)
+            raise
+        self._track_web_search(succeeded=True)
 
         log.info(
             "AgentCore web search completed",
@@ -534,6 +545,12 @@ class AgentCoreWebSearch(DuoBaseTool):
             {"results": [result.model_dump(exclude_none=True) for result in results]}
         )
 
+    @staticmethod
+    def _track_web_search(succeeded: bool) -> None:
+        track_web_tool_invoked(
+            WEB_SEARCH_TOOL_NAME, AGENTCORE_SEARCH_SOURCE, succeeded, *current_model()
+        )
+
     def _audit_web_search(self) -> None:
         """Emitted on top of `ai_tool_invoked`, so both search paths share one event name."""
         collector = get_audit_collector()
@@ -546,7 +563,7 @@ class AgentCoreWebSearch(DuoBaseTool):
                 workflow_id=collector.workflow_id,
                 model_name=model_name,
                 provider=provider,
-                search_source="agentcore",
+                search_source=AGENTCORE_SEARCH_SOURCE,
             )
         )
 

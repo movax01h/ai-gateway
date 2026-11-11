@@ -30,6 +30,7 @@ class EventEnum(StrEnum):
     WORKFLOW_MAX_CYCLES_REACHED = "duo_workflow_max_cycles_reached"
     WORKFLOW_TOOL_LOOP_SESSION_SUMMARY = "duo_workflow_tool_loop_session_summary"
     WORKFLOW_MERGE_REQUEST_CREATED = "duo_workflow_merge_request_created"
+    WEB_TOOL_INVOKED = "invoke_duo_workflow_web_tool"
     WORKFLOW_SUBAGENT_DELEGATED = "duo_workflow_subagent_delegated"
     WORKFLOW_SUBAGENT_RETURNED = "duo_workflow_subagent_returned"
     WORKFLOW_SUBAGENT_DELEGATION_REJECTED = "duo_workflow_subagent_delegation_rejected"

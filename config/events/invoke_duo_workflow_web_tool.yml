@@ -1,0 +1,21 @@
+---
+description: Tracks each web search or web fetch attempted during a Duo Agent Platform session, whether the model provider ran it natively or the AgentCore tool did
+internal_events: true
+action: invoke_duo_workflow_web_tool
+product_group: duo_chat
+product_categories:
+  - duo_agent_platform
+additional_properties:
+  label:
+    description: Where the call ran, native when the model provider ran it inside the model request, agentcore when the AgentCore web search tool ran it
+  property:
+    description: Web tool that ran, web_search or web_fetch
+  value:
+    description: Workflow Id that connects this event to others in the same session
+  status:
+    description: success when the provider or gateway completed the call without an error, even with zero results; failure when it returned an error or never completed the call
+milestone: '19.6'
+introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/7914
+tiers:
+  - premium
+  - ultimate

@@ -70,6 +70,13 @@ from lib.events import GLReportingEventContext
 from lib.internal_events import InternalEventAdditionalProperties
 
 
+@pytest.fixture(autouse=True)
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container,
+):
+    """Native web calls are tracked through the wired internal events client."""
+
+
 @pytest.fixture(name="mock_prompt")
 def mock_prompt_fixture(mock_ai_message):
     """Fixture for mock prompt."""
