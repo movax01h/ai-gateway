@@ -26,6 +26,7 @@ from ai_gateway.models.v2._model_compat import (
     current_model_supports_vision,
     flatten_assistant_content,
     hoist_tool_result_images,
+    model_supports_vision,
     normalize_image_blocks,
     strip_image_blocks_for_non_vision_model,
 )
@@ -1204,6 +1205,7 @@ class TestModelSupportsVision:
         )
 
         assert _model_supports_vision("my-model", "custom_openai") is None
+        assert model_supports_vision("my-model", "custom_openai") is None
 
     def test_flag_of_another_model_in_the_context_is_ignored(self, litellm_mock):
         # A tag-routed component runs on a model other than the context's default.

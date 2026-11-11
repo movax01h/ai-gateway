@@ -457,6 +457,13 @@ def _model_supports_vision(
     return _litellm_vision_verdict(model, None)
 
 
+def model_supports_vision(
+    model: str, custom_llm_provider: Optional[str]
+) -> Optional[bool]:
+    """Return the vision verdict for one model, the same one the request-time strip uses."""
+    return _model_supports_vision(model, custom_llm_provider)
+
+
 def current_model_supports_vision() -> Optional[bool]:
     """Return ``False`` only when every model this request can run on is known not to see images.
 
