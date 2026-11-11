@@ -202,6 +202,7 @@ from lib.internal_events.context import (
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
 from lib.jwt import (
     FEATURE_ENABLEMENT_TYPE_CLAIM,
+    PAID_CREDIT_MODELS_ALLOWED_CLAIM,
     instance_uid_claim,
     trusted_instance_id,
 )
@@ -242,6 +243,7 @@ _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
     BINDS_WORKFLOW_CLAIM,
     FEATURE_ENABLEMENT_TYPE_CLAIM,
+    PAID_CREDIT_MODELS_ALLOWED_CLAIM,
     "tool_access_policies",
     "gitlab_root_namespace_id",
 }

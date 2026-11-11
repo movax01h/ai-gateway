@@ -9,6 +9,7 @@ from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
     current_user,
 )
+from lib.context.model import paid_credit_models_allowed_ctx
 
 
 @pytest.fixture(name="mock_continuation")
@@ -379,3 +380,45 @@ def test_oidc_customers_dot_provider(
 
     providers = interceptor.oidc_auth_provider.providers
     assert providers[1].oidc_providers == expected
+
+
+@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("extra_claims", "expected"),
+    [
+        pytest.param({"gitlab_paid_credit_models_allowed": False}, False, id="false"),
+        pytest.param({"gitlab_paid_credit_models_allowed": True}, True, id="true"),
+        pytest.param({}, None, id="no_claim"),
+        pytest.param(None, None, id="no_extra_claims"),
+    ],
+)
+async def test_intercept_service_sets_paid_credit_models_allowed(
+    _mock_cloud_connector_ready,
+    mock_continuation,
+    handler_call_details,
+    mock_config,
+    extra_claims,
+    expected,
+):
+    seen = []
+    mock_continuation.side_effect = lambda _details: seen.append(
+        paid_credit_models_allowed_ctx.get()
+    )
+    with patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
+        return_value=(
+            CloudConnectorUser(
+                True, claims=UserClaims(gitlab_realm="self-managed", extra=extra_claims)
+            ),
+            None,
+        ),
+    ):
+        interceptor = AuthenticationInterceptor(mock_config)
+        await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    assert seen == [expected]

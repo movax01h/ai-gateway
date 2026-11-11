@@ -1,15 +1,19 @@
 from typing import Annotated
+from unittest.mock import patch
 
 import pytest
 import structlog
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
+from starlette_context.middleware import RawContextMiddleware
 from structlog.testing import capture_logs
 
 from ai_gateway.api.middleware import MiddlewareAuthentication
 from lib.context import StarletteUser, get_current_user
+from lib.context.model import paid_credit_models_allowed_ctx
 
 router = APIRouter(
     prefix="",
@@ -600,3 +604,44 @@ def test_bypass_external_with_header(fast_api_router, stub_auth_provider):
         "is_debug": True,
         "scopes": [],
     }
+
+
+@pytest.mark.parametrize(
+    ("claims_extra", "expected"),
+    [
+        ({"gitlab_paid_credit_models_allowed": False}, False),
+        ({"gitlab_paid_credit_models_allowed": True}, True),
+        ({}, None),
+        (None, None),
+    ],
+)
+def test_authentication_sets_paid_credit_models_allowed(
+    stub_auth_provider, claims_extra, expected
+):
+    paid_router = APIRouter()
+
+    @paid_router.post("/paid")
+    def paid():
+        return JSONResponse(content={"allowed": paid_credit_models_allowed_ctx.get()})
+
+    app = FastAPI(
+        middleware=[
+            Middleware(RawContextMiddleware),
+            MiddlewareAuthentication(stub_auth_provider, False, False),
+        ]
+    )
+    app.include_router(paid_router)
+    user = CloudConnectorUser(
+        authenticated=True, claims=UserClaims(scopes=[], extra=claims_extra)
+    )
+
+    with patch.object(stub_auth_provider, "authenticate", return_value=user):
+        response = TestClient(app).post(
+            "/paid",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+        )
+
+    assert response.json() == {"allowed": expected}

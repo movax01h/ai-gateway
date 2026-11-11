@@ -20,8 +20,10 @@ from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
 from ai_gateway.config import Config
 from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS, abort_handler
 from lib.context import cloud_connector_token_context_var
+from lib.context.model import paid_credit_models_allowed_ctx
 from lib.jwt import (
     GITLAB_ROOT_NAMESPACE_ID_CLAIM,
+    paid_credit_models_allowed_from_claims_extra,
     root_namespace_id_from_claims_extra,
 )
 
@@ -107,6 +109,12 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
                 ),
             )
 
+        claims = cloud_connector_user.claims
+        paid_credit_models_allowed_ctx.set(
+            paid_credit_models_allowed_from_claims_extra(
+                claims.extra if claims else None
+            )
+        )
         current_user.set(cloud_connector_user)
         return await continuation(handler_call_details)
 

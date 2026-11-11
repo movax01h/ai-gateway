@@ -28,6 +28,14 @@ restricted_access_ctx: ContextVar[Optional[str]] = ContextVar(
     "restricted_access_ctx", default=None
 )
 
+# The signed gitlab_paid_credit_models_allowed claim of this request's token. False
+# means models marked requires_paid_credits in models.yml may not be used (a
+# self-managed trial without purchased credits); None means the token has no such
+# claim. Set by authentication in the AI Gateway and the Duo Workflow Service.
+paid_credit_models_allowed_ctx: ContextVar[Optional[bool]] = ContextVar(
+    "paid_credit_models_allowed_ctx", default=None
+)
+
 
 def get_model_metadata(model_tags: list[str] | str | None = None) -> Optional[Any]:
     """Return model metadata for the given model tags, or None if no context is set."""
