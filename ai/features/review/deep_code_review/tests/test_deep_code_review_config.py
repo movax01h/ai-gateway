@@ -1,7 +1,7 @@
 """Guards for the shipped deep_code_review flow config.
 
 These tests assert on the content of ``deep_code_review/1.0.0.yml`` (the
-five-step pipeline and the router that skips the discussion fetch on a first
+seven-step pipeline and the router that skips the discussion fetch on a first
 review, the reviewer's schema id, toolset and ``max_cycles``, the fetch step's
 pinned inputs, and the publish step's schema-validated answer and
 ``min_confidence`` literal), plus the reviewer response schema those inputs
@@ -57,8 +57,8 @@ class TestDeepCodeReviewConfig:
             if component_input["as"] == name
         )
 
-    def test_flow_is_fetch_discussions_review_publish(self):
-        """The reviewer is the only model step; everything after its final answer is deterministic code."""
+    def test_flow_is_fetch_discussions_review_summarize_publish(self):
+        """The reviewer and the summary writer are the only model steps; the gate and publishing are code."""
         components = self._components()
 
         assert list(components) == [
@@ -66,6 +66,8 @@ class TestDeepCodeReviewConfig:
             "fetch_existing_discussions",
             "review",
             "check_truncation",
+            "gate_findings",
+            "summarize",
             "publish_review",
         ]
         assert components["fetch_mr_data"]["type"] == "DeterministicStepComponent"
@@ -75,6 +77,8 @@ class TestDeepCodeReviewConfig:
         )
         assert components["review"]["type"] == "AgentComponent"
         assert components["check_truncation"]["type"] == "DeterministicStepComponent"
+        assert components["gate_findings"]["type"] == "DeterministicStepComponent"
+        assert components["summarize"]["type"] == "AgentComponent"
         assert components["publish_review"]["type"] == "DeterministicStepComponent"
 
     def test_flow_declares_the_code_review_context_input(self):
@@ -200,7 +204,7 @@ class TestDeepCodeReviewConfig:
         summary = self._input(publish, "summary")
         assert findings["from"] == "context:review.final_answer.findings"
         assert findings.get("optional") is not True
-        assert summary["from"] == "context:review.final_answer.summary"
+        assert summary["from"] == "context:summarize.final_answer.summary"
         assert summary["optional"] is True
         previous = self._input(publish, "previous_findings")
         assert previous["from"] == "context:review.final_answer.previous_findings"
@@ -266,15 +270,44 @@ class TestDeepCodeReviewConfig:
         """The reviewer still reports every finding; the volume/precision operating point lives in config, where it is
         logged and counted.
 
-        The reviewer gets the same value so its summary leaves out the findings the gate drops.
+        The summary's gate uses the same value, so the summary covers exactly the posted findings.
         """
         components = self._components()
         gate = self._input(components["publish_review"], "min_confidence")
-        reviewer = self._input(components["review"], "min_confidence")
+        summary_gate = self._input(components["gate_findings"], "min_confidence")
 
         assert gate["from"] == "5"
         assert gate["literal"] is True
-        assert reviewer == gate
+        assert summary_gate == gate
+
+    def test_summary_sees_only_the_findings_that_will_be_posted(self):
+        """A summary written from the reviewer's raw findings mentioned ones the gate later dropped (ai-assist#3606)."""
+        components = self._components()
+        gate = components["gate_findings"]
+        summarize = components["summarize"]
+
+        assert gate["tool_name"] == "finalize_code_review_findings"
+        assert self._input(gate, "findings")["from"] == (
+            "context:review.final_answer.findings"
+        )
+        assert summarize["toolset"] == []
+        assert summarize["response_schema_id"] == "code_review_summary"
+        sources = {i["as"]: i["from"] for i in summarize["inputs"]}
+        assert sources == {
+            "findings": "context:gate_findings.tool_responses.findings",
+            "previous_findings": "context:review.final_answer.previous_findings",
+            "checks": "context:review.final_answer.checks",
+        }
+
+    def test_reviewer_schema_has_checks_and_no_summary(self):
+        """The reviewer must not write the summary, since it does not know which findings the gate will drop."""
+        review = self._components()["review"]
+        schema = ResponseSchemaRegistry().get(
+            review["response_schema_id"], review["response_schema_version"]
+        )
+
+        assert "summary" not in schema.model_fields
+        assert schema.model_fields["checks"].is_required() is True
 
 
 def test_1_0_0_reads_the_merge_request_from_the_resource_context():
