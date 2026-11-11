@@ -36,6 +36,7 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             "agent_platform_session_failure_counter",
             "agent_platform_session_abort_counter",
             "agent_platform_tool_failure_counter",
+            "agent_platform_image_fallback_counter",
             "agent_platform_receive_start_counter",
             "agent_platform_response_schema_output_counter",
             "agent_platform_flow_route_decision_counter",
@@ -293,6 +294,28 @@ class TestDuoWorkflowMetrics(unittest.TestCase):
             flow_type="test_flow_type",
             tool_name="test_tool",
             failure_reason="test_error",
+        )
+
+    def test_agent_platform_image_fallback_counter(self):
+        """The model name is passed through, like ``model_name`` in the model-request metrics."""
+        self._assert_counter_called(
+            "agent_platform_image_fallback_counter",
+            "count_image_fallback",
+            {
+                "flow_type": "software_development",
+                "kind": "unclassified",
+                "model_name": "m" * 80,
+                "model_vendor": "custom_openai",
+                "lsp_version": "unknown",
+                "gitlab_version": "unknown",
+                "client_type": "unknown",
+                "gitlab_realm": "unknown",
+                "is_gitlab_team_member": "unknown",
+            },
+            flow_type="software_development",
+            kind="unclassified",
+            model_name="m" * 80,
+            model_vendor="custom_openai",
         )
 
     @patch("lib.context.request_metadata.language_server_version")

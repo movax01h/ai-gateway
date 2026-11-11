@@ -169,6 +169,13 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             registry=registry,
         )
 
+        self.agent_platform_image_fallback_counter = Counter(
+            "agent_platform_image_fallback_total",
+            "Count of requests retried without images after a provider rejected them",
+            ["flow_type", "kind", "model_name", "model_vendor"] + METADATA_LABELS,
+            registry=registry,
+        )
+
         self.agent_platform_receive_start_counter = Counter(
             "agent_platform_receive_start_total",
             "Count of receive start events in Duo Workflow",
@@ -427,6 +434,21 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             flow_type=flow_type,
             tool_name=tool_name,
             failure_reason=failure_reason,
+            **build_metadata_labels(),
+        ).inc()
+
+    def count_image_fallback(
+        self,
+        flow_type: str = "unknown",
+        kind: str = "unknown",
+        model_name: str = "unknown",
+        model_vendor: str = "unknown",
+    ) -> None:
+        self.agent_platform_image_fallback_counter.labels(
+            flow_type=flow_type,
+            kind=kind,
+            model_name=model_name,
+            model_vendor=model_vendor,
             **build_metadata_labels(),
         ).inc()
 
