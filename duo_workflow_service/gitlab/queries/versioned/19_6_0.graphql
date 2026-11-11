@@ -1,0 +1,81 @@
+query(
+    $workflowId: AiDuoWorkflowsWorkflowID!
+    $projectId: ProjectID
+    $withToolAccessPolicies: Boolean = false
+) {
+    duoWorkflowWorkflows(workflowId: $workflowId) {
+        nodes {
+            statusName
+            projectId
+            project {
+                id
+                name
+                description
+                httpUrlToRepo
+                languages {
+                    name
+                    share
+                }
+                webUrl
+                statisticsDetailsPaths {
+                    repository
+                }
+                duoContextExclusionSettings {
+                    exclusionRules
+                }
+                duoWorkflowStatusCheck {
+                    foundationalFlowsEnabled
+                    enabledFoundationalFlows
+                }
+                namespace {
+                    aiSettings {
+                        promptInjectionProtectionLevel
+                    }
+                    rootNamespace @gl_introduced(version: "19.4.0") {
+                        aiSettings {
+                            webSearchEnabled
+                        }
+                    }
+                }
+            }
+            namespaceId
+            namespace {
+                id
+                name
+                description
+                webUrl
+                aiSettings {
+                    promptInjectionProtectionLevel
+                }
+                rootNamespace @gl_introduced(version: "19.4.0") {
+                    aiSettings {
+                        webSearchEnabled
+                    }
+                }
+            }
+            agentPrivilegesNames
+            preApprovedAgentPrivilegesNames
+            mcpEnabled
+            incrementalCheckpointsEnabled
+            allowAgentToRequestUser
+            allowClientInjectedMcpTools @gl_introduced(version: "19.5.0")
+            fileAttachmentsAllowed @gl_introduced(version: "19.6.0")
+            webSearchEnabled
+            latestCheckpoint {
+                threadTs
+                parentTs
+                metadata
+                compressedCheckpoint
+                currentThread @gl_introduced(version: "19.4.0")
+            }
+            archived
+            stalled
+            sourceType @gl_introduced(version: "19.4.0")
+            # @include sits on a fragment: the version filter does not count
+            # variables used in a stripped field's own directives.
+            ... @include(if: $withToolAccessPolicies) {
+                toolAccessPolicies(projectId: $projectId) @gl_introduced(version: "19.6.0")
+            }
+        }
+    }
+}

@@ -318,3 +318,61 @@ class TestOutbox:
         assert excinfo.value is error
         assert request_id not in outbox._action_response
         assert request_id not in outbox._legacy_action_response
+
+
+def _http_action() -> contract_pb2.Action:
+    return contract_pb2.Action(
+        runHTTPRequest=contract_pb2.RunHTTPRequest(path="/api/v4/x", method="GET")
+    )
+
+
+def _response(response_type: str) -> contract_pb2.ClientEvent:
+    response = (
+        {"httpResponse": contract_pb2.HttpResponse(statusCode=200)}
+        if response_type == "httpResponse"
+        else {"plainTextResponse": contract_pb2.PlainTextResponse(response="ok")}
+    )
+    return contract_pb2.ClientEvent(
+        actionResponse=contract_pb2.ActionResponse(**response)
+    )
+
+
+@pytest.mark.asyncio
+async def test_exact_http_responses_discards_an_http_response_without_a_request_id():
+    outbox = Outbox(exact_http_responses=True)
+    result: asyncio.Future = asyncio.get_event_loop().create_future()
+    action = _http_action()
+    outbox.put_action(action, result=result)
+
+    outbox.set_action_response(_response("httpResponse"))
+
+    assert not result.done()
+    assert action.requestID in outbox._action_response
+
+
+@pytest.mark.asyncio
+async def test_exact_http_responses_still_resolves_by_request_id():
+    outbox = Outbox(exact_http_responses=True)
+    result: asyncio.Future = asyncio.get_event_loop().create_future()
+    request_id = outbox.put_action(_http_action(), result=result)
+    response = _response("httpResponse")
+    response.actionResponse.requestID = request_id
+
+    outbox.set_action_response(response)
+
+    assert result.result() is response
+
+
+@pytest.mark.asyncio
+async def test_exact_http_responses_keeps_legacy_plain_text_responses():
+    outbox = Outbox(exact_http_responses=True)
+    result: asyncio.Future = asyncio.get_event_loop().create_future()
+    outbox.put_action(
+        contract_pb2.Action(runReadFile=contract_pb2.ReadFile(filepath="a")),
+        result=result,
+    )
+    response = _response("plainTextResponse")
+
+    outbox.set_action_response(response)
+
+    assert result.result() is response
