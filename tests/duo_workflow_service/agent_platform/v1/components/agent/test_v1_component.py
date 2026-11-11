@@ -57,6 +57,13 @@ from tests.duo_workflow_service.ui_chat_log_contract import (
 )
 
 
+@pytest.fixture(autouse=True)
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container,
+):
+    """Native web calls are tracked through the wired internal events client."""
+
+
 @pytest.fixture(name="prompt_id")
 def prompt_id_fixture():
     """Fixture for prompt ID."""

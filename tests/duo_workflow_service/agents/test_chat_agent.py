@@ -73,6 +73,13 @@ from tests.duo_workflow_service.ui_chat_log_contract import (
 )
 
 
+@pytest.fixture(autouse=True)
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container,
+):
+    """Native web calls are tracked through the wired internal events client."""
+
+
 @pytest.fixture(name="mock_datetime")
 def mock_datetime_fixture(mock_now: datetime):
     with patch("duo_workflow_service.agents.chat_agent.datetime") as mock:

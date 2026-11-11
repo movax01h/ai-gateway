@@ -23,6 +23,8 @@ from duo_workflow_service.tools.web_search import (
 )
 from lib.context import current_model_metadata_context
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
+from lib.internal_events import InternalEventsClient
+from lib.internal_events.event_enum import EventEnum
 
 GATEWAY_URL = (
     "https://gw-abcdefghij.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
@@ -34,6 +36,13 @@ BEDROCK_LITELLM_MODEL = (
     "bedrock/global.anthropic.claude-sonnet-4-6",
     "bedrock",
 )
+
+
+@pytest.fixture(autouse=True)
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container,
+):
+    """The tool tracks usage through the wired internal events client."""
 
 
 @pytest.fixture(name="isolate_web_search_env", autouse=True)
@@ -776,3 +785,72 @@ class TestAuditEvent:
             result = await tool._execute(query="q")
 
         assert json.loads(result)["results"][0]["url"] == "https://a.com"
+
+
+class TestUsageEvent:
+    @pytest.fixture(name="internal_event_client")
+    def internal_event_client_fixture(self, mock_duo_workflow_service_container):
+        client = MagicMock(spec=InternalEventsClient)
+        with mock_duo_workflow_service_container.internal_event.client.override(client):
+            yield client
+
+    @staticmethod
+    def _tracked(client):
+        return [
+            call.kwargs
+            for call in client.track_event.call_args_list
+            if call.kwargs["event_name"] == EventEnum.WEB_TOOL_INVOKED.value
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("resolved_model", [VERTEX_LITELLM_MODEL], indirect=True)
+    async def test_tracks_a_completed_search(
+        self, tool, mock_post, internal_event_client, resolved_model
+    ):
+        patcher, _ = mock_post(_tool_result([]))
+        with patcher:
+            await tool._execute(query="CVE-2025-50182")
+
+        [event] = self._tracked(internal_event_client)
+        properties = event["additional_properties"]
+        assert (properties.label, properties.property) == ("agentcore", "web_search")
+        assert properties.extra["status"] == "success"
+        assert (event["model_name"], event["model_provider"]) == (
+            "claude-sonnet-4-6",
+            "Gemini Enterprise Agent Platform",
+        )
+        assert "CVE-2025-50182" not in str(event)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("query", "expected_statuses"),
+        [
+            pytest.param("q", ["failure"], id="gateway-failure"),
+            pytest.param("   ", [], id="query-rejected-before-any-call"),
+        ],
+    )
+    async def test_tracks_a_failed_search_once_it_reached_the_gateway(
+        self, tool, mock_post, internal_event_client, query, expected_statuses
+    ):
+        patcher, _ = mock_post({}, status_code=500)
+        with patcher, pytest.raises(ToolException):
+            await tool._execute(query=query)
+
+        assert [
+            e["additional_properties"].extra["status"]
+            for e in self._tracked(internal_event_client)
+        ] == expected_statuses
+
+    @pytest.mark.asyncio
+    async def test_tracks_a_failure_when_the_gateway_returns_an_unexpected_body(
+        self, tool, mock_post, internal_event_client
+    ):
+        """A 200 with a body we cannot read is still a failed search."""
+        patcher, _ = mock_post({"result": {"content": ["not-a-content-block"]}})
+        with patcher, pytest.raises(AttributeError):
+            await tool._execute(query="q")
+
+        assert [
+            e["additional_properties"].extra["status"]
+            for e in self._tracked(internal_event_client)
+        ] == ["failure"]
