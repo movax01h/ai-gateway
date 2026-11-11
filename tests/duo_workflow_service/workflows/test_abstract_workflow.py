@@ -68,6 +68,7 @@ from lib.context import client_capabilities, client_type, gitlab_version
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.context import EventContext, current_event_context
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
 from lib.language_server import LanguageServerVersion
@@ -1833,7 +1834,7 @@ async def test_compile_and_run_graph_with_token_rejection(
 
 @pytest.mark.asyncio
 @patch(
-    "duo_workflow_service.workflows.abstract_workflow.TOKEN_REJECTION_DROP_TIMEOUT_S",
+    "duo_workflow_service.workflows.abstract_workflow.SESSION_DROP_TIMEOUT_S",
     0.01,
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
@@ -4237,8 +4238,7 @@ def test_first_party_claim_needs_a_client_that_reserves_the_name(
     assert [
         e["reason"]
         for e in cap_logs
-        if e["event"]
-        == "Ignoring first-party MCP tools from tool_access_policies claim"
+        if e["event"] == "Ignoring first-party MCP tools from tool_access_policies"
     ] == ([] if trusted else [expected_reason])
 
 
@@ -4267,8 +4267,7 @@ def test_no_first_party_discard_log_without_a_claimed_map(claim_name):
     assert not [
         e
         for e in cap_logs
-        if e["event"]
-        == "Ignoring first-party MCP tools from tool_access_policies claim"
+        if e["event"] == "Ignoring first-party MCP tools from tool_access_policies"
     ]
 
 
@@ -4647,6 +4646,267 @@ async def test_first_party_claim_errors_with_the_ceiling_on(
         else set()
     )
     assert kwargs["first_party_tools"] == expected_map
+
+
+def _workflow_with_claims(extra):
+    user = CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_realm="self-managed", extra=extra)
+    )
+    workflow = MockWorkflow(
+        "123",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._workflow_config = {
+        "allow_agent_to_request_user": True,
+        "workflow_status": "created",
+    }
+    return workflow
+
+
+_GATE = (
+    "duo_workflow_service.workflows.abstract_workflow."
+    "supports_tool_access_policies_field"
+)
+
+
+def _workflow_with_loaded_policy(policy):
+    workflow = _workflow_with_claims({})
+    workflow._workflow_config["tool_access_policies"] = policy
+    return workflow
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_applies_the_loaded_policy(_mock_gate):
+    workflow = _workflow_with_loaded_policy(
+        {"allow": ["read_file"], "ask": [], "deny": ["run_command"]}
+    )
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._denied_tools == ["run_command"]
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_applies_a_loaded_ceiling(_mock_gate):
+    workflow = _workflow_with_loaded_policy(
+        {"allow": ["read_file"], "ask": [], "deny": [], "ceiling": True}
+    )
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._admin_allowed_preapprovals is not None
+    assert "read_file" in workflow._admin_allowed_preapprovals
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_keeps_an_empty_loaded_policy_ungoverned(
+    _mock_gate,
+):
+    workflow = _workflow_with_loaded_policy({"allow": [], "ask": [], "deny": []})
+    preapproved = list(workflow._preapproved_tools)
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._preapproved_tools == preapproved
+    assert workflow._denied_tools == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"tool_access_policies": '{"allow": [], "ask": [], "deny": ["create_issue"]}'},
+        {"tool_access_policies": "not json"},
+    ],
+    ids=["claim", "unparsable_claim"],
+)
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_ignores_the_loaded_policy_when_the_token_has_a_claim(
+    _mock_gate, extra
+):
+    workflow = _workflow_with_claims(extra)
+    workflow._workflow_config["tool_access_policies"] = {
+        "allow": ["read_file"],
+        "ask": [],
+        "deny": [],
+    }
+
+    await workflow._merge_governance_policies()
+
+    assert "read_file" not in workflow._preapproved_tools
+    assert not workflow._loads_tool_access_policies()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["claim", "field"])
+@pytest.mark.usefixtures("first_party_client")
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_applies_first_party_verdicts_from_either_source(
+    _mock_gate, source
+):
+    policy = _FIRST_PARTY_CLAIMS["first_party_only_ask"]
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                gitlab_realm="self-managed",
+                extra={"tool_access_policies": policy} if source == "claim" else {},
+            ),
+        ),
+        _client_mcp_tools(),
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+        preapproved_tools=[_DUO_REVIEW, "read_file"],
+    )
+    workflow._workflow_config = {
+        "allow_agent_to_request_user": True,
+        # Rails always sends the three lists.
+        "tool_access_policies": (
+            {"allow": [], "ask": [], "deny": [], **policy}
+            if source == "field"
+            else None
+        ),
+    }
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._first_party_tools == {_DUO_REVIEW: "ask"}
+    assert workflow._mcp_tools[0]["first_party"] is True
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=False)
+async def test_merge_governance_policies_ignores_the_field_on_older_gitlab(_mock_gate):
+    workflow = _workflow_with_loaded_policy(None)
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._denied_tools == []
+    assert not workflow._loads_tool_access_policies()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy",
+    [None, {"allow": [], "deny": []}, {"allow": "read_file", "ask": [], "deny": []}],
+    ids=["missing", "partial", "malformed"],
+)
+@patch(_GATE, return_value=True)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+async def test_merge_governance_policies_drops_and_ends_the_session(
+    mock_status_updater, _mock_gate, policy
+):
+    mock_status_updater.return_value.update_workflow_status = AsyncMock()
+    workflow = _workflow_with_loaded_policy(policy)
+
+    with pytest.raises(NotifiableException, match="could not load the tool rules"):
+        await workflow._merge_governance_policies()
+
+    mock_status_updater.return_value.update_workflow_status.assert_awaited_once_with(
+        "123",
+        WorkflowStatusEventEnum.DROP,
+        drop_reason="tool_rules_unavailable",
+    )
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=True)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+async def test_merge_governance_policies_keeps_a_resumed_session_status(
+    mock_status_updater, _mock_gate
+):
+    mock_status_updater.return_value.update_workflow_status = AsyncMock()
+    workflow = _workflow_with_loaded_policy(None)
+    workflow._workflow_config["workflow_status"] = "tool_call_approval_required"
+
+    with pytest.raises(NotifiableException, match="could not load the tool rules"):
+        await workflow._merge_governance_policies()
+
+    mock_status_updater.return_value.update_workflow_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "project_id,claim,gate,expected",
+    [
+        (
+            7,
+            None,
+            True,
+            {"tool_access_policies_project_id": 7, "with_tool_access_policies": True},
+        ),
+        (
+            None,
+            None,
+            True,
+            {
+                "tool_access_policies_project_id": None,
+                "with_tool_access_policies": True,
+            },
+        ),
+        (
+            7,
+            '{"allow": [], "ask": [], "deny": []}',
+            True,
+            {"with_tool_access_policies": False},
+        ),
+        (7, None, False, {"with_tool_access_policies": False}),
+    ],
+    ids=["claim_absent", "no_project", "claim_present", "older_gitlab"],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_requests_the_policy_only_without_a_claim(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    mock_fetch_workflow_and_container_data,
+    workflow_config,
+    project_id,
+    claim,
+    gate,
+    expected,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    workflow_config["tool_access_policies"] = {
+        "allow": [],
+        "ask": [],
+        "deny": ["run_command"],
+    }
+    with patch(_GATE, return_value=gate):
+        workflow = _workflow_with_claims(
+            {"tool_access_policies": claim} if claim else {}
+        )
+        token = current_event_context.set(EventContext(project_id=project_id))
+        try:
+            await workflow._compile_and_run_graph("Test goal")
+        finally:
+            current_event_context.reset(token)
+
+    kwargs = mock_fetch_workflow_and_container_data.call_args.kwargs
+    assert {key: kwargs[key] for key in expected} == expected
+    assert ("run_command" in workflow._denied_tools) is (claim is None and gate)
+
+
+@pytest.mark.parametrize("gate", [True, False])
+def test_outbox_matches_http_responses_by_id_only_on_governed_versions(gate):
+    with patch(_GATE, return_value=gate):
+        workflow = _workflow_with_claims({})
+
+    assert workflow._outbox._exact_http_responses is gate
 
 
 @contextlib.contextmanager

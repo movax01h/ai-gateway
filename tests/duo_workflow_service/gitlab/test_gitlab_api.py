@@ -269,6 +269,53 @@ async def test_fetch_workflow_and_container_data_source_type(source_type, expect
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs,expected_variables",
+    [
+        ({}, {}),
+        ({"with_tool_access_policies": True}, {"withToolAccessPolicies": True}),
+        (
+            {"with_tool_access_policies": True, "tool_access_policies_project_id": 7},
+            {"withToolAccessPolicies": True, "projectId": "gid://gitlab/Project/7"},
+        ),
+        ({"tool_access_policies_project_id": 7}, {}),
+    ],
+    ids=["not_requested", "requested", "requested_for_a_project", "project_only"],
+)
+async def test_fetch_workflow_and_container_data_tool_access_policies(
+    kwargs, expected_variables
+):
+    policies = {"allow": ["read_file"], "ask": [], "deny": ["run_command"]}
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "webUrl": "http://example.com/test-project",
+                    },
+                    "toolAccessPolicies": policies,
+                }
+            ]
+        }
+    }
+
+    _, _, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123", **kwargs
+    )
+
+    assert gitlab_client.graphql.call_args[0][1] == {
+        "workflowId": "gid://gitlab/Ai::DuoWorkflows::Workflow/123",
+        **expected_variables,
+    }
+    assert workflow_config["tool_access_policies"] == policies
+
+
+@pytest.mark.asyncio
 async def test_fetch_workflow_and_project_data_with_missing_languages(
     workflow_and_project_data,
 ):

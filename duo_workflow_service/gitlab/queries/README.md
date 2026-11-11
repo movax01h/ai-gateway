@@ -26,4 +26,5 @@ The last row covers GitLab.com `-pre` builds and stale CI branches; it requires 
 ## When to add a new versioned file
 
 Only for a non-additive change: removing a field, renaming a field, or restructuring the
-query. `18_2_0.graphql` is the floor; older GitLab rejects unknown directives.
+query. A new query variable counts too: GitLab before 19.4 reports a variable that only a
+stripped field uses as unused. `18_2_0.graphql` is the floor; older GitLab rejects unknown directives.
