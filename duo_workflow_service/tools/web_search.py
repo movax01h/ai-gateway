@@ -25,6 +25,8 @@ See https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target
 import asyncio
 import json
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, ClassVar, Optional, Type
 
@@ -38,8 +40,6 @@ from packaging.version import Version
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from ai_gateway.model_metadata import TypeModelMetadata
-from ai_gateway.models.v2.web_search_support import supports_native_web_search
 from duo_workflow_service.audit_events.context import get_audit_collector
 from duo_workflow_service.audit_events.event_types import WebSearchInvokedEvent
 from duo_workflow_service.audit_events.web_tools import (
@@ -47,9 +47,9 @@ from duo_workflow_service.audit_events.web_tools import (
     WEB_SEARCH_TOOL_NAME,
     current_model,
 )
+from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.internal_events.events_utils import track_web_tool_invoked
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-from lib.context import current_model_metadata_context
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 log = structlog.stdlib.get_logger("web_search")
@@ -149,6 +149,38 @@ class WebSearchInput(BaseModel):
     )
 
 
+@dataclass(frozen=True)
+class WebSearchState:
+    """Defaults to "web search plays no part here", for callers that never resolved it."""
+
+    supported: bool = False
+    """Web search exists for this session at all, regardless of the user's toggle."""
+
+    active: bool = False
+    """Supported AND the user has web search toggled on right now."""
+
+    @classmethod
+    def resolve(
+        cls, user_toggle: bool, group_allowed: bool = False
+    ) -> "WebSearchState":
+        """Resolve web-search availability for the current session.
+
+        Args:
+            user_toggle: Whether the user has web search toggled on for this request.
+            group_allowed: Whether the top-level group allows web search at all.
+
+        Returns:
+            A state where `supported` reflects the group setting, the feature flag and
+            the client capability, and `active` additionally requires `user_toggle`.
+        """
+        supported = (
+            group_allowed
+            and is_feature_enabled(FeatureFlag.DAP_WEB_SEARCH)
+            and is_client_capable("web_search")
+        )
+        return cls(supported=supported, active=supported and user_toggle)
+
+
 class WebSearchResult(BaseModel):
     """A single search result.
 
@@ -159,28 +191,6 @@ class WebSearchResult(BaseModel):
     url: Optional[str] = None
     title: Optional[str] = None
     published_date: Optional[str] = None
-
-
-def native_web_search_available(
-    model_metadata: Optional[TypeModelMetadata] = None,
-) -> bool:
-    """Whether the currently selected model runs web search itself and its provider is cleared for it.
-
-    When it does, this tool must stay out of the toolset: the model would be offered two ways to search, and every
-    AgentCore call is separately billed.
-
-    Pass `model_metadata` to check a specific model, such as a flow component's tagged model, instead of the request's.
-
-    Defaults to True when no model has been resolved. The default chat model is Anthropic-backed and searches natively,
-    so assuming native is the conservative choice — it risks no search rather than a duplicated, billable one.
-    """
-    metadata = model_metadata or current_model_metadata_context.get()
-    definition = getattr(metadata, "llm_definition", None)
-
-    if definition is None:
-        return True
-
-    return supports_native_web_search(definition)
 
 
 @lru_cache(maxsize=1)
@@ -323,22 +333,27 @@ class AgentCoreWebSearch(DuoBaseTool):
     _settings: WebSearchSettings = WebSearchSettings()
 
     @classmethod
-    def is_available(cls) -> bool:
-        """Gate this tool behind the same flag as native web search, as a fallback only.
+    def is_available(cls, workflow_config: Mapping[str, Any]) -> bool:
+        """Offered only when this session may search: the user's opt-in, the group setting and the flag.
 
-        The client capability is checked by the tools registry via `required_capability`, mirroring
-        how native web search requires both the `dap_web_search` flag and the `web_search` client
-        capability before `web_search_options` is bound.
-
-        Settings are read here rather than taken from `_settings` so that an unconfigured deployment
-        never advertises the tool. This is what keeps the feature dormant until a gateway exists:
-        enabling the flag alone would otherwise offer a tool whose every call fails.
+        The client capability is checked by the tools registry via `required_capability`. Whether
+        the model then searches natively or calls this tool is decided when the tools are bound
+        (`bind_web_search`), because only the binding knows the model.
         """
-        return (
-            is_feature_enabled(FeatureFlag.DAP_WEB_SEARCH)
-            and not native_web_search_available()
-            and WebSearchSettings().is_configured()
-        )
+        return WebSearchState.resolve(
+            user_toggle=bool(workflow_config.get("web_search_enabled", False)),
+            group_allowed=bool(
+                workflow_config.get("web_search_allowed_for_group", False)
+            ),
+        ).active
+
+    @property
+    def locally_available(self) -> bool:
+        """Whether this tool can run here; without a configured gateway every call would fail.
+
+        Read from the environment rather than `_settings` so a deployment configured after import is seen.
+        """
+        return WebSearchSettings().is_configured()
 
     @property
     def settings(self) -> WebSearchSettings:

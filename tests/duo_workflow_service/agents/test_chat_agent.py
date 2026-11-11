@@ -20,7 +20,6 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
-from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.audit_events.collector import AuditEventCollector
 from duo_workflow_service.audit_events.context import audit_collector_context
 from duo_workflow_service.audit_events.event_types import AuditEventType
@@ -57,6 +56,7 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.tools import MalformedToolCallError, Toolset
+from duo_workflow_service.tools.web_search import WebSearchState
 from lib.context import current_model_metadata_context, gitlab_version
 from lib.context.approval_sources import (
     approval_sources,

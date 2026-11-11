@@ -68,6 +68,9 @@ components:
       - "create_merge_request"
       - "update_merge_request"
       - "notify_me_when"
+      # Offered only when the session may search (the user's opt-in, the group setting,
+      # `dap_web_search`, the client capability); binding picks native or fallback per model.
+      - "web_search"
     ui_log_events:
       - "on_agent_reasoning"
       - "on_tool_execution_success"

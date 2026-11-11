@@ -18,7 +18,6 @@ from duo_workflow_service.tools.web_search import (
     _extract_mcp_payload,
     _negotiated_protocol_version,
     _parse_results,
-    native_web_search_available,
     web_search_boto_session,
 )
 from lib.context import current_model_metadata_context
@@ -31,11 +30,6 @@ GATEWAY_URL = (
 )
 
 VERTEX_LITELLM_MODEL = (ModelClassProvider.LITE_LLM, "claude-sonnet-4-6", "vertex_ai")
-BEDROCK_LITELLM_MODEL = (
-    ModelClassProvider.LITE_LLM,
-    "bedrock/global.anthropic.claude-sonnet-4-6",
-    "bedrock",
-)
 
 
 @pytest.fixture(autouse=True)
@@ -355,87 +349,6 @@ def web_search_flag_fixture(request):
     current_feature_flag_context.reset(token)
 
 
-class TestNativeWebSearchAvailable:
-    @pytest.mark.parametrize(
-        "resolved_model,expected",
-        [
-            pytest.param(
-                (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None),
-                True,
-                id="anthropic",
-            ),
-            pytest.param(
-                (ModelClassProvider.OPENAI, "gpt-5.2", None), True, id="openai"
-            ),
-            pytest.param(
-                (ModelClassProvider.GOOGLE_GENAI, "gemini-2.5-pro", None),
-                False,
-                id="google-genai",
-            ),
-            pytest.param(
-                (ModelClassProvider.AMAZON_Q, None, None), False, id="amazon-q"
-            ),
-            # Vertex can search natively but isn't cleared for it, so it gets AgentCore.
-            pytest.param(
-                (ModelClassProvider.LITE_LLM, "claude-sonnet-4-6", "vertex_ai"),
-                False,
-                id="litellm-vertex",
-            ),
-            pytest.param(
-                (
-                    ModelClassProvider.LITE_LLM,
-                    "bedrock/global.anthropic.claude-sonnet-4-6",
-                    "bedrock",
-                ),
-                False,
-                id="litellm-bedrock",
-            ),
-        ],
-        indirect=["resolved_model"],
-    )
-    def test_model_determines_native_support(self, resolved_model, expected):
-        assert native_web_search_available() is expected
-
-    @pytest.mark.parametrize(
-        "resolved_model",
-        [(ModelClassProvider.LITE_LLM, "claude-sonnet-4-6", "vertex_ai")],
-        indirect=True,
-    )
-    def test_vertex_is_native_once_cleared(self, resolved_model):
-        with patch(
-            "ai_gateway.models.v2.chat_litellm.NATIVE_WEB_SEARCH_ALLOWED_LITELLM_PROVIDERS",
-            frozenset({"vertex_ai"}),
-        ):
-            assert native_web_search_available() is True
-
-    @pytest.mark.parametrize(
-        "resolved_model",
-        [(ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None)],
-        indirect=True,
-    )
-    def test_capable_provider_not_cleared_is_not_native(self, resolved_model):
-        with patch(
-            "ai_gateway.models.v2.web_search_support.NATIVE_WEB_SEARCH_ALLOWED_PROVIDERS",
-            frozenset(),
-        ):
-            assert native_web_search_available() is False
-
-    @pytest.mark.parametrize(
-        "resolved_model",
-        [(ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None)],
-        indirect=True,
-    )
-    def test_checks_the_given_model_instead_of_the_request_model(self, resolved_model):
-        assert (
-            native_web_search_available(_model_metadata(*VERTEX_LITELLM_MODEL)) is False
-        )
-
-    @pytest.mark.parametrize("resolved_model", [None], indirect=True)
-    def test_assumes_native_when_no_model_resolved(self, resolved_model):
-        """Conservative default: risk no search rather than a duplicated, billable one."""
-        assert native_web_search_available() is True
-
-
 class TestProtocolVersionNegotiation:
     @staticmethod
     def _response(payload):
@@ -536,30 +449,39 @@ class TestBotoSession:
         mock_session.assert_called_once_with()
 
 
+_OPTED_IN = {"web_search_enabled": True, "web_search_allowed_for_group": True}
+
+
 class TestIsAvailable:
     @pytest.mark.parametrize(
-        "web_search_flag,resolved_model,expected",
+        ("web_search_flag", "capable", "config", "expected"),
         [
-            # Flag on and native unavailable: this tool is the fallback.
-            (True, BEDROCK_LITELLM_MODEL, True),
-            (True, (ModelClassProvider.GOOGLE_GENAI, "gemini-2.5-pro", None), True),
-            # Native handles it, so the fallback stays out of the toolset.
-            (True, (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None), False),
-            (True, (ModelClassProvider.OPENAI, "gpt-5.2", None), False),
-            # Vertex could search natively but isn't cleared for it.
-            (True, VERTEX_LITELLM_MODEL, True),
-            # Flag off: never enabled, regardless of model.
-            (False, BEDROCK_LITELLM_MODEL, False),
-            (False, (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None), False),
+            (True, True, _OPTED_IN, True),
+            (True, True, {**_OPTED_IN, "web_search_enabled": False}, False),
+            (True, True, {**_OPTED_IN, "web_search_allowed_for_group": False}, False),
+            (True, False, _OPTED_IN, False),
+            (False, True, _OPTED_IN, False),
+            (True, True, {}, False),
         ],
-        indirect=["web_search_flag", "resolved_model"],
+        ids=[
+            "opted_in",
+            "user_off",
+            "group_off",
+            "client_incapable",
+            "flag_off",
+            "unset",
+        ],
+        indirect=["web_search_flag"],
     )
-    def test_gating(self, web_search_flag, resolved_model, expected, monkeypatch):
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__ENABLED", "true")
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__GATEWAY_URL", GATEWAY_URL)
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__TARGET_NAME", "websearch")
-
-        assert AgentCoreWebSearch.is_available() is expected
+    def test_offered_only_when_the_session_may_search(
+        self, web_search_flag, capable, config, expected
+    ):
+        """Independent of the model and the gateway: the binding picks native or this tool."""
+        with patch(
+            "duo_workflow_service.tools.web_search.is_client_capable",
+            return_value=capable,
+        ):
+            assert AgentCoreWebSearch.is_available(config) is expected
 
     @pytest.mark.parametrize(
         "env,expected",
@@ -583,25 +505,20 @@ class TestIsAvailable:
                 },
                 False,
             ),
-            # Half-configured: enabling without a gateway to call must not offer the tool.
+            # Half-configured: enabling without a gateway to call must not run the tool.
             ({"ENABLED": "true", "TARGET_NAME": "websearch"}, False),
             ({"ENABLED": "true", "GATEWAY_URL": GATEWAY_URL}, False),
         ],
         ids=["configured", "unset", "disabled", "no_gateway_url", "no_target_name"],
     )
-    @pytest.mark.parametrize("resolved_model", [BEDROCK_LITELLM_MODEL], indirect=True)
-    def test_requires_configured_gateway(
-        self, web_search_flag, resolved_model, env, expected, monkeypatch
+    def test_runs_locally_only_with_a_configured_gateway(
+        self, env, expected, monkeypatch
     ):
-        """An unconfigured deployment must not advertise the tool.
-
-        This is what keeps the feature dormant while the flag rolls out: offering it without a
-        gateway would fail every call the model made, rather than leaving the model unaware of it.
-        """
+        """Without a gateway the binding drops the tool for models that can't search natively."""
         for key, value in env.items():
             monkeypatch.setenv(f"DUO_WORKFLOW_WEB_SEARCH__{key}", value)
 
-        assert AgentCoreWebSearch.is_available() is expected
+        assert AgentCoreWebSearch(metadata={}).locally_available is expected
 
 
 class TestSigning:
@@ -620,7 +537,7 @@ class TestSigning:
     ):
         """Signing cannot proceed without credentials, and must say which part is missing.
 
-        `is_available()` keeps an unconfigured deployment from reaching this, so hitting it means the settings and the
+        `bind_web_search` keeps an unconfigured deployment from reaching this, so hitting it means the settings and the
         AWS environment disagree — worth an error that names the difference.
         """
         metadata = {}

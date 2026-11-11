@@ -718,35 +718,14 @@ def test_start_flow_tool_offered_whatever_the_foundational_flow_config(
 @pytest.mark.parametrize(
     "generic_gitlab_tools_enabled", [True, False], ids=["generic_tools", "simple_tools"]
 )
-@pytest.mark.parametrize("web_search_enabled", [True, False])
-@pytest.mark.parametrize("web_search_allowed_for_group", [True, False])
-def test_web_search_requested_when_opted_in(
-    generic_gitlab_tools_enabled,
-    web_search_enabled,
-    web_search_allowed_for_group,
-    workflow_with_project,
+def test_web_search_requested_under_either_tool_set(
+    generic_gitlab_tools_enabled, workflow_with_project
 ):
-    """web_search follows the per-conversation opt-in and the group grant, under either read-only tool set.
-
-    Requesting it is necessary but not sufficient: ToolsRegistry enables it only for models without
-    native web search, and `toolset` silently drops names that are not enabled. So omitting it when
-    opted in would disable the fallback with no error surfacing, while requesting it when opted out
-    would let non-native models search after the user declined.
-    """
+    """Chat always asks for web_search; the registry offers it only when the session may search."""
     if generic_gitlab_tools_enabled:
         current_feature_flag_context.set({"use_generic_gitlab_api_tools"})
 
-    workflow_with_project._workflow_config = {
-        **workflow_with_project._workflow_config,
-        "web_search_enabled": web_search_enabled,
-        "web_search_allowed_for_group": web_search_allowed_for_group,
-    }
-
-    tools = workflow_with_project._get_tools()
-
-    assert ("web_search" in tools) is (
-        web_search_enabled and web_search_allowed_for_group
-    )
+    assert "web_search" in workflow_with_project._get_tools()
 
 
 def _gitlab_checkpoint_with_history(
@@ -1663,6 +1642,7 @@ async def test_workflow_with_approval_object(flow_type: GLReportingEventContext)
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
 @patch.object(Workflow, "_get_tools")
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
 @patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
@@ -1671,6 +1651,7 @@ async def test_compile_with_tools_override_and_flow_config(
     mock_state_graph,
     mock_toolset,
     mock_get_tools,
+    mock_create_agent,
     flow_type: GLReportingEventContext,
     mock_checkpointer,
 ):
@@ -1705,6 +1686,7 @@ async def test_compile_with_tools_override_and_flow_config(
 
     workflow._compile("Test goal", tools_registry, mock_checkpointer)
 
+    # Chat-partial agents get exactly their toolset; web search only if it lists `web_search`.
     tools_registry.toolset.assert_called_once_with(["tool1", "tool2"])
     mock_get_tools.assert_not_called()
 
@@ -3972,3 +3954,40 @@ async def test_run_tools_applies_the_limit_stored_for_the_response(
     workflow_with_project._tools_executor.run.assert_awaited_once_with(
         state, **expected_kwargs
     )
+
+
+@pytest.mark.parametrize(
+    ("tools_override", "expected_settings"),
+    [
+        (["tool1", "web_search"], (True, True)),
+        # Not listed: no web search, so the prompt must not point the user at the toggle.
+        (["tool1"], (False, False)),
+    ],
+    ids=["listed", "not_listed"],
+)
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
+def test_chat_partial_web_search_follows_its_toolset(
+    mock_state_graph, mock_create_agent, tools_override, expected_settings
+):
+    workflow = Workflow(
+        workflow_id="test-id",
+        workflow_metadata={},
+        workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
+        user=CloudConnectorUser(authenticated=True),
+        tools_override=tools_override,
+    )
+    workflow._workflow_config = {
+        "web_search_enabled": True,
+        "web_search_allowed_for_group": True,
+    }
+    tools_registry = MagicMock(spec=ToolsRegistry)
+    tools_registry.mcp_tool_names.return_value = []
+
+    workflow._compile("Test goal", tools_registry, MagicMock())
+
+    kwargs = mock_create_agent.call_args.kwargs
+    assert (
+        kwargs["web_search_enabled"],
+        kwargs["web_search_allowed_for_group"],
+    ) == expected_settings

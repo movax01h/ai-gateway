@@ -18,7 +18,7 @@ from langgraph.graph import StateGraph
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from ai_gateway.container import ContainerApplication
-from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.prompts import BasePromptRegistry, Prompt
 from ai_gateway.response_schemas import BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.registry import BaseAgentOutput
 from duo_workflow_service.agent_platform.constants import NODE_ROLE_SEPARATOR
@@ -79,7 +79,6 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
-from duo_workflow_service.tools.web_search import native_web_search_available
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventsClient
 
@@ -282,28 +281,26 @@ class AgentComponentBase(BaseComponent):
         raise NotImplementedError
 
     def _web_search_enabled(self) -> bool:
-        """Whether the provider-native web-search tool is active for this build.
+        """Whether this build offers the provider-native web search (`enable_web_search`).
 
-        Requires the per-flow opt-in AND the runtime feature flag AND the client's
-        `web_search` capability AND a model cleared to search natively. Used both to
-        bind the tool and to tell the prompt (via `tools_enabled`) so it can branch
-        its web-search guidance.
+        Requires the per-flow opt-in, the flow's kill switch (`dependency_bump_web_search`) and the
+        client's `web_search` capability. Binding drops the offer for models that can't search
+        natively or whose provider isn't cleared for it (`web_search_policy`).
         """
         return (
             self.enable_web_search
             and is_feature_enabled(FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH)
             and is_client_capable("web_search")
-            and native_web_search_available()
         )
 
-    def _tools_enabled(self) -> dict[str, bool]:
+    def _tools_enabled(self, prompt: Prompt) -> dict[str, bool]:
         """Map of optional tool/capability -> active, exposed to the prompt template.
 
-        The keys are not computed the same way: `web_search` is a capability gate for the
-        provider-native search route, `run_command` is toolset membership.
+        The keys are not computed the same way: `web_search` is what binding gave `prompt` (the
+        provider's own search or the fallback tool), `run_command` is toolset membership.
         """
         return {
-            "web_search": self._web_search_enabled(),
+            "web_search": prompt.binds_web_search,
             # Presence is the whole answer: `run_command` reaches the toolset only if the
             # `run_commands` privilege was granted and no tool policy denied it. Checked
             # by name because RunCommand and ShellCommand both register under it.
@@ -324,7 +321,7 @@ class AgentComponentBase(BaseComponent):
             internal_events_client=self.internal_event_client,
         )
 
-    def _build_prompt(self, tools: list, tool_choice: str) -> Any:
+    def _build_prompt(self, tools: list, tool_choice: str) -> Prompt:
         """Build the agent prompt with the given tool list and tool choice."""
         extra_params: dict[str, Any] = {}
         if self._web_search_enabled():
@@ -669,7 +666,7 @@ class AgentComponent(AgentComponentBase):
                 ),
             ),
             response_schema_tool_choice=tool_choice,
-            prompt_template_inputs={"tools_enabled": self._tools_enabled()},
+            prompt_template_inputs={"tools_enabled": self._tools_enabled(prompt)},
         )
         tracker = ToolEventTracker(
             flow_id=self.flow_id,

@@ -1965,87 +1965,69 @@ class TestAgentComponentCompaction:
 
 
 class TestWebSearchBinding:
-    """`_build_prompt` binds the provider-native web-search tool only when the `enable_web_search` opt-in AND the
-    dependency_bump_web_search flag AND the client's `web_search` capability are present, and the model is cleared to
-    search natively."""
+    """`_build_prompt` offers the provider-native web search for `enable_web_search` only when the opt-in, the
+    dependency_bump_web_search flag and the client's `web_search` capability are all present.
+
+    The prompt template learns from the binding whether the model can search.
+    """
 
     _MODULE = (
         "duo_workflow_service.agent_platform.experimental.components.agent.component"
     )
 
     @pytest.mark.parametrize(
-        ("enabled", "flag_on", "client_capable", "native", "expect_bound"),
+        ("enabled", "flags_on", "client_capable", "expect_bound"),
         [
-            (True, True, True, True, True),  # all gates satisfied -> bound
-            (False, True, True, True, False),  # flow opt-in off
-            (True, False, True, True, False),  # dependency_bump_web_search flag off
-            (True, True, False, True, False),  # client lacks web_search capability
-            (True, True, True, False, False),  # model not cleared for native search
+            (True, {FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH}, True, True),
+            (False, {FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH}, True, False),
+            (True, set(), True, False),
+            (True, {FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH}, False, False),
         ],
+        ids=["all_gates", "flow_opt_in_off", "kill_switch_off", "client_not_capable"],
     )
     def test_web_search_binding_is_gated(
         self,
         make_agent_component,
         mock_prompt_registry,
         enabled,
-        flag_on,
+        flags_on,
         client_capable,
-        native,
         expect_bound,
     ):
         component = make_agent_component(enable_web_search=enabled)
 
         with (
             patch(
-                f"{self._MODULE}.is_feature_enabled", return_value=flag_on
-            ) as mock_is_feature_enabled,
+                f"{self._MODULE}.is_feature_enabled",
+                side_effect=lambda flag: flag in flags_on,
+            ),
             patch(
-                f"{self._MODULE}.is_client_capable", return_value=client_capable
-            ) as mock_is_client_capable,
-            patch(f"{self._MODULE}.native_web_search_available", return_value=native),
+                f"{self._MODULE}.is_client_capable",
+                side_effect=lambda capability: (
+                    client_capable and capability == "web_search"
+                ),
+            ),
         ):
             component._build_prompt(tools=[], tool_choice="auto")
 
         call_kwargs = mock_prompt_registry.get_on_behalf.call_args.kwargs
         if expect_bound:
             assert call_kwargs["bind_tools_params"] == {"web_search_options": {}}
-            # the gate must query the correct flag and capability identifiers
-            mock_is_feature_enabled.assert_called_once_with(
-                FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH
-            )
-            mock_is_client_capable.assert_called_once_with("web_search")
         else:
             assert "bind_tools_params" not in call_kwargs
 
-    @pytest.mark.parametrize(
-        ("enabled", "flag_on", "client_capable", "native", "expected"),
-        [
-            (True, True, True, True, True),  # all gates satisfied
-            (False, True, True, True, False),  # flow opt-in off
-            (True, False, True, True, False),  # dependency_bump_web_search flag off
-            (True, True, False, True, False),  # client lacks web_search capability
-            (True, True, True, False, False),  # model not cleared for native search
-        ],
-    )
-    def test_tools_enabled_map_reflects_gate(
-        self, make_agent_component, enabled, flag_on, client_capable, native, expected
+    @pytest.mark.parametrize("binds_web_search", [True, False])
+    def test_tools_enabled_web_search_follows_the_binding(
+        self, make_agent_component, binds_web_search
     ):
-        """`_tools_enabled()` exposes the same gate to the prompt (as `tools_enabled`) that decides whether the tool is
-        bound, so the prompt can branch its guidance."""
-        component = make_agent_component(enable_web_search=enabled)
+        """A model with no route gets nothing bound, so the template must not describe search."""
+        component = make_agent_component()
 
-        with (
-            patch(f"{self._MODULE}.is_feature_enabled", return_value=flag_on),
-            patch(f"{self._MODULE}.is_client_capable", return_value=client_capable),
-            patch(f"{self._MODULE}.native_web_search_available", return_value=native),
-        ):
-            # `run_command` is True because the mock toolset contains every key; it
-            # reflects toolset membership, not the patched flag, which this component
-            # does not consult. `..._follows_toolset_membership` covers that directly.
-            assert component._tools_enabled() == {
-                "web_search": expected,
-                "run_command": True,
-            }
+        tools_enabled = component._tools_enabled(
+            Mock(binds_web_search=binds_web_search)
+        )
+
+        assert tools_enabled["web_search"] is binds_web_search
 
     @pytest.mark.parametrize("in_toolset", [True, False])
     def test_tools_enabled_run_command_follows_toolset_membership(
@@ -2060,8 +2042,6 @@ class TestWebSearchBinding:
         )
         component = make_agent_component()
 
-        with (
-            patch(f"{self._MODULE}.is_feature_enabled", return_value=False),
-            patch(f"{self._MODULE}.is_client_capable", return_value=False),
-        ):
-            assert component._tools_enabled()["run_command"] is in_toolset
+        tools_enabled = component._tools_enabled(Mock(binds_web_search=False))
+
+        assert tools_enabled["run_command"] is in_toolset

@@ -54,6 +54,7 @@ from duo_workflow_service.components.tools_registry import (
 from duo_workflow_service.executor.outbox import Outbox
 from lib.context import client_capabilities, gitlab_version
 from lib.events import GLReportingEventContext
+from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 
 __all__ = ["VALIDATION_FLOW_TYPE", "VALIDATION_USER", "DryRunFlowValidator"]
@@ -74,6 +75,12 @@ _DISABLED_INTERNAL_EVENT_CLIENT = InternalEventsClient(
     batch_size=1,
     thread_count=1,
 )
+
+
+class _StubPrompt:
+    """Stands in for a bound prompt during a dry-run compile; never invoked."""
+
+    binds_web_search = False
 
 
 class _StubPromptRegistry(BasePromptRegistry):
@@ -121,14 +128,15 @@ class _StubPromptRegistry(BasePromptRegistry):
         return self._real_registry.get_required_variables(prompt_id, prompt_version)
 
     def get_on_behalf(self, *args: Any, **kwargs: Any) -> Any:
-        """Return None — the result is stored by component nodes but never invoked.
+        """Return a ``_StubPrompt`` — stored by component nodes but never invoked.
 
         ``AgentComponent.attach()`` passes the return value directly to
-        ``AgentNode(prompt=...)`` which stores it as ``self._prompt``.  That
-        attribute is only accessed inside ``AgentNode.run()``, which is async
-        graph execution.  Execution is unconditionally blocked by
-        ``DryRunFlowValidator._compile_and_run_graph()``, so ``None`` is safe.
+        ``AgentNode(prompt=...)`` which stores it as ``self._prompt``, and reads only
+        ``binds_web_search`` from it.  The prompt is otherwise accessed inside
+        ``AgentNode.run()``, which is async graph execution.  Execution is
+        unconditionally blocked by ``DryRunFlowValidator._compile_and_run_graph()``.
         """
+        return _StubPrompt()
 
 
 def _make_validation_tools_registry() -> ToolsRegistry:
@@ -167,9 +175,11 @@ def _make_validation_tools_registry() -> ToolsRegistry:
         caps: frozenset[str] = getattr(tool_cls, "required_capability", frozenset())
         all_capabilities.update(caps)
 
-    # Temporarily set context vars so ToolsRegistry registers all tools.
+    # Temporarily set context vars so ToolsRegistry registers all tools, including the ones a
+    # session must opt in to (web search).
     version_token = gitlab_version.set(str(MIN_CAPABILITIES_VERSION))
     caps_token = client_capabilities.set(all_capabilities)
+    flags_token = current_feature_flag_context.set({FeatureFlag.DAP_WEB_SEARCH.value})
     try:
         all_privileges = list(_AGENT_PRIVILEGES.keys())
         return ToolsRegistry(
@@ -177,10 +187,15 @@ def _make_validation_tools_registry() -> ToolsRegistry:
             preapproved_tools=all_privileges,
             tool_metadata=stub_metadata,
             mcp_tools=[],
+            workflow_config={
+                "web_search_enabled": True,
+                "web_search_allowed_for_group": True,
+            },
         )
     finally:
         gitlab_version.reset(version_token)
         client_capabilities.reset(caps_token)
+        current_feature_flag_context.reset(flags_token)
 
 
 class DryRunFlowValidator(Flow):
