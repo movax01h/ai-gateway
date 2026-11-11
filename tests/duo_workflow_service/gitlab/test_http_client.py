@@ -313,6 +313,50 @@ def test_gitlab_http_response_headers_case_insensitive(headers, name, expected):
     assert response.headers.get(name) == expected
 
 
+@pytest.mark.parametrize(
+    "headers,name,expected",
+    [
+        (
+            {"X-Gitlab-File-Path": "日本語/ファイル.py"},
+            "X-Gitlab-File-Path",
+            "日本語/ファイル.py",
+        ),
+        (
+            {"X-Gitlab-File-Path": "日本語/ファイル.py"},
+            "x-gitlab-file-path",
+            "日本語/ファイル.py",
+        ),
+        ({"x-gitlab-file-name": "ファイル.py"}, "X-Gitlab-File-Name", "ファイル.py"),
+        ({"X-Gitlab-File-Path": "src/main.py"}, "x-gitlab-file-path", "src/main.py"),
+    ],
+    ids=[
+        "non_ascii_exact_case",
+        "non_ascii_lowercase_lookup",
+        "non_ascii_lowercase_key",
+        "ascii_path",
+    ],
+)
+def test_gitlab_http_response_headers_utf8_values(headers, name, expected):
+    """Non-ASCII header values are accepted and returned unchanged; ASCII values still work."""
+    response = GitLabHttpResponse(status_code=200, body="", headers=headers)
+
+    assert response.headers.get(name) == expected
+
+
+def test_gitlab_http_response_headers_mixed_ascii_and_non_ascii():
+    response = GitLabHttpResponse(
+        status_code=200,
+        body="",
+        headers={
+            "Content-Type": "text/plain",
+            "X-Gitlab-File-Name": "ファイル.py",
+        },
+    )
+
+    assert response.headers.get("content-type") == "text/plain"
+    assert response.headers.get("x-gitlab-file-name") == "ファイル.py"
+
+
 def test_parse_response():
     """Test the _parse_response method of GitlabHttpClient."""
     client = MockGitLabHttpClient()
