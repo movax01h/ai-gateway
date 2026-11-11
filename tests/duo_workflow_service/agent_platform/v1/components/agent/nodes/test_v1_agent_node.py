@@ -66,6 +66,8 @@ def mock_prompt_fixture(mock_ai_message):
     mock_prompt.model = Mock()
     mock_prompt.model.model_name = "claude-3-sonnet"
     mock_prompt.model_provider = "anthropic"
+    mock_prompt.model_vendor = "anthropic"
+    mock_prompt.reported_model_name = "claude-3-sonnet"
     mock_prompt.ainvoke = AsyncMock(return_value=mock_ai_message)
 
     return mock_prompt
@@ -3739,6 +3741,156 @@ class TestAgentNodeImageLimitFallback:
             await self._run(agent_node, base_flow_state, component_name, history)
 
         assert mock_prompt.ainvoke.call_count == 1
+
+
+class TestAgentNodeImageFallbackCounter:
+    _METRICS = (
+        "duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node."
+        "duo_workflow_metrics"
+    )
+
+    @staticmethod
+    def _one_image_round() -> list:
+        return [
+            HumanMessage(content="describe the screenshot"),
+            AIMessage(
+                content="", tool_calls=[{"id": "a", "name": "read_file", "args": {}}]
+            ),
+            _image_tool_message("a"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("error", "kind"),
+        [
+            pytest.param(_image_limit_error(), "request", id="many_image_400"),
+            pytest.param(
+                _image_limit_error("request too large", status_code=413),
+                "request",
+                id="413",
+            ),
+            pytest.param(
+                _image_limit_error(_ONE_IMAGE_MESSAGE), "single_image", id="one_image"
+            ),
+            pytest.param(
+                _image_limit_error(_UNCLASSIFIED_MESSAGE),
+                "unclassified",
+                id="unclassified",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_every_retry_without_images_is_counted(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        error,
+        kind,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Labels: flow type, rejection kind, and the prompt's model name and vendor."""
+        mock_prompt.reported_model_name = "Mistral-7B-Instruct-v0.3"
+        mock_prompt.model_vendor = "custom_openai"
+        mock_prompt.ainvoke = AsyncMock(side_effect=[error, mock_ai_message])
+        base_flow_state["conversation_history"] = {
+            component_name: self._one_image_round()
+        }
+
+        with patch(self._METRICS) as metrics:
+            await agent_node.run(base_flow_state)
+
+        metrics.count_image_fallback.assert_called_once_with(
+            flow_type=agent_node._flow_type.value,
+            kind=kind,
+            model_name="Mistral-7B-Instruct-v0.3",
+            model_vendor="custom_openai",
+        )
+
+    @pytest.mark.asyncio
+    async def test_each_retry_is_counted_with_its_own_kind(
+        self,
+        agent_node,
+        base_flow_state,
+        component_name,
+        mock_prompt,
+        mock_ai_message,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Each retry is counted with the kind of its own rejection."""
+        mock_prompt.ainvoke = AsyncMock(
+            side_effect=[
+                _image_limit_error(_MANY_IMAGES_MESSAGE),
+                _image_limit_error(_ONE_IMAGE_MESSAGE),
+                mock_ai_message,
+            ]
+        )
+        base_flow_state["conversation_history"] = {
+            component_name: [
+                *self._one_image_round(),
+                AIMessage(
+                    content="",
+                    tool_calls=[{"id": "b", "name": "read_file", "args": {}}],
+                ),
+                _image_tool_message("b"),
+            ]
+        }
+
+        with patch(self._METRICS) as metrics:
+            await agent_node.run(base_flow_state)
+
+        assert [
+            c.kwargs["kind"] for c in metrics.count_image_fallback.call_args_list
+        ] == ["request", "single_image"]
+
+    @pytest.mark.asyncio
+    async def test_a_wrap_up_rejection_is_labelled_from_the_wrap_up_prompt(
+        self,
+        mock_prompt,
+        make_agent_node,
+        state_at_limit,
+        component_name,
+        _mock_get_vars_from_state,
+        _mock_predefined_runtime_variables,
+    ):
+        """Past max_cycles the wrap-up prompt makes the call, so its labels are the ones counted."""
+        mock_prompt.reported_model_name = "main-model"
+        wrap_up_prompt = Mock(spec=Prompt)
+        wrap_up_prompt.reported_model_name = "wrap-up-model"
+        wrap_up_prompt.model_vendor = "custom_openai"
+        final_message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "final",
+                    "name": "final_response_tool",
+                    "args": {"final_response": "Done"},
+                }
+            ],
+        )
+        final_message.response_metadata = {}
+        wrap_up_prompt.ainvoke = AsyncMock(
+            side_effect=[_image_limit_error(_MANY_IMAGES_MESSAGE), final_message]
+        )
+        state_at_limit["conversation_history"] = {
+            component_name: self._one_image_round()
+        }
+
+        with patch(self._METRICS) as metrics:
+            await make_agent_node(
+                response_schema=AgentFinalOutput, wrap_up_prompt=wrap_up_prompt
+            ).run(state_at_limit)
+
+        mock_prompt.ainvoke.assert_not_called()
+        metrics.count_image_fallback.assert_called_once()
+        labels = metrics.count_image_fallback.call_args.kwargs
+        assert (labels["model_name"], labels["model_vendor"]) == (
+            "wrap-up-model",
+            "custom_openai",
+        )
 
 
 class TestAgentNodeSelfHostedBilling:

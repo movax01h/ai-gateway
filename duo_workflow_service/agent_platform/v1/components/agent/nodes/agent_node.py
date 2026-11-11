@@ -52,6 +52,7 @@ from duo_workflow_service.errors.error_handler import (
     ModelErrorType,
 )
 from duo_workflow_service.errors.typing import ModelRefusalError
+from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.langsmith_tags import tag_current_run
 from lib.context import LLMFinishReason, extract_finish_reason
 from lib.events import GLReportingEventContext
@@ -789,7 +790,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             # every model served through LiteLLM.
             except (AnthropicAPIStatusError, OpenAIAPIStatusError) as e:
                 recovered = await self._recover_from_status_error(
-                    history, e, image_limit_retries
+                    history, e, image_limit_retries, prompt
                 )
                 if recovered is not None:
                     history, image_limit_retries = recovered, image_limit_retries + 1
@@ -870,12 +871,16 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         history: list,
         error: AnthropicAPIStatusError | OpenAIAPIStatusError,
         image_limit_retries: int,
+        prompt: Prompt,
     ) -> Optional[list]:
-        """Return a history to retry with, or let the error handler wait or raise."""
+        """Return a history to retry with, or let the error handler wait or raise.
+
+        ``prompt`` is the one that failed: the wrap-up prompt once the cycle budget is spent, else the main prompt.
+        """
         message = str(error)
         status_code = error.status_code
         recovered = self._without_rejected_images(
-            history, status_code, message, image_limit_retries
+            history, status_code, message, image_limit_retries, prompt
         )
         if recovered is not None:
             return recovered
@@ -889,7 +894,12 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         return None
 
     def _without_rejected_images(
-        self, history: list, status_code: int, message: str, retries: int
+        self,
+        history: list,
+        status_code: int,
+        message: str,
+        retries: int,
+        prompt: Prompt,
     ) -> Optional[list]:
         """Retry a 400 or 413 without the images, whatever the provider's wording.
 
@@ -925,6 +935,12 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             scope=scope,
             retry=retries + 1,
             provider_message=message[:500],
+        )
+        duo_workflow_metrics.count_image_fallback(
+            flow_type=self._flow_type.value,
+            kind=kind.value,
+            model_name=prompt.reported_model_name,
+            model_vendor=prompt.model_vendor or "unknown",
         )
         return restore_message_consistency(
             [
