@@ -452,20 +452,23 @@ async def test_set_action_response(workflow):
     )
 
 
+ALL_TEST_MCP_TOOL_NAMES = [
+    "orbit_invoke_command",
+    "orbit_fake",
+    "gitlab_search",
+    "context7",
+    "slack_slack_read_thread",
+    "slack_admin_fake",
+    "slack_client_fake",
+]
+
+
 @pytest.mark.parametrize(
     ("mcp_enabled", "trust_stripped", "expected_tools"),
     [
-        (
-            True,
-            True,
-            ["orbit_invoke_command", "orbit_fake", "gitlab_search", "context7"],
-        ),
-        (
-            True,
-            False,
-            ["orbit_invoke_command", "orbit_fake", "gitlab_search", "context7"],
-        ),
-        (False, True, ["orbit_invoke_command"]),
+        (True, True, ALL_TEST_MCP_TOOL_NAMES),
+        (True, False, ALL_TEST_MCP_TOOL_NAMES),
+        (False, True, ["orbit_invoke_command", "slack_slack_read_thread"]),
         (False, False, []),
     ],
 )
@@ -481,6 +484,18 @@ def test_permitted_mcp_tools(
         contract_pb2.McpTool(name="orbit_fake", inputSchema="{}", trusted=False),
         contract_pb2.McpTool(name="gitlab_search", inputSchema="{}", trusted=True),
         contract_pb2.McpTool(name="context7", inputSchema="{}", trusted=False),
+        contract_pb2.McpTool(
+            name="slack_slack_read_thread", inputSchema="{}", trusted=True
+        ),
+        # An AI Catalog server named "Slack ...": Rails doesn't mark it trusted.
+        contract_pb2.McpTool(name="slack_admin_fake", inputSchema="{}", trusted=False),
+        # A client tool that claims trust: never trusted.
+        contract_pb2.McpTool(
+            name="slack_client_fake",
+            inputSchema="{}",
+            trusted=True,
+            client_injected=True,
+        ),
     ]
     workflow = MockWorkflow(
         "id",
