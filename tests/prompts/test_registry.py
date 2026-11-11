@@ -34,6 +34,7 @@ from ai_gateway.prompts import LocalPromptRegistry, Prompt, feature_roots
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.config.template import Template
 from ai_gateway.prompts.registry import (
     LEGACY_MODEL_MAPPING,
     feature_setting_for_prompt_id,
@@ -1756,6 +1757,40 @@ class TestGetRequiredVariables:
                 "test/include_vars", prompt_version="^1.0.0"
             )
         assert result == {"goal", "nested_var"}
+
+    @pytest.mark.parametrize(
+        ("template", "expected"),
+        [
+            (
+                {"system": "{{ goal }}", "message": "{{ inbound_messages.text }}"},
+                {"goal"},
+            ),
+            ({"system": "{{ inbound_messages }}"}, {"inbound_messages"}),
+        ],
+        ids=["handed to the message block", "required in system"],
+    )
+    def test_a_template_prompt_is_handed_inbound_messages_in_message_only(
+        self,
+        fs: FakeFilesystem,
+        registry: LocalPromptRegistry,
+        template: dict,
+        expected: set[str],
+    ):
+        self._create_prompt_file(fs, "test/template_vars", "unused")
+        # Prompt files may not declare `template` yet, so the config is handed to the variable check directly, as it
+        # will be once they may.
+        config = PromptConfig(
+            name="Test prompt",
+            unit_primitive="duo_chat",
+            template=Template.model_validate(template),
+        )
+
+        with patch.object(registry, "_get_prompt_config", return_value=config):
+            result = registry.get_required_variables(
+                "test/template_vars", prompt_version="^1.0.0"
+            )
+
+        assert result == expected
 
     def test_include_unknown_template_raises(
         self, fs: FakeFilesystem, registry: LocalPromptRegistry

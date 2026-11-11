@@ -2,6 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from pydantic import ValidationError
 from structlog.testing import capture_logs
 
 from ai_gateway.config import ConfigModelLimits
@@ -26,6 +27,7 @@ from ai_gateway.prompts.config.base import (
 )
 from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
 from ai_gateway.prompts.registry import LocalPromptRegistry
+from lib.billing_events.service import LLMOperationType
 from lib.internal_events.client import InternalEventsClient
 
 
@@ -173,6 +175,24 @@ class TestInMemoryPromptRegistry:
 
         mock_shared_registry._build_prompt.assert_called_once()
         assert result == prompt
+
+    @pytest.mark.parametrize(
+        "declared",
+        [LLMOperationType.COMPACTION_AUTO, LLMOperationType.DECISION],
+    )
+    def test_an_inline_prompt_cannot_choose_its_operation_type(
+        self, in_memory_registry, mock_shared_registry, sample_prompt_data, declared
+    ):
+        # A flow author writes this config: a compaction call can skip billing, and a decision needs its own
+        # template factory, so only repository prompts choose it.
+        in_memory_registry.register_prompt(
+            "test_prompt", sample_prompt_data | {"operation_type": declared}
+        )
+
+        in_memory_registry.get("test_prompt", prompt_version=None)
+
+        config = mock_shared_registry._build_prompt.call_args.kwargs["config"]
+        assert config.operation_type == LLMOperationType.STANDARD
 
     @pytest.mark.parametrize(
         ("inline_params", "expected_keys", "expected_timeout"),
@@ -496,7 +516,7 @@ class TestInMemoryPromptRegistry:
         assert kwargs["is_graph_node"] is is_graph_node
 
     def test_get_local_prompt_missing_prompt_template(self, in_memory_registry):
-        """Test error when prompt_template key is missing."""
+        """Test error when a prompt declares neither format."""
         prompt_id = "missing_template_prompt"
         invalid_prompt_data = {
             "model": {
@@ -510,7 +530,10 @@ class TestInMemoryPromptRegistry:
 
         in_memory_registry.register_prompt(prompt_id, invalid_prompt_data)
 
-        with pytest.raises(KeyError, match="'prompt_template'"):
+        # The config refuses it, naming both formats, instead of a KeyError on one of them.
+        with pytest.raises(
+            ValidationError, match="declares 'template' or 'prompt_template'"
+        ):
             in_memory_registry.get(prompt_id, prompt_version=None)
 
     @pytest.mark.parametrize(
@@ -661,6 +684,68 @@ class TestGetRequiredVariables:
             "my_prompt", prompt_version=None
         )
         assert result == {"name", "goal"}
+
+    @pytest.mark.parametrize(
+        ("prompt", "required"),
+        [
+            # Both blocks are read; what the author wrote in either is theirs to provide.
+            (
+                {
+                    "template": {
+                        "system": "{{ from_system }}",
+                        "message": "{{ from_message }}",
+                    }
+                },
+                {"from_system", "from_message"},
+            ),
+            # The engine passes the messages to `message`, so an author never provides them.
+            (
+                {"template": {"system": "x", "message": "{{ inbound_messages.text }}"}},
+                set(),
+            ),
+            # Nor for the platform default, which is a source like a written block.
+            ({"template": {"system": "x"}}, set()),
+            # The prefix renders on every call, before any message arrives, so nothing passes them there.
+            (
+                {"template": {"system": "{{ inbound_messages.text }}"}},
+                {"inbound_messages"},
+            ),
+            # Nor to an old-format prompt.
+            (
+                {
+                    "prompt_template": {
+                        "system": "x",
+                        "user": "{{ inbound_messages.text }}",
+                    }
+                },
+                {"inbound_messages"},
+            ),
+        ],
+        ids=[
+            "author variables in both blocks",
+            "inbound_messages in the message block",
+            "inbound_messages in the default message block",
+            "inbound_messages in the system block",
+            "inbound_messages in an old-format prompt",
+        ],
+    )
+    def test_a_template_prompt_is_handed_inbound_messages_in_message_only(
+        self, in_memory_registry, prompt, required
+    ):
+        in_memory_registry.register_prompt(
+            "p",
+            InMemoryPromptConfig(
+                prompt_id="p",
+                name="p",
+                unit_primitives=["duo_agent_platform"],
+                **prompt,
+            ).to_prompt_data(),
+        )
+
+        assert (
+            in_memory_registry.get_required_variables("p", prompt_version=None)
+            == required
+        )
 
     def test_inline_prompt_not_found_raises(self, in_memory_registry):
         with pytest.raises(TemplateNotFoundError):

@@ -8,6 +8,7 @@ from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.model_selection.models import validate_client_headers
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt, TemplateNotFoundError
 from ai_gateway.prompts.config import ModelConfig, PromptConfig
+from ai_gateway.prompts.config.formats import parse_format
 from ai_gateway.prompts.registry import LocalPromptRegistry
 
 log = structlog.stdlib.get_logger("prompts")
@@ -124,7 +125,9 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         # `raw_data` is produced by `InMemoryPromptConfig.to_prompt_data()`, which
         # collapses the plural `unit_primitives` list into a single `unit_primitive` value.
         unit_primitive = raw_data.get("unit_primitive")
-        prompt_template = raw_data["prompt_template"]
+        # Each field is named on purpose: a flow author writes this config, so a field added to `PromptConfig` later
+        # doesn't reach the prompt from it until someone decides it should. `operation_type`, for one, stays at its
+        # default, because it decides billing and how the prompt renders.
         prompt_config = PromptConfig(
             name=prompt_id,
             model=ModelConfig(
@@ -136,7 +139,8 @@ class InMemoryPromptRegistry(BasePromptRegistry):
                 if unit_primitive
                 else GitLabUnitPrimitive.DUO_AGENT_PLATFORM
             ),
-            prompt_template=prompt_template,
+            prompt_template=raw_data.get("prompt_template"),
+            template=raw_data.get("template"),
             params=raw_data.get("params"),
             tool_output_security=raw_data.get("tool_output_security", True),
         )
@@ -186,16 +190,11 @@ class InMemoryPromptRegistry(BasePromptRegistry):
                 "prompt is not registered inline and no prompt_version was provided"
             )
 
-        prompt_template = raw_data.get("prompt_template", {})
-        variables: set[str] = set()
-        for template_msg in prompt_template.values():
-            items = [template_msg] if isinstance(template_msg, str) else template_msg
-
-            for item in items:
-                if item:
-                    variables.update(self._collect_jinja2_variables(item))
-
-        return variables
+        # Registered data is a mapping, so the format is parsed back from it: one shape inside, and a mapping that
+        # isn't a template is refused here rather than at the first model call.
+        return self._required_variables(
+            parse_format(raw_data.get("prompt_template"), raw_data.get("template"))
+        )
 
     @override
     def get(
