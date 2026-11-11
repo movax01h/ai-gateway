@@ -18,6 +18,12 @@ from duo_workflow_service.agent_platform.v1.components.supervisor.ui_log import 
 )
 from lib.internal_events.event_enum import EventEnum
 
+_VALID_ARGS = {"subagent_name": "developer", "prompt": "A"}
+
+
+def _delegate_call(args, call_id="c1"):
+    return {"id": call_id, "name": DelegateTask.tool_title, "args": args}
+
 
 class TestDelegationNodeNewSession:
     """Tests for DelegationNode creating new sessions."""
@@ -668,22 +674,48 @@ class TestDelegationNodeErrorHandling:
         assert all("mixed" in tm.content for tm in tool_messages)
 
     @pytest.mark.asyncio
-    async def test_invalid_subagent_name_returns_error(
+    @pytest.mark.parametrize(
+        ("args", "expected"),
+        [
+            (
+                {"subagent_name": "nonexistent", "prompt": "Do work"},
+                "Subagent 'nonexistent' is not available in this session. "
+                "The available subagents are: 'developer', 'tester'.",
+            ),
+            (
+                {"subagent_name": "developer"},
+                "Invalid delegate_task arguments: 1 validation error",
+            ),
+            (
+                {"subagent_name": "nonexistent"},
+                "Invalid delegate_task arguments: 2 validation errors",
+            ),
+            (
+                ["developer", "Do work"],
+                "Invalid delegate_task arguments: ",
+            ),
+        ],
+        ids=[
+            "unknown_subagent",
+            "missing_prompt",
+            "unknown_subagent_and_missing_prompt",
+            "args_not_a_mapping",
+        ],
+    )
+    async def test_invalid_arguments_return_a_correction(
         self,
         delegation_node,
         supervisor_flow_state,
         supervisor_name,
         delegate_tool_call_id,
+        args,
+        expected,
     ):
-        """Test that an invalid subagent_name is caught by Pydantic validation."""
+        """The LLM is told how to fix its call; an unknown subagent alone is named with the valid ones."""
         tool_call = {
             "id": delegate_tool_call_id,
             "name": DelegateTask.tool_title,
-            "args": {
-                "subagent_name": "nonexistent",
-                "subsession_id": None,
-                "prompt": "Do work",
-            },
+            "args": args,
         }
         ai_msg = Mock(spec=AIMessage)
         ai_msg.tool_calls = [tool_call]
@@ -693,11 +725,9 @@ class TestDelegationNodeErrorHandling:
 
         result = await delegation_node.run(state)
 
-        # Pydantic enum validation rejects invalid subagent_name,
-        # caught by the try/except and returned as error ToolMessage
         history = result[FlowStateKeys.CONVERSATION_HISTORY][supervisor_name]
         assert isinstance(history[-1], ToolMessage)
-        assert "Invalid delegate_task arguments" in history[-1].content
+        assert history[-1].content.startswith(expected)
 
 
 class TestDelegationNodeUILog:
@@ -841,6 +871,128 @@ class TestDelegationNodeUILog:
         assert call_kwargs["message_id"] == delegate_tool_call_id
         ui_history.pop_state_updates.assert_called_once()
         assert result["ui_chat_log"] == ["sentinel_error_log_entry"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool_calls", "max_delegations", "max_subsession_id", "expected"),
+        [
+            pytest.param(
+                [_delegate_call({"subagent_name": "nonexistent", "prompt": "A"})],
+                None,
+                0,
+                "Subagent 'nonexistent' is not available in this session.",
+                id="unknown_subagent",
+            ),
+            pytest.param(
+                [_delegate_call({"subagent_name": "developer"})],
+                None,
+                0,
+                "The task could not be delegated due to an error.",
+                id="missing_prompt",
+            ),
+            pytest.param(
+                [_delegate_call(["developer", "A"])],
+                None,
+                0,
+                "The task could not be delegated due to an error.",
+                id="args_not_a_mapping",
+            ),
+            pytest.param(
+                [
+                    _delegate_call(_VALID_ARGS),
+                    {"id": "c2", "name": "read_file", "args": {}},
+                ],
+                None,
+                0,
+                "The task could not be delegated due to an error.",
+                id="mixed_tool_calls",
+            ),
+            pytest.param(
+                [
+                    _delegate_call(_VALID_ARGS),
+                    _delegate_call(_VALID_ARGS, call_id="c2"),
+                ],
+                None,
+                0,
+                "The task could not be delegated due to an error.",
+                id="parallel_call",
+            ),
+            pytest.param(
+                [_delegate_call({**_VALID_ARGS, "subsession_id": 99})],
+                None,
+                0,
+                "The task could not be delegated due to an error.",
+                id="subsession_out_of_range",
+            ),
+            pytest.param(
+                [_delegate_call({**_VALID_ARGS, "subsession_id": 1})],
+                None,
+                1,
+                "The task could not be delegated due to an error.",
+                id="subsession_without_history",
+            ),
+            pytest.param(
+                [_delegate_call(_VALID_ARGS)],
+                0,
+                0,
+                "The delegation limit was reached.",
+                id="limit_reached",
+            ),
+        ],
+    )
+    async def test_each_rejection_logs_a_short_message_for_the_user(
+        self,
+        tool_calls,
+        max_delegations,
+        max_subsession_id,
+        expected,
+        supervisor_name,
+        delegate_task_cls,
+        delegation_count_key,
+        active_subsession_key,
+        active_subagent_name_key,
+        max_subsession_id_key,
+        supervisor_history_runtime_key,
+        subsession_history_key_factory,
+        subsession_goal_key_factory,
+        supervisor_flow_state,
+        ui_history,
+        delegation_tracker,
+    ):
+        """The entry's content is a short message for the user, and the entry has no tool response."""
+        node = self._make_node_with_ui_history(
+            supervisor_name=supervisor_name,
+            delegate_task_cls=delegate_task_cls,
+            delegation_count_key=delegation_count_key,
+            active_subsession_key=active_subsession_key,
+            active_subagent_name_key=active_subagent_name_key,
+            max_subsession_id_key=max_subsession_id_key,
+            supervisor_history_runtime_key=supervisor_history_runtime_key,
+            subsession_history_key_factory=subsession_history_key_factory,
+            subsession_goal_key_factory=subsession_goal_key_factory,
+            ui_history=ui_history,
+            tracker=delegation_tracker,
+            max_delegations=max_delegations,
+        )
+        ai_msg = Mock(spec=AIMessage)
+        ai_msg.tool_calls = tool_calls
+        state = supervisor_flow_state
+        state["context"][supervisor_name]["max_subsession_id"] = max_subsession_id
+        state["conversation_history"][supervisor_name] = [ai_msg]
+
+        result = await node.run(state)
+
+        llm_message = result[FlowStateKeys.CONVERSATION_HISTORY][supervisor_name][-1]
+        assert isinstance(llm_message, ToolMessage)
+        assert llm_message.content != expected
+        ui_history.log.error.assert_called_once()
+        assert ui_history.log.error.call_args.args == (expected,)
+        call_kwargs = ui_history.log.error.call_args.kwargs
+        assert call_kwargs["tool_info"] == {
+            "name": delegate_task_cls.tool_title,
+            "args": {},
+        }
+        assert call_kwargs["message_id"] == "c1"
 
 
 class TestDelegationNodeInternalEvents:

@@ -107,6 +107,17 @@ class DelegateTask(BaseModel):
     )
 
     @classmethod
+    def subagent_names(cls) -> list[str]:
+        """Return the names ``subagent_name`` accepts, in the order of the subagents list.
+
+        Empty for this base class, whose ``subagent_name`` is a plain string.
+        """
+        annotation = cls.model_fields["subagent_name"].annotation
+        if isinstance(annotation, type) and issubclass(annotation, StrEnum):
+            return [member.value for member in annotation]
+        return []
+
+    @classmethod
     def from_ai_message(cls, ai_message: AIMessage) -> Self:
         """Extract a DelegateTask from an AI message's tool calls."""
         delegate_call = next(
