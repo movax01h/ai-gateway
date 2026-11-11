@@ -170,7 +170,7 @@ async def test_pipeline_requires_project_filter(
 ):
     """Listing individual pipelines (standard mode) must use project, not group, scope."""
 
-    def respond(glql_yaml: str) -> GitLabHttpResponse:
+    def respond(glql_yaml: str, _after: str | None) -> GitLabHttpResponse:
         # Group-scoped queries fail exactly as production does for Pipeline.
         if has_group_filter(glql_yaml):
             return glql_http_error(PIPELINES_GROUP_SCOPE_ERROR)
