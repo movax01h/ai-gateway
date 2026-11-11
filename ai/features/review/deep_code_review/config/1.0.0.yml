@@ -200,7 +200,14 @@ routers:
   - from: "summarize"
     to: "publish_review"
   - from: "publish_review"
-    to: "end"
+    condition:
+      # DeterministicStepComponent catches a failed post, or a missing findings input, and
+      # exits through the same route as a published review.
+      # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2789
+      input: "context:publish_review.execution_result"
+      routes:
+        "success": "end"
+        "default_route": "abort"
 
 flow:
   entry_point: "fetch_mr_data"
