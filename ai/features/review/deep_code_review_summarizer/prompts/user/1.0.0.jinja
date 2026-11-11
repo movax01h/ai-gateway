@@ -1,0 +1,15 @@
+<findings>
+{{ findings | tojson(indent=2) }}
+</findings>
+{%- if previous_findings %}
+
+<previous_findings>
+{{ previous_findings | tojson(indent=2) }}
+</previous_findings>
+{%- endif %}
+{%- if checks %}
+
+<checks>
+{{ checks | tojson(indent=2) }}
+</checks>
+{%- endif %}

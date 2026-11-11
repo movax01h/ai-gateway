@@ -1,6 +1,7 @@
-# Deep Duo Code Review: one investigative reviewer agent followed by a
-# deterministic publish step. No finding passes through a model after the
-# reviewer writes it; the confidence gate is the only (counted) drop.
+# Deep Duo Code Review: one investigative reviewer agent, a summary written
+# from the findings that pass the confidence gate, and a deterministic publish
+# step. No finding passes through a model after the reviewer writes it; the
+# confidence gate is the only (counted) drop.
 # Epic: https://gitlab.com/groups/gitlab-org/-/work_items/21524
 
 version: "v1"
@@ -64,7 +65,7 @@ components:
     prompt_id: "deep_code_review_reviewer"
     prompt_version: "^1.0.0"
     response_schema_id: "code_review_findings"
-    response_schema_version: "^1.0.0"
+    response_schema_version: "^2.0.0"
     max_cycles: 50
     inputs:
       - from: "context:project_id"
@@ -82,10 +83,6 @@ components:
       - from: "context:inputs.code_review_context.last_reviewed_head_sha"
         as: "last_reviewed_head_sha"
         optional: true
-      # The publish step reuses this anchor, so the summary rule and the gate share one threshold.
-      - from: &min_confidence "5"
-        as: "min_confidence"
-        literal: true
     toolset:
       # The workload checks the repository out at this merge request's head, so
       # these read local disk instead of a round trip per file.
@@ -116,9 +113,42 @@ components:
         as: "review_context"
         optional: true
 
-  # Step 5: Publish in pure code from the reviewer's schema-validated answer.
+  # Step 5: Apply the confidence gate in code, so the summary step never sees a
+  # finding that will not be posted (ai-assist#3606).
+  - name: "gate_findings"
+    type: DeterministicStepComponent
+    tool_name: "finalize_code_review_findings"
+    inputs:
+      - from: "context:review.final_answer.findings"
+        as: "findings"
+      # min_confidence 5 comes from the Sonnet 5.5 xhigh sweep (gitlab#637410).
+      - from: &min_confidence "5"
+        as: "min_confidence"
+        literal: true
+
+  # Step 6: Write the summary from what will be posted.
+  - name: "summarize"
+    type: AgentComponent
+    prompt_id: "deep_code_review_summarizer"
+    prompt_version: "^1.0.0"
+    response_schema_id: "code_review_summary"
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: "context:gate_findings.tool_responses.findings"
+        as: "findings"
+      - from: "context:review.final_answer.previous_findings"
+        as: "previous_findings"
+        optional: true
+      - from: "context:review.final_answer.checks"
+        as: "checks"
+        optional: true
+    toolset: []
+    ui_log_events:
+      - "on_agent_final_answer"
+
+  # Step 7: Publish in pure code from the reviewer's schema-validated answer.
   # `findings` is required so a missing answer fails the flow instead of posting
-  # a clean review. min_confidence 5 comes from the Sonnet 5.5 xhigh sweep (gitlab#637410).
+  # a clean review.
   - name: "publish_review"
     type: DeterministicStepComponent
     tool_name: "post_duo_code_review_findings"
@@ -129,7 +159,7 @@ components:
         as: "merge_request_iid"
       - from: "context:review.final_answer.findings"
         as: "findings"
-      - from: "context:review.final_answer.summary"
+      - from: "context:summarize.final_answer.summary"
         as: "summary"
         optional: true
       - from: "context:review.final_answer.previous_findings"
@@ -164,6 +194,10 @@ routers:
   - from: "review"
     to: "check_truncation"
   - from: "check_truncation"
+    to: "gate_findings"
+  - from: "gate_findings"
+    to: "summarize"
+  - from: "summarize"
     to: "publish_review"
   - from: "publish_review"
     to: "end"
