@@ -252,6 +252,18 @@ def _parse_tool_access_policies(
         )
 
 
+_SLACK_TOOL_NAME_PREFIX = "slack_"
+
+
+def _runs_without_external_mcp_setting(llm_name: str) -> bool:
+    """Whether a trusted tool runs without "Allow external MCP tools": Orbit's and the GitLab for Slack app's.
+
+    Other trusted tools, such as GitLab MCP's, stay behind the setting. ADR-005's bridge rule: replace this with the
+    tool's origin once tools carry one (https://gitlab.com/gitlab-org/gitlab/-/work_items/635112).
+    """
+    return is_orbit_tool(llm_name) or llm_name.startswith(_SLACK_TOOL_NAME_PREFIX)
+
+
 # The client type the Duo CLI and Language Server websocket send; only their releases reserve
 # the `duo` MCP server name for the first-party server.
 _FIRST_PARTY_CLIENT_TYPE = "node-websocket"
@@ -606,7 +618,7 @@ class AbstractWorkflow(ABC):
             or (
                 orbit_permitted
                 and tool.get("trusted", False)
-                and is_orbit_tool(tool["llm_name"])
+                and _runs_without_external_mcp_setting(tool["llm_name"])
             )
         ]
 
