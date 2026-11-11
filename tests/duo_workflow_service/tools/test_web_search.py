@@ -315,6 +315,15 @@ class TestDisplayMessage:
         assert message == "Searched the web for: urllib3 CVE"
 
 
+def _model_metadata(provider, model, custom_llm_provider):
+    metadata = MagicMock()
+    metadata.llm_definition.model_class_provider = provider
+    metadata.llm_definition.params.model = model
+    metadata.llm_definition.params.custom_llm_provider = custom_llm_provider
+    metadata.llm_definition.provider = "Gemini Enterprise Agent Platform"
+    return metadata
+
+
 @pytest.fixture(name="resolved_model")
 def resolved_model_fixture(request):
     """Set the resolved model, as `(model_class_provider, model, custom_llm_provider)`, or None for no resolved model.
@@ -322,16 +331,8 @@ def resolved_model_fixture(request):
     Litellm routes are decided per model rather than per provider, so the params matter here.
     """
     param = getattr(request, "param", None)
-    if param is None:
-        token = current_model_metadata_context.set(None)
-    else:
-        provider, model, custom_llm_provider = param
-        metadata = MagicMock()
-        metadata.llm_definition.model_class_provider = provider
-        metadata.llm_definition.params.model = model
-        metadata.llm_definition.params.custom_llm_provider = custom_llm_provider
-        metadata.llm_definition.provider = "Gemini Enterprise Agent Platform"
-        token = current_model_metadata_context.set(metadata)
+    metadata = None if param is None else _model_metadata(*param)
+    token = current_model_metadata_context.set(metadata)
     yield param
     current_model_metadata_context.reset(token)
 
@@ -365,10 +366,10 @@ class TestNativeWebSearchAvailable:
             pytest.param(
                 (ModelClassProvider.AMAZON_Q, None, None), False, id="amazon-q"
             ),
-            # Litellm is per-model: Vertex runs Anthropic's server-side tools, Bedrock does not.
+            # Vertex can search natively but isn't cleared for it, so it gets AgentCore.
             pytest.param(
                 (ModelClassProvider.LITE_LLM, "claude-sonnet-4-6", "vertex_ai"),
-                True,
+                False,
                 id="litellm-vertex",
             ),
             pytest.param(
@@ -385,6 +386,40 @@ class TestNativeWebSearchAvailable:
     )
     def test_model_determines_native_support(self, resolved_model, expected):
         assert native_web_search_available() is expected
+
+    @pytest.mark.parametrize(
+        "resolved_model",
+        [(ModelClassProvider.LITE_LLM, "claude-sonnet-4-6", "vertex_ai")],
+        indirect=True,
+    )
+    def test_vertex_is_native_once_cleared(self, resolved_model):
+        with patch(
+            "ai_gateway.models.v2.chat_litellm.NATIVE_WEB_SEARCH_ALLOWED_LITELLM_PROVIDERS",
+            frozenset({"vertex_ai"}),
+        ):
+            assert native_web_search_available() is True
+
+    @pytest.mark.parametrize(
+        "resolved_model",
+        [(ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None)],
+        indirect=True,
+    )
+    def test_capable_provider_not_cleared_is_not_native(self, resolved_model):
+        with patch(
+            "ai_gateway.models.v2.web_search_support.NATIVE_WEB_SEARCH_ALLOWED_PROVIDERS",
+            frozenset(),
+        ):
+            assert native_web_search_available() is False
+
+    @pytest.mark.parametrize(
+        "resolved_model",
+        [(ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None)],
+        indirect=True,
+    )
+    def test_checks_the_given_model_instead_of_the_request_model(self, resolved_model):
+        assert (
+            native_web_search_available(_model_metadata(*VERTEX_LITELLM_MODEL)) is False
+        )
 
     @pytest.mark.parametrize("resolved_model", [None], indirect=True)
     def test_assumes_native_when_no_model_resolved(self, resolved_model):
@@ -502,8 +537,8 @@ class TestIsAvailable:
             # Native handles it, so the fallback stays out of the toolset.
             (True, (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None), False),
             (True, (ModelClassProvider.OPENAI, "gpt-5.2", None), False),
-            # Vertex runs the search itself even though it is litellm-routed.
-            (True, VERTEX_LITELLM_MODEL, False),
+            # Vertex could search natively but isn't cleared for it.
+            (True, VERTEX_LITELLM_MODEL, True),
             # Flag off: never enabled, regardless of model.
             (False, BEDROCK_LITELLM_MODEL, False),
             (False, (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None), False),

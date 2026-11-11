@@ -13,6 +13,7 @@ the same query and bills the fallback provider for work the model provider would
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.model_selection.models import ModelClassProvider
 from ai_gateway.models.v2.chat_litellm import litellm_supports_native_web_search
+from ai_gateway.models.v2.web_search_policy import NATIVE_WEB_SEARCH_ALLOWED_PROVIDERS
 
 __all__ = ["NATIVE_WEB_SEARCH_PROVIDERS", "supports_native_web_search"]
 
@@ -39,13 +40,13 @@ of those platforms run a hosted search. `supports_native_web_search` asks
 def supports_native_web_search(definition: LLMDefinition) -> bool:
     """Whether this model executes web search itself.
 
-    This answers only what the model is capable of. Deciding what to do when no model has been resolved is the caller's
-    policy call, not a fact about any model.
+    A model that could search but whose provider isn't cleared in `web_search_policy` counts as unable. Deciding what to
+    do when no model has been resolved is the caller's policy call, not a fact about any model.
     """
     provider = definition.model_class_provider
 
     if provider in NATIVE_WEB_SEARCH_PROVIDERS:
-        return True
+        return provider in NATIVE_WEB_SEARCH_ALLOWED_PROVIDERS
 
     if provider is not ModelClassProvider.LITE_LLM:
         return False

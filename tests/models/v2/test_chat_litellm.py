@@ -31,6 +31,7 @@ from ai_gateway.models.v2.chat_litellm import (
     _litellm_maps_web_search,
     _remove_deprecated_temperature_parameters,
     _rewrite_trailing_assistant_prefill,
+    litellm_supports_native_web_search,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 from ai_gateway.vendor.langchain_litellm.litellm import (
@@ -403,6 +404,38 @@ class TestLitellmMapsWebSearch:
         assert _litellm_maps_web_search(model, provider) is expected
 
 
+@pytest.fixture(name="vertex_cleared")
+def vertex_cleared_fixture():
+    with patch(
+        "ai_gateway.models.v2.chat_litellm.NATIVE_WEB_SEARCH_ALLOWED_LITELLM_PROVIDERS",
+        frozenset({"vertex_ai"}),
+    ):
+        yield
+
+
+class TestLitellmSupportsNativeWebSearch:
+    def test_capable_provider_not_cleared(self):
+        assert (
+            litellm_supports_native_web_search("claude-sonnet-4-6", "vertex_ai")
+            is False
+        )
+
+    @pytest.mark.usefixtures("vertex_cleared")
+    def test_capable_provider_once_cleared(self):
+        assert (
+            litellm_supports_native_web_search("claude-sonnet-4-6", "vertex_ai") is True
+        )
+
+    @pytest.mark.usefixtures("vertex_cleared")
+    def test_incapable_provider(self):
+        assert (
+            litellm_supports_native_web_search(
+                "bedrock/global.anthropic.claude-sonnet-4-6", "bedrock"
+            )
+            is False
+        )
+
+
 class TestDropUnsupportedWebSearch:
     @pytest.mark.parametrize(
         ("model", "provider"),
@@ -411,7 +444,8 @@ class TestDropUnsupportedWebSearch:
             pytest.param("claude-haiku-4-5", "vertex_ai", id="vertex-haiku"),
         ],
     )
-    def test_kept_for_capable_provider(self, model, provider):
+    @pytest.mark.usefixtures("vertex_cleared")
+    def test_kept_for_capable_and_cleared_provider(self, model, provider):
         kwargs = {
             "model": model,
             "custom_llm_provider": provider,
@@ -421,6 +455,22 @@ class TestDropUnsupportedWebSearch:
         _drop_unsupported_web_search(kwargs)
 
         assert kwargs["web_search_options"] == {}
+
+    def test_dropped_for_capable_provider_not_cleared(self):
+        kwargs = {
+            "model": "claude-sonnet-4-6",
+            "custom_llm_provider": "vertex_ai",
+            "web_search_options": {},
+        }
+
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            _drop_unsupported_web_search(kwargs)
+
+        assert "web_search_options" not in kwargs
+        assert (
+            mock_log.warning.call_args.kwargs["reason"]
+            == "provider is not cleared for native web search"
+        )
 
     @pytest.mark.parametrize(
         ("model", "provider"),
@@ -512,6 +562,7 @@ class TestDropUnsupportedWebSearch:
             pytest.param("bedrock", False, id="bedrock"),
         ],
     )
+    @pytest.mark.usefixtures("vertex_cleared")
     async def test_gate_applies_on_the_way_to_litellm(self, provider, expect_forwarded):
         """The gate runs in `acompletion_with_retry`, where model and provider are finally merged."""
         chat = ChatLiteLLM(model="claude-sonnet-4-6")
@@ -530,6 +581,7 @@ class TestDropUnsupportedWebSearch:
         assert ("web_search_options" in forwarded) is expect_forwarded
 
 
+@pytest.mark.usefixtures("vertex_cleared")
 class TestWebSearchPolicyFallback:
     POLICY_ERROR = (
         "Organization Policy constraint constraints/vertexai.allowedPartnerModelFeatures "
