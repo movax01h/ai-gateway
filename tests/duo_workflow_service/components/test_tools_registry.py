@@ -9,6 +9,9 @@ from langchain.tools import BaseTool, ToolException
 from pydantic import BaseModel
 from structlog.testing import capture_logs
 
+from ai.features.security.sast_fp_detection.components.post_sast_fp_analysis_to_gitlab import (
+    PostSastFpAnalysisToGitlab,
+)
 from ai.features.security.secrets_fp_detection.components.post_secret_fp_analysis_to_gitlab import (
     PostSecretFpAnalysisToGitlab,
 )
@@ -72,9 +75,6 @@ from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import
     EvaluateVulnerabilityFalsePositiveStatus,
     GetVulnerabilityDetails,
     ResolveVulnerabilityTargetBranch,
-)
-from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
-    PostSastFpAnalysisToGitlab,
 )
 from duo_workflow_service.tools.wiki import GetWikiPage
 from lib.context import current_model_metadata_context

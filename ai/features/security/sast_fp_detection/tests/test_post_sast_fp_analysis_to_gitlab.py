@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langchain.tools import ToolException
 
-from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
-from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
+from ai.features.security.sast_fp_detection.components.post_sast_fp_analysis_to_gitlab import (
     PostSastFpAnalysisToGitlab,
     PostSastFpAnalysisToGitlabInput,
 )
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 
 @pytest.fixture(name="gitlab_client_mock")
