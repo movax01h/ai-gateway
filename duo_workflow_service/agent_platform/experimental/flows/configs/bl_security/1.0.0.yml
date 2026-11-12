@@ -176,6 +176,10 @@ components:
     inputs:
       - from: "context:map_reviews.results"
         as: "results"
+      - from: "context:map_reviews.succeeded"
+        as: "succeeded"
+      - from: "context:map_reviews.failed"
+        as: "failed"
       - from: "context:map_reviews_prep.tool_responses.emitted_count"
         as: "emitted_count"
         optional: true
@@ -247,6 +251,10 @@ components:
     inputs:
       - from: "context:sibling_scan.results"
         as: "results"
+      - from: "context:sibling_scan.succeeded"
+        as: "succeeded"
+      - from: "context:sibling_scan.failed"
+        as: "failed"
       - from: "context:sibling_scan_prep.tool_responses.emitted_count"
         as: "emitted_count"
         optional: true
@@ -328,6 +336,10 @@ components:
     inputs:
       - from: "context:triage.results"
         as: "results"
+      - from: "context:triage.succeeded"
+        as: "succeeded"
+      - from: "context:triage.failed"
+        as: "failed"
       - from: "context:triage_prep.tool_responses.units"
         as: "verdict_items"
       - from: "context:triage_prep.tool_responses.emitted_count"

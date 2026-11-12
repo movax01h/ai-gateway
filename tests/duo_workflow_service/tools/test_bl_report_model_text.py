@@ -116,7 +116,10 @@ def test_title_and_impact_survive_dedup_triage_and_report():
     }
     collected = asyncio.run(
         BlCollectAndFlatten(metadata=None)._execute(
-            results=[{"final_answer": verdict}], verdict_items=deduped
+            results=[{"final_answer": verdict}],
+            succeeded=1,
+            failed=0,
+            verdict_items=deduped,
         )
     )
     kept = asyncio.run(_dedup()._execute([collected["final_answer"]]))
