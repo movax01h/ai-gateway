@@ -459,7 +459,7 @@ class TestValidateFlowConfigs:
         misspelled tool is dropped at flow-build time with no error and no warning — the flow ships
         and runs, just without that capability. That is how ``security_review`` ran for months
         declaring ``blob_search`` when the registered name is ``gitlab_blob_search``
-        (gitlab-org/gitlab#627166), and how ``project_activity`` came to declare a
+        (gitlab-org/gitlab#627166), and how a since-removed flow came to declare a
         ``gitlab_api_post`` that was never written (#2802, fixed by !6789 — this sweep is what
         found it).
 
