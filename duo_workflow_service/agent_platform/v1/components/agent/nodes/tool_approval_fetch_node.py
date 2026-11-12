@@ -28,6 +28,7 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
 )
 from duo_workflow_service.entities import WorkflowStatusEnum
 from duo_workflow_service.errors.typing import InvalidRequestException
+from duo_workflow_service.tools.toolset import Toolset
 from lib.context import record_approval_policy_ref, record_approval_source
 from lib.internal_events.event_enum import EventEnum, EventPropertyEnum
 
@@ -59,6 +60,10 @@ class ToolApprovalFetchNode:
         tracker: Optional tool event tracker for approval-resolution events
         approval_requests_key: Optional RuntimeIOKey shared with
             ToolApprovalRequestNode; reads which tool calls required approval.
+        approval_skip_sources_key: Optional RuntimeIOKey shared with
+            ToolApprovalRequestNode; reads the source of each call that skipped approval.
+        toolset: The request node's toolset, to confirm a replayed source.
+        pre_approved_tools: The request node's component-level pre-approved tools.
     """
 
     def __init__(
@@ -72,6 +77,9 @@ class ToolApprovalFetchNode:
         session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
         tracker: ToolEventTracker | None = None,
         approval_requests_key: RuntimeIOKey | None = None,
+        approval_skip_sources_key: RuntimeIOKey | None = None,
+        toolset: Toolset | None = None,
+        pre_approved_tools: list[str] | None = None,
     ):
         self.name = name
         self._conversation_history_key = conversation_history_key
@@ -81,6 +89,40 @@ class ToolApprovalFetchNode:
         self._session_id_key = session_id_key
         self._tracker = tracker
         self._approval_requests_key = approval_requests_key
+        self._approval_skip_sources_key = approval_skip_sources_key
+        self._toolset = toolset
+        self._pre_approved_tools = pre_approved_tools or []
+
+    def _record_skipped_tool_sources(
+        self, state: FlowState, existing_history: list, decided_ids: list[str]
+    ) -> None:
+        """Replay the source the request node persisted for each call in the batch that skipped approval.
+
+        Not re-derived from this request, whose mode can differ; a checkpoint predating the key leaves the calls
+        unattributed (see ``Toolset.replay_skip_source``).
+        """
+        last_message = existing_history[-1] if existing_history else None
+        if (
+            self._approval_skip_sources_key is None
+            or self._toolset is None
+            or not isinstance(last_message, AIMessage)
+        ):
+            return
+        persisted = self._approval_skip_sources_key.value_from_state(state)
+        skip_sources = (
+            {
+                entry.get("id"): entry.get("source")
+                for entry in persisted
+                if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+            }
+            if isinstance(persisted, list)
+            else {}
+        )
+        for tool_call in last_message.tool_calls:
+            if tool_call.get("id") not in decided_ids:
+                self._toolset.replay_skip_source(
+                    tool_call, skip_sources, self._pre_approved_tools
+                )
 
     def _track_approval_resolved(
         self, state: FlowState, outcome: EventPropertyEnum
@@ -114,27 +156,29 @@ class ToolApprovalFetchNode:
         Prefers the set the request node persisted in ``approval_requests_key``, so the
         client's approval source is only applied to those ids, not to pre-approved /
         session-reused calls in the same mixed batch. Falls back to every tool call on
-        the last AIMessage when that key is unset or its persisted value is empty (e.g.
-        an older checkpoint), which can mislabel a pre-approved / session-reused call;
-        see ``Workflow._record_approved_tool_sources`` for the related KNOWN GAP
+        the last AIMessage when that key is unset, its persisted value is empty (e.g. an
+        older checkpoint) or none of its ids are on the last AIMessage (a corrupt or
+        forged checkpoint), which can mislabel a pre-approved / session-reused call
         (https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938).
         """
-        if self._approval_requests_key is not None:
-            requested_calls = self._approval_requests_key.value_from_state(state)
-            if requested_calls:
-                ids = (
-                    call.get("id") if isinstance(call, dict) else None
-                    for call in requested_calls
-                )
-                return [call_id for call_id in ids if call_id]
-
         last_message = existing_history[-1] if existing_history else None
-        if isinstance(last_message, AIMessage):
-            tool_call_ids = (
-                tool_call.get("id") for tool_call in last_message.tool_calls
-            )
-            return [call_id for call_id in tool_call_ids if call_id]
-        return []
+        if not isinstance(last_message, AIMessage):
+            return []
+        tool_call_ids = [
+            call_id
+            for call_id in (call.get("id") for call in last_message.tool_calls)
+            if call_id
+        ]
+        if self._approval_requests_key is not None:
+            requested_calls = self._approval_requests_key.value_from_state(state) or []
+            requested = [
+                call.get("id") for call in requested_calls if isinstance(call, dict)
+            ]
+            # Ids that are not on the message cannot have been prompted for.
+            decided = [call_id for call_id in tool_call_ids if call_id in requested]
+            if decided:
+                return decided
+        return tool_call_ids
 
     @staticmethod
     def _build_rejection_messages(tool_calls: list[ToolCall]) -> list[ToolMessage]:
@@ -176,13 +220,14 @@ class ToolApprovalFetchNode:
                 state, EventPropertyEnum.WORKFLOW_TOOL_APPROVAL_APPROVAL
             )
             # Scoped to _decided_tool_call_ids so this doesn't relabel any
-            # pre-approval / session-reuse calls in the same mixed batch (see that
-            # method's docstring for the related KNOWN GAP).
+            # pre-approval / session-reuse calls in the same mixed batch.
             approval_source = event.get("approval_source")
             policy_ref = event.get("policy_ref")
-            for tool_call_id in self._decided_tool_call_ids(state, existing_history):
+            decided_ids = self._decided_tool_call_ids(state, existing_history)
+            for tool_call_id in decided_ids:
                 record_approval_source(tool_call_id, approval_source)
                 record_approval_policy_ref(tool_call_id, policy_ref)
+            self._record_skipped_tool_sources(state, existing_history, decided_ids)
             return {
                 **self._status_key.to_nested_dict(WorkflowStatusEnum.EXECUTION, state),
                 **approval_decision_iokey.to_nested_dict(FlowEventType.APPROVE),

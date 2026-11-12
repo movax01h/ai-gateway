@@ -622,6 +622,7 @@ async def test_compile_and_run_graph(
         registry_flow_id=None,
         admin_allowed_preapprovals=None,
         promoted_tools=[],
+        promotable_tools=[],
         first_party_tools={},
     )
 
@@ -4023,7 +4024,7 @@ async def _chat_prompts_for(
     )
     # _get_approvals reads only the project from the state.
     state: Any = {"project": None}
-    approval_required, _, _ = await agent._get_approvals(
+    approval_required, _, _, _ = await agent._get_approvals(
         message, workflow._preapproved_tools or [], state
     )
     return approval_required
@@ -5103,6 +5104,7 @@ async def test_a_promote_only_claim_stays_ungoverned(workflow_config, capabiliti
     )
 
     assert kwargs["promoted_tools"] == []
+    assert kwargs["promotable_tools"] == []
     assert workflow._preapproved_tools == ["run_command"]
 
 
@@ -5127,6 +5129,40 @@ async def test_promotion_logs_the_count_at_info_and_the_names_at_debug(workflow_
     assert "tool_names" not in info
     assert debug["log_level"] == "debug"
     assert debug["tool_names"] == ["create_file_with_contents", "edit_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("capabilities", [[], ["auto_mode"]])
+async def test_the_signed_promote_list_reaches_the_registry_in_every_mode(
+    workflow_config, capabilities
+):
+    """A resume after an auto to build switch still checks a replayed auto_mode receipt against it."""
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(_PROMOTE_CLAIM), workflow_config, capabilities
+    )
+
+    assert kwargs["promotable_tools"] == ["create_file_with_contents", "edit_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("can_ask", [True, False])
+async def test_the_promotable_list_drops_ask_and_deny_like_promotion(
+    workflow_config, can_ask
+):
+    claim = {
+        "allow": ["read_file"],
+        "ask": ["run_command"],
+        "deny": ["create_commit"],
+        "promote": ["edit_file", "run_command", "create_commit"],
+    }
+
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(claim), workflow_config, [], can_ask=can_ask
+    )
+
+    assert kwargs["promotable_tools"] == ["edit_file"]
 
 
 @pytest.mark.parametrize(

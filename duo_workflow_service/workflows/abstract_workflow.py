@@ -466,6 +466,8 @@ class AbstractWorkflow(ABC):
         # Kept apart from _preapproved_tools: chat state checkpoints that list, and
         # promotion holds for this turn only.
         self._promoted_tools: list[str] = []
+        # What promotion would cover whatever this turn's mode, to check a replayed auto_mode receipt.
+        self._promotable_tools: list[str] = []
         self._ceiling_claim_unparsable = False
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
@@ -859,6 +861,8 @@ class AbstractWorkflow(ABC):
         requested = set(policies.promote) - set(policies.ask) - set(policies.deny)
         if not requested:
             return
+        if governance_active:
+            self._promotable_tools = sorted(requested)
         engaged = is_client_capable(AUTO_MODE_CAPABILITY)
         if not (governance_active and can_ask_user and engaged):
             self.log.debug(
@@ -1052,6 +1056,7 @@ class AbstractWorkflow(ABC):
                     allowed_tools=self._governance_allowed_tools,
                     admin_allowed_preapprovals=self._admin_allowed_preapprovals,
                     promoted_tools=self._promoted_tools,
+                    promotable_tools=self._promotable_tools,
                     registry_flow_id=self._registry_flow_id(),
                     first_party_tools=self._first_party_tools,
                 )

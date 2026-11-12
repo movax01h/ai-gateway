@@ -52,6 +52,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes import (
     ToolNode,
     WrapUpPrompt,
     approval_requests_key_for,
+    approval_skip_sources_key_for,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -661,6 +662,9 @@ class AgentComponentBase(BaseComponent):
         approval_requests_key = approval_requests_key_for(
             self._tool_approval_decision_key
         )
+        approval_skip_sources_key = approval_skip_sources_key_for(
+            self._tool_approval_decision_key
+        )
 
         # The two halts answer different questions, so they use different signals.
         # Denied-tool: is a human present to see a "blocked, continuing" result?
@@ -693,6 +697,7 @@ class AgentComponentBase(BaseComponent):
             session_id_key=session_id_key,
             tracker=tracker,
             approval_requests_key=approval_requests_key,
+            approval_skip_sources_key=approval_skip_sources_key,
             halt_on_denied_tool=non_interactive,
             halt_on_unanswerable_approval=not self.allow_agent_to_request_user,
         )
@@ -723,6 +728,9 @@ class AgentComponentBase(BaseComponent):
             session_id_key=session_id_key,
             tracker=tracker,
             approval_requests_key=approval_requests_key,
+            approval_skip_sources_key=approval_skip_sources_key,
+            toolset=self.toolset,
+            pre_approved_tools=self.pre_approved_tools,
         )
 
         graph.add_node(node_tool_approval_request.name, node_tool_approval_request.run)

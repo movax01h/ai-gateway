@@ -1,4 +1,8 @@
-__all__ = ["ToolApprovalRequestNode", "approval_requests_key_for"]
+__all__ = [
+    "ToolApprovalRequestNode",
+    "approval_requests_key_for",
+    "approval_skip_sources_key_for",
+]
 
 import asyncio
 from typing import Any, Optional
@@ -27,7 +31,10 @@ from duo_workflow_service.agent_platform.v1.state import (
     IOKey,
     RuntimeIOKey,
 )
-from duo_workflow_service.agent_platform.v1.state.base import BaseIOKey
+from duo_workflow_service.agent_platform.v1.state.base import (
+    BaseIOKey,
+    merge_nested_dict,
+)
 from duo_workflow_service.agent_platform.v1.ui_log import DefaultUILogWriter, UIHistory
 from duo_workflow_service.entities import (
     ApprovalSource,
@@ -65,6 +72,21 @@ def approval_requests_key_for(decision_key: RuntimeIOKey) -> RuntimeIOKey:
     return RuntimeIOKey(alias="tool_approval_requests", factory=_factory)
 
 
+def approval_skip_sources_key_for(decision_key: RuntimeIOKey) -> RuntimeIOKey:
+    """Build the key, beside the requests key, holding the source of each call in the batch that skipped approval."""
+
+    def _factory(state: FlowState) -> IOKey:
+        decision_iokey = decision_key.to_iokey(state)
+        parent_subkeys = (decision_iokey.subkeys or [])[:-1]
+        return IOKey(
+            target=decision_iokey.target,
+            subkeys=[*parent_subkeys, "tool_approval_skip_sources"],
+            optional=True,
+        )
+
+    return RuntimeIOKey(alias="tool_approval_skip_sources", factory=_factory)
+
+
 class ToolApprovalRequestNode:
     """Node that validates tool calls and requests human approval.
 
@@ -94,6 +116,8 @@ class ToolApprovalRequestNode:
         tracker: Optional tool event tracker for approval-request and blocked-tool events
         approval_requests_key: Optional RuntimeIOKey shared with
             ToolApprovalFetchNode; persists which tool calls required approval.
+        approval_skip_sources_key: Optional RuntimeIOKey shared with
+            ToolApprovalFetchNode; persists the source of each call that skipped approval.
         halt_on_denied_tool: Halt the flow when the agent calls a governance-denied tool,
             rather than returning a "blocked, continue without it" result (set off for
             interactive environments, where the user can keep going).
@@ -114,6 +138,7 @@ class ToolApprovalRequestNode:
         session_id_key: BaseIOKey = DEFAULT_SESSION_ID_KEY,
         tracker: ToolEventTracker | None = None,
         approval_requests_key: RuntimeIOKey | None = None,
+        approval_skip_sources_key: RuntimeIOKey | None = None,
         halt_on_denied_tool: bool = True,
         halt_on_unanswerable_approval: bool = False,
     ):
@@ -126,6 +151,7 @@ class ToolApprovalRequestNode:
         self._session_id_key = session_id_key
         self._tracker = tracker
         self._approval_requests_key = approval_requests_key
+        self._approval_skip_sources_key = approval_skip_sources_key
         self._halt_on_denied_tool = halt_on_denied_tool
         self._halt_on_unanswerable_approval = halt_on_unanswerable_approval
 
@@ -203,11 +229,14 @@ class ToolApprovalRequestNode:
             *(self._should_skip_approval(call) for call in valid_calls)
         )
         needs_approval = []
+        skipped: list[dict[str, str]] = []
         for call, source in zip(valid_calls, skip_sources):
             if source is None:
                 needs_approval.append(call)
             else:
                 record_approval_source(call.get("id"), source)
+                if call.get("id"):
+                    skipped.append({"id": call["id"], "source": source})
                 log.info(
                     "Skipping tool call approval",
                     tool_name=call["name"],
@@ -253,6 +282,12 @@ class ToolApprovalRequestNode:
                 **result,
                 **self._approval_requests_key.to_nested_dict(requested_calls, state),
             }
+        # A list, like the requests key, so the context reducer replaces rather than merges
+        # it across batches; merged into `result`, not spread: both share one parent.
+        if self._approval_skip_sources_key is not None:
+            result = merge_nested_dict(
+                result, self._approval_skip_sources_key.to_nested_dict(skipped, state)
+            )
 
         # Guard on what survived the event filter, not on what was written.
         updates = self._ui_history.pop_state_updates()

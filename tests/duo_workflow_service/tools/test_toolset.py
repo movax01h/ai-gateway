@@ -4,6 +4,7 @@ import pytest
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from pydantic import BaseModel, Field
+from structlog.testing import capture_logs
 
 from duo_workflow_service.entities.state import ApprovalSource
 from duo_workflow_service.tools import (
@@ -13,6 +14,11 @@ from duo_workflow_service.tools import (
     UnknownToolError,
 )
 from duo_workflow_service.tools.merge_request_notes import CreateMergeRequestNote
+from lib.context.approval_sources import (
+    approval_sources,
+    get_approval_source,
+    init_approval_sources,
+)
 
 
 class MockBaseTool(BaseTool):
@@ -459,3 +465,86 @@ class TestToolset:
 
         assert "Invalid arguments" in str(exc_info.value)
         assert exc_info.value.tool_call == tool_call
+
+
+_RUN = {"run_command"}
+
+
+class TestReplaySkipSource:
+    @pytest.mark.parametrize(
+        "tool_call,skip_sources",
+        [
+            ({"name": "run_command"}, {"call-1": "auto_mode"}),
+            ({"id": "call-1", "name": "run_command"}, None),
+            ({"id": "call-1", "name": "run_command"}, ["auto_mode"]),
+            ({"id": "call-1", "name": "run_command"}, {}),
+        ],
+    )
+    def test_returns_none_without_a_call_id_or_a_persisted_source(
+        self, tool_call, skip_sources
+    ):
+        toolset = Toolset(pre_approved=set(), all_tools={}, promotable=_RUN)
+
+        assert toolset.replay_skip_source(tool_call, skip_sources) is None
+
+    @pytest.mark.parametrize(
+        ("source", "toolset", "also", "expected"),
+        [
+            ("auto_mode", {"promotable": _RUN}, (), "auto_mode"),
+            ("auto_mode", {}, (), None),
+            ("preapproved_config", {"pre_approved": _RUN}, (), "preapproved_config"),
+            # Forged: a person's decision relabelled as the admin's configuration.
+            ("preapproved_config", {}, (), None),
+            ("preapproved_config", {"pre_approved": _RUN, "promoted": _RUN}, (), None),
+            # The chat state's or the component's own list.
+            ("preapproved_config", {}, _RUN, "preapproved_config"),
+            ("session_approval", {}, (), "session_approval"),
+            ("session_approval", {"pre_approved": _RUN}, (), None),
+            # Promoted on an "approve and enter auto mode" resume.
+            (
+                "session_approval",
+                {"pre_approved": _RUN, "promoted": _RUN},
+                (),
+                "session_approval",
+            ),
+            # DWS records a tool on the chat or component list as preapproved_config.
+            ("auto_mode", {"promotable": _RUN}, _RUN, None),
+            ("session_approval", {}, _RUN, None),
+        ],
+    )
+    def test_keeps_only_a_source_this_request_backs(
+        self, source, toolset, also, expected
+    ):
+        toolset = Toolset(all_tools={}, **{"pre_approved": set(), **toolset})
+        init_approval_sources()
+        try:
+            with capture_logs() as logs:
+                result = toolset.replay_skip_source(
+                    {"id": "call-1", "name": "run_command"}, {"call-1": source}, also
+                )
+
+            assert result == expected
+            assert get_approval_source("call-1") == expected
+            dropped = [e for e in logs if e["event"].startswith("Dropped a replayed")]
+            assert [e["claimed_approval_source"] for e in dropped] == (
+                [] if expected else [source]
+            )
+        finally:
+            approval_sources.set(None)
+
+    @pytest.mark.parametrize("source", ["user_explicit", ["auto_mode"]])
+    def test_drops_a_source_outside_the_allowlist_and_logs_it_as_invalid(self, source):
+        toolset = Toolset(pre_approved=set(), all_tools={}, promotable=_RUN)
+        init_approval_sources()
+        try:
+            with capture_logs() as logs:
+                result = toolset.replay_skip_source(
+                    {"id": "call-1", "name": "run_command"}, {"call-1": source}
+                )
+
+            assert result is None
+            assert get_approval_source("call-1") is None
+            dropped = [e for e in logs if e["event"].startswith("Dropped a replayed")]
+            assert [e["claimed_approval_source"] for e in dropped] == ["invalid"]
+        finally:
+            approval_sources.set(None)
