@@ -183,67 +183,69 @@ class TestCoverageSentencesReachTheReport:
     covered one.
     """
 
-    def test_summary_names_the_stage_s_own_unit_noun(self):
-        cov = _coverage_sentences(
-            noun="findings",
-            emitted=12,
-            dispatched=12,
-            completed=12,
-            errored=0,
-        )
-        assert cov["summary"] == "Reviewed 12 of 12 findings."
-        # A clean stage discloses no cap and no loss.
-        assert "truncation" not in cov
-        assert "loss" not in cov
-
-    def test_a_cap_that_bound_is_disclosed_separately_from_loss(self):
-        cov = _coverage_sentences(
-            noun="review units",
-            emitted=150,
-            dispatched=62,
-            completed=62,
-            errored=0,
-        )
-        assert "62 of 150 review units were sent for review" in cov["truncation"]
-        assert "88 were never reviewed" in cov["truncation"]
-        # A cap is a CHOICE; it must not read as discarded findings.
-        assert "loss" not in cov
-
-    def test_discarded_units_are_reported_as_loss_not_as_a_cap(self):
-        cov = _coverage_sentences(
-            noun="review units",
-            emitted=40,
-            dispatched=40,
-            completed=40,
-            errored=0,
-            unread=14,
-        )
-        assert "14 of 40 review units are missing from the results" in cov["loss"]
-        assert "14 returned an answer that could not be read" in cov["loss"]
-        assert "truncation" not in cov
-
-    def test_errored_and_unread_units_are_counted_together_but_named_apart(self):
-        cov = _coverage_sentences(
-            noun="units",
-            emitted=10,
-            dispatched=10,
-            completed=9,
-            errored=1,
-            unread=2,
-        )
-        assert "3 of 10 units are missing from the results" in cov["loss"]
-        assert "2 returned an answer that could not be read" in cov["loss"]
-        assert "1 failed" in cov["loss"]
-
-    def test_a_stage_that_dispatched_nothing_still_says_so(self):
-        cov = _coverage_sentences(
-            noun="findings",
-            emitted=0,
-            dispatched=0,
-            completed=0,
-            errored=0,
-        )
-        assert cov["summary"] == "No findings were dispatched for this stage."
+    @pytest.mark.parametrize(
+        ("noun", "counts", "expected"),
+        [
+            pytest.param(
+                "findings",
+                {"emitted": 12, "dispatched": 12, "completed": 12, "errored": 0},
+                {"summary": "Reviewed 12 of 12 findings."},
+                id="clean",
+            ),
+            pytest.param(
+                "review units",
+                {"emitted": 150, "dispatched": 62, "completed": 62, "errored": 0},
+                {
+                    "summary": "Reviewed 62 of 62 review units.",
+                    "truncation": "The scan limit was reached: 62 of 150 review units "
+                    "were sent for review; 88 were never reviewed.",
+                },
+                id="cap-bound",
+            ),
+            pytest.param(
+                "review units",
+                {
+                    "emitted": 40,
+                    "dispatched": 40,
+                    "completed": 40,
+                    "errored": 0,
+                    "unread": 14,
+                },
+                {
+                    "summary": "Reviewed 26 of 40 review units.",
+                    "loss": "14 of 40 review units are missing from the results "
+                    "(14 returned an answer that could not be read).",
+                },
+                id="loss-unread",
+            ),
+            pytest.param(
+                "units",
+                {
+                    "emitted": 10,
+                    "dispatched": 10,
+                    "completed": 9,
+                    "errored": 1,
+                    "unread": 2,
+                },
+                {
+                    "summary": "Reviewed 7 of 10 units.",
+                    "loss": "3 of 10 units are missing from the results "
+                    "(2 returned an answer that could not be read; 1 failed).",
+                },
+                id="loss-errored-and-unread",
+            ),
+            pytest.param(
+                "findings",
+                {"emitted": 0, "dispatched": 0, "completed": 0, "errored": 0},
+                {"summary": "No findings were dispatched for this stage."},
+                id="nothing-dispatched",
+            ),
+        ],
+    )
+    def test_coverage_sentences(self, noun, counts, expected):
+        # The whole dict is asserted, so a sentence that should not apply fails
+        # the case: a cap must never read as a loss, nor a loss as a cap.
+        assert _coverage_sentences(noun=noun, **counts) == expected
 
     @pytest.mark.asyncio
     async def test_the_tool_publishes_the_sentences_alongside_the_counts(self):
