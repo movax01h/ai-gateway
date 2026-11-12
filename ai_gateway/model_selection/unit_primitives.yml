@@ -648,6 +648,7 @@ configurable_unit_primitives:
       - "claude_sonnet_5_5_vertex"
     selectable_models:
       - "claude_mythos_5_1"
+      - "claude_mythos_5_2"
       - "claude_opus_5_5"
       - "claude_opus_5_5_vertex"
       - "claude_sonnet_4_6"

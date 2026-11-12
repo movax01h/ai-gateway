@@ -15,3 +15,5 @@
 restricted_models:
   - identifier: claude_mythos_5_1
     feature_settings: [bl_security]
+  - identifier: claude_mythos_5_2
+    feature_settings: [bl_security]
