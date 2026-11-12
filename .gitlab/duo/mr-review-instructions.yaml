@@ -155,6 +155,7 @@ instructions:
 
   - name: FastAPI Endpoints
     fileFilters:
+      - "ai/apps/aigw/**/*.py"
       - "ai_gateway/api/**/*.py"
       - "!tests/**/*"
     instructions: |
@@ -167,7 +168,7 @@ instructions:
       1. New endpoints are versioned under the correct `v{1,2,3,4}/` directory.
       1. Ensure `feature_category` is set correctly for new endpoints (see `ai_gateway/api/feature_category.py`).
       1. Streaming endpoints use `StreamingResponse` with proper content-type headers.
-      1. Verify that new routes are registered in the appropriate router and included in `server.py`.
+      1. Verify that new routes are registered in the appropriate router and included in `ai/apps/aigw/server.py`.
 
   - name: Pydantic Models and Configuration
     fileFilters:
@@ -220,6 +221,7 @@ instructions:
 
   - name: Authentication and Security
     fileFilters:
+      - "ai/apps/aigw/server.py"
       - "ai_gateway/auth/**/*.py"
       - "ai_gateway/api/middleware/**/*.py"
       - "!tests/**/*"
@@ -227,7 +229,7 @@ instructions:
       For authentication and security changes, verify:
       1. JWT validation logic is not weakened — flag any changes to signature verification.
       1. `bypass_external` and `bypass_jwt_signature` config flags must only be used in local dev/test.
-      1. New middleware must be applied in the correct order in `server.py`.
+      1. New middleware must be applied in the correct order in `ai/apps/aigw/server.py`.
       1. Authorization checks must happen before any business logic or data access.
       1. Ensure no credentials, tokens, or secrets are logged at any log level.
       1. Cloud Connector JWT claims are validated against expected values.
