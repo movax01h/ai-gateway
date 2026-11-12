@@ -52,6 +52,7 @@ from duo_workflow_service.audit_events.context import (
 from duo_workflow_service.audit_events.event_types import (
     SessionStartedEvent,
 )
+from duo_workflow_service.checkpointer.content_retention import ERROR_NOTICE_ID_PREFIX
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
@@ -1286,12 +1287,17 @@ class AbstractWorkflow(ABC):
             # str() of a NotifiableException; all other exceptions fall back to the generic
             # message to avoid leaking internal details (stack traces, tokens, infra hints)
             # to end users.
+            # Only text the service writes itself is marked as a notice, which metadata-only
+            # sessions still show; any branch that does not opt in keeps the plain prefix.
+            message_id_prefix = "error-"
             if isinstance(e, NotifiableAgentException):
                 content = e.ui_message
+                message_id_prefix = ERROR_NOTICE_ID_PREFIX
             elif isinstance(e, NotifiableException):
                 content = str(e)
             else:
                 content = GENERIC_WORKFLOW_ERROR_MESSAGE
+                message_id_prefix = ERROR_NOTICE_ID_PREFIX
             ui_chat_log = [
                 UiChatLog(
                     message_type=MessageTypeEnum.AGENT,
@@ -1302,7 +1308,7 @@ class AbstractWorkflow(ABC):
                     correlation_id=None,
                     tool_info=None,
                     additional_context=None,
-                    message_id=f"error-{uuid4()!s}",
+                    message_id=f"{message_id_prefix}{uuid4()!s}",
                 )
             ]
 

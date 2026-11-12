@@ -3,6 +3,7 @@ import json
 import pytest
 
 from duo_workflow_service.checkpointer.content_retention import (
+    ERROR_NOTICE_ID_PREFIX,
     reduce_ui_chat_log,
     reduce_ui_chat_log_entry,
 )
@@ -127,3 +128,42 @@ class TestReduction:
         entry = {**_chat_entry(), "message_id": None}
 
         assert "message_id" not in reduce_ui_chat_log_entry(entry)
+
+    def test_error_notice_keeps_its_text(self):
+        entry = {
+            **_chat_entry(message_id=f"{ERROR_NOTICE_ID_PREFIX}1"),
+            "message_type": "agent",
+            "status": "failure",
+            "content": "Step limit reached.",
+        }
+
+        reduced = reduce_ui_chat_log_entry(entry)
+
+        assert reduced["content"] == "Step limit reached."
+        assert reduced["additional_context"] is None
+        assert reduced["tool_info"] == {"name": "read_file", "args": {}}
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"message_id": "error-1"},
+            {"message_id": f"x-{ERROR_NOTICE_ID_PREFIX}1"},
+            {"message_type": "tool"},
+            {"status": "success"},
+        ],
+        ids=[
+            "plain_error_id",
+            "prefix_not_at_start",
+            "not_an_agent_entry",
+            "not_a_failure",
+        ],
+    )
+    def test_other_entries_lose_their_text(self, overrides):
+        entry = {
+            **_chat_entry(message_id=f"{ERROR_NOTICE_ID_PREFIX}1"),
+            "message_type": "agent",
+            "status": "failure",
+            **overrides,
+        }
+
+        assert reduce_ui_chat_log_entry(entry)["content"] == ""
