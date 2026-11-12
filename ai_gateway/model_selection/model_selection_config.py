@@ -45,7 +45,7 @@ from ai_gateway.model_selection.types import (
     DevConfig,
     FeatureDeprecatedModel,
 )
-from lib.context.model import restricted_access_ctx
+from lib.context.model import paid_credit_models_allowed_ctx, restricted_access_ctx
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 log = structlog.stdlib.get_logger(__name__)
@@ -58,8 +58,18 @@ class RestrictedModelAccessError(Exception):
     another model silently, and a denial must never be swallowed that way.
     """
 
+    def __init__(self, message: str = "Model not available for this flow") -> None:
+        super().__init__(message)
+
+
+class PaidCreditsModelAccessError(RestrictedModelAccessError):
+    """A model marked requires_paid_credits was requested by a trial without purchased credits.
+
+    A RestrictedModelAccessError, so every handler that reports a restricted model denial reports this one the same way.
+    """
+
     def __init__(self) -> None:
-        super().__init__("Model not available for this flow")
+        super().__init__("Model requires purchased GitLab Credits")
 
 
 def _safe_error_details(exc: Exception) -> list[dict]:
@@ -1098,6 +1108,42 @@ def ensure_restricted_model_access(
             allowed_flows=sorted(allowed),
         )
         raise RestrictedModelAccessError()
+
+
+def paid_credit_models_gate_mode() -> Optional[Literal["log", "enforce"]]:
+    """Return how paid models are gated for this request, or None when they are not gated."""
+    if paid_credit_models_allowed_ctx.get() is not False:
+        return None
+    mode = get_config().model_selection.paid_credit_models_gate_mode
+    return None if mode == "off" else mode
+
+
+def ensure_paid_credits_model_access(
+    identifiers: Iterable[Optional[str]] = (),
+    models: Iterable[Optional[str]] = (),
+) -> None:
+    """Raise PaidCreditsModelAccessError if a trial without credits requests a paid model.
+
+    Applies only when the token's signed ``gitlab_paid_credit_models_allowed`` claim is
+    false (``paid_credit_models_allowed_ctx``). The ``paid_credit_models_gate_mode`` setting
+    decides whether a denial is only logged or also raised.
+    """
+    mode = paid_credit_models_gate_mode()
+    if mode is None:
+        return
+    identifiers = [i for i in identifiers if i]
+    models = [m for m in models if m]
+    paid = ModelSelectionConfig.instance().paid_credit_models_for(identifiers, models)
+    if not paid:
+        return
+    log.warning(
+        "Paid credits model denied",
+        identifiers=identifiers,
+        paid_models=paid,
+        mode=mode,
+    )
+    if mode == "enforce":
+        raise PaidCreditsModelAccessError()
 
 
 def validate_model_selection_config():

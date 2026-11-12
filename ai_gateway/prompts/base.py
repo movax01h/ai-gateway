@@ -90,6 +90,7 @@ from ai_gateway.model_metadata import (
 from ai_gateway.model_selection import (
     ModelSelectionConfig,
     PromptParams,
+    ensure_paid_credits_model_access,
     ensure_restricted_model_access,
 )
 from ai_gateway.model_selection.model_selection_config import fallback_models
@@ -824,19 +825,21 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         llm_definition = model_metadata.llm_definition if model_metadata else None
         # Default-deny for restricted models, on every name the model can be reached
         # by: the resolved definition, a custom-provider identifier, a raw model string, or a fallback.
-        ensure_restricted_model_access(
-            identifiers=[
+        model_names = {
+            "identifiers": [
                 llm_definition.gitlab_identifier if llm_definition else None,
                 getattr(model_metadata, "name", None),
             ],
-            models=[
+            "models": [
                 model_kwargs.get("model"),
                 model_kwargs.get("model_id"),
                 config.model.params.model,
                 llm_definition.params.model if llm_definition else None,
                 *fallback_models(llm_definition.params if llm_definition else None),
             ],
-        )
+        }
+        ensure_restricted_model_access(**model_names)
+        ensure_paid_credits_model_access(**model_names)
 
         if not self._is_anthropic_provider(model_provider, config.model.params):
             for key in ANTHROPIC_ONLY_MODEL_KWARGS:
@@ -1125,9 +1128,12 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     additional_allowed=operator_allowed_headers,
                 )
 
-        ensure_restricted_model_access(
-            models=[model_factory_args.get("model"), model_factory_args.get("model_id")]
-        )
+        factory_models = [
+            model_factory_args.get("model"),
+            model_factory_args.get("model_id"),
+        ]
+        ensure_restricted_model_access(models=factory_models)
+        ensure_paid_credits_model_access(models=factory_models)
 
         return model_factory(**model_factory_args)
 

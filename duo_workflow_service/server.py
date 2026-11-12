@@ -42,7 +42,9 @@ from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.model_selection import (
     ModelSelectionConfig,
+    PaidCreditsModelAccessError,
     RestrictedModelAccessError,
+    ensure_paid_credits_model_access,
     ensure_restricted_model_access,
 )
 from ai_gateway.prompts import BasePromptRegistry
@@ -957,7 +959,8 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         # restricted to, on a signed flow claim; no debug bypass. Prompt construction
         # enforces this for every model. A tagged model the caller may not use falls back
         # to the default model; the default model is checked here so a denied run fails
-        # before any workflow setup.
+        # before any workflow setup. Paid models are checked the same way for trials
+        # without purchased credits.
         authorized_flow = _restricted_access_flow(
             user
         ) or await _restricted_access_flow_from_proof(
@@ -982,6 +985,26 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 )
                 await context.abort(grpc.StatusCode.PERMISSION_DENIED, str(e))
         _drop_denied_tagged_models(authorized_flow)
+
+        by_tag_metadata = current_model_metadata_with_size_context.get()
+        for metadata in filter(
+            None,
+            [
+                current_model_metadata_context.get(),
+                *(by_tag_metadata.by_tag.values() if by_tag_metadata else []),
+            ],
+        ):
+            llm_definition = metadata.llm_definition
+            try:
+                ensure_paid_credits_model_access(**_model_references(metadata))
+            except PaidCreditsModelAccessError as e:
+                log.warning(
+                    "Paid credits model denied at workflow start",
+                    workflow_definition=workflow_definition,
+                    gitlab_realm=user.claims.gitlab_realm if user.claims else None,
+                    model=llm_definition.gitlab_identifier,
+                )
+                await context.abort(grpc.StatusCode.PERMISSION_DENIED, str(e))
 
         workflow_id = start_req.workflowID
         set_workflow_id(workflow_id)

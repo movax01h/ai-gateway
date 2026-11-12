@@ -51,6 +51,7 @@ __all__ = [
     "FeatureAllowlistMode",
     "ModelReleaseFeatureAttachment",
     "ModelReleasesPayload",
+    "PaidCreditModelsGateMode",
     "get_config",
 ]
 
@@ -531,6 +532,8 @@ class ModelReleasesPayload(BaseModel):
 FeatureAllowlistMode = Literal["off", "log", "fallback", "enforce"]
 ActorLimitMode = Literal["off", "log", "enforce"]
 
+PaidCreditModelsGateMode = Literal["off", "log", "enforce"]
+
 
 class ConfigModelSelection(BaseModel):
     default_models: dict[str, list[str]] = Field(
@@ -586,6 +589,16 @@ class ConfigModelSelection(BaseModel):
         description=(
             "The same check on the Duo Workflow Service, with the same modes. 'enforce' "
             "rejects the call with gRPC PERMISSION_DENIED."
+        ),
+    )
+    paid_credit_models_gate_mode: PaidCreditModelsGateMode = Field(
+        default="log",
+        description=(
+            "How models marked requires_paid_credits in models.yml are checked for a "
+            "token whose signed gitlab_paid_credit_models_allowed claim is false (a "
+            "self-managed trial without purchased credits). A token without the claim is "
+            "not checked. 'off': no check. 'log': log the model that would be denied. "
+            "'enforce': reject it (HTTP 403, gRPC PERMISSION_DENIED)."
         ),
     )
 
