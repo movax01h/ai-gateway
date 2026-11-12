@@ -11,6 +11,9 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node import (
     ToolApprovalFetchNode,
 )
+from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_request_node import (
+    approval_skip_sources_key_for,
+)
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
 )
@@ -27,6 +30,7 @@ from duo_workflow_service.agent_platform.v1.ui_log import (
 )
 from duo_workflow_service.entities import MessageTypeEnum, WorkflowStatusEnum
 from duo_workflow_service.errors.typing import InvalidRequestException
+from duo_workflow_service.tools.toolset import Toolset
 from lib.context.approval_sources import (
     approval_sources,
     get_approval_policy_ref,
@@ -747,14 +751,8 @@ class TestToolApprovalFetchNodeTracking:
         state_with_tool_calls,
         component_name,
     ):
-        """KNOWN GAP (https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938), not
-        fixed here: a pre-approved call's attribution does not actually survive to resume, because the
-        approval_sources registry is a per-invocation ContextVar (reset in GitLabWorkflow.__aenter__) and an approval
-        decision always arrives as a new invocation.
-
-        This reproduces that reset (unlike the sibling test above, which keeps using the same registry instance
-        throughout) and documents that the pre-approved call comes back unattributed.
-        """
+        """Without persisted skip sources (a checkpoint predating that key), a pre-approved call's attribution does not
+        survive to resume; see test_mixed_batch_replays_persisted_skip_sources_across_real_resume for the replay."""
         state_with_tool_calls[FlowStateKeys.CONTEXT][component_name] = {
             "tool_approval_requests": [{"id": "call_456", "name": "another_tool"}]
         }
@@ -785,12 +783,89 @@ class TestToolApprovalFetchNodeTracking:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
+        ("skip_sources", "promotable", "pre_approved_tools", "expected"),
+        [
+            (
+                [{"id": "call_123", "source": "auto_mode"}],
+                {"test_tool"},
+                [],
+                "auto_mode",
+            ),
+            # The checkpoint is writable by the session owner, so a replayed source
+            # must be one this request backs.
+            ([{"id": "call_123", "source": "auto_mode"}], set(), [], None),
+            # Backed by the node's own `pre_approved_tools`.
+            (
+                [{"id": "call_123", "source": "preapproved_config"}],
+                set(),
+                ["test_tool"],
+                "preapproved_config",
+            ),
+            # Not the persisted shape.
+            ({"call_123": "auto_mode"}, {"test_tool"}, [], None),
+            # An unhashable id from a corrupt or forged checkpoint is dropped.
+            ([{"id": ["call_123"], "source": "auto_mode"}], {"test_tool"}, [], None),
+            # A checkpoint predating the key.
+            (None, {"test_tool"}, [], None),
+        ],
+    )
+    async def test_mixed_batch_replays_persisted_skip_sources_across_real_resume(
+        self,
+        make_node,
+        approval_requests_key,
+        state_with_tool_calls,
+        component_name,
+        skip_sources,
+        promotable,
+        pre_approved_tools,
+        expected,
+    ):
+        """The call that skipped approval before the interrupt keeps the source the request node persisted."""
+        decision_key = RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda _: IOKey(
+                target="context", subkeys=[component_name, "tool_approval_decision"]
+            ),
+        )
+        node = make_node(
+            approval_requests_key=approval_requests_key,
+            approval_skip_sources_key=approval_skip_sources_key_for(decision_key),
+            toolset=Toolset(pre_approved=set(), all_tools={}, promotable=promotable),
+            pre_approved_tools=pre_approved_tools,
+        )
+        context = {
+            "tool_approval_requests": [{"id": "call_456", "name": "another_tool"}]
+        }
+        if skip_sources is not None:
+            context["tool_approval_skip_sources"] = skip_sources
+        state_with_tool_calls[FlowStateKeys.CONTEXT][component_name] = context
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_fetch_node.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = FlowEvent(
+                event_type=FlowEventType.APPROVE,
+                approval_source="user_explicit",
+            )
+
+            init_approval_sources()
+            try:
+                await node.run(state_with_tool_calls)
+
+                assert get_approval_source("call_123") == expected
+                assert get_approval_source("call_456") == "user_explicit"
+            finally:
+                approval_sources.set(None)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
         "requests_context",
         [
             {},
             {"tool_approval_requests": []},
+            {"tool_approval_requests": [{"id": "not-on-the-message"}]},
         ],
-        ids=["missing", "empty"],
+        ids=["missing", "empty", "no_call_on_the_message"],
     )
     async def test_missing_or_empty_requested_calls_tracks_nothing(
         self,

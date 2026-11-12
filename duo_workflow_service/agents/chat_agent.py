@@ -168,10 +168,11 @@ class ChatAgent:
         preapproved_tools: List[str],
         state: ChatWorkflowState,
         max_tool_calls: Optional[int] = None,
-    ) -> tuple[bool, list[UiChatLog], list[str]]:
+    ) -> tuple[bool, list[UiChatLog], list[str], dict[str, str]]:
         approval_required = False
         approval_messages = []
         requested_ids: list[str] = []
+        skip_sources: dict[str, str] = {}
 
         # Calls past the limit are skipped without running, so they need no approval.
         for call in message.tool_calls[:max_tool_calls]:
@@ -200,6 +201,8 @@ class ChatAgent:
 
             if not needs_approval:
                 record_approval_source(call.get("id"), skip_source)
+                if call_id := call.get("id"):
+                    skip_sources[call_id] = skip_source
 
             if needs_approval:
                 approval_required = True
@@ -252,7 +255,7 @@ class ChatAgent:
                     )
                 )
 
-        return approval_required, approval_messages, requested_ids
+        return approval_required, approval_messages, requested_ids, skip_sources
 
     async def _resolve_approval(
         self, tool_name: str, tool_args: dict
@@ -519,6 +522,7 @@ class ChatAgent:
             tools_need_approval,
             approval_messages,
             requested_ids,
+            skip_sources,
         ) = await self._get_approvals(
             agent_response, preapproved_tools, state, max_tool_calls
         )
@@ -550,6 +554,7 @@ class ChatAgent:
             # client's source to exactly those, not pre-approved/session-reused
             # calls in the same batch.
             result["tool_call_approval_requested"] = requested_ids
+            result["tool_call_skip_sources"] = skip_sources
 
     def _create_error_response(self, error: Exception) -> Dict[str, Any]:
         log.info("We are hitting an error while making an llm call.")

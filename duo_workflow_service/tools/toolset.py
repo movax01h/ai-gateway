@@ -1,5 +1,5 @@
 import collections.abc
-from typing import Any, Optional, Protocol, Type, Union, cast
+from typing import Any, Collection, Mapping, Optional, Protocol, Type, Union, cast
 
 import structlog
 from langchain.tools import BaseTool
@@ -7,8 +7,18 @@ from langchain_core.messages import ToolCall
 from pydantic import BaseModel, ValidationError
 
 from duo_workflow_service.entities.state import ApprovalSource
+from lib.context import record_approval_source
 
 log = structlog.stdlib.get_logger(__name__)
+
+# The sources a call can skip approval with; anything else persisted is dropped.
+_SKIP_SOURCES = frozenset(
+    {
+        ApprovalSource.AUTO_MODE.value,
+        ApprovalSource.PREAPPROVED_CONFIG.value,
+        ApprovalSource.SESSION_APPROVAL.value,
+    }
+)
 
 ToolType = Union[BaseTool, Type[BaseModel]]
 
@@ -37,6 +47,7 @@ class Toolset(collections.abc.Mapping):
     _all_tools: dict[str, ToolType]
     _pre_approved: set[str]
     _promoted: set[str]
+    _promotable: set[str]
     _executable_tools: dict[str, BaseTool]
     _tool_options: dict[str, dict[str, Any]]
     _approval_policy: Optional[ApprovalPolicy]
@@ -50,6 +61,7 @@ class Toolset(collections.abc.Mapping):
         approval_policy: Optional[ApprovalPolicy] = None,
         denied_tools: Optional[set[str]] = None,
         promoted: Optional[set[str]] = None,
+        promotable: Optional[set[str]] = None,
     ):
         """Initialize a Toolset with pre-approved tools and all available tools.
 
@@ -65,10 +77,13 @@ class Toolset(collections.abc.Mapping):
                 only track the call.
             promoted: Optional subset of ``pre_approved`` that only auto mode promotion
                 pre-approved this turn.
+            promotable: Optional names in the session's signed promote list, whether or
+                not this turn is in auto mode.
         """
         self._all_tools = all_tools
         self._pre_approved = pre_approved
         self._promoted = set(promoted or set())
+        self._promotable = set(promotable or set())
         self._tool_options = tool_options or {}
         self._approval_policy = approval_policy
         self._denied_tools = set(denied_tools or set())
@@ -96,6 +111,74 @@ class Toolset(collections.abc.Mapping):
     @property
     def bindable(self) -> list[ToolType]:
         return list(self._all_tools.values())
+
+    @property
+    def promotable(self) -> set[str]:
+        """Names in the session's signed promote list, whether or not this turn is in auto mode."""
+        return self._promotable
+
+    def replay_skip_source(
+        self,
+        tool_call: Mapping[str, Any],
+        skip_sources: Any,
+        also_pre_approved: Collection[str] = (),
+    ) -> Optional[str]:
+        """Record the approval source persisted for a call that skipped approval before an approval interrupt.
+
+        The approval_sources registry is per invocation and an approval always arrives as a new one, so the source
+        decided before the interrupt is replayed, not re-derived from this request, whose mode can differ. Returns the
+        recorded source, or None when nothing usable was persisted (an older checkpoint). The session owner can write
+        checkpoints, so a source this request does not back is dropped and logged.
+        """
+        tool_call_id = tool_call.get("id")
+        if not tool_call_id or not isinstance(skip_sources, dict):
+            return None
+        source = skip_sources.get(tool_call_id)
+        if source is None:
+            return None
+        tool_name = tool_call.get("name", "")
+        if (
+            not isinstance(source, str)
+            or source not in _SKIP_SOURCES
+            or not self._backs_skip_source(tool_name, source, also_pre_approved)
+        ):
+            log.info(
+                "Dropped a replayed approval source this request does not confirm",
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                claimed_approval_source=(
+                    source
+                    if isinstance(source, str) and source in _SKIP_SOURCES
+                    else "invalid"
+                ),
+                pre_approved=tool_name in self._pre_approved,
+                promoted=tool_name in self._promoted,
+                promotable=tool_name in self._promotable,
+            )
+            return None
+        record_approval_source(tool_call_id, source)
+        return source
+
+    def _backs_skip_source(
+        self, tool_name: str, source: str, also_pre_approved: Collection[str]
+    ) -> bool:
+        """Whether this request backs a replayed source.
+
+        `auto_mode` only for a tool the signed promote list makes promotable, `preapproved_config` only for a tool
+        pre-approved by configuration (the registry, the chat state's or the component's list), `session_approval`
+        only for a tool not pre-approved by configuration. A session approval is taken as stored: re-checking it would
+        cost a call to the GitLab instance.
+        """
+        config_pre_approved = (
+            tool_name in self._pre_approved - self._promoted
+            or tool_name in also_pre_approved
+        )
+        if source == ApprovalSource.AUTO_MODE:
+            return tool_name in self._promotable and not config_pre_approved
+        if source == ApprovalSource.PREAPPROVED_CONFIG:
+            return config_pre_approved
+        # After "approve and enter auto mode" a session-approved tool is promoted, so in `_pre_approved` too.
+        return not config_pre_approved
 
     @property
     def denied_tools(self) -> set[str]:

@@ -2811,8 +2811,8 @@ class TestAgentComponentToolApprovalExecutionFlow:
         flow_type,
         mock_internal_event_client,
     ):
-        """Both approval nodes receive the same tracker (bound to the internal event client) and the same shared
-        approval-requests key."""
+        """Both approval nodes share one tracker (bound to the internal event client), one toolset, and the keys for the
+        requested calls and their skip sources."""
         agent_component_with_tool_approval.attach(mock_state_graph, mock_router)
 
         request_kwargs = mock_tool_approval_request_node_cls.call_args[1]
@@ -2829,6 +2829,17 @@ class TestAgentComponentToolApprovalExecutionFlow:
         assert (
             request_kwargs["approval_requests_key"]
             is fetch_kwargs["approval_requests_key"]
+        )
+        # The fetch node replays the skip sources the request node persists and
+        # confirms them against the same toolset.
+        assert isinstance(request_kwargs["approval_skip_sources_key"], RuntimeIOKey)
+        assert (
+            request_kwargs["approval_skip_sources_key"]
+            is fetch_kwargs["approval_skip_sources_key"]
+        )
+        assert fetch_kwargs["toolset"] is request_kwargs["toolset"]
+        assert (
+            fetch_kwargs["pre_approved_tools"] == request_kwargs["pre_approved_tools"]
         )
 
 

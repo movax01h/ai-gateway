@@ -16,6 +16,7 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.tool_approval_request_node import (
     ToolApprovalRequestNode,
     approval_requests_key_for,
+    approval_skip_sources_key_for,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -24,12 +25,13 @@ from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
 from duo_workflow_service.agent_platform.v1.state.base import (
     IOKey,
     RuntimeIOKey,
+    merge_nested_dict_reducer,
 )
 from duo_workflow_service.agent_platform.v1.ui_log import (
     UIHistory,
     default_ui_log_writer_class,
 )
-from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.components.tools_registry import Promotion, ToolsRegistry
 from duo_workflow_service.entities import (
     ApprovalSource,
     MessageTypeEnum,
@@ -613,7 +615,7 @@ class TestToolApprovalRequestNodePreApproved:
             enabled_tools=["read_write_files"],
             preapproved_tools=[],
             tool_metadata=tool_metadata,
-            promoted_tools=["edit_file"],
+            promotion=Promotion(promoted=["edit_file"]),
             can_ask_user=True,
         )
         node = ToolApprovalRequestNode(
@@ -890,6 +892,82 @@ class TestToolApprovalRequestNodeTracking:
             tracker=mock_tracker,
             approval_requests_key=approval_requests_key,
         )
+
+    @pytest.mark.asyncio
+    async def test_mixed_batch_persists_the_skip_sources(
+        self,
+        conversation_history_key,
+        status_key,
+        approval_requests_key,
+        mock_toolset,
+        ui_history,
+        base_flow_state,
+        component_name,
+    ):
+        """The fetch node replays these on resume, since the approval arrives as a new invocation."""
+        decision_key = RuntimeIOKey(
+            alias="tool_approval_decision",
+            factory=lambda _: IOKey(
+                target="context", subkeys=[component_name, "tool_approval_decision"]
+            ),
+        )
+        node = ToolApprovalRequestNode(
+            name="test_agent#tool_approval_request",
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=lambda _: conversation_history_key
+            ),
+            toolset=mock_toolset,
+            pre_approved_tools=["component_tool"],
+            status_key=RuntimeIOKey(alias="status", factory=lambda _: status_key),
+            ui_history=ui_history,
+            approval_requests_key=approval_requests_key,
+            approval_skip_sources_key=approval_skip_sources_key_for(decision_key),
+        )
+        sources = {
+            "promoted_tool": ApprovalSource.AUTO_MODE,
+            "reused_tool": ApprovalSource.SESSION_APPROVAL,
+            "test_tool": None,
+        }
+        mock_toolset.resolve_approval_source.side_effect = lambda name, _args: sources[
+            name
+        ]
+        mock_message = Mock(spec=AIMessage)
+        mock_message.tool_calls = [
+            {"id": "call_1", "name": "promoted_tool", "args": {}},
+            {"id": "call_2", "name": "reused_tool", "args": {}},
+            {"id": "call_3", "name": "component_tool", "args": {}},
+            {"id": "call_4", "name": "test_tool", "args": {}},
+        ]
+        state = base_flow_state.copy()
+        state[FlowStateKeys.CONVERSATION_HISTORY] = {component_name: [mock_message]}
+
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components."
+            "agent.nodes.tool_approval_request_node.format_tool_display_message"
+        ) as mock_format:
+            mock_format.return_value = "Execute tool"
+            init_approval_sources()
+            try:
+                result = await node.run(state)
+            finally:
+                approval_sources.set(None)
+
+        context = result["context"][component_name]
+        assert context["tool_approval_requests"] == [
+            {"id": "call_4", "name": "test_tool"}
+        ]
+        assert context["tool_approval_skip_sources"] == [
+            {"id": "call_1", "source": "auto_mode"},
+            {"id": "call_2", "source": "session_approval"},
+            {"id": "call_3", "source": "preapproved_config"},
+        ]
+        # The context reducer replaces a list, so the next batch's write drops this
+        # one's entries instead of accumulating them for the whole session.
+        merged = merge_nested_dict_reducer(
+            result["context"],
+            {component_name: {"tool_approval_skip_sources": []}},
+        )
+        assert merged[component_name]["tool_approval_skip_sources"] == []
 
     @pytest.mark.asyncio
     async def test_tracks_one_request_event_per_tool_needing_approval(

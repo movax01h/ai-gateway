@@ -401,6 +401,14 @@ class _ToolGrant(NamedTuple):
     allowed_flows: Optional[frozenset[str]]
 
 
+class Promotion(NamedTuple):
+    """The claim's ``promote`` list: what this auto mode turn pre-approves, and what a replayed receipt is checked
+    against in any mode."""
+
+    promoted: Sequence[str] = ()
+    promotable: Sequence[str] = ()
+
+
 def _index_tool_grants() -> dict[str, _ToolGrant]:
     """Map each privilege-granted tool name to its granting privileges and ``allowed_flows``, in one pass."""
     grants: dict[str, _ToolGrant] = {}
@@ -625,6 +633,7 @@ class ToolsRegistry:
     _preapproved_tool_names: set[str]
     _ask_tool_names: set[str]
     _promoted_tool_names: set[str]
+    _promotable_tool_names: set[str]
     _policy_permitted_preapprovals: Optional[set[str]]
     _mcp_tool_names: list[str]
     _enabled_privileges: set[str]
@@ -647,6 +656,7 @@ class ToolsRegistry:
         registry_flow_id: Optional[str] = None,
         first_party_tools: Optional[Mapping[str, FirstPartyVerdict]] = None,
         promoted_tools: Optional[list[str]] = None,
+        promotable_tools: Optional[list[str]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -682,7 +692,7 @@ class ToolsRegistry:
             allowed_tools=allowed_tools or [],
             admin_allowed_preapprovals=admin_allowed_preapprovals,
             first_party_tools=first_party_tools or {},
-            promoted_tools=promoted_tools or [],
+            promotion=Promotion(promoted_tools or [], promotable_tools or []),
             can_ask_user=workflow_config.get("allow_agent_to_request_user", False),
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
@@ -708,7 +718,7 @@ class ToolsRegistry:
         first_party_tools: Optional[Mapping[str, FirstPartyVerdict]] = None,
         can_ask_user: bool = False,
         workflow_config: Optional[Mapping[str, Any]] = None,
-        promoted_tools: Optional[list[str]] = None,
+        promotion: Promotion = Promotion(),
     ):
         """Build the tools a workflow can use.
 
@@ -845,17 +855,18 @@ class ToolsRegistry:
 
         # The workflow already gates on this; kept here so no caller can skip a prompt
         # a headless session would otherwise halt on.
-        if not can_ask_user:
-            promoted_tools = []
+        promoted_tools = promotion.promoted if can_ask_user else ()
         # Applied after the ceiling, which would otherwise strip these (never in the
         # admin allow list). Client-injected names are dropped: Rails cannot rule on them.
-        self._promoted_tool_names = {
-            name
-            for name in promoted_tools or []
-            if name in self._enabled_tools
-            and name not in self._denied_tools
-            and not getattr(self._enabled_tools[name], "_client_injected", False)
-        } - self._preapproved_tool_names
+        self._promoted_tool_names = (
+            self._promotion_candidates(promoted_tools) - self._preapproved_tool_names
+        )
+        # The same filter without the engaged and can-prompt gates, so a replayed receipt
+        # is checked against what promotion would cover in any mode.
+        self._promotable_tool_names = (
+            self._promotion_candidates(promotion.promotable)
+            - self._preapproved_tool_names
+        )
         self._preapproved_tool_names |= self._promoted_tool_names
         if removed - self._promoted_tool_names:
             log.info(
@@ -869,6 +880,16 @@ class ToolsRegistry:
         # emptied upstream, so an ask rule cannot force a prompt there.
         self._preapproved_tool_names -= self._ask_tool_names
         self._promoted_tool_names -= self._ask_tool_names
+        self._promotable_tool_names -= self._ask_tool_names
+
+    def _promotion_candidates(self, names: Iterable[str]) -> set[str]:
+        return {
+            name
+            for name in names
+            if name in self._enabled_tools
+            and name not in self._denied_tools
+            and not getattr(self._enabled_tools[name], "_client_injected", False)
+        }
 
     def _add_capability_dependent_tools(
         self,
@@ -1155,6 +1176,7 @@ class ToolsRegistry:
         return Toolset(
             pre_approved=pre_approved,
             promoted=pre_approved & self._promoted_tool_names,
+            promotable={t for t in tool_names if t in self._promotable_tool_names},
             all_tools=all_tools,
             tool_options=tool_options or {},
             approval_policy=self,
