@@ -12,6 +12,9 @@ from duo_workflow_service.agent_platform.experimental.routers.router import (
     Router,
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowState, IOKey
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from lib.events import GLReportingEventContext
 from lib.internal_events.ai_context import AIContext
 from lib.internal_events.client import InternalEventsClient
@@ -204,10 +207,10 @@ class TestRouter:
         "duo_workflow_service.agent_platform.experimental.routers.base.IOKey.parse_key",
         return_value=Mock(spec=IOKey, target="context", subkeys=["key"], literal=False),
     )
-    def test_router_route_with_input_raises_keyerror_when_no_match_and_no_default(
+    def test_router_route_with_input_raises_when_no_match_and_no_default(
         self, mock_iokey, mock_metrics
     ):
-        """Test Router.route raises KeyError when no matching route and no default route."""
+        """A route miss names the step to the user and keeps the route key server-side."""
         from_component = self.create_mock_component("from")
         to_component_1 = self.create_mock_component("to1")
         mock_iokey.return_value.value_from_state.return_value = "non_existing_route"
@@ -219,12 +222,18 @@ class TestRouter:
             to_component={"route1": to_component_1},
         )
 
-        with pytest.raises(KeyError) as exc_info:
+        with pytest.raises(NotifiableAgentException) as exc_info:
             router.route(state)
 
-        error_message = str(exc_info.value)
-        assert "Route key" in error_message
-        assert "not found in conditions" in error_message
+        assert exc_info.value.ui_message == (
+            "The flow stopped at the 'from' step. "
+            "Please try again, or contact support if the issue persists."
+        )
+        assert isinstance(exc_info.value.__cause__, KeyError)
+        assert exc_info.value.internal_detail is not None
+        assert "'non_existing_route'" in exc_info.value.internal_detail
+        assert "Route key" in exc_info.value.internal_detail
+        assert "not found in conditions" in exc_info.value.internal_detail
         mock_iokey.return_value.value_from_state.assert_called_once_with(state)
         mock_metrics.count_flow_route_decision.assert_called_once_with(
             flow_type="unknown",
