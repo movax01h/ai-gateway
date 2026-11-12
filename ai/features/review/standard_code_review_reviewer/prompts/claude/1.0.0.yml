@@ -1,0 +1,18 @@
+---
+name: Standard Code Review Reviewer
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'standard_code_review_reviewer/system/1.0.0.jinja' %}
+  user: |
+    {% include 'standard_code_review_reviewer/user/1.0.0.jinja' %}
+  placeholder: history
+# xhigh effort is what makes Sonnet 5.5 investigate instead of stopping after a few turns (gitlab#637120, #637410).
+# LiteLLM maps `reasoning_effort` to `output_config.effort` for adaptive-thinking Claude models. Kept out of `base`
+# so self-hosted models, which resolve to `base`, don't get it.
+model:
+  provider_params:
+    litellm:
+      reasoning_effort: xhigh
+params:
+  timeout: 300

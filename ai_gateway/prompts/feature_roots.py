@@ -32,6 +32,14 @@ LEGACY_INCLUDE_ALIASES: dict[str, str] = {
     "common/developer/system/1.0.0.jinja": "developer/common/system/1.0.0.jinja",
     "common/git_commits/1.0.0.jinja": "developer/common/git_commits/1.0.0.jinja",
     "common/merge_request_guidelines/1.0.0.jinja": "developer/common/merge_request_guidelines/1.0.0.jinja",
+    "deep_code_review_reviewer/system/1.0.0.jinja": "standard_code_review_reviewer/system/1.0.0.jinja",
+    "deep_code_review_reviewer/user/1.0.0.jinja": "standard_code_review_reviewer/user/1.0.0.jinja",
+    "deep_code_review_summarizer/system/1.0.0.jinja": "standard_code_review_summarizer/system/1.0.0.jinja",
+    "deep_code_review_summarizer/user/1.0.0.jinja": "standard_code_review_summarizer/user/1.0.0.jinja",
+    "review/deep_code_review_reviewer/system/1.0.0.jinja": "standard_code_review_reviewer/system/1.0.0.jinja",
+    "review/deep_code_review_reviewer/user/1.0.0.jinja": "standard_code_review_reviewer/user/1.0.0.jinja",
+    "review/deep_code_review_summarizer/system/1.0.0.jinja": "standard_code_review_summarizer/system/1.0.0.jinja",
+    "review/deep_code_review_summarizer/user/1.0.0.jinja": "standard_code_review_summarizer/user/1.0.0.jinja",
 }
 
 # Include names deleted on purpose, with no replacement. Only

@@ -30,6 +30,7 @@ def discover_flow_configs_fixture():
 
 
 class TestDeepCodeReviewConfig:
+    FLOW = "deep_code_review"
     INVESTIGATION_TOOLSET = [
         "grep",
         "read_file",
@@ -44,7 +45,7 @@ class TestDeepCodeReviewConfig:
 
     @classmethod
     def _config(cls) -> FlowConfig:
-        return FlowConfig.from_yaml_config("deep_code_review", "1.0.0")
+        return FlowConfig.from_yaml_config(cls.FLOW, "1.0.0")
 
     @classmethod
     def _components(cls) -> dict:
@@ -326,8 +327,13 @@ class TestDeepCodeReviewConfig:
         assert schema.model_fields["checks"].is_required() is True
 
 
-def test_1_0_0_reads_the_merge_request_from_the_resource_context():
-    config = FlowConfig.from_yaml_config("deep_code_review", "1.0.0")
+class TestStandardCodeReviewConfig(TestDeepCodeReviewConfig):
+    FLOW = "standard_code_review"
+
+
+@pytest.mark.parametrize("flow", ["deep_code_review", "standard_code_review"])
+def test_1_0_0_reads_the_merge_request_from_the_resource_context(flow):
+    config = FlowConfig.from_yaml_config(flow, "1.0.0")
     sources = {
         i["from"]
         for c in config.components
