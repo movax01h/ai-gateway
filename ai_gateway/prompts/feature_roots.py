@@ -37,7 +37,22 @@ LEGACY_INCLUDE_ALIASES: dict[str, str] = {
 # Include names deleted on purpose, with no replacement. Only
 # scripts/check_include_names.py reads this. Before you add a name, check that
 # no AI Catalog flow includes it.
-RETIRED_INCLUDE_NAMES: frozenset[str] = frozenset()
+RETIRED_INCLUDE_NAMES: frozenset[str] = frozenset(
+    {
+        "common/project_activity_fetch_issues/1.0.0.jinja",
+        "common/project_activity_fetch_merge_requests/1.0.0.jinja",
+        "project_activity_create_summary_issue/system/1.0.0.jinja",
+        "project_activity_create_summary_issue/user/1.0.0.jinja",
+        "project_activity_fetch_issues_closed/user/1.0.0.jinja",
+        "project_activity_fetch_issues_new/user/1.0.0.jinja",
+        "project_activity_fetch_issues_updated/user/1.0.0.jinja",
+        "project_activity_fetch_merge_requests_closed/user/1.0.0.jinja",
+        "project_activity_fetch_merge_requests_new/user/1.0.0.jinja",
+        "project_activity_fetch_merge_requests_updated/user/1.0.0.jinja",
+        "project_activity_summarize_project_activity/system/1.0.0.jinja",
+        "project_activity_summarize_project_activity/user/1.0.0.jinja",
+    }
+)
 
 # prompt id -> the `prompts/` directory that owns it
 _FEATURE_PROMPT_ROOTS: dict[str, Path] = {}
