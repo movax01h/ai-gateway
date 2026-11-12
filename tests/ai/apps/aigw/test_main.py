@@ -1,6 +1,7 @@
 """Tests for ai.apps.aigw.main.run_app."""
 
 import importlib
+import runpy
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -105,3 +106,23 @@ def test_app_factory_path_resolves(mock_get_config, mock_uvicorn_run):
 
     module_name, attribute = mock_uvicorn_run.call_args.args[0].split(":")
     assert getattr(importlib.import_module(module_name), attribute) is get_app
+
+
+def test_deprecated_path_reexports_run_app():
+    import ai_gateway.main  # pylint: disable=import-outside-toplevel
+
+    with pytest.warns(DeprecationWarning, match="ai.apps.aigw.main"):
+        deprecated = importlib.reload(ai_gateway.main)
+
+    assert deprecated.run_app is run_app
+
+
+@pytest.mark.filterwarnings("ignore:.*found in sys.modules:RuntimeWarning")
+def test_deprecated_path_runs_as_main_module():
+    with (
+        patch("ai.apps.aigw.main.run_app") as mock_run_app,
+        pytest.warns(DeprecationWarning, match="ai.apps.aigw.main"),
+    ):
+        runpy.run_module("ai_gateway.main", run_name="__main__")
+
+    mock_run_app.assert_called_once_with()

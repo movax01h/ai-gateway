@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import os
 import socket
 from unittest import mock
@@ -924,3 +925,19 @@ async def test_lifespan_snowplow_shutdown_exception():
     ]
     assert len(warning_logs) == 1
     assert warning_logs[0]["error"] == "snowplow unavailable"
+
+
+def test_deprecated_paths_reexport_create_fast_api_server():
+    import ai_gateway.api  # pylint: disable=import-outside-toplevel
+    import ai_gateway.api.server  # pylint: disable=import-outside-toplevel
+
+    with pytest.warns(DeprecationWarning, match="ai.apps.aigw.server"):
+        deprecated = importlib.reload(ai_gateway.api.server)
+    with pytest.warns(DeprecationWarning, match="ai.apps.aigw.server"):
+        from_package = ai_gateway.api.create_fast_api_server
+
+    assert deprecated.create_fast_api_server is create_fast_api_server
+    assert from_package is create_fast_api_server
+    assert (
+        deprecated.CONTAINER_APPLICATION_MODULES is server.CONTAINER_APPLICATION_MODULES
+    )

@@ -1,3 +1,4 @@
+import importlib
 from unittest.mock import patch
 
 import pytest
@@ -59,3 +60,12 @@ class TestGetAppMockUsageQuotaServer:
         get_app()
 
         mock_start.assert_not_called()
+
+
+def test_deprecated_path_reexports_get_app():
+    import ai_gateway.app  # pylint: disable=import-outside-toplevel
+
+    with pytest.warns(DeprecationWarning, match="ai.apps.aigw.app"):
+        deprecated = importlib.reload(ai_gateway.app)
+
+    assert deprecated.get_app is get_app
