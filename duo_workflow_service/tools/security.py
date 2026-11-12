@@ -13,6 +13,7 @@ from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.tier_access_checker import (
     LICENSED_FEATURE_SECURITY_DASHBOARD,
+    TierAccessChecker,
 )
 from duo_workflow_service.tools.version_compatibility import (
     supports_project_vulnerabilities_rest_scope,
@@ -297,10 +298,25 @@ class ListVulnerabilities(DuoBaseTool):
         if not isinstance(response, GitLabHttpResponse) or response.status_code != 403:
             return
 
-        log.info(
+        # The REST 403 is the same whether the tier lacks the security dashboard or the
+        # user lacks `read_security_resource`. `DuoBaseTool._arun` only runs the tier
+        # check after `_execute` returns, which this raise would skip, so run it first
+        # to surface a tier problem as `TierAccessDeniedException` with its plan details.
+        await TierAccessChecker(
+            tool_name=self.name,
+            gitlab_client=self.gitlab_client,
+            project=self.project,
+        ).check_tier_access(
+            self.tier_check_licensed_feature,
+            "[]",
+            {"project_full_path": project_full_path},
+        )
+
+        log.warning(
             "Vulnerability report access denied",
             tool=self.name,
             project_full_path=project_full_path,
+            reason="insufficient_permissions",
         )
 
         raise ToolException(

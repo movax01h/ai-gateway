@@ -7,6 +7,7 @@ from langchain_core.tools import ToolException
 from packaging.version import InvalidVersion
 from pydantic import ValidationError
 
+from duo_workflow_service.errors.typing import TierAccessDeniedException
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.security import (
     ConfirmVulnerability,
@@ -25,6 +26,9 @@ from duo_workflow_service.tools.security import (
     RevertToDetectedVulnerabilityInput,
     VulnerabilityReportType,
     VulnerabilitySeverity,
+)
+from duo_workflow_service.tools.tier_access_checker import (
+    LICENSED_FEATURE_SECURITY_DASHBOARD,
 )
 
 
@@ -568,6 +572,103 @@ class TestListVulnerabilities:
             path="/api/v4/projects/namespace%2Fproject/vulnerabilities",
             params={"per_page": 1},
             parse_json=False,
+        )
+
+    @pytest.mark.parametrize(
+        "available,required_plan,expected_exception,expected_message",
+        [
+            (
+                True,
+                None,
+                ToolException,
+                "Vulnerability report access denied: namespace/project",
+            ),
+            (
+                False,
+                "ULTIMATE",
+                TierAccessDeniedException,
+                "This feature requires a Ultimate GitLab subscription.",
+            ),
+        ],
+    )
+    @patch(
+        "duo_workflow_service.tools.tier_access_checker.supports_licensed_feature_availability",
+        return_value=True,
+    )
+    @patch(
+        "duo_workflow_service.tools.security.supports_project_vulnerabilities_rest_scope",
+        return_value=True,
+    )
+    async def test_report_access_denied_prefers_tier_error(
+        self,
+        _mock_supports_scope,
+        _mock_supports_licensed_feature,
+        gitlab_client_mock,
+        metadata,
+        empty_vulnerabilities_response,
+        available,
+        required_plan,
+        expected_exception,
+        expected_message,
+    ):
+        """Test a 403 surfaces the tier error on unlicensed instances only."""
+        tier_response = {
+            "data": {
+                "project": {
+                    "licensedFeatureAvailability": {
+                        "available": available,
+                        "requiredPlan": required_plan,
+                    }
+                }
+            }
+        }
+        gitlab_client_mock.apost = AsyncMock(
+            side_effect=[empty_vulnerabilities_response, tier_response]
+        )
+        gitlab_client_mock.aget = AsyncMock(
+            return_value=GitLabHttpResponse(status_code=403, body="403 Forbidden")
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        with pytest.raises(expected_exception) as exc_info:
+            await tool.arun({"project_full_path": "namespace/project"})
+
+        assert type(exc_info.value) is expected_exception
+        assert expected_message in str(exc_info.value)
+        if expected_exception is TierAccessDeniedException:
+            assert exc_info.value.required_plan == required_plan
+            assert exc_info.value.feature == LICENSED_FEATURE_SECURITY_DASHBOARD
+        assert gitlab_client_mock.apost.await_count == 2
+
+    @patch(
+        "duo_workflow_service.tools.security.supports_project_vulnerabilities_rest_scope",
+        return_value=True,
+    )
+    async def test_report_access_denied_logs_warning_with_reason(
+        self,
+        _mock_supports_scope,
+        gitlab_client_mock,
+        metadata,
+        empty_vulnerabilities_response,
+    ):
+        """Test the denial is logged as a warning carrying a queryable reason."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value=empty_vulnerabilities_response
+        )
+        gitlab_client_mock.aget = AsyncMock(
+            return_value=GitLabHttpResponse(status_code=403, body="403 Forbidden")
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        with patch("duo_workflow_service.tools.security.log") as mock_log:
+            with pytest.raises(ToolException):
+                await tool.arun({"project_full_path": "namespace/project"})
+
+        mock_log.warning.assert_called_once_with(
+            "Vulnerability report access denied",
+            tool="list_vulnerabilities",
+            project_full_path="namespace/project",
+            reason="insufficient_permissions",
         )
 
     @patch(
