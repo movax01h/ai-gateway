@@ -99,6 +99,20 @@ def _group_allows_web_search(project_data: dict, namespace_data: dict) -> bool:
     return False
 
 
+def _web_search_allowed(
+    workflow: dict, project_data: dict, namespace_data: dict
+) -> bool:
+    """Web-search grant as resolved by GitLab, else the top-level group setting.
+
+    GitLab >= 19.6 resolves webSearchAllowed (the instance setting outside GitLab.com); older versions strip it to None.
+    """
+    allowed = workflow.get("webSearchAllowed")
+    if allowed is not None:
+        return allowed
+
+    return _group_allows_web_search(project_data, namespace_data)
+
+
 async def fetch_workflow_and_container_data(
     client: GitlabHttpClient,
     workflow_id: str,
@@ -213,8 +227,8 @@ async def fetch_workflow_and_container_data(
         ),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
         web_search_enabled=workflow.get("webSearchEnabled", False),
-        web_search_allowed_for_group=_group_allows_web_search(
-            project_data, namespace_data
+        web_search_allowed_for_group=_web_search_allowed(
+            workflow, project_data, namespace_data
         ),
         first_checkpoint=workflow.get("firstCheckpoint", None),
         latest_checkpoint=workflow.get("latestCheckpoint", None),

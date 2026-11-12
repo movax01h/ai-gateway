@@ -1062,6 +1062,56 @@ async def test_fetch_workflow_web_search_allowed_for_group(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "web_search_allowed, group_value, expected",
+    [
+        pytest.param(True, False, True, id="resolved_allows_over_group"),
+        pytest.param(False, True, False, id="resolved_forbids_over_group"),
+        pytest.param(None, True, True, id="null_falls_back_to_group_allows"),
+        pytest.param(None, False, False, id="null_falls_back_to_group_forbids"),
+        pytest.param(None, None, False, id="null_and_no_group_value"),
+    ],
+)
+async def test_fetch_workflow_web_search_allowed_resolved_by_gitlab(
+    web_search_allowed, group_value, expected
+):
+    """GitLab >= 19.6 returns webSearchAllowed; older versions strip it to null and DWS reads the group setting."""
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "description": "Test Project",
+                        "httpUrlToRepo": "http://example.com/test.git",
+                        "webUrl": "http://example.com/test",
+                        "namespace": _root_namespace(group_value),
+                    },
+                    "namespaceId": None,
+                    "webSearchEnabled": True,
+                    "webSearchAllowed": web_search_allowed,
+                    "agentPrivilegesNames": [],
+                    "preApprovedAgentPrivilegesNames": [],
+                    "mcpEnabled": False,
+                    "allowAgentToRequestUser": False,
+                    "latestCheckpoint": None,
+                }
+            ]
+        }
+    }
+
+    _, _, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "123"
+    )
+
+    assert workflow_config["web_search_allowed_for_group"] is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "workflow_fields, expected",
     [
         pytest.param({"fileAttachmentsAllowed": True}, True, id="allowed"),
