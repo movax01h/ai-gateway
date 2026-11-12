@@ -12,6 +12,8 @@ MINIMUM_WORKFLOW_CLIENT_VERSION = Version("7.43.0")
 FLOW_SCHEMA_VERSION_LANGUAGE_SERVER_VERSION = Version("8.51.0")
 # First release that reserves the `duo` MCP server name for the first-party server (gitlab-lsp!4448).
 FIRST_PARTY_MCP_TOOLS_LANGUAGE_SERVER_VERSION = Version("9.33.0")
+# First release whose read_file allowlist takes uploads of groups and other projects (gitlab-lsp!4663).
+UPLOAD_OWNER_URLS_LANGUAGE_SERVER_VERSION = Version("10.2.0")
 
 
 class LanguageServerVersion:
@@ -39,6 +41,9 @@ class LanguageServerVersion:
 
     def supports_first_party_mcp_tools(self) -> bool:
         return self.version >= FIRST_PARTY_MCP_TOOLS_LANGUAGE_SERVER_VERSION
+
+    def supports_upload_owner_urls(self) -> bool:
+        return self.version >= UPLOAD_OWNER_URLS_LANGUAGE_SERVER_VERSION
 
     def ignore_broken_flow_schema_version(self) -> bool:
         return self.version < FLOW_SCHEMA_VERSION_LANGUAGE_SERVER_VERSION
