@@ -7,6 +7,9 @@ from pydantic import model_validator
 from duo_workflow_service.agent_platform.experimental.components import BaseComponent
 from duo_workflow_service.agent_platform.experimental.routers.base import BaseRouter
 from duo_workflow_service.agent_platform.experimental.state import FlowState
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent as V1BaseComponent,
 )
@@ -72,9 +75,17 @@ class Router(BaseRouter):
         if BaseRouter.DEFAULT_ROUTE in self.to_component:
             return self.to_component[BaseRouter.DEFAULT_ROUTE].__entry_hook__()  # type: ignore[index]
 
-        raise KeyError(
-            f"Route key {self.input} not found in conditions {self.to_component}"
+        # The step name comes from the flow config, so it is safe to show. The
+        # route key, its value and the conditions go only to internal_detail,
+        # which stays in the server-side log.
+        error = KeyError(
+            f"Route key {self.input}={route_value!r} not found in conditions {self.to_component}"
         )
+        raise NotifiableAgentException(
+            f"The flow stopped at the '{self.from_component.name}' step. "
+            "Please try again, or contact support if the issue persists.",
+            internal_detail=str(error),
+        ) from error
 
     def _track_route_decision(self, route_value: str, is_default_route: bool) -> None:
         component_name = self.from_component.name

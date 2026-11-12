@@ -5,7 +5,8 @@
 ``DeterministicStepComponent`` records a tool failure in
 ``context:<step>.execution_result`` instead of raising, so only the routers can
 stop the run. These tests drive the shipped router table through the real
-``Flow._build_routers`` over stub steps and check where the graph ends.
+``Flow._build_routers`` over stub steps and check where the graph ends, and that
+the error names the failed step to the user.
 """
 
 import asyncio
@@ -23,6 +24,9 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
     FlowConfig,
 )
 from duo_workflow_service.agent_platform.experimental.state import FlowState
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    NotifiableAgentException,
+)
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 
 
@@ -108,5 +112,14 @@ def test_a_run_whose_steps_all_succeed_completes():
 
 @pytest.mark.parametrize("step", DETERMINISTIC_STEPS)
 def test_a_failed_deterministic_step_raises_out_of_the_graph(step):
-    with pytest.raises(KeyError, match=f"Route key .*'{step}', 'execution_result'"):
+    with pytest.raises(NotifiableAgentException) as exc_info:
         _run(failing=step)
+
+    # The user sees which step failed; the route key stays in the server log.
+    assert exc_info.value.ui_message == (
+        f"The flow stopped at the '{step}' step. "
+        "Please try again, or contact support if the issue persists."
+    )
+    assert isinstance(exc_info.value.__cause__, KeyError)
+    assert exc_info.value.internal_detail is not None
+    assert f"'{step}', 'execution_result'" in exc_info.value.internal_detail
