@@ -27,7 +27,10 @@ class OutgoingMessageTooLargeError(Exception):
 class Outbox:
     """Class to manage outbound requests to clients."""
 
-    def __init__(self):
+    def __init__(self, exact_http_responses: bool = False):
+        # True on GitLab versions where Workhorse runs every runHTTPRequest and always echoes
+        # its request ID, so HTTP responses are matched by ID only.
+        self._exact_http_responses = exact_http_responses
         self._queue: asyncio.Queue[contract_pb2.Action | OutboxSignal] = asyncio.Queue()
         self._action_response: dict[
             ActionRequestID, asyncio.Future[contract_pb2.ClientEvent] | None
@@ -107,6 +110,13 @@ class Outbox:
         # request. We need to handle this case to maintain backward compatibility with
         # older clients.
         if not request_id:
+            if (
+                self._exact_http_responses
+                and event.actionResponse.WhichOneof("response_type") == "httpResponse"
+            ):
+                log.warning("Discarding an HTTP response without a request ID")
+                return
+
             self.legacy_set_action_response(event)
             return
 

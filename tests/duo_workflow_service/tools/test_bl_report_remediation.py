@@ -23,7 +23,7 @@ def test_the_owasp_identifier_changes_neither_the_id_nor_tracking():
         "file": "a.ts",
         "new_line": 2,
         "code_excerpt": "find(id)",
-        "anchor_status": bl.ANCHOR_VERIFIED,
+        "anchor_status": bl._ANCHOR_VERIFIED,
     }
     sources = {"a.ts": "function getBasket(id) {\n  find(id)\n}\n"}
     (v,) = _writer()._build_report([finding], sources=sources)["vulnerabilities"]

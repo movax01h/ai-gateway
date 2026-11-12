@@ -1,7 +1,7 @@
 # pylint: disable=too-many-lines
 import json
 from datetime import datetime, timezone
-from unittest.mock import ANY, AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, call, patch
 
 import pytest
 from anthropic import APIStatusError
@@ -20,7 +20,6 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent, _suggest_patterns
 from duo_workflow_service.agents.prompt_adapter import ChatAgentPromptTemplate
-from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.audit_events.collector import AuditEventCollector
 from duo_workflow_service.audit_events.context import audit_collector_context
 from duo_workflow_service.audit_events.event_types import AuditEventType
@@ -57,18 +56,28 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.tools import MalformedToolCallError, Toolset
-from lib.context import current_model_metadata_context
+from duo_workflow_service.tools.web_search import WebSearchState
+from lib.context import current_model_metadata_context, gitlab_version
 from lib.context.approval_sources import (
     approval_sources,
     get_approval_source,
     init_approval_sources,
 )
 from lib.events import GLReportingEventContext
+from lib.feature_flags import current_feature_flag_context
+from lib.feature_flags.context import FeatureFlag
 from lib.internal_events import InternalEventAdditionalProperties
 from lib.internal_events.event_enum import EventEnum
 from tests.duo_workflow_service.ui_chat_log_contract import (
     assert_client_valid_tool_info,
 )
+
+
+@pytest.fixture(autouse=True)
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container,
+):
+    """Native web calls are tracked through the wired internal events client."""
 
 
 @pytest.fixture(name="mock_datetime")
@@ -1102,6 +1111,68 @@ async def test_unanswerable_halt_skips_preapproved_tools(input, mock_toolset):
 
 
 @pytest.mark.asyncio
+async def test_unanswerable_halt_includes_id_less_tool_calls(input, mock_toolset):
+    """A needs-approval call without an id must still reach the error's tool names and its UNAVAILABLE event.
+
+    The halt reads names from approval_messages, which hold every needs-approval call; matching against requested_ids
+    would silently drop id-less calls.
+    """
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    mock_tools_registry = Mock(spec=ToolsRegistry)
+    # None = a fresh human decision is required for both tools.
+    mock_toolset.resolve_approval_source = AsyncMock(return_value=None)
+    mock_tracker = Mock(spec=ToolEventTracker)
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=mock_tools_registry,
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+        tracker=mock_tracker,
+        allow_agent_to_request_user=False,
+    )
+
+    ai_message = AIMessage(
+        content="I need two tools",
+        tool_calls=[
+            {
+                "name": "tool_with_id",
+                "args": {},
+                "id": "call_1",
+                "type": "tool_call",
+            },
+            {
+                "name": "tool_without_id",
+                "args": {},
+                "id": None,
+                "type": "tool_call",
+            },
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    with pytest.raises(ToolApprovalUnavailableError) as exc_info:
+        await chat_agent.run(input)
+
+    assert exc_info.value.tool_names == ["tool_with_id", "tool_without_id"]
+    assert mock_tracker.track_tool_governance_event.call_args_list == [
+        call(
+            EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+            tool_name="tool_with_id",
+        ),
+        call(
+            EventEnum.WORKFLOW_TOOL_APPROVAL_UNAVAILABLE,
+            tool_name="tool_without_id",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_silent_reuse_records_session_approval_source(input, mock_toolset):
     """A tool call that skips approval by reusing a prior/session approval must still be attributed so its
     ToolInvokedEvent carries the source."""
@@ -1184,6 +1255,51 @@ async def test_preapproved_tool_records_preapproved_source(input, mock_toolset):
     try:
         await chat_agent.run({**input, "preapproved_tools": ["read_file"]})
         assert get_approval_source("call_pre") == "preapproved_config"
+    finally:
+        approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_promoted_tool_records_auto_mode_source(input, tool_metadata):
+    """Chat reaches the toolset for a promoted tool, since promotion never joins the state's preapproved_tools."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        promoted_tools=["edit_file"],
+        can_ask_user=True,
+    )
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=registry,
+        system_template_override=None,
+        toolset=registry.toolset(["edit_file"]),
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    ai_message = AIMessage(
+        content="promoted",
+        tool_calls=[
+            {
+                "name": "edit_file",
+                "args": {"file_path": "/a", "old_str": "a", "new_str": "b"},
+                "id": "call_promoted",
+                "type": "tool_call",
+            }
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    init_approval_sources()
+    try:
+        result = await chat_agent.run({**input, "preapproved_tools": []})
+        assert result["status"] == WorkflowStatusEnum.EXECUTION
+        assert get_approval_source("call_promoted") == "auto_mode"
     finally:
         approval_sources.set(None)
 
@@ -2940,3 +3056,60 @@ class TestToolApprovalRequestTracking:
 
         assert result["status"] == WorkflowStatusEnum.EXECUTION
         internal_event_client.track_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("flag_enabled", "version", "expected_limit", "expected_requested"),
+    [
+        (True, "19.6.0", 2, ["call_0", "call_1"]),
+        (True, "19.5.3", None, ["call_0", "call_1", "call_2", "call_3"]),
+        (True, None, None, ["call_0", "call_1", "call_2", "call_3"]),
+        (False, "19.6.0", None, ["call_0", "call_1", "call_2", "call_3"]),
+    ],
+    ids=["flag_on", "flag_on_old_gitlab", "flag_on_unknown_gitlab", "flag_off"],
+)
+@patch("duo_workflow_service.agents.chat_agent.MAX_TOOL_CALLS_PER_MODEL_CALL", 2)
+async def test_approval_is_requested_only_for_tool_calls_that_will_run(
+    input, mock_toolset, flag_enabled, version, expected_limit, expected_requested
+):
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    mock_toolset.resolve_approval_source = AsyncMock(return_value=None)
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=Mock(spec=ToolsRegistry),
+        system_template_override=None,
+        toolset=mock_toolset,
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(
+        return_value=AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "tool_requiring_approval",
+                    "args": {"param": index},
+                    "id": f"call_{index}",
+                    "type": "tool_call",
+                }
+                for index in range(4)
+            ],
+        )
+    )
+
+    token = current_feature_flag_context.set(
+        {FeatureFlag.DUO_CHAT_TOOL_CALL_LIMITS.value} if flag_enabled else set()
+    )
+    version_token = gitlab_version.set(version)
+    try:
+        result = await chat_agent.run(input)
+    finally:
+        gitlab_version.reset(version_token)
+        current_feature_flag_context.reset(token)
+
+    assert result["max_tool_calls"] == expected_limit
+    assert result["tool_call_approval_requested"] == expected_requested

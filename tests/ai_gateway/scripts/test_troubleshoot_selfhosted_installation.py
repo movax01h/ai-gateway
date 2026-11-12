@@ -24,6 +24,21 @@ class _FakeRpcError(grpc.RpcError):
 
 
 class TestCheckCustomerPortalReachable:
+    @pytest.fixture(autouse=True)
+    def portal_url(self, monkeypatch):
+        monkeypatch.delenv("DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL", raising=False)
+        monkeypatch.setenv("AIGW_CUSTOMER_PORTAL_URL", "https://customers.gitlab.com")
+
+    def test_skipped_when_url_unset(self, monkeypatch, capsys):
+        monkeypatch.delenv("AIGW_CUSTOMER_PORTAL_URL")
+        get = MagicMock()
+        monkeypatch.setattr(ts.requests, "get", get)
+
+        ts.check_customer_portal_reachable()
+
+        get.assert_not_called()
+        assert "not used as a key source ✔" in capsys.readouterr().out
+
     def test_reachable(self, monkeypatch, capsys):
         monkeypatch.setattr(ts.requests, "get", lambda *a, **k: MagicMock())
 

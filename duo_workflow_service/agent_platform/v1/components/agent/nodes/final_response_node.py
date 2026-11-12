@@ -14,6 +14,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes._session impo
 )
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
+    log_server_tool_turn,
 )
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
@@ -115,13 +116,33 @@ class FinalResponseNode:  # pylint: disable=too-many-instance-attributes
                 last_message, output_iokey
             )
 
-        self._ui_history.log.success(
-            final_response_text,
-            event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+        # In schema mode the answer is a tool call, so AgentNode logged this
+        # message's server-tool cards along with its reasoning already.
+        if self._response_schema is not None or not log_server_tool_turn(
+            self._ui_history,
+            last_message,
+            log_text=lambda text, message_id: self._log_final_answer(
+                text, session_id, message_id
+            ),
+            component_name=self._component_name,
             subsession_id=session_id,
-        )
+        ):
+            self._log_final_answer(final_response_text, session_id)
 
         return {**self._ui_history.pop_state_updates(), **updates}
+
+    def _log_final_answer(
+        self,
+        text: str,
+        session_id: Optional[str],
+        message_id: Optional[str] = None,
+    ) -> None:
+        self._ui_history.log.success(
+            text,
+            event=UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+            subsession_id=session_id,
+            message_id=message_id,
+        )
 
     def _get_last_ai_message(
         self, state: FlowState, history_iokey: IOKey

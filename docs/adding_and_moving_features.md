@@ -17,7 +17,7 @@ design, and some parts of that design are not implemented yet.
 | Flow configuration | `ai/features/<domain>/<feature>/config/<version>.yml` | flow ID `<feature>` |
 | Feature tools | `ai/features/<domain>/<feature>/components/__init__.py`, in `FEATURE_TOOLS` | tools in the tools registry |
 | Tests | `ai/features/<domain>/<feature>/tests/` | collected by `pytest` |
-| Serving surface | `ai/features/<domain>/<feature>/serving.py`, in `SERVING_SURFACE` | not read yet |
+| Serving surface | `ai/features/<domain>/<feature>/serving.py`, in `SERVING_SURFACE` | not read at runtime yet |
 
 Follow these rules:
 
@@ -84,6 +84,9 @@ lint rejects it, so move the feature first.
        {% include '<feature>/system/1.0.0.jinja' %}
    ```
 
+   A prompt that the AI Gateway serves over HTTP sets `models_from` in each version. See
+   [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http).
+
 1. Declare the serving surface in `serving.py`. For a prompt that the AI Gateway serves
    over REST:
 
@@ -93,7 +96,8 @@ lint rejects it, so move the feature first.
    SERVING_SURFACE = [ServingSurface(transport="rest", deployable="aigw")]
    ```
 
-   Nothing reads this declaration yet.
+   Nothing reads this declaration at runtime yet. A test checks that a feature whose prompt
+   versions set `models_from` declares it.
 
 1. Add the feature or its domain to `.gitlab/CODEOWNERS`.
 
@@ -125,6 +129,9 @@ lint rejects it, so move the feature first.
      config/1.0.0.yml          # prompt_id: "<flow>"
      prompts/base/1.0.0.yml
    ```
+
+   Do not set `models_from` in this prompt: the flow selects its models. See
+   [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http).
 
 1. Put the tools that only this flow uses in `components/`. Export them from
    `components/__init__.py` in a `FEATURE_TOOLS` mapping, keyed by the agent privilege that
@@ -213,6 +220,15 @@ Move the whole feature in one merge request:
 
    Includes such as `<feature>/system/1.0.0.jinja` or `chat/react/system/1.0.0.jinja` keep
    working without a change.
+
+   An include string that changes its prefix in the move is part of the Flow Registry public
+   API, because custom flows in the AI Catalog include it by the old name. For example,
+   `common/branch_naming/1.0.0.jinja` became `developer/common/branch_naming/1.0.0.jinja`.
+   Add the old name to `LEGACY_INCLUDE_ALIASES` in `ai_gateway/prompts/feature_roots.py`,
+   so the old name still renders. `make check-include-names INCLUDE_NAMES_BASE=origin/main`
+   lists every include name that stopped resolving. A fragment that you delete on purpose
+   goes to `RETIRED_INCLUDE_NAMES` in the same module instead; check first that no AI
+   Catalog flow includes it.
 
 1. Run `make check-legacy-roots`. From `scripts/legacy_roots_allowlist.txt`, delete each line
    that it reports as stale.

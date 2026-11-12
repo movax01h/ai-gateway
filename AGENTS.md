@@ -172,12 +172,12 @@ Always run these `make` targets rather than invoking `pytest`, `mypy`,
 `.tool-versions` via mise, not npm, so `npx markdownlint-cli2` fails even
 though `make markdownlint` works. Exception: `make test` always runs the full
 suite and takes no path argument, so to run specific tests use
-`poetry run pytest <path>`. When piping test or check output through tools
-such as `tail` or `grep`, enable `set -o pipefail` (or otherwise preserve the
-producer's exit status) so a failing command cannot appear successful because
-the final pipeline command succeeded. `make test`, `check-mypy`, `check-ruff`,
-and `check-pylint` install required dependencies first via
-`install-test-deps`/`install-lint-deps`, and `check-mypy` also passes an
+`poetry run pytest <path>`. When piping output from any command whose exit
+status matters through tools such as `tail` or `grep`, enable `set -o pipefail`
+(or otherwise preserve the producer's exit status) so a failing command cannot
+appear successful because the final pipeline command succeeded. `make test`,
+`check-mypy`, `check-ruff`, and `check-pylint` install required dependencies
+first via `install-test-deps`/`install-lint-deps`, and `check-mypy` also passes an
 `--exclude` flag for `scripts/vendor/*` that a bare `mypy` invocation would
 silently skip, causing local results to disagree with CI.
 
@@ -186,9 +186,10 @@ run `poetry install`, which needs network
 access. In network-restricted environments (e.g. agent sandboxes) with a
 pre-installed `.venv`, prefix the make target with `CI=true` (e.g.
 `CI=true make check-mypy ...`) — the Makefile skips the install step when
-`CI=true` and `.venv` exists. The same prefix fixes lefthook hooks that
-fail in the install step (`CI=true git commit ...`); prefer it over
-`LEFTHOOK=0`, which skips the checks entirely.
+`CI=true` and `.venv` exists. This also applies to other targets that run
+`poetry install`. The same prefix fixes lefthook hooks that fail in the
+install step (`CI=true git commit ...`); prefer it over `LEFTHOOK=0`, which
+skips the checks entirely.
 
 The pre-installed `.venv` matches the `poetry.lock` of the commit the session
 started on. After you check out or rebase onto another ref, run
@@ -209,6 +210,11 @@ the Makefile runs docformatter recursively (`-r`).
 CI=true make check-mypy LINT_WORKING_DIR="path/to/changed_file.py"
 ```
 
+If `check-mypy` fails with `Failed to establish connection with worker` (or a
+`PermissionError` from `socket`), the sandbox blocks the sockets mypy's
+parallel workers use. Rerun with `MYPY_NUM_WORKERS=0` (also as a prefix to
+`git commit` for the lefthook mypy hook) to check in-process.
+
 Run the full-repo `check-mypy` only when you can allow a longer timeout;
 never weaken the check to make it pass.
 
@@ -228,7 +234,8 @@ LEFTHOOK=0 git commit ...
 Don't pipe `git commit` output (`| tail`): the pipeline reports `tail`'s exit
 status and hides a lefthook failure. If a commit's outcome is unclear, never
 `sleep` and retry blind: verify with `git log --oneline -1` (and
-`ls .git/MERGE_HEAD` during a merge) before retrying or pushing.
+`git rev-parse -q --verify MERGE_HEAD` during a merge) before retrying or
+pushing.
 
 ### Protocol Buffers
 
@@ -279,12 +286,14 @@ make duo-workflow-docs
 poetry run validate-model-selection-config
 ```
 
-`docs/duo_workflow_service_graphs.md` is generated from the flow configs and
-the legacy workflows in `duo_workflow_service/workflows/`, so never hand-edit
-it: run `make duo-workflow-docs` after changing either. To resolve merge
-conflicts in this doc, first resolve any conflicts in those sources, then run
-`make duo-workflow-docs`; either side of the conflicted doc works as a starting
-point, since regeneration overwrites it.
+`docs/duo_workflow_service_graphs.md` is generated from the flow configs in
+`duo_workflow_service/agent_platform/{v1,experimental}/flows/configs/` and
+`ai/features/*/*/config/`, and from the legacy workflows in
+`duo_workflow_service/workflows/`, so never hand-edit it: run
+`make duo-workflow-docs` after changing any of these sources. To resolve merge
+conflicts in the generated doc, first resolve any conflicts in those sources,
+then run `make duo-workflow-docs`. Regeneration replaces the doc, so either
+conflicted version is fine as a starting point.
 
 ## Code Style
 
@@ -438,10 +447,17 @@ Use `glab` for MR/issue CLI operations (or the GitLab MCP tools, if available).
 - Worktrees usually check out a single branch, so local `main` may not exist.
   Diff against `origin/main` (for example `git fetch origin main`, then
   `git diff origin/main...HEAD`), and never assume `main` resolves locally.
+- For conflict-resolution tasks with a restricted file scope, use
+  `git diff --name-only --diff-filter=U` to identify conflicts. Avoid merging
+  or rebasing unrelated target-branch changes into the work; verify every
+  changed path is in scope before committing or pushing, and stop if it is not.
 - Shell commands have a default timeout (often ~120s). Don't block a
   single call with a long `sleep`. Instead, request a longer timeout if
   your tool supports it, and poll in a bounded loop with an early break:
   `for i in $(seq 1 5); do glab ci get ... | grep -q '^status:.*success' && break; sleep 30; done`.
+  Budget the timeout when looping tests (`for i in $(seq 1 30); do pytest ...`): a run of
+  ~10s each already exceeds 300s. Use fewer iterations or a longer timeout, and split a
+  loop's pass/fail tally from a full output capture run.
 
 ### Branch Naming
 
@@ -526,9 +542,21 @@ git push --set-upstream origin <branch-name>
 ```
 
 When working on an existing MR, push to its `source_branch` (find it with
-`glab mr view <iid> --output json`). Don't guess remote state: check
+`glab mr view <iid> --output json`). Before reporting the change complete, verify
+the intended diff is committed, pushed, and included in the MR's latest commit;
+a working-tree diff alone is not enough. Don't guess remote state: check
 `git branch -a` or `glab` rather than enabling `push.autoSetupRemote` or
 retrying blindly.
+
+Never force push the shared default branch. When a force push is the agreed fix
+(for example dropping an out-of-scope commit from your own MR branch after review
+feedback):
+
+1. Push a backup first: `git push origin <branch>:refs/heads/duo-developer-backup/<branch>`
+   (push a named ref; pushing a raw `<sha>:refs/heads/...` fails with `not our ref`
+   on remotes configured to reject fetching arbitrary SHAs).
+1. `git push --force-with-lease origin <branch>` — never plain `--force`.
+1. Post a comment on the MR explaining what was rewritten and where the backup is.
 
 ### MR Template
 

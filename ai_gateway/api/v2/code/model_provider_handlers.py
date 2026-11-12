@@ -6,10 +6,6 @@ from ai_gateway.api.v2.code.typing import CompletionsRequestWithVersion
 from ai_gateway.models.base import KindModelProvider
 from ai_gateway.models.litellm import KindLiteLlmModel
 
-# Product budget for completion prompts, independent of model capability.
-# Evals show no quality gain from larger prompts (https://gitlab.com/gitlab-org/gitlab/-/work_items/607984).
-COMPLETION_MAX_PROMPT_TOKENS = 32_767
-
 
 class BaseModelProviderHandler:
     def __init__(
@@ -55,7 +51,6 @@ class FireworksHandler(BaseModelProviderHandler):
             {
                 "max_output_tokens": 48,
                 "context_max_percent": 0.3,
-                "max_prompt_tokens": COMPLETION_MAX_PROMPT_TOKENS,
             }
         )
 
@@ -79,7 +74,6 @@ class VertexHandler(BaseModelProviderHandler):
                 "temperature": 0.7,
                 "max_output_tokens": 64,
                 "context_max_percent": 0.3,
-                "max_prompt_tokens": COMPLETION_MAX_PROMPT_TOKENS,
             }
         )
 

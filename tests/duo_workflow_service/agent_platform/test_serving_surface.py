@@ -5,11 +5,13 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 
 from duo_workflow_service.agent_platform.serving_surface import (
     ServingSurface,
     collect_serving_surfaces,
 )
+from tests.prompts.prompt_dirs import REPO_ROOT, feature_prompt_dirs, version_files
 
 _DECLARATION = (
     "from duo_workflow_service.agent_platform.serving_surface import ServingSurface\n"
@@ -163,3 +165,43 @@ class TestCollectServingSurfaces:
         ) as logger:
             assert collect_serving_surfaces(features) == {}
         assert logger.warning.called
+
+
+class TestFeaturesThatDeclareModelsFrom:
+    """`models_from` is only for prompts that the AI Gateway serves over HTTP.
+
+    A feature under `ai/features/` that declares `models_from` in any prompt version must declare
+    `ServingSurface(transport="rest", deployable="aigw")` in its `serving.py`. A prompt that only runs in a flow must
+    not declare `models_from`: the prompt routes would then serve it.
+    """
+
+    @staticmethod
+    def _declares_models_from(prompts_dir: Path) -> bool:
+        return any(
+            yaml.safe_load(version_file.read_text()).get("models_from")
+            for version_file in version_files(prompts_dir)
+        )
+
+    def test_every_feature_with_models_from_is_served_over_rest_by_the_ai_gateway(
+        self,
+    ):
+        surfaces = collect_serving_surfaces()
+        feature_dirs = {
+            prompts_dir.parent
+            for prompts_dir in feature_prompt_dirs().values()
+            if prompts_dir.is_relative_to(REPO_ROOT / "ai" / "features")
+        }
+
+        undeclared = sorted(
+            str(feature_dir.relative_to(REPO_ROOT))
+            for feature_dir in feature_dirs
+            if self._declares_models_from(feature_dir / "prompts")
+            and ServingSurface(transport="rest", deployable="aigw")
+            not in surfaces.get(feature_dir.name, [])
+        )
+
+        assert feature_dirs
+        assert not undeclared, (
+            "These features declare `models_from` but their `serving.py` does not declare "
+            f"`ServingSurface(transport='rest', deployable='aigw')`: {undeclared}"
+        )

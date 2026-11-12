@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, NoReturn, Optional, override
+from typing import Any, Dict, NoReturn, Optional, cast, override
 from uuid import uuid4
 
 import jsonschema
@@ -21,8 +21,15 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
 )
 from duo_workflow_service.agent_platform.v1.catalog import (
     CatalogItems,
+    CatalogItemSource,
     default_prompts,
 )
+from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogAgentsUnavailableError,
+    CatalogItemsError,
+    CatalogItemsFetchError,
+)
+from duo_workflow_service.agent_platform.v1.catalog.fetch import fetch_catalog_agents
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
 from duo_workflow_service.agent_platform.v1.flows.graph_builder import FlowGraphBuilder
 from duo_workflow_service.agent_platform.v1.flows.inputs import (
@@ -177,7 +184,7 @@ class Flow(AbstractWorkflow):
         workflow_metadata: Dict[str, Any],
         workflow_type: GLReportingEventContext,
         user: CloudConnectorUser,
-        config: FlowConfig,
+        config: Optional[FlowConfig],
         streaming: bool = False,
         mcp_tools: list[contract_pb2.McpTool] = [],
         additional_context: Optional[list[AdditionalContext]] = None,
@@ -206,15 +213,30 @@ class Flow(AbstractWorkflow):
             internal_event_client=internal_event_client,
             **kwargs,
         )
-        self._config = config
         self._stream = streaming
         self._catalog_items = catalog_items or CatalogItems()
-
         self._flow_prompt_registry = InMemoryPromptRegistry(prompt_registry)
+        self._flow_schema_registry = InlineResponseSchemaRegistry(schema_registry)
+        # None only for a flow that fetches its config before the graph is compiled.
+        if config is not None:
+            self._use_config(config)
+
+        self._set_tracking_context_from_additional_context()
+
+    # pylint: enable=dangerous-default-value
+
+    def _use_config(self, config: FlowConfig) -> None:
+        """Set the flow config and register its prompts and response schemas."""
+        self._config = config
+        # Both are the in-memory registries made in __init__. Self-hosted billing may wrap
+        # the prompt registry, and the wrapper forwards these calls to it.
+        prompt_registry = cast(InMemoryPromptRegistry, self._flow_prompt_registry)
+        schema_registry = cast(InlineResponseSchemaRegistry, self._flow_schema_registry)
+
         if self._config.prompts:
             for prompt_config in self._config.prompts:
                 prompt_id = prompt_config.prompt_id
-                self._flow_prompt_registry.register_prompt(
+                prompt_registry.register_prompt(
                     prompt_id=prompt_id,
                     prompt_data=prompt_config.to_prompt_data(),
                 )
@@ -224,21 +246,16 @@ class Flow(AbstractWorkflow):
         # flow's own, so one of these cannot be shadowed; overriding them is a later
         # phase.
         for catalog_prompt in default_prompts():
-            self._flow_prompt_registry.register_prompt(
+            prompt_registry.register_prompt(
                 prompt_id=catalog_prompt.prompt_id,
                 prompt_data=catalog_prompt.to_prompt_data(),
             )
 
-        self._flow_schema_registry = InlineResponseSchemaRegistry(schema_registry)
         if self._config.response_schemas:
             for schema_config in self._config.response_schemas:
-                self._flow_schema_registry.register_schema(
+                schema_registry.register_schema(
                     schema_config.schema_id, schema_config.to_schema_dict()
                 )
-
-        self._set_tracking_context_from_additional_context()
-
-    # pylint: enable=dangerous-default-value
 
     def _set_tracking_context_from_additional_context(self) -> None:
         """Set merge_request_url and pipeline_source ContextVars from additional context."""
@@ -668,6 +685,34 @@ class Flow(AbstractWorkflow):
                 return None  # retry from last checkpoint
             case _:
                 return None
+
+    @override
+    async def _prepare_compile(self) -> None:
+        """Fetch the AI Catalog agents the flow references, when it references any.
+
+        The fetch is a RunHTTPRequest action on the run's stream, which Workhorse serves with the run's token. GitLab
+        resolves the agents from the saved flow's dependency rows and checks each one for the current user. A flow
+        without an ``ai-catalog`` entry makes no request.
+
+        Runs on every turn. A pinned version cannot change, but it can be unpublished or become unreadable between
+        turns, and a resume must see that.
+        """
+        if not self._references_ai_catalog():
+            return
+
+        try:
+            fetched = await fetch_catalog_agents(self._http_client, self._workflow_id)
+        except (CatalogItemsFetchError, CatalogItemsError) as exc:
+            raise CatalogAgentsUnavailableError.from_error(exc) from exc
+        self._catalog_items = self._catalog_items.with_ai_catalog_agents(
+            fetched.agents, fetched.skipped_reason
+        )
+
+    def _references_ai_catalog(self) -> bool:
+        return any(
+            ref.source == CatalogItemSource.AI_CATALOG
+            for ref in self._config.include or []
+        )
 
     @override
     def _compile(

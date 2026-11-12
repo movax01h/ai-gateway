@@ -1,6 +1,5 @@
 import asyncio
-import contextlib
-from typing import Awaitable, Optional, TypeVar
+from typing import Any, Awaitable, Optional, TypeVar, cast
 
 from fastapi import Request, Response
 from prometheus_client import Counter
@@ -34,11 +33,15 @@ async def run_unless_disconnected(
     enabled: bool = True,
     poll_interval: Optional[float] = None,
 ) -> T:
-    """Await ``awaitable``, cancelling it as soon as the request's client disconnects.
+    """Await ``awaitable`` in the current task, cancelling it as soon as the request's client disconnects.
 
     Starlette cancels a streaming response when its client leaves, but the model call that runs before any response
-    exists keeps going, including every retry. Polling ``request.is_disconnected()`` while that call is in flight
-    closes the gap for streaming and non-streaming requests alike.
+    exists keeps going, including every retry. A side task polls ``request.is_disconnected()`` while that call is in
+    flight and cancels this task once the client has gone.
+
+    The call itself stays in the request's task on purpose: a task of its own would get a copy of the context
+    variables, and the LLM operations it registers there would be invisible to the code that streams and bills the
+    response afterwards.
     """
     if not enabled:
         return await awaitable
@@ -48,26 +51,28 @@ async def run_unless_disconnected(
         if poll_interval is not None
         else _DISCONNECT_POLL_INTERVAL_SECONDS
     )
-    task = asyncio.ensure_future(awaitable)
+    task = cast("asyncio.Task[Any]", asyncio.current_task())
+    cancels_before = task.cancelling()
+    disconnected = False
+
+    async def _cancel_on_disconnect() -> None:
+        nonlocal disconnected
+        while not await request.is_disconnected():
+            await asyncio.sleep(interval)
+        disconnected = True
+        task.cancel()
+
+    watcher = asyncio.create_task(_cancel_on_disconnect())
     try:
-        while True:
-            done, _ = await asyncio.wait({task}, timeout=interval)
-            if done:
-                return task.result()
-            if await request.is_disconnected():
-                break
+        return await awaitable
+    except asyncio.CancelledError:
+        if not disconnected or task.uncancel() > cancels_before:
+            raise
     finally:
-        if not task.done():
-            await _cancel(task)
+        watcher.cancel()
 
     CLIENT_DISCONNECTS.labels(route=request.url.path).inc()
     raise ClientDisconnectedError()
-
-
-async def _cancel(task: "asyncio.Future[T]") -> None:
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
 
 
 async def client_disconnected_exception_handler(

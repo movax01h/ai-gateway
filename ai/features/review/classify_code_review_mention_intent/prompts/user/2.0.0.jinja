@@ -1,0 +1,10 @@
+<context>
+Duo is a reviewer of this merge request: {{ 'yes' if duo_review_state and duo_review_state != 'not_reviewer' else 'no' }}
+Thread started by a Duo review: {{ 'yes' if thread_started_by_duo_review else 'no' }}
+{%- if thread %}
+Earlier messages in this thread, oldest first:
+{{ thread }}
+{%- endif %}
+</context>
+
+Message: {{ message }}

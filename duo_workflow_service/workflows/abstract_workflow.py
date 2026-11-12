@@ -5,7 +5,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, NoReturn, Optional
+from typing import Any, Dict, NoReturn, Optional, get_args
 from uuid import uuid4
 
 import structlog
@@ -29,7 +29,7 @@ from langgraph.errors import (  # pylint: disable=no-langgraph-langchain-imports
 )
 from langgraph.types import Command, Durability
 from langsmith import traceable, tracing_context
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from ai_gateway.container import ContainerApplication
 from ai_gateway.prompts import BasePromptRegistry
@@ -66,6 +66,10 @@ from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.checkpointer.write_mode import (
     incremental_checkpoints_enabled,
 )
+from duo_workflow_service.client_capabilities import (
+    AUTO_MODE_CAPABILITY,
+    is_client_capable,
+)
 from duo_workflow_service.components import ToolsRegistry
 from duo_workflow_service.components.tools_registry import ceiling_exempt_tool_names
 from duo_workflow_service.entities import DuoWorkflowStateType, WorkflowStatusEnum
@@ -94,9 +98,13 @@ from duo_workflow_service.gitlab.gitlab_api import (
     empty_workflow_config,
     fetch_workflow_and_container_data,
 )
+from duo_workflow_service.gitlab.help_links import gitlab_web_url
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
-from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
+from duo_workflow_service.gitlab.url_parser import (
+    SESSION_URL_PATH,
+    sanitize_url_credentials,
+)
 from duo_workflow_service.model_routing import (
     route_default_model,
     track_routing_decision,
@@ -106,11 +114,13 @@ from duo_workflow_service.status_updater.gitlab_status_updater import (
     GitLabStatusUpdater,
 )
 from duo_workflow_service.tools.mcp_tools import (
+    FirstPartyVerdict,
     McpToolConfig,
     convert_mcp_tools_to_configs,
 )
 from duo_workflow_service.tools.version_compatibility import (
     strips_client_mcp_trust,
+    supports_tool_access_policies_field,
 )
 from duo_workflow_service.tracking import (
     MonitoringContext,
@@ -123,10 +133,12 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
 )
+from lib.context import client_type
 from lib.context.orbit import is_orbit_tool
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
+from lib.internal_events.context import current_event_context
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from lib.langsmith_tracing import get_langsmith_trace_headers
 from lib.language_server import LanguageServerVersion
@@ -139,7 +151,7 @@ MAX_TOKENS_TO_SAMPLE = 8192
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 # Same bound the executor HTTP client puts on a GraphQL round trip.
-TOKEN_REJECTION_DROP_TIMEOUT_S = 10.0
+SESSION_DROP_TIMEOUT_S = 10.0
 
 
 def _claim_requests_ceiling(raw: Any) -> bool:
@@ -175,6 +187,13 @@ def _token_issued_by_dws(user: CloudConnectorUser) -> bool:
     return claims.issuer == self_issued_by
 
 
+TOOL_ACCESS_POLICIES_UNAVAILABLE_MESSAGE = (
+    "GitLab Duo could not load the tool rules for this session. Try again later."
+)
+TOOL_ACCESS_POLICIES_DROP_REASON = "tool_rules_unavailable"
+_TOOL_ACCESS_POLICY_KEYS = {"allow", "ask", "deny"}
+
+
 class ToolAccessPolicies(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -187,6 +206,130 @@ class ToolAccessPolicies(BaseModel):
     # the registry baseline and start_flows stay pre-approved, not the read-only exemption.
     # The same holds whenever allow is empty.
     ceiling: bool = False
+    # Names Rails owns as first-party, with their verdict. Sent on ungoverned surfaces too, so it never counts towards
+    # whether governance is active.
+    first_party_tools: dict[str, FirstPartyVerdict] = {}
+    # Tools left at the built-in default of ask that Rails lets auto mode run without a
+    # prompt. Applied only on a turn whose client declared auto mode and can prompt.
+    promote: list[str] = []
+
+    @field_validator("promote", mode="before")
+    @classmethod
+    def _coerce_promote(cls, value: Any) -> list[str]:
+        """Degrade a malformed list to none.
+
+        Promotion only ever adds pre-approvals, so dropping it is the safe direction and must not fail the rest of the
+        claim closed.
+        """
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            structlog.stdlib.get_logger("workflow").warning(
+                "Ignoring a promote list that is not a list",
+                value_type=type(value).__name__,
+            )
+            return []
+        if not all(isinstance(name, str) for name in value):
+            structlog.stdlib.get_logger("workflow").warning(
+                "Ignoring a promote list with entries that are not tool names",
+            )
+            return []
+        return value
+
+    @field_validator("first_party_tools", mode="before")
+    @classmethod
+    def _drop_unknown_verdicts(cls, value: Any) -> Any:
+        """Drop entries with a verdict this service does not know, keeping the rest of the claim in force.
+
+        Rails and this service skew on self-managed instances, so a verdict added later must cost only that tool its
+        exemption, not fail the whole claim closed. A null map means no exemptions, like an absent one. A list, string
+        or other shape breaks the contract and fails the claim closed.
+        """
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            return value
+
+        known = {
+            name: verdict
+            for name, verdict in value.items()
+            if verdict in get_args(FirstPartyVerdict)
+        }
+        if len(known) != len(value):
+            structlog.stdlib.get_logger("workflow").warning(
+                "Ignoring first-party tools with unknown verdicts",
+                dropped=sorted(str(name) for name in value.keys() - known.keys()),
+            )
+        return known
+
+
+@dataclass(frozen=True)
+class _UnparsableClaim:
+    error: Exception
+    # The claim still asks for the ceiling, so the ceiling fails closed too.
+    requests_ceiling: bool
+
+
+def _parse_tool_access_policies(
+    user: CloudConnectorUser,
+) -> ToolAccessPolicies | _UnparsableClaim | None:
+    """Parse the tool_access_policies claim; None when the claim is absent or empty."""
+    claims = getattr(user, "claims", None)
+    if not claims or not claims.extra:
+        return None
+
+    raw = claims.extra.get("tool_access_policies")
+    if not raw:
+        return None
+
+    try:
+        if isinstance(raw, str):
+            return ToolAccessPolicies.model_validate_json(raw)
+        return ToolAccessPolicies.model_validate(raw)
+    except Exception as error:
+        return _UnparsableClaim(
+            error=error, requests_ceiling=_claim_requests_ceiling(raw)
+        )
+
+
+_SLACK_TOOL_NAME_PREFIX = "slack_"
+
+
+def _runs_without_external_mcp_setting(llm_name: str) -> bool:
+    """Whether a trusted tool runs without "Allow external MCP tools": Orbit's and the GitLab for Slack app's.
+
+    Other trusted tools, such as GitLab MCP's, stay behind the setting. ADR-005's bridge rule: replace this with the
+    tool's origin once tools carry one (https://gitlab.com/gitlab-org/gitlab/-/work_items/635112).
+    """
+    return is_orbit_tool(llm_name) or llm_name.startswith(_SLACK_TOOL_NAME_PREFIX)
+
+
+# The client type the Duo CLI and Language Server websocket send; only their releases reserve
+# the `duo` MCP server name for the first-party server.
+_FIRST_PARTY_CLIENT_TYPE = "node-websocket"
+
+
+def _first_party_untrusted_reason(
+    user: CloudConnectorUser,
+    request_client_type: Optional[str],
+    language_server_version: Optional[LanguageServerVersion],
+) -> Optional[str]:
+    """Why the client cannot be trusted with first-party tool names, or None when it can.
+
+    The claim names a first-party tool, but the client picks its tool names. Only a client that reserves the `duo`
+    server name can be held to the claim. A DWS-issued token reaches runner flows too, where every MCP tool counts as
+    client-injected.
+    """
+    if _token_issued_by_dws(user):
+        return "dws_issued_token"
+    if request_client_type != _FIRST_PARTY_CLIENT_TYPE:
+        return "client_type"
+    if not (
+        language_server_version
+        and language_server_version.supports_first_party_mcp_tools()
+    ):
+        return "language_server_version"
+    return None
 
 
 @dataclass(frozen=True)
@@ -257,8 +400,15 @@ class AbstractWorkflow(ABC):
         ],
         resume_checkpoint_ts: Optional[str] = None,
     ):
-        self._outbox = Outbox()
+        self._outbox = Outbox(
+            exact_http_responses=supports_tool_access_policies_field()
+        )
         self._workflow_id = workflow_id
+        # Strip any embedded userinfo from git_url at the boundary: executors
+        # may forward an origin URL carrying the workflow OAuth token, and the
+        # value must not live on the workflow for the whole session.
+        if git_url := workflow_metadata.get("git_url"):
+            workflow_metadata["git_url"] = sanitize_url_credentials(git_url)
         self._workflow_metadata = workflow_metadata
         self._user = user
         self._resume_checkpoint_ts = resume_checkpoint_ts
@@ -266,9 +416,18 @@ class AbstractWorkflow(ABC):
         self._http_client = ExecutorGitLabHttpClient(self._outbox)
         self._workflow_type = workflow_type
         self._additional_context = additional_context
-        self._mcp_tools = convert_mcp_tools_to_configs(
-            mcp_tools=mcp_tools,
-            force_client_injected=_token_issued_by_dws(user),
+        # Parsed once here because tool conversion needs the first-party names before
+        # _merge_jwt_governance_claims runs.
+        self._claimed_tool_access_policies = _parse_tool_access_policies(user)
+        self._language_server_version = language_server_version
+        self._raw_mcp_tools = mcp_tools
+        self._first_party_untrusted_reason = _first_party_untrusted_reason(
+            user, client_type.get(), language_server_version
+        )
+        self._use_first_party_tools(
+            self._claimed_tool_access_policies.first_party_tools
+            if isinstance(self._claimed_tool_access_policies, ToolAccessPolicies)
+            else {}
         )
         self._approval = approval
         if approval is not None and approval.HasField("approval"):
@@ -295,7 +454,6 @@ class AbstractWorkflow(ABC):
         self._prompt_registry = prompt_registry
         self._workflow_config = empty_workflow_config()
         self._internal_event_client = internal_event_client
-        self._language_server_version = language_server_version
         self._preapproved_tools = preapproved_tools
         self._denied_tools: list[str] = []
         self._ask_tools: list[str] = []
@@ -305,6 +463,9 @@ class AbstractWorkflow(ABC):
         self._governance_allowed_tools: list[str] = []
         # `None` means the ceiling is off; an empty set means it is on and permits nothing.
         self._admin_allowed_preapprovals: Optional[set[str]] = None
+        # Kept apart from _preapproved_tools: chat state checkpoints that list, and
+        # promotion holds for this turn only.
+        self._promoted_tools: list[str] = []
         self._ceiling_claim_unparsable = False
         self._session_url: Optional[str] = None
         self._last_gitlab_status: WorkflowStatusEventEnum | None = None
@@ -322,7 +483,11 @@ class AbstractWorkflow(ABC):
             monitoring_context: MonitoringContext = current_monitoring_context.get()
 
             tracing_metadata = {
-                "git_url": self._workflow_metadata.get("git_url", ""),
+                # Defense in depth: sanitize again at the sink so a git_url set
+                # after __init__ can never leak credentials to LangSmith.
+                "git_url": sanitize_url_credentials(
+                    self._workflow_metadata.get("git_url", "")
+                ),
                 "git_sha": self._workflow_metadata.get("git_sha", ""),
                 "workflow_type": self._workflow_type.value,
                 "thread_id": self._workflow_id,
@@ -448,6 +613,42 @@ class AbstractWorkflow(ABC):
             )
             self._first_response_metric_recorded = True
 
+    def _use_first_party_tools(
+        self, claimed_first_party_tools: dict[str, FirstPartyVerdict]
+    ) -> None:
+        """Take the policy's first-party verdicts, if the client can be held to them, and convert the MCP tools."""
+        untrusted_reason = self._first_party_untrusted_reason
+        self._first_party_tools: dict[str, FirstPartyVerdict] = (
+            {} if untrusted_reason else claimed_first_party_tools
+        )
+        if claimed_first_party_tools and untrusted_reason:
+            self.log.info(
+                "Ignoring first-party MCP tools from tool_access_policies",
+                reason=untrusted_reason,
+                client_type=client_type.get(),
+                language_server_version=(
+                    str(self._language_server_version.version)
+                    if self._language_server_version
+                    else None
+                ),
+                first_party_tools=sorted(claimed_first_party_tools),
+            )
+        self._mcp_tools = convert_mcp_tools_to_configs(
+            mcp_tools=self._raw_mcp_tools,
+            force_client_injected=_token_issued_by_dws(self._user),
+            first_party_tools=self._first_party_tools,
+        )
+        if self._first_party_tools:
+            self.log.info(
+                "Recognised first-party MCP tools from tool_access_policies",
+                first_party_tools=self._first_party_tools,
+                recognised_tool_names=sorted(
+                    tool["llm_name"]
+                    for tool in self._mcp_tools
+                    if tool.get("first_party", False)
+                ),
+            )
+
     def _mcp_enabled(self) -> bool:
         """Whether the root namespace allows MCP tools (``duo_workflow_mcp_enabled``).
 
@@ -460,13 +661,16 @@ class AbstractWorkflow(ABC):
         if self._mcp_enabled():
             return self._mcp_tools
 
-        if not strips_client_mcp_trust():
-            return []
-
+        orbit_permitted = strips_client_mcp_trust()
         return [
             tool
             for tool in self._mcp_tools
-            if tool.get("trusted", False) and is_orbit_tool(tool["llm_name"])
+            if tool.get("first_party", False)
+            or (
+                orbit_permitted
+                and tool.get("trusted", False)
+                and _runs_without_external_mcp_setting(tool["llm_name"])
+            )
         ]
 
     def _allow_client_injected_mcp_tools(self) -> bool:
@@ -497,68 +701,179 @@ class AbstractWorkflow(ABC):
             ]
         return tools_registry
 
-    def _merge_jwt_governance_claims(self) -> None:
-        if self._user.claims and self._user.claims.extra:
-            raw = self._user.claims.extra.get("tool_access_policies")
-            if raw:
-                try:
-                    policies = (
-                        ToolAccessPolicies.model_validate_json(raw)
-                        if isinstance(raw, str)
-                        else ToolAccessPolicies.model_validate(raw)
-                    )
-                except Exception:
-                    # Fail closed: a present-but-unparsable claim must not leave the
-                    # client-supplied preapproved_tools in effect. Log it -- a malformed
-                    # governance claim is security-relevant and operators need visibility.
-                    self.log.warning(
-                        "tool_access_policies claim present but unparsable; "
-                        "failing closed and clearing client preapproved_tools",
-                        exc_info=True,
-                    )
-                    self._preapproved_tools = []
-                    if _claim_requests_ceiling(raw):
-                        self._admin_allowed_preapprovals = set()
-                        self._ceiling_claim_unparsable = True
-                    return
-                can_ask_user = self._workflow_config.get(
-                    "allow_agent_to_request_user", False
-                )
-                ask = set(policies.ask)
-                deny = set(policies.deny) if can_ask_user else set(policies.deny) | ask
-                self._ask_tools = list(ask) if can_ask_user else []
-                # The JWT allow-list is the ceiling: client-supplied preapproved_tools
-                # cannot widen it, else a custom container bypasses Ask/Deny governance.
-                # `ask` counts as active so an "ask everything" policy (empty allow and
-                # deny) still enforces the ceiling.
-                # A ceiling claim is active even when empty: Rails resolved the policy and it
-                # allowed nothing.
-                governance_active = (
-                    policies.ceiling
-                    or bool(policies.allow)
-                    or bool(deny)
-                    or bool(self._ask_tools)
-                )
-                if governance_active:
-                    # deny > ask > allow, matching Rails' resolution order, so a tool
-                    # named in both allow and ask still reaches the user.
-                    # Sorted so the order is stable across processes. A reorder makes the
-                    # checkpointer treat the list as a full replacement (compaction).
-                    self._preapproved_tools = sorted(set(policies.allow) - ask)
-                    self._governance_allowed_tools = list(self._preapproved_tools)
-                # Uses the raw ask list: `_ask_tools` is emptied for sessions that cannot ask,
-                # and an ask rule must still keep a tool out of pre-approval there.
-                if policies.ceiling:
-                    # An empty allow means Rails' read-only groups did not resolve to allow.
-                    self._admin_allowed_preapprovals = (
-                        set(policies.allow) - set(policies.ask)
-                    ) | ceiling_exempt_tool_names(
-                        set(policies.ask) | set(policies.deny),
-                        keep_read_only=bool(policies.allow),
-                    )
-                if deny:
-                    # Sorted for the same stable-order reason as _preapproved_tools above.
-                    self._denied_tools = sorted(set(self._denied_tools) | deny)
+    def _record_container_urls(self) -> None:
+        """Keep the session link and the browser URL that user-facing links are built from.
+
+        Both come from the container's web URL, which is the address the user's browser opened. The service may reach
+        GitLab through an internal address instead.
+        """
+        project_url = self._project.get("web_url", "") if self._project else ""
+        if project_url:
+            self._session_url = f"{project_url}{SESSION_URL_PATH}{self._workflow_id}"
+        namespace_url = self._namespace.get("web_url", "") if self._namespace else ""
+        gitlab_web_url.set(project_url or namespace_url)
+
+    def _merge_jwt_governance_claims(self) -> bool:
+        """Apply the policy claim, and return whether the token carried one."""
+        policies = self._claimed_tool_access_policies
+        if policies is None:
+            return False
+        if isinstance(policies, _UnparsableClaim):
+            # Fail closed: a present-but-unparsable claim must not leave the
+            # client-supplied preapproved_tools in effect. Log it -- a malformed
+            # governance claim is security-relevant and operators need visibility.
+            self.log.warning(
+                "tool_access_policies claim present but unparsable; "
+                "failing closed and clearing client preapproved_tools",
+                exc_info=policies.error,
+            )
+            self._preapproved_tools = []
+            if policies.requests_ceiling:
+                self._admin_allowed_preapprovals = set()
+                self._ceiling_claim_unparsable = True
+            return True
+
+        self._apply_tool_access_policies(policies)
+        return True
+
+    @staticmethod
+    def _requested_project_id() -> Optional[int]:
+        event_context = current_event_context.get()
+        return event_context.project_id if event_context else None
+
+    def _loads_tool_access_policies(self) -> bool:
+        return (
+            self._claimed_tool_access_policies is None
+            and supports_tool_access_policies_field()
+        )
+
+    async def _merge_governance_policies(self) -> None:
+        """Merge the policy claim, or the policy Rails returned when the token has none."""
+        if (
+            self._merge_jwt_governance_claims()
+            or not supports_tool_access_policies_field()
+        ):
+            return
+
+        loaded = self._workflow_config.get("tool_access_policies")
+        try:
+            # A null or partial answer would otherwise apply as "no governance".
+            if (
+                not isinstance(loaded, dict)
+                or not _TOOL_ACCESS_POLICY_KEYS <= loaded.keys()
+            ):
+                raise ValueError("tool access policies missing from the workflow query")
+            policies = ToolAccessPolicies.model_validate(loaded)
+        except Exception as error:
+            self.log.error(
+                "Stopping the session: tool access policies could not be loaded",
+                workflow_id=self._workflow_id,
+                error_type=type(error).__name__,
+            )
+            # The stop comes before GitLabWorkflow is entered, so nothing else
+            # moves a new session out of `created`. A resumed session keeps its
+            # status, since a failed fetch is often temporary.
+            if (
+                self._workflow_config.get("workflow_status")
+                == WorkflowStatusEnum.CREATED
+            ):
+                await self._drop_session(TOOL_ACCESS_POLICIES_DROP_REASON)
+            raise NotifiableException(
+                TOOL_ACCESS_POLICIES_UNAVAILABLE_MESSAGE
+            ) from error
+
+        self._use_first_party_tools(policies.first_party_tools)
+        self._apply_tool_access_policies(policies)
+
+    def _apply_tool_access_policies(self, policies: ToolAccessPolicies) -> None:
+        can_ask_user = self._workflow_config.get("allow_agent_to_request_user", False)
+        ask = set(policies.ask)
+        deny = set(policies.deny) if can_ask_user else set(policies.deny) | ask
+        self._ask_tools = list(ask) if can_ask_user else []
+        # The JWT allow-list is the ceiling: client-supplied preapproved_tools
+        # cannot widen it, else a custom container bypasses Ask/Deny governance.
+        # `ask` counts as active so an "ask everything" policy (empty allow and
+        # deny) still enforces the ceiling.
+        # A ceiling claim is active even when empty: Rails resolved the policy and it
+        # allowed nothing.
+        governance_active = (
+            policies.ceiling
+            or bool(policies.allow)
+            or bool(deny)
+            or bool(self._ask_tools)
+        )
+        if governance_active:
+            # deny > ask > allow, matching Rails' resolution order, so a tool
+            # named in both allow and ask still reaches the user.
+            # Sorted so the order is stable across processes. A reorder makes the
+            # checkpointer treat the list as a full replacement (compaction).
+            self._preapproved_tools = sorted(set(policies.allow) - ask)
+            self._governance_allowed_tools = list(self._preapproved_tools)
+        # An ungoverned claim leaves the client's own list in force, and the CLI pre-approves
+        # its first-party server there. Chat skips approval for any name on it, so an `ask`
+        # verdict would never reach the user.
+        first_party_ask = {
+            name
+            for name, verdict in self._first_party_tools.items()
+            if verdict == "ask"
+        }
+        if first_party_ask and self._preapproved_tools:
+            self._preapproved_tools = [
+                name for name in self._preapproved_tools if name not in first_party_ask
+            ]
+        # Uses the raw ask list: `_ask_tools` is emptied for sessions that cannot ask,
+        # and an ask rule must still keep a tool out of pre-approval there.
+        if policies.ceiling:
+            # Rails keeps first-party tools out of every privilege group, so a rule on one
+            # cannot have demoted a read-only group and must not cost those tools their exemption.
+            # That holds whatever the client, so this reads the signed map, not the gated one:
+            # it only keeps an exemption Rails' groups allow and marks no client tool first-party.
+            ruled = (set(policies.ask) | set(policies.deny)) - set(
+                policies.first_party_tools
+            )
+            # An empty allow means Rails' read-only groups did not resolve to allow.
+            self._admin_allowed_preapprovals = (
+                set(policies.allow) - set(policies.ask)
+            ) | ceiling_exempt_tool_names(ruled, keep_read_only=bool(policies.allow))
+        # The registry folds a first-party ask nobody can answer into deny. List it here too,
+        # so the prompt names it as unavailable. Kept out of `deny` above: a first-party map
+        # alone must not make the claim count as governance.
+        if not can_ask_user:
+            deny = deny | first_party_ask
+        if deny:
+            # Sorted for the same stable-order reason as _preapproved_tools above.
+            self._denied_tools = sorted(set(self._denied_tools) | deny)
+        self._apply_auto_mode_promotion(policies, governance_active, can_ask_user)
+
+    def _apply_auto_mode_promotion(
+        self,
+        policies: ToolAccessPolicies,
+        governance_active: bool,
+        can_ask_user: bool,
+    ) -> None:
+        """Pre-approve the claim's `promote` list for this turn when the user engaged auto mode.
+
+        Rails decides which tools may be promoted; only the client knows whether this turn is in auto mode. A session
+        that cannot prompt keeps halting on those tools instead.
+        """
+        requested = set(policies.promote) - set(policies.ask) - set(policies.deny)
+        if not requested:
+            return
+        engaged = is_client_capable(AUTO_MODE_CAPABILITY)
+        if not (governance_active and can_ask_user and engaged):
+            self.log.debug(
+                "Not promoting default-ask tools for this turn",
+                governance_active=governance_active,
+                can_ask_user=can_ask_user,
+                auto_mode_engaged=engaged,
+            )
+            return
+        self._promoted_tools = sorted(requested)
+        self.log.info(
+            "Promoting default-ask tools for this auto mode turn",
+            promoted_count=len(self._promoted_tools),
+        )
+        self.log.debug("Promoted default-ask tools", tool_names=self._promoted_tools)
 
     def _extract_trace_output(self, state: dict | None) -> str | None:
         """Extract the final response content from ui_chat_log for LangSmith tracing.
@@ -698,9 +1013,11 @@ class AbstractWorkflow(ABC):
             ) = await fetch_workflow_and_container_data(
                 client=self._http_client,
                 workflow_id=self._workflow_id,
+                tool_access_policies_project_id=self._requested_project_id(),
+                with_tool_access_policies=self._loads_tool_access_policies(),
             )
 
-            self._merge_jwt_governance_claims()
+            await self._merge_governance_policies()
 
             incremental_checkpoints_enabled.set(
                 self._workflow_config.get("incremental_checkpoints_enabled", False)
@@ -715,10 +1032,7 @@ class AbstractWorkflow(ABC):
                 )
             )
 
-            if self._project and self._project.get("web_url"):
-                self._session_url = (
-                    f"{self._project['web_url']}{SESSION_URL_PATH}{self._workflow_id}"
-                )
+            self._record_container_urls()
 
             if self._namespace and self._support_namespace_level_workflow() is False:
                 raise NamespaceLevelWorkflowNotSupportedException()
@@ -737,7 +1051,9 @@ class AbstractWorkflow(ABC):
                     allow_client_injected_mcp_tools=self._allow_client_injected_mcp_tools(),
                     allowed_tools=self._governance_allowed_tools,
                     admin_allowed_preapprovals=self._admin_allowed_preapprovals,
+                    promoted_tools=self._promoted_tools,
                     registry_flow_id=self._registry_flow_id(),
+                    first_party_tools=self._first_party_tools,
                 )
             )
 
@@ -819,6 +1135,7 @@ class AbstractWorkflow(ABC):
                     status_event = WorkflowStatusEventEnum.START
 
                 await self._route_default_model(goal, status_event)
+                await self._prepare_compile()
 
                 # Compile is CPU-bound process hence we're using a thread to avoid interrupting the gRPC server.
                 # See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/1468
@@ -1046,6 +1363,16 @@ class AbstractWorkflow(ABC):
         """
         return None, WorkflowStatusEventEnum.RETRY
 
+    async def _prepare_compile(self) -> None:
+        """Fetch what the graph needs before it is built.
+
+        ``_compile`` runs in a thread and is synchronous, so a subclass that needs GitLab data for the build fetches it
+        here. The default fetches nothing.
+
+        Runs on every turn, not only START, unlike model routing: the graph is rebuilt per turn, and what it is built
+        from can change between turns.
+        """
+
     async def _route_default_model(self, goal: str, status_event: str) -> None:
         # Route once, before the flow is built, so every turn uses the same model.
         if status_event != WorkflowStatusEventEnum.START:
@@ -1161,30 +1488,37 @@ class AbstractWorkflow(ABC):
             category=self._workflow_type,
         )
 
+        await self._drop_session(error.drop_reason)
+
+        # A client-disconnect cancel raises CancelledError (a BaseException) from the
+        # drop above; the drop does not catch it, so it skips this raise by design.
+        # The client is gone so the terminal status is moot, the reject count+event
+        # above already recorded the rejection, and catching the cancel would suppress
+        # cooperative cancellation.
+        raise NotifiableException(error.user_message) from error
+
+    async def _drop_session(self, drop_reason: str) -> None:
+        """Drop the Rails session straight away, for a run that stops before ``GitLabWorkflow`` is entered.
+
+        A failed or timed-out drop is logged and does not mask the caller's error.
+        """
         # The timeout bounds the drop against an executor (CI) client that never
         # answers its action stream; a Workhorse session runs the HTTP action
-        # itself, so the drop there does not depend on the rejected client.
+        # itself, so the drop there does not depend on the client.
         try:
             await asyncio.wait_for(
                 GitLabStatusUpdater(self._http_client).update_workflow_status(
                     self._workflow_id,
                     WorkflowStatusEventEnum.DROP,
-                    drop_reason=error.drop_reason,
+                    drop_reason=drop_reason,
                 ),
-                timeout=TOKEN_REJECTION_DROP_TIMEOUT_S,
+                timeout=SESSION_DROP_TIMEOUT_S,
             )
         except Exception as status_error:
             log_exception(
                 status_error,
                 extra={"workflow_id": self._workflow_id, "source": __name__},
             )
-
-        # A client-disconnect cancel raises CancelledError (a BaseException) from the
-        # await above; it propagates past the except and skips this raise by design.
-        # The client is gone so the terminal status is moot, the reject count+event
-        # above already recorded the rejection, and catching the cancel would suppress
-        # cooperative cancellation.
-        raise NotifiableException(error.user_message) from error
 
     def _track_internal_event(
         self,

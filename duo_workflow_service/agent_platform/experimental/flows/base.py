@@ -87,16 +87,17 @@ class UserDecision(StrEnum):
     REJECT = "rejection"
 
 
-def _for_each_enabled() -> bool:
+def _for_each_enabled(config: FlowConfig) -> bool:
     """Whether a component's ``for_each`` block is acted on.
 
-    A feature flag rather than a flow-config field: declaring ``for_each`` is
-    how a flow author asks for a fan-out, while this is how the platform decides
-    whether it is ready to run one, per instance or group and without shipping a
-    new flow config revision. With the flag off the attribute is ignored and the
-    component runs once, so a flow that declares it still loads and still works.
+    Gated on a feature flag: declaring ``for_each`` is how a flow author asks
+    for a fan-out, while the flag is how the platform decides whether it is
+    ready to run one, per instance or group. With the flag off the attribute is
+    ignored and the component runs once. A registry flow whose config sets
+    ``requires_for_each`` cannot work that way, so it fans out regardless.
     """
-    return is_feature_enabled(FeatureFlag.DAP_FOR_EACH)
+    registry_requires = config.requires_for_each and config.config_id is not None
+    return registry_requires or is_feature_enabled(FeatureFlag.DAP_FOR_EACH)
 
 
 @support_self_hosted_billing(class_schema="flow/experimental")
@@ -450,7 +451,7 @@ class Flow(AbstractWorkflow):
         protocol rather than every attribute, so ``subagent_components`` is
         readable on the component itself and not through the wrapper.
         """
-        if not _for_each_enabled():
+        if not _for_each_enabled(self._config):
             self.log.warning(
                 "Ignoring for_each: the feature flag is off, so the component runs once",
                 component=component.name,

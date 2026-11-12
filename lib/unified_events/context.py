@@ -94,7 +94,12 @@ class EventConstructContext(BaseModel):
     subject_type: Optional[str] = Field(
         default=None,
         max_length=255,
-        description="Type of subject: user, service_account, ci_pipeline, agent, runner.",
+        description="Type of subject: user, ci_pipeline, agent, runner.",
+    )
+    user_type: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="Type of the user when the subject is a user, e.g. human, service_account, project_bot.",
     )
     global_user_id: Optional[str] = Field(
         default=None,
@@ -119,6 +124,11 @@ class EventConstructContext(BaseModel):
     realm: Optional[Realm] = Field(
         default=None,
         description="Self-Managed, SaaS or Dedicated.",
+    )
+    instance_id: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="ID of the GitLab instance where the request comes from.",
     )
     unique_instance_id: Optional[str] = Field(
         default=None,

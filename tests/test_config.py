@@ -11,12 +11,14 @@ from pydantic import SecretStr, ValidationError
 
 from ai_gateway.config import (
     Config,
+    ConfigActorLimits,
     ConfigAmazonQ,
     ConfigAuditEvent,
     ConfigAuth,
     ConfigBedrockGuardrail,
     ConfigBillingEvent,
     ConfigCachingProxy,
+    ConfigCodeSuggestions,
     ConfigCustomModels,
     ConfigDuoChat,
     ConfigDuoWorkflow,
@@ -30,6 +32,7 @@ from ai_gateway.config import (
     ConfigModelLimits,
     ConfigModelSelection,
     ConfigMtls,
+    ConfigPrompts,
     ConfigSnowplow,
     ConfigTLS,
     ConfigVertexSearch,
@@ -599,6 +602,16 @@ def test_config_model_limits(values: dict, expected: ConfigModelLimits):
                 endpoint="endpoint.test",
             ),
         ),
+        (
+            {
+                "AIGW_BILLING_EVENT__VALIDATION_MODE_HTTP": "enforce",
+                "AIGW_BILLING_EVENT__VALIDATION_MODE_DWS": "enforce",
+            },
+            ConfigBillingEvent(
+                validation_mode_http="enforce",
+                validation_mode_dws="enforce",
+            ),
+        ),
     ],
 )
 def test_config_billing_event(values: dict, expected: ConfigBillingEvent):
@@ -606,6 +619,28 @@ def test_config_billing_event(values: dict, expected: ConfigBillingEvent):
         config = Config(_env_file=None)
 
         assert config.billing_event == expected
+
+
+def test_config_billing_event_validation_modes_default_to_log():
+    with mock.patch.dict(os.environ, {}, clear=True):
+        config = Config(_env_file=None)
+
+        assert config.billing_event.validation_mode_http == "log"
+        assert config.billing_event.validation_mode_dws == "log"
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "AIGW_BILLING_EVENT__VALIDATION_MODE_HTTP",
+        "AIGW_BILLING_EVENT__VALIDATION_MODE_DWS",
+    ],
+)
+@pytest.mark.parametrize("value", ["off", "strict"])
+def test_config_billing_event_rejects_an_unknown_validation_mode(variable, value):
+    with mock.patch.dict(os.environ, {variable: value}, clear=True):
+        with pytest.raises(ValidationError):
+            Config(_env_file=None)
 
 
 @pytest.mark.parametrize(
@@ -728,6 +763,43 @@ def test_duo_workflow_config_use_caching_proxy(
         config = ConfigDuoWorkflow()
 
         assert config.use_caching_proxy == expected_use_caching_proxy
+
+
+@pytest.mark.parametrize(
+    ("values", "expected_max_bytes", "expected_max_components"),
+    [
+        ({}, 160 * 1024, 100),
+        (
+            {
+                "DUO_WORKFLOW_FLOW_VALIDATION__MAX_BYTES": "1024",
+                "DUO_WORKFLOW_FLOW_VALIDATION__MAX_COMPONENTS": "5",
+            },
+            1024,
+            5,
+        ),
+    ],
+)
+def test_duo_workflow_config_flow_validation(
+    values: dict, expected_max_bytes: int, expected_max_components: int
+):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = ConfigDuoWorkflow()
+
+        assert config.flow_validation.max_bytes == expected_max_bytes
+        assert config.flow_validation.max_components == expected_max_components
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"DUO_WORKFLOW_FLOW_VALIDATION__MAX_BYTES": "0"},
+        {"DUO_WORKFLOW_FLOW_VALIDATION__MAX_COMPONENTS": "-1"},
+    ],
+)
+def test_duo_workflow_config_flow_validation_rejects_non_positive(values: dict):
+    with mock.patch.dict(os.environ, values, clear=True):
+        with pytest.raises(ValidationError):
+            ConfigDuoWorkflow()
 
 
 @pytest.mark.parametrize(
@@ -937,8 +1009,12 @@ def test_config_bedrock_guardrail_identifier_at_max_length():
             ),
         ),
         (
-            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE": "enforce"},
-            ConfigModelSelection(feature_allowlist_mode="enforce"),
+            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP": "enforce"},
+            ConfigModelSelection(feature_allowlist_mode_http="enforce"),
+        ),
+        (
+            {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS": "log"},
+            ConfigModelSelection(feature_allowlist_mode_dws="log"),
         ),
     ],
 )
@@ -949,15 +1025,125 @@ def test_config_model_selection(values: dict, expected: ConfigModelSelection):
         assert config.model_selection == expected
 
 
-def test_config_model_selection_feature_allowlist_mode_defaults_to_log():
+def test_config_model_selection_feature_allowlist_modes_default_per_surface():
     with mock.patch.dict(os.environ, {}, clear=True):
         config = Config(_env_file=None)
 
-        assert config.model_selection.feature_allowlist_mode == "log"
+        assert config.model_selection.feature_allowlist_mode_http == "fallback"
+        assert config.model_selection.feature_allowlist_mode_dws == "fallback"
 
 
-def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode():
-    values = {"AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE": "strict"}
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP",
+        "AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS",
+    ],
+)
+def test_config_model_selection_rejects_an_unknown_feature_allowlist_mode(variable):
+    with mock.patch.dict(os.environ, {variable: "strict"}, clear=True):
+        with pytest.raises(ValidationError):
+            Config(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    ("values", "field", "expected"),
+    [
+        (
+            {},
+            "code_suggestions",
+            ConfigCodeSuggestions(
+                actor_limit_mode="off",
+                user_limit=5,
+                instance_limit=20,
+                instance_limit_per_seat=0.05,
+                namespace_limit=20,
+            ),
+        ),
+        (
+            {
+                "AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE": "enforce",
+                "AIGW_CODE_SUGGESTIONS__USER_LIMIT": "3",
+                "AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT": "30",
+                "AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "0.1",
+                "AIGW_CODE_SUGGESTIONS__NAMESPACE_LIMIT": "40",
+            },
+            "code_suggestions",
+            ConfigCodeSuggestions(
+                actor_limit_mode="enforce",
+                user_limit=3,
+                instance_limit=30,
+                instance_limit_per_seat=0.1,
+                namespace_limit=40,
+            ),
+        ),
+        (
+            {},
+            "prompts",
+            ConfigPrompts(
+                actor_limit_mode="off",
+                user_limit=5,
+                instance_limit=20,
+                instance_limit_per_seat=0.05,
+                namespace_limit=20,
+            ),
+        ),
+        (
+            {
+                "AIGW_PROMPTS__ACTOR_LIMIT_MODE": "log",
+                "AIGW_PROMPTS__USER_LIMIT": "10",
+                "AIGW_PROMPTS__INSTANCE_LIMIT": "50",
+                "AIGW_PROMPTS__INSTANCE_LIMIT_PER_SEAT": "0.2",
+                "AIGW_PROMPTS__NAMESPACE_LIMIT": "60",
+            },
+            "prompts",
+            ConfigPrompts(
+                actor_limit_mode="log",
+                user_limit=10,
+                instance_limit=50,
+                instance_limit_per_seat=0.2,
+                namespace_limit=60,
+            ),
+        ),
+        (
+            {"AIGW_CODE_SUGGESTIONS__USER_LIMIT": "3"},
+            "prompts",
+            ConfigPrompts(),
+        ),
+    ],
+    ids=[
+        "code suggestions defaults",
+        "code suggestions from env",
+        "prompts defaults",
+        "prompts from env",
+        "prompts do not read the code suggestions settings",
+    ],
+)
+def test_config_actor_limits(values: dict, field: str, expected: ConfigActorLimits):
+    with mock.patch.dict(os.environ, values, clear=True):
+        config = Config(_env_file=None)
+
+        assert getattr(config, field) == expected
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE": "strict"},
+        {"AIGW_CODE_SUGGESTIONS__USER_LIMIT": "0"},
+        {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT": "0"},
+        {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "-1"},
+        {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "inf"},
+        {"AIGW_CODE_SUGGESTIONS__INSTANCE_LIMIT_PER_SEAT": "nan"},
+        {"AIGW_CODE_SUGGESTIONS__NAMESPACE_LIMIT": "0"},
+        {"AIGW_PROMPTS__ACTOR_LIMIT_MODE": "strict"},
+        {"AIGW_PROMPTS__USER_LIMIT": "0"},
+        {"AIGW_PROMPTS__INSTANCE_LIMIT": "0"},
+        {"AIGW_PROMPTS__INSTANCE_LIMIT_PER_SEAT": "-1"},
+        {"AIGW_PROMPTS__NAMESPACE_LIMIT": "0"},
+    ],
+)
+def test_config_actor_limits_reject_invalid_values(values: dict):
     with mock.patch.dict(os.environ, values, clear=True):
         with pytest.raises(ValidationError):
             Config(_env_file=None)

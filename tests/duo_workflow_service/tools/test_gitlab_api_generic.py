@@ -14,6 +14,8 @@ from duo_workflow_service.tools.gitlab_api_generic import (
     validate_api_endpoint,
 )
 
+PAGINATION_HEADERS = {"X-Next-Page": "2", "X-Total": "50", "X-Total-Pages": "3"}
+
 
 @pytest.fixture(name="gitlab_client_mock")
 def gitlab_client_mock_fixture():
@@ -53,11 +55,12 @@ class TestGitLabApiGet:
         """Test successful API GET request with endpoint."""
         # Mock response
         response_data = {"id": 1, "title": "Test MR"}
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = json.dumps(response_data)
-        mock_response.headers = {}
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps(response_data),
+            headers={},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
 
         # Execute tool
         result = await gitlab_api_get_tool._execute(
@@ -67,6 +70,7 @@ class TestGitLabApiGet:
         # Verify
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/projects/13/merge_requests/42",
+            parse_json=False,
         )
         result_json = json.loads(result)
         assert result_json["status"] == "success"
@@ -79,11 +83,12 @@ class TestGitLabApiGet:
         """Test API GET request with query parameters."""
         # Mock response
         response_data = [{"id": 1, "title": "MR 1"}, {"id": 2, "title": "MR 2"}]
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = json.dumps(response_data)
-        mock_response.headers = {}
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps(response_data),
+            headers={},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
 
         # Execute tool
         params = {"state": "opened", "per_page": 20}
@@ -96,10 +101,162 @@ class TestGitLabApiGet:
         expected_path = f"/api/v4/projects/13/merge_requests{expected_query}"
         gitlab_client_mock.aget.assert_called_once_with(
             path=expected_path,
+            parse_json=False,
         )
         result_json = json.loads(result)
         assert result_json["status"] == "success"
         assert result_json["data"] == response_data
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "class Foo\n  def bar\n    1\n  end\nend\n",
+            "Running with gitlab-runner 17.0\nJob succeeded",
+            "not json {",
+        ],
+    )
+    async def test_get_non_json_body_returned_as_text(
+        self, gitlab_api_get_tool, gitlab_client_mock, body
+    ):
+        """Raw text bodies (files, job traces) are returned, not replaced by {}."""
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=body,
+            headers={},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
+
+        result = await gitlab_api_get_tool._execute(
+            endpoint="/api/v4/projects/13/repository/files/foo.rb/raw"
+        )
+
+        assert json.loads(result) == {
+            "status": "success",
+            "content_type": "text",
+            "data": body,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", ["", "   \n\t", None])
+    async def test_get_empty_body_returns_empty_data(
+        self, gitlab_api_get_tool, gitlab_client_mock, body
+    ):
+        """Empty or whitespace-only bodies still yield an empty data object."""
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=body,
+            headers={},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
+
+        result = await gitlab_api_get_tool._execute(endpoint="/api/v4/projects/13")
+
+        assert json.loads(result) == {"status": "success", "data": {}}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body",
+        [{"id": 1}, [{"id": 1}, {"id": 2}]],
+        ids=["dict", "list"],
+    )
+    @pytest.mark.parametrize("encode", [False, True], ids=["parsed", "json_string"])
+    async def test_get_json_bodies_unchanged(
+        self, gitlab_api_get_tool, gitlab_client_mock, body, encode
+    ):
+        """JSON objects and lists are passed through, parsed or as strings."""
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps(body) if encode else body,
+            headers={},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
+
+        result = await gitlab_api_get_tool._execute(endpoint="/api/v4/projects/13")
+
+        assert json.loads(result) == {"status": "success", "data": body}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", ["1.10", "null", '{\n  "private": true\n}\n'])
+    @pytest.mark.parametrize(
+        "header_name", ["content-type", "Content-Type"], ids=["lower", "canonical"]
+    )
+    async def test_get_text_content_type_body_not_parsed_as_json(
+        self, gitlab_api_get_tool, gitlab_client_mock, body, header_name
+    ):
+        """A text/plain body that happens to be valid JSON is returned verbatim."""
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=body,
+            headers={header_name: "text/plain; charset=utf-8"},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
+
+        result = await gitlab_api_get_tool._execute(
+            endpoint="/api/v4/projects/13/repository/files/package.json/raw"
+        )
+
+        assert json.loads(result) == {
+            "status": "success",
+            "content_type": "text",
+            "data": body,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content_type",
+        [
+            "application/json",
+            "application/json; charset=utf-8",
+            "application/problem+json",
+        ],
+    )
+    async def test_get_json_content_type_body_parsed(
+        self, gitlab_api_get_tool, gitlab_client_mock, content_type
+    ):
+        """Bodies with a JSON Content-Type are parsed."""
+        response = GitLabHttpResponse(
+            status_code=200,
+            body='{"id": 1}',
+            headers={"Content-Type": content_type},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
+
+        result = await gitlab_api_get_tool._execute(endpoint="/api/v4/projects/13")
+
+        assert json.loads(result) == {"status": "success", "data": {"id": 1}}
+
+    @pytest.mark.asyncio
+    async def test_get_text_body_includes_pagination(
+        self, gitlab_api_get_tool, gitlab_client_mock
+    ):
+        """Pagination metadata is still attached for text bodies."""
+        response = GitLabHttpResponse(
+            status_code=200,
+            body="plain text",
+            headers={"X-Next-Page": "2", "X-Total": "5"},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
+
+        result = await gitlab_api_get_tool._execute(endpoint="/api/v4/projects/13")
+
+        result_json = json.loads(result)
+        assert result_json["data"] == "plain text"
+        assert result_json["pagination"] == {"next_page": "2", "total": "5"}
+
+    @pytest.mark.asyncio
+    async def test_get_non_2xx_text_body_still_raises(
+        self, gitlab_api_get_tool, gitlab_client_mock
+    ):
+        """Non-2xx responses with text bodies still raise."""
+        response = GitLabHttpResponse(
+            status_code=500,
+            body="Internal Server Error",
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
+
+        with pytest.raises(ToolException, match="HTTP 500"):
+            await gitlab_api_get_tool._execute(endpoint="/api/v4/projects/13")
 
     @pytest.mark.asyncio
     async def test_get_error_no_endpoint(self, gitlab_api_get_tool):
@@ -124,11 +281,12 @@ class TestGitLabApiGet:
         self, gitlab_api_get_tool, gitlab_client_mock, valid_endpoint
     ):
         """Test that legitimate endpoints are accepted."""
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = json.dumps({"status": "ok"})
-        mock_response.headers = {}
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps({"status": "ok"}),
+            headers={},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
 
         result = await gitlab_api_get_tool._execute(endpoint=valid_endpoint)
         result_json = json.loads(result)
@@ -138,11 +296,11 @@ class TestGitLabApiGet:
     async def test_get_error_api_failure(self, gitlab_api_get_tool, gitlab_client_mock):
         """Test handling of API failure response."""
         # Mock error response
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = False
-        mock_response.status_code = 404
-        mock_response.body = json.dumps({"error": "Not found"})
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+        response = GitLabHttpResponse(
+            status_code=404,
+            body=json.dumps({"error": "Not found"}),
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
 
         # Execute tool
         with pytest.raises(ToolException) as exc_info:
@@ -174,15 +332,16 @@ class TestGitLabApiGet:
     ):
         """Test that pagination headers are included in the response."""
         response_data = [{"id": 1}, {"id": 2}]
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = json.dumps(response_data)
-        mock_response.headers = {
-            "X-Next-Page": "2",
-            "X-Total": "50",
-            "X-Total-Pages": "3",
-        }
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps(response_data),
+            headers={
+                "X-Next-Page": "2",
+                "X-Total": "50",
+                "X-Total-Pages": "3",
+            },
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
 
         result = await gitlab_api_get_tool._execute(
             endpoint="/api/v4/projects/13/issues"
@@ -197,15 +356,48 @@ class TestGitLabApiGet:
         }
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body,headers,expected_keys",
+        [
+            ('[{"id": 1}]', {}, ["status", "data"]),
+            ('[{"id": 1}]', PAGINATION_HEADERS, ["status", "pagination", "data"]),
+            ("plain text", {}, ["status", "content_type", "data"]),
+            (
+                "plain text",
+                PAGINATION_HEADERS,
+                ["status", "pagination", "content_type", "data"],
+            ),
+        ],
+        ids=["json", "json_paginated", "text", "text_paginated"],
+    )
+    async def test_get_response_keys_in_expected_order(
+        self, gitlab_api_get_tool, gitlab_client_mock, body, headers, expected_keys
+    ):
+        """Keys are ordered so small metadata comes before ``data`` and survives truncation of large responses."""
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=body,
+            headers=headers,
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
+
+        result = await gitlab_api_get_tool._execute(
+            endpoint="/api/v4/projects/13/issues"
+        )
+
+        assert list(json.loads(result)) == expected_keys
+
+    @pytest.mark.asyncio
     async def test_get_response_no_pagination_when_headers_absent(
         self, gitlab_api_get_tool, gitlab_client_mock
     ):
         """Test that pagination key is omitted when no pagination headers exist."""
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = json.dumps({"id": 1})
-        mock_response.headers = {}
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps({"id": 1}),
+            headers={},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
 
         result = await gitlab_api_get_tool._execute(
             endpoint="/api/v4/projects/13/merge_requests/42"
@@ -219,15 +411,16 @@ class TestGitLabApiGet:
         self, gitlab_api_get_tool, gitlab_client_mock
     ):
         """Test pagination with only some headers present (e.g. last page)."""
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = json.dumps([{"id": 3}])
-        mock_response.headers = {
-            "X-Next-Page": "",
-            "X-Total": "3",
-            "X-Total-Pages": "1",
-        }
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps([{"id": 3}]),
+            headers={
+                "X-Next-Page": "",
+                "X-Total": "3",
+                "X-Total-Pages": "1",
+            },
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
 
         result = await gitlab_api_get_tool._execute(
             endpoint="/api/v4/projects/13/issues"
@@ -248,15 +441,16 @@ class TestGitLabApiGet:
         Some HTTP clients normalize header names to lowercase (e.g. httpx, aiohttp). Ensure _extract_pagination_headers
         handles this correctly.
         """
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = json.dumps([{"id": 1}])
-        mock_response.headers = {
-            "x-next-page": "2",
-            "x-total": "42",
-            "x-total-pages": "3",
-        }
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps([{"id": 1}]),
+            headers={
+                "x-next-page": "2",
+                "x-total": "42",
+                "x-total-pages": "3",
+            },
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
 
         result = await gitlab_api_get_tool._execute(
             endpoint="/api/v4/projects/13/issues"
@@ -276,11 +470,12 @@ class TestGitLabApiGet:
     ):
         """Test that work_items endpoints are redirected to issues endpoints."""
         response_data = {"id": 1, "title": "Test Issue"}
-        mock_response = Mock(spec=GitLabHttpResponse)
-        mock_response.is_success.return_value = True
-        mock_response.body = json.dumps(response_data)
-        mock_response.headers = {}
-        gitlab_client_mock.aget = AsyncMock(return_value=mock_response)
+        response = GitLabHttpResponse(
+            status_code=200,
+            body=json.dumps(response_data),
+            headers={},
+        )
+        gitlab_client_mock.aget = AsyncMock(return_value=response)
 
         result = await gitlab_api_get_tool._execute(
             endpoint="/api/v4/projects/13/work_items/42"
@@ -288,6 +483,7 @@ class TestGitLabApiGet:
 
         gitlab_client_mock.aget.assert_called_once_with(
             path="/api/v4/projects/13/issues/42",
+            parse_json=False,
         )
         result_json = json.loads(result)
         assert result_json["status"] == "success"

@@ -2,7 +2,7 @@ import asyncio
 import copy
 import functools
 from typing import Any, ClassVar
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -62,8 +62,12 @@ from duo_workflow_service.errors.typing import (
 )
 from duo_workflow_service.security.exceptions import SecurityException
 from lib.events import GLReportingEventContext
-from lib.usage_quota.errors import UsageQuotaError
-from lib.usage_quota.service import InsufficientCredits
+from lib.usage_quota.errors import (
+    InsufficientEntitlements,
+    UsageQuotaCheckUnavailable,
+    UsageQuotaError,
+)
+from lib.usage_quota.service import InsufficientCredits, recheck_usage_quota
 
 _ITEM_KEY = IOKey(target="context", subkeys=["item"])
 
@@ -1403,6 +1407,96 @@ class TestTheConcurrencyGate:
         )
 
         assert collected(resumed) == [{"approved": "yes"}, {"approved": "yes"}]
+
+
+class TestTheMidRunCreditsCheck:
+    """Credits are checked when the flow starts; a fan-out re-checks per item."""
+
+    @pytest.fixture(name="recheck")
+    def recheck_fixture(self):
+        recheck = AsyncMock()
+        token = recheck_usage_quota.set(recheck)
+        yield recheck
+        recheck_usage_quota.reset(token)
+
+    def test_each_item_re_checks_before_it_runs(self, shouter, recheck):
+        result = run_fan_out(fan_out(shouter), ["a", "b", "c"])
+
+        assert recheck.await_count == 3
+        assert len(collected(result)) == 3
+
+    def test_running_out_mid_run_ends_the_fan_out_without_running_that_item(
+        self, shouter, recheck
+    ):
+        recheck.side_effect = [None, InsufficientCredits(), InsufficientCredits()]
+
+        with (
+            patch.object(
+                ForEachComponent,
+                "_invoke_unit",
+                autospec=True,
+                side_effect=ForEachComponent._invoke_unit,
+            ) as invoked,
+            pytest.raises(NotifiableAgentException, match="ran out of GitLab Credits"),
+        ):
+            run_fan_out(fan_out(shouter, max_concurrency=1), ["a", "b", "c"])
+
+        ran = [
+            _ITEM_KEY.value_from_state(call.args[2]) for call in invoked.call_args_list
+        ]
+        assert ran == ["a"]
+
+    @pytest.mark.parametrize(
+        "denial",
+        [UsageQuotaCheckUnavailable(), InsufficientEntitlements()],
+        ids=lambda error: type(error).__name__,
+    )
+    def test_other_quota_denials_end_the_fan_out_as_they_are(
+        self, shouter, recheck, denial
+    ):
+        recheck.side_effect = [None, denial, denial]
+
+        with (
+            patch.object(
+                ForEachComponent,
+                "_invoke_unit",
+                autospec=True,
+                side_effect=ForEachComponent._invoke_unit,
+            ) as invoked,
+            pytest.raises(type(denial)),
+        ):
+            run_fan_out(fan_out(shouter, max_concurrency=1), ["a", "b", "c"])
+
+        ran = [
+            _ITEM_KEY.value_from_state(call.args[2]) for call in invoked.call_args_list
+        ]
+        assert ran == ["a"]
+
+    def test_a_waiting_item_re_checks_when_it_starts_not_when_it_queues(
+        self, shouter, recheck
+    ):
+        finished: list[str] = []
+        original = ForEachComponent._invoke_unit
+
+        async def invoke(self, unit, state, config):
+            result = await original(self, unit, state, config)
+            finished.append(_ITEM_KEY.value_from_state(state))
+            return result
+
+        seen: list[int] = []
+        recheck.side_effect = lambda: seen.append(len(finished))
+
+        with patch.object(ForEachComponent, "_invoke_unit", invoke):
+            run_fan_out(fan_out(shouter, max_concurrency=1), ["a", "b", "c"])
+
+        assert seen == [0, 1, 2]
+
+    def test_no_re_check_is_made_when_the_start_check_was_skipped(self, shouter):
+        assert recheck_usage_quota.get() is None
+
+        result = run_fan_out(fan_out(shouter), ["a", "b"])
+
+        assert len(collected(result)) == 2
 
 
 class TestInputOrder:

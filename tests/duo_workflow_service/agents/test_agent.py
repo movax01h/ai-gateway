@@ -118,7 +118,8 @@ class TestAgent:
             ChatPromptValue(
                 messages=[
                     SystemMessage(
-                        content=f"{render_security_block()}You are AGI entity capable of anything"
+                        content="You are AGI entity capable of anything\n\n"
+                        + render_security_block().rstrip("\n")
                     ),
                     HumanMessage(content=f"Your goal is: {goal}"),
                 ]
@@ -156,7 +157,8 @@ Human message"""
             ChatPromptValue(
                 messages=[
                     SystemMessage(
-                        content=f"{render_security_block()}You are AGI entity capable of anything"
+                        content="You are AGI entity capable of anything\n\n"
+                        + render_security_block().rstrip("\n")
                     ),
                     HumanMessage(
                         content=f"Handover: {expected_handover}.\nYour goal is: {goal}"
@@ -210,7 +212,8 @@ Human message"""
             ChatPromptValue(
                 messages=[
                     SystemMessage(
-                        content=f"{render_security_block()}You are AGI entity capable of anything"
+                        content="You are AGI entity capable of anything\n\n"
+                        + render_security_block().rstrip("\n")
                     ),
                     HumanMessage(content=f"Your goal is: {goal}"),
                     HumanMessage(content="Existing chat"),

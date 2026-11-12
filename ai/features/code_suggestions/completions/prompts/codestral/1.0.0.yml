@@ -1,0 +1,21 @@
+---
+name: Codestral 22B Code Completions
+model:
+  params:
+    temperature: 0.32
+    max_tokens: 64
+unit_primitive: complete_code
+models_from: code_completions
+tool_output_security: false
+prompt_template:
+  system: |
+    {% include 'code_suggestions/completions/codestral_system/1.0.0.jinja' %}
+  user: |
+    <s>[SUFFIX]{{suffix}}[PREFIX]{{prefix}}
+params:
+  timeout: 60
+  stop:
+    - "[PREFIX]"
+    - "[MIDDLE]"
+    - "[SUFFIX]"
+    - "[INST]"

@@ -1,6 +1,7 @@
+import functools
 from dataclasses import dataclass
 from time import time
-from typing import Annotated, Any, AsyncIterator, Optional, Tuple
+from typing import Annotated, Any, AsyncIterator, Callable, Optional, Tuple
 
 from dependency_injector.providers import Configuration, Factory
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,6 +11,7 @@ from gitlab_cloud_connector import (
     GitLabUnitPrimitive,
     WrongUnitPrimitives,
 )
+from starlette_context import context as starlette_context
 
 from ai_gateway.api.client_disconnect import run_unless_disconnected
 from ai_gateway.api.error_utils import capture_validation_errors
@@ -118,10 +120,32 @@ async def get_prompt_registry():
     yield get_container_application().pkg_prompts.prompt_registry()
 
 
+def record_requested_model():
+    """Record the model the client requested in the request context, so `AccessLogMiddleware` logs it.
+
+    Place it above `has_sufficient_usage_quota` so requests denied by the quota check are covered too. It runs before
+    the handler replaces `payload`'s model with the resolved one, and omitted values are recorded as None. Requests that
+    fail FastAPI's request body validation (422) never reach it, so they aren't covered.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            payload: SuggestionsRequest = kwargs["payload"]
+            starlette_context["meta.requested_model_provider"] = payload.model_provider
+            starlette_context["meta.requested_model_name"] = payload.model_name
+            return await func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 @router.post("/completions")
 @router.post("/code/completions")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 @capture_validation_errors()
+@record_requested_model()
 @has_sufficient_usage_quota(
     feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
     event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
@@ -227,6 +251,7 @@ async def completions(
 @router.post("/code/generations")
 @feature_category(GitLabFeatureCategory.CODE_SUGGESTIONS)
 @capture_validation_errors()
+@record_requested_model()
 @has_sufficient_usage_quota(
     feature_qualified_name=FeatureQualifiedNameStatic.CODE_SUGGESTIONS,
     event=UsageQuotaEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,

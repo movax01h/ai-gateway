@@ -7,8 +7,26 @@ from pydantic import BaseModel, ConfigDict, Field
 from lib.internal_events.context import EventContext
 
 __all__ = [
+    "REALM_MAPPING",
     "BillingEventContext",
+    "normalize_realm",
 ]
+
+# Maps the realm reported by the request (JWT claim or header) to the value
+# sent in billing events. Unknown realms are passed through unchanged.
+REALM_MAPPING: Dict[str, str] = {
+    "self-managed": "SM",
+    "saas": "SaaS",
+    "SaaS": "SaaS",
+    "SM": "SM",
+}
+
+
+def normalize_realm(realm: Optional[str]) -> Optional[str]:
+    """Map a request realm to the value sent in billing events."""
+    if not realm:
+        return realm
+    return REALM_MAPPING.get(realm, realm)
 
 
 class BillingEventContext(BaseModel):

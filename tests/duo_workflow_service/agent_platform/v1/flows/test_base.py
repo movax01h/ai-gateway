@@ -11,11 +11,24 @@ from langgraph.graph import StateGraph
 from langgraph.types import Command
 from structlog.testing import capture_logs
 
+from ai_gateway.prompts.config.base import InMemoryPromptConfig
+from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
+from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.agent_platform.v1.catalog import (
+    AiCatalogAgent,
+    CatalogItems,
+)
+from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogAgentsUnavailableError,
+    CatalogItemsError,
+    CatalogItemsFetchError,
+)
+from duo_workflow_service.agent_platform.v1.catalog.fetch import FetchedCatalogAgents
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
     EndComponent,
@@ -52,6 +65,9 @@ from duo_workflow_service.errors.typing import (
 )
 from duo_workflow_service.gitlab.gitlab_api import Namespace
 from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInstanceInfo
+from duo_workflow_service.interceptors.route.usage_billing import (
+    PromptRegistrySelfHostedBillingSupport,
+)
 from duo_workflow_service.workflows.abstract_workflow import TraceableException
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
@@ -560,7 +576,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         default."""
         approval = contract_pb2.Approval(
             approval=contract_pb2.Approval.Approved(
-                approval_source=contract_pb2.Approval.APPROVAL_SOURCE_AUTO_MODE,
+                approval_source=contract_pb2.Approval.APPROVAL_SOURCE_PRETOOLUSE_HOOK,
                 policy_ref=contract_pb2.Approval.PolicyRef(
                     origin="gitlab_default",
                     file=".gitlab/duo/pretooluse.rego",
@@ -589,7 +605,7 @@ class TestFlow:  # pylint: disable=too-many-public-methods
 
             assert isinstance(input, Command)
             assert input.resume["event_type"] == FlowEventType.APPROVE  # type: ignore[index]
-            assert input.resume["approval_source"] == "auto_mode"  # type: ignore[index]
+            assert input.resume["approval_source"] == "pretooluse_hook"  # type: ignore[index]
             assert input.resume["policy_ref"] == {  # type: ignore[index]
                 "origin": "gitlab_default",
                 "file": ".gitlab/duo/pretooluse.rego",
@@ -1214,6 +1230,113 @@ class TestFlow:  # pylint: disable=too-many-public-methods
                 "allow_agent_to_request_user", False
             ),
         }
+
+    def test_inline_response_schemas_are_registered_with_the_flow(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        flow_type: GLReportingEventContext,
+    ):
+        config = sample_flow_config.model_copy(
+            update={
+                "response_schemas": [
+                    InlineResponseSchemaConfig(
+                        schema_id="verdict",
+                        definition={
+                            "type": "object",
+                            "properties": {"approved": {"type": "boolean"}},
+                            "required": ["approved"],
+                        },
+                    )
+                ]
+            }
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-schemas",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=config,
+            )
+
+        schema = flow._flow_schema_registry.get("verdict", "")
+        assert "approved" in schema.model_fields
+
+    @pytest.mark.parametrize("wrap_registry_in_billing_support", [False, True])
+    def test_use_config_registers_inline_prompts_and_schemas(
+        self,
+        mock_flow_metadata,
+        user,
+        sample_flow_config,
+        flow_type: GLReportingEventContext,
+        wrap_registry_in_billing_support,
+    ):
+        """Cover the deferred-config path a fetched flow takes.
+
+        A flow that fetches its config is built with ``config=None`` and calls
+        ``_use_config`` later. Self-hosted billing may wrap the prompt registry
+        before that call, so this also pins that the wrapper forwards
+        ``register_prompt`` to the wrapped in-memory registry through
+        ``__getattr__``.
+        """
+        config = sample_flow_config.model_copy(
+            update={
+                "prompts": [
+                    InMemoryPromptConfig(
+                        prompt_id="test/prompt",
+                        name="test/prompt",
+                        unit_primitives=["duo_agent_platform"],
+                        prompt_template={"system": "You help with {{goal}}"},
+                    )
+                ],
+                "response_schemas": [
+                    InlineResponseSchemaConfig(
+                        schema_id="verdict",
+                        definition={
+                            "type": "object",
+                            "properties": {"approved": {"type": "boolean"}},
+                            "required": ["approved"],
+                        },
+                    )
+                ],
+            }
+        )
+
+        with (
+            self.mock_components(["AgentComponent"]),
+            patch("duo_workflow_service.agent_platform.v1.flows.graph_builder.Router"),
+        ):
+            flow = Flow(
+                workflow_id="test-workflow-deferred-config",
+                workflow_metadata=mock_flow_metadata,
+                workflow_type=flow_type,
+                user=user,
+                config=None,
+            )
+
+        in_memory_registry = flow._flow_prompt_registry
+        assert isinstance(in_memory_registry, InMemoryPromptRegistry)
+        if wrap_registry_in_billing_support:
+            flow._flow_prompt_registry = PromptRegistrySelfHostedBillingSupport(
+                instance=in_memory_registry,
+                workflow_id="test-workflow-deferred-config",
+                gl_feat_context=flow_type,
+                outbox=AsyncMock(),
+            )
+
+        flow._use_config(config)
+
+        # The wrapper has no storage of its own; it forwards register_prompt to the
+        # in-memory registry, so the inline prompt must land in its raw store.
+        assert "test/prompt" in in_memory_registry._raw_prompt_data
+        schema = flow._flow_schema_registry.get("verdict", "")
+        assert "approved" in schema.model_fields
 
     def test_registry_flow_id_comes_from_the_registry_load(
         self, flow_instance, sample_flow_config
@@ -2790,3 +2913,166 @@ class TestSetTrackingContextFromAdditionalContext:
         finally:
             merge_request_url_context.reset(mr_token)
             pipeline_source_context.reset(ps_token)
+
+
+AI_CATALOG_REF = {
+    "source": "ai-catalog",
+    "item_type": "agent",
+    "item_id": "53",
+    "version": "1.0.0",
+}
+WORKSPACE_REF = {"source": "workspace", "item_type": "agent_template", "item_id": "*"}
+
+
+@pytest.mark.usefixtures("mock_duo_workflow_service_container")
+class TestPrepareCompileFetchesCatalogAgents:
+    """``Flow._prepare_compile`` fetches AI Catalog agents before the graph is built."""
+
+    @staticmethod
+    def _agent() -> AiCatalogAgent:
+        return AiCatalogAgent.model_validate(
+            {
+                "item_id": "53",
+                "version": "1.0.0",
+                "name": "Code Reviewer",
+                "description": "Reviews code.",
+                "prompt": "You review code.",
+            }
+        )
+
+    @staticmethod
+    def _flow(include, user, subagents=None) -> Flow:
+        component = {
+            "name": "agent",
+            "type": "AgentComponent",
+            "inputs": ["context:goal"],
+            "prompt_id": "test/prompt",
+            "prompt_version": "v1",
+            "toolset": [],
+        }
+        if subagents is not None:
+            component["subagents"] = subagents
+
+        config = FlowConfig(
+            flow=FlowConfigMetadata(entry_point="agent"),
+            components=[component],
+            routers=[{"from": "agent", "to": "end"}],
+            environment="ambient",
+            version="v1",
+            include=include,
+        )
+        return Flow(
+            workflow_id="44",
+            workflow_metadata={},
+            workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
+            user=user,
+            config=config,
+        )
+
+    @pytest.fixture(name="fetch")
+    def fetch_fixture(self):
+        with patch(
+            "duo_workflow_service.agent_platform.v1.flows.base.fetch_catalog_agents",
+            new=AsyncMock(return_value=FetchedCatalogAgents(agents=[self._agent()])),
+        ) as fetch:
+            yield fetch
+
+    @pytest.mark.asyncio
+    async def test_a_flow_that_references_the_catalog_fetches_its_agents(
+        self, fetch, user
+    ):
+        flow = self._flow([AI_CATALOG_REF], user)
+
+        await flow._prepare_compile()
+
+        fetch.assert_awaited_once_with(flow._http_client, "44")
+        assert [a.item_id for a in flow._catalog_items.ai_catalog_agents] == ["53"]
+
+    @pytest.mark.asyncio
+    async def test_the_fetched_agents_keep_the_request_workspace_agents(
+        self, fetch, user
+    ):
+        flow = self._flow([AI_CATALOG_REF], user)
+        flow._catalog_items = CatalogItems(
+            workspace_agents=[
+                {
+                    "name": "tester",
+                    "description": "Runs tests.",
+                    "prompt": "You run tests.",
+                }
+            ]
+        )
+
+        await flow._prepare_compile()
+
+        assert [a.name for a in flow._catalog_items.workspace_agents] == [
+            "workspace/agents/tester"
+        ]
+        assert len(flow._catalog_items.ai_catalog_agents) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("include", [None, [], [WORKSPACE_REF]])
+    async def test_a_flow_without_catalog_references_makes_no_request(
+        self, fetch, user, include
+    ):
+        flow = self._flow(include, user)
+
+        await flow._prepare_compile()
+
+        fetch.assert_not_awaited()
+        assert flow._catalog_items.ai_catalog_agents == []
+
+    @pytest.mark.asyncio
+    async def test_a_skip_reason_is_recorded_for_the_binding(self, fetch, user):
+        fetch.return_value = FetchedCatalogAgents(
+            skipped_reason="custom_agents_disabled"
+        )
+        flow = self._flow(
+            [AI_CATALOG_REF, WORKSPACE_REF], user, subagents=[AI_CATALOG_REF]
+        )
+
+        await flow._prepare_compile()
+
+        assert flow._catalog_items.ai_catalog_agents == []
+        assert flow._catalog_items.ai_catalog_skipped_reason == "custom_agents_disabled"
+        assert [ref.source for ref in flow._config.include] == [
+            "ai-catalog",
+            "workspace",
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("error", "ui_message"),
+        [
+            (
+                CatalogItemsError("AI Catalog agent '53' (53) was refused: not_found"),
+                CatalogAgentsUnavailableError.REFUSED_MESSAGE,
+            ),
+            (
+                CatalogItemsFetchError("HTTP 503: upstream down", status_code=503),
+                CatalogAgentsUnavailableError.FETCH_FAILED_MESSAGE,
+            ),
+            (
+                CatalogItemsFetchError("HTTP 404: not found", status_code=404),
+                CatalogAgentsUnavailableError.REFUSED_MESSAGE,
+            ),
+            (
+                # No status: GitLab answered 2xx with a malformed body. A server fault,
+                # not the catalog's own answer, so the run asks the user to try again.
+                CatalogItemsFetchError("expected object, got list"),
+                CatalogAgentsUnavailableError.FETCH_FAILED_MESSAGE,
+            ),
+        ],
+    )
+    async def test_a_failed_fetch_shows_a_static_message_and_logs_the_detail(
+        self, fetch, user, error, ui_message
+    ):
+        fetch.side_effect = error
+        flow = self._flow([AI_CATALOG_REF], user)
+
+        with pytest.raises(CatalogAgentsUnavailableError) as raised:
+            await flow._prepare_compile()
+
+        assert raised.value.ui_message == ui_message
+        assert raised.value.internal_detail == str(error)
+        assert raised.value.__cause__ is error

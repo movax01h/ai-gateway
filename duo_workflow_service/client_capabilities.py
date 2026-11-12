@@ -6,6 +6,9 @@ from lib.context import client_capabilities, gitlab_version
 # workhorse.  This threshold can be removed once 18.7 is no longer supported.
 MIN_CAPABILITIES_VERSION = Version("18.7.0")
 
+# Sent by the CLI on every request of a turn the user runs in auto mode.
+AUTO_MODE_CAPABILITY = "auto_mode"
+
 
 def is_client_capable(capabilities: str | frozenset[str]) -> bool:
     """Check if the client supports all of the given capabilities.

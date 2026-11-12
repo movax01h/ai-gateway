@@ -1,3 +1,5 @@
+import functools
+import operator
 import time
 from unittest.mock import AsyncMock, Mock
 
@@ -98,6 +100,53 @@ class TestAgenticFakeModel:  # pylint: disable=too-many-public-methods
 
         assert len(chunks) == 1
         assert chunks[0].message.content == "Delayed response"
+
+    STOP_REASON_CASES = [
+        ("<response stop_reason='refusal'></response>", {"stop_reason": "refusal"}),
+        (
+            "<response stream='true' stop_reason='refusal'>Partial</response>",
+            {"stop_reason": "refusal"},
+        ),
+        ("<response>Plain</response>", {}),
+        ("<response stream='true'>Plain streamed</response>", {}),
+    ]
+
+    @staticmethod
+    def _fresh_model():
+        return AgenticFakeModel(auto_tool_approval=False, use_last_human_message=False)
+
+    @pytest.mark.parametrize(("content", "expected_metadata"), STOP_REASON_CASES)
+    def test_stop_reason_reaches_response_metadata(self, content, expected_metadata):
+        """A scripted stop reason is on the message from _generate and _stream."""
+        messages = [HumanMessage(content=content)]
+
+        generated = self._fresh_model()._generate(messages).generations[0].message
+        streamed = functools.reduce(
+            operator.add,
+            (chunk.message for chunk in self._fresh_model()._stream(messages)),
+        )
+
+        assert generated.response_metadata == expected_metadata
+        assert streamed.response_metadata == expected_metadata
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("content", "expected_metadata"), STOP_REASON_CASES)
+    async def test_stop_reason_reaches_response_metadata_async(
+        self, content, expected_metadata
+    ):
+        """A scripted stop reason is on the message from _agenerate and _astream."""
+        messages = [HumanMessage(content=content)]
+
+        agenerated = (
+            (await self._fresh_model()._agenerate(messages)).generations[0].message
+        )
+        chunks = [
+            chunk.message async for chunk in self._fresh_model()._astream(messages)
+        ]
+        astreamed = functools.reduce(operator.add, chunks)
+
+        assert agenerated.response_metadata == expected_metadata
+        assert astreamed.response_metadata == expected_metadata
 
     def test_model_properties(self, model):
         assert model._llm_type == "agentic-fake-provider"

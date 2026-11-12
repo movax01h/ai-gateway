@@ -2,7 +2,10 @@ import asyncio
 import contextvars
 from unittest import mock
 
+import anthropic
 import httpx
+import litellm
+import openai
 import pytest
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from langchain_core.messages import AIMessage
@@ -76,6 +79,39 @@ def test_get_llm_operations():
 
 
 class TestWatchContainer:
+    @mock.patch("prometheus_client.Counter.labels")
+    def test_register_llm_operation_is_for_billing_only(
+        self, mock_counters, container, internal_event_client
+    ):
+        init_token_usage()
+        init_llm_operations()
+
+        container.register_llm_operation(
+            "test_model",
+            {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            {"agent_name": "my_agent", "operation_type": "compaction_auto"},
+        )
+
+        assert llm_operations.get() == [
+            {
+                "token_count": 0,
+                "model_id": "test_model",
+                "model_engine": "test_provider",
+                "model_provider": "test_provider",
+                "model_vendor": "test_provider",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "agent_name": "my_agent",
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "operation_type": "compaction_auto",
+            }
+        ]
+        # No accumulator update, no counters, no internal event
+        assert token_usage.get() == {}
+        assert mock_counters.mock_calls == []
+        internal_event_client.track_event.assert_not_called()
+
     @mock.patch("prometheus_client.Counter.labels")
     def test_register_token_usage(self, mock_counters, container):
         init_token_usage()
@@ -747,6 +783,21 @@ class TestDetailLabels:
             assert labels["unit_primitive"] == "unknown"
 
 
+_TIMEOUT_REQUEST = httpx.Request("POST", "https://x")
+
+
+def _wrapped_read_timeout() -> anthropic.APIConnectionError:
+    try:
+        try:
+            raise httpx.ReadTimeout("", request=_TIMEOUT_REQUEST)
+        except httpx.ReadTimeout as cause:
+            raise anthropic.APIConnectionError(
+                message="Connection error.", request=_TIMEOUT_REQUEST
+            ) from cause
+    except anthropic.APIConnectionError as exc:
+        return exc
+
+
 class TestRegisterError:
     def test_register_error_no_exception(self, container):
         container.register_error(None)
@@ -884,3 +935,32 @@ class TestRegisterError:
         container.register_error(exception)
         assert container.error is True
         assert container.error_type == "connection_error"
+
+    @pytest.mark.parametrize(
+        ("exception", "expected_error_type"),
+        [
+            # status_code=408, which would otherwise fall through to "other"
+            (
+                litellm.Timeout(message="...", model="m", llm_provider="vertex_ai"),
+                "timeout",
+            ),
+            (anthropic.APITimeoutError(request=_TIMEOUT_REQUEST), "timeout"),
+            (openai.APITimeoutError(request=_TIMEOUT_REQUEST), "timeout"),
+            (httpx.ReadTimeout("", request=_TIMEOUT_REQUEST), "timeout"),
+            (_wrapped_read_timeout(), "timeout"),
+            # A dropped connection is not a timeout.
+            (httpx.ReadError("", request=_TIMEOUT_REQUEST), "connection_error"),
+        ],
+        ids=[
+            "litellm_timeout",
+            "anthropic_api_timeout",
+            "openai_api_timeout",
+            "httpx_read_timeout",
+            "wrapped_read_timeout",
+            "httpx_read_error",
+        ],
+    )
+    def test_register_error_timeout(self, container, exception, expected_error_type):
+        container.register_error(exception)
+        assert container.error is True
+        assert container.error_type == expected_error_type

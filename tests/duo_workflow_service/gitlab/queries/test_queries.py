@@ -154,6 +154,14 @@ class TestQueryVersionSelection:
             ),
             pytest.param("19.4.0", "currentThread", id="19.4_has_currentThread"),
             pytest.param("19.4.0", "sourceType", id="19.4_has_sourceType"),
+            pytest.param(
+                "19.6.0", "toolAccessPolicies", id="19.6_has_toolAccessPolicies"
+            ),
+            pytest.param(
+                "19.6.0",
+                'webSearchAllowed @gl_introduced(version: "19.6.0")',
+                id="19.6_has_webSearchAllowed",
+            ),
         ],
     )
     def test_version_gate_features(self, version: str, expected_feature: str):
@@ -161,3 +169,28 @@ class TestQueryVersionSelection:
         result = fetch_query_for_version(version)
 
         assert expected_feature in result
+
+    def test_query_selection_before_19_6_has_no_tool_access_policies(self):
+        """Older instances keep a query without the policy variables."""
+        result = fetch_query_for_version("19.5.0")
+
+        assert "toolAccessPolicies" not in result
+        assert "$projectId" not in result
+
+    def test_query_selection_before_19_6_has_no_web_search_allowed(self):
+        """Older instances get no resolved grant, so DWS falls back to the group setting."""
+        assert "webSearchAllowed" not in fetch_query_for_version("19.5.0")
+
+    def test_19_6_query_keeps_every_19_3_field(self):
+        """19.6 only adds fields, so newer instances lose nothing 19.3 asks for."""
+        older = fetch_query_for_version("19.5.0").splitlines()
+        newer = fetch_query_for_version("19.6.0")
+
+        missing = [
+            line.strip()
+            for line in older
+            if line.strip() and not line.lstrip().startswith("query")
+            if line.strip() not in newer
+        ]
+
+        assert not missing

@@ -1,6 +1,5 @@
 import pytest
 import yaml
-from langchain_core.prompts import ChatPromptTemplate
 
 from ai_gateway.model_metadata import ModelMetadata
 from ai_gateway.model_selection.models import ModelClassProvider
@@ -36,9 +35,14 @@ def model_provider_fixture(request):
     return request.param
 
 
+def _required_inputs(prompt: Prompt) -> list[str]:
+    return prompt.prompt_tpl.get_input_jsonschema().get("required", [])
+
+
 def _render(prompt: Prompt, **template_vars) -> str:
-    prompt_tpl: ChatPromptTemplate = prompt.prompt_tpl  # type: ignore[assignment]
-    messages = prompt_tpl.invoke({"content": "hi", **template_vars}).to_messages()
+    messages = prompt.prompt_tpl.invoke(
+        {"content": "hi", **template_vars}
+    ).to_messages()
 
     return "\n".join(message.text() for message in messages)
 
@@ -104,10 +108,9 @@ class TestShippedAgenticChatPrompt:
         "model_provider", [ModelClassProvider.OPENAI], indirect=True
     )
     def test_model_name_rendered_from_bound_model(self, prompt: Prompt):
-        prompt_tpl: ChatPromptTemplate = prompt.prompt_tpl  # type: ignore[assignment]
         # The variables the flow config does declare as component inputs; the model ones
         # must not be among them.
-        declared_inputs = dict.fromkeys(prompt_tpl.input_variables, "")
+        declared_inputs = dict.fromkeys(_required_inputs(prompt), "")
 
         assert not MODEL_TEMPLATE_VARIABLES & set(declared_inputs)
         assert "<model_name>Mistral</model_name>" in _render(prompt, **declared_inputs)
@@ -125,8 +128,7 @@ class TestShippedAgenticChatPrompt:
         self, prompt: Prompt, caching_enabled: str, time_shown: bool
     ):
         set_prompt_caching_enabled_to_current_request(caching_enabled)
-        prompt_tpl: ChatPromptTemplate = prompt.prompt_tpl  # type: ignore[assignment]
-        declared_inputs = dict.fromkeys(prompt_tpl.input_variables, "")
+        declared_inputs = dict.fromkeys(_required_inputs(prompt), "")
 
         rendered = _render(prompt, **{**declared_inputs, "current_time": "12:00:00"})
 

@@ -164,7 +164,7 @@ class TestReanchor:
             {"file": "a.rb", "new_line": 99, "code_excerpt": "Record.find(params[:id])"}
         ]
         counts = asyncio.run(_writer()._verify_anchors(findings))
-        assert counts[bl.ANCHOR_CORRECTED] == 1
+        assert counts[bl._ANCHOR_CORRECTED] == 1
         assert findings[0]["new_line"] == 3  # relocated to the real line
 
     def test_skips_findings_without_excerpt_or_file(self):
@@ -173,12 +173,12 @@ class TestReanchor:
             counts = asyncio.run(_writer()._verify_anchors(findings))
         read.assert_not_called()
         assert counts == {
-            bl.ANCHOR_VERIFIED: 0,
-            bl.ANCHOR_CORRECTED: 0,
-            bl.ANCHOR_UNVERIFIED: 2,
+            bl._ANCHOR_VERIFIED: 0,
+            bl._ANCHOR_CORRECTED: 0,
+            bl._ANCHOR_UNVERIFIED: 2,
         }
         # Nothing to check against => the anchor is a CLAIM, and says so.
-        assert [f["anchor_status"] for f in findings] == [bl.ANCHOR_UNVERIFIED] * 2
+        assert [f["anchor_status"] for f in findings] == [bl._ANCHOR_UNVERIFIED] * 2
 
     def test_an_excluded_file_is_not_read_and_stays_unverified(self, monkeypatch):
         """The same exclusion rules ``_repair_path`` applies to a listing apply to the claimed file itself."""
@@ -198,7 +198,7 @@ class TestReanchor:
 
         counts = asyncio.run(writer._verify_anchors(findings))
 
-        assert counts[bl.ANCHOR_UNVERIFIED] == 1
+        assert counts[bl._ANCHOR_UNVERIFIED] == 1
         assert findings[0]["anchor_reason"] == bl._ANCHOR_EXCLUDED
         assert read == []
 
@@ -218,7 +218,7 @@ class TestReanchor:
 
         counts = asyncio.run(_writer()._verify_anchors(findings))
 
-        assert counts[bl.ANCHOR_UNVERIFIED] == 1
+        assert counts[bl._ANCHOR_UNVERIFIED] == 1
         assert findings[0]["anchor_reason"] == bl._ANCHOR_EXCLUDED
         assert read == []
 
@@ -255,11 +255,11 @@ class TestReanchor:
             },  # second: cache hit -> None
         ]
         counts = asyncio.run(_writer()._verify_anchors(findings))
-        assert counts[bl.ANCHOR_UNVERIFIED] == 2
+        assert counts[bl._ANCHOR_UNVERIFIED] == 2
         # The line is KEPT (a correct finding is never discarded over a bad
         # coordinate), but it is marked as unchecked.
         assert findings[0]["new_line"] == 5
-        assert findings[0]["anchor_status"] == bl.ANCHOR_UNVERIFIED
+        assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
 
     def test_loop_level_exception_is_swallowed(self, monkeypatch):
         async def _fake(metadata, action):
@@ -274,9 +274,9 @@ class TestReanchor:
         # the per-finding try/except must swallow this and keep going
         findings = [_BadDict()]
         counts = asyncio.run(_writer()._verify_anchors(findings))
-        assert counts[bl.ANCHOR_VERIFIED] == 0
+        assert counts[bl._ANCHOR_VERIFIED] == 0
         # A finding whose verification BLEW UP is unverified, not fine.
-        assert findings[0]["anchor_status"] == bl.ANCHOR_UNVERIFIED
+        assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
 
 
 # --------------------------------------------------------------------------- #
@@ -677,9 +677,9 @@ class TestTriageClauseReachesTheLog:
         # THE assertion: the arm that let this finding survive is in the log
         # line, keyed by the vulnerability id...
         assert audit["vulnerability_id"] == report["vulnerabilities"][0]["id"]
-        assert audit[bl.TRIAGE_CLAUSE_DETAIL_KEY] == "KEEP-incorrect-guard"
-        assert audit[bl.TRIAGE_VERDICT_DETAIL_KEY] == "KEEP"
-        assert bl.ANCHOR_DETAIL_KEY in audit
+        assert audit[bl._TRIAGE_CLAUSE_DETAIL_KEY] == "KEEP-incorrect-guard"
+        assert audit[bl._TRIAGE_VERDICT_DETAIL_KEY] == "KEEP"
+        assert bl._ANCHOR_DETAIL_KEY in audit
         # ...and not in the report a customer reads.
         assert "details" not in report["vulnerabilities"][0]
         assert "KEEP-incorrect-guard" not in json.dumps(report)
@@ -707,15 +707,15 @@ class TestTriageClauseReachesTheLog:
 
         assert [v["location"]["file"] for v in report["vulnerabilities"]] == ["keep.py"]
         (audit,) = _audit(out)
-        assert audit[bl.TRIAGE_CLAUSE_DETAIL_KEY] == "KEEP-stale-authorization-state"
+        assert audit[bl._TRIAGE_CLAUSE_DETAIL_KEY] == "KEEP-stale-authorization-state"
 
     def test_an_unadjudicated_finding_says_so_rather_than_going_silent(self):
         # A finding that never went through triage carries no annotation. The
         # key is still emitted: absence would read as "adjudicated and fine".
         (audit,) = _audit([_finding()])
 
-        assert bl.TRIAGE_VERDICT_DETAIL_KEY not in audit
-        assert "no triage annotation" in audit[bl.TRIAGE_CLAUSE_DETAIL_KEY]
+        assert bl._TRIAGE_VERDICT_DETAIL_KEY not in audit
+        assert "no triage annotation" in audit[bl._TRIAGE_CLAUSE_DETAIL_KEY]
 
     def test_a_verdict_with_no_clause_is_not_dressed_up_as_one(self):
         # Three distinct states, three distinct strings: annotated, never
@@ -723,15 +723,15 @@ class TestTriageClauseReachesTheLog:
         # either of the others invents a criterion the adjudicator never named.
         (audit,) = _audit([_finding(verdict="KEEP")])
 
-        assert audit[bl.TRIAGE_VERDICT_DETAIL_KEY] == "KEEP"
-        assert "named no clause" in audit[bl.TRIAGE_CLAUSE_DETAIL_KEY]
+        assert audit[bl._TRIAGE_VERDICT_DETAIL_KEY] == "KEEP"
+        assert "named no clause" in audit[bl._TRIAGE_CLAUSE_DETAIL_KEY]
 
     def test_the_clause_is_bounded(self):
         # The clause is LLM output. A 500-finding run must not be able to grow
         # the log without bound through it.
         (audit,) = _audit([_finding(verdict="KEEP", clause="K" * 500)])
 
-        assert len(audit[bl.TRIAGE_CLAUSE_DETAIL_KEY]) == TRIAGE_CLAUSE_MAX
+        assert len(audit[bl._TRIAGE_CLAUSE_DETAIL_KEY]) == TRIAGE_CLAUSE_MAX
 
 
 def _messages(report: dict) -> list[dict]:
@@ -747,7 +747,7 @@ def _messages(report: dict) -> list[dict]:
     return [
         m
         for m in report["scan"]["messages"]
-        if not m["value"].startswith(bl.ANCHOR_MESSAGE_PREFIX)
+        if not m["value"].startswith(bl._ANCHOR_MESSAGE_PREFIX)
     ]
 
 
@@ -756,7 +756,7 @@ def _anchor_message(report: dict) -> dict:
     found = [
         m
         for m in report["scan"]["messages"]
-        if m["value"].startswith(bl.ANCHOR_MESSAGE_PREFIX)
+        if m["value"].startswith(bl._ANCHOR_MESSAGE_PREFIX)
     ]
     assert len(found) == 1, f"expected exactly one anchor message, got {found}"
     return found[0]
@@ -1007,11 +1007,11 @@ class TestAnchorVerificationOutcomes:
         counts = asyncio.run(_writer()._verify_anchors(findings))
 
         assert counts == {
-            bl.ANCHOR_VERIFIED: 1,
-            bl.ANCHOR_CORRECTED: 0,
-            bl.ANCHOR_UNVERIFIED: 0,
+            bl._ANCHOR_VERIFIED: 1,
+            bl._ANCHOR_CORRECTED: 0,
+            bl._ANCHOR_UNVERIFIED: 0,
         }
-        assert findings[0]["anchor_status"] == bl.ANCHOR_VERIFIED
+        assert findings[0]["anchor_status"] == bl._ANCHOR_VERIFIED
         assert findings[0]["new_line"] == 10  # emitted as-is
         assert "anchor_claimed_line" not in findings[0]
 
@@ -1038,11 +1038,11 @@ class TestAnchorVerificationOutcomes:
         counts = asyncio.run(_writer()._verify_anchors(findings))
 
         assert counts == {
-            bl.ANCHOR_VERIFIED: 0,
-            bl.ANCHOR_CORRECTED: 1,
-            bl.ANCHOR_UNVERIFIED: 0,
+            bl._ANCHOR_VERIFIED: 0,
+            bl._ANCHOR_CORRECTED: 1,
+            bl._ANCHOR_UNVERIFIED: 0,
         }
-        assert findings[0]["anchor_status"] == bl.ANCHOR_CORRECTED
+        assert findings[0]["anchor_status"] == bl._ANCHOR_CORRECTED
         assert findings[0]["new_line"] == 9
         assert findings[0]["anchor_claimed_line"] == 4
 
@@ -1061,13 +1061,13 @@ class TestAnchorVerificationOutcomes:
         counts = asyncio.run(_writer()._verify_anchors(findings))
 
         assert counts == {
-            bl.ANCHOR_VERIFIED: 0,
-            bl.ANCHOR_CORRECTED: 0,
-            bl.ANCHOR_UNVERIFIED: 1,
+            bl._ANCHOR_VERIFIED: 0,
+            bl._ANCHOR_CORRECTED: 0,
+            bl._ANCHOR_UNVERIFIED: 1,
         }
         # Not dropped - a sound security claim must survive a bad coordinate.
         assert len(findings) == 1
-        assert findings[0]["anchor_status"] == bl.ANCHOR_UNVERIFIED
+        assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
         assert findings[0]["new_line"] == 7  # the model's claim, kept as such
         assert "not appear" in findings[0]["anchor_reason"]
 
@@ -1081,8 +1081,8 @@ class TestAnchorVerificationOutcomes:
 
         counts = asyncio.run(_writer()._verify_anchors(findings))
 
-        assert counts[bl.ANCHOR_UNVERIFIED] == 1
-        assert findings[0]["anchor_status"] == bl.ANCHOR_UNVERIFIED
+        assert counts[bl._ANCHOR_UNVERIFIED] == 1
+        assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
         assert findings[0]["anchor_reason"] == bl._ANCHOR_NO_EXCERPT
 
     def test_a_finding_with_no_file_is_unverified(self, monkeypatch):
@@ -1091,7 +1091,7 @@ class TestAnchorVerificationOutcomes:
 
         counts = asyncio.run(_writer()._verify_anchors(findings))
 
-        assert counts[bl.ANCHOR_UNVERIFIED] == 1
+        assert counts[bl._ANCHOR_UNVERIFIED] == 1
         assert "no file path" in findings[0]["anchor_reason"]
 
     def test_a_finding_that_claimed_no_line_is_not_reported_as_a_corrected_claim(
@@ -1109,7 +1109,7 @@ class TestAnchorVerificationOutcomes:
 
         counts = asyncio.run(_writer()._verify_anchors(findings))
 
-        assert counts[bl.ANCHOR_CORRECTED] == 1
+        assert counts[bl._ANCHOR_CORRECTED] == 1
         assert findings[0]["new_line"] == 10
         assert "anchor_claimed_line" not in findings[0]
         assert "no line number" in findings[0]["anchor_reason"]
@@ -1126,9 +1126,9 @@ class TestAnchorVerificationOutcomes:
         counts = asyncio.run(_writer()._verify_anchors(findings))
 
         assert counts == {
-            bl.ANCHOR_VERIFIED: 1,
-            bl.ANCHOR_CORRECTED: 1,
-            bl.ANCHOR_UNVERIFIED: 2,
+            bl._ANCHOR_VERIFIED: 1,
+            bl._ANCHOR_CORRECTED: 1,
+            bl._ANCHOR_UNVERIFIED: 2,
         }
         # Every finding carries a state; none is left unlabelled.
         assert all("anchor_status" in f for f in findings)
@@ -1145,23 +1145,23 @@ class TestAnchorVerificationIsDisclosed:
 
     def test_every_vulnerability_logs_an_explicit_anchor_state(self):
         findings = [
-            {"file": "a.go", "new_line": 3, "anchor_status": bl.ANCHOR_VERIFIED},
-            {"file": "b.go", "new_line": 4, "anchor_status": bl.ANCHOR_UNVERIFIED},
+            {"file": "a.go", "new_line": 3, "anchor_status": bl._ANCHOR_VERIFIED},
+            {"file": "b.go", "new_line": 4, "anchor_status": bl._ANCHOR_UNVERIFIED},
         ]
 
-        states = [a[bl.ANCHOR_DETAIL_KEY] for a in _audit(findings)]
-        assert states == [bl.ANCHOR_VERIFIED, bl.ANCHOR_UNVERIFIED]
+        states = [a[bl._ANCHOR_DETAIL_KEY] for a in _audit(findings)]
+        assert states == [bl._ANCHOR_VERIFIED, bl._ANCHOR_UNVERIFIED]
 
     def test_an_unverified_anchor_is_distinguishable_from_a_verified_one(self):
         (verified,) = _audit(
-            [{"file": "a.go", "new_line": 3, "anchor_status": bl.ANCHOR_VERIFIED}],
+            [{"file": "a.go", "new_line": 3, "anchor_status": bl._ANCHOR_VERIFIED}],
         )
         (unverified,) = _audit(
             [
                 {
                     "file": "a.go",
                     "new_line": 3,
-                    "anchor_status": bl.ANCHOR_UNVERIFIED,
+                    "anchor_status": bl._ANCHOR_UNVERIFIED,
                     "anchor_reason": "the quoted code does not appear in the file",
                 }
             ],
@@ -1171,8 +1171,8 @@ class TestAnchorVerificationIsDisclosed:
         assert verified["file"] == unverified["file"]
         assert verified["line"] == unverified["line"]
         # ...and yet they are not the same claim, and the log says which.
-        assert verified[bl.ANCHOR_DETAIL_KEY] != unverified[bl.ANCHOR_DETAIL_KEY]
-        assert "does not appear" in unverified[bl.ANCHOR_REASON_DETAIL_KEY]
+        assert verified[bl._ANCHOR_DETAIL_KEY] != unverified[bl._ANCHOR_DETAIL_KEY]
+        assert "does not appear" in unverified[bl._ANCHOR_REASON_DETAIL_KEY]
 
     def test_a_corrected_anchor_logs_the_line_originally_claimed(self):
         (audit,) = _audit(
@@ -1180,15 +1180,15 @@ class TestAnchorVerificationIsDisclosed:
                 {
                     "file": "container.go",
                     "new_line": 9,
-                    "anchor_status": bl.ANCHOR_CORRECTED,
+                    "anchor_status": bl._ANCHOR_CORRECTED,
                     "anchor_claimed_line": 4,
                 }
             ],
         )
 
         assert audit["line"] == 9
-        assert audit[bl.ANCHOR_DETAIL_KEY] == bl.ANCHOR_CORRECTED
-        assert audit[bl.ANCHOR_CLAIMED_DETAIL_KEY] == "4"
+        assert audit[bl._ANCHOR_DETAIL_KEY] == bl._ANCHOR_CORRECTED
+        assert audit[bl._ANCHOR_CLAIMED_DETAIL_KEY] == "4"
 
     def test_a_finding_verification_never_saw_is_not_reported_as_verified(self):
         """``_verify_anchors`` is best-effort and ``_execute`` swallows its failure, so a report CAN be built from
@@ -1199,8 +1199,8 @@ class TestAnchorVerificationIsDisclosed:
         """
         (audit,) = _audit([{"file": "a.go", "new_line": 3}])
 
-        assert audit[bl.ANCHOR_DETAIL_KEY] == bl.ANCHOR_UNVERIFIED
-        assert audit[bl.ANCHOR_REASON_DETAIL_KEY] == bl._ANCHOR_NOT_RUN
+        assert audit[bl._ANCHOR_DETAIL_KEY] == bl._ANCHOR_UNVERIFIED
+        assert audit[bl._ANCHOR_REASON_DETAIL_KEY] == bl._ANCHOR_NOT_RUN
 
     def test_the_verbatim_quote_travels_with_the_finding(self):
         report = _writer()._build_report(
@@ -1209,7 +1209,7 @@ class TestAnchorVerificationIsDisclosed:
                     "file": "a.go",
                     "new_line": 3,
                     "code_excerpt": "upload.Commit()",
-                    "anchor_status": bl.ANCHOR_VERIFIED,
+                    "anchor_status": bl._ANCHOR_VERIFIED,
                 }
             ],
         )
@@ -1239,7 +1239,7 @@ class TestAnchorVerificationIsDisclosed:
                     "cwe": "CWE-862",
                     "file": "a.go",
                     "code_excerpt": "x()",
-                    "anchor_status": bl.ANCHOR_UNVERIFIED,
+                    "anchor_status": bl._ANCHOR_UNVERIFIED,
                     "anchor_reason": "whatever",
                 }
             ],
@@ -1249,7 +1249,7 @@ class TestAnchorVerificationIsDisclosed:
 
     def test_a_clean_run_says_so_at_info_level(self):
         report = _writer()._build_report(
-            [{"file": "a.go", "new_line": 3, "anchor_status": bl.ANCHOR_VERIFIED}],
+            [{"file": "a.go", "new_line": 3, "anchor_status": bl._ANCHOR_VERIFIED}],
         )
         message = _anchor_message(report)
 
@@ -1259,9 +1259,9 @@ class TestAnchorVerificationIsDisclosed:
     def test_any_unverified_anchor_makes_the_disclosure_a_warning(self):
         report = _writer()._build_report(
             [
-                {"file": "a.go", "new_line": 3, "anchor_status": bl.ANCHOR_VERIFIED},
-                {"file": "b.go", "new_line": 4, "anchor_status": bl.ANCHOR_CORRECTED},
-                {"file": "c.go", "new_line": 5, "anchor_status": bl.ANCHOR_UNVERIFIED},
+                {"file": "a.go", "new_line": 3, "anchor_status": bl._ANCHOR_VERIFIED},
+                {"file": "b.go", "new_line": 4, "anchor_status": bl._ANCHOR_CORRECTED},
+                {"file": "c.go", "new_line": 5, "anchor_status": bl._ANCHOR_UNVERIFIED},
             ],
         )
         message = _anchor_message(report)
@@ -1333,12 +1333,12 @@ class TestAnchorVerificationEndToEnd:
         assert [a["vulnerability_id"] for a in audits] == [
             v["id"] for v in report["vulnerabilities"]
         ]
-        got = [(a["line"], a[bl.ANCHOR_DETAIL_KEY]) for a in audits]
+        got = [(a["line"], a[bl._ANCHOR_DETAIL_KEY]) for a in audits]
         assert got == [
-            (10, bl.ANCHOR_VERIFIED),
-            (9, bl.ANCHOR_CORRECTED),  # relocated out of the wrong function
-            (7, bl.ANCHOR_UNVERIFIED),  # kept, but flagged as a claim
-            (5, bl.ANCHOR_UNVERIFIED),  # kept, but flagged as a claim
+            (10, bl._ANCHOR_VERIFIED),
+            (9, bl._ANCHOR_CORRECTED),  # relocated out of the wrong function
+            (7, bl._ANCHOR_UNVERIFIED),  # kept, but flagged as a claim
+            (5, bl._ANCHOR_UNVERIFIED),  # kept, but flagged as a claim
         ]
         assert _anchor_message(report)["level"] == "warn"
 
@@ -1402,7 +1402,7 @@ class TestPostReanchorCollapse:
             for claimed in (196, 222, 244, 270, 280, 379)
         ]
         counts = asyncio.run(_writer()._verify_anchors(findings))
-        assert counts[bl.ANCHOR_CORRECTED] == 6
+        assert counts[bl._ANCHOR_CORRECTED] == 6
         assert {f["new_line"] for f in findings} == {4}, (
             "all six should re-anchor to one line"
         )
@@ -1484,7 +1484,7 @@ class TestPostReanchorCollapse:
             },
         ]
         counts = asyncio.run(_writer()._verify_anchors(findings))
-        assert counts[bl.ANCHOR_UNVERIFIED] == 2
+        assert counts[bl._ANCHOR_UNVERIFIED] == 2
         out = bl._collapse_after_reanchor(findings)
         assert len(out) == 2, "unverified anchors keep claimed lines and stay distinct"
 
@@ -1864,7 +1864,7 @@ def other(request):
                 "anchor_status": status,
             }
             # Lines in different buckets, so only this pass could merge them.
-            for line, status in ((2, bl.ANCHOR_VERIFIED), (9, bl.ANCHOR_UNVERIFIED))
+            for line, status in ((2, bl._ANCHOR_VERIFIED), (9, bl._ANCHOR_UNVERIFIED))
         ]
         out = bl._collapse_after_reanchor(findings, {"views.py": self.VIEWS_PY})
         assert len(out) == 2
@@ -1885,11 +1885,13 @@ def other(request):
         return [f["new_line"] for f in out]
 
     def test_a_verified_finding_is_kept_over_a_corrected_one(self):
-        kept = self._merge((17, 20, bl.ANCHOR_CORRECTED), (20, 20, bl.ANCHOR_VERIFIED))
+        kept = self._merge(
+            (17, 20, bl._ANCHOR_CORRECTED), (20, 20, bl._ANCHOR_VERIFIED)
+        )
         assert kept == [20]
 
     def test_the_lowest_line_is_kept_when_both_are_verified(self):
-        kept = self._merge((20, 20, bl.ANCHOR_VERIFIED), (17, 20, bl.ANCHOR_VERIFIED))
+        kept = self._merge((20, 20, bl._ANCHOR_VERIFIED), (17, 20, bl._ANCHOR_VERIFIED))
         assert kept == [17]
 
     def test_different_functions_stay_apart(self, monkeypatch):
@@ -2048,9 +2050,9 @@ class TestAnchorVerificationReadsTheWholeFile:
             f"anchor MOVED to line {findings[0]['new_line']} instead of "
             f"{_TRUE_LINE} -- a lookalike inside the truncated prefix was matched"
         )
-        assert findings[0]["anchor_status"] == bl.ANCHOR_VERIFIED
-        assert counts[bl.ANCHOR_CORRECTED] == 0
-        assert counts[bl.ANCHOR_VERIFIED] == 1
+        assert findings[0]["anchor_status"] == bl._ANCHOR_VERIFIED
+        assert counts[bl._ANCHOR_CORRECTED] == 0
+        assert counts[bl._ANCHOR_VERIFIED] == 1
         assert len(reader.reads) > 1, (
             "the read never paginated -- the anchor pass is issuing one "
             "unbounded runReadFile and getting a silent prefix"
@@ -2075,7 +2077,7 @@ class TestAnchorVerificationReadsTheWholeFile:
 
         asyncio.run(_writer()._verify_anchors(findings))
 
-        assert findings[0]["anchor_status"] != bl.ANCHOR_UNVERIFIED, (
+        assert findings[0]["anchor_status"] != bl._ANCHOR_UNVERIFIED, (
             "a quote that IS in the file was reported absent -- the read was truncated"
         )
         assert findings[0]["new_line"] == _TRUE_LINE
@@ -2092,7 +2094,7 @@ class TestAnchorVerificationReadsTheWholeFile:
 
         counts = asyncio.run(_writer()._verify_anchors(findings))
 
-        assert counts[bl.ANCHOR_VERIFIED] == 1
+        assert counts[bl._ANCHOR_VERIFIED] == 1
         assert findings[0]["new_line"] == 10
 
 
@@ -2227,7 +2229,7 @@ TOP = load()
         },
     }
 
-    def _vulns(self, lines, sources=None, status=bl.ANCHOR_VERIFIED):
+    def _vulns(self, lines, sources=None, status=bl._ANCHOR_VERIFIED):
         findings = [
             {
                 "cwe": "CWE-639",
@@ -2280,8 +2282,8 @@ TOP = load()
                 "anchor_status": status,
             }
             for n, status in (
-                (11, bl.ANCHOR_UNVERIFIED),
-                (12, bl.ANCHOR_VERIFIED),
+                (11, bl._ANCHOR_UNVERIFIED),
+                (12, bl._ANCHOR_VERIFIED),
             )
         ]
         sources = {"app/orders.py": self.SOURCE}
@@ -2299,7 +2301,7 @@ TOP = load()
                     "file": "app/orders.py",
                     "new_line": 11,
                     "code_excerpt": quote,
-                    "anchor_status": bl.ANCHOR_VERIFIED,
+                    "anchor_status": bl._ANCHOR_VERIFIED,
                 }
                 for quote in order
             ]
@@ -2404,7 +2406,7 @@ class TestPathRepair:
         )
         assert findings[1]["file"] == self.REAL
         assert findings[1]["claimed_file"] == "vpn/graphql/schema.py"
-        assert findings[1]["anchor_status"] == bl.ANCHOR_VERIFIED
+        assert findings[1]["anchor_status"] == bl._ANCHOR_VERIFIED
         assert len(out) == 1
         assert calls == ["schema.py"]
 
@@ -2414,13 +2416,13 @@ class TestPathRepair:
             monkeypatch, [self.REAL, other], ["vpn/graphql/schema.py"]
         )
         assert findings[0]["file"] == "vpn/graphql/schema.py"
-        assert findings[0]["anchor_status"] == bl.ANCHOR_UNVERIFIED
+        assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
 
     def test_no_match_is_left_alone(self, monkeypatch):
         findings, _, _ = self._run(monkeypatch, ["netbox/vpn/models.py"], ["vpn/x.py"])
         assert findings[0]["file"] == "vpn/x.py"
         assert "claimed_file" not in findings[0]
-        assert findings[0]["anchor_status"] == bl.ANCHOR_UNVERIFIED
+        assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
 
     def test_a_failed_lookup_is_left_alone(self, monkeypatch):
         async def _fake(metadata, action):
@@ -2432,7 +2434,7 @@ class TestPathRepair:
         findings = [{"cwe": "CWE-639", "file": "vpn/x.py", "code_excerpt": "x()"}]
         asyncio.run(_writer()._verify_anchors(findings, {}))
         assert findings[0]["file"] == "vpn/x.py"
-        assert findings[0]["anchor_status"] == bl.ANCHOR_UNVERIFIED
+        assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
 
     @pytest.mark.parametrize(
         "listing",
@@ -2447,7 +2449,7 @@ class TestPathRepair:
     def test_a_truncated_listing_is_left_alone(self, monkeypatch, listing):
         findings, _, _ = self._run(monkeypatch, listing, ["vpn/graphql/schema.py"])
         assert findings[0]["file"] == "vpn/graphql/schema.py"
-        assert findings[0]["anchor_status"] == bl.ANCHOR_UNVERIFIED
+        assert findings[0]["anchor_status"] == bl._ANCHOR_UNVERIFIED
 
     def test_an_exit_code_header_is_ignored(self, monkeypatch):
         findings, _, _ = self._run(
@@ -2473,5 +2475,5 @@ class TestPathRepair:
         _, out, _ = self._run(monkeypatch, [self.REAL], ["vpn/graphql/schema.py"])
         (vuln,) = _writer()._build_report(out)["vulnerabilities"]
         (audit,) = _audit(out)
-        assert audit[bl.ANCHOR_CLAIMED_FILE_DETAIL_KEY] == "vpn/graphql/schema.py"
+        assert audit[bl._ANCHOR_CLAIMED_FILE_DETAIL_KEY] == "vpn/graphql/schema.py"
         assert vuln["location"]["file"] == self.REAL

@@ -118,6 +118,14 @@ components:
     # cap are silently dropped. TODO: derive this from the manifest skill
     # count (or chunk/paginate) so large repos are handled correctly.
     max_delegations: 100
+    # Cap per-turn delegation fan-out. All subagent results from one turn collect
+    # into the supervisor's conversation_history channel in a single checkpoint;
+    # an unbounded turn overflows the 1 MiB per-blob checkpoint limit and fails
+    # the run with CheckpointSaveError. Rejected delegations retry next turn.
+    # Requires `dap_parallel_subagents` (SupervisorAgentComponentV2); the serial
+    # supervisor ignores this field. Keep <= 16 (MAX_NESTED_INCREMENTAL_BASELINES),
+    # past which checkpoint writes degrade to full snapshots.
+    delegation_batch_size: 10
     ui_log_events:
       - "on_delegation"
       - "on_delegation_returns"
@@ -176,6 +184,8 @@ components:
       - "read_file"
     # LIMITATION: see fact_check_supervisor — same ~100-skill delegation cap.
     max_delegations: 100
+    # See fact_check_supervisor — bounds per-turn fan-out below the checkpoint limit.
+    delegation_batch_size: 10
     ui_log_events:
       - "on_delegation"
       - "on_delegation_returns"
@@ -216,6 +226,8 @@ components:
       - "read_file"
     # LIMITATION: see fact_check_supervisor — same ~100-skill delegation cap.
     max_delegations: 100
+    # See fact_check_supervisor — bounds per-turn fan-out below the checkpoint limit.
+    delegation_batch_size: 10
     ui_log_events:
       - "on_delegation"
       - "on_delegation_returns"
@@ -257,6 +269,8 @@ components:
       - "read_file"
     # LIMITATION: see fact_check_supervisor — same ~100-skill delegation cap.
     max_delegations: 100
+    # See fact_check_supervisor — bounds per-turn fan-out below the checkpoint limit.
+    delegation_batch_size: 10
     ui_log_events:
       - "on_delegation"
       - "on_delegation_returns"

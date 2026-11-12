@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pytest
@@ -33,6 +33,7 @@ from ai_gateway.tracking.instrumentator import SnowplowInstrumentator
 from ai_gateway.tracking.snowplow import SnowplowEvent, SnowplowEventContext
 from lib.billing_events import BillingEvent, ExecutionEnvironment
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
+from lib.usage_quota import InsufficientCredits
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -906,7 +907,6 @@ class TestCodeCompletions:
                     "temperature": 0.7,
                     "max_output_tokens": 64,
                     "context_max_percent": 0.3,
-                    "max_prompt_tokens": 32767,
                 },
                 [],
             ),
@@ -918,7 +918,6 @@ class TestCodeCompletions:
                     "temperature": 0.7,
                     "max_output_tokens": 64,
                     "context_max_percent": 0.3,
-                    "max_prompt_tokens": 32767,
                 },
                 [{"name": "test", "type": "file", "content": "some context"}],
             ),
@@ -1321,6 +1320,49 @@ class TestCodeCompletions:
 
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
+        ("model_details", "expected_provider", "expected_name"),
+        [
+            ({}, None, None),
+            # The handler replaces the "gitlab" provider with the resolved one, which must not reach the log
+            ({"model_provider": "gitlab"}, "gitlab", None),
+            (
+                {"model_provider": "vertex-ai", "model_name": "codestral-2508"},
+                "vertex-ai",
+                "codestral-2508",
+            ),
+        ],
+        ids=["nothing requested", "gitlab default", "explicit model"],
+    )
+    @pytest.mark.usefixtures("mock_prompt_ainvoke", "mock_post_processor")
+    def test_requested_model_in_access_log(
+        self,
+        mock_client: Mock,
+        model_details: Dict[str, str],
+        expected_provider: Optional[str],
+        expected_name: Optional[str],
+    ):
+        params = {
+            "prompt_version": 2,
+            "project_path": "gitlab-org/gitlab",
+            "project_id": 278964,
+            "current_file": {
+                "file_name": "main.py",
+                "content_above_cursor": "foo",
+                "content_below_cursor": "\n",
+            },
+        }
+        params.update(model_details)
+
+        with capture_logs() as cap_logs:
+            response = self._send_code_completions_request(mock_client, params)
+
+        assert response.status_code == 200
+        [access_log] = [log for log in cap_logs if log.get("method") == "POST"]
+        assert access_log["meta.requested_model_provider"] == expected_provider
+        assert access_log["meta.requested_model_name"] == expected_name
+
+    @pytest.mark.parametrize("mock_model_responses", [True])
+    @pytest.mark.parametrize(
         ("model_details", "expected_fallback_calls"),
         [
             ({"model_provider": "fireworks_ai", "model_name": "codestral-2508"}, 1),
@@ -1522,7 +1564,10 @@ class TestCodeCompletions:
 
         with patch(
             "ai_gateway.api.v2.code.completions.create_model_metadata",
-            wraps=create_model_metadata,
+            # The builder consumes the mapping it gets, so pass it a copy and keep the payload of the route.
+            side_effect=lambda data, **kwargs: create_model_metadata(
+                dict(data), **kwargs
+            ),
         ) as mock_create_model_metadata:
             response = self._send_code_completions_request(mock_client, params)
 
@@ -2499,11 +2544,60 @@ class TestCodeGenerations:
                 enabled_feature_flags
             )
 
+    @pytest.mark.parametrize(
+        ("model_details", "expected_provider", "expected_name"),
+        [
+            ({}, None, None),
+            (
+                {"model_provider": "vertex-ai", "model_name": "code-bison@002"},
+                "vertex-ai",
+                "code-bison@002",
+            ),
+        ],
+        ids=["nothing requested", "explicit model"],
+    )
+    @pytest.mark.usefixtures(
+        "mock_code_bison", "mock_anthropic_chat", "mock_llm_chat", "mock_agent_model"
+    )
+    def test_requested_model_in_access_log(
+        self,
+        mock_client,
+        model_details: Dict[str, str],
+        expected_provider: Optional[str],
+        expected_name: Optional[str],
+    ):
+        with capture_logs() as cap_logs:
+            response = mock_client.post(
+                "/code/generations",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 1,
+                    "project_path": "gitlab-org/gitlab",
+                    "project_id": 278964,
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "foo",
+                        "content_below_cursor": "\n",
+                    },
+                    **model_details,
+                },
+            )
+
+        assert response.status_code == 200
+        [access_log] = [log for log in cap_logs if log.get("method") == "POST"]
+        assert access_log["meta.requested_model_provider"] == expected_provider
+        assert access_log["meta.requested_model_name"] == expected_name
+
     @pytest.mark.usefixtures("mock_llm_chat")
     def test_billing_event(
         self,
         mock_client,
-        mock_track_billing_event,
+        mock_send_billing_event,
     ):
         """Verify a generations request results in a billing event reaching the underlying BillingEventsClient with the
         expected payload."""
@@ -2547,7 +2641,7 @@ class TestCodeGenerations:
 
         assert response.status_code == 200
 
-        mock_track_billing_event.assert_called_once_with(
+        mock_send_billing_event.assert_called_once_with(
             ANY,
             BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS,
             "CodeGenerations",
@@ -2614,6 +2708,88 @@ class TestUnauthorizedScopes:
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert response.json() == {"detail": error_message}
+
+    @pytest.mark.parametrize(
+        ("path", "model_name"),
+        [
+            ("/completions", "codestral-2508"),
+            ("/code/generations", "code-bison@002"),
+        ],
+    )
+    def test_failed_authorization_logs_requested_model(
+        self, mock_client, path: str, model_name: str
+    ):
+        with capture_logs() as cap_logs:
+            response = mock_client.post(
+                path,
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 1,
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "foo",
+                        "content_below_cursor": "\n",
+                    },
+                    "model_provider": "vertex-ai",
+                    "model_name": model_name,
+                },
+            )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        [access_log] = [log for log in cap_logs if log.get("method") == "POST"]
+        assert access_log["meta.requested_model_provider"] == "vertex-ai"
+        assert access_log["meta.requested_model_name"] == model_name
+
+
+class TestUsageQuotaDenied:
+    @pytest.mark.parametrize(
+        ("path", "model_name"),
+        [
+            ("/completions", "codestral-2508"),
+            ("/code/generations", "code-bison@002"),
+        ],
+    )
+    def test_denied_request_logs_requested_model(
+        self, mock_client, path: str, model_name: str
+    ):
+        with (
+            patch(
+                "lib.usage_quota.service.UsageQuotaService.execute",
+                new_callable=AsyncMock,
+                side_effect=InsufficientCredits(),
+            ),
+            capture_logs() as cap_logs,
+        ):
+            response = mock_client.post(
+                path,
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-GitLab-Instance-Id": "1234",
+                    "X-GitLab-Realm": "self-managed",
+                },
+                json={
+                    "prompt_version": 1,
+                    "current_file": {
+                        "file_name": "main.py",
+                        "content_above_cursor": "foo",
+                        "content_below_cursor": "\n",
+                    },
+                    "model_provider": "vertex-ai",
+                    "model_name": model_name,
+                },
+            )
+
+        # The quota check returns before the handler runs
+        assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED
+        [access_log] = [log for log in cap_logs if log.get("method") == "POST"]
+        assert access_log["meta.requested_model_provider"] == "vertex-ai"
+        assert access_log["meta.requested_model_name"] == model_name
 
 
 class TestUnauthorizedIssuer:

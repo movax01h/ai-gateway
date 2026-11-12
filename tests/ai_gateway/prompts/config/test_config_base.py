@@ -2,10 +2,13 @@
 """Tests for ai_gateway.prompts.config.base module."""
 
 import pytest
+import yaml
 from gitlab_cloud_connector import GitLabUnitPrimitive
+from pydantic import ValidationError
 
 from ai_gateway.model_selection.models import CompletionLiteLLMParams, CompletionType
 from ai_gateway.prompts.config.base import InMemoryPromptConfig, PromptConfig
+from tests.prompts.prompt_dirs import REPO_ROOT, prompt_ids_by_dir, version_files
 
 
 class TestInMemoryPromptConfig:
@@ -42,6 +45,21 @@ class TestInMemoryPromptConfig:
             "system": "You are a helpful assistant.",
             "user": "{{user_input}}",
         }
+
+    def test_rejects_models_from(self):
+        """A custom flow client sends this config, so it must not choose the models of its own prompt.
+
+        Accepting `models_from` here needs a security decision first, see
+        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3413.
+        """
+        with pytest.raises(ValidationError, match="models_from"):
+            InMemoryPromptConfig(
+                prompt_id="test/prompt",
+                name="test_prompt",
+                unit_primitives=[GitLabUnitPrimitive.DUO_CHAT],
+                prompt_template={"user": "{{user_input}}"},
+                models_from="duo_chat",
+            )
 
     @pytest.mark.parametrize(
         "unit_primitives,expected_unit_primitive",
@@ -114,6 +132,58 @@ class TestInMemoryPromptConfig:
         # Should not have excluded fields
         assert not hasattr(prompt_config, "prompt_id")
         assert not hasattr(prompt_config, "unit_primitives")
+
+
+class TestPromptConfig:
+    @staticmethod
+    def _config(**fields) -> PromptConfig:
+        return PromptConfig(
+            name="Test", prompt_template={"user": "{{ input }}"}, **fields
+        )
+
+    def test_models_from_is_optional(self):
+        config = self._config(unit_primitive=GitLabUnitPrimitive.ASK_ISSUE)
+
+        assert config.models_from is None
+
+    def test_accepts_models_from_that_lists_the_unit_primitive(self):
+        config = self._config(
+            unit_primitive=GitLabUnitPrimitive.ASK_ISSUE, models_from="duo_chat"
+        )
+
+        assert config.models_from == "duo_chat"
+
+    @pytest.mark.parametrize(
+        ("models_from", "message"),
+        [
+            ("no_such_feature", "is not a feature setting in unit_primitives.yml"),
+            ("generate_commit_message", "does not list the unit primitive 'ask_issue'"),
+        ],
+    )
+    def test_rejects_models_from_that_does_not_list_the_unit_primitive(
+        self, models_from, message
+    ):
+        with pytest.raises(ValueError, match=message):
+            self._config(
+                unit_primitive=GitLabUnitPrimitive.ASK_ISSUE, models_from=models_from
+            )
+
+    def test_every_shipped_prompt_version_is_valid(self):
+        shipped = [
+            version_file
+            for directory in sorted(prompt_ids_by_dir())
+            for version_file in version_files(directory)
+        ]
+
+        invalid = []
+        for version_file in shipped:
+            try:
+                PromptConfig(**yaml.safe_load(version_file.read_text()))
+            except ValueError as error:
+                invalid.append(f"{version_file.relative_to(REPO_ROOT)}: {error}")
+
+        assert shipped
+        assert not invalid
 
 
 class TestCompletionLiteLLMParams:

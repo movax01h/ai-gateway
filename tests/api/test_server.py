@@ -19,20 +19,29 @@ from ai_gateway.api.client_disconnect import (
     client_disconnected_exception_handler,
 )
 from ai_gateway.api.feature_category import get_feature_categories
+from ai_gateway.api.middleware import (
+    ActorLimitMiddleware,
+    MiddlewareAuthentication,
+    ModelConfigMiddleware,
+    RequestBodyLimitMiddleware,
+)
 from ai_gateway.api.server import (
     assume_role_exception_handler,
     custom_http_exception_handler,
     model_api_exception_handler,
+    prompt_too_long_exception_handler,
     restricted_model_access_exception_handler,
     setup_custom_exception_handlers,
     setup_gcp_service_account,
     validation_exception_handler,
 )
+from ai_gateway.code_suggestions.processing.pre import PromptTooLongError
 from ai_gateway.config import (
     Config,
     ConfigAuth,
     ConfigGoogleCloudPlatform,
     ConfigInternalEvent,
+    ConfigRequestBodyLimit,
 )
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_selection import RestrictedModelAccessError
@@ -206,6 +215,103 @@ def test_every_route_has_feature_category():
     )
 
 
+def test_actor_limits_run_after_authentication(fastapi_server_app):
+    middleware = fastapi_server_app.user_middleware
+    authentication = next(
+        i for i, m in enumerate(middleware) if isinstance(m, MiddlewareAuthentication)
+    )
+    body_limit = next(
+        i for i, m in enumerate(middleware) if m.cls is RequestBodyLimitMiddleware
+    )
+    actor_limits = [
+        i for i, m in enumerate(middleware) if m.cls is ActorLimitMiddleware
+    ]
+    model_config = next(
+        i for i, m in enumerate(middleware) if m.cls is ModelConfigMiddleware
+    )
+
+    assert authentication < body_limit < min(actor_limits)
+    assert max(actor_limits) < model_config
+
+
+def test_each_route_group_has_its_own_actor_limit(fastapi_server_app):
+    controls = [
+        (m.kwargs["control_name"], m.kwargs["path_prefixes"], m.kwargs["limits"])
+        for m in fastapi_server_app.user_middleware
+        if m.cls is ActorLimitMiddleware
+    ]
+    config = fastapi_server_app.state.config
+
+    assert controls == [
+        (
+            "code_suggestions_actor_limit",
+            ("/v2/completions", "/v2/code/", "/v3/code/", "/v4/code/"),
+            config.code_suggestions,
+        ),
+        (
+            "prompts_actor_limit",
+            ("/v1/prompts/", "/v2/prompts/"),
+            config.prompts,
+        ),
+    ]
+
+
+def test_body_cap_applies_only_to_code_suggestion_routes(fastapi_server_app):
+    # Prompt bodies may exceed 600 KB, so the body cap must not inherit the prompt prefixes.
+    (body_limit,) = [
+        m.kwargs
+        for m in fastapi_server_app.user_middleware
+        if m.cls is RequestBodyLimitMiddleware
+    ]
+
+    assert body_limit == {
+        "max_bytes": 600_000,
+        "path_prefixes": ("/v2/completions", "/v2/code/", "/v3/code/", "/v4/code/"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("max_bytes", "general_limits"),
+    [
+        (0, []),
+        (
+            16_777_216,
+            [
+                {
+                    "max_bytes": 16_777_216,
+                    "path_prefixes": ("/",),
+                    "excluded_prefixes": ("/v1/proxy/",),
+                }
+            ],
+        ),
+    ],
+    ids=["off by default", "set"],
+)
+def test_request_body_limit_covers_every_route_except_the_proxy_routes(
+    max_bytes, general_limits
+):
+    config = Config(
+        _env_file=None, request_body_limit=ConfigRequestBodyLimit(max_bytes=max_bytes)
+    )
+
+    app = create_fast_api_server(config)
+
+    body_limits = [
+        m.kwargs for m in app.user_middleware if m.cls is RequestBodyLimitMiddleware
+    ]
+    code_suggestions_limit = {
+        "max_bytes": 600_000,
+        "path_prefixes": ("/v2/completions", "/v2/code/", "/v3/code/", "/v4/code/"),
+    }
+    assert body_limits == [code_suggestions_limit, *general_limits]
+
+
+def test_request_body_limit_reads_its_environment_variable(monkeypatch):
+    monkeypatch.setenv("AIGW_REQUEST_BODY_LIMIT__MAX_BYTES", "16777216")
+
+    assert Config(_env_file=None).request_body_limit.max_bytes == 16_777_216
+
+
 def test_setup_prometheus_fastapi_instrumentator():
     app = FastAPI()
     server.setup_prometheus_fastapi_instrumentator(app)
@@ -238,7 +344,7 @@ async def test_lifespan(config, app, unused_port, monkeypatch, vertex_project):
 
     config.fastapi.metrics_port = unused_port
 
-    app.extra = {"extra": {"config": config}}
+    app.state.config = config
 
     async with server.lifespan(app):
         mock_container_app.assert_called_once()
@@ -265,6 +371,44 @@ def test_cloud_connector_auth_provider_in_app_state():
     assert app.state.cloud_connector_auth_provider is not None
 
 
+@pytest.mark.parametrize(
+    ("custom_models_enabled", "portal_url", "expects_customers_dot"),
+    [
+        pytest.param("false", None, True, id="saas_default_url"),
+        pytest.param("false", "https://cdot.example.com", True, id="saas_explicit"),
+        pytest.param("true", None, False, id="self_hosted_default_url"),
+        pytest.param("true", "", False, id="self_hosted_empty_url"),
+        pytest.param(
+            "true", "https://cdot.example.com", True, id="self_hosted_explicit"
+        ),
+        pytest.param(
+            "true",
+            "https://customers.gitlab.com",
+            True,
+            id="self_hosted_explicit_default_value",
+        ),
+    ],
+)
+def test_cloud_connector_customers_dot_provider(
+    monkeypatch, custom_models_enabled, portal_url, expects_customers_dot
+):
+    monkeypatch.setenv("AIGW_CUSTOM_MODELS__ENABLED", custom_models_enabled)
+    if portal_url is None:
+        monkeypatch.delenv("AIGW_CUSTOMER_PORTAL_URL", raising=False)
+    else:
+        monkeypatch.setenv("AIGW_CUSTOMER_PORTAL_URL", portal_url)
+
+    config = Config(_env_file=None, auth=ConfigAuth(bypass_external=True))
+    app = create_fast_api_server(config)
+
+    expected = {"Gitlab": config.gitlab_url}
+    if expects_customers_dot:
+        expected["CustomersDot"] = portal_url or "https://customers.gitlab.com"
+
+    providers = app.state.cloud_connector_auth_provider.providers
+    assert providers[1].oidc_providers == expected
+
+
 def test_middleware_authentication(fastapi_server_app: FastAPI, auth_enabled: bool):
     client = TestClient(fastapi_server_app)
 
@@ -288,6 +432,36 @@ def test_middleware_log_request(fastapi_server_app: FastAPI):
         client.post("/v2/chat/agent")
         correlation_ids = [log.get("correlation_id") for log in cap_logs]
         assert len(correlation_ids) > 0
+
+
+@pytest.mark.usefixtures("fastapi_server_app", "custom_models_gateway")
+@pytest.mark.parametrize(
+    "test_path,expected", [("/v2/chat/agent", True), ("/monitoring/healthz", False)]
+)
+def test_middleware_model_config(test_path, expected):
+    config = Config(_env_file=None, auth=ConfigAuth(bypass_external=True))
+    app = create_fast_api_server(config)
+    client = TestClient(app)
+
+    with patch(
+        "ai_gateway.api.middleware.model_config.current_model_metadata_context"
+    ) as mock_model_metadata_context:
+        client.post(
+            test_path,
+            json={
+                "model_metadata": {
+                    "name": "gpt",
+                    "provider": "custom_openai",
+                    "endpoint": "http://test_model.com/",
+                    "api_key": "test_api_key",
+                    "identifier": "test_model_identifier",
+                }
+            },
+        )
+        if expected:
+            mock_model_metadata_context.set.assert_called_once()
+        else:
+            mock_model_metadata_context.set.assert_not_called()
 
 
 @pytest.mark.usefixtures("fastapi_server_app")
@@ -439,6 +613,7 @@ def test_setup_custom_exception_handlers(app, monkeypatch):
 
     assert mock_add_exception_handler.mock_calls == [
         mock.call(StarletteHTTPException, custom_http_exception_handler),
+        mock.call(PromptTooLongError, prompt_too_long_exception_handler),
         mock.call(ModelAPIError, model_api_exception_handler),
         mock.call(AssumeRoleError, assume_role_exception_handler),
         mock.call(RequestValidationError, validation_exception_handler),
@@ -480,6 +655,21 @@ def test_client_disconnected_exception_handler(app):
 
     assert response.status_code == 499
     assert response.content == b""
+
+
+def test_prompt_too_long_exception_handler(app):
+    @app.get("/test")
+    def test_route():
+        raise PromptTooLongError("the prompt size exceeds overall maximum length")
+
+    setup_custom_exception_handlers(app)
+
+    response = TestClient(app).get("/test")
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "the prompt size exceeds overall maximum length"
+    }
 
 
 def test_restricted_model_access_exception_handler(app):
@@ -658,7 +848,7 @@ async def test_lifespan_wires_and_validates():
     config = MagicMock()
     config.instrumentator.thread_monitoring_enabled = False
     app = MagicMock()
-    app.extra = {"extra": {"config": config}}
+    app.state.config = config
 
     with (
         patch("ai_gateway.api.server.ContainerApplication") as mock_container,
@@ -683,7 +873,7 @@ async def test_lifespan_snowplow_shutdown():
     config = MagicMock()
     config.instrumentator.thread_monitoring_enabled = False
     app = MagicMock()
-    app.extra = {"extra": {"config": config}}
+    app.state.config = config
 
     with (
         patch("ai_gateway.api.server.ContainerApplication") as mock_container,
@@ -706,7 +896,7 @@ async def test_lifespan_snowplow_shutdown_exception():
     config = MagicMock()
     config.instrumentator.thread_monitoring_enabled = False
     app = MagicMock()
-    app.extra = {"extra": {"config": config}}
+    app.state.config = config
 
     with (
         patch("ai_gateway.api.server.ContainerApplication") as mock_container,

@@ -52,6 +52,7 @@ tool card and the compaction summarizer. Images become the placeholder above;
 every other block without text becomes a marker naming its type.
 """
 
+import re
 from enum import StrEnum
 from http import HTTPStatus
 from typing import Any, Optional
@@ -61,12 +62,23 @@ from langchain_core.messages.content import create_image_block
 
 __all__ = [
     "IMAGE_BLOCK_TOKEN_ESTIMATE",
+    "IMAGE_LIMIT_LATEST_MESSAGE",
+    "IMAGE_LIMIT_SEEN_MESSAGE",
+    "IMAGE_REJECTED_LATEST_CUSTOM_MESSAGE",
+    "IMAGE_REJECTED_LATEST_MESSAGE",
+    "IMAGE_REJECTED_SEEN_CUSTOM_MESSAGE",
+    "IMAGE_REJECTED_SEEN_MESSAGE",
+    "IMAGE_REJECTED_UI_MESSAGE",
+    "IMAGE_SUPPORT_HELP_ANCHOR",
+    "IMAGE_SUPPORT_HELP_PATH",
+    "IMAGE_TOO_LARGE_MESSAGE",
     "ImageLimitKind",
     "ImageScope",
     "block_text",
     "content_as_text",
     "image_content_block",
     "image_limit_kind",
+    "image_rejection_note",
     "is_image_block",
     "is_image_content_block",
     "is_internal_image_block",
@@ -199,14 +211,22 @@ class ImageLimitKind(StrEnum):
     """Why the provider rejected a request that carried images.
 
     ``single_image`` and ``request`` are read from Anthropic's wording and pick the scope
-    order and the note for the model. ``unclassified`` is every other 400 or 413: the
-    rejection still recovers, since the newest images are the only unproven content in
-    the request, but the note cannot name a cause.
+    order and the note for the model. ``image_input`` is any other 400 whose wording names
+    the images: the provider objected to them, not to the rest of the request.
+    ``unclassified`` is every other 400 or 413: the rejection still recovers, since the
+    newest images are the only unproven content in the request, but the note cannot name
+    a cause.
     """
 
     SINGLE_IMAGE = "single_image"
     REQUEST = "request"
+    IMAGE_INPUT = "image_input"
     UNCLASSIFIED = "unclassified"
+
+
+# Doc path and anchor for the instance's ``/help`` route.
+IMAGE_SUPPORT_HELP_PATH = "administration/gitlab_duo_self_hosted/configure_duo_features"
+IMAGE_SUPPORT_HELP_ANCHOR = "declare-image-support-for-a-self-hosted-model"
 
 
 class ImageScope(StrEnum):
@@ -214,22 +234,120 @@ class ImageScope(StrEnum):
     CURRENT = "current"
 
 
+# A rejection that names the images, in any provider's words. The word start keeps
+# "provisioned" or "revision" out.
+_NAMES_IMAGES = re.compile(r"\b(?:image|multimodal|vision)", re.IGNORECASE)
+
+
 def image_limit_kind(status_code: int, message: str) -> Optional[ImageLimitKind]:
     """Classify a provider rejection, or return ``None`` for a status the image fallback does not cover.
 
     Only the wording decides between the kinds, never whether to recover: a 400 or 413
     of any wording is ``unclassified`` at worst. Anthropic names the rejected block
-    ``...image.source.base64.data`` for size errors.
+    ``...image.source.base64.data`` for size errors. A context-window or schema error
+    that clears once the images are gone names no image, so it stays ``unclassified``
+    and nobody is pointed at image support for a model that reads images.
     """
     if status_code == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
         return ImageLimitKind.REQUEST
     if status_code != HTTPStatus.BAD_REQUEST:
         return None
     if "image.source.base64" not in message:
+        if _NAMES_IMAGES.search(message):
+            return ImageLimitKind.IMAGE_INPUT
         return ImageLimitKind.UNCLASSIFIED
     if "max allowed size" in message and "many-image" not in message:
         return ImageLimitKind.SINGLE_IMAGE
     return ImageLimitKind.REQUEST
+
+
+# Notes for the agent after a retry without images; see ``image_rejection_note``.
+IMAGE_LIMIT_SEEN_MESSAGE = (
+    "Older images were removed because the request exceeded the provider's "
+    "image limit. Rely on what you noted about them."
+)
+
+IMAGE_LIMIT_LATEST_MESSAGE = (
+    "The images from the latest step were removed because the request exceeded "
+    "the provider's image limit. Reading them again will hit the same limit. "
+    "Continue without them."
+)
+
+IMAGE_TOO_LARGE_MESSAGE = (
+    "The images from the latest step were removed: one of them is larger than "
+    "the provider accepts{limit}. Reading it again will hit the same limit. "
+    "If the user needs it read, ask for a smaller copy."
+)
+
+IMAGE_REJECTED_SEEN_MESSAGE = (
+    "Older images were removed because the provider rejected the request "
+    "while they were in it. Rely on what you noted about them."
+)
+
+IMAGE_REJECTED_LATEST_MESSAGE = (
+    "The images from the latest step were removed because the provider "
+    "rejected the request while they were in it. Reading them again will fail "
+    "the same way. If the user needs one read, ask for a smaller or re-saved "
+    "copy of the file."
+)
+
+IMAGE_REJECTED_SEEN_CUSTOM_MESSAGE = (
+    "Older images were removed because the model rejected the request while "
+    "they were in it. Rely on what you noted about them. A file may be broken "
+    "or too large, or this model may not read images. If the model cannot read "
+    "images, the administrator can declare that so GitLab stops sending them: "
+    "{url}"
+)
+
+IMAGE_REJECTED_LATEST_CUSTOM_MESSAGE = (
+    "The images from the latest step were removed because the model rejected "
+    "the request while they were in it. Reading them again will fail the same "
+    "way. The file may be broken or too large, or this model may not read "
+    "images. If the user needs one read, ask for a smaller or re-saved copy. If "
+    "the model cannot read images, the administrator can declare that so GitLab "
+    "stops sending them: {url}"
+)
+
+IMAGE_REJECTED_UI_MESSAGE = (
+    "The model rejected a request that contained images, so the images were "
+    "removed and the session continued. If this model cannot read images, the "
+    "administrator can [declare image support]({url})."
+)
+
+
+def image_rejection_note(
+    kind: ImageLimitKind,
+    scope: ImageScope,
+    message: str,
+    *,
+    suggest_declaration: bool,
+    help_url: str,
+) -> str:
+    """Return the note the agent gets after a retry without images.
+
+    ``suggest_declaration`` comes from the caller, which knows the model. The custom note names both causes, because
+    a rejection that names images does not say whether the file or the model is the problem.
+    """
+    if kind in (ImageLimitKind.IMAGE_INPUT, ImageLimitKind.UNCLASSIFIED):
+        if suggest_declaration and kind is ImageLimitKind.IMAGE_INPUT:
+            template = (
+                IMAGE_REJECTED_SEEN_CUSTOM_MESSAGE
+                if scope is ImageScope.SEEN
+                else IMAGE_REJECTED_LATEST_CUSTOM_MESSAGE
+            )
+            return template.format(url=help_url)
+        return (
+            IMAGE_REJECTED_SEEN_MESSAGE
+            if scope is ImageScope.SEEN
+            else IMAGE_REJECTED_LATEST_MESSAGE
+        )
+    if scope is ImageScope.SEEN:
+        return IMAGE_LIMIT_SEEN_MESSAGE
+    if kind is not ImageLimitKind.SINGLE_IMAGE:
+        return IMAGE_LIMIT_LATEST_MESSAGE
+    pixels = re.search(r"(\d[\d,]*) pixels", message)
+    limit = f" (one side is over {pixels.group(1)} px)" if pixels else ""
+    return IMAGE_TOO_LARGE_MESSAGE.format(limit=limit)
 
 
 def without_image_payloads(

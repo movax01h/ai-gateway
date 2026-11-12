@@ -6,6 +6,7 @@ from duo_workflow_service.bl_security.executor_output import (
     EXIT_CODE_HEADER,
     complete_lines,
     executor_truncated,
+    strip_size_limit_notice,
 )
 
 MARKER = "[... output truncated: showing first and last 25KB of 80KB ...]"
@@ -43,3 +44,15 @@ def test_a_notice_without_a_marker_drops_only_the_notice():
 
 def test_an_untruncated_listing_is_every_line():
     assert complete_lines("a.rb\nb.rb") == ["a.rb", "b.rb"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (NOTICE + "Exit code: 0\na.rb\n", "Exit code: 0\na.rb\n"),
+        ("Exit code: 0\na.rb\n", "Exit code: 0\na.rb\n"),
+        ("a.rb\n" + NOTICE, "a.rb\n" + NOTICE),
+    ],
+)
+def test_the_notice_is_stripped_only_from_the_start(text, expected):
+    assert strip_size_limit_notice(text) == expected

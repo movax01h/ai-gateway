@@ -18,22 +18,25 @@ from duo_workflow_service.tools.web_search import (
     _extract_mcp_payload,
     _negotiated_protocol_version,
     _parse_results,
-    native_web_search_available,
     web_search_boto_session,
 )
 from lib.context import current_model_metadata_context
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
+from lib.internal_events import InternalEventsClient
+from lib.internal_events.event_enum import EventEnum
 
 GATEWAY_URL = (
     "https://gw-abcdefghij.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
 )
 
 VERTEX_LITELLM_MODEL = (ModelClassProvider.LITE_LLM, "claude-sonnet-4-6", "vertex_ai")
-BEDROCK_LITELLM_MODEL = (
-    ModelClassProvider.LITE_LLM,
-    "bedrock/global.anthropic.claude-sonnet-4-6",
-    "bedrock",
-)
+
+
+@pytest.fixture(autouse=True)
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container,
+):
+    """The tool tracks usage through the wired internal events client."""
 
 
 @pytest.fixture(name="isolate_web_search_env", autouse=True)
@@ -315,6 +318,15 @@ class TestDisplayMessage:
         assert message == "Searched the web for: urllib3 CVE"
 
 
+def _model_metadata(provider, model, custom_llm_provider):
+    metadata = MagicMock()
+    metadata.llm_definition.model_class_provider = provider
+    metadata.llm_definition.params.model = model
+    metadata.llm_definition.params.custom_llm_provider = custom_llm_provider
+    metadata.llm_definition.provider = "Gemini Enterprise Agent Platform"
+    return metadata
+
+
 @pytest.fixture(name="resolved_model")
 def resolved_model_fixture(request):
     """Set the resolved model, as `(model_class_provider, model, custom_llm_provider)`, or None for no resolved model.
@@ -322,16 +334,8 @@ def resolved_model_fixture(request):
     Litellm routes are decided per model rather than per provider, so the params matter here.
     """
     param = getattr(request, "param", None)
-    if param is None:
-        token = current_model_metadata_context.set(None)
-    else:
-        provider, model, custom_llm_provider = param
-        metadata = MagicMock()
-        metadata.llm_definition.model_class_provider = provider
-        metadata.llm_definition.params.model = model
-        metadata.llm_definition.params.custom_llm_provider = custom_llm_provider
-        metadata.llm_definition.provider = "Gemini Enterprise Agent Platform"
-        token = current_model_metadata_context.set(metadata)
+    metadata = None if param is None else _model_metadata(*param)
+    token = current_model_metadata_context.set(metadata)
     yield param
     current_model_metadata_context.reset(token)
 
@@ -343,53 +347,6 @@ def web_search_flag_fixture(request):
     token = current_feature_flag_context.set(flags)
     yield enabled
     current_feature_flag_context.reset(token)
-
-
-class TestNativeWebSearchAvailable:
-    @pytest.mark.parametrize(
-        "resolved_model,expected",
-        [
-            pytest.param(
-                (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None),
-                True,
-                id="anthropic",
-            ),
-            pytest.param(
-                (ModelClassProvider.OPENAI, "gpt-5.2", None), True, id="openai"
-            ),
-            pytest.param(
-                (ModelClassProvider.GOOGLE_GENAI, "gemini-2.5-pro", None),
-                False,
-                id="google-genai",
-            ),
-            pytest.param(
-                (ModelClassProvider.AMAZON_Q, None, None), False, id="amazon-q"
-            ),
-            # Litellm is per-model: Vertex runs Anthropic's server-side tools, Bedrock does not.
-            pytest.param(
-                (ModelClassProvider.LITE_LLM, "claude-sonnet-4-6", "vertex_ai"),
-                True,
-                id="litellm-vertex",
-            ),
-            pytest.param(
-                (
-                    ModelClassProvider.LITE_LLM,
-                    "bedrock/global.anthropic.claude-sonnet-4-6",
-                    "bedrock",
-                ),
-                False,
-                id="litellm-bedrock",
-            ),
-        ],
-        indirect=["resolved_model"],
-    )
-    def test_model_determines_native_support(self, resolved_model, expected):
-        assert native_web_search_available() is expected
-
-    @pytest.mark.parametrize("resolved_model", [None], indirect=True)
-    def test_assumes_native_when_no_model_resolved(self, resolved_model):
-        """Conservative default: risk no search rather than a duplicated, billable one."""
-        assert native_web_search_available() is True
 
 
 class TestProtocolVersionNegotiation:
@@ -492,30 +449,39 @@ class TestBotoSession:
         mock_session.assert_called_once_with()
 
 
+_OPTED_IN = {"web_search_enabled": True, "web_search_allowed_for_group": True}
+
+
 class TestIsAvailable:
     @pytest.mark.parametrize(
-        "web_search_flag,resolved_model,expected",
+        ("web_search_flag", "capable", "config", "expected"),
         [
-            # Flag on and native unavailable: this tool is the fallback.
-            (True, BEDROCK_LITELLM_MODEL, True),
-            (True, (ModelClassProvider.GOOGLE_GENAI, "gemini-2.5-pro", None), True),
-            # Native handles it, so the fallback stays out of the toolset.
-            (True, (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None), False),
-            (True, (ModelClassProvider.OPENAI, "gpt-5.2", None), False),
-            # Vertex runs the search itself even though it is litellm-routed.
-            (True, VERTEX_LITELLM_MODEL, False),
-            # Flag off: never enabled, regardless of model.
-            (False, BEDROCK_LITELLM_MODEL, False),
-            (False, (ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6", None), False),
+            (True, True, _OPTED_IN, True),
+            (True, True, {**_OPTED_IN, "web_search_enabled": False}, False),
+            (True, True, {**_OPTED_IN, "web_search_allowed_for_group": False}, False),
+            (True, False, _OPTED_IN, False),
+            (False, True, _OPTED_IN, False),
+            (True, True, {}, False),
         ],
-        indirect=["web_search_flag", "resolved_model"],
+        ids=[
+            "opted_in",
+            "user_off",
+            "group_off",
+            "client_incapable",
+            "flag_off",
+            "unset",
+        ],
+        indirect=["web_search_flag"],
     )
-    def test_gating(self, web_search_flag, resolved_model, expected, monkeypatch):
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__ENABLED", "true")
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__GATEWAY_URL", GATEWAY_URL)
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__TARGET_NAME", "websearch")
-
-        assert AgentCoreWebSearch.is_available() is expected
+    def test_offered_only_when_the_session_may_search(
+        self, web_search_flag, capable, config, expected
+    ):
+        """Independent of the model and the gateway: the binding picks native or this tool."""
+        with patch(
+            "duo_workflow_service.tools.web_search.is_client_capable",
+            return_value=capable,
+        ):
+            assert AgentCoreWebSearch.is_available(config) is expected
 
     @pytest.mark.parametrize(
         "env,expected",
@@ -539,25 +505,20 @@ class TestIsAvailable:
                 },
                 False,
             ),
-            # Half-configured: enabling without a gateway to call must not offer the tool.
+            # Half-configured: enabling without a gateway to call must not run the tool.
             ({"ENABLED": "true", "TARGET_NAME": "websearch"}, False),
             ({"ENABLED": "true", "GATEWAY_URL": GATEWAY_URL}, False),
         ],
         ids=["configured", "unset", "disabled", "no_gateway_url", "no_target_name"],
     )
-    @pytest.mark.parametrize("resolved_model", [BEDROCK_LITELLM_MODEL], indirect=True)
-    def test_requires_configured_gateway(
-        self, web_search_flag, resolved_model, env, expected, monkeypatch
+    def test_runs_locally_only_with_a_configured_gateway(
+        self, env, expected, monkeypatch
     ):
-        """An unconfigured deployment must not advertise the tool.
-
-        This is what keeps the feature dormant while the flag rolls out: offering it without a
-        gateway would fail every call the model made, rather than leaving the model unaware of it.
-        """
+        """Without a gateway the binding drops the tool for models that can't search natively."""
         for key, value in env.items():
             monkeypatch.setenv(f"DUO_WORKFLOW_WEB_SEARCH__{key}", value)
 
-        assert AgentCoreWebSearch.is_available() is expected
+        assert AgentCoreWebSearch(metadata={}).locally_available is expected
 
 
 class TestSigning:
@@ -576,7 +537,7 @@ class TestSigning:
     ):
         """Signing cannot proceed without credentials, and must say which part is missing.
 
-        `is_available()` keeps an unconfigured deployment from reaching this, so hitting it means the settings and the
+        `bind_web_search` keeps an unconfigured deployment from reaching this, so hitting it means the settings and the
         AWS environment disagree — worth an error that names the difference.
         """
         metadata = {}
@@ -776,3 +737,72 @@ class TestAuditEvent:
             result = await tool._execute(query="q")
 
         assert json.loads(result)["results"][0]["url"] == "https://a.com"
+
+
+class TestUsageEvent:
+    @pytest.fixture(name="internal_event_client")
+    def internal_event_client_fixture(self, mock_duo_workflow_service_container):
+        client = MagicMock(spec=InternalEventsClient)
+        with mock_duo_workflow_service_container.internal_event.client.override(client):
+            yield client
+
+    @staticmethod
+    def _tracked(client):
+        return [
+            call.kwargs
+            for call in client.track_event.call_args_list
+            if call.kwargs["event_name"] == EventEnum.WEB_TOOL_INVOKED.value
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("resolved_model", [VERTEX_LITELLM_MODEL], indirect=True)
+    async def test_tracks_a_completed_search(
+        self, tool, mock_post, internal_event_client, resolved_model
+    ):
+        patcher, _ = mock_post(_tool_result([]))
+        with patcher:
+            await tool._execute(query="CVE-2025-50182")
+
+        [event] = self._tracked(internal_event_client)
+        properties = event["additional_properties"]
+        assert (properties.label, properties.property) == ("agentcore", "web_search")
+        assert properties.extra["status"] == "success"
+        assert (event["model_name"], event["model_provider"]) == (
+            "claude-sonnet-4-6",
+            "Gemini Enterprise Agent Platform",
+        )
+        assert "CVE-2025-50182" not in str(event)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("query", "expected_statuses"),
+        [
+            pytest.param("q", ["failure"], id="gateway-failure"),
+            pytest.param("   ", [], id="query-rejected-before-any-call"),
+        ],
+    )
+    async def test_tracks_a_failed_search_once_it_reached_the_gateway(
+        self, tool, mock_post, internal_event_client, query, expected_statuses
+    ):
+        patcher, _ = mock_post({}, status_code=500)
+        with patcher, pytest.raises(ToolException):
+            await tool._execute(query=query)
+
+        assert [
+            e["additional_properties"].extra["status"]
+            for e in self._tracked(internal_event_client)
+        ] == expected_statuses
+
+    @pytest.mark.asyncio
+    async def test_tracks_a_failure_when_the_gateway_returns_an_unexpected_body(
+        self, tool, mock_post, internal_event_client
+    ):
+        """A 200 with a body we cannot read is still a failed search."""
+        patcher, _ = mock_post({"result": {"content": ["not-a-content-block"]}})
+        with patcher, pytest.raises(AttributeError):
+            await tool._execute(query="q")
+
+        assert [
+            e["additional_properties"].extra["status"]
+            for e in self._tracked(internal_event_client)
+        ] == ["failure"]

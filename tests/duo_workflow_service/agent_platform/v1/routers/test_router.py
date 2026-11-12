@@ -7,8 +7,13 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from langgraph.graph import StateGraph
 from pydantic import ValidationError
+from structlog.testing import capture_logs
 
 from duo_workflow_service.agent_platform import v1
+from duo_workflow_service.agent_platform.utils.exceptions import (
+    MissingAdditionalContextError,
+    NotifiableAgentException,
+)
 from duo_workflow_service.agent_platform.v1.components.base import BaseComponent
 from duo_workflow_service.agent_platform.v1.routers.router import BaseRouter, Router
 from duo_workflow_service.agent_platform.v1.state import FlowState, IOKey
@@ -465,6 +470,225 @@ class TestRouter:
         )
 
         assert router.route({"context": {"inputs": inputs}}) == expected_route
+
+    # Deliberately different from any context node name below, so an assertion
+    # that the message names the context node cannot pass on this fallback.
+    ROUTER_OWNER = "decide_next"
+
+    @pytest.mark.parametrize(
+        "input_key,node,missing_key,missing_state",
+        [
+            # The node namespace is missing entirely from context.
+            (
+                "context:classify_impact.execution_result",
+                "classify_impact",
+                "classify_impact",
+                {"context": {}},
+            ),
+            # The node ran but did not write its execution_result output.
+            (
+                "context:classify_impact.execution_result",
+                "classify_impact",
+                "execution_result",
+                {"context": {"classify_impact": {}}},
+            ),
+            # A sibling context lookup on the same router fails the same way.
+            (
+                "context:classify_impact.decision",
+                "classify_impact",
+                "decision",
+                {"context": {"classify_impact": {}}},
+            ),
+        ],
+    )
+    def test_router_route_missing_context_key_raises_notifiable_error(
+        self, input_key, node, missing_key, missing_state
+    ):
+        """A missing routing context key raises a domain error, not a bare KeyError.
+
+        The message names the flow node and the key in the documented
+        ``context:{node}.{key}`` form, and the original ``KeyError`` is chained
+        so engineers keep the traceback.
+        """
+        from_component = self.create_mock_component(self.ROUTER_OWNER)
+        run_component = self.create_mock_component("run")
+        default_component = self.create_mock_component("default")
+
+        router = Router(
+            input=input_key,
+            from_component=from_component,
+            to_component={
+                "failed": run_component,
+                BaseRouter.DEFAULT_ROUTE: default_component,
+            },
+        )
+
+        with capture_logs() as logs:
+            with pytest.raises(NotifiableAgentException) as exc_info:
+                router.route(missing_state)
+
+        ui_message = exc_info.value.ui_message
+        assert node in ui_message
+        # The node comes from the key, not from the component that owns the router.
+        assert self.ROUTER_OWNER not in ui_message
+        assert input_key in ui_message
+        assert "KeyError" not in ui_message
+        # Original KeyError preserved for engineers.
+        assert isinstance(exc_info.value.__cause__, KeyError)
+        assert missing_key in exc_info.value.internal_detail
+        assert "KeyError(" not in exc_info.value.internal_detail
+
+        assert [
+            entry
+            for entry in logs
+            if entry["log_level"] == "error"
+            and entry["event"] == "Flow route failed: missing context key"
+            and entry["node"] == node
+            and entry["context_key"] == input_key
+        ]
+
+    def test_router_route_missing_bare_target_key_names_the_owning_node(self):
+        """A bare-target routing key names the router's own node when it is missing.
+
+        ``context:{node}.{key}`` inputs carry the producing node in their first
+        subkey, but an input like ``status`` has no subkeys. When that value is
+        absent, ``_missing_context_key_error`` falls back to the component that
+        owns the router for the node and uses the bare target as the context
+        key, a path the subkeyed cases above never exercise.
+        """
+        from_component = self.create_mock_component(self.ROUTER_OWNER)
+        run_component = self.create_mock_component("run")
+        default_component = self.create_mock_component("default")
+
+        router = Router(
+            input="status",
+            from_component=from_component,
+            to_component={
+                "failed": run_component,
+                BaseRouter.DEFAULT_ROUTE: default_component,
+            },
+        )
+
+        with capture_logs() as logs:
+            with pytest.raises(NotifiableAgentException) as exc_info:
+                router.route({"context": {}})
+
+        ui_message = exc_info.value.ui_message
+        # With no subkey to name the producing node, the router's own component
+        # stands in, and the bare target itself is the context key.
+        assert self.ROUTER_OWNER in ui_message
+        assert "status" in ui_message
+        assert "KeyError" not in ui_message
+        assert isinstance(exc_info.value.__cause__, KeyError)
+        assert "status" in exc_info.value.internal_detail
+        assert "KeyError(" not in exc_info.value.internal_detail
+
+        assert [
+            entry
+            for entry in logs
+            if entry["log_level"] == "error"
+            and entry["event"] == "Flow route failed: missing context key"
+            and entry["node"] == self.ROUTER_OWNER
+            and entry["context_key"] == "status"
+        ]
+
+    def test_router_route_missing_additional_context_category_propagates(self):
+        """A missing additional context category belongs to the caller, not the flow.
+
+        ``value_from_state`` raises ``MissingAdditionalContextError`` for
+        ``context:inputs.<category>``, and the server maps that to
+        ``INVALID_ARGUMENT``. Reshaping it into a ``NotifiableAgentException``
+        here would turn a bad request into an internal error and blame a step
+        called ``inputs`` that does not exist.
+        """
+        from_component = self.create_mock_component(self.ROUTER_OWNER)
+        run_component = self.create_mock_component("run")
+        default_component = self.create_mock_component("default")
+
+        router = Router(
+            input="context:inputs.issue",
+            from_component=from_component,
+            to_component={
+                "failed": run_component,
+                BaseRouter.DEFAULT_ROUTE: default_component,
+            },
+        )
+
+        with pytest.raises(MissingAdditionalContextError) as exc_info:
+            router.route({"context": {"inputs": {}}})
+
+        assert exc_info.value.category == "issue"
+
+    def test_router_route_missing_inputs_namespace_names_the_caller_not_a_step(self):
+        """``context:inputs`` is supplied by the caller, so no step is blamed.
+
+        The category case above never reaches the message builder. This covers
+        the remaining ``inputs`` shape, where the whole namespace is absent.
+        """
+        from_component = self.create_mock_component(self.ROUTER_OWNER)
+        run_component = self.create_mock_component("run")
+        default_component = self.create_mock_component("default")
+
+        router = Router(
+            input="context:inputs.issue",
+            from_component=from_component,
+            to_component={
+                "failed": run_component,
+                BaseRouter.DEFAULT_ROUTE: default_component,
+            },
+        )
+
+        with pytest.raises(NotifiableAgentException) as exc_info:
+            router.route({"context": {}})
+
+        ui_message = exc_info.value.ui_message
+        assert "context:inputs.issue" in ui_message
+        assert "step" not in ui_message
+        assert "was not supplied" in ui_message
+
+    def test_router_route_non_dict_intermediate_value_is_not_handled(self):
+        """A non-dict intermediate value raises ``TypeError``, which is out of scope.
+
+        ``value_from_state`` indexes into whatever it found, so a scalar raises
+        ``TypeError`` before any ``KeyError`` handling runs. That is a flow
+        configuration error rather than a step failing to produce an output, so
+        it is deliberately left to surface unchanged.
+        """
+        from_component = self.create_mock_component(self.ROUTER_OWNER)
+        run_component = self.create_mock_component("run")
+        default_component = self.create_mock_component("default")
+
+        router = Router(
+            input="context:classify_impact.execution_result",
+            from_component=from_component,
+            to_component={
+                "failed": run_component,
+                BaseRouter.DEFAULT_ROUTE: default_component,
+            },
+        )
+
+        with pytest.raises(TypeError):
+            router.route({"context": {"classify_impact": "not-a-dict"}})
+
+    def test_router_route_present_context_key_routes_normally(self):
+        """The happy path still routes on a present context key."""
+        from_component = self.create_mock_component("classify_impact")
+        run_component = self.create_mock_component("run")
+        default_component = self.create_mock_component("default")
+
+        router = Router(
+            input="context:classify_impact.execution_result",
+            from_component=from_component,
+            to_component={
+                "failed": run_component,
+                BaseRouter.DEFAULT_ROUTE: default_component,
+            },
+        )
+
+        state = {"context": {"classify_impact": {"execution_result": "failed"}}}
+
+        assert router.route(state) == "run_entry_hook"
+        run_component.__entry_hook__.assert_called_once()
 
     def test_router_allowed_input_targets(self):
         """Test that Router has correct allowed input targets."""

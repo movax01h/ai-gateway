@@ -1,4 +1,5 @@
 from .access_log import AccessLogMiddleware
+from .actor_limit import ActorLimitMiddleware
 from .authentication import MiddlewareAuthentication
 from .distributed_trace import DistributedTraceMiddleware
 from .feature_flag import FeatureFlagMiddleware
@@ -21,6 +22,7 @@ from .headers import (
 )
 from .internal_event import InternalEventMiddleware
 from .model_config import ModelConfigMiddleware
+from .request_body_limit import RequestBodyLimitMiddleware
 from .request_metadata import RequestMetadataMiddleware
 
 __all__ = [
@@ -40,10 +42,12 @@ __all__ = [
     "X_GITLAB_TEAM_MEMBER_HEADER",
     "X_GITLAB_VERSION_HEADER",
     "AccessLogMiddleware",
+    "ActorLimitMiddleware",
     "DistributedTraceMiddleware",
     "FeatureFlagMiddleware",
     "InternalEventMiddleware",
     "MiddlewareAuthentication",
     "ModelConfigMiddleware",
+    "RequestBodyLimitMiddleware",
     "RequestMetadataMiddleware",
 ]

@@ -48,6 +48,7 @@ from .vulnerabilities import *
 from .web_search import *
 from .wiki import *
 from .work_item import *
+from .workplan_tracks import *
 
 # Tools that live in their feature package under ai/features/ (see
 # docs/module_boundaries.md). Resolve the old attribute access lazily to
@@ -60,6 +61,7 @@ _MOVED_TOOLS = {
     "RiskClassificationClaimInput": "ai.features.review.risk_classification.components",
     "SubmitMergeRequestRiskClassification": "ai.features.review.risk_classification.components",
     "SubmitMergeRequestRiskClassificationInput": "ai.features.review.risk_classification.components",
+    "PostSecretFpAnalysisToGitlab": "ai.features.security.secrets_fp_detection.components",
 }
 
 

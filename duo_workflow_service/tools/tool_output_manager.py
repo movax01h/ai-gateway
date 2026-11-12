@@ -1,7 +1,7 @@
 import json
 from enum import Enum
 from textwrap import dedent
-from typing import Any
+from typing import Any, Optional
 
 import structlog
 from langchain_core.messages import ToolMessage
@@ -12,6 +12,10 @@ from duo_workflow_service.entities.image_blocks import (
     block_text,
     is_image_block,
     with_block_text,
+)
+from duo_workflow_service.security.secret_redaction import (
+    redact_cut_comparison,
+    redact_unclosed_assignment,
 )
 from duo_workflow_service.security.tool_output_security import (
     TRUNCATED_TOOL_OUTPUT_TAG,
@@ -81,10 +85,29 @@ def _add_truncation_instruction(
         """)
 
 
+def _cut(encoded: bytes, size: int, direction: TruncationDirection) -> str:
+    """``size`` bytes from the start of ``encoded``, or from its end for ``FROM_END``."""
+    if size <= 0:
+        # ``encoded[-0:]`` would be all of it.
+        return ""
+
+    kept = (
+        encoded[-size:] if direction == TruncationDirection.FROM_END else encoded[:size]
+    )
+    return kept.decode("utf-8", errors="ignore")
+
+
 def truncate_string(
-    text: str, tool_name: str, truncation_config: TruncationConfig
+    text: str,
+    tool_name: str,
+    truncation_config: TruncationConfig,
+    original_len: Optional[int] = None,
 ) -> str:
-    """Truncate string if it exceeds the configured byte limits."""
+    """Truncate string if it exceeds the configured byte limits.
+
+    ``original_len`` is the length in characters of the longer result that ``text`` was cut from, if any. The notice
+    then reports the size of that result, not of the cut.
+    """
 
     max_bytes = truncation_config.max_bytes
     truncated_size = truncation_config.truncated_size
@@ -95,15 +118,12 @@ def truncate_string(
     if len(encoded) <= max_bytes:
         return text
 
-    if direction == TruncationDirection.FROM_END:
-        # Keep the end (most recent content)
-        truncated_text = encoded[-truncated_size:].decode("utf-8", errors="ignore")
-    else:
-        # Keep the beginning (default behavior)
-        truncated_text = encoded[:truncated_size].decode("utf-8", errors="ignore")
+    truncated_text = _cut(encoded, truncated_size, direction)
 
     # Log token size to be consistent
     original_token_size = token_counter.count_string_content(text)
+    if original_len is not None:
+        original_token_size = original_token_size * original_len // len(text)
     truncated_token_size = token_counter.count_string_content(truncated_text)
 
     logger.info(
@@ -123,6 +143,84 @@ def truncate_string(
     )
 
     return truncated_output
+
+
+# Bytes scanned past ``max_bytes`` when a long result is cut before redaction. See ``redact_window``.
+_REDACTION_WINDOW_MARGIN = 64 * 1024
+
+
+def redact_window(text: str, truncation_config: TruncationConfig) -> Optional[str]:
+    """The part of ``text`` to redact when redacting all of it would stall the event loop, else ``None``.
+
+    Redaction time grows with the size of the text, and a tool result can be megabytes. Only ``truncated_size`` bytes
+    of it reach the model, so a text longer than ``max_bytes`` plus ``_REDACTION_WINDOW_MARGIN`` is cut to that size,
+    from the end that truncation keeps. Shorter text is redacted whole, as before.
+
+    A secret split by this cut is no longer matched, so it stays raw at the cut end of the window.
+    ``truncate_redacted_window`` drops the last ``max_bytes - truncated_size`` bytes at that end. A split secret
+    reaches the model only if the part of it inside the window is longer than that, and starts in the part that is
+    kept. A keyword assignment whose closing quote lies past the cut, or a comparison whose keyword does, can be long,
+    so ``truncate_redacted_window`` masks it. A keyword cut off from its value by a run of whitespace longer than the
+    slack plus the margin is not matched, and not masked. A config with no such slack is not cut.
+    """
+    if truncation_config.max_bytes <= truncation_config.truncated_size:
+        return None
+
+    # A lone surrogate cannot be encoded. ``_cut`` drops it when it decodes, so the size counts without it.
+    encoded = text.encode("utf-8", errors="ignore")
+    size = truncation_config.max_bytes + _REDACTION_WINDOW_MARGIN
+    if len(encoded) <= size:
+        return None
+
+    return _cut(encoded, size, truncation_config.direction)
+
+
+def truncate_redacted_window(
+    redacted: str,
+    tool_name: str,
+    truncation_config: TruncationConfig,
+    original_len: int,
+) -> str:
+    """Truncate the redacted ``redact_window`` of a longer result, always with the truncation notice.
+
+    Keeps ``truncated_size`` bytes, as ``truncate_string`` does for a result over ``max_bytes``. Redaction can shrink
+    the window below ``max_bytes``. Then fewer bytes are kept, so the last ``max_bytes - truncated_size`` bytes at the
+    cut end are still dropped.
+
+    A keyword assignment whose closing quote lies past the cut of a window kept from the start is masked to the end
+    of the window, as redacting the whole result would mask it up to that quote. So is a comparison whose keyword lies
+    past the cut. The end is then a placeholder, so no bytes are dropped for a split secret. A window kept from the
+    end is the end of the result, so an assignment with no closing quote in it has none anywhere, and the whole result
+    would not match it either.
+    """
+    slack = truncation_config.max_bytes - truncation_config.truncated_size
+    masked = None
+    if truncation_config.direction == TruncationDirection.FROM_START:
+        kept = truncation_config.truncated_size
+        masked = redact_unclosed_assignment(redacted, kept) or redact_cut_comparison(
+            redacted, kept
+        )
+    if masked is not None:
+        redacted, slack = masked, 0
+
+    window_bytes = len(redacted.encode("utf-8"))
+    keep = max(min(truncation_config.truncated_size, window_bytes - slack), 0)
+
+    logger.info(
+        "Tool response was cut before redaction",
+        tool_name=tool_name,
+        original_len=original_len,
+        window_bytes=window_bytes,
+        kept_bytes=keep,
+        shrunk=keep < truncation_config.truncated_size,
+        unclosed_assignment_masked=masked is not None,
+    )
+
+    # ``max_bytes=0`` forces the cut and the notice, whatever the size left after redaction.
+    forced = truncation_config.model_copy(
+        update={"max_bytes": 0, "truncated_size": keep}
+    )
+    return truncate_string(redacted, tool_name, forced, original_len=original_len)
 
 
 def _budgeted_text(block: Any) -> str:

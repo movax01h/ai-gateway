@@ -19,7 +19,7 @@ def mock_prompt_fixture():
     """Mock Prompt with ainvoke and prompt_tpl stubbed."""
     mock = AsyncMock()
     mock.prompt_tpl = MagicMock()
-    mock.prompt_tpl.format_messages.return_value = [
+    mock.prompt_tpl.invoke.return_value.to_messages.return_value = [
         SystemMessage(content="system prompt"),
         HumanMessage(content="user prompt"),
     ]
@@ -32,7 +32,7 @@ def mock_prompt_manual_fixture():
     """Mock Prompt for the manual compaction prompt."""
     mock = AsyncMock()
     mock.prompt_tpl = MagicMock()
-    mock.prompt_tpl.format_messages.return_value = [
+    mock.prompt_tpl.invoke.return_value.to_messages.return_value = [
         SystemMessage(content="system prompt"),
         HumanMessage(content="user prompt"),
     ]

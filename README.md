@@ -147,3 +147,8 @@ See [release doc](docs/delivery/release.md).
 ## Rate limiting
 
 Access to AI Gateway is subjected to rate limiting defined as part of <https://gitlab.com/gitlab-com/runbooks/-/blob/master/docs/cloud_connector/README.md#rate-limiting>.
+
+## Request body limits
+
+See [request body limits doc](docs/request_body_limits.md) for the size limits on request bodies and the logs that
+the gateway writes when it rejects a body.

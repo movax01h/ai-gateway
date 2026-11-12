@@ -78,7 +78,6 @@ from ai_gateway.prompts.base import (
     _RETRYABLE_OPENAI_STREAM_ERROR_TYPES,
     TemplateNotFoundError,
     _attempt_failure_log_fields,
-    _is_timeout_error,
     _log_before_backoff_sleep,
     _log_retries_exhausted,
     _record_attempt_start,
@@ -94,7 +93,7 @@ from ai_gateway.prompts.config.base import (
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from lib.context import StarletteUser, current_model_metadata_context
-from lib.prompts.utilities import render_security_block
+from lib.prompts.utilities import prompt_template_to_messages, render_security_block
 from tests.conftest import FakeModel
 
 
@@ -318,10 +317,8 @@ configurable_unit_primitives:
 
         assert prompt_template == ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    render_security_block() + "{% include 'system.jinja' %}",
-                ),
+                ("system", "{% include 'system.jinja' %}"),
+                ("system", render_security_block().rstrip("\n")),
                 ("user", "{{content}}"),
                 MessagesPlaceholder("history", optional=True),
             ],
@@ -351,10 +348,8 @@ configurable_unit_primitives:
 
         assert prompt_template == ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    render_security_block() + "{% include 'system.jinja' %}",
-                ),
+                ("system", "{% include 'system.jinja' %}"),
+                ("system", render_security_block().rstrip("\n")),
                 ("user", "{{content}}"),
                 MessagesPlaceholder("history", optional=True),
             ],
@@ -645,10 +640,8 @@ configurable_unit_primitives:
 
         assert prompt_template == ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    render_security_block() + "{% include 'system.jinja' %}",
-                ),
+                ("system", "{% include 'system.jinja' %}"),
+                ("system", render_security_block().rstrip("\n")),
                 ("user", "{{content}}"),
                 MessagesPlaceholder("messages"),
                 MessagesPlaceholder("history", optional=True),
@@ -684,7 +677,7 @@ configurable_unit_primitives:
 
         expected_call = mock.call(
             "Performing LLM request",
-            prompt=f"System: {render_security_block()}Hi, I'm Duo\nHuman: What's up?",
+            prompt=f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\nHuman: What's up?",
         )
         assert mock_logger.info.mock_calls[0] == expected_call
 
@@ -725,7 +718,7 @@ configurable_unit_primitives:
         expected_call = mock.call(
             "Performing LLM request",
             prompt=(
-                f"System: {render_security_block()}Hi, I'm Duo\n"
+                f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\n"
                 "Human: What's up?\nAI: Fine, you?\nHuman: Good."
             ),
         )
@@ -764,7 +757,7 @@ configurable_unit_primitives:
 
         expected_call = mock.call(
             "Performing LLM request",
-            prompt=f"System: {render_security_block()}Hi, I'm Duo\nHuman: What's up?",
+            prompt=f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\nHuman: What's up?",
         )
         assert mock_logger.info.mock_calls[0] == expected_call
 
@@ -814,7 +807,7 @@ configurable_unit_primitives:
         expected_call = mock.call(
             "Performing LLM request",
             prompt=(
-                f"System: {render_security_block()}Hi, I'm Duo\n"
+                f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\n"
                 "Human: What's up?\nAI: Fine, you?\nHuman: Good."
             ),
         )
@@ -858,7 +851,7 @@ configurable_unit_primitives:
 
         expected_call = mock.call(
             "Performing LLM request",
-            prompt=f"System: {render_security_block()}Hi, I'm Duo\nHuman: What's up?",
+            prompt=f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\nHuman: What's up?",
         )
         assert mock_logger.info.mock_calls[0] == expected_call
 
@@ -909,7 +902,7 @@ configurable_unit_primitives:
         expected_call = mock.call(
             "Performing LLM request",
             prompt=(
-                f"System: {render_security_block()}Hi, I'm Duo\n"
+                f"System: Hi, I'm Duo\n\n{render_security_block().rstrip()}\n"
                 "Human: What's up?\nAI: Fine, you?\nHuman: Good."
             ),
         )
@@ -1050,6 +1043,97 @@ configurable_unit_primitives:
         with pytest.raises(StopAsyncIteration):
             await anext(iterator)
 
+    @staticmethod
+    def _open_stream(prompt: Prompt, method: str):
+        inputs = {"name": "Duo", "content": "What's up?"}
+        if method == "astream":
+            return prompt.astream(inputs)
+
+        async def _input():
+            yield inputs
+
+        return prompt.atransform(_input())
+
+    @staticmethod
+    async def _cancel_stream(iterator):
+        # A client disconnect cancels the task: CancelledError at the yield.
+        with pytest.raises(asyncio.CancelledError):
+            await iterator.athrow(asyncio.CancelledError())
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model_response", ["abc"])
+    @pytest.mark.parametrize("method", ["astream", "atransform"])
+    async def test_stream_cancelled_before_usage_available_registers_zero_usage_for_billing_only(
+        self, mock_watch: mock.Mock, prompt: Prompt, method: str
+    ):
+        """A client that leaves before the provider reports usage must still be billable, without events."""
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+        empty_usage_callback = mock.MagicMock(usage_metadata={})
+
+        with mock.patch(
+            "ai_gateway.prompts.base.UsageMetadataCallbackHandler",
+            return_value=empty_usage_callback,
+        ):
+            iterator = self._open_stream(prompt, method)
+            await anext(iterator)
+            await self._cancel_stream(iterator)
+
+        mock_watcher.register_llm_operation.assert_called_once_with(
+            prompt.reported_model_name,
+            UsageMetadata(input_tokens=0, output_tokens=0, total_tokens=0),
+            {**prompt.internal_event_extra, "operation_type": prompt.operation_type},
+        )
+        mock_watcher.register_token_usage.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("model_response", "usage_metadata"),
+        [("abc", UsageMetadata(input_tokens=1, output_tokens=3, total_tokens=4))],
+    )
+    @pytest.mark.parametrize("method", ["astream", "atransform"])
+    async def test_stream_cancelled_after_usage_available_registers_real_usage(
+        self,
+        mock_watch: mock.Mock,
+        prompt: Prompt,
+        usage_metadata: UsageMetadata,
+        method: str,
+    ):
+        """Usage the provider already reported is registered once, as for a completed call."""
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+
+        with self._mock_usage_metadata(prompt.model_name, usage_metadata):
+            iterator = self._open_stream(prompt, method)
+            await anext(iterator)
+            await self._cancel_stream(iterator)
+
+        mock_watcher.register_token_usage.assert_called_once_with(
+            prompt.model_name,
+            usage_metadata,
+            {**prompt.internal_event_extra, "operation_type": prompt.operation_type},
+        )
+        mock_watcher.register_llm_operation.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("model_response", ["abc"])
+    @pytest.mark.parametrize("method", ["astream", "atransform"])
+    async def test_closed_stream_registers_no_usage(
+        self, mock_watch: mock.Mock, prompt: Prompt, method: str
+    ):
+        """A closed generator may be a garbage-collected one in an unrelated context, so it registers nothing."""
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+        empty_usage_callback = mock.MagicMock(usage_metadata={})
+
+        with mock.patch(
+            "ai_gateway.prompts.base.UsageMetadataCallbackHandler",
+            return_value=empty_usage_callback,
+        ):
+            iterator = self._open_stream(prompt, method)
+            await anext(iterator)
+            await iterator.aclose()  # raises GeneratorExit inside the generator
+
+        mock_watcher.register_llm_operation.assert_not_called()
+        mock_watcher.register_token_usage.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_ainvoke_model_input(self, prompt: Prompt):
         with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
@@ -1058,7 +1142,9 @@ configurable_unit_primitives:
         mock_ainvoke.assert_called_once()
         assert mock_ainvoke.call_args.args[0] == ChatPromptValue(
             messages=[
-                SystemMessage(content=render_security_block() + "Hi, I'm Duo"),
+                SystemMessage(
+                    content="Hi, I'm Duo\n\n" + render_security_block().rstrip("\n")
+                ),
                 HumanMessage(content="What's up?"),
             ]
         )
@@ -1085,7 +1171,9 @@ configurable_unit_primitives:
         mock_astream.assert_called_once()
         assert mock_astream.call_args.args[0] == ChatPromptValue(
             messages=[
-                SystemMessage(content=render_security_block() + "Hi, I'm Duo"),
+                SystemMessage(
+                    content="Hi, I'm Duo\n\n" + render_security_block().rstrip("\n")
+                ),
                 HumanMessage(content="What's up?"),
             ]
         )
@@ -1164,11 +1252,13 @@ configurable_unit_primitives:
         ]
 
         assert [log_entry["attempt"] for log_entry in retry_logs] == [1, 2, 3]
-        assert [log_entry["sleep_before_retry_s"] for log_entry in retry_logs] == [
-            3.0,
-            9.0,
-            27.0,
-        ]
+        # Jittered waits fall between the floor and each attempt's exponential cap.
+        sleeps = [log_entry["sleep_before_retry_s"] for log_entry in retry_logs]
+        upper_bounds = [3.0, 9.0, 27.0]
+        assert all(
+            1.5 <= sleep <= upper_bound
+            for sleep, upper_bound in zip(sleeps, upper_bounds)
+        )
         assert all(log_entry["timeout_suspected"] for log_entry in retry_logs)
         assert all(
             log_entry["exception_class"] == "ReadTimeout" for log_entry in retry_logs
@@ -1695,8 +1785,8 @@ configurable_unit_primitives:
                 await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
     @pytest.mark.asyncio
-    async def test_ainvoke_uses_exponential_backoff(self, prompt: Prompt):
-        """Test that retry waits follow exponential backoff: ~3s, ~9s, ~27s."""
+    async def test_ainvoke_uses_jittered_exponential_backoff(self, prompt: Prompt):
+        """Test that retry waits are random between 1.5s and the exponential cap: 3s, 9s, 27s."""
         sleep_calls = []
 
         async def fake_sleep(seconds: float) -> None:
@@ -1708,13 +1798,19 @@ configurable_unit_primitives:
             side_effect=httpx.ReadError("Connection reset by peer"),
         ):
             with mock.patch("asyncio.sleep", side_effect=fake_sleep):
-                with pytest.raises(httpx.ReadError):
-                    await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+                with mock.patch(
+                    "random.uniform", side_effect=lambda low, high: high
+                ) as mock_uniform:
+                    with pytest.raises(httpx.ReadError):
+                        await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
 
-        assert len(sleep_calls) == 3
-        assert sleep_calls[0] == pytest.approx(3.0)
-        assert sleep_calls[1] == pytest.approx(9.0)
-        assert sleep_calls[2] == pytest.approx(27.0)
+        assert sleep_calls == pytest.approx([3.0, 9.0, 27.0])
+        # Tenacity also computes a wait after the final attempt, but never sleeps it.
+        assert [call.args for call in mock_uniform.call_args_list[:3]] == [
+            pytest.approx((1.5, 3.0)),
+            pytest.approx((1.5, 9.0)),
+            pytest.approx((1.5, 27.0)),
+        ]
 
     @pytest.mark.parametrize(
         "tool_choice",
@@ -1754,6 +1850,49 @@ configurable_unit_primitives:
         kwargs = mock_bind_tool.call_args.kwargs
 
         assert kwargs["tool_choice"] == tool_choice
+
+    def test_bind_tools_turns_web_search_into_the_models_route(
+        self,
+        model_provider: ModelClassProvider,
+        prompt_config: PromptConfig,
+        model_factory: TypeModelFactory,
+        model: FakeModel,
+    ):
+        """The binding swaps a `web_search` tool for the provider's own search; see `bind_web_search`."""
+        with mock.patch.object(FakeModel, "bind_tools") as mock_bind_tool:
+            mock_bind_tool.return_value = model
+            web_search = mock.Mock(spec=BaseTool)
+            web_search.name = "web_search"
+            web_search.description = "Search the web"
+
+            prompt = Prompt(
+                model_provider=model_provider,
+                model_factory=model_factory,
+                config=prompt_config,
+                model_metadata=None,
+                tools=[web_search],
+            )
+
+        assert mock_bind_tool.call_args.args[0] == []
+        assert mock_bind_tool.call_args.kwargs["web_search_options"] == {}
+        assert prompt.binds_web_search is True
+
+    def test_web_search_options_without_tools_do_not_count_as_search(
+        self,
+        model_provider: ModelClassProvider,
+        prompt_config: PromptConfig,
+        model_factory: TypeModelFactory,
+    ):
+        """Nothing is bound without tools, so the prompt must not be told it can search."""
+        prompt = Prompt(
+            model_provider=model_provider,
+            model_factory=model_factory,
+            config=prompt_config,
+            model_metadata=None,
+            bind_tools_params={"web_search_options": {}},
+        )
+
+        assert prompt.binds_web_search is False
 
     @pytest.mark.parametrize(
         ("model_metadata_identifier", "config_model_name", "expected_model_id_suffix"),
@@ -2043,6 +2182,79 @@ class TestPromptRequestedModel:
 
 class _FakeLiteLLMModel(FakeModel):
     custom_llm_provider: Optional[str] = None
+
+
+class TestPromptSystemMessageLayout:
+    """The system messages the model receives follow ``merges_system_messages``, whatever built the template."""
+
+    @pytest.fixture(name="uses_cache_breakpoints")
+    def uses_cache_breakpoints_fixture(self):
+        return True
+
+    @pytest.fixture(name="llm_definition")
+    def llm_definition_fixture(self, uses_cache_breakpoints: bool):
+        return ChatLiteLLMDefinition(
+            name="Test model",
+            gitlab_identifier="test_model",
+            max_context_tokens=200000,
+            uses_cache_breakpoints=uses_cache_breakpoints,
+            params=ChatLiteLLMParams(
+                model="test-model", temperature=0.0, max_tokens=4096
+            ),
+        )
+
+    @pytest.fixture(name="prompt_template")
+    def prompt_template_fixture(self):
+        return {"system": ["Hi, I'm {{name}}", "Dynamic part"], "user": "{{content}}"}
+
+    @pytest.fixture(name="factory_built")
+    def factory_built_fixture(self):
+        return False
+
+    @pytest.fixture(name="prompt_template_factory")
+    def prompt_template_factory_fixture(self, factory_built: bool):
+        if not factory_built:
+            return None
+
+        # Like ``AgentPromptTemplate``: a factory that builds its own messages with the shared helper.
+        def factory(_model_provider, config):
+            return ChatPromptTemplate.from_messages(
+                prompt_template_to_messages(config.prompt_template),
+                template_format="jinja2",
+            )
+
+        return factory
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("uses_cache_breakpoints", "factory_built", "expected_system_messages"),
+        [
+            (True, False, ["Hi, I'm Duo", "Dynamic part", "{security}"]),
+            (False, False, ["Hi, I'm Duo\n\nDynamic part\n\n{security}"]),
+            (True, True, ["Hi, I'm Duo", "Dynamic part", "{security}"]),
+            (False, True, ["Hi, I'm Duo\n\nDynamic part\n\n{security}"]),
+        ],
+    )
+    async def test_model_input_system_messages(
+        self, prompt: Prompt, expected_system_messages: list[str]
+    ):
+        inputs = {"name": "Duo", "content": "What's up?"}
+        with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+            await prompt.ainvoke(inputs)
+
+        security = render_security_block().rstrip("\n")
+        expected = [
+            *(
+                ("system", t.replace("{security}", security))
+                for t in expected_system_messages
+            ),
+            ("human", "What's up?"),
+        ]
+        sent = mock_ainvoke.call_args.args[0].to_messages()
+        rendered = prompt.prompt_tpl.invoke(inputs).to_messages()
+
+        assert [(m.type, m.text) for m in sent] == expected
+        assert [(m.type, m.text) for m in rendered] == expected
 
 
 class TestPromptModelVendor:
@@ -2517,6 +2729,45 @@ class TestBaseRegistry:
         internal_event_client.track_event.assert_not_called()
 
     @pytest.mark.parametrize(
+        ("unit_primitive", "scopes", "issuer", "success"),
+        [
+            (GitLabUnitPrimitive.COMPLETE_CODE, ["complete_code"], "gitlab.com", True),
+            (
+                GitLabUnitPrimitive.COMPLETE_CODE,
+                ["complete_code"],
+                "gitlab-ai-gateway",
+                False,
+            ),
+        ],
+    )
+    def test_get_on_behalf_with_disallowed_issuers(
+        self,
+        internal_event_client: Mock,
+        registry: BasePromptRegistry,
+        user: StarletteUser,
+        prompt: Prompt,
+        success: bool,
+    ):
+        if success:
+            assert (
+                registry.get_on_behalf(
+                    user=user,
+                    prompt_id="test",
+                    disallowed_issuers=["gitlab-ai-gateway"],
+                )
+                == prompt
+            )
+        else:
+            with pytest.raises(WrongUnitPrimitives):
+                registry.get_on_behalf(
+                    user=user,
+                    prompt_id="test",
+                    disallowed_issuers=["gitlab-ai-gateway"],
+                )
+
+            internal_event_client.track_event.assert_not_called()
+
+    @pytest.mark.parametrize(
         ("model_metadata", "unit_primitive", "scopes"),
         [
             (
@@ -2576,6 +2827,11 @@ class TestBaseRegistry:
         )
 
         assert result == prompt
+
+    def test_models_from_returns_none_without_an_override(
+        self, registry: BasePromptRegistry
+    ):
+        assert registry.models_from("test", "^1.0.0") is None
 
 
 class TestPromptCallbacks:
@@ -3098,18 +3354,36 @@ configurable_unit_primitives:
         registry: BasePromptRegistry,
     ):
         """Test that exceptions from prompt invocation are propagated."""
-        with mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke:
+        validations = []
+        validate_model = registry.validate_model
+
+        async def track_validation(model: str):
+            validation = asyncio.ensure_future(validate_model(model))
+            validations.append(validation)
+            await validation
+
+        async def settle():
+            # gather() raises on the first failure and leaves the other
+            # validations running, so wait for them before counting calls
+            await asyncio.gather(*validations, return_exceptions=True)
+
+        with (
+            mock.patch.object(FakeModel, "ainvoke") as mock_ainvoke,
+            mock.patch.object(registry, "validate_model", side_effect=track_validation),
+        ):
             mock_ainvoke.side_effect = Exception("Model validation failed")
 
             with pytest.raises(Exception, match="Model validation failed"):
                 await registry.validate_default_models()
 
+            await settle()
             # Tried to validate all three models independently, all failed
             assert mock_ainvoke.call_count == 3
 
             with pytest.raises(Exception, match="Model validation failed"):
                 await registry.validate_default_models()
 
+            await settle()
             # Doesn't cache the failed results, tries to validate all models again
             assert mock_ainvoke.call_count == 6
 
@@ -3555,48 +3829,6 @@ class TestBuildModelExtraHeaders:
         assert capturing_model_factory.captured_kwargs["default_headers"] == {
             "anthropic-version": "2023-06-01"
         }
-
-
-def _chained_timeout_error() -> ValueError:
-    outer = ValueError("wrapper")
-    outer.__cause__ = httpx.ReadTimeout("read timed out")
-    return outer
-
-
-class TestIsTimeoutError:
-    @pytest.mark.parametrize(
-        ("exc", "expected"),
-        [
-            (httpx.ReadTimeout("read timed out"), True),
-            (asyncio.TimeoutError(), True),
-            # litellm surfaces the aiohttp idle-read timeout as a generic
-            # connection error carrying a fixed message.
-            (
-                MidStreamFallbackError(
-                    "AnthropicException - Timeout on reading data from socket",
-                    model="claude-3",
-                    llm_provider="anthropic",
-                ),
-                True,
-            ),
-            (_chained_timeout_error(), True),
-            (ValueError("boom"), False),
-            (None, False),
-        ],
-    )
-    def test_classification(self, exc: Optional[BaseException], expected: bool):
-        assert _is_timeout_error(exc) is expected
-
-    def test_loop_exhaustion_returns_false(self):
-        """A chain of 5+ non-timeout exceptions exhausts the loop and hits the final ``return False``."""
-        # Build a chain of 6 plain exceptions so the loop runs all 5 iterations
-        # without ever finding a timeout, reaching the ``return False`` after the loop.
-        exc: BaseException = ValueError("level-6")
-        for i in range(5, 0, -1):
-            wrapper = ValueError(f"level-{i}")
-            wrapper.__cause__ = exc
-            exc = wrapper
-        assert _is_timeout_error(exc) is False
 
 
 class TestRetryHooks:

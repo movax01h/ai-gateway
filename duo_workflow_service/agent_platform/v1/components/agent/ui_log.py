@@ -4,11 +4,13 @@ from functools import partial
 from typing import Any, Callable, Optional, override
 from uuid import uuid4
 
+from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
 from duo_workflow_service.agent_platform.v1.ui_log import (
     BaseUILogEvents,
     BaseUILogWriter,
+    UIHistory,
     UILogCallback,
     format_tool_display_message,
 )
@@ -19,11 +21,19 @@ from duo_workflow_service.entities import (
     UiChatLog,
     build_tool_info,
 )
+from duo_workflow_service.entities.server_tool_blocks import (
+    AgentTextSegment,
+    ServerToolBoundary,
+    ServerToolResults,
+    split_content_around_server_tools,
+    warn_unmatched_server_tool_results,
+)
 
 __all__ = [
     "UILogEventsAgent",
     "UILogWriterAgentTools",
     "agent_tools_ui_log_writer_class",
+    "log_server_tool_turn",
 ]
 
 
@@ -186,3 +196,49 @@ def agent_tools_ui_log_writer_class(
         ``UILogCallback``.
     """
     return partial(UILogWriterAgentTools, component_name=component_name)
+
+
+def log_server_tool_turn(
+    ui_history: UIHistory,
+    message: AIMessage,
+    *,
+    log_text: Callable[[str, Optional[str]], None],
+    component_name: Optional[str],
+    subsession_id: Optional[str] = None,
+) -> bool:
+    """Queue ``message``'s text segments and server-tool cards (e.g. web search) in content order.
+
+    Entries take the ids the streaming notifier gives them (``text_segment_id`` for text, the call id for cards),
+    so the entries it streamed are replaced in place, not repeated. The notifier drops a streamed card that graph
+    state does not carry, so these entries are what keeps a card on screen after the next checkpoint and on resume.
+
+    Args:
+        ui_history: History the entries are queued on; cards are filtered as ``ON_TOOL_EXECUTION_SUCCESS``.
+        message: The model's completion.
+        log_text: Called as ``log_text(text, message_id)`` for each text segment, so the caller picks the event.
+        component_name: Stamped on each card, matching the caller's writer.
+        subsession_id: Stamped on each card, matching the caller's text entries.
+
+    Returns:
+        False, having queued nothing, when the message made no server-tool call.
+    """
+    content = message.content
+    if not isinstance(content, list):
+        return False
+
+    segments = list(split_content_around_server_tools(content, message.id))
+    if not any(isinstance(segment, ServerToolBoundary) for segment in segments):
+        return False
+
+    warn_unmatched_server_tool_results(content)
+    results = ServerToolResults(content)
+    for segment in segments:
+        if isinstance(segment, AgentTextSegment):
+            log_text(segment.text, segment.key)
+            continue
+
+        card = results.build_ui_chat_log(segment.block, component_name=component_name)
+        card["subsession_id"] = subsession_id
+        ui_history.add(card, event=UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS)
+
+    return True

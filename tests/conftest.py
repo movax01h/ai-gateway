@@ -1,3 +1,4 @@
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional, Union
@@ -34,6 +35,7 @@ from ai_gateway.api.middleware.route import usage_quota
 from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
 from ai_gateway.config import Config, ConfigModelLimits, get_config
 from ai_gateway.container import ContainerApplication
+from ai_gateway.feature_allowlist import dws_client_model_request_context
 from ai_gateway.model_metadata import ModelMetadata, TypeModelMetadata
 from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
@@ -124,8 +126,8 @@ def mock_client_fixture(
     mock_config,
 ):
     """Setup all the needed mocks to perform requests in the test environment."""
-    # Set the config on the app in the nested structure: extra['extra']['config']
-    test_client.app.extra["extra"] = {"config": mock_config}
+    # Set the config on the app state
+    test_client.app.state.config = mock_config
 
     # Initialize usage quota service for tests
     test_client.app.state.usage_quota_service = UsageQuotaService(
@@ -402,6 +404,30 @@ def model_fixture(
     )
 
 
+@pytest.fixture(name="blocked_model_stream")
+def blocked_model_stream_fixture():
+    """Make `FakeModel` stream two chunks, then wait for the provider forever.
+
+    Yields an `asyncio.Event` that is set when the stream starts waiting, so a test can cancel the task that consumes
+    it. The Prompt holds back one item, and `execute()` reads the first chunk, so a consumer needs two model chunks to
+    have received one before the cancel.
+    """
+    waiting = asyncio.Event()
+    original_astream = FakeModel._astream  # pylint: disable=protected-access
+
+    async def _astream(self, *args, **kwargs):
+        sent = 0
+        async for chunk in original_astream(self, *args, **kwargs):
+            yield chunk
+            sent += 1
+            if sent == 2:
+                waiting.set()
+                await asyncio.Event().wait()
+
+    with patch.object(FakeModel, "_astream", _astream):
+        yield waiting
+
+
 @pytest.fixture(name="model_factory")
 def model_factory_fixture(model: Model):
     return lambda *args, **kwargs: model
@@ -472,6 +498,7 @@ def llm_definition_fixture():
         name="Mistral",
         gitlab_identifier="mistral",
         max_context_tokens=128000,
+        requires_paid_credits=False,
         family=["mistral"],
         params={"model": "mistral", "temperature": 0.0, "max_tokens": 4096},
     )
@@ -635,6 +662,7 @@ def reset_context_vars():
     current_feature_flag_context.set(set[str]())
     current_model_metadata_with_size_context.set(None)
     current_model_metadata_context.set(None)
+    dws_client_model_request_context.set(None)
     token_usage.set(None)
     llm_operations.set(None)
     current_prompt_cache_context.set(None)
@@ -645,10 +673,25 @@ def reset_context_vars():
 
 @pytest.fixture(name="feature_allowlist_mode")
 def feature_allowlist_mode_fixture(request, monkeypatch):
-    """Set the feature allowlist mode for the test; parametrize indirectly to pick it."""
+    """Set the feature allowlist mode of both surfaces for the test; parametrize indirectly to pick it."""
     mode = getattr(request, "param", "log")
-    monkeypatch.setattr(get_config().model_selection, "feature_allowlist_mode", mode)
+    model_selection = get_config().model_selection
+    monkeypatch.setattr(model_selection, "feature_allowlist_mode_http", mode)
+    monkeypatch.setattr(model_selection, "feature_allowlist_mode_dws", mode)
     return mode
+
+
+# The `config_values` fixture configures the app container, but the allowlist check reads the global config.
+@pytest.fixture(name="cloud_gateway")
+def cloud_gateway_fixture(monkeypatch):
+    """Run as GitLab's own gateway, which checks client model metadata against the feature allowlist."""
+    monkeypatch.setattr(get_config().custom_models, "enabled", False)
+
+
+@pytest.fixture(name="custom_models_gateway")
+def custom_models_gateway_fixture(monkeypatch):
+    """Run as a gateway that serves custom models, which skips the feature allowlist check."""
+    monkeypatch.setattr(get_config().custom_models, "enabled", True)
 
 
 @pytest.fixture(autouse=True)
@@ -871,10 +914,10 @@ def mock_acompletion_with_retry_fixture(request, acompletion_response_fixture):
         yield mock
 
 
-@pytest.fixture(name="mock_track_billing_event")
-def mock_track_billing_event_fixture():
+@pytest.fixture(name="mock_send_billing_event")
+def mock_send_billing_event_fixture():
     with patch(
-        "lib.billing_events.client.BillingEventsClient.track_billing_event"
+        "lib.billing_events.client.BillingEventsClient.send_billing_event"
     ) as mock:
         yield mock
 

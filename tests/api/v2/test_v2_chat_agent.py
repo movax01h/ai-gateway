@@ -151,6 +151,7 @@ class TestShouldStripReasoning:
         assert _should_strip_reasoning(None) is False
 
 
+@pytest.mark.usefixtures("custom_models_gateway")
 class TestReActAgentStream:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

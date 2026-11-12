@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Annotated, Any, List, Literal, Optional, Union
 
 from fastapi import Body
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from ai_gateway.code_suggestions import ModelProvider
 from ai_gateway.code_suggestions.handler import (
@@ -118,6 +118,18 @@ class CompletionRequest(BaseModel):
     prompt_components: Annotated[
         List[PromptComponent], Field(min_length=1, max_length=100)
     ]
+
+    @field_validator("prompt_components")
+    @classmethod
+    def validate_first_component(
+        cls, prompt_components: list[PromptComponent]
+    ) -> list[PromptComponent]:
+        # The handler reads the editor content from the first component, so code contexts can only follow it
+        if prompt_components[0].type == CodeEditorComponents.CONTEXT:
+            raise ValueError(
+                "the first prompt component must be code_editor_completion or code_editor_generation"
+            )
+        return prompt_components
 
 
 # v4-only SSE wire types (consumed by handle_stream_sse).

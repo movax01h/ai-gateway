@@ -71,8 +71,8 @@ def _validate_agents(request: BindRequest) -> None:
     for agent in request.items.workspace_agents:
         if agent.name in taken:
             raise CatalogItemsError(
-                f"Workspace agent name '{agent.name}' collides with a component "
-                f"name used by this flow."
+                f"Workspace agent name '{agent.display_name}' collides with a "
+                f"component name used by this flow."
             )
 
         try:
@@ -81,7 +81,8 @@ def _validate_agents(request: BindRequest) -> None:
             # The registry raises ValueError; re-raised naming the item, which it
             # cannot see.
             raise CatalogItemsError(
-                f"Workspace agent '{agent.name}' declares an unusable tool: {exc}"
+                f"Workspace agent '{agent.display_name}' declares an unusable "
+                f"tool: {exc}"
             ) from exc
 
 

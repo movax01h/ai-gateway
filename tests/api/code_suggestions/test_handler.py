@@ -623,6 +623,7 @@ class TestEditorContentGeneration:
             suffix="\n",
         )
 
+    @pytest.mark.usefixtures("custom_models_gateway")
     class TestModelMetadataSelection:
         @dataclass
         class Case:
@@ -652,6 +653,7 @@ class TestEditorContentGeneration:
                         name="Mistral",
                         gitlab_identifier="mistral",
                         max_context_tokens=128000,
+                        requires_paid_credits=False,
                         family=["mistral"],
                         params=ChatLiteLLMParams(
                             model="mistral",

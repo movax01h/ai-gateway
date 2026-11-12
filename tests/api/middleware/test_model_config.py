@@ -1,19 +1,29 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from gitlab_cloud_connector import CloudConnectorUser
 from starlette.middleware import Middleware
 from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette_context.middleware import RawContextMiddleware
 from structlog.testing import capture_logs
 
+from ai_gateway.api.middleware.access_log import AccessLogMiddleware
 from ai_gateway.api.middleware.model_config import ModelConfigMiddleware
-from ai_gateway.config import get_config
-from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
+from ai_gateway.api.v1.prompts.invoke import check_prompt_model_metadata
+from ai_gateway.config import ConfigModelLimits
+from ai_gateway.model_metadata import DEFAULT_MODEL_REF_PREFIX
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    ModelSelectionError,
+    UnitPrimitiveConfig,
+)
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
-from ai_gateway.prompts.registry import PROMPT_ID_TO_FEATURE_SETTING
+from ai_gateway.prompts.registry import LocalPromptRegistry
 from lib.context import StarletteUser, current_model_metadata_context
+from tests.prompts.prompt_dirs import FEATURE_SETTINGS_THAT_RAILS_SENDS
 
 
 @pytest.fixture(name="model_metadata_context")
@@ -24,7 +34,23 @@ def model_metadata_context_fixture():
 
 @pytest.fixture(name="middleware_test_client")
 def middleware_test_client_fixture(model_metadata_context):
-    app = FastAPI(middleware=[Middleware(ModelConfigMiddleware)])
+    app = FastAPI(
+        middleware=[
+            Middleware(RawContextMiddleware),
+            Middleware(AccessLogMiddleware, skip_endpoints=[]),
+            Middleware(ModelConfigMiddleware, skip_endpoints=["/skipped"]),
+        ]
+    )
+
+    @app.get("/body")
+    @app.post("/body")
+    @app.post("/skipped")
+    @app.post("/v1/proxy/anthropic/{path:path}")
+    async def body(request: Request):
+        return {
+            "body": await request.json(),
+            "model_metadata_set": model_metadata_context.get() is not None,
+        }
 
     @app.post("/test")
     async def do_something(
@@ -53,10 +79,23 @@ def middleware_test_client_fixture(model_metadata_context):
             "name": model_metadata.name if model_metadata else None,
         }
 
+    prompt_registry = LocalPromptRegistry.from_local_yaml(
+        prompt_template_factories={},
+        model_factories={},
+        internal_event_client=Mock(),
+        model_limits=ConfigModelLimits(),
+    )
+
     @app.post("/v1/prompts/{prompt_id:path}")
     @app.post("/v2/prompts/{prompt_id:path}")
     async def prompts(request: Request, prompt_id: str):
-        await request.body()
+        body = await request.json()
+        try:
+            check_prompt_model_metadata(
+                prompt_registry, prompt_id, body.get("prompt_version")
+            )
+        except ModelSelectionError as error:
+            return JSONResponse(status_code=403, content={"detail": str(error)})
         model_metadata = model_metadata_context.get()
         return {
             "prompt_id": prompt_id,
@@ -75,6 +114,7 @@ def middleware_test_client_fixture(model_metadata_context):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_parses_model_params_into_context_var(middleware_test_client):
     model_params = {
         "name": "gpt",
@@ -89,6 +129,117 @@ async def test_parses_model_params_into_context_var(middleware_test_client):
     )
 
     assert response.json() == model_params
+
+
+@pytest.mark.usefixtures("custom_models_gateway")
+@pytest.mark.parametrize(
+    ("method", "path", "model_metadata_set"),
+    [
+        pytest.param("POST", "/body", True, id="post"),
+        pytest.param("GET", "/body", False, id="get"),
+        pytest.param("POST", "/skipped", False, id="skipped-endpoint"),
+    ],
+)
+def test_reads_the_body_only_for_requests_that_can_use_model_metadata(
+    middleware_test_client, method, path, model_metadata_set
+):
+    payload = {
+        "model_metadata": {
+            "name": "gpt",
+            "provider": "custom_openai",
+            "endpoint": "http://test_model.com/",
+            "api_key": "test_api_key",
+            "identifier": "test_model_identifier",
+        }
+    }
+
+    response = middleware_test_client.request(method, path, json=payload)
+
+    assert response.json() == {
+        "body": payload,
+        "model_metadata_set": model_metadata_set,
+    }
+
+
+@pytest.mark.parametrize(
+    ("body", "has_model_metadata"),
+    [
+        pytest.param(b"", False, id="empty"),
+        pytest.param(b'{"foo": "bar"}', False, id="without-model-metadata"),
+        pytest.param(b'{"foo": "model_metadata"}', False, id="key-only-in-a-value"),
+        pytest.param(b'{"model_metadata": null}', True, id="with-model-metadata"),
+    ],
+)
+def test_logs_the_body_size_on_the_access_log(
+    middleware_test_client, body, has_model_metadata
+):
+    with patch("ai_gateway.api.middleware.access_log.access_logger") as access_logger:
+        middleware_test_client.post(
+            "/test", content=body, headers={"content-type": "application/json"}
+        )
+
+    fields = access_logger.info.call_args.kwargs
+    assert {
+        "request_body_bytes": fields["request_body_bytes"],
+        "request_body_has_model_metadata": fields["request_body_has_model_metadata"],
+    } == {
+        "request_body_bytes": len(body),
+        "request_body_has_model_metadata": has_model_metadata,
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        pytest.param("GET", "/body", id="get"),
+        pytest.param("POST", "/skipped", id="skipped-endpoint"),
+    ],
+)
+def test_does_not_log_the_body_size_when_it_does_not_read_the_body(
+    middleware_test_client, method, path
+):
+    with patch("ai_gateway.api.middleware.access_log.access_logger") as access_logger:
+        middleware_test_client.request(method, path, json={"model_metadata": None})
+
+    fields = access_logger.info.call_args.kwargs
+    assert "request_body_bytes" not in fields
+    assert "request_body_has_model_metadata" not in fields
+
+
+@pytest.mark.usefixtures("custom_models_gateway")
+def test_does_not_parse_model_metadata_on_the_proxy_routes(middleware_test_client):
+    payload = {
+        "model_metadata": {
+            "name": "gpt",
+            "provider": "custom_openai",
+            "endpoint": "http://test_model.com/",
+            "api_key": "test_api_key",
+            "identifier": "test_model_identifier",
+        }
+    }
+
+    response = middleware_test_client.post(
+        "/v1/proxy/anthropic/v1/messages", json=payload
+    )
+
+    assert response.json() == {"body": payload, "model_metadata_set": False}
+
+
+def test_logs_the_body_size_of_a_proxy_request(middleware_test_client):
+    body = b'{"model_metadata": null}'
+
+    with patch("ai_gateway.api.middleware.access_log.access_logger") as access_logger:
+        middleware_test_client.post(
+            "/v1/proxy/anthropic/v1/messages",
+            content=body,
+            headers={"content-type": "application/json"},
+        )
+
+    fields = access_logger.info.call_args.kwargs
+    assert {
+        "request_body_bytes": fields["request_body_bytes"],
+        "request_body_has_model_metadata": fields["request_body_has_model_metadata"],
+    } == {"request_body_bytes": len(body), "request_body_has_model_metadata": False}
 
 
 @pytest.mark.asyncio
@@ -123,6 +274,7 @@ async def test_model_params_is_none_when_metadata_is_not_in_body(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_handles_large_request_body_with_model_metadata(middleware_test_client):
     """Test that model_metadata is extracted from large request bodies (chunked requests)"""
     model_params = {
@@ -150,6 +302,7 @@ async def test_handles_large_request_body_with_model_metadata(middleware_test_cl
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_handles_very_large_request_body(middleware_test_client):
     """Test with very large request body (>1MB) to ensure chunking is handled."""
     model_params = {
@@ -188,7 +341,71 @@ async def test_handles_malformed_json_in_large_body(middleware_test_client):
     assert response.json() is None
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b'["model_metadata"]', id="array-body"),
+        pytest.param(b'"model_metadata"', id="string-body"),
+        pytest.param(b'{"model_metadata": 5}', id="number-value"),
+        pytest.param(b'{"model_metadata": true}', id="boolean-value"),
+        pytest.param(b'{"model_metadata": "provider"}', id="string-value"),
+        pytest.param(b'{"model_metadata": ["provider"]}', id="array-value"),
+    ],
+)
+def test_ignores_model_metadata_that_is_not_an_object(middleware_test_client, body):
+    response = middleware_test_client.post(
+        "/test", content=body, headers={"content-type": "application/json"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+class TestMetadataNotApplied:
+    UNKNOWN_IDENTIFIER = {
+        "provider": "gitlab",
+        "name": "claude_sonnet_4_6_vertex",
+        "identifier": "vertex_ai/claude-opus-4-8",
+        "api_key": "client-api-key",
+    }
+
+    def test_logs_the_model_the_client_asked_for(self, middleware_test_client):
+        with capture_logs() as logs:
+            response = middleware_test_client.post(
+                "/test", json={"model_metadata": self.UNKNOWN_IDENTIFIER}
+            )
+
+        assert response.json() is None
+        assert [
+            entry for entry in logs if entry["event"] == "Model metadata not applied"
+        ] == [
+            {
+                "event": "Model metadata not applied",
+                "log_level": "warning",
+                "path": "/test",
+                "error_type": "ValueError",
+                "provider": "gitlab",
+                "requested_name": "claude_sonnet_4_6_vertex",
+                "requested_identifier": "vertex_ai/claude-opus-4-8",
+                "feature_setting": None,
+            }
+        ]
+
+    def test_does_not_log_a_body_that_is_not_json(self, middleware_test_client):
+        with capture_logs() as logs:
+            middleware_test_client.post(
+                "/test",
+                content=b'{"model_metadata": {"name": "test"}, "invalid": json}',
+                headers={"content-type": "application/json"},
+            )
+
+        assert [
+            entry for entry in logs if entry["event"] == "Model metadata not applied"
+        ] == []
+
+
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_handles_unicode_in_large_body(middleware_test_client):
     """Test that unicode characters in large bodies are handled correctly."""
     model_params = {
@@ -209,6 +426,7 @@ async def test_handles_unicode_in_large_body(middleware_test_client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_model_metadata_at_end_of_large_body(middleware_test_client):
     """Test that model_metadata is found even when it appears at the end of a large body."""
     model_params = {
@@ -265,6 +483,7 @@ async def test_null_model_metadata_in_large_body(middleware_test_client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("custom_models_gateway")
 async def test_multiple_model_metadata_fields_in_large_body(middleware_test_client):
     """Test that only the first model_metadata field is processed in large bodies."""
     model_params_1 = {
@@ -302,19 +521,9 @@ BEDROCK_ENDPOINT = "https://bedrock-runtime.us-east-1.amazonaws.com/"
 IAM_ROLE_ARN = "arn:aws:iam::123456789012:role/my-role"
 
 
-@pytest.fixture(name="custom_models")
-def custom_models_fixture():
-    with patch("ai_gateway.model_metadata.get_config") as get_config:
-        get_config.return_value.custom_models.enabled = True
-        yield get_config.return_value.custom_models
-
-
 @pytest.mark.asyncio
-async def test_rejects_iam_role_when_custom_models_disabled(
-    middleware_test_client, custom_models
-):
-    custom_models.enabled = False
-
+@pytest.mark.usefixtures("cloud_gateway")
+async def test_rejects_iam_role_when_custom_models_disabled(middleware_test_client):
     response = middleware_test_client.post(
         "/iam-role",
         json={
@@ -335,7 +544,8 @@ async def test_rejects_iam_role_when_custom_models_disabled(
 
 
 @pytest.mark.asyncio
-async def test_parses_iam_role_into_context_var(middleware_test_client, custom_models):
+@pytest.mark.usefixtures("custom_models_gateway")
+async def test_parses_iam_role_into_context_var(middleware_test_client):
     model_params = {
         "name": "gpt",
         "provider": "bedrock",
@@ -353,6 +563,7 @@ async def test_parses_iam_role_into_context_var(middleware_test_client, custom_m
 
 FABLE = "claude_fable_5"
 CHAT = "duo_chat"
+GIT_COMMAND = "glab_ask_git_command"
 NOT_ALLOWED_FOR_CHAT = {
     "provider": "gitlab",
     "identifier": FABLE,
@@ -397,12 +608,6 @@ class _AuthenticatedUser:
         await self.app(scope, receive, send)
 
 
-@pytest.fixture(name="cloud_gateway")
-def cloud_gateway_fixture(monkeypatch):
-    """Run as GitLab's own gateway: a gateway that serves custom models skips the allowlist check."""
-    monkeypatch.setattr(get_config().custom_models, "enabled", False)
-
-
 @pytest.mark.usefixtures("cloud_gateway", "feature_allowlist_mode")
 class TestFeatureAllowlist:
     @pytest.mark.parametrize(
@@ -424,6 +629,32 @@ class TestFeatureAllowlist:
 
         assert response.status_code == 200
         assert response.json()["name"] == allowed
+
+    @pytest.mark.parametrize(
+        "feature_allowlist_mode", ["log", "fallback", "enforce"], indirect=True
+    )
+    def test_serves_the_feature_default_for_the_load_balanced_default(
+        self, middleware_test_client
+    ):
+        defaults = _feature(GIT_COMMAND).default_model_identifiers
+        # `/v1/models/definitions` lists the load-balanced default for a feature with several default models.
+        assert len(defaults) > 1
+
+        with capture_logs() as logs:
+            response = middleware_test_client.post(
+                "/test",
+                json={
+                    "model_metadata": {
+                        "provider": "gitlab",
+                        "identifier": f"{DEFAULT_MODEL_REF_PREFIX}{GIT_COMMAND}",
+                        "feature_setting": GIT_COMMAND,
+                    }
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json()["name"] in defaults
+        assert [entry for entry in logs if entry["log_level"] == "warning"] == []
 
     @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
     def test_log_mode_serves_the_model_and_logs_the_mismatch(
@@ -465,6 +696,7 @@ class TestFeatureAllowlist:
     def test_a_fireworks_default_gets_the_user_session(self, model_metadata_context):
         app = FastAPI(
             middleware=[
+                Middleware(RawContextMiddleware),
                 Middleware(_AuthenticatedUser),
                 Middleware(ModelConfigMiddleware),
             ]
@@ -578,9 +810,9 @@ class TestFeatureAllowlist:
             }
 
     class TestPromptRoutes:
-        """A prompt in `PROMPT_ID_TO_FEATURE_SETTING` is checked against its feature; any other prompt gets a note."""
+        """A prompt version with `models_from` is checked against it; any other prompt gets a note."""
 
-        class TestMappedPrompts:
+        class TestPromptsThatRailsCalls:
             PATHS = ["/v1/prompts/chat/explain_code", "/v2/prompts/chat/explain_code"]
 
             @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
@@ -617,7 +849,7 @@ class TestFeatureAllowlist:
             def test_fallback_mode_serves_the_default_of_the_feature_rails_sends(
                 self, middleware_test_client, path
             ):
-                # The client's feature allows the model, so only the mapped feature replaces it.
+                # The client's feature allows the model, so only the `models_from` of the version replaces it.
                 assert (
                     "codestral_2508_fireworks"
                     in _feature("code_completions").allowed_model_identifiers
@@ -684,7 +916,7 @@ class TestFeatureAllowlist:
             )
             @pytest.mark.parametrize(
                 ("prompt_id", "feature_setting"),
-                sorted(PROMPT_ID_TO_FEATURE_SETTING.items()),
+                sorted(FEATURE_SETTINGS_THAT_RAILS_SENDS.items()),
             )
             def test_enforce_mode_serves_what_rails_sends(
                 self, middleware_test_client, prompt_id, feature_setting
@@ -741,10 +973,113 @@ class TestFeatureAllowlist:
                     if entry["event"].startswith("Model allowlist")
                 ] == []
 
+        class TestPromptVersions:
+            """The allowlist is the `models_from` of the prompt version that runs, not the entry of its prompt."""
+
+            AGENT_PLATFORM_MODEL = {
+                "provider": "gitlab",
+                "identifier": "claude_fable_5_1_vertex",
+                "feature_setting": "summarize_review",
+            }
+
+            @pytest.fixture(autouse=True)
+            def model_of_another_feature(self):
+                assert (
+                    "claude_fable_5_1_vertex"
+                    in _feature("duo_agent_platform").allowed_model_identifiers
+                )
+                assert (
+                    "claude_fable_5_1_vertex"
+                    not in _feature("summarize_review").allowed_model_identifiers
+                )
+
+            @pytest.mark.parametrize(
+                "feature_allowlist_mode", ["enforce"], indirect=True
+            )
+            def test_enforce_mode_serves_a_model_that_the_version_allows(
+                self, middleware_test_client
+            ):
+                response = middleware_test_client.post(
+                    "/v1/prompts/summarize_review",
+                    json={
+                        "model_metadata": self.AGENT_PLATFORM_MODEL,
+                        "prompt_version": "3.0.0",
+                    },
+                )
+
+                assert response.status_code == 200
+                assert response.json()["name"] == "claude_fable_5_1_vertex"
+
+            @pytest.mark.parametrize(
+                "feature_allowlist_mode", ["enforce"], indirect=True
+            )
+            def test_enforce_mode_rejects_a_model_that_the_version_does_not_allow(
+                self, middleware_test_client
+            ):
+                response = middleware_test_client.post(
+                    "/v1/prompts/summarize_review",
+                    json={
+                        "model_metadata": self.AGENT_PLATFORM_MODEL,
+                        "prompt_version": "^2.0.0",
+                    },
+                )
+
+                assert response.status_code == 403
+                assert response.json() == {
+                    "detail": "Model 'claude_fable_5_1_vertex' is not available for 'summarize_review'"
+                }
+
+            @pytest.mark.parametrize(
+                "feature_allowlist_mode", ["fallback"], indirect=True
+            )
+            def test_fallback_mode_serves_the_default_of_the_version(
+                self, middleware_test_client
+            ):
+                response = middleware_test_client.post(
+                    "/v1/prompts/summarize_review",
+                    json={
+                        "model_metadata": self.AGENT_PLATFORM_MODEL,
+                        "prompt_version": "^2.0.0",
+                    },
+                )
+
+                assert (
+                    response.json()["name"]
+                    == _feature("summarize_review").default_model_identifiers[0]
+                )
+
+        class TestUncheckedRoute:
+            @pytest.mark.parametrize(
+                "feature_allowlist_mode", ["enforce"], indirect=True
+            )
+            def test_sets_no_model_metadata_until_the_route_checks_it(
+                self, model_metadata_context
+            ):
+                app = FastAPI(
+                    middleware=[
+                        Middleware(RawContextMiddleware),
+                        Middleware(ModelConfigMiddleware),
+                    ]
+                )
+
+                @app.post("/v1/prompts/{prompt_id:path}")
+                async def unchecked(request: Request):
+                    await request.body()
+                    return {
+                        "model_metadata_set": model_metadata_context.get() is not None
+                    }
+
+                response = TestClient(app).post(
+                    "/v1/prompts/chat/explain_code",
+                    json={"model_metadata": CODE_COMPLETIONS_MODEL},
+                )
+
+                assert response.json() == {"model_metadata_set": False}
+
         class TestOtherPrompts:
             PATHS = [
-                "/v1/prompts/generate_description",
-                "/v2/prompts/generate_description",
+                "/v1/prompts/security_review",
+                "/v2/prompts/security_review",
             ]
 
             @pytest.mark.parametrize(
@@ -754,7 +1089,7 @@ class TestFeatureAllowlist:
             def test_notes_the_model_and_serves_it(self, middleware_test_client, path):
                 assert (
                     "codestral_2508_fireworks"
-                    not in _feature("generate_description").allowed_model_identifiers
+                    not in _feature("security_review").allowed_model_identifiers
                 )
 
                 with capture_logs() as logs:
@@ -765,14 +1100,14 @@ class TestFeatureAllowlist:
 
                 assert response.status_code == 200
                 assert response.json() == {
-                    "prompt_id": "generate_description",
+                    "prompt_id": "security_review",
                     "name": "codestral_2508_fireworks",
                 }
                 assert _allowlist_logs(logs, "Model allowlist note") == [
                     (
                         "prompt_feature_model_not_allowed",
-                        "generate_description",
-                        "generate_description",
+                        "security_review",
+                        "security_review",
                         path,
                     )
                 ]
@@ -785,7 +1120,7 @@ class TestFeatureAllowlist:
                         {
                             "provider": "gitlab",
                             "identifier": "codestral_2508_fireworks",
-                            "feature_setting": "generate_description",
+                            "feature_setting": "security_review",
                         },
                         id="client-sends-the-prompt-feature",
                     ),

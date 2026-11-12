@@ -16,6 +16,7 @@ Generic ``FlowConfig`` behavior is covered in ``test_flow_config.py``; these
 tests assert on the shipped config content only.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,14 @@ FLOW_VERSION = "1.0.0"
 
 # The shipped config lives next to this test's feature dir:
 # ai/features/security/skillguard_scan/{config/1.0.0.yml,tests/<this file>}
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / f"{FLOW_VERSION}.yml"
+FEATURE_DIR = Path(__file__).resolve().parents[1]
+CONFIG_PATH = FEATURE_DIR / "config" / f"{FLOW_VERSION}.yml"
+
+# The shared supervisor prompt bodies that instruct the batched delegation cap.
+SUPERVISOR_PROMPTS = [
+    FEATURE_DIR / "prompts" / "supervisor_system" / f"{FLOW_VERSION}.jinja",
+    FEATURE_DIR / "prompts" / "supervisor_user" / f"{FLOW_VERSION}.jinja",
+]
 
 # Deterministic steps that must abort the flow on failure.
 DETERMINISTIC_STEPS = [
@@ -185,6 +193,42 @@ class TestSkillguardScanSupervisorsAreWired:
         component = _component(_config(), name)
         assert isinstance(component.get("max_delegations"), int)
         assert component["max_delegations"] > 0
+
+    @pytest.mark.parametrize("name,prompt_id,subagent", SUPERVISORS)
+    def test_supervisor_has_per_turn_batch_cap(self, name, prompt_id, subagent):
+        # Without a per-turn cap a single supervisor turn can fan out the whole
+        # skill list, overflowing the 1 MiB checkpoint blob (CheckpointSaveError).
+        component = _component(_config(), name)
+        assert isinstance(component.get("delegation_batch_size"), int)
+        assert component["delegation_batch_size"] > 0
+        assert component["delegation_batch_size"] <= component["max_delegations"]
+
+    def test_prompt_batch_size_matches_config(self):
+        # The supervisor prompts hard-code the per-turn cap ("up to N per turn")
+        # separately from delegation_batch_size in config. The config value is
+        # what DelegationPrepareNode enforces; the prompt number only tells the
+        # model how many to issue. If they drift, the model is told one limit
+        # while a different one is enforced — it wastes a turn on rejected calls.
+        # Pin them together so a config change that forgets the prompt fails here.
+        config = _config()
+        batch_sizes = {
+            _component(config, name)["delegation_batch_size"]
+            for name, _, _ in SUPERVISORS
+        }
+        assert len(batch_sizes) == 1, (
+            f"supervisors disagree on delegation_batch_size: {batch_sizes}; "
+            "the shared prompt can only match one value"
+        )
+        batch_size = batch_sizes.pop()
+
+        for prompt_path in SUPERVISOR_PROMPTS:
+            text = prompt_path.read_text()
+            caps = [int(n) for n in re.findall(r"\b\d+\b", text)]
+            assert caps, f"{prompt_path.name} states no per-turn cap"
+            assert all(cap == batch_size for cap in caps), (
+                f"{prompt_path.name} tells the model a per-turn cap of {caps} but "
+                f"delegation_batch_size is {batch_size}; update the prompt to match"
+            )
 
     @pytest.mark.parametrize("name,prompt_id,subagent", SUPERVISORS)
     def test_subagent_component_exists(self, name, prompt_id, subagent):

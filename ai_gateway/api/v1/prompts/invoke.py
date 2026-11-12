@@ -4,10 +4,14 @@ from typing import Annotated, Any, AsyncIterator, Callable, Optional
 
 from dependency_injector.providers import Configuration
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from gitlab_cloud_connector import GitLabFeatureCategory, WrongUnitPrimitives
+from gitlab_cloud_connector import (
+    CloudConnectorConfig,
+    GitLabFeatureCategory,
+    WrongUnitPrimitives,
+)
 from langchain_core.messages import BaseMessage
 from poetry.core.constraints.version.exceptions import ParseConstraintError
-from pydantic import BaseModel, RootModel, model_validator
+from pydantic import BaseModel, Field, RootModel, model_validator
 from starlette.responses import StreamingResponse
 
 from ai_gateway.api.client_disconnect import run_unless_disconnected
@@ -17,8 +21,20 @@ from ai_gateway.api.feature_category import (
     set_feature_category_for_unit_primitive,
 )
 from ai_gateway.async_dependency_resolver import get_config, get_prompt_registry
+from ai_gateway.feature_allowlist import (
+    check_client_model_metadata,
+    note_prompt_feature,
+    prompt_model_check_context,
+)
+from ai_gateway.model_selection import ModelSelectionError
 from ai_gateway.prompts import BasePromptRegistry, Prompt
-from lib.context import StarletteUser, get_current_user
+from ai_gateway.prompts.registry import feature_setting_for_prompt_id
+from lib.context import (
+    StarletteUser,
+    current_model_metadata_context,
+    get_current_user,
+)
+from lib.version import MAX_VERSION_QUERY_LENGTH
 
 
 class PromptInputs(RootModel):
@@ -33,7 +49,9 @@ class PromptInputs(RootModel):
 
 class PromptRequest(BaseModel):
     inputs: PromptInputs
-    prompt_version: Optional[str] = None
+    prompt_version: Optional[str] = Field(
+        default=None, max_length=MAX_VERSION_QUERY_LENGTH
+    )
     stream: Optional[bool] = False
 
 
@@ -70,6 +88,51 @@ async def invoke(
     )
 
 
+def check_prompt_model_metadata(
+    prompt_registry: BasePromptRegistry, prompt_id: str, prompt_version: Optional[str]
+) -> None:
+    """Check the client's model metadata against the models of the prompt version that runs.
+
+    The allowlist is the ``models_from`` of the version, or the client's ``feature_setting`` for a version without
+    ``models_from``. The function returns nothing. It sets the checked metadata in
+    ``current_model_metadata_context``, where the registry reads it. ``None`` there leaves the request on the prompt's
+    own default model. A request without model metadata is not checked.
+
+    Args:
+        prompt_registry: The registry that resolves the prompt version.
+        prompt_id: Identifier of the prompt, from the route path.
+        prompt_version: Version constraint of the request, or ``None`` for the default version.
+
+    Raises:
+        ModelSelectionError: In ``enforce`` mode, when the prompt version does not allow the client's model.
+    """
+    pending = prompt_model_check_context.get()
+    if pending is None:
+        return
+
+    feature_setting = prompt_registry.models_from(
+        prompt_id, prompt_version, pending.metadata
+    )
+    if feature_setting is None:
+        note_prompt_feature(
+            pending.request,
+            pending.metadata,
+            prompt_feature_setting=feature_setting_for_prompt_id(prompt_id),
+            log_context=pending.log_context,
+        )
+
+    current_model_metadata_context.set(
+        check_client_model_metadata(
+            pending.request,
+            pending.metadata,
+            surface="http",
+            feature_setting=feature_setting,
+            user=pending.user,
+            log_context=pending.log_context,
+        )
+    )
+
+
 async def _invoke(
     request: Request,
     config: Configuration,
@@ -81,12 +144,18 @@ async def _invoke(
     internal_event_category: str,
 ):
     try:
+        check_prompt_model_metadata(
+            prompt_registry, prompt_id, prompt_request.prompt_version
+        )
         prompt = prompt_registry.get_on_behalf(
             current_user,
             prompt_id,
             prompt_request.prompt_version,
             internal_event_category=internal_event_category,
+            disallowed_issuers=[CloudConnectorConfig().service_name],
         )
+    except ModelSelectionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ParseConstraintError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

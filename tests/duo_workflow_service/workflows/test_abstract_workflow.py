@@ -1,5 +1,6 @@
 # pylint: disable=direct-environment-variable-reference,too-many-lines
 import asyncio
+import contextlib
 import contextvars
 import json
 import os
@@ -16,6 +17,7 @@ from gitlab_cloud_connector import (
     UserClaims,
 )
 from jose import jwt
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 from langgraph.errors import GraphRecursionError
 from langsmith import utils as ls_utils
@@ -27,6 +29,7 @@ from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
+from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
@@ -45,6 +48,8 @@ from duo_workflow_service.errors.typing import (
     WorkflowAlreadyFinishedException,
     WorkflowTokenRejectedError,
 )
+from duo_workflow_service.gitlab.help_links import gitlab_web_url
+from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
 from duo_workflow_service.tracking import (
     MonitoringContext,
@@ -54,17 +59,21 @@ from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
     GraphInvocation,
     TraceableException,
+    _first_party_untrusted_reason,
     _token_issued_by_dws,
 )
 from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
+from lib.context import client_capabilities, client_type, gitlab_version
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
+from lib.internal_events.context import EventContext, current_event_context
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
+from lib.language_server import LanguageServerVersion
 from lib.verbose_ai_logs import extended_logging_context
 
 
@@ -446,20 +455,23 @@ async def test_set_action_response(workflow):
     )
 
 
+ALL_TEST_MCP_TOOL_NAMES = [
+    "orbit_invoke_command",
+    "orbit_fake",
+    "gitlab_search",
+    "context7",
+    "slack_slack_read_thread",
+    "slack_admin_fake",
+    "slack_client_fake",
+]
+
+
 @pytest.mark.parametrize(
     ("mcp_enabled", "trust_stripped", "expected_tools"),
     [
-        (
-            True,
-            True,
-            ["orbit_invoke_command", "orbit_fake", "gitlab_search", "context7"],
-        ),
-        (
-            True,
-            False,
-            ["orbit_invoke_command", "orbit_fake", "gitlab_search", "context7"],
-        ),
-        (False, True, ["orbit_invoke_command"]),
+        (True, True, ALL_TEST_MCP_TOOL_NAMES),
+        (True, False, ALL_TEST_MCP_TOOL_NAMES),
+        (False, True, ["orbit_invoke_command", "slack_slack_read_thread"]),
         (False, False, []),
     ],
 )
@@ -475,6 +487,18 @@ def test_permitted_mcp_tools(
         contract_pb2.McpTool(name="orbit_fake", inputSchema="{}", trusted=False),
         contract_pb2.McpTool(name="gitlab_search", inputSchema="{}", trusted=True),
         contract_pb2.McpTool(name="context7", inputSchema="{}", trusted=False),
+        contract_pb2.McpTool(
+            name="slack_slack_read_thread", inputSchema="{}", trusted=True
+        ),
+        # An AI Catalog server named "Slack ...": Rails doesn't mark it trusted.
+        contract_pb2.McpTool(name="slack_admin_fake", inputSchema="{}", trusted=False),
+        # A client tool that claims trust: never trusted.
+        contract_pb2.McpTool(
+            name="slack_client_fake",
+            inputSchema="{}",
+            trusted=True,
+            client_injected=True,
+        ),
     ]
     workflow = MockWorkflow(
         "id",
@@ -597,6 +621,8 @@ async def test_compile_and_run_graph(
         allowed_tools=[],
         registry_flow_id=None,
         admin_allowed_preapprovals=None,
+        promoted_tools=[],
+        first_party_tools={},
     )
 
 
@@ -641,15 +667,93 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_prepares_compile_before_the_build(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    user,
+):
+    """The async prepare step runs before the graph is compiled."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    order: list[str] = []
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    async def prepare():
+        order.append("prepare")
+
+    original_compile = workflow._compile
+
+    def compile_(*args, **kwargs):
+        order.append("compile")
+        return original_compile(*args, **kwargs)
+
+    with (
+        patch.object(workflow, "_prepare_compile", side_effect=prepare),
+        patch.object(workflow, "_compile", side_effect=compile_),
+    ):
+        await workflow._compile_and_run_graph("Test goal")
+
+    assert order == ["prepare", "compile"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("status_event", ["START", "RESUME", "RETRY"])
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_prepares_compile_on_every_turn(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    status_event,
+    user,
+):
+    """Unlike model routing, the prepare step is not limited to START."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.aget_tuple = AsyncMock(return_value=None)
+    mock_checkpointer.initial_status_event = status_event
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    with (
+        patch.object(workflow, "_prepare_compile", new=AsyncMock()) as prepare,
+        patch.object(workflow, "_route_default_model", new=AsyncMock()),
+    ):
+        await workflow._compile_and_run_graph("Test goal")
+
+    prepare.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
 async def test_compile_and_run_graph_orders_governance_tools_deterministically(
     mock_tools_registry,
     mock_gitlab_workflow,
     _mock_convert_mcp_tools,
 ):
-    # Set iteration order is randomized per process, so building these lists with
-    # list(set(...)) made an approval resume on another gateway process look like a
-    # reordered list, falsely triggering a full-snapshot compaction that dropped
-    # approved tool results on reload. The lists must come out in a stable order.
+    # These lists are persisted in state and rendered into the system prompt, so
+    # their order must not depend on the process's hash seed.
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
     mock_checkpointer.initial_status_event = "START"
@@ -1265,10 +1369,116 @@ async def test_compile_and_run_graph_fails_closed_on_invalid_claim(
 @patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
 @patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
 @patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@pytest.mark.parametrize(
+    ("first_party_tools", "expected_preapproved"),
+    [
+        # Null means no exemptions, like an absent map: the allow ceiling still applies.
+        (None, ["run_command"]),
+        # Any other non-object shape breaks the contract and fails the claim closed.
+        (["mcp__duo__review"], []),
+        ("allow", []),
+    ],
+    ids=["null", "list", "string"],
+)
+# A trusted client, so an empty map comes from the parser and not from the client gate.
+@pytest.mark.usefixtures("first_party_client")
+async def test_compile_and_run_graph_fails_closed_on_non_object_first_party_tools(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    first_party_tools,
+    expected_preapproved,
+):
+    """Only unknown verdicts are dropped per entry; a field of the wrong shape breaks the contract."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={
+                "tool_access_policies": {
+                    "allow": ["run_command"],
+                    "first_party_tools": first_party_tools,
+                }
+            },
+        ),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+    )
+    workflow._preapproved_tools = ["read_file"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._preapproved_tools == expected_preapproved
+    assert mock_tools_registry.call_args.kwargs["first_party_tools"] == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@pytest.mark.parametrize("claim", ["", {}], ids=["empty_string", "empty_object"])
+@pytest.mark.usefixtures("first_party_client")
+async def test_compile_and_run_graph_treats_empty_claim_as_absent(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    claim,
+):
+    """An empty claim value carries no policies, so it neither governs nor fails closed."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(gitlab_realm="saas", extra={"tool_access_policies": claim}),
+    )
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+    )
+    workflow._preapproved_tools = ["read_file"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._preapproved_tools == ["read_file"]
+    assert mock_tools_registry.call_args.kwargs["first_party_tools"] == {}
+    assert mock_tools_registry.call_args.kwargs["allowed_tools"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@pytest.mark.parametrize(
+    "claim",
+    [
+        '{"allow": [], "ask": [], "deny": []}',
+        # Rails sends first_party_tools on ungoverned surfaces too; it must not
+        # activate governance.
+        '{"allow": [], "ask": [], "deny": [], "first_party_tools": {"mcp__duo__review": "allow"}}',
+    ],
+    ids=["empty", "first_party_only"],
+)
 async def test_compile_and_run_graph_keeps_client_preapproved_when_governance_inactive(
     mock_tools_registry,
     mock_gitlab_workflow,
     _mock_convert_mcp_tools,
+    claim,
 ):
     mock_tools_registry.return_value = MagicMock()
     mock_checkpointer = AsyncMock()
@@ -1279,7 +1489,7 @@ async def test_compile_and_run_graph_keeps_client_preapproved_when_governance_in
         authenticated=True,
         claims=UserClaims(
             gitlab_realm="saas",
-            extra={"tool_access_policies": '{"allow": [], "ask": [], "deny": []}'},
+            extra={"tool_access_policies": claim},
         ),
     )
     workflow = MockWorkflow(
@@ -1294,6 +1504,7 @@ async def test_compile_and_run_graph_keeps_client_preapproved_when_governance_in
     await workflow._compile_and_run_graph("Test goal")
 
     assert "read_file" in workflow._preapproved_tools
+    assert mock_tools_registry.call_args.kwargs["allowed_tools"] == []
 
 
 @pytest.mark.asyncio
@@ -1625,7 +1836,7 @@ async def test_compile_and_run_graph_with_token_rejection(
 
 @pytest.mark.asyncio
 @patch(
-    "duo_workflow_service.workflows.abstract_workflow.TOKEN_REJECTION_DROP_TIMEOUT_S",
+    "duo_workflow_service.workflows.abstract_workflow.SESSION_DROP_TIMEOUT_S",
     0.01,
 )
 @patch("duo_workflow_service.workflows.abstract_workflow.log_exception")
@@ -1889,6 +2100,37 @@ async def test_run_passes_correct_metadata_to_langsmith_extra(
     assert "flow_id" not in metadata
     assert "flow_version" not in metadata
     assert "schema_version" not in metadata
+
+
+@pytest.mark.asyncio
+# pylint: disable=direct-environment-variable-reference
+@patch.dict(os.environ, {"LANGCHAIN_TRACING_V2": "true"})
+# pylint: enable=direct-environment-variable-reference
+@patch.object(MockWorkflow, "_compile_and_run_graph")
+async def test_run_strips_credentials_from_git_url_in_langsmith_metadata(
+    mock_compile_and_run_graph, user
+):
+    workflow = MockWorkflow(
+        "test-workflow-id",
+        {
+            "git_url": "https://oauth:0123456789abcdef@gitlab.example.com/group/project.git",
+            "git_sha": "abc123",
+        },
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+
+    await workflow.run("Test goal")
+
+    _, kwargs = mock_compile_and_run_graph.call_args
+    metadata = kwargs["langsmith_extra"]["metadata"]
+    assert metadata["git_url"] == "https://gitlab.example.com/group/project.git"
+    # The constructor strips the token too, so it must not live on the workflow
+    # for the rest of the session.
+    assert (
+        workflow._workflow_metadata["git_url"]
+        == "https://gitlab.example.com/group/project.git"
+    )
 
 
 @pytest.mark.asyncio
@@ -3299,7 +3541,9 @@ def test_only_stamped_client_tools_are_preapproved_with_the_flag_on(
     )
 
 
-async def _configure_kwargs_for(claim, workflow_config, can_ask=True, issuer=None):
+async def _configure_kwargs_for(
+    claim, workflow_config, can_ask=True, issuer=None, language_server_version=None
+):
     """Run the graph with a claim and return what ToolsRegistry.configure received."""
     workflow_config["allow_agent_to_request_user"] = can_ask
     workflow_config["allow_client_injected_mcp_tools"] = True
@@ -3331,6 +3575,7 @@ async def _configure_kwargs_for(claim, workflow_config, can_ask=True, issuer=Non
             {},
             GLReportingEventContext.from_workflow_definition("software_development"),
             user,
+            language_server_version=language_server_version,
         )
         await workflow._compile_and_run_graph("Test goal")
 
@@ -3405,6 +3650,55 @@ def _with_exemptions(claim, expected):
     return expected | ceiling_exempt_tool_names(
         ruled, keep_read_only=bool(data.get("allow"))
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.usefixtures("first_party_client")
+@pytest.mark.parametrize("verdict", ["ask", "deny"])
+@pytest.mark.parametrize(
+    ("map_shape", "language_server_version", "expected_ruled"),
+    [
+        # Rails keeps first-party tools out of every privilege group.
+        ("first_party", "9.33.0", set()),
+        # That holds for any client: the gate drops the map, but the signed claim still
+        # says Rails kept the name out of every group.
+        ("first_party", "9.32.1", set()),
+        # Without the first-party key it is an MCP rule, which may have demoted a group.
+        ("empty", "9.33.0", {"mcp__duo__review"}),
+        ("null", "9.33.0", {"mcp__duo__review"}),
+    ],
+    ids=["first_party", "old_client", "plain_mcp", "null_map"],
+)
+async def test_first_party_rule_keeps_the_read_only_ceiling_exemption(
+    workflow_config, verdict, map_shape, language_server_version, expected_ruled
+):
+    # Guards against a vacuous pass: the rule must be able to change the exemption.
+    assert ceiling_exempt_tool_names(set()) != ceiling_exempt_tool_names(
+        {"mcp__duo__review"}
+    )
+    claim = {
+        "allow": ["read_file"],
+        verdict: ["mcp__duo__review"],
+        "first_party_tools": {
+            "first_party": {"mcp__duo__review": verdict},
+            "empty": {},
+            "null": None,
+        }[map_shape],
+        "ceiling": True,
+    }
+
+    kwargs = await _configure_kwargs_for(
+        json.dumps(claim),
+        workflow_config,
+        language_server_version=LanguageServerVersion.from_string(
+            language_server_version
+        ),
+    )
+
+    assert kwargs["admin_allowed_preapprovals"] == {
+        "read_file"
+    } | ceiling_exempt_tool_names(expected_ruled)
 
 
 @pytest.mark.asyncio
@@ -3643,3 +3937,1231 @@ async def test_compile_and_run_graph_keeps_an_empty_claim_without_ceiling_ungove
     assert workflow._preapproved_tools == ["read_file", "start_flow"]
     assert kwargs["allowed_tools"] == []
     assert kwargs["admin_allowed_preapprovals"] is None
+
+
+_DUO_REVIEW = "mcp__duo__review"
+
+# The first release that reserves the `duo` MCP server name.
+_FIRST_PARTY_CLIENT_VERSION = LanguageServerVersion.from_string("9.33.0")
+
+
+@pytest.fixture(name="first_party_client")
+def first_party_client_fixture():
+    """A Duo CLI or Language Server websocket client, the only kind trusted with first-party names."""
+    token = client_type.set("node-websocket")
+    yield
+    client_type.reset(token)
+
+
+_FIRST_PARTY_CLAIMS: dict[str, dict[str, Any] | None] = {
+    "absent": None,
+    "ungoverned_default_allow": {"first_party_tools": {_DUO_REVIEW: "allow"}},
+    # Governed claims as Rails sends them: other tools in the lists, the first-party name
+    # only in the map, except that a deny is also mirrored into the deny list.
+    "governed_allow": {
+        "allow": ["read_file"],
+        "first_party_tools": {_DUO_REVIEW: "allow"},
+    },
+    "governed_ask": {
+        "allow": ["read_file"],
+        "first_party_tools": {_DUO_REVIEW: "ask"},
+    },
+    # Ungoverned: no lists at all, so only the registry's own fold can remove it.
+    "first_party_only_ask": {"first_party_tools": {_DUO_REVIEW: "ask"}},
+    "governed_deny": {
+        "deny": [_DUO_REVIEW],
+        "first_party_tools": {_DUO_REVIEW: "deny"},
+    },
+    # Only that entry is ignored; the rest of the claim stays in force.
+    "unknown_verdict": {
+        "deny": ["run_command"],
+        "first_party_tools": {_DUO_REVIEW: "sometimes"},
+    },
+}
+
+
+def _first_party_user(claim_name: str) -> CloudConnectorUser:
+    claim = _FIRST_PARTY_CLAIMS[claim_name]
+    return CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            issuer="https://gitlab.example.com",
+            extra={} if claim is None else {"tool_access_policies": claim},
+        ),
+    )
+
+
+async def _chat_prompts_for(
+    registry: ToolsRegistry, workflow: AbstractWorkflow, tool_name: str
+) -> bool:
+    """Whether chat would prompt for one call, through ChatAgent._get_approvals on the real registry.
+
+    The session-approval lookup answers "not approved", so only pre-approval can skip the prompt.
+    """
+    registry._gl_http_client = AsyncMock()
+    registry._gl_http_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": False}]}
+    }
+    prompt_adapter = Mock()
+    prompt_adapter.get_model.return_value._is_auto_approved_by_agentic_mock_model = (
+        False
+    )
+    agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=prompt_adapter,
+        tools_registry=registry,
+        toolset=registry.toolset(registry.mcp_tool_names()),
+        system_template_override=None,
+        optimizer_pipeline=Mock(),
+    )
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": tool_name, "args": {}, "id": "call_1", "type": "tool_call"}
+        ],
+    )
+    # _get_approvals reads only the project from the state.
+    state: Any = {"project": None}
+    approval_required, _, _ = await agent._get_approvals(
+        message, workflow._preapproved_tools or [], state
+    )
+    return approval_required
+
+
+def _client_mcp_tools() -> list[contract_pb2.McpTool]:
+    return [
+        contract_pb2.McpTool(
+            name=_DUO_REVIEW,
+            description="Review the diff",
+            inputSchema="{}",
+            client_injected=True,
+        ),
+        contract_pb2.McpTool(
+            name="salesforce_get_account",
+            description="External client tool",
+            inputSchema="{}",
+            client_injected=True,
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("claim_name", "expected_first_party"),
+    [
+        ("absent", False),
+        ("ungoverned_default_allow", True),
+        ("governed_allow", True),
+        ("governed_ask", True),
+        ("first_party_only_ask", True),
+        # Kept through the toggle; the registry removes it.
+        ("governed_deny", True),
+        ("unknown_verdict", False),
+    ],
+)
+@pytest.mark.parametrize("mcp_enabled", [True, False], ids=["mcp_on", "mcp_off"])
+@pytest.mark.usefixtures("first_party_client")
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.strips_client_mcp_trust",
+    return_value=True,
+)
+def test_first_party_claim_exempts_client_tool_from_mcp_toggle(
+    _mock_strips_client_mcp_trust, claim_name, expected_first_party, mcp_enabled
+):
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        _first_party_user(claim_name),
+        [
+            *_client_mcp_tools(),
+            # A user server `duo..review` with a tool `-`: sanitises to the same name.
+            contract_pb2.McpTool(
+                name="mcp__duo..review__-",
+                description="Alias",
+                inputSchema="{}",
+                client_injected=True,
+            ),
+        ],
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+    )
+    workflow._workflow_config = {"mcp_enabled": mcp_enabled}
+
+    review, external, alias = workflow._mcp_tools
+    assert review["first_party"] is expected_first_party
+    assert review["description"].startswith(UNTRUSTED_MCP_WARNING) is (
+        not expected_first_party
+    )
+    assert external["first_party"] is False
+    assert alias["first_party"] is False
+    assert alias["description"].startswith(UNTRUSTED_MCP_WARNING)
+
+    permitted = [tool["original_name"] for tool in workflow._permitted_mcp_tools()]
+    if mcp_enabled:
+        assert permitted == [
+            _DUO_REVIEW,
+            "salesforce_get_account",
+            "mcp__duo..review__-",
+        ]
+    else:
+        assert permitted == ([_DUO_REVIEW] if expected_first_party else [])
+
+
+@pytest.mark.usefixtures("first_party_client")
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_first_party_claim_is_ignored_on_dws_issued_tokens():
+    """Runner flows get DWS-issued tokens too, where every MCP tool counts as client-injected."""
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                gitlab_realm="saas",
+                issuer="gitlab-duo-workflow-service",
+                extra={
+                    "tool_access_policies": _FIRST_PARTY_CLAIMS[
+                        "ungoverned_default_allow"
+                    ]
+                },
+            ),
+        ),
+        [
+            contract_pb2.McpTool(name=_DUO_REVIEW, inputSchema="{}"),
+            contract_pb2.McpTool(name="soqlQuery", inputSchema="{}"),
+        ],
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+    )
+    workflow._workflow_config = {"mcp_enabled": False}
+
+    assert [tool["client_injected"] for tool in workflow._mcp_tools] == [True, True]
+    assert [tool["first_party"] for tool in workflow._mcp_tools] == [False, False]
+    assert workflow._permitted_mcp_tools() == []
+
+
+@pytest.mark.parametrize(
+    ("issuer", "request_client_type", "version", "expected_reason"),
+    [
+        (None, "node-websocket", "9.33.0", None),
+        # Checked in order, so the first failing input names the reason.
+        ("gitlab-duo-workflow-service", "vscode", "9.32.1", "dws_issued_token"),
+        (None, "vscode", "9.32.1", "client_type"),
+        (None, None, "9.33.0", "client_type"),
+        (None, "node-websocket", "9.32.1", "language_server_version"),
+        (None, "node-websocket", None, "language_server_version"),
+    ],
+    ids=[
+        "trusted",
+        "dws_token_first",
+        "client_type_before_version",
+        "no_client_type",
+        "old_version",
+        "no_version",
+    ],
+)
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_first_party_untrusted_reason_takes_every_input_explicitly(
+    issuer, request_client_type, version, expected_reason
+):
+    """No request context: the gate decides from its arguments alone."""
+    user = CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
+    )
+
+    assert (
+        _first_party_untrusted_reason(
+            user,
+            request_client_type,
+            LanguageServerVersion.from_string(version) if version else None,
+        )
+        == expected_reason
+    )
+
+
+@pytest.mark.parametrize(
+    ("client", "version", "issuer", "expected_reason"),
+    [
+        ("node-websocket", "9.33.0", None, None),
+        ("node-websocket", "10.0.0", None, None),
+        # Released clients before 9.33.0 do not reserve the `duo` server name.
+        ("node-websocket", "9.32.1", None, "language_server_version"),
+        ("node-websocket", None, None, "language_server_version"),
+        ("vscode", "9.33.0", None, "client_type"),
+        (None, "9.33.0", None, "client_type"),
+        ("node-websocket", "9.33.0", "gitlab-duo-workflow-service", "dws_issued_token"),
+    ],
+    ids=[
+        "at_minimum",
+        "above_minimum",
+        "below_minimum",
+        "no_version",
+        "other_client",
+        "no_client_type",
+        "dws_issued_token",
+    ],
+)
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+def test_first_party_claim_needs_a_client_that_reserves_the_name(
+    client, version, issuer, expected_reason
+):
+    token = client_type.set(client)
+    try:
+        with capture_logs() as cap_logs:
+            workflow = MockWorkflow(
+                "id",
+                {},
+                GLReportingEventContext.from_workflow_definition(
+                    "software_development"
+                ),
+                CloudConnectorUser(
+                    authenticated=True,
+                    claims=UserClaims(
+                        gitlab_realm="saas",
+                        issuer=issuer,
+                        extra={
+                            "tool_access_policies": _FIRST_PARTY_CLAIMS[
+                                "ungoverned_default_allow"
+                            ]
+                        },
+                    ),
+                ),
+                _client_mcp_tools(),
+                language_server_version=(
+                    LanguageServerVersion.from_string(version) if version else None
+                ),
+            )
+    finally:
+        client_type.reset(token)
+
+    trusted = expected_reason is None
+    assert workflow._first_party_tools == ({_DUO_REVIEW: "allow"} if trusted else {})
+    assert workflow._mcp_tools[0]["first_party"] is trusted
+    assert [
+        e["reason"]
+        for e in cap_logs
+        if e["event"] == "Ignoring first-party MCP tools from tool_access_policies"
+    ] == ([] if trusted else [expected_reason])
+
+
+@pytest.mark.parametrize("claim_name", ["absent", "governed_deny"])
+def test_no_first_party_discard_log_without_a_claimed_map(claim_name):
+    """Only a non-empty map that gets discarded is worth a log line."""
+    claim = _FIRST_PARTY_CLAIMS[claim_name]
+    if claim is not None:
+        claim = {
+            key: value for key, value in claim.items() if key != "first_party_tools"
+        }
+    with capture_logs() as cap_logs:
+        MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("software_development"),
+            CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(
+                    gitlab_realm="saas",
+                    extra={} if claim is None else {"tool_access_policies": claim},
+                ),
+            ),
+        )
+
+    assert not [
+        e
+        for e in cap_logs
+        if e["event"] == "Ignoring first-party MCP tools from tool_access_policies"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch(
+    "duo_workflow_service.workflows.abstract_workflow.strips_client_mcp_trust",
+    return_value=True,
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@pytest.mark.parametrize(
+    ("claim_name", "verdict"),
+    [
+        ("absent", None),
+        ("ungoverned_default_allow", "allow"),
+        ("governed_allow", "allow"),
+        ("governed_ask", "ask"),
+        ("first_party_only_ask", "ask"),
+        ("governed_deny", "deny"),
+        ("unknown_verdict", None),
+    ],
+)
+@pytest.mark.parametrize(
+    "pre_approved_agent_privileges_names",
+    [[], ["run_mcp_tools"]],
+    ids=["build", "auto"],
+)
+@pytest.mark.parametrize("mcp_enabled", [True, False], ids=["mcp_on", "mcp_off"])
+@pytest.mark.parametrize(
+    "allow_agent_to_request_user", [True, False], ids=["can_ask", "cannot_ask"]
+)
+@pytest.mark.parametrize("agent_privileges_names", [["run_mcp_tools"]])
+@pytest.mark.usefixtures("first_party_client")
+async def test_first_party_verdict_reaches_the_registry(
+    mock_gitlab_workflow,
+    _mock_strips_client_mcp_trust,
+    claim_name,
+    verdict,
+    pre_approved_agent_privileges_names,
+    mcp_enabled,
+    allow_agent_to_request_user,
+):
+    """The claim drives the real registry: presence, pre-approval and forced prompts per verdict."""
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    real_configure = ToolsRegistry.configure
+    registries: list[ToolsRegistry] = []
+
+    async def capture_registry(**kwargs):
+        registry = await real_configure(**kwargs)
+        registries.append(registry)
+        return registry
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        _first_party_user(claim_name),
+        _client_mcp_tools(),
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+    )
+    with patch(
+        "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure",
+        side_effect=capture_registry,
+    ):
+        await workflow._compile_and_run_graph("Test goal")
+
+    [registry] = registries
+    present = _DUO_REVIEW in registry.toolset(registry.mcp_tool_names())
+    auto = bool(pre_approved_agent_privileges_names)
+
+    if verdict is None:
+        # Today's behaviour: governed by the toggle and the privilege group.
+        assert present is mcp_enabled
+        assert registry.is_preapproved(_DUO_REVIEW) is (mcp_enabled and auto)
+    elif verdict == "allow":
+        assert present
+        assert registry.is_preapproved(_DUO_REVIEW)
+        assert not await _chat_prompts_for(registry, workflow, _DUO_REVIEW)
+    elif verdict == "ask":
+        # Without a user to answer, ask folds into deny.
+        assert present is allow_agent_to_request_user
+        # Never degrades to allow, even when the privilege group is pre-approved.
+        assert not registry.is_preapproved(_DUO_REVIEW)
+        if present:
+            assert await _chat_prompts_for(registry, workflow, _DUO_REVIEW)
+    else:
+        assert not present
+        assert not registry.is_preapproved(_DUO_REVIEW)
+
+    assert registry.ask_listed_tool_names([_DUO_REVIEW]) == (
+        {_DUO_REVIEW} if verdict == "ask" and allow_agent_to_request_user else set()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data", "first_party_client")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@pytest.mark.parametrize("agent_privileges_names", [["run_mcp_tools"]])
+@pytest.mark.parametrize("mcp_enabled", [True])
+@pytest.mark.parametrize("allow_agent_to_request_user", [True])
+async def test_ungoverned_first_party_ask_overrides_client_preapproval(
+    mock_gitlab_workflow,
+):
+    """Chat skips approval for any name in `_preapproved_tools`, and the CLI pre-approves its own server there."""
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    real_configure = ToolsRegistry.configure
+    registries: list[ToolsRegistry] = []
+
+    async def capture_registry(**kwargs):
+        registry = await real_configure(**kwargs)
+        registries.append(registry)
+        return registry
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("chat"),
+        _first_party_user("first_party_only_ask"),
+        _client_mcp_tools(),
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+        preapproved_tools=[_DUO_REVIEW, "read_file"],
+    )
+    with patch(
+        "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure",
+        side_effect=capture_registry,
+    ):
+        await workflow._compile_and_run_graph("Test goal")
+
+    [registry] = registries
+    assert _DUO_REVIEW in registry.toolset(registry.mcp_tool_names())
+    assert registry.ask_listed_tool_names([_DUO_REVIEW]) == {_DUO_REVIEW}
+    # The rest of the client's list is untouched: the claim is ungoverned.
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@pytest.mark.parametrize(
+    ("allow_agent_to_request_user", "trusted", "expected_denied"),
+    [
+        (False, True, [_DUO_REVIEW]),
+        # A user can answer, so the tool prompts instead.
+        (True, True, []),
+        # An untrusted client gets no first-party map, so nothing is folded.
+        (False, False, []),
+    ],
+    ids=["cannot_ask", "can_ask", "untrusted_client"],
+)
+async def test_unanswerable_first_party_ask_is_listed_as_denied(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    allow_agent_to_request_user,
+    trusted,
+    expected_denied,
+):
+    """The prompt and the registry must agree the tool is gone, without the map turning governance on."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    token = client_type.set("node-websocket" if trusted else "vscode")
+    try:
+        workflow = MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("chat"),
+            _first_party_user("first_party_only_ask"),
+            _client_mcp_tools(),
+            language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+            preapproved_tools=["read_file"],
+        )
+    finally:
+        client_type.reset(token)
+    await workflow._compile_and_run_graph("Test goal")
+
+    assert workflow._denied_tools == expected_denied
+    assert mock_tools_registry.call_args.kwargs["denied_tools"] == expected_denied
+    # Ungoverned claim: the client's own list is not capped to an empty allow list.
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@pytest.mark.usefixtures("first_party_client")
+async def test_unknown_first_party_verdict_keeps_the_rest_of_the_claim(
+    mock_tools_registry, mock_gitlab_workflow
+):
+    """A verdict a newer Rails adds must cost only that entry, not fail the claim closed."""
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                gitlab_realm="saas",
+                extra={
+                    "tool_access_policies": {
+                        "allow": ["read_file"],
+                        "deny": ["run_command"],
+                        "first_party_tools": {
+                            _DUO_REVIEW: "allow",
+                            "mcp__duo__other": "sometimes",
+                        },
+                    }
+                },
+            ),
+        ),
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+    )
+    workflow._preapproved_tools = ["create_issue"]
+    await workflow._compile_and_run_graph("Test goal")
+
+    # The allow-list ceiling applied rather than the fail-closed clear.
+    assert workflow._preapproved_tools == ["read_file"]
+    assert "run_command" in workflow._denied_tools
+    assert mock_tools_registry.call_args.kwargs["first_party_tools"] == {
+        _DUO_REVIEW: "allow"
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@pytest.mark.parametrize("verdict", ["allow", "ask", "deny"])
+@pytest.mark.parametrize(
+    "pre_approved_agent_privileges_names",
+    [[], ["run_mcp_tools"]],
+    ids=["build", "auto"],
+)
+@pytest.mark.parametrize(
+    "allow_agent_to_request_user", [True, False], ids=["can_ask", "cannot_ask"]
+)
+@pytest.mark.parametrize("mcp_enabled", [True])
+@pytest.mark.parametrize("agent_privileges_names", [["run_mcp_tools"]])
+@pytest.mark.usefixtures("first_party_client")
+async def test_first_party_verdict_with_the_ceiling_on(
+    mock_gitlab_workflow,
+    verdict,
+    pre_approved_agent_privileges_names,
+    allow_agent_to_request_user,
+):
+    """The ceiling switched on from the claim keeps first-party verdicts intact and still refuses aliases."""
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+
+    # Rails puts the verdict in the map and mirrors only a deny into the deny list.
+    claim: dict[str, Any] = {
+        "allow": ["read_file"],
+        "first_party_tools": {_DUO_REVIEW: verdict},
+        "ceiling": True,
+    }
+    if verdict == "deny":
+        claim["deny"] = [_DUO_REVIEW]
+
+    real_configure = ToolsRegistry.configure
+    registries: list[ToolsRegistry] = []
+
+    async def capture_registry(**kwargs):
+        registry = await real_configure(**kwargs)
+        registries.append(registry)
+        return registry
+
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                gitlab_realm="saas",
+                issuer="https://gitlab.example.com",
+                extra={"tool_access_policies": claim},
+            ),
+        ),
+        [
+            *_client_mcp_tools(),
+            contract_pb2.McpTool(
+                name="mcp__duo..review__-", inputSchema="{}", client_injected=True
+            ),
+        ],
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+    )
+    with patch(
+        "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure",
+        side_effect=capture_registry,
+    ):
+        await workflow._compile_and_run_graph("Test goal")
+
+    [registry] = registries
+    present = _DUO_REVIEW in registry.toolset(registry.mcp_tool_names())
+
+    # The ceiling is on: a plain client tool loses its privilege pre-approval in auto.
+    assert not registry.is_preapproved("salesforce_get_account")
+    # The alias is refused whichever verdict applies.
+    assert all(
+        getattr(registry.get(name), "_original_mcp_name", None) != "mcp__duo..review__-"
+        for name in registry.mcp_tool_names()
+    )
+
+    if verdict == "allow":
+        assert present
+        assert registry.is_preapproved(_DUO_REVIEW)
+        # Not on chat's own list (no allow mirror); the registry pre-approval covers it.
+        assert _DUO_REVIEW not in workflow._preapproved_tools
+        assert not await _chat_prompts_for(registry, workflow, _DUO_REVIEW)
+    elif verdict == "ask":
+        assert present is allow_agent_to_request_user
+        assert not registry.is_preapproved(_DUO_REVIEW)
+        if present:
+            assert await _chat_prompts_for(registry, workflow, _DUO_REVIEW)
+    else:
+        assert not present
+        assert not registry.is_preapproved(_DUO_REVIEW)
+
+    assert registry.ask_listed_tool_names([_DUO_REVIEW]) == (
+        {_DUO_REVIEW} if verdict == "ask" and allow_agent_to_request_user else set()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    ("first_party_tools", "expected_ceiling", "expected_map"),
+    [
+        # A malformed field fails the claim, and with it the ceiling, closed.
+        (["mcp__duo__review"], set(), {}),
+        # Null means no exemptions; the ceiling applies as usual.
+        (None, {"read_file"}, {}),
+        # An unknown verdict costs only that entry; the ceiling and the known entry stay.
+        (
+            {"mcp__duo__review": "allow", "mcp__duo__other": "sometimes"},
+            {"read_file"},
+            {"mcp__duo__review": "allow"},
+        ),
+    ],
+    ids=["non_object", "null", "unknown_verdict"],
+)
+# A trusted client, so the map comes from the parser and not from the client gate.
+@pytest.mark.usefixtures("first_party_client")
+async def test_first_party_claim_errors_with_the_ceiling_on(
+    workflow_config, first_party_tools, expected_ceiling, expected_map
+):
+    claim = {
+        "allow": ["read_file"],
+        "first_party_tools": first_party_tools,
+        "ceiling": True,
+    }
+
+    kwargs = await _configure_kwargs_for(
+        json.dumps(claim),
+        workflow_config,
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+    )
+
+    assert kwargs["admin_allowed_preapprovals"] == (
+        expected_ceiling | ceiling_exempt_tool_names(set())
+        if expected_ceiling
+        else set()
+    )
+    assert kwargs["first_party_tools"] == expected_map
+
+
+def _workflow_with_claims(extra):
+    user = CloudConnectorUser(
+        authenticated=True, claims=UserClaims(gitlab_realm="self-managed", extra=extra)
+    )
+    workflow = MockWorkflow(
+        "123",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        user,
+    )
+    workflow._workflow_config = {
+        "allow_agent_to_request_user": True,
+        "workflow_status": "created",
+    }
+    return workflow
+
+
+_GATE = (
+    "duo_workflow_service.workflows.abstract_workflow."
+    "supports_tool_access_policies_field"
+)
+
+
+def _workflow_with_loaded_policy(policy):
+    workflow = _workflow_with_claims({})
+    workflow._workflow_config["tool_access_policies"] = policy
+    return workflow
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_applies_the_loaded_policy(_mock_gate):
+    workflow = _workflow_with_loaded_policy(
+        {"allow": ["read_file"], "ask": [], "deny": ["run_command"]}
+    )
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._denied_tools == ["run_command"]
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_applies_a_loaded_ceiling(_mock_gate):
+    workflow = _workflow_with_loaded_policy(
+        {"allow": ["read_file"], "ask": [], "deny": [], "ceiling": True}
+    )
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._admin_allowed_preapprovals is not None
+    assert "read_file" in workflow._admin_allowed_preapprovals
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_keeps_an_empty_loaded_policy_ungoverned(
+    _mock_gate,
+):
+    workflow = _workflow_with_loaded_policy({"allow": [], "ask": [], "deny": []})
+    preapproved = list(workflow._preapproved_tools)
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._preapproved_tools == preapproved
+    assert workflow._denied_tools == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"tool_access_policies": '{"allow": [], "ask": [], "deny": ["create_issue"]}'},
+        {"tool_access_policies": "not json"},
+    ],
+    ids=["claim", "unparsable_claim"],
+)
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_ignores_the_loaded_policy_when_the_token_has_a_claim(
+    _mock_gate, extra
+):
+    workflow = _workflow_with_claims(extra)
+    workflow._workflow_config["tool_access_policies"] = {
+        "allow": ["read_file"],
+        "ask": [],
+        "deny": [],
+    }
+
+    await workflow._merge_governance_policies()
+
+    assert "read_file" not in workflow._preapproved_tools
+    assert not workflow._loads_tool_access_policies()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["claim", "field"])
+@pytest.mark.usefixtures("first_party_client")
+@patch(_GATE, return_value=True)
+async def test_merge_governance_policies_applies_first_party_verdicts_from_either_source(
+    _mock_gate, source
+):
+    policy = _FIRST_PARTY_CLAIMS["first_party_only_ask"]
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                gitlab_realm="self-managed",
+                extra={"tool_access_policies": policy} if source == "claim" else {},
+            ),
+        ),
+        _client_mcp_tools(),
+        language_server_version=_FIRST_PARTY_CLIENT_VERSION,
+        preapproved_tools=[_DUO_REVIEW, "read_file"],
+    )
+    workflow._workflow_config = {
+        "allow_agent_to_request_user": True,
+        # Rails always sends the three lists.
+        "tool_access_policies": (
+            {"allow": [], "ask": [], "deny": [], **policy}
+            if source == "field"
+            else None
+        ),
+    }
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._first_party_tools == {_DUO_REVIEW: "ask"}
+    assert workflow._mcp_tools[0]["first_party"] is True
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=False)
+async def test_merge_governance_policies_ignores_the_field_on_older_gitlab(_mock_gate):
+    workflow = _workflow_with_loaded_policy(None)
+
+    await workflow._merge_governance_policies()
+
+    assert workflow._denied_tools == []
+    assert not workflow._loads_tool_access_policies()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy",
+    [None, {"allow": [], "deny": []}, {"allow": "read_file", "ask": [], "deny": []}],
+    ids=["missing", "partial", "malformed"],
+)
+@patch(_GATE, return_value=True)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+async def test_merge_governance_policies_drops_and_ends_the_session(
+    mock_status_updater, _mock_gate, policy
+):
+    mock_status_updater.return_value.update_workflow_status = AsyncMock()
+    workflow = _workflow_with_loaded_policy(policy)
+
+    with pytest.raises(NotifiableException, match="could not load the tool rules"):
+        await workflow._merge_governance_policies()
+
+    mock_status_updater.return_value.update_workflow_status.assert_awaited_once_with(
+        "123",
+        WorkflowStatusEventEnum.DROP,
+        drop_reason="tool_rules_unavailable",
+    )
+
+
+@pytest.mark.asyncio
+@patch(_GATE, return_value=True)
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabStatusUpdater")
+async def test_merge_governance_policies_keeps_a_resumed_session_status(
+    mock_status_updater, _mock_gate
+):
+    mock_status_updater.return_value.update_workflow_status = AsyncMock()
+    workflow = _workflow_with_loaded_policy(None)
+    workflow._workflow_config["workflow_status"] = "tool_call_approval_required"
+
+    with pytest.raises(NotifiableException, match="could not load the tool rules"):
+        await workflow._merge_governance_policies()
+
+    mock_status_updater.return_value.update_workflow_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "project_id,claim,gate,expected",
+    [
+        (
+            7,
+            None,
+            True,
+            {"tool_access_policies_project_id": 7, "with_tool_access_policies": True},
+        ),
+        (
+            None,
+            None,
+            True,
+            {
+                "tool_access_policies_project_id": None,
+                "with_tool_access_policies": True,
+            },
+        ),
+        (
+            7,
+            '{"allow": [], "ask": [], "deny": []}',
+            True,
+            {"with_tool_access_policies": False},
+        ),
+        (7, None, False, {"with_tool_access_policies": False}),
+    ],
+    ids=["claim_absent", "no_project", "claim_present", "older_gitlab"],
+)
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_requests_the_policy_only_without_a_claim(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    mock_fetch_workflow_and_container_data,
+    workflow_config,
+    project_id,
+    claim,
+    gate,
+    expected,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    workflow_config["tool_access_policies"] = {
+        "allow": [],
+        "ask": [],
+        "deny": ["run_command"],
+    }
+    with patch(_GATE, return_value=gate):
+        workflow = _workflow_with_claims(
+            {"tool_access_policies": claim} if claim else {}
+        )
+        token = current_event_context.set(EventContext(project_id=project_id))
+        try:
+            await workflow._compile_and_run_graph("Test goal")
+        finally:
+            current_event_context.reset(token)
+
+    kwargs = mock_fetch_workflow_and_container_data.call_args.kwargs
+    assert {key: kwargs[key] for key in expected} == expected
+    assert ("run_command" in workflow._denied_tools) is (claim is None and gate)
+
+
+@pytest.mark.parametrize("gate", [True, False])
+def test_outbox_matches_http_responses_by_id_only_on_governed_versions(gate):
+    with patch(_GATE, return_value=gate):
+        workflow = _workflow_with_claims({})
+
+    assert workflow._outbox._exact_http_responses is gate
+
+
+@contextlib.contextmanager
+def _client_capabilities(capabilities, gl_version="19.6.0"):
+    caps_token = client_capabilities.set(set(capabilities))
+    version_token = gitlab_version.set(gl_version)
+    try:
+        yield
+    finally:
+        client_capabilities.reset(caps_token)
+        gitlab_version.reset(version_token)
+
+
+async def _run_with_promotion(
+    claim, workflow_config, capabilities, can_ask=True, gl_version="19.6.0"
+):
+    """Run the graph on an auto mode turn and return what ToolsRegistry.configure received and the workflow."""
+    workflow_config["allow_agent_to_request_user"] = can_ask
+    user = CloudConnectorUser(
+        authenticated=True,
+        claims=UserClaims(
+            gitlab_realm="saas",
+            extra={"tool_access_policies": claim},
+        ),
+    )
+    with (
+        _client_capabilities(capabilities, gl_version),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs"
+        ),
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow"
+        ) as mock_gitlab_workflow,
+        patch(
+            "duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure"
+        ) as mock_configure,
+    ):
+        mock_configure.return_value = MagicMock()
+        mock_checkpointer = AsyncMock()
+        mock_checkpointer.initial_status_event = "START"
+        mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+        workflow = MockWorkflow(
+            "id",
+            {},
+            GLReportingEventContext.from_workflow_definition("software_development"),
+            user,
+            preapproved_tools=["run_command"],
+        )
+        await workflow._compile_and_run_graph("Test goal")
+
+    return mock_configure.call_args.kwargs, workflow
+
+
+_PROMOTE_CLAIM = {
+    "allow": ["read_file"],
+    "ask": [],
+    "deny": [],
+    "promote": ["edit_file", "create_file_with_contents"],
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("ceiling", [False, True])
+@pytest.mark.parametrize(
+    ("capabilities", "can_ask", "expected"),
+    [
+        (["auto_mode"], True, ["create_file_with_contents", "edit_file"]),
+        # Build mode: the client did not engage auto mode this turn.
+        ([], True, []),
+        # A session that cannot prompt keeps halting instead.
+        (["auto_mode"], False, []),
+        ([], False, []),
+    ],
+)
+async def test_promote_applies_only_on_an_auto_mode_turn_that_can_prompt(
+    workflow_config, capabilities, can_ask, expected, ceiling
+):
+    claim = {**_PROMOTE_CLAIM, "ceiling": ceiling}
+
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(claim), workflow_config, capabilities, can_ask=can_ask
+    )
+
+    assert kwargs["promoted_tools"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_promote_needs_a_gitlab_that_forwards_capabilities(workflow_config):
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(_PROMOTE_CLAIM),
+        workflow_config,
+        ["auto_mode"],
+        gl_version="18.6.0",
+    )
+
+    assert kwargs["promoted_tools"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_promote_never_overrides_an_explicit_ask_or_deny(workflow_config):
+    claim = {
+        "allow": ["read_file"],
+        "ask": ["run_command"],
+        "deny": ["create_commit"],
+        "promote": ["edit_file", "run_command", "create_commit"],
+    }
+
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(claim), workflow_config, ["auto_mode"]
+    )
+
+    assert kwargs["promoted_tools"] == ["edit_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    ("promote", "expected"),
+    [
+        (None, []),
+        ("edit_file", []),
+        ({"edit_file": True}, []),
+        ([1, "edit_file", None], []),
+        ([], []),
+    ],
+)
+async def test_malformed_promote_keeps_the_rest_of_the_claim(
+    workflow_config, promote, expected
+):
+    claim = {"allow": ["read_file"], "ask": ["grep"], "deny": [], "promote": promote}
+
+    kwargs, workflow = await _run_with_promotion(
+        json.dumps(claim), workflow_config, ["auto_mode"]
+    )
+
+    assert kwargs["promoted_tools"] == expected
+    assert kwargs["allowed_tools"] == ["read_file"]
+    assert kwargs["ask_tools"] == ["grep"]
+    assert workflow._preapproved_tools == ["read_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_unparsable_claim_promotes_nothing(workflow_config):
+    claim = '{"allow": 5, "promote": ["edit_file"], "ceiling": true}'
+
+    kwargs, workflow = await _run_with_promotion(claim, workflow_config, ["auto_mode"])
+
+    assert kwargs["promoted_tools"] == []
+    assert kwargs["admin_allowed_preapprovals"] == set()
+    assert workflow._preapproved_tools == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("ceiling", [False, True])
+async def test_promote_leaves_every_other_pre_approval_input_unchanged(
+    workflow_config, ceiling
+):
+    """Promoted names reach the registry only as promoted_tools, never through a list chat state or the ceiling
+    reads."""
+    without = {"allow": ["read_file"], "ask": ["grep"], "deny": [], "ceiling": ceiling}
+
+    baseline, baseline_workflow = await _run_with_promotion(
+        json.dumps(without), workflow_config, ["auto_mode"]
+    )
+    promoted, promoted_workflow = await _run_with_promotion(
+        json.dumps({**without, "promote": ["edit_file"]}),
+        workflow_config,
+        ["auto_mode"],
+    )
+
+    assert promoted["promoted_tools"] == ["edit_file"]
+    for key in ("allowed_tools", "admin_allowed_preapprovals", "ask_tools"):
+        assert promoted[key] == baseline[key]
+    assert promoted_workflow._preapproved_tools == baseline_workflow._preapproved_tools
+    assert "edit_file" not in promoted_workflow._preapproved_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize("capabilities", [[], ["auto_mode"]])
+async def test_a_promote_only_claim_stays_ungoverned(workflow_config, capabilities):
+    """A promote list alone does not make the claim governance, so the client's own list stays in force."""
+    claim = {"allow": [], "ask": [], "deny": [], "promote": ["edit_file"]}
+
+    kwargs, workflow = await _run_with_promotion(
+        json.dumps(claim), workflow_config, capabilities
+    )
+
+    assert kwargs["promoted_tools"] == []
+    assert workflow._preapproved_tools == ["run_command"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_promotion_logs_the_count_at_info_and_the_names_at_debug(workflow_config):
+    with capture_logs() as logs:
+        await _run_with_promotion(
+            json.dumps(_PROMOTE_CLAIM), workflow_config, ["auto_mode"]
+        )
+
+    info = next(
+        entry
+        for entry in logs
+        if entry["event"] == "Promoting default-ask tools for this auto mode turn"
+    )
+    debug = next(
+        entry for entry in logs if entry["event"] == "Promoted default-ask tools"
+    )
+    assert info["log_level"] == "info"
+    assert info["promoted_count"] == 2
+    assert "tool_names" not in info
+    assert debug["log_level"] == "debug"
+    assert debug["tool_names"] == ["create_file_with_contents", "edit_file"]
+
+
+@pytest.mark.parametrize(
+    ("project", "namespace", "with_session", "browser_url"),
+    [
+        (
+            {"web_url": "https://gitlab.example.test/group/project"},
+            None,
+            True,
+            "https://gitlab.example.test/group/project",
+        ),
+        (
+            None,
+            {"web_url": "https://gitlab.example.test/groups/group"},
+            False,
+            "https://gitlab.example.test/groups/group",
+        ),
+        (None, None, False, ""),
+    ],
+    ids=["project", "namespace_only", "nothing_fetched"],
+)
+def test_container_urls_feed_the_session_link_and_user_facing_links(
+    workflow, project, namespace, with_session, browser_url
+):
+    workflow._project = project
+    workflow._namespace = namespace
+    workflow._session_url = None
+
+    def record() -> str:
+        workflow._record_container_urls()
+        return gitlab_web_url.get()
+
+    assert contextvars.copy_context().run(record) == browser_url
+    assert workflow._session_url == (
+        f"{browser_url}{SESSION_URL_PATH}{workflow._workflow_id}"
+        if with_session
+        else None
+    )

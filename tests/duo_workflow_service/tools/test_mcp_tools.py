@@ -362,3 +362,74 @@ def test_convert_mcp_tools_to_configs_carries_client_injected():
 
     assert configs[0]["client_injected"] is False
     assert configs[1]["client_injected"] is True
+
+
+@pytest.mark.parametrize(
+    (
+        "name",
+        "client_injected",
+        "force_client_injected",
+        "first_party_tools",
+        "expected_first_party",
+    ),
+    [
+        ("mcp__duo__review", True, False, {"mcp__duo__review": "allow"}, True),
+        # The key carries identity whatever the verdict; deny is enforced later.
+        ("mcp__duo__review", True, False, {"mcp__duo__review": "deny"}, True),
+        # Sanitising is lossy, so only the exact raw name is first-party.
+        ("mcp__duo..review__-", True, False, {"mcp__duo__review": "allow"}, False),
+        ("mcp__duo__review__", True, False, {"mcp__duo__review": "allow"}, False),
+        ("-mcp__duo__review", True, False, {"mcp__duo__review": "allow"}, False),
+        ("mcp::duo::review", True, False, {"mcp__duo__review": "allow"}, False),
+        # A GitLab-configured tool never inherits a first-party exemption.
+        ("mcp__duo__review", False, False, {"mcp__duo__review": "allow"}, False),
+        # Converter contract on its own: force_client_injected counts every tool as
+        # client-injected, so only the map decides. The workflow never pairs the two today:
+        # its client gate gives DWS-issued tokens, the only forcing caller, an empty map.
+        ("mcp__duo__review", False, True, {"mcp__duo__review": "allow"}, True),
+        ("mcp__duo__review", True, False, {"mcp__other__tool": "allow"}, False),
+        ("mcp__duo__review", True, False, {}, False),
+        ("mcp__duo__review", True, False, None, False),
+    ],
+    ids=[
+        "allow",
+        "deny",
+        "alias_dots_dash",
+        "alias_trailing_underscores",
+        "alias_leading_dash",
+        "alias_colons",
+        "gitlab_origin",
+        "direct_access",
+        "other_key",
+        "empty_map",
+        "no_map",
+    ],
+)
+def test_convert_mcp_tools_to_configs_marks_first_party(
+    name,
+    client_injected,
+    force_client_injected,
+    first_party_tools,
+    expected_first_party,
+):
+    tool = contract_pb2.McpTool(
+        name=name,
+        description="Review the diff",
+        inputSchema="{}",
+        client_injected=client_injected,
+    )
+
+    [config] = convert_mcp_tools_to_configs(
+        [tool],
+        force_client_injected=force_client_injected,
+        first_party_tools=first_party_tools,
+    )
+
+    assert config["first_party"] is expected_first_party
+    # Orbit's toggle exemption keys on `trusted`, so first-party must not set it.
+    assert config["trusted"] is False
+    assert config["description"] == (
+        "Review the diff"
+        if expected_first_party
+        else f"{UNTRUSTED_MCP_WARNING}\n\nReview the diff"
+    )

@@ -92,6 +92,13 @@ def test_large_string_chunking():
     assert result > 50_000
 
 
+def test_special_token_text_is_counted_as_text():
+    # Long enough to be sampled. The window tests cover shorter text, which is encoded whole.
+    counter = TikTokenCounter("some_name")
+
+    assert counter.count_string_content("<|endoftext|> " * 3000) > 0
+
+
 class TestImageContentBlocks:
     """Image payloads must be estimated, never tiktoken-encoded as prose."""
 

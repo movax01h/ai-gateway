@@ -35,6 +35,7 @@ from duo_workflow_service.entities import (
     ToolStatus,
     WorkflowStatusEnum,
 )
+from duo_workflow_service.entities.attachments import AttachmentsNotAllowedError
 from duo_workflow_service.entities.state import (
     ApprovalStateRejection,
     ChatWorkflowState,
@@ -44,8 +45,12 @@ from duo_workflow_service.errors.typing import (
     NotifiableException,
     ToolApprovalUnavailableError,
 )
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.tools.toolset import Toolset
-from duo_workflow_service.workflows.abstract_workflow import TraceableException
+from duo_workflow_service.workflows.abstract_workflow import (
+    ToolAccessPolicies,
+    TraceableException,
+)
 from duo_workflow_service.workflows.chat.commands import (
     CHAT_COMMAND_CATEGORY,
     forced_tool_call_message_id,
@@ -64,6 +69,7 @@ from duo_workflow_service.workflows.chat.workflow import (
     _resolve_additional_context_vars,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
+from lib.context import client_capabilities, gitlab_version
 from lib.context.approval_sources import (
     approval_sources,
     get_approval_policy_ref,
@@ -484,9 +490,10 @@ async def test_workflow_run(
                 web_search_enabled=False,
                 web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
-                allow_agent_to_request_user=workflow._workflow_config.get(
-                    "allow_agent_to_request_user", True
-                ),
+                # The conftest allow_agent_to_request_user fixture pins the
+                # fetched config to False, so the literal proves the config
+                # value reaches create_agent rather than a hardcoded default.
+                allow_agent_to_request_user=False,
             )
 
             # The workflow's own tracker must be bound to this workflow's identity
@@ -578,9 +585,8 @@ async def test_workflow_run_with_agent_name_override(
                 web_search_enabled=False,
                 web_search_allowed_for_group=False,
                 tracker=workflow._tracker,
-                allow_agent_to_request_user=workflow._workflow_config.get(
-                    "allow_agent_to_request_user", True
-                ),
+                # False comes from the conftest allow_agent_to_request_user fixture.
+                allow_agent_to_request_user=False,
             )
 
 
@@ -712,35 +718,14 @@ def test_start_flow_tool_offered_whatever_the_foundational_flow_config(
 @pytest.mark.parametrize(
     "generic_gitlab_tools_enabled", [True, False], ids=["generic_tools", "simple_tools"]
 )
-@pytest.mark.parametrize("web_search_enabled", [True, False])
-@pytest.mark.parametrize("web_search_allowed_for_group", [True, False])
-def test_web_search_requested_when_opted_in(
-    generic_gitlab_tools_enabled,
-    web_search_enabled,
-    web_search_allowed_for_group,
-    workflow_with_project,
+def test_web_search_requested_under_either_tool_set(
+    generic_gitlab_tools_enabled, workflow_with_project
 ):
-    """web_search follows the per-conversation opt-in and the group grant, under either read-only tool set.
-
-    Requesting it is necessary but not sufficient: ToolsRegistry enables it only for models without
-    native web search, and `toolset` silently drops names that are not enabled. So omitting it when
-    opted in would disable the fallback with no error surfacing, while requesting it when opted out
-    would let non-native models search after the user declined.
-    """
+    """Chat always asks for web_search; the registry offers it only when the session may search."""
     if generic_gitlab_tools_enabled:
         current_feature_flag_context.set({"use_generic_gitlab_api_tools"})
 
-    workflow_with_project._workflow_config = {
-        **workflow_with_project._workflow_config,
-        "web_search_enabled": web_search_enabled,
-        "web_search_allowed_for_group": web_search_allowed_for_group,
-    }
-
-    tools = workflow_with_project._get_tools()
-
-    assert ("web_search" in tools) is (
-        web_search_enabled and web_search_allowed_for_group
-    )
+    assert "web_search" in workflow_with_project._get_tools()
 
 
 def _gitlab_checkpoint_with_history(
@@ -796,13 +781,13 @@ async def test_record_approved_tool_sources_defaults_to_user_explicit(
 
 @pytest.mark.asyncio
 async def test_record_approved_tool_sources_uses_client_source(workflow_with_project):
-    """A client-sent approval source (e.g. auto_mode) overrides the default."""
+    """A client-sent approval source (e.g. pretooluse_hook) overrides the default."""
     workflow = workflow_with_project
     workflow._agent = Mock()
     workflow._agent.name = "test_prompt"
     workflow._approval = contract_pb2.Approval(
         approval=contract_pb2.Approval.Approved(
-            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_AUTO_MODE,
+            approval_source=contract_pb2.Approval.APPROVAL_SOURCE_PRETOOLUSE_HOOK,
             policy_ref=contract_pb2.Approval.PolicyRef(origin="policy"),
         )
     )
@@ -816,7 +801,7 @@ async def test_record_approved_tool_sources_uses_client_source(workflow_with_pro
     init_approval_sources()
     try:
         workflow._record_approved_tool_sources(checkpoint_tuple)
-        assert get_approval_source("c1") == "auto_mode"
+        assert get_approval_source("c1") == "pretooluse_hook"
         assert get_approval_policy_ref("c1") == {"origin": "policy"}
     finally:
         approval_sources.set(None)
@@ -1520,6 +1505,31 @@ async def test_agent_resume_with_updated_preapproved_tools(workflow_with_project
 
 
 @pytest.mark.asyncio
+async def test_promoted_tools_never_reach_chat_state(workflow_with_project):
+    """Promotion holds for one turn, so it must not ride the checkpointed preapproved_tools list."""
+    workflow = workflow_with_project
+    workflow._claimed_tool_access_policies = ToolAccessPolicies(
+        allow=["read_file"], promote=["edit_file"]
+    )
+    workflow._workflow_config = {"allow_agent_to_request_user": True}
+    caps_token = client_capabilities.set({"auto_mode"})
+    version_token = gitlab_version.set("19.6.0")
+    try:
+        workflow._merge_jwt_governance_claims()
+    finally:
+        client_capabilities.reset(caps_token)
+        gitlab_version.reset(version_token)
+
+    assert workflow._promoted_tools == ["edit_file"]
+    start_state = workflow.get_workflow_state("goal")
+    resumed = await workflow.get_graph_input(
+        "", WorkflowStatusEventEnum.RESUME, EXISTING_CHECKPOINT
+    )
+    assert start_state["preapproved_tools"] == ["read_file"]
+    assert resumed.update["preapproved_tools"] == ["read_file"]
+
+
+@pytest.mark.asyncio
 async def test_agent_resume_with_updated_denied_tools(workflow_with_project):
     workflow_with_project._denied_tools = ["create_merge_request"]
 
@@ -1632,6 +1642,7 @@ async def test_workflow_with_approval_object(flow_type: GLReportingEventContext)
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
 @patch.object(Workflow, "_get_tools")
 @patch("duo_workflow_service.components.tools_registry.ToolsRegistry.toolset")
 @patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
@@ -1640,6 +1651,7 @@ async def test_compile_with_tools_override_and_flow_config(
     mock_state_graph,
     mock_toolset,
     mock_get_tools,
+    mock_create_agent,
     flow_type: GLReportingEventContext,
     mock_checkpointer,
 ):
@@ -1674,6 +1686,7 @@ async def test_compile_with_tools_override_and_flow_config(
 
     workflow._compile("Test goal", tools_registry, mock_checkpointer)
 
+    # Chat-partial agents get exactly their toolset; web search only if it lists `web_search`.
     tools_registry.toolset.assert_called_once_with(["tool1", "tool2"])
     mock_get_tools.assert_not_called()
 
@@ -2463,6 +2476,44 @@ class TestWebSearchTogglePropagation:
         )
 
 
+class TestAllowAgentToRequestUserPropagation:
+    """The flag gates the chat agent's unanswerable-approval halt, so create_agent must receive the config's own value,
+    not a constant."""
+
+    @pytest.mark.parametrize(
+        ("workflow_config_value", "expected"),
+        [
+            ({"allow_agent_to_request_user": False}, False),
+            ({"allow_agent_to_request_user": True}, True),
+            # An absent key falls back to True: legacy sessions keep prompting.
+            ({}, True),
+        ],
+    )
+    def test_compile_passes_config_value_to_create_agent(
+        self,
+        workflow_with_project,
+        mock_tools_registry,
+        workflow_config_value,
+        expected,
+    ):
+        workflow = workflow_with_project
+        workflow._workflow_config = workflow_config_value
+
+        with (
+            patch("duo_workflow_service.workflows.chat.workflow.StateGraph"),
+            patch(
+                "duo_workflow_service.workflows.chat.workflow.create_agent",
+                return_value=MagicMock(),
+            ) as mock_create_agent,
+        ):
+            workflow._compile("Test goal", mock_tools_registry, MagicMock())
+
+        assert (
+            mock_create_agent.call_args.kwargs["allow_agent_to_request_user"]
+            is expected
+        )
+
+
 PNG_BYTES = b"\x89PNG\r\n\x1a\npixels"
 PNG_B64 = base64.b64encode(PNG_BYTES).decode()
 # `_verify_declared_type` checks the payload against its declared type, so a webp
@@ -2522,6 +2573,13 @@ class TestChatAttachments:
     later turn (the plain-message branch of `get_graph_input`).
     """
 
+    @pytest.fixture(name="attachments_allowed", autouse=True)
+    def attachments_allowed_fixture(self, workflow_with_project):
+        workflow_with_project._workflow_config = {
+            **workflow_with_project._workflow_config,
+            "file_attachments_allowed": True,
+        }
+
     @pytest.fixture(name="workflow_with_attachment")
     def workflow_with_attachment_fixture(self, workflow_with_project):
         workflow_with_project._additional_context = [
@@ -2564,6 +2622,84 @@ class TestChatAttachments:
         message = result.update["conversation_history"]["test_prompt"][0]
         assert message.content[0]["text"] == "what is in this screenshot?"
         assert image_blocks(message)[0]["base64"] == PNG_B64
+
+    @pytest.mark.asyncio
+    async def test_a_session_file_reference_is_sent_as_the_image(
+        self, workflow_with_project, workflow_id
+    ):
+        url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"
+        workflow_with_project._additional_context = [
+            AdditionalContext(
+                category="attachments",
+                content=json.dumps({"url": url, "filename": "screenshot.png"}),
+            )
+        ]
+        workflow_with_project._http_client.aget = AsyncMock(
+            return_value=GitLabHttpResponse(
+                status_code=200, body={"content_type": "image/png", "data": PNG_B64}
+            )
+        )
+
+        result = await self._later_turn(workflow_with_project)
+
+        workflow_with_project._http_client.aget.assert_awaited_once_with(
+            path=url, parse_json=True
+        )
+        message = result.update["conversation_history"]["test_prompt"][0]
+        (image,) = image_blocks(message)
+        assert image["base64"] == PNG_B64
+        assert image["mime_type"] == "image/png"
+
+    @pytest.fixture(name="workflow_with_session_file")
+    def workflow_with_session_file_fixture(self, workflow_with_project, workflow_id):
+        url = f"/api/v4/ai/duo_workflows/workflows/{workflow_id}/session_files/5"
+        workflow_with_project._additional_context = [
+            AdditionalContext(
+                category="attachments",
+                content=json.dumps({"url": url, "filename": "screenshot.png"}),
+            )
+        ]
+        workflow_with_project._http_client.aget = AsyncMock()
+        return workflow_with_project
+
+    @pytest.mark.asyncio
+    async def test_a_session_file_is_not_fetched_when_attachments_are_not_allowed(
+        self, workflow_with_session_file
+    ):
+        workflow_with_session_file._workflow_config = {
+            **workflow_with_session_file._workflow_config,
+            "file_attachments_allowed": False,
+        }
+
+        with pytest.raises(AttachmentsNotAllowedError):
+            await self._later_turn(workflow_with_session_file)
+
+        workflow_with_session_file._http_client.aget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "approval",
+        [
+            pytest.param(
+                contract_pb2.Approval(approval=contract_pb2.Approval.Approved()),
+                id="approval_turn",
+            ),
+            pytest.param(
+                contract_pb2.Approval(
+                    rejection=contract_pb2.Approval.Rejected(message="no")
+                ),
+                id="rejection_turn",
+            ),
+        ],
+    )
+    async def test_a_session_file_is_not_fetched_for_a_decision_turn(
+        self, workflow_with_session_file, approval
+    ):
+        workflow_with_session_file._approval = approval
+
+        await self._later_turn(workflow_with_session_file)
+
+        workflow_with_session_file._http_client.aget.assert_not_awaited()
 
     def test_every_attachment_becomes_its_own_block(self, workflow_with_project):
         workflow_with_project._additional_context = [
@@ -2973,6 +3109,87 @@ class TestChatAttachments:
             item for item in (ui_context or []) if item.category == "attachments"
         ]
         assert "could not be sent" in result.update["ui_chat_log"][-1]["content"]
+
+
+class TestChatAttachmentsNotAllowed:
+    """Attachments the workflow's top-level group has not allowed are refused outright."""
+
+    @pytest.fixture(name="workflow_with_attachment")
+    def workflow_with_attachment_fixture(self, workflow_with_project, request):
+        workflow_with_project._workflow_config = {
+            **workflow_with_project._workflow_config,
+            **request.param,
+        }
+        workflow_with_project._additional_context = [
+            FILE_CONTEXT,
+            attachment_envelope(),
+        ]
+        return workflow_with_project
+
+    @pytest.mark.parametrize(
+        "workflow_with_attachment",
+        [
+            pytest.param({"file_attachments_allowed": False}, id="not_allowed"),
+            pytest.param({}, id="setting_missing"),
+        ],
+        indirect=True,
+    )
+    def test_first_turn_raises(self, workflow_with_attachment):
+        with pytest.raises(AttachmentsNotAllowedError):
+            workflow_with_attachment.get_workflow_state("what is in this screenshot?")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "workflow_with_attachment",
+        [
+            pytest.param({"file_attachments_allowed": False}, id="not_allowed"),
+            pytest.param({}, id="setting_missing"),
+        ],
+        indirect=True,
+    )
+    async def test_later_turn_raises(self, workflow_with_attachment):
+        with pytest.raises(AttachmentsNotAllowedError):
+            await workflow_with_attachment.get_graph_input(
+                "what is in this screenshot?",
+                WorkflowStatusEventEnum.RESUME,
+                EXISTING_CHECKPOINT,
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("mock_duo_workflow_service_container")
+    async def test_the_rejection_reason_is_shown_to_the_user(
+        self, workflow_with_project
+    ):
+        """The specific reason reaches the transcript rather than the generic error message."""
+        notifier = AsyncMock()
+        workflow_with_project.checkpoint_notifier = notifier
+        error = AttachmentsNotAllowedError(
+            "File attachments are not allowed for this session."
+        )
+
+        with pytest.raises(TraceableException) as exc_info:
+            await workflow_with_project._handle_compile_and_run_exception(
+                error, AsyncMock(), {}
+            )
+
+        assert exc_info.value.original_exception is error
+        state = notifier.send_event.call_args.kwargs["state"]
+        assert state["status"] == WorkflowStatusEnum.ERROR
+        (entry,) = state["ui_chat_log"]
+        assert entry["content"] == "File attachments are not allowed for this session."
+        assert entry["status"] == ToolStatus.FAILURE
+
+    def test_a_turn_without_attachments_is_unaffected(self, workflow_with_project):
+        workflow_with_project._workflow_config = {
+            **workflow_with_project._workflow_config,
+            "file_attachments_allowed": False,
+        }
+        workflow_with_project._additional_context = [FILE_CONTEXT]
+
+        state = workflow_with_project.get_workflow_state("explain this file")
+
+        message = state["conversation_history"]["test_prompt"][0]
+        assert message.additional_kwargs["additional_context"] == [FILE_CONTEXT]
 
 
 FLOW_COMMAND_CONTEXT = AdditionalContext(
@@ -3702,3 +3919,75 @@ async def test_a_tool_the_model_chose_still_returns_to_it(
 
     assert visited == ["run_tools", "agent"]
     assert state.next == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("max_tool_calls", "expected_kwargs"),
+    [(2, {"max_tool_calls": 2}), (None, {})],
+    ids=["limit", "no_limit"],
+)
+async def test_run_tools_applies_the_limit_stored_for_the_response(
+    workflow_with_project, max_tool_calls, expected_kwargs
+):
+    """The stored limit applies with the flag off too, so turning it off after an approval cannot run more calls."""
+    workflow_with_project._agent = MagicMock()
+    workflow_with_project._agent.name = "test_prompt"
+    workflow_with_project._tools_executor = MagicMock(run=AsyncMock(return_value=[]))
+    state = ChatWorkflowState(
+        conversation_history={
+            "test_prompt": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "read_file", "args": {}, "id": f"call-{index}"}
+                        for index in range(3)
+                    ],
+                )
+            ]
+        },
+        max_tool_calls=max_tool_calls,
+    )
+
+    await workflow_with_project._run_tools(state)
+
+    workflow_with_project._tools_executor.run.assert_awaited_once_with(
+        state, **expected_kwargs
+    )
+
+
+@pytest.mark.parametrize(
+    ("tools_override", "expected_settings"),
+    [
+        (["tool1", "web_search"], (True, True)),
+        # Not listed: no web search, so the prompt must not point the user at the toggle.
+        (["tool1"], (False, False)),
+    ],
+    ids=["listed", "not_listed"],
+)
+@patch("duo_workflow_service.workflows.chat.workflow.create_agent")
+@patch("duo_workflow_service.workflows.chat.workflow.StateGraph")
+def test_chat_partial_web_search_follows_its_toolset(
+    mock_state_graph, mock_create_agent, tools_override, expected_settings
+):
+    workflow = Workflow(
+        workflow_id="test-id",
+        workflow_metadata={},
+        workflow_type=GLReportingEventContext.from_workflow_definition("chat"),
+        user=CloudConnectorUser(authenticated=True),
+        tools_override=tools_override,
+    )
+    workflow._workflow_config = {
+        "web_search_enabled": True,
+        "web_search_allowed_for_group": True,
+    }
+    tools_registry = MagicMock(spec=ToolsRegistry)
+    tools_registry.mcp_tool_names.return_value = []
+
+    workflow._compile("Test goal", tools_registry, MagicMock())
+
+    kwargs = mock_create_agent.call_args.kwargs
+    assert (
+        kwargs["web_search_enabled"],
+        kwargs["web_search_allowed_for_group"],
+    ) == expected_settings

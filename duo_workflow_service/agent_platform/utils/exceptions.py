@@ -6,6 +6,7 @@ from pydantic import ValidationError
 # tree can raise them without importing ``agent_platform``. Re-exported here for existing callers.
 from duo_workflow_service.errors.typing import (
     TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT,
+    ModelRefusalError,
     NotifiableAgentException,
     ToolApprovalUnavailableError,
     ToolBlockedByAdministratorError,
@@ -13,8 +14,10 @@ from duo_workflow_service.errors.typing import (
 
 __all__ = [
     "TOOL_BLOCKED_BY_ADMINISTRATOR_RESULT",
+    "FlowConfigLimitExceededError",
     "FlowValidationError",
     "MissingAdditionalContextError",
+    "ModelRefusalError",
     "NotifiableAgentException",
     "ToolApprovalUnavailableError",
     "ToolBlockedByAdministratorError",
@@ -41,6 +44,14 @@ class FlowValidationError(ValueError):
             msg = err["msg"]
             errors.append(f"{loc}: {msg}" if loc else msg)
         return cls(errors)
+
+
+class FlowConfigLimitExceededError(FlowValidationError):
+    """Raised when a flow config exceeds an input cap before validation runs.
+
+    A subclass of ``FlowValidationError`` so callers that only know the base class still treat it as a validation
+    failure, while the gRPC handler can log cap rejections separately.
+    """
 
 
 class MissingAdditionalContextError(KeyError):

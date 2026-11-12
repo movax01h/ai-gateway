@@ -16,6 +16,8 @@ additional_properties:
     description: Number of input tokens written to the 5-minute TTL prompt cache
   ephemeral_1h_input_tokens:
     description: Number of input tokens written to the 1-hour TTL prompt cache
+  operation_type:
+    description: Kind of LLM call, matching the billing event's operation_type. `decision` is a call to a model's Decisions endpoint that classifies, routes, or gates a request instead of generating text
 milestone: '19.5'
 introduced_by_url: https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/6799
 tiers:

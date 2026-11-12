@@ -1,7 +1,7 @@
 import asyncio
 import json
 from datetime import date
-from typing import Optional
+from typing import Any, Mapping, NamedTuple, Optional
 from unittest.mock import Mock, patch
 
 import pytest
@@ -28,6 +28,7 @@ from ai_gateway.model_selection import (
     LLMDefinition,
     ModelNotAllowedForFeatureError,
     ModelSelectionConfig,
+    ModelSelectionError,
     ProviderNotServedError,
     UnitPrimitiveConfig,
 )
@@ -211,7 +212,7 @@ def _dws_metadata(raw: dict) -> Optional[TypeModelMetadata]:
     token = current_user.set(USER.cloud_connector_user)
     try:
         with patch.object(
-            get_config().model_selection, "feature_allowlist_mode", "off"
+            get_config().model_selection, "feature_allowlist_mode_dws", "off"
         ):
             asyncio.run(
                 ModelMetadataInterceptor().intercept_service(continuation, details)
@@ -304,6 +305,27 @@ class TestCheckClientModelMetadata:
 
         assert result is metadata
         assert logs == []
+
+    @pytest.mark.parametrize(
+        ("surface", "mode", "served"),
+        [("http", "fallback", "allowed_model"), ("dws", "log", "other_model")],
+    )
+    def test_each_surface_uses_its_own_mode(self, monkeypatch, surface, mode, served):
+        model_selection = get_config().model_selection
+        monkeypatch.setattr(model_selection, "feature_allowlist_mode_http", "fallback")
+        monkeypatch.setattr(model_selection, "feature_allowlist_mode_dws", "log")
+
+        _, result, logs = _check(
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": FEATURE,
+            },
+            surface=surface,
+        )
+
+        assert result.llm_definition.gitlab_identifier == served
+        assert [e["mode"] for e in logs if e["event"] == MISMATCH] == [mode]
 
     @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
     def test_a_gateway_that_serves_custom_models_does_not_check(self, monkeypatch):
@@ -538,6 +560,7 @@ class TestCheckClientModelMetadata:
             assert entry["feature_setting"] == FEATURE
             assert entry["requested_name"] is None
             assert entry["requested_identifier"] == "other_model"
+            assert entry["checked_identifier"] == "other_model"
             assert entry["served_identifier"] == "other_model"
             assert entry["pinned"] is True
             assert entry["path"] == "/v1/prompts/chat/react"
@@ -560,6 +583,8 @@ class TestCheckClientModelMetadata:
                     "log_level": "warning",
                     "reason": "model_not_allowed",
                     "mode": "log",
+                    "outcome": "served",
+                    "enforce_outcome": "refused",
                     "surface": "http",
                     "feature_setting": FEATURE,
                     "client_feature_setting": FEATURE,
@@ -567,6 +592,7 @@ class TestCheckClientModelMetadata:
                     "requested_name": None,
                     "requested_identifier": "other_model",
                     "pinned": True,
+                    "checked_identifier": "other_model",
                     "served_identifier": "other_model",
                     "path": "/v1/prompts/chat/react",
                 }
@@ -580,6 +606,9 @@ class TestCheckClientModelMetadata:
             assert result.llm_definition.gitlab_identifier == "allowed_model"
             assert result.provider == "gitlab"
             assert _reasons(logs) == ["model_not_allowed"]
+            entry = next(e for e in logs if e["event"] == MISMATCH)
+            assert entry["checked_identifier"] == "other_model"
+            assert entry["served_identifier"] == "allowed_model"
 
         @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
         @pytest.mark.parametrize("surface", ["http", "dws"])
@@ -667,51 +696,43 @@ class TestCheckClientModelMetadata:
             assert _reasons(logs) == []
             assert _reasons(logs, NOTE) == ["missing_feature_setting"]
 
-    class TestIdentifierOverrideOnManagedModel:
-        """`name` resolves an allowed model while the raw `identifier` rewrites the wire model."""
+    class TestRawIdentifierOnManagedModel:
+        """A raw `identifier` next to `name` would rewrite the wire model of a GitLab-managed request.
+
+        A `gitlab` request resolves `identifier` and ignores `name`, so the shape takes another provider string. The
+        gateway resolves `name` and ignores the raw `identifier` when it builds the metadata, in every mode.
+        """
 
         RAW = {
-            "provider": "gitlab",
+            "provider": "vertex-ai",
             "name": "allowed_model",
             "identifier": "vertex_ai/other-model",
             "feature_setting": FEATURE,
         }
 
-        @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
-        def test_log_mode_keeps_the_override_and_warns(self):
+        @pytest.mark.parametrize("feature_allowlist_mode", ALL_MODES, indirect=True)
+        def test_every_mode_checks_the_name_and_notes_the_ignored_identifier(self):
             metadata, result, logs = _check(self.RAW)
 
             assert result is metadata
-            assert result.identifier == "vertex_ai/other-model"
-            assert result.to_params()["model"] == "other-model"
-            assert _reasons(logs) == ["managed_identifier_override"]
-
-        @pytest.mark.parametrize(
-            "feature_allowlist_mode", ["fallback", "enforce"], indirect=True
-        )
-        def test_stricter_modes_rebuild_the_model_from_its_definition(self):
-            metadata, result, _ = _check(self.RAW)
-
-            assert result is not metadata
             assert isinstance(result, ModelMetadata)
             assert result.llm_definition.gitlab_identifier == "allowed_model"
             assert result.identifier is None
             # No wire model override is left: the model comes from the definition.
             assert "model" not in result.to_params()
+            assert _reasons(logs) == []
+            assert _reasons(logs, NOTE) == ["identifier_ignored"]
 
-        @pytest.mark.parametrize(
-            "feature_allowlist_mode", ["fallback", "enforce"], indirect=True
-        )
-        def test_stricter_modes_discard_limits_copied_from_the_identifier(self):
-            """`_create_gitlab_metadata` copies limits and tuning from the model the identifier matched."""
+        @pytest.mark.parametrize("feature_allowlist_mode", ALL_MODES, indirect=True)
+        def test_no_limits_are_copied_from_the_identifier(self):
+            """A self-hosted model copies limits and tuning from the models.yml entry its identifier matches."""
             with patch.object(
                 ModelSelectionConfig,
                 "find_by_identifier",
                 return_value=MODELS["matched_model"],
             ):
-                metadata, result, _ = _check(self.RAW)
+                _, result, _ = _check(self.RAW)
 
-            assert metadata.llm_definition.max_context_tokens == 1_000_000
             assert result.llm_definition.gitlab_identifier == "allowed_model"
             assert result.llm_definition.max_context_tokens == 200000
             assert result.llm_definition.params.max_tokens is None
@@ -787,6 +808,60 @@ class TestCheckClientModelMetadata:
             assert bool(getattr(metadata, "identifier", None)) is carries_identifier
             assert result is metadata
             assert _reasons(logs) == []
+            assert _reasons(logs, NOTE) == []
+
+    class TestGitLabModelByIdentifier:
+        """A `gitlab` request resolves its model from `identifier`, which is the field that GitLab clients send."""
+
+        @pytest.mark.parametrize("feature_allowlist_mode", ALL_MODES, indirect=True)
+        @pytest.mark.parametrize("surface", ["http", "dws"])
+        def test_checks_the_identifier_and_notes_the_ignored_name(self, surface):
+            metadata, _, logs = _check(
+                {
+                    "provider": "gitlab",
+                    "name": "other_model",
+                    "identifier": "allowed_model",
+                    "feature_setting": FEATURE,
+                },
+                surface=surface,
+            )
+
+            assert metadata.llm_definition.gitlab_identifier == "allowed_model"
+            assert getattr(metadata, "identifier", None) is None
+            assert _reasons(logs) == []
+            assert _reasons(logs, NOTE) == ["name_ignored"]
+
+        @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+        def test_an_allowed_name_does_not_pass_a_model_that_is_not_allowed(self):
+            with pytest.raises(ModelNotAllowedForFeatureError):
+                _check(
+                    {
+                        "provider": "gitlab",
+                        "name": "allowed_model",
+                        "identifier": "other_model",
+                        "feature_setting": FEATURE,
+                    }
+                )
+
+        def test_a_raw_identifier_is_not_a_model(self):
+            with pytest.raises(ValueError, match="vertex_ai/other-model"):
+                create_model_metadata(
+                    {
+                        "provider": "gitlab",
+                        "name": "allowed_model",
+                        "identifier": "vertex_ai/other-model",
+                        "feature_setting": FEATURE,
+                    }
+                )
+
+        @pytest.mark.parametrize("feature_allowlist_mode", ALL_MODES, indirect=True)
+        def test_the_resume_replay_still_resolves_its_name(self):
+            metadata, _, logs = _check(
+                {"provider": "gitlab", "name": "allowed_model"}, surface="dws"
+            )
+
+            assert metadata.llm_definition.gitlab_identifier == "allowed_model"
+            assert "name_ignored" not in _reasons(logs, NOTE)
 
     class TestRebuiltMetadata:
         """Metadata that the check builds keeps the request settings that the server builders set."""
@@ -851,6 +926,205 @@ def _note_prompt_feature(raw: dict, prompt_feature_setting: str):
             log_context={"prompt_id": "test/prompt"},
         )
     return logs
+
+
+class _Run(NamedTuple):
+    """What one check did with a request, and the log entry of the case under test.
+
+    `served` is the model that runs: the result of the check, or None when the check refuses the request or leaves it
+    on the prompt's own default model.
+    """
+
+    checked: str
+    done: str
+    served: Optional[str]
+    entry: Mapping[str, Any]
+
+
+class TestOutcomeLogFields:
+    """Each event logs what its check does in the current mode, and what `enforce` mode would do."""
+
+    CASES = [
+        pytest.param(
+            "http",
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            MISMATCH,
+            "model_not_allowed",
+            id="http-model-not-allowed",
+        ),
+        pytest.param(
+            "dws",
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            MISMATCH,
+            "model_not_allowed",
+            id="dws-model-not-allowed",
+        ),
+        pytest.param(
+            "http",
+            {"provider": "gitlab", "name": "other_model"},
+            {},
+            MISMATCH,
+            "missing_feature_setting",
+            id="http-missing-feature",
+        ),
+        pytest.param(
+            "dws",
+            {"provider": "gitlab", "name": "other_model"},
+            {},
+            NOTE,
+            "missing_feature_setting",
+            id="dws-resume-replay",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "gitlab",
+                "identifier": "other_model",
+                "feature_setting": "nope",
+            },
+            {},
+            MISMATCH,
+            "unknown_feature",
+            id="http-unknown-feature",
+        ),
+        pytest.param(
+            "http",
+            {"provider": "gitlab", "feature_setting": OTHER_FEATURE},
+            {"feature_setting": FEATURE},
+            MISMATCH,
+            "feature_mismatch",
+            id="http-feature-mismatch",
+        ),
+        pytest.param(
+            "http",
+            {"provider": "gitlab", "feature_setting": OTHER_FEATURE},
+            {"feature_setting": "nope"},
+            MISMATCH,
+            "feature_mismatch",
+            id="http-feature-mismatch-with-an-unknown-call-site-feature",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "vertex-ai",
+                "name": "allowed_model",
+                "identifier": "vertex_ai/other-model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            NOTE,
+            "identifier_ignored",
+            id="http-identifier-ignored",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "litellm",
+                "name": "allowed_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            MISMATCH,
+            "provider_not_served",
+            id="http-provider-not-served",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "gitlab",
+                "identifier": "dev_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            NOTE,
+            "dev_model",
+            id="http-dev-model",
+        ),
+        pytest.param(
+            "http",
+            {
+                "provider": "gitlab",
+                "identifier": "deprecated_model",
+                "feature_setting": FEATURE,
+            },
+            {},
+            NOTE,
+            "deprecated_model",
+            id="http-deprecated-model",
+        ),
+    ]
+
+    @staticmethod
+    def _run(monkeypatch, mode, surface, raw, kwargs, event, reason) -> _Run:
+        """Run the check in `mode`, and return what it did with the request and the log entry of `reason`."""
+        model_selection = get_config().model_selection
+        monkeypatch.setattr(model_selection, "feature_allowlist_mode_http", mode)
+        monkeypatch.setattr(model_selection, "feature_allowlist_mode_dws", mode)
+        request = ClientModelRequest.from_raw(raw)
+        metadata = (
+            _dws_metadata(raw) if surface == "dws" else create_model_metadata(dict(raw))
+        )
+        assert metadata is not None, (
+            "the Duo Workflow Service does not resolve this shape"
+        )
+        result: Optional[TypeModelMetadata] = None
+        with structlog.testing.capture_logs() as logs:
+            try:
+                result = check_client_model_metadata(
+                    request, metadata, surface=surface, **kwargs
+                )
+                done = "served" if result is metadata else "replaced"
+            except ModelSelectionError:
+                done = "refused"
+        [entry] = [
+            entry
+            for entry in logs
+            if entry["event"] == event and entry["reason"] == reason
+        ]
+        return _Run(
+            checked=metadata.llm_definition.gitlab_identifier,
+            done=done,
+            served=result.llm_definition.gitlab_identifier if result else None,
+            entry=entry,
+        )
+
+    @pytest.mark.parametrize(("surface", "raw", "kwargs", "event", "reason"), CASES)
+    def test_the_logged_outcomes_match_what_each_mode_does(
+        self, monkeypatch, surface, raw, kwargs, event, reason
+    ):
+        runs = {
+            mode: self._run(monkeypatch, mode, surface, raw, kwargs, event, reason)
+            for mode in ALL_MODES
+        }
+
+        assert {mode: run.entry["outcome"] for mode, run in runs.items()} == {
+            mode: run.done for mode, run in runs.items()
+        }
+        assert {run.entry["enforce_outcome"] for run in runs.values()} == {
+            runs["enforce"].done
+        }
+
+    @pytest.mark.parametrize("mode", ALL_MODES)
+    @pytest.mark.parametrize(("surface", "raw", "kwargs", "event", "reason"), CASES)
+    def test_the_logged_identifiers_name_the_checked_and_the_served_model(
+        self, monkeypatch, mode, surface, raw, kwargs, event, reason
+    ):
+        run = self._run(monkeypatch, mode, surface, raw, kwargs, event, reason)
+
+        assert {
+            "checked_identifier": run.entry["checked_identifier"],
+            "served_identifier": run.entry["served_identifier"],
+        } == {"checked_identifier": run.checked, "served_identifier": run.served}
 
 
 @pytest.mark.usefixtures("feature_allowlist_mode")

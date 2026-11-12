@@ -30,7 +30,7 @@ def test_the_description_is_structured_and_keeps_the_model_text():
         "new_line": 4,
         "code_excerpt": "find(id)",
         "body": "Any user can read any basket. The id is not scoped.",
-        "anchor_status": bl.ANCHOR_VERIFIED,
+        "anchor_status": bl._ANCHOR_VERIFIED,
     }
     (v,) = _writer()._build_report([finding])["vulnerabilities"]
 
@@ -49,7 +49,7 @@ def test_the_model_text_is_escaped_in_the_written_description():
         "new_line": 4,
         "code_excerpt": "find(id)",
         "body": "Send <token> as @admin. See #12.",
-        "anchor_status": bl.ANCHOR_VERIFIED,
+        "anchor_status": bl._ANCHOR_VERIFIED,
     }
     (v,) = _writer()._build_report([finding])["vulnerabilities"]
 
@@ -72,7 +72,7 @@ def test_the_model_title_and_impact_lead_the_structured_text():
         "body": "Proof.",
         "title": "Checkout accepts another user's basket",
         "impact": "Any signed-in user can check out another user's basket.",
-        "anchor_status": bl.ANCHOR_VERIFIED,
+        "anchor_status": bl._ANCHOR_VERIFIED,
     }
     (v,) = _writer()._build_report([finding])["vulnerabilities"]
 

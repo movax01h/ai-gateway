@@ -62,7 +62,9 @@ Usage::
 """
 
 import copy
-from typing import Any, Callable, List
+import re
+from functools import partial
+from typing import Any, Callable, List, Optional
 
 import structlog
 from detect_secrets.plugins.artifactory import ArtifactoryDetector
@@ -82,7 +84,9 @@ from detect_secrets.plugins.ibm_cloud_iam import IbmCloudIamDetector
 from detect_secrets.plugins.ibm_cos_hmac import IbmCosHmacDetector
 from detect_secrets.plugins.jwt import JwtTokenDetector
 from detect_secrets.plugins.keyword import (
+    PRECEDED_BY_EQUAL_COMPARISON_SIGNS_QUOTES_REQUIRED_REGEX,
     QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP,
+    SECRET,
     KeywordDetector,
 )
 from detect_secrets.plugins.mailchimp import MailchimpDetector
@@ -169,6 +173,35 @@ def _line_excluded(detector: KeywordDetector, text: str, start: int, end: int) -
     return bool(detector.keyword_exclude.search(text[line_start:line_end]))
 
 
+def _redact_keyword_match(
+    match: re.Match[str], group_number: int, detector: KeywordDetector, text: str
+) -> str:
+    """The text that replaces one keyword-assignment match: the match with its value group redacted.
+
+    ``text`` is the string the match was found in; ``_line_excluded`` reads the surrounding line from it.
+    """
+    start, end = match.span(group_number)
+
+    if start == -1 or end <= start:
+        # A detected assignment whose value cannot be located would
+        # otherwise pass through unredacted, so fail closed.  The
+        # message deliberately carries no matched text.
+        raise SecurityException(
+            f"Keyword denylist group {group_number} did not capture; "
+            "cannot locate the value to redact"
+        )
+
+    if _line_excluded(detector, text, start, end):
+        return match.group(0)
+
+    offset = match.start()
+    return (
+        match.group(0)[: start - offset]
+        + REDACTED_PLACEHOLDER
+        + match.group(0)[end - offset :]
+    )
+
+
 def _redact_keyword_assignments(detector: KeywordDetector, text: str) -> str:
     """Redact the captured value of each keyword-assignment match in place.
 
@@ -176,6 +209,10 @@ def _redact_keyword_assignments(detector: KeywordDetector, text: str) -> str:
     stops at the first match per pattern, so it cannot drive a substitution.
     The denylist patterns are applied directly instead, which both keeps the
     replacement local to the match and reaches every assignment.
+
+    Each pattern is applied in one ``Pattern.sub`` pass.  Rewriting the whole
+    text once per match instead costs time quadratic in the number of matches,
+    which stalled the event loop for tens of seconds on a multi-megabyte log.
 
     Nothing outside an assignment is rewritten.  A value assigned to a
     secret-named key is as often the secret's *name* as the secret itself, and
@@ -187,25 +224,89 @@ def _redact_keyword_assignments(detector: KeywordDetector, text: str) -> str:
     regex-based detectors, which match them wherever they appear.
     """
     for pattern, group_number in QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP.items():
-        # Replace right to left so earlier match offsets stay valid.
-        for match in reversed(list(pattern.finditer(text))):
-            start, end = match.span(group_number)
-
-            if start == -1 or end <= start:
-                # A detected assignment whose value cannot be located would
-                # otherwise pass through unredacted, so fail closed.  The
-                # message deliberately carries no matched text.
-                raise SecurityException(
-                    f"Keyword denylist group {group_number} did not capture; "
-                    "cannot locate the value to redact"
-                )
-
-            if _line_excluded(detector, text, start, end):
-                continue
-
-            text = text[:start] + REDACTED_PLACEHOLDER + text[end:]
+        text = pattern.sub(
+            partial(
+                _redact_keyword_match,
+                group_number=group_number,
+                detector=detector,
+                text=text,
+            ),
+            text,
+        )
 
     return text
+
+
+# The quotes-required keyword patterns cut off after the opening quote, with the quote group's number. ``(?=\w)`` is
+# the first-character rule of the value. The quote group is the one before the value group. The comparison pattern
+# is left out: its keyword follows the closing quote, so an opener alone does not show it. See
+# ``redact_cut_comparison``.
+_ASSIGNMENT_OPENERS = tuple(
+    (
+        re.compile(pattern.pattern.split(f"({SECRET})")[0] + r"(?=\w)", pattern.flags),
+        value_group - 1,
+    )
+    for pattern, value_group in QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP.items()
+    if pattern is not PRECEDED_BY_EQUAL_COMPARISON_SIGNS_QUOTES_REQUIRED_REGEX
+)
+
+
+def redact_unclosed_assignment(text: str, kept: int) -> Optional[str]:
+    """``text`` masked from the value of its first keyword assignment with no closing quote in it, else ``None``.
+
+    For a ``text`` cut from a longer one. The keyword patterns need the closing quote, so an assignment whose quote
+    lies past the cut is not matched and its value stays raw, where redacting the whole text would mask it up to that
+    quote. Only the part before ``kept`` is shown, so only an assignment whose value starts there matters.
+
+    A value holds no ``'`` or ``"``, so one of them ends it. Only the last such quote can open a value that nothing
+    ends, or a backtick after it, and the patterns run only if one of those starts before ``kept``. The mask may cover
+    more than the whole text would, as it does not look for the ``;`` that one pattern needs.
+
+    A comparison with the keyword on the right, such as ``'x' == password``, is not checked here. See
+    ``redact_cut_comparison``.
+    """
+    last = max(text.rfind("'"), text.rfind('"'))
+    if last + 1 >= kept or (last == -1 and "`" not in text):
+        return None
+
+    last_backtick = text.rfind("`")
+    starts = []
+    for opener, quote_group in _ASSIGNMENT_OPENERS:
+        for match in opener.finditer(text):
+            # A backtick can also end a value that a backtick opened.
+            last_ender = (
+                max(last, last_backtick) if match.group(quote_group) == "`" else last
+            )
+            if match.end() > last_ender:
+                starts.append(match.end())
+                break
+
+    return text[: min(starts)] + REDACTED_PLACEHOLDER if starts else None
+
+
+# What the comparison pattern allows between the closing quote and its keyword: whitespace, an operator,
+# whitespace and a run of word characters.
+_COMPARISON_TAIL = re.compile(r"\s*(?:[!=]{1,3}\s*\w*)?")
+
+
+def redact_cut_comparison(text: str, kept: int) -> Optional[str]:
+    """``text`` masked from the value of a comparison whose keyword may lie past the cut, else ``None``.
+
+    For a ``text`` cut from a longer one. The comparison pattern, such as ``'x' == password``, ends with the keyword.
+    If ``text`` ends right after the closing quote, the operator and a run of word characters, the keyword may follow
+    the cut, and the value stays raw where redacting the whole text would mask it. Only a value that starts before
+    ``kept`` is shown. The mask may cover more than the whole text would, as the keyword may not follow.
+
+    A comparison cut inside its value has no closing quote in ``text``, so this does not mask it. That needs a value
+    longer than the margin plus ``max_bytes - truncated_size``. Masking every unclosed quote would hide the text after
+    a stray apostrophe.
+    """
+    last = max(text.rfind(quote) for quote in "'\"`")
+    if last < 1 or not _COMPARISON_TAIL.fullmatch(text, last + 1):
+        return None
+
+    start = text.rfind(text[last], 0, last)
+    return text[: start + 1] + REDACTED_PLACEHOLDER if 0 <= start < kept - 1 else None
 
 
 def _redact_string(text: str, detectors: List[BasePlugin]) -> str:

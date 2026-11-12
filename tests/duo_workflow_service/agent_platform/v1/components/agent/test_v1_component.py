@@ -5,7 +5,7 @@ from typing import ClassVar, Literal
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
@@ -19,6 +19,7 @@ from ai_gateway.response_schemas.base import BaseAgentOutput
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
 from duo_workflow_service.agent_platform.utils.exceptions import (
+    ModelRefusalError,
     NotifiableAgentException,
     ToolApprovalUnavailableError,
 )
@@ -43,13 +44,25 @@ from duo_workflow_service.agent_platform.v1.state import (
 )
 from duo_workflow_service.agent_platform.v1.state.base import IOKey, NoneIOKey
 from duo_workflow_service.agent_platform.v1.ui_log import UIHistory
+from duo_workflow_service.checkpointer.notifier import UserInterface
 from duo_workflow_service.conversation.history_optimizer.schema import (
     CompactionConfig,
 )
 from duo_workflow_service.entities import MessageTypeEnum
-from duo_workflow_service.entities.state import WorkflowStatusEnum
+from duo_workflow_service.entities.state import ToolStatus, WorkflowStatusEnum
 from duo_workflow_service.tools.toolset import Toolset
+from lib.context import client_capabilities
 from lib.feature_flags import FeatureFlag
+from tests.duo_workflow_service.ui_chat_log_contract import (
+    assert_client_valid_tool_info,
+)
+
+
+@pytest.fixture(autouse=True)
+def prepare_container(  # pylint: disable=unused-argument  # fixture-on-fixture ordering dep
+    mock_duo_workflow_service_container,
+):
+    """Native web calls are tracked through the wired internal events client."""
 
 
 @pytest.fixture(name="prompt_id")
@@ -785,6 +798,24 @@ class TestResponseSchemaDefinition:
             text_turns == 3
         )
 
+    @pytest.mark.asyncio
+    async def test_refusal_stops_a_schema_agent(self, request, base_flow_state):
+        """In schema mode a turn without tool calls loops back to the agent, so the refusal must stop it there."""
+        refused = AIMessage(
+            content=[{"type": "thinking", "thinking": "", "signature": "sig"}],
+            response_metadata={"stop_reason": "refusal"},
+        )
+        with pytest.raises(ModelRefusalError):
+            await self._run_graph_with_replies(
+                [refused for _ in range(10)],
+                **self._graph_fixtures(request),
+                base_flow_state=base_flow_state,
+            )
+        prompt = request.getfixturevalue(
+            "mock_prompt_registry"
+        ).get_on_behalf.return_value
+        assert prompt.ainvoke.await_count == 1
+
     @staticmethod
     def _graph_fixtures(request):
         return {
@@ -800,6 +831,85 @@ class TestResponseSchemaDefinition:
                 "inline_schema_registry",
             )
         }
+
+
+class TestAgentComponentModelRefusal:
+    """A refused turn through a real compiled graph: the component, AgentNode and FinalResponseNode are real.
+
+    Only the model call is faked, with the shape of a real refusal from session 10869437 (gitlab-lsp#3537): an empty
+    thinking block and ``stop_reason: "refusal"``.
+    """
+
+    @staticmethod
+    def _empty_turn(response_metadata: dict) -> AIMessage:
+        return AIMessage(
+            content=[{"type": "thinking", "thinking": "", "signature": "sig"}],
+            response_metadata=response_metadata,
+        )
+
+    @staticmethod
+    async def _run(make_agent_component, mock_prompt_registry, base_flow_state, reply):
+        prompt = mock_prompt_registry.get_on_behalf.return_value
+        prompt.ainvoke = AsyncMock(return_value=reply)
+        component = make_agent_component(inputs=["context:user_input"])
+        router = Mock()
+        router.route.return_value = END
+        graph = StateGraph(FlowState)
+        component.attach(graph, router)
+        graph.set_entry_point(component.__entry_hook__())
+        compiled = graph.compile()
+        return (
+            prompt,
+            router,
+            compiled.ainvoke(
+                base_flow_state, config={"recursion_limit": RECURSION_LIMIT}
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_refusal_stops_the_flow(
+        self, make_agent_component, mock_prompt_registry, base_flow_state
+    ):
+        """The refusal raises ModelRefusalError: no retry, no final answer, the router is never reached."""
+        prompt, router, run = await self._run(
+            make_agent_component,
+            mock_prompt_registry,
+            base_flow_state,
+            self._empty_turn(
+                {
+                    "stop_reason": "refusal",
+                    "stop_details": {"type": "refusal", "category": "cyber"},
+                }
+            ),
+        )
+
+        with pytest.raises(ModelRefusalError) as exc_info:
+            await run
+
+        assert "refusal category: cyber" in exc_info.value.internal_detail
+        prompt.ainvoke.assert_awaited_once()
+        router.route.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_empty_turn_without_refusal_still_ends_the_turn(
+        self,
+        make_agent_component,
+        mock_prompt_registry,
+        base_flow_state,
+        component_name,
+    ):
+        """Control: only the refusal changes behavior; the same empty turn with end_turn still completes."""
+        _, router, run = await self._run(
+            make_agent_component,
+            mock_prompt_registry,
+            base_flow_state,
+            self._empty_turn({"stop_reason": "end_turn"}),
+        )
+
+        result = await run
+
+        assert result["context"][component_name]["final_answer"] == ""
+        router.route.assert_called_once()
 
 
 class TestAgentComponentInitialization:
@@ -1180,7 +1290,7 @@ class TestAgentComponentAttachEdges:
         assert wrap_up_kwargs["track_event"] is False
         agent_call_kwargs = mock_agent_node_cls.call_args[1]
         assert agent_call_kwargs["prompt"] is main_prompt
-        assert agent_call_kwargs["wrap_up_prompt"] is wrap_up_prompt
+        assert agent_call_kwargs["wrap_up_prompt"].prompt is wrap_up_prompt
 
     @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
     def test_text_mode_has_no_wrap_up_prompt(
@@ -3198,26 +3308,30 @@ class TestAgentComponentIdenticalToolCallLimit:
 
 
 class TestWebSearchBinding:
-    """`_build_prompt` binds the provider-native web-search tool only when the `enable_web_search` opt-in AND the
-    dependency_bump_web_search flag AND the client's `web_search` capability are all present."""
+    """`_build_prompt` offers the provider-native web search for the `enable_web_search` alias only when the opt-in, the
+    dependency_bump_web_search flag and the client's `web_search` capability are all present.
+
+    The prompt template learns from the binding whether the model can search.
+    """
 
     _MODULE = "duo_workflow_service.agent_platform.v1.components.agent.component"
 
     @pytest.mark.parametrize(
-        ("enabled", "flag_on", "client_capable", "expect_bound"),
+        ("enabled", "flags_on", "client_capable", "expect_bound"),
         [
-            (True, True, True, True),  # all gates satisfied -> bound
-            (False, True, True, False),  # flow opt-in off
-            (True, False, True, False),  # dependency_bump_web_search flag off
-            (True, True, False, False),  # client lacks web_search capability
+            (True, {FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH}, True, True),
+            (False, {FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH}, True, False),
+            (True, set(), True, False),
+            (True, {FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH}, False, False),
         ],
+        ids=["all_gates", "flow_opt_in_off", "kill_switch_off", "client_not_capable"],
     )
     def test_web_search_binding_is_gated(
         self,
         make_agent_component,
         mock_prompt_registry,
         enabled,
-        flag_on,
+        flags_on,
         client_capable,
         expect_bound,
     ):
@@ -3225,22 +3339,21 @@ class TestWebSearchBinding:
 
         with (
             patch(
-                f"{self._MODULE}.is_feature_enabled", return_value=flag_on
-            ) as mock_is_feature_enabled,
+                f"{self._MODULE}.is_feature_enabled",
+                side_effect=lambda flag: flag in flags_on,
+            ),
             patch(
-                f"{self._MODULE}.is_client_capable", return_value=client_capable
-            ) as mock_is_client_capable,
+                f"{self._MODULE}.is_client_capable",
+                side_effect=lambda capability: (
+                    client_capable and capability == "web_search"
+                ),
+            ),
         ):
             component._build_prompt(tools=[], tool_choice="auto")
 
         call_kwargs = mock_prompt_registry.get_on_behalf.call_args.kwargs
         if expect_bound:
             assert call_kwargs["bind_tools_params"] == {"web_search_options": {}}
-            # the gate must query the correct flag and capability identifiers
-            mock_is_feature_enabled.assert_called_once_with(
-                FeatureFlag.DEPENDENCY_BUMP_WEB_SEARCH
-            )
-            mock_is_client_capable.assert_called_once_with("web_search")
         else:
             assert "bind_tools_params" not in call_kwargs
 
@@ -3279,33 +3392,19 @@ class TestWebSearchBinding:
         mock_is_feature_enabled.assert_not_called()
         mock_is_client_capable.assert_not_called()
 
-    @pytest.mark.parametrize(
-        ("enabled", "flag_on", "client_capable", "expected"),
-        [
-            (True, True, True, True),  # all gates satisfied
-            (False, True, True, False),  # flow opt-in off
-            (True, False, True, False),  # dependency_bump_web_search flag off
-            (True, True, False, False),  # client lacks web_search capability
-        ],
-    )
-    def test_tools_enabled_map_reflects_gate(
-        self, make_agent_component, enabled, flag_on, client_capable, expected
+    @pytest.mark.parametrize("binds_web_search", [True, False])
+    def test_tools_enabled_web_search_follows_the_binding(
+        self, make_agent_component, binds_web_search
     ):
-        """`_tools_enabled()` exposes the same gate to the prompt (as `tools_enabled`) that decides whether the tool is
-        bound, so the prompt can branch its guidance."""
-        component = make_agent_component(enable_web_search=enabled)
+        """Listing `web_search` isn't enough: a model with no route (no native search, no gateway) gets nothing bound,
+        so the template must not describe search."""
+        component = make_agent_component()
 
-        with (
-            patch(f"{self._MODULE}.is_feature_enabled", return_value=flag_on),
-            patch(f"{self._MODULE}.is_client_capable", return_value=client_capable),
-        ):
-            # `run_command` is True because the mock toolset contains every key; it
-            # reflects toolset membership, not the patched flag, which this component
-            # does not consult. `..._follows_toolset_membership` covers that directly.
-            assert component._tools_enabled() == {
-                "web_search": expected,
-                "run_command": True,
-            }
+        tools_enabled = component._tools_enabled(
+            Mock(binds_web_search=binds_web_search)
+        )
+
+        assert tools_enabled["web_search"] is binds_web_search
 
     @pytest.mark.parametrize("in_toolset", [True, False])
     def test_tools_enabled_run_command_follows_toolset_membership(
@@ -3320,11 +3419,9 @@ class TestWebSearchBinding:
         )
         component = make_agent_component()
 
-        with (
-            patch(f"{self._MODULE}.is_feature_enabled", return_value=False),
-            patch(f"{self._MODULE}.is_client_capable", return_value=False),
-        ):
-            assert component._tools_enabled()["run_command"] is in_toolset
+        tools_enabled = component._tools_enabled(Mock(binds_web_search=False))
+
+        assert tools_enabled["run_command"] is in_toolset
 
     @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
     def test_attach_forwards_tools_enabled_to_agent_node(
@@ -3333,18 +3430,219 @@ class TestWebSearchBinding:
         mock_agent_node_cls,
         mock_state_graph,
         mock_router,
+        mock_prompt_registry,
     ):
         """The prompt template reads `tools_enabled`, which is injected at execution time rather than declared as a
         component input, so it has to reach AgentNode via prompt_template_inputs."""
-        component = make_agent_component(enable_web_search=True)
+        mock_prompt_registry.get_on_behalf.return_value = Mock(binds_web_search=True)
+        component = make_agent_component()
 
-        with (
-            patch(f"{self._MODULE}.is_feature_enabled", return_value=True),
-            patch(f"{self._MODULE}.is_client_capable", return_value=True),
-        ):
-            component.attach(mock_state_graph, mock_router)
+        component.attach(mock_state_graph, mock_router)
 
         call_kwargs = mock_agent_node_cls.call_args[1]
         assert call_kwargs["prompt_template_inputs"] == {
             "tools_enabled": {"web_search": True, "run_command": True}
         }
+        assert call_kwargs["wrap_up_prompt"] is None
+
+    @pytest.mark.usefixtures("mock_tool_node_cls", "mock_final_response_node_cls")
+    def test_wrap_up_prompt_is_told_it_cannot_search(
+        self,
+        agent_component_with_custom_schema,
+        mock_agent_node_cls,
+        mock_state_graph,
+        mock_router,
+        mock_prompt_registry,
+    ):
+        """Past max_cycles only the schema tool is bound, so the wrap-up template must not describe search."""
+        mock_prompt_registry.get_on_behalf.side_effect = [
+            Mock(binds_web_search=True),
+            Mock(binds_web_search=False),
+        ]
+
+        agent_component_with_custom_schema.attach(mock_state_graph, mock_router)
+
+        call_kwargs = mock_agent_node_cls.call_args[1]
+        assert call_kwargs["prompt_template_inputs"]["tools_enabled"]["web_search"]
+        assert (
+            call_kwargs["wrap_up_prompt"].template_inputs["tools_enabled"]["web_search"]
+            is False
+        )
+
+
+_SEARCH_RESULT_URL = "https://pypi.org/project/urllib3/"
+_SEARCH_RESULT_TITLE = "urllib3 · PyPI"
+
+
+def _anthropic_search_answer(msg_id: str = "msg_search") -> AIMessage:
+    """A final answer in the shape native Anthropic web search returns it."""
+    return AIMessage(
+        content=[
+            {"type": "text", "text": "Let me check PyPI."},
+            {
+                "type": "server_tool_use",
+                "id": "srvtoolu_1",
+                "name": "web_search",
+                "input": {"query": "urllib3 latest version"},
+            },
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_1",
+                "content": [
+                    {
+                        "type": "web_search_result",
+                        "url": _SEARCH_RESULT_URL,
+                        "title": _SEARCH_RESULT_TITLE,
+                        "encrypted_content": "opaque",
+                        "page_age": None,
+                    }
+                ],
+            },
+            {"type": "text", "text": "The latest release is 2.8.0."},
+        ],
+        id=msg_id,
+        response_metadata={"model_name": "claude-sonnet-4-5"},
+    )
+
+
+def _openai_search_answer(msg_id: str = "resp_search") -> AIMessage:
+    """A final answer in the shape the OpenAI Responses API returns it."""
+    return AIMessage(
+        content=[
+            {"type": "text", "text": "Let me check PyPI."},
+            {
+                "type": "web_search_call",
+                "id": "ws_1",
+                "status": "completed",
+                "action": {"type": "search", "query": "urllib3 latest version"},
+            },
+            {
+                "type": "text",
+                "text": "The latest release is 2.8.0.",
+                "annotations": [
+                    {
+                        "type": "url_citation",
+                        "url": _SEARCH_RESULT_URL,
+                        "title": _SEARCH_RESULT_TITLE,
+                        "start_index": 0,
+                        "end_index": 1,
+                    }
+                ],
+            },
+        ],
+        id=msg_id,
+        response_metadata={"model_name": "gpt-5"},
+    )
+
+
+class TestServerToolCardsInUiChatLog:
+    """Server-tool cards from a turn land in graph state, so the next checkpoint and a resume still show them.
+
+    The streaming notifier draws these cards live, but it keeps only PENDING entries the state does not know about once
+    the next values event arrives. A card that state never received vanishes at that point.
+    """
+
+    _CHAT_UI_LOG_EVENTS: ClassVar[list[UILogEventsAgent]] = [
+        UILogEventsAgent.ON_AGENT_FINAL_ANSWER,
+        UILogEventsAgent.ON_AGENT_REASONING,
+        UILogEventsAgent.ON_TOOL_EXECUTION_SUCCESS,
+        UILogEventsAgent.ON_TOOL_EXECUTION_FAILED,
+    ]
+
+    @staticmethod
+    async def _run_turn(component, completion, base_flow_state, thread_id="turn"):
+        """Run one turn of ``component`` in a real graph with a checkpointer; return the reloaded state values."""
+        component.prompt_registry.get_on_behalf.return_value.ainvoke = AsyncMock(
+            return_value=completion
+        )
+        router = Mock()
+        router.route.return_value = END
+        graph = StateGraph(FlowState)
+        component.attach(graph, router)
+        graph.set_entry_point(component.__entry_hook__())
+        compiled = graph.compile(checkpointer=InMemorySaver())
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": RECURSION_LIMIT,
+        }
+        await compiled.ainvoke(base_flow_state, config)
+        return (await compiled.aget_state(config)).values
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("completion", "card_id"),
+        [
+            (_anthropic_search_answer(), "srvtoolu_1"),
+            (_openai_search_answer(), "ws_1"),
+        ],
+        ids=["anthropic", "openai"],
+    )
+    async def test_final_answer_keeps_cards_between_text_segments(
+        self, make_agent_component, base_flow_state, completion, card_id
+    ):
+        component = make_agent_component(
+            inputs=["context:user_input"], ui_log_events=self._CHAT_UI_LOG_EVENTS
+        )
+
+        values = await self._run_turn(component, completion, base_flow_state)
+
+        log = values[FlowStateKeys.UI_CHAT_LOG]
+        assert [(e["message_type"], e["message_id"]) for e in log] == [
+            (MessageTypeEnum.AGENT, completion.id),
+            (MessageTypeEnum.TOOL, card_id),
+            (MessageTypeEnum.AGENT, f"{completion.id}:seg1"),
+        ]
+        before, card, after = log
+        assert before["content"] == "Let me check PyPI."
+        assert after["content"] == "The latest release is 2.8.0."
+        assert card["status"] == ToolStatus.SUCCESS
+        assert card["message_sub_type"] == "web_search"
+        assert card["component_name"] == component.name
+        assert card["tool_info"]["name"] == "web_search"
+        assert card["tool_info"]["args"] == {"query": "urllib3 latest version"}
+        assert card["tool_info"]["sources"] == [
+            {"title": _SEARCH_RESULT_TITLE, "url": _SEARCH_RESULT_URL}
+        ]
+        assert_client_valid_tool_info(card["tool_info"])
+        # The component's output is still the whole answer text.
+        assert (
+            values["context"][component.name]["final_answer"]
+            == "Let me check PyPI.The latest release is 2.8.0."
+        )
+
+    @pytest.mark.asyncio
+    async def test_streamed_entries_are_replaced_not_duplicated(
+        self, make_agent_component, base_flow_state
+    ):
+        """The state entries reuse the ids the notifier streamed under, so the values event replaces them in place."""
+        completion = _anthropic_search_answer()
+        component = make_agent_component(
+            inputs=["context:user_input"], ui_log_events=self._CHAT_UI_LOG_EVENTS
+        )
+        values = await self._run_turn(component, completion, base_flow_state)
+
+        client_capabilities.set({"incremental_streaming", "tool_call_streaming"})
+        notifier = UserInterface(outbox=Mock(), goal="goal")
+        streamed = AIMessageChunk(
+            id=completion.id,
+            content=[
+                {**block, "index": index}
+                for index, block in enumerate(completion.content)
+            ],
+        )
+        await notifier.send_event(
+            "messages",
+            (streamed, {"langgraph_node": component.__entry_hook__()}),
+            stream=True,
+        )
+        streamed_ids = [e["message_id"] for e in notifier.ui_chat_log]
+
+        await notifier.send_event("values", values, stream=True)
+
+        ids = [e["message_id"] for e in notifier.ui_chat_log]
+        assert ids == streamed_ids
+        assert len(ids) == len(set(ids))
+        card = next(
+            e for e in notifier.ui_chat_log if e["message_type"] == MessageTypeEnum.TOOL
+        )
+        assert card["status"] == ToolStatus.SUCCESS

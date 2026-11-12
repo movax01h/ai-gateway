@@ -1,10 +1,14 @@
+import random
+import string
 from typing import Dict, List, Optional
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.entities.state import (
+    _DISPLAY_REDACTION_WINDOW,
     TOOL_RESPONSE_MAX_DISPLAY_MSG,
     ApprovalSource,
     MessageTypeEnum,
@@ -16,6 +20,10 @@ from duo_workflow_service.entities.state import (
     build_tool_info,
     policy_ref_to_log_dict,
     render_for_display,
+)
+from duo_workflow_service.security.secret_redaction import (
+    REDACTED_PLACEHOLDER,
+    redact_secrets_for_ui,
 )
 from tests.duo_workflow_service.ui_chat_log_contract import (
     assert_client_valid_tool_info,
@@ -61,9 +69,12 @@ class TestApprovalSourceFromApproval:
 
     def test_uses_client_reported_source_when_present(self):
         approved = contract_pb2.Approval.Approved(
-            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_AUTO_MODE
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_PRETOOLUSE_HOOK
         )
-        assert ApprovalSource.from_approval(approved) == ApprovalSource.AUTO_MODE.value
+        assert (
+            ApprovalSource.from_approval(approved)
+            == ApprovalSource.PRETOOLUSE_HOOK.value
+        )
 
     def test_defaults_to_user_explicit_when_source_unset(self):
         # An Approved message with no approval_source field (never sent) defaults
@@ -92,6 +103,29 @@ class TestApprovalSourceFromApproval:
         )
         assert (
             ApprovalSource.from_approval(approved) == ApprovalSource.USER_EXPLICIT.value
+        )
+
+    def test_clamps_client_sent_auto_mode_to_user_explicit(self):
+        """AUTO_MODE is server-produced only: it means a signed promote list skipped the prompt."""
+        approved = contract_pb2.Approval.Approved(
+            approval_source=contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_AUTO_MODE
+        )
+        with capture_logs() as logs:
+            source = ApprovalSource.from_approval(approved)
+
+        assert source == ApprovalSource.USER_EXPLICIT.value
+        assert {
+            "event": "Recording a client-sent server-only approval source as user_explicit",
+            "claimed_approval_source": "auto_mode",
+            "log_level": "info",
+        } in logs
+
+    def test_from_proto_itself_still_reports_auto_mode_unclamped(self):
+        assert (
+            ApprovalSource.from_proto(
+                contract_pb2.Approval.ApprovalSource.APPROVAL_SOURCE_AUTO_MODE
+            )
+            == ApprovalSource.AUTO_MODE.value
         )
 
     def test_from_proto_itself_still_reports_session_approval_unclamped(self):
@@ -511,6 +545,80 @@ class TestRenderForDisplay:
             f"[... display truncated: {TOOL_RESPONSE_MAX_DISPLAY_MSG:,} of "
             f"{redacted_len:,} characters shown ...]"
         )
+
+
+# "glpat-" and 50 characters: the longest GitLab token the detector matches, 56 characters, replaced by 10.
+TOKEN = "glpat-" + "A" * 50
+
+# A value in the head, cut from its closing quote or from the keyword that follows it. The window alone would leave
+# ``hunter2`` raw.
+SHAPES = {
+    "unclosed": "password = {q}hunter2" + " ok" * 5000 + "{q}",
+    "comparison": "if {q}hunter2{q}" + " " * 14000 + "== password:",
+}
+
+
+def head_of(rendered: str) -> str:
+    return rendered.split("\n[... display truncated", maxsplit=1)[0]
+
+
+class TestRenderForDisplayWindow:
+    """A text over the window is cut before redaction, and the head shown is what redacting everything shows."""
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_head_is_the_head_of_redacting_everything(self, seed):
+        rng = random.Random(seed)
+        lines = [f"line {i} ok" for i in range(3000)]
+        for _ in range(8):
+            secret = "".join(rng.choices(string.ascii_letters, k=20))
+            lines[rng.randrange(len(lines))] += f" glpat-{secret}"
+        text = "\n".join(lines)
+        assert len(text) > _DISPLAY_REDACTION_WINDOW
+
+        result = render_for_display(text, tool_name="t")
+
+        whole = redact_secrets_for_ui(text, tool_name="t")
+        assert head_of(result) == whole[:TOOL_RESPONSE_MAX_DISPLAY_MSG]
+        assert "glpat" not in result
+        assert result.endswith(f"of {len(text):,} characters shown ...]")
+
+    @pytest.mark.parametrize(
+        "text, head",
+        [
+            # The window ends 5 characters into a token.
+            (
+                "x" * (_DISPLAY_REDACTION_WINDOW - 5) + TOKEN + "y" * 5000,
+                "x" * TOOL_RESPONSE_MAX_DISPLAY_MSG,
+            ),
+            # Redacted, the window is shorter than the slack, so none of it is shown, not the fragment of the token.
+            (
+                "x" * ((_DISPLAY_REDACTION_WINDOW - 5) % (len(TOKEN) + 1))
+                + (TOKEN + " ") * 400,
+                "",
+            ),
+        ],
+        ids=["split_token", "shrunk_window"],
+    )
+    def test_fragment_of_a_split_secret_is_not_shown(self, text, head):
+        result = render_for_display(text, tool_name="t")
+
+        assert head_of(result) == head
+        assert "glpat" not in result
+
+    @pytest.mark.parametrize("shape", SHAPES)
+    @pytest.mark.parametrize("quote", ["'", '"', "`"])
+    @pytest.mark.parametrize("position", [0, 2000])
+    def test_value_cut_from_what_completes_its_match_is_masked(
+        self, shape, quote, position
+    ):
+        text = "x" * position + SHAPES[shape].format(q=quote) + "y" * 5000
+
+        head = head_of(render_for_display(text, tool_name="t"))
+
+        whole = redact_secrets_for_ui(text, tool_name="t")
+        assert "hunter2" not in head
+        assert head.endswith(f"{quote}{REDACTED_PLACEHOLDER}")
+        assert whole.startswith(head)
 
 
 def test_contract_mirror_rejects_a_non_array_suggested_patterns():

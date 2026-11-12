@@ -1,6 +1,6 @@
 # These tests cover a YAML flow config, so there is no module to name the file after.
 # pylint: disable=file-naming-for-tests
-"""A failed closing step of ``bl_security/1.0.0.yml`` must fail the run.
+"""A failed deterministic step of ``bl_security/1.0.0.yml`` must fail the run where it failed.
 
 ``DeterministicStepComponent`` records a tool failure in
 ``context:<step>.execution_result`` instead of raising, so only the routers can
@@ -25,11 +25,14 @@ from duo_workflow_service.agent_platform.experimental.flows.flow_config import (
 from duo_workflow_service.agent_platform.experimental.state import FlowState
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 
-CLOSING_STEPS = ("triage_collect", "adjudicate_post", "write_report")
-
 
 def _config() -> FlowConfig:
     return FlowConfig.from_yaml_config("bl_security", "1.0.0")
+
+
+DETERMINISTIC_STEPS = tuple(
+    c["name"] for c in _config().components if c["type"] == "DeterministicStepComponent"
+)
 
 
 def _router(step: str) -> dict:
@@ -91,8 +94,8 @@ def _run(failing: str | None = None) -> dict:
     return asyncio.run(graph.compile().ainvoke(initial))
 
 
-@pytest.mark.parametrize("step", CLOSING_STEPS)
-def test_a_closing_step_routes_only_on_success(step):
+@pytest.mark.parametrize("step", DETERMINISTIC_STEPS)
+def test_a_deterministic_step_routes_only_on_success(step):
     router = _router(step)
     assert "to" not in router
     assert router["condition"]["input"] == f"context:{step}.execution_result"
@@ -103,7 +106,7 @@ def test_a_run_whose_steps_all_succeed_completes():
     assert _run()["status"] == WorkflowStatusEnum.COMPLETED
 
 
-@pytest.mark.parametrize("step", CLOSING_STEPS)
-def test_a_failed_closing_step_raises_out_of_the_graph(step):
+@pytest.mark.parametrize("step", DETERMINISTIC_STEPS)
+def test_a_failed_deterministic_step_raises_out_of_the_graph(step):
     with pytest.raises(KeyError, match=f"Route key .*'{step}', 'execution_result'"):
         _run(failing=step)

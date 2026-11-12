@@ -125,11 +125,6 @@ class InMemoryPromptRegistry(BasePromptRegistry):
         # collapses the plural `unit_primitives` list into a single `unit_primitive` value.
         unit_primitive = raw_data.get("unit_primitive")
         prompt_template = raw_data["prompt_template"]
-        if (
-            model_metadata
-            and model_metadata.llm_definition.requires_single_system_message
-        ):
-            prompt_template = self._join_system_messages(prompt_template)
         prompt_config = PromptConfig(
             name=prompt_id,
             model=ModelConfig(
@@ -154,17 +149,6 @@ class InMemoryPromptRegistry(BasePromptRegistry):
             tools=tools,
             **kwargs,
         )
-
-    @staticmethod
-    def _join_system_messages(
-        prompt_template: dict[str, str | list[str]],
-    ) -> dict[str, str | list[str]]:
-        system = prompt_template.get("system", "")
-        if isinstance(system, list):
-            joined_system = "\n".join(system)
-            return {**prompt_template, "system": joined_system}
-        else:
-            return prompt_template
 
     @override
     def get_required_variables(

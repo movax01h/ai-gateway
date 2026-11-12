@@ -55,6 +55,7 @@ query($workflowId: AiDuoWorkflowsWorkflowID!) {
             incrementalCheckpointsEnabled
             allowAgentToRequestUser
             allowClientInjectedMcpTools @gl_introduced(version: "19.5.0")
+            fileAttachmentsAllowed @gl_introduced(version: "19.6.0")
             webSearchEnabled
             latestCheckpoint {
                 threadTs

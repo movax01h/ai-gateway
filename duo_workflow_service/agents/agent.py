@@ -161,7 +161,7 @@ class Agent(BaseAgent):
             except APIStatusError as error:
                 log_exception(error, extra={"context": "Error processing agent"})
 
-                status_code = error.response.status_code
+                status_code = error.status_code
 
                 if 500 <= status_code < 600:
                     ui_content = (

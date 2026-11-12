@@ -161,18 +161,23 @@ def check_gitlab_connectivity():
 
 
 def check_customer_portal_reachable() -> None:
-    """Probe the effective Customer Portal OIDC discovery endpoint.
+    """Probe the Customer Portal OIDC discovery endpoint, if one is configured.
 
-    Reads the portal URL from ``DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL`` or
-    ``AIGW_CUSTOMER_PORTAL_URL``, falling back to ``https://customers.gitlab.com``,
-    and prints guidance for both online and airgapped deployments.
+    With custom models enabled, AI Gateway and Duo Workflow Service fetch keys
+    from the Customer Portal only when ``AIGW_CUSTOMER_PORTAL_URL`` or
+    ``DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL`` is set, so the probe is
+    skipped when neither is.
     """
     # pylint: disable=direct-environment-variable-reference
-    portal_url = (
-        os.getenv("DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL")
-        or os.getenv("AIGW_CUSTOMER_PORTAL_URL")
-        or "https://customers.gitlab.com"
+    portal_url = os.getenv("DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL") or os.getenv(
+        "AIGW_CUSTOMER_PORTAL_URL"
     )
+    if not portal_url:
+        print(
+            ">> Customer Portal URL is not set, so it is not used as a key source ✔\n"
+        )
+        return
+
     well_known = f"{portal_url.rstrip('/')}/.well-known/openid-configuration"
 
     print(f"Testing if the Customer Portal is reachable at {portal_url} ...")
@@ -187,9 +192,8 @@ def check_customer_portal_reachable() -> None:
                 >> Could not reach the Customer Portal at {portal_url} (error: {e}).
                 >> - If this is an online instance, check network, DNS, and firewall rules.
                 >> - If this is an offline (airgapped) instance, this is expected. To avoid a
-                >>   ~20s delay on each request and OIDC key prefetch failures, set both
-                >>   DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL and AIGW_CUSTOMER_PORTAL_URL
-                >>   to your GitLab instance URL.
+                >>   ~20s delay on each request and OIDC key prefetch failures, unset both
+                >>   DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL and AIGW_CUSTOMER_PORTAL_URL.
                 """
         )
 

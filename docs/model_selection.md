@@ -29,6 +29,10 @@ primarily by model metadata requesting a custom model.
 This is the case applicable to users selecting "GitLab default model" in the UI
 - If `identifier` is provided, the model definition with the matching `gitlab_identifier` is fetched. This is triggered
 when the user has selected a GitLab-provided model other than "GitLab default model" in the UI
+- If a `gitlab` request has an `identifier` that starts with `__default__`, the identifier is ignored. For a feature
+with more than one default model, `/v1/models/definitions` lists `__default__<feature_setting>` as the default model,
+and clients send it back when the user selects it. The request then gets one of the `default_models` of its
+`feature_setting`, as without an `identifier`.
 
 If none of these values is given to `create_model_metadata`, a `ValueError` is raised. Once the model definition has
 been established, the Prompt Registry determines the prompt definition to use based on the following logic:
@@ -70,18 +74,19 @@ configurable_unit_primitives:
 ```
 
 ```yaml
-# ai_gateway/prompts/definitions/code_suggestions/completions/mistral/1.0.0.yml
+# ai/features/code_suggestions/completions/prompts/mistral/1.0.0.yml
 name: Mistral Code Suggestions
 model:
   params:
     temperature: 0.1
+    max_retries: 3
 unit_primitives:
   - complete_code
 prompt_template:
   system: Complete the following code
   user: Here's my code: {{code}}
 params:
-  max_retries: 3
+  timeout: 60
 ```
 
 Assume `code_suggestions/completions` is given as the `prompt_id`, and `1.0.0` as the `prompt_version` for each example.
@@ -95,10 +100,10 @@ steps will occur:
   picked (with a single entry, `codestral` is always selected)
 - `models.yml` will be searched for `gitlab_identifier: codestral`, and its `family` and parameters retrieved
 - Each `value` from `family` will be checked in order for a corresponding prompt definition folder, so first the path
-`ai_gateway/prompts/definitions/code_suggestions/completions/codestral` is checked. Assuming it doesn't exist, next
-`ai_gateway/prompts/definitions/code_suggestions/completions/mistral` is checked. Since it exists, the version file is
+`ai/features/code_suggestions/completions/prompts/codestral` is checked. Assuming it doesn't exist, next
+`ai/features/code_suggestions/completions/prompts/mistral` is checked. Since it exists, the version file is
 searched in that folder
-- The prompt definition `ai_gateway/prompts/definitions/code_suggestions/completions/mistral/1.0.0.yml` is loaded
+- The prompt definition `ai/features/code_suggestions/completions/prompts/mistral/1.0.0.yml` is loaded
 
 Thus, the resulting values will be:
 
@@ -108,6 +113,7 @@ Thus, the resulting values will be:
 model: codestral:22b # From model definition
 max_tokens: 4_096 # From model definition
 temperature: 0.1 # Overwritten in prompt definition
+max_retries: 3 # Overwritten in prompt definition
 prompt_template: # From prompt definition
   system: Complete the following code
   user: Here's my code: {{code}}
@@ -117,7 +123,6 @@ prompt_template: # From prompt definition
 
 ```yaml
 timeout: 60
-max_retries: 3
 ```
 
 #### Custom models example
@@ -151,9 +156,13 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
 - `provider` (optional): The provider of the model, used for display in the UI (e.g "Vertex", "Anthropic")
 - `description`: **Required** for GitLab UI-selectable models. A brief description of the model (up to 90 characters) used for display in the UI e.g "Fast, cost-effective responses". When adding descriptions, tag `@badesoji` (BJ Adesoji) for a vendor approval on the copy.
 - `cost_indicator`: **Required** for GitLab UI-selectable models. A visual cost indicator for the model, used for display in the UI (i.e `$`, `$$`, `$$$`, `$$$$`). See [Determining model cost indicators](#determining-model-cost-indicators).
-- `requires_paid_credits` (optional, defaults to `false`): Marks the model as available only to accounts that have purchased GitLab credits. Surfaced in the `/v1/models/definitions` response so clients can show a "Requires paid credits" indicator and block chat input.
+- `requires_paid_credits` (optional, defaults to `true`): Marks the model as available only to accounts that have purchased GitLab credits. Surfaced in the `/v1/models/definitions` response so clients can show a "Requires paid credits" indicator and block chat input. A newly added model is therefore unavailable to trials until it explicitly sets `requires_paid_credits: false`.
 - `family` (optional): an ordered list of preferred prompt definitions to use with this model (see
 [How models and prompts are selected](#how-models-and-prompts-are-selected) for more details)
+- `uses_cache_breakpoints` (optional, defaults to `false`): set to `true` for every Claude model. Claude caches the
+  prompt up to explicit breakpoints, so these models get the per-session security block as a separate system message
+  behind the stable system prompt. All other models get one merged system message. This flag is independent of
+  `family`, which only selects prompt files.
 - `params`: Dictionary with custom parameters to be passed to the model client
 - `prompt_params`: Dictionary with custom parameters to be passed to LLM invocations
 
@@ -174,7 +183,6 @@ models:
       max_retries: 1
     prompt_params:
       timeout: 60
-      max_retries: 3
 ```
 
 ### Thinking configuration for Claude models
@@ -586,25 +594,29 @@ embeddings routes serve the model that the check returns, so `fallback` mode ser
 there. They build the model from the request body only to answer HTTP 422 for metadata that is not valid. The route
 payloads do not call the check yet.
 
-On the `/v1/prompts/<prompt_id>` and `/v2/prompts/<prompt_id>` routes, the middleware passes the feature setting of
-the prompt's entry in `PROMPT_ID_TO_FEATURE_SETTING` (`ai_gateway/prompts/registry.py`). For a prompt that GitLab Rails
-calls, the entry is the feature that Rails sends. Rails takes it from the unit primitive of the call, not from the prompt
-ID: for example, `chat/explain_code` uses `duo_chat_explain_code`, and `categorize_question` uses `duo_chat`. The
-registry also picks the default model of a request without model metadata from this entry. The middleware finds the
-entry for each spelling of the prompt ID that loads the same prompt, for example `chat/explain_code/` or
-`review/review_merge_request`.
+On the `/v1/prompts/<prompt_id>` and `/v2/prompts/<prompt_id>` routes, the allowlist depends on the prompt version,
+and only the route resolves the version. So the middleware sets no model metadata for these routes. The route runs the
+check before it builds the prompt, in `check_prompt_model_metadata` (`ai_gateway/api/v1/prompts/invoke.py`), and
+answers HTTP 403 in `enforce` mode. The check uses the `models_from` of the version that the client's model resolves, or of the version
+in `base` when the folder of the model's family has no matching version or declares no `models_from`
+(see [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http)). For a prompt
+that GitLab Rails calls, `models_from` is the feature that Rails sends. Rails takes it from the unit primitive of the
+call, not from the prompt ID: for example, `chat/explain_code` uses `duo_chat_explain_code`, and `categorize_question`
+uses `duo_chat`. The registry picks the default model of a request without model metadata from the same `models_from`.
+The route reads `models_from` from the prompt that the ID loads, so each spelling of the ID that loads the prompt,
+for example `chat/explain_code/` or `review/review_merge_request`, gets the same allowlist.
 
-For a prompt without an entry, the check still uses the client's `feature_setting`, and the middleware logs a
+For a version without `models_from`, the check still uses the client's `feature_setting`, and the route logs a
 `Model allowlist note` when a named model would not pass the allowlist of the feature that `feature_setting_for_prompt_id`
 derives from the first part of the prompt ID: `prompt_feature_unknown` when the derived feature does not exist, and
 `prompt_feature_model_not_allowed` when its allowlist does not have the model. The note has the `prompt_id`, and its
 `feature_setting` is the derived feature. It changes nothing in any mode, and a request whose `feature_setting` is the
 derived feature gets no note.
 
-When you add a prompt that GitLab Rails or another client calls on the prompt routes, add it to
-`PROMPT_ID_TO_FEATURE_SETTING` with the feature setting that the client sends for it. Otherwise add it to
-`_GRAPH_NODE_PROMPT_IDS` or `_PROMPTS_WITHOUT_AN_ENTRY` in `tests/prompts/test_registry.py`.
-`test_every_prompt_has_an_entry_or_is_listed` fails until you do.
+When you add a prompt that GitLab Rails or another client calls on the prompt routes, set `models_from` in each of its
+versions to the feature setting that the client sends for it. Otherwise add it to `_GRAPH_NODE_PROMPT_IDS`,
+`_IN_PROCESS_PROMPT_IDS` or `_PROMPTS_WITHOUT_MODELS_FROM` in `tests/prompts/test_registry.py`.
+`test_every_prompt_declares_its_models_or_is_listed` fails until you do.
 
 On the Duo Workflow Service, `ModelMetadataInterceptor` runs the check on the default model that it resolves from the
 `x-gitlab-agent-platform-model-metadata` header. It passes no feature, so the client's `feature_setting` selects the
@@ -637,35 +649,126 @@ The check looks at:
   model has this shape.
 - A named GitLab-managed model with a `feature_setting` that does not exist. Both surfaces handle it the way HTTP
   handles a named model with no `feature_setting`.
-- `identifier` sent together with `name` for a GitLab-managed model. `name` resolves the model the allowlist checks,
-  but the raw `identifier` becomes the wire model: `{"name": "claude_sonnet_4_6_vertex", "identifier":
-  "vertex_ai/claude-opus-4-8"}` passes as Sonnet and runs Opus on the gateway's Vertex AI credentials. Only `fallback`
-  and `enforce` mode rebuild the model from its definition. In `off` and `log` mode the override stays until
-  GitLab-managed models are resolved by their GitLab identifier only. A client `endpoint` or `api_key` is not handled
-  here; `validate_custom_endpoint` rejects both on a gateway without custom models.
+- `identifier` sent together with `name` for a GitLab-managed model.
+  - For `provider: gitlab`, the gateway resolves the model from `identifier`, the GitLab identifier that GitLab clients
+    send, and ignores `name`. The request is logged as a `name_ignored` note. An `identifier` that is not in
+    `models.yml`, such as `vertex_ai/claude-opus-4-8`, is not a model, so the gateway does not build the metadata. A
+    route that takes the metadata from `ModelConfigMiddleware` runs the request without it and logs a
+    `Model metadata not applied` warning, and code embeddings returns HTTP 422. A bare `name` still resolves the model, because the Duo Workflow Service resume replays a
+    checkpointed model in this shape.
+  - For another provider string on a gateway without custom models, the gateway resolves the model from `name` and
+    ignores the raw `identifier` in every mode, so the `identifier` never becomes the wire model. For example,
+    `{"provider": "vertex-ai", "name": "claude_sonnet_4_6_vertex", "identifier": "vertex_ai/claude-opus-4-8"}` runs
+    Claude Sonnet 4.6. The request is logged as an `identifier_ignored` note. A gateway with custom models keeps both,
+    because a self-hosted model sends its family as `name` and the operator's model as `identifier`.
+  - A client `endpoint` or `api_key` is not handled here; `validate_custom_endpoint` rejects both on a gateway without
+    custom models.
 - A `dev` model or a deprecated model (logged only).
 
-`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE` selects the behavior. Set the same value on AI Gateway and Duo
-Workflow Service:
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP` selects the behavior on the AI Gateway HTTP routes, and
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS` on the Duo Workflow Service. Each surface reads only its own
+variable, so you can set both in the same environment:
 
 | Mode | Behavior |
 |------|-----------|
 | `off` | No check. |
-| `log` | Log mismatches, change nothing. This is the default. |
-| `fallback` | Serve the feature's default model instead of a model that is not allowed. Rebuild a GitLab-managed model from its definition when a raw `identifier` would rewrite it. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. |
-| `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. Rebuild a raw `identifier` override as `fallback` does. |
+| `log` | Log mismatches, change nothing. |
+| `fallback` | Serve the feature's default model instead of a model that is not allowed. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. This is the default on both surfaces. |
+| `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. |
 
 Every mismatch is logged as `Model allowlist mismatch` with a `reason` (`provider_not_served`, `model_not_allowed`,
-`feature_mismatch`, `missing_feature_setting`, `unknown_feature`, `managed_identifier_override`), the `mode`, the
+`feature_mismatch`, `missing_feature_setting`, `unknown_feature`), the `mode`, the
 `surface` (`http` or `dws`), the `feature_setting` the check used (the route's feature when the route passes one, else
 the client's), the `client_feature_setting` as the client sent it, the `requested_name` and `requested_identifier` as
-the client sent them, the `served_identifier` and the caller's context such as the request `path`. Endpoint and key
-values are never logged. One request can log more than one mismatch, so count by `reason` or by correlation ID
-rather than by event. Informational cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
-`deprecated_model`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
-`Model allowlist note`.
+the client sent them, the `checked_identifier` of the model that the check got, the `served_identifier` of the model
+that the check serves, and the caller's context such as the request `path`. The `served_identifier` is empty when the
+gateway refuses the request, or serves the prompt's default model. Endpoint and key values are never logged. One
+request can log more than one mismatch, so count by `reason` or by correlation ID rather than by event. Informational
+cases (`missing_feature_setting` on the Duo Workflow Service, `dev_model`,
+`deprecated_model`, `name_ignored`, `identifier_ignored`, `prompt_feature_unknown`, `prompt_feature_model_not_allowed`) are logged as
+`Model allowlist note`. A note changes nothing, so its `served_identifier` is the model at the point of the note. A
+later mismatch of the same request can still replace that model.
 
-To roll back a stricter mode, set `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE=log`.
+Each mismatch and note also has the `outcome` of the check in the current mode, and the `enforce_outcome` that
+`enforce` mode would have. The values are:
+
+- `served`: the request keeps its model.
+- `replaced`: the gateway serves another model, such as the feature's default or the prompt's default.
+- `refused`: the gateway rejects the request with HTTP 403 or gRPC `PERMISSION_DENIED`.
+
+To roll back a stricter mode, set the variable of that surface to `log`. For example, set
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS=log`.
+
+At each workflow start, the Duo Workflow Service also logs `Flow model feature` (logger `model_scope`) with the `flow`,
+the `client_feature_setting` and `pinned` value of the request, and the `served_identifier` that passed the check. It
+shows which feature the clients of each flow send, and changes nothing. A request without model metadata is not
+logged.
+
+### Find the requests that `enforce` mode would refuse
+
+Before you move a surface to `enforce` mode, find the requests that it would refuse in the logs of the current mode.
+Production logs are in the Google Cloud project `gitlab-runway-production`. The AI Gateway runs as the Cloud Run
+service `ai-gateway`, and the Duo Workflow Service as `duo-workflow-svc`.
+
+1. Filter on the allowlist events that `enforce` mode would refuse. For example, in the Logs Explorer:
+
+   ```plaintext
+   resource.labels.service_name="ai-gateway"
+   jsonPayload.logger="feature_allowlist"
+   jsonPayload.enforce_outcome="refused"
+   ```
+
+   Use `duo-workflow-svc` for the Duo Workflow Service.
+1. Group the events by `reason`, `path` (HTTP) or `method` (gRPC), and `feature_setting`, to see which call sites the
+   change affects.
+1. Group them by `gitlab_realm`, `gitlab_instance_id` and `gitlab_version`, to see which clients would get an error.
+   `is_gitlab_team_member` shows requests from team members.
+1. Check `requested_name`, `requested_identifier` and `provider` to tell a stale client setting from a request that
+   was made by hand.
+1. For an HTTP request, find the user agent and the response status in the access log. Filter on the
+   `correlation_id` of the event, with `jsonPayload.logger="api.access"`.
+
+One request can log more than one event, so count requests by `correlation_id`. To see what `enforce` mode would do
+to the other requests, filter on `jsonPayload.enforce_outcome="replaced"`: these requests keep working, but get
+another model.
+
+On the Duo Workflow Service, the check uses the client's `feature_setting` until the service derives the feature from
+the flow. Until then, `enforce_outcome` shows what `enforce` mode would do with the client's feature only.
+
+## Decision models
+
+The [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions) answers typed questions about an input instead of generating text, with a probability for each possible answer.
+Use it to classify, route, or gate a request.
+It's in beta, and `gpt-6-luna` is the only model it accepts.
+
+A decision runs on the model's normal entry, `gpt_6_luna`. Give the prompt `operation_type: decision`, and the
+registry calls the model's Decisions endpoint instead of chat:
+
+```yaml
+name: Classify request
+unit_primitive: duo_agent_platform
+operation_type: decision
+prompt_template:
+  user: "{{request}}"
+```
+
+The `prompt_template` renders the input, so use a `user` message: other roles reach the Decisions API as JSON text.
+Pass the questions with the call, and read the answers with `decision_response`:
+
+```python
+message = await prompt.ainvoke({"request": text, "questions": {"category": Choice(...)}})
+decision_response(message).choices["category"].choice
+```
+
+A question can be a `Choice`, a `Predicate` (the probability that a condition is true), or a `Score` (a position on ordered levels).
+
+`operation_type: decision` marks the call as a classification rather than a generation. It's billed as `gpt-6-luna`
+like any other call, and the billing entry and token usage event both carry `operation_type: decision`, so
+CustomersDot can leave it out of credit consumption.
+
+A decision classifies so the caller can fall back, so it fails fast instead of retrying or waiting out a slow request.
+The OpenAI client makes a single attempt (`max_retries: 0`) under a short request timeout, both set on the model
+factory. Tune them with `AIGW_DECISION__MAX_RETRIES` and `AIGW_DECISION__REQUEST_TIMEOUT` (seconds, default 10).
 
 ## Developer models
 
@@ -696,6 +799,13 @@ does (so a variant of a restricted model, such as its Vertex AI entry, counts as
 At request time, the model is usable only when the flow config ID the request is authorized for (from a signed flow
 claim) is one of its `feature_settings`. A flow's feature setting is its flow config ID (for example,
 `bl_security`). This is a naming convention: if the names differ, validation rejects the entry (fail-safe).
+
+For GitLab.com, `DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS` holds its instance UUID (the `sub` of its
+instance token) as the explicit opt-in for restricted models, and must be set before any model GitLab.com uses is
+added to `model_restrictions.yml`. UUIDs are compared as UUIDs, ignoring case. While it is empty, GitLab.com cannot
+use restricted models; outside self-hosted mode, the service also logs a warning at startup. A Dedicated instance in
+`DUO_WORKFLOW_AUTH__TRUSTED_RESTRICTED_ISSUERS` gets restricted models through a signed proof instead, so this list
+does not apply to it.
 
 ## Model deprecations
 

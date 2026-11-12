@@ -62,6 +62,7 @@ WORKFLOW_TIME_SCALE_BUCKETS = [
     3600,
 ]
 LLM_TIME_SCALE_BUCKETS = [0.25, 0.5, 1, 2, 4, 7, 10, 20, 30, 60]
+TOOL_CALL_TIME_SCALE_BUCKETS = [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60]
 FIRST_RESPONSE_SCALE_BUCKETS = [0.5, 1, 1.5, 2, 2.5, 3, 5, 10, 20, 30, 60]
 
 LLM_FINISH_REASONS = LLMFinishReason.values()
@@ -88,6 +89,7 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             "Duration of tool calls in Duo Workflow",
             ["tool_name", "flow_type"] + METADATA_LABELS,
             registry=registry,
+            buckets=TOOL_CALL_TIME_SCALE_BUCKETS,
         )
 
         self.compute_duration = Histogram(
@@ -164,6 +166,13 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             "agent_platform_tool_failure_total",
             "Count of failed tools in Duo Workflow",
             ["flow_type", "tool_name", "failure_reason"] + METADATA_LABELS,
+            registry=registry,
+        )
+
+        self.agent_platform_image_fallback_counter = Counter(
+            "agent_platform_image_fallback_total",
+            "Count of requests retried without images after a provider rejected them",
+            ["flow_type", "kind", "model_name", "model_vendor"] + METADATA_LABELS,
             registry=registry,
         )
 
@@ -425,6 +434,21 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             flow_type=flow_type,
             tool_name=tool_name,
             failure_reason=failure_reason,
+            **build_metadata_labels(),
+        ).inc()
+
+    def count_image_fallback(
+        self,
+        flow_type: str = "unknown",
+        kind: str = "unknown",
+        model_name: str = "unknown",
+        model_vendor: str = "unknown",
+    ) -> None:
+        self.agent_platform_image_fallback_counter.labels(
+            flow_type=flow_type,
+            kind=kind,
+            model_name=model_name,
+            model_vendor=model_vendor,
             **build_metadata_labels(),
         ).inc()
 

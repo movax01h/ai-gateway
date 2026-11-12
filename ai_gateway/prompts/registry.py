@@ -1,5 +1,4 @@
 import importlib
-import posixpath
 from functools import cache
 from pathlib import Path
 from typing import Any, List, NamedTuple, Optional, Type, cast, override
@@ -14,17 +13,19 @@ from ai_gateway.model_metadata import (
     TypeModelMetadata,
     create_model_metadata,
 )
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.prompts.base import BasePromptRegistry, Prompt, TemplateNotFoundError
 from ai_gateway.prompts.bind_tools_cache import BindToolsCacheProtocol
 from ai_gateway.prompts.completion import completion_prompt_template_factory
 from ai_gateway.prompts.config import ModelClassProvider, ModelConfig, PromptConfig
+from ai_gateway.prompts.decision import decision_prompt_template_factory
 from ai_gateway.prompts.embedding import embedding_prompt_template_factory
 from ai_gateway.prompts.feature_roots import (
     discover_feature_prompts,
-    feature_prompt_aliases,
     feature_prompt_root,
 )
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
+from lib.billing_events.service import LLMOperationType
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import current_event_context
 from lib.version import resolve_version
@@ -158,11 +159,11 @@ LEGACY_MODEL_MAPPING = {
         "1.0.2": "claude_sonnet_4_5_20250929",
     },
     "review_merge_request": {
-        "0.9.0": "claude_sonnet_4_5_20250929",
-        "1.0.0": "claude_sonnet_4_5_20250929",
-        "1.1.0": "claude_sonnet_4_5_20250929",
-        "1.2.0": "claude_sonnet_4_5_20250929",
-        "1.3.0": "claude_sonnet_4_5_20250929",
+        "0.9.0": "claude_sonnet_4_5_20250929_bedrock",
+        "1.0.0": "claude_sonnet_4_5_20250929_bedrock",
+        "1.1.0": "claude_sonnet_4_5_20250929_bedrock",
+        "1.2.0": "claude_sonnet_4_5_20250929_bedrock",
+        "1.3.0": "claude_sonnet_4_5_20250929_bedrock",
     },
     "summarize_new_merge_request": {
         "1.0.0": "claude_sonnet_4_5_20250929",
@@ -181,71 +182,17 @@ LEGACY_MODEL_MAPPING = {
 }
 
 
-# The feature setting of each prompt that GitLab Rails calls on the prompt routes, and of a few
-# prompts whose ID doesn't name their feature. For a prompt that Rails calls, it is the feature
-# that Rails sends: Rails takes it from the unit primitive of the call, not from the prompt ID, so
-# the chat tools have their own feature settings and `categorize_question` runs on the chat model.
-#
-# - The registry picks the default model of a request without model metadata from this feature.
-#   Without an entry, a prompt whose ID doesn't start with a feature setting fails with "Invalid
-#   feature setting" when model metadata is absent, for example on a self-managed instance with a
-#   configured ai_gateway_url.
-# - ModelConfigMiddleware checks client model metadata on the prompt routes against this feature.
-PROMPT_ID_TO_FEATURE_SETTING: dict[str, str] = {
-    "code_suggestions/completions": "code_completions",
-    "code_suggestions/generations": "code_generations",
-    "categorize_question": "duo_chat",
-    "chat/build_reader": "duo_chat",
-    "chat/commit_reader": "duo_chat",
-    "chat/documentation_search": "duo_chat",
-    "chat/epic_reader": "duo_chat",
-    "chat/issue_reader": "duo_chat",
-    "chat/merge_request_reader": "duo_chat",
-    "chat/work_item_reader": "duo_chat",
-    "chat/explain_code": "duo_chat_explain_code",
-    "chat/explain_vulnerability": "duo_chat_explain_vulnerability",
-    "chat/fix_code": "duo_chat_fix_code",
-    "chat/refactor_code": "duo_chat_refactor_code",
-    "chat/summarize_comments": "duo_chat_summarize_comments",
-    "chat/troubleshoot_job": "duo_chat_troubleshoot_job",
-    "chat/write_tests": "duo_chat_write_tests",
-    "classify_code_review_mention_intent": "duo_agent_platform",
-    "generate_session_title": "duo_agent_platform",
-    "summarize_duo_workflow": "duo_agent_platform",
-    # The Duo Workflow Service calls this one in-process, not over the prompt routes.
-    "classify_goal_tier": "duo_agent_platform",
-    "feature_discovery_search": "feature_discovery_search",
-    "generate_commit_message": "generate_commit_message",
-    "glab_ask_git_command": "glab_ask_git_command",
-    "resolve_vulnerability": "resolve_vulnerability",
-    "review_merge_request": "review_merge_request",
-    "summarize_new_merge_request": "summarize_new_merge_request",
-    "summarize_review": "summarize_review",
-}
-
-
 def feature_setting_for_prompt_id(prompt_id: str) -> str:
-    if prompt_id in PROMPT_ID_TO_FEATURE_SETTING:
-        return PROMPT_ID_TO_FEATURE_SETTING[prompt_id]
+    """Return the feature setting that the ID of a prompt names.
 
+    It is the first segment of the ID, and ``duo_chat`` for the ``chat/`` prompts. The registry uses it for the
+    default model of a version without ``models_from``. The ID of such a prompt does not always name a feature
+    setting, so a request without model metadata can have no default model.
+    """
     feature_setting = prompt_id.split("/", 1)[0]
 
     # the folder for chat in the definitions doesn't match the feature_setting name
     return "duo_chat" if feature_setting == "chat" else feature_setting
-
-
-def mapped_feature_setting_for_prompt_id(prompt_id: str) -> Optional[str]:
-    """Return the ``PROMPT_ID_TO_FEATURE_SETTING`` entry of the prompt that ``prompt_id`` loads, or None.
-
-    The registry loads one prompt for more than one spelling of its ID. Extra slashes and dot segments
-    collapse in the definitions path, and a prompt under ``ai/features/`` registers as ``<feature>`` and as
-    ``<domain>/<feature>``. The lookup finds the entry for each of these spellings.
-    """
-    normalized = posixpath.normpath(prompt_id)
-    for spelling in (normalized, *feature_prompt_aliases(normalized)):
-        if spelling in PROMPT_ID_TO_FEATURE_SETTING:
-            return PROMPT_ID_TO_FEATURE_SETTING[spelling]
-    return None
 
 
 class PromptRegistered(NamedTuple):
@@ -267,10 +214,15 @@ class LocalPromptRegistry(BasePromptRegistry):
         custom_models_extra_headers: dict[str, str] | None = None,
         bind_tools_cache: Optional[BindToolsCacheProtocol] = None,
         duo_chat_max_tokens: Optional[int] = None,
+        decision_model_factories: Optional[
+            dict[ModelClassProvider, TypeModelFactory]
+        ] = None,
     ):
         super().__init__(internal_event_client, model_limits)
         self.prompt_template_factories = prompt_template_factories
         self.model_factories = model_factories
+        # Providers that also serve a Decisions endpoint, used by prompts with `operation_type: decision`.
+        self.decision_model_factories = decision_model_factories or {}
         self.custom_models_enabled = custom_models_enabled
         self.disable_streaming = disable_streaming
         self.custom_models_extra_headers = custom_models_extra_headers
@@ -343,12 +295,61 @@ class LocalPromptRegistry(BasePromptRegistry):
             model_metadata.llm_definition.family = [self.key_prompt_type_base]
             return model_metadata
 
+        feature_setting = self.models_from(prompt_id, prompt_version)
+        if feature_setting is None:
+            # An unknown or invalid version raises here, before the feature setting of the prompt ID, which may not
+            # exist.
+            base = self._load_prompt_definition(
+                prompt_id, self._resolve_id(prompt_id, [])
+            )
+            self._get_prompt_config(base.versions, prompt_version)
+
+            feature_setting = feature_setting_for_prompt_id(prompt_id)
+            if (
+                feature_setting
+                not in ModelSelectionConfig.instance().get_resolved_unit_primitive_config_map()
+            ):
+                raise ValueError(
+                    f"Prompt '{prompt_id}' has no default model. Send `model_metadata` with a `feature_setting`."
+                )
+
         return create_model_metadata(
-            {
-                "provider": "gitlab",
-                "feature_setting": feature_setting_for_prompt_id(prompt_id),
-            }
+            {"provider": "gitlab", "feature_setting": feature_setting}
         )
+
+    @override
+    def models_from(
+        self,
+        prompt_id: str,
+        prompt_version: Optional[str],
+        model_metadata: Optional[TypeModelMetadata] = None,
+    ) -> Optional[str]:
+        constraint = prompt_version or self._DEFAULT_VERSION
+        family = model_metadata.llm_definition.family if model_metadata else []
+        in_family = self._resolve_version(prompt_id, family, constraint)
+        if in_family and in_family[1].models_from is not None:
+            return in_family[1].models_from
+
+        # The folder of a model family can lack versions that `base` has, or declare no `models_from`, like `amazon_q`.
+        # Read the same version in `base`, or else the version that the constraint resolves there: in fallback mode,
+        # the allowlist check can serve another model whose family resolves `base`. The families of a prompt declare
+        # the same `models_from`.
+        for base_constraint in ([in_family[0]] if in_family else []) + [constraint]:
+            if in_base := self._resolve_version(prompt_id, [], base_constraint):
+                return in_base[1].models_from
+        return None
+
+    def _resolve_version(
+        self, prompt_id: str, family: list[str], constraint: str
+    ) -> Optional[tuple[str, PromptConfig]]:
+        """Return the version that ``constraint`` resolves in the folder of ``family``, or None."""
+        try:
+            prompt_path = self._resolve_id(prompt_id, family)
+            versions = self._load_prompt_definition(prompt_id, prompt_path).versions
+            resolved = resolve_version(versions.keys(), constraint)
+        except (FileNotFoundError, ValueError):
+            return None
+        return resolved, versions[resolved]
 
     def _adjust_tool_choice_for_model(
         self, tool_choice: Optional[str], model_metadata: Optional[TypeModelMetadata]
@@ -424,7 +425,9 @@ class LocalPromptRegistry(BasePromptRegistry):
         prompt_template_override = self.prompt_template_factories.get(prompt_id, None)
 
         if not prompt_template_override:
-            if model_class_provider == ModelClassProvider.LITE_LLM_COMPLETION:
+            if config.operation_type == LLMOperationType.DECISION:
+                prompt_template_override = decision_prompt_template_factory
+            elif model_class_provider == ModelClassProvider.LITE_LLM_COMPLETION:
                 prompt_template_override = completion_prompt_template_factory
             elif model_class_provider == ModelClassProvider.LITE_LLM_EMBEDDING:
                 prompt_template_override = embedding_prompt_template_factory
@@ -540,7 +543,14 @@ class LocalPromptRegistry(BasePromptRegistry):
         tool_choice: Optional[str],
         **kwargs,
     ) -> Prompt:
-        model_factory = self.model_factories.get(model_class_provider, None)
+        if config.operation_type == LLMOperationType.DECISION:
+            model_factory = self.decision_model_factories.get(model_class_provider)
+            if not model_factory:
+                raise ValueError(
+                    f"`{model_class_provider}` models have no decision endpoint (prompt '{config.name}')."
+                )
+        else:
+            model_factory = self.model_factories.get(model_class_provider, None)
 
         if not model_factory:
             raise ValueError(
@@ -574,6 +584,9 @@ class LocalPromptRegistry(BasePromptRegistry):
         custom_models_extra_headers: dict[str, str] | None = None,
         bind_tools_cache: Optional[BindToolsCacheProtocol] = None,
         duo_chat_max_tokens: Optional[int] = None,
+        decision_model_factories: Optional[
+            dict[ModelClassProvider, TypeModelFactory]
+        ] = None,
     ) -> "LocalPromptRegistry":
         """Create a LocalPromptRegistry with lazy loading enabled.
 
@@ -599,6 +612,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             custom_models_extra_headers,
             bind_tools_cache,
             duo_chat_max_tokens,
+            decision_model_factories,
         )
 
     @classmethod

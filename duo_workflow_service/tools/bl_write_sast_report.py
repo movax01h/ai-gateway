@@ -164,8 +164,8 @@ def _merge_overlapping_spans(findings: List[dict], contents: dict) -> List[dict]
         file = f.get("file") or f.get("path") or ""
         keys: set = set()
         if file in counts and f.get("anchor_status") in (
-            ANCHOR_VERIFIED,
-            ANCHOR_CORRECTED,
+            _ANCHOR_VERIFIED,
+            _ANCHOR_CORRECTED,
         ):
             keys = {
                 (cwe_digits(f), file, ln.strip())
@@ -183,7 +183,7 @@ def _merge_overlapping_spans(findings: List[dict], contents: dict) -> List[dict]
 
 
 def _merge_rank(finding: dict) -> tuple:
-    return (finding.get("anchor_status") != ANCHOR_VERIFIED, line_of(finding))
+    return (finding.get("anchor_status") != _ANCHOR_VERIFIED, line_of(finding))
 
 
 def _collapse_after_reanchor(
@@ -290,7 +290,7 @@ def _tracking_signatures(findings: List[dict], sources: dict) -> List[Optional[s
         file = f.get("file") or f.get("path") or ""
         text = sources.get(file)
         # An unlocated quote has no reliable line, so no stable scope either.
-        if text and _anchor_status_of(f) in (ANCHOR_VERIFIED, ANCHOR_CORRECTED):
+        if text and _anchor_status_of(f) in (_ANCHOR_VERIFIED, _ANCHOR_CORRECTED):
             fn = _enclosing_function(text, line_of(f))
             key = (file, fn, cwe_digits(f))
             located.append((key, line_of(f), _fingerprint_of(f), i))
@@ -410,25 +410,25 @@ def _find_excerpt_line(content: str, excerpt: str, hint: int = 0) -> int:
 # is not addressed here.
 # --------------------------------------------------------------------------- #
 
-ANCHOR_VERIFIED = "verified"
+_ANCHOR_VERIFIED = "verified"
 
-ANCHOR_CORRECTED = "corrected"
+_ANCHOR_CORRECTED = "corrected"
 
-ANCHOR_UNVERIFIED = "unverified"
+_ANCHOR_UNVERIFIED = "unverified"
 
 #: Keys of the per-finding audit log record (see :func:`_audit_record`). The
 #: anchor state is internal: it is logged, never put in the report.
-ANCHOR_DETAIL_KEY = "bl_anchor_status"
+_ANCHOR_DETAIL_KEY = "bl_anchor_status"
 
-ANCHOR_REASON_DETAIL_KEY = "bl_anchor_unverified_reason"
+_ANCHOR_REASON_DETAIL_KEY = "bl_anchor_unverified_reason"
 
-ANCHOR_CLAIMED_DETAIL_KEY = "bl_anchor_claimed_line"
+_ANCHOR_CLAIMED_DETAIL_KEY = "bl_anchor_claimed_line"
 
-ANCHOR_CLAIMED_FILE_DETAIL_KEY = "bl_anchor_claimed_file"
+_ANCHOR_CLAIMED_FILE_DETAIL_KEY = "bl_anchor_claimed_file"
 
 #: Every anchor disclosure in ``scan.messages`` starts with this, so a reader
 #: (and the coverage tests) can tell it apart from the coverage sentences.
-ANCHOR_MESSAGE_PREFIX = "Location check:"
+_ANCHOR_MESSAGE_PREFIX = "Location check:"
 
 _ANCHOR_NO_FILE = "the finding carries no file path, so nothing could be checked"
 
@@ -480,10 +480,10 @@ def _anchor_status_of(finding: dict) -> str:
     must not read as "checked and fine".
     """
     status = str(finding.get("anchor_status") or "").strip().lower()
-    return status if status in _ANCHOR_STATES else ANCHOR_UNVERIFIED
+    return status if status in _ANCHOR_STATES else _ANCHOR_UNVERIFIED
 
 
-_ANCHOR_STATES = (ANCHOR_VERIFIED, ANCHOR_CORRECTED, ANCHOR_UNVERIFIED)
+_ANCHOR_STATES = (_ANCHOR_VERIFIED, _ANCHOR_CORRECTED, _ANCHOR_UNVERIFIED)
 
 #: Appended to the description of a finding whose line the location check could not verify. The anchor state itself
 #: stays out of the report; this is what it means for the reader of that one finding.
@@ -492,7 +492,7 @@ UNVERIFIED_LINE_NOTE = "This line could not be matched to the quoted code; the i
 
 def _add_line_note(finding: dict, vuln: dict) -> None:
     """Add :data:`UNVERIFIED_LINE_NOTE` as the last paragraph of ``vuln``'s description when its line is unverified."""
-    if _anchor_status_of(finding) != ANCHOR_UNVERIFIED:
+    if _anchor_status_of(finding) != _ANCHOR_UNVERIFIED:
         return
     body = vuln["description"]
     vuln["description"] = (
@@ -506,16 +506,16 @@ def _anchor_audit(finding: dict) -> dict:
     Recorded for EVERY finding, including verified ones. Recording only the bad cases would make absence mean "fine".
     """
     status = _anchor_status_of(finding)
-    audit = {ANCHOR_DETAIL_KEY: status}
-    if status == ANCHOR_UNVERIFIED:
-        audit[ANCHOR_REASON_DETAIL_KEY] = (
+    audit = {_ANCHOR_DETAIL_KEY: status}
+    if status == _ANCHOR_UNVERIFIED:
+        audit[_ANCHOR_REASON_DETAIL_KEY] = (
             finding.get("anchor_reason") or _ANCHOR_NOT_RUN
         )
     claimed = finding.get("anchor_claimed_line")
-    if status == ANCHOR_CORRECTED and claimed:
-        audit[ANCHOR_CLAIMED_DETAIL_KEY] = str(claimed)
+    if status == _ANCHOR_CORRECTED and claimed:
+        audit[_ANCHOR_CLAIMED_DETAIL_KEY] = str(claimed)
     if finding.get("claimed_file"):
-        audit[ANCHOR_CLAIMED_FILE_DETAIL_KEY] = str(finding["claimed_file"])
+        audit[_ANCHOR_CLAIMED_FILE_DETAIL_KEY] = str(finding["claimed_file"])
     return audit
 
 
@@ -530,12 +530,12 @@ def _anchor_message(findings: List[dict]) -> dict:
         counts[_anchor_status_of(f)] += 1
     total = len(findings)
     body = (
-        f"{ANCHOR_MESSAGE_PREFIX} of {total} findings, "
-        f"{counts[ANCHOR_VERIFIED]} were found at the reported line, "
-        f"{counts[ANCHOR_CORRECTED]} were moved to the line where the quoted code "
-        f"is, and {counts[ANCHOR_UNVERIFIED]} could not be checked."
+        f"{_ANCHOR_MESSAGE_PREFIX} of {total} findings, "
+        f"{counts[_ANCHOR_VERIFIED]} were found at the reported line, "
+        f"{counts[_ANCHOR_CORRECTED]} were moved to the line where the quoted code "
+        f"is, and {counts[_ANCHOR_UNVERIFIED]} could not be checked."
     )
-    if counts[ANCHOR_UNVERIFIED] or counts[ANCHOR_CORRECTED]:
+    if counts[_ANCHOR_UNVERIFIED] or counts[_ANCHOR_CORRECTED]:
         return {
             "level": "warn",
             "value": (
@@ -547,9 +547,9 @@ def _anchor_message(findings: List[dict]) -> dict:
 
 
 #: Keys of the triage decision in the per-finding audit log record.
-TRIAGE_CLAUSE_DETAIL_KEY = "bl_triage_clause"
+_TRIAGE_CLAUSE_DETAIL_KEY = "bl_triage_clause"
 
-TRIAGE_VERDICT_DETAIL_KEY = "bl_triage_verdict"
+_TRIAGE_VERDICT_DETAIL_KEY = "bl_triage_verdict"
 
 #: Emitted when a reported finding carries no triage annotation at all. Absence
 #: of the key would read as "adjudicated and fine".
@@ -583,10 +583,10 @@ def _triage_audit(finding: dict) -> dict:
         :TRIAGE_CLAUSE_MAX
     ]
     if not verdict and not clause:
-        return {TRIAGE_CLAUSE_DETAIL_KEY: _TRIAGE_NOT_RECORDED}
-    audit = {TRIAGE_CLAUSE_DETAIL_KEY: clause or _TRIAGE_CLAUSE_UNSPECIFIED}
+        return {_TRIAGE_CLAUSE_DETAIL_KEY: _TRIAGE_NOT_RECORDED}
+    audit = {_TRIAGE_CLAUSE_DETAIL_KEY: clause or _TRIAGE_CLAUSE_UNSPECIFIED}
     if verdict:
-        audit[TRIAGE_VERDICT_DETAIL_KEY] = verdict
+        audit[_TRIAGE_VERDICT_DETAIL_KEY] = verdict
     return audit
 
 
@@ -790,15 +790,15 @@ class BlWriteSastReport(DuoBaseTool):
                 exc = excerpt_of(f)
                 file = f.get("file") or f.get("path") or ""
                 if not file:
-                    _record(f, ANCHOR_UNVERIFIED, _ANCHOR_NO_FILE)
+                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_NO_FILE)
                     continue
                 if not exc.strip():
                     # No quote was ever emitted, so this anchor is uncheckable
                     # by construction, not merely unchecked.
-                    _record(f, ANCHOR_UNVERIFIED, _ANCHOR_NO_EXCERPT)
+                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_NO_EXCERPT)
                     continue
                 if not _allowed(file):
-                    _record(f, ANCHOR_UNVERIFIED, _ANCHOR_EXCLUDED)
+                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_EXCLUDED)
                     continue
                 content = await _read(file)
                 repaired = "" if content else await self._repair_path(file, listed)
@@ -806,25 +806,25 @@ class BlWriteSastReport(DuoBaseTool):
                     f["claimed_file"], f["file"], file = file, repaired, repaired
                     content = cache[file]
                 if not content:
-                    _record(f, ANCHOR_UNVERIFIED, _ANCHOR_UNREADABLE)
+                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_UNREADABLE)
                     continue
                 claimed = line_of(f)
                 ln = _find_excerpt_line(content, exc, hint=claimed)
                 if not ln:
-                    _record(f, ANCHOR_UNVERIFIED, _ANCHOR_NOT_PRESENT)
+                    _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_NOT_PRESENT)
                 elif ln == claimed:
-                    _record(f, ANCHOR_VERIFIED)
+                    _record(f, _ANCHOR_VERIFIED)
                 else:
                     f["new_line"] = ln
                     _record(
                         f,
-                        ANCHOR_CORRECTED,
+                        _ANCHOR_CORRECTED,
                         "" if claimed else _ANCHOR_NO_CLAIM,
                         claimed,
                     )
             except Exception as loop_err:
                 _log.info("bl_anchor finding skipped", err=str(loop_err))
-                _record(f, ANCHOR_UNVERIFIED, _ANCHOR_RAISED)
+                _record(f, _ANCHOR_UNVERIFIED, _ANCHOR_RAISED)
                 continue
         return counts
 
@@ -1016,9 +1016,9 @@ class BlWriteSastReport(DuoBaseTool):
             "bl_write_sast_report input",
             findings_type=type(findings).__name__,
             parsed=len(parsed),
-            anchors_verified=anchors[ANCHOR_VERIFIED],
-            anchors_corrected=anchors[ANCHOR_CORRECTED],
-            anchors_unverified=anchors[ANCHOR_UNVERIFIED],
+            anchors_verified=anchors[_ANCHOR_VERIFIED],
+            anchors_corrected=anchors[_ANCHOR_CORRECTED],
+            anchors_unverified=anchors[_ANCHOR_UNVERIFIED],
         )
         # Dedup keyed on the lines the MODEL claimed; `_verify_anchors` has just
         # replaced them with the real ones. Re-reports of a single site only look

@@ -25,6 +25,9 @@ Usage examples:
     Response with streaming simulation:
         "<response stream='true' chunk_delay_ms='50'>This response will be streamed token by token</response>"
 
+    Response with a provider stop reason, for example a model refusal:
+        "<response stop_reason='refusal'></response>"
+
     Response from file:
         "Analyze this code. <response file='tests/fixtures/long_response.txt' stream='true' chunk_delay_ms='50' />"
 
@@ -89,6 +92,12 @@ class Response(NamedTuple):
     latency_ms: int = 0
     stream: bool = False
     chunk_delay_ms: int = 0
+    stop_reason: Optional[str] = None
+
+    @property
+    def response_metadata(self) -> dict[str, Any]:
+        """The provider metadata the response carries, as LangChain exposes it on the message."""
+        return {"stop_reason": self.stop_reason} if self.stop_reason else {}
 
 
 class ResponseHandler:
@@ -196,6 +205,7 @@ class ResponseHandler:
                 chunk_delay_ms = self._parse_int_attribute(
                     attributes, "chunk_delay_ms", 0
                 )
+                stop_reason = attributes.get("stop_reason")
 
                 log.debug(
                     "Parsed response",
@@ -206,6 +216,7 @@ class ResponseHandler:
                     latency_ms=latency_ms,
                     stream=stream,
                     chunk_delay_ms=chunk_delay_ms,
+                    stop_reason=stop_reason,
                 )
 
                 parsed_responses.append(
@@ -215,6 +226,7 @@ class ResponseHandler:
                         latency_ms=latency_ms,
                         stream=stream,
                         chunk_delay_ms=chunk_delay_ms,
+                        stop_reason=stop_reason,
                     )
                 )
 
@@ -570,6 +582,7 @@ class AgenticFakeModel(BaseChatModel):
         ai_message = AIMessage(
             content=response.content,
             tool_calls=response.tool_calls if response.tool_calls else [],
+            response_metadata=response.response_metadata,
         )
 
         log.debug(
@@ -697,12 +710,24 @@ class AgenticFakeModel(BaseChatModel):
             if response.tool_calls:
                 for chunk_generation in self._generate_tool_call_chunks(response):
                     yield chunk_generation, None
+
+            # Providers send the stop reason after the content, on the last chunk.
+            if response.response_metadata:
+                yield (
+                    ChatGenerationChunk(
+                        message=AIMessageChunk(
+                            content="", response_metadata=response.response_metadata
+                        )
+                    ),
+                    None,
+                )
         else:
             log.debug("Yielding complete non-streaming response")
             chunk_generation = ChatGenerationChunk(
                 message=AIMessageChunk(
                     content=response.content,
                     tool_calls=response.tool_calls if response.tool_calls else [],
+                    response_metadata=response.response_metadata,
                 )
             )
             yield chunk_generation, response.content

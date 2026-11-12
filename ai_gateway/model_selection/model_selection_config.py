@@ -138,10 +138,12 @@ class BaseLLMDefinition(BaseModel):
     # Whether this deployment accepts image input; absent means ask litellm's registry.
     # Set per deployment, with a dated comment naming the evidence.
     supports_vision: Optional[bool] = None
-    requires_single_system_message: bool = False
-    # Some models are available only to accounts that have purchased GitLab credits.
-    # When true, clients show a "Requires paid credits" indicator and block chat input.
-    requires_paid_credits: bool = False
+    # Claude caches the prompt up to explicit breakpoints placed on messages, so it keeps the per-session security
+    # block in its own system message behind them. All other models get one merged system message.
+    uses_cache_breakpoints: bool = False
+    # Default deny: a model requires purchased GitLab credits unless it sets this to
+    # false. Clients show a "Requires paid credits" indicator and block chat input.
+    requires_paid_credits: bool = True
     # Some models return an empty 404 on streaming requests when max_tokens is at the
     # model's max. Opt in to use this model's max_tokens from models.yml
     use_model_max_tokens: bool = False
@@ -229,6 +231,19 @@ def _match_identifier(definition: LLMDefinition) -> Optional[str]:
 
     # Bedrock entries include the provider in `params.model`, Vertex entries do not.
     return f"{provider}/{model.removeprefix(f'{provider}/')}"
+
+
+def _definition_matches(
+    llm_def: LLMDefinition, ids: set[str], model_strings: list[str]
+) -> bool:
+    """Whether ``ids`` or ``model_strings`` name ``llm_def``; see restricted_flows_for."""
+    if llm_def.gitlab_identifier in ids:
+        return True
+    model = (llm_def.params.model or "").lower()
+    return bool(model) and any(
+        re.search(rf"(?:^|[/.:@]){re.escape(model)}(?=$|[@:_-])", m)
+        for m in model_strings
+    )
 
 
 def _build_match_index(
@@ -427,7 +442,8 @@ class ModelSelectionConfig:
     def _load_env_releases(self, model_releases: str) -> None:
         try:
             payload = ModelReleasesPayload.model_validate_json(model_releases)
-        except Exception as exc:  # catches json.JSONDecodeError, ValidationError, and anything else  # pylint: disable=broad-except
+        # catches json.JSONDecodeError, ValidationError, and anything else
+        except Exception as exc:  # pylint: disable=broad-except
             log.error(
                 "AIGW_MODEL_SELECTION__MODEL_RELEASES failed to parse; env-injected models will not be available",
                 errors=_safe_error_details(exc),
@@ -441,7 +457,8 @@ class ModelSelectionConfig:
                     model_data
                 )
                 self._env_llm_definitions[definition.gitlab_identifier] = definition
-            except Exception as exc:  # catches all Pydantic validation errors to allow warm startup  # pylint: disable=broad-except
+            # catches all Pydantic validation errors to allow warm startup
+            except Exception as exc:  # pylint: disable=broad-except
                 log.error(
                     "Env-injected model definition failed validation; skipping",
                     gitlab_identifier=identifier,
@@ -630,6 +647,26 @@ class ModelSelectionConfig:
             ]
         return []
 
+    def _validate_default_models_available_without_paid_credits(
+        self,
+        unit_primitive_configs: Iterable[UnitPrimitiveConfig],
+        models: dict,
+        models_ids: set,
+    ) -> list[str]:
+        errors = [
+            f"Feature '{upc.feature_setting}' has default model "
+            f"'{model_id}' that requires paid credits."
+            for upc in unit_primitive_configs
+            for model_id in upc.default_model_identifiers
+            if model_id in models_ids and models[model_id].requires_paid_credits
+        ]
+        if errors:
+            return [
+                "Default models must set requires_paid_credits: false:\n"
+                + "\n".join(f"  - {error}" for error in errors)
+            ]
+        return []
+
     def _validate_deprecated_models_are_selectable(
         self, unit_primitive_configs: Iterable[UnitPrimitiveConfig]
     ) -> list[str]:
@@ -674,6 +711,30 @@ class ModelSelectionConfig:
                 + "\n".join(f"  - {error}" for error in errors)
             ]
         return []
+
+    def _validate_paid_credit_models(
+        self,
+        unit_primitive_configs: Iterable[UnitPrimitiveConfig],
+        models: dict[str, LLMDefinition],
+    ) -> list[str]:
+        paid = {i for i, d in models.items() if d.requires_paid_credits}
+        errors = [
+            f"Tag '{tag}' of '{config.feature_setting}' needs a model that does not "
+            "require paid credits"
+            for config in unit_primitive_configs
+            for tag, entry in config.models_for_tags.items()
+            if paid.issuperset(entry.models)
+        ]
+        errors.extend(
+            f"Model '{identifier}' does not require paid credits but its model name "
+            f"matches paid model(s) {matched}"
+            for identifier, llm_def in chain(
+                models.items(), self._env_llm_definitions.items()
+            )
+            if not llm_def.requires_paid_credits
+            and (matched := self.paid_credit_models_for(models=[llm_def.params.model]))
+        )
+        return errors
 
     def _validate_restricted_models(
         self,
@@ -787,11 +848,15 @@ class ModelSelectionConfig:
         error_messages = [
             *self._validate_model_ids_exist(unit_primitive_configs, models_ids),
             *self._validate_default_models_are_selectable(unit_primitive_configs),
+            *self._validate_default_models_available_without_paid_credits(
+                unit_primitive_configs, models, models_ids
+            ),
             *self._validate_deprecated_models_are_selectable(unit_primitive_configs),
             *self._validate_selectable_model_required_fields(
                 unit_primitive_configs, models, models_ids
             ),
             *self._validate_restricted_models(unit_primitive_configs, models),
+            *self._validate_paid_credit_models(unit_primitive_configs, models),
         ]
 
         if error_messages:
@@ -867,21 +932,39 @@ class ModelSelectionConfig:
         model_strings = [m.lower() for m in models if m]
         allowed: Optional[frozenset[str]] = None
         for llm_def, flows in self._restricted_definitions():
-            restricted_model = (llm_def.params.model or "").lower()
-            matched = llm_def.gitlab_identifier in ids or (
-                bool(restricted_model)
-                and any(
-                    re.search(
-                        rf"(?:^|[/.:@]){re.escape(restricted_model)}"
-                        r"(?=$|[@:_-])",
-                        m,
-                    )
-                    for m in model_strings
-                )
-            )
-            if matched:
+            if _definition_matches(llm_def, ids, model_strings):
                 allowed = flows if allowed is None else allowed & flows
         return allowed
+
+    def paid_credit_models_for(
+        self,
+        identifiers: Iterable[Optional[str]] = (),
+        models: Iterable[Optional[str]] = (),
+    ) -> list[str]:
+        """Return the identifiers of the requires_paid_credits definitions the given names match.
+
+        Matches like restricted_flows_for, so a provider prefix or a date, version or alias suffix on a model string
+        still names the paid model.
+        """
+        ids = {i for i in identifiers if i}
+        model_strings = [m.lower() for m in models if m]
+        return sorted(
+            {
+                llm_def.gitlab_identifier
+                for llm_def in self._paid_credit_definitions()
+                if _definition_matches(llm_def, ids, model_strings)
+            }
+        )
+
+    def _paid_credit_definitions(self) -> list[LLMDefinition]:
+        return [
+            llm_def
+            for llm_def in chain(
+                self.get_llm_definitions().values(),
+                self._env_llm_definitions.values(),
+            )
+            if llm_def.requires_paid_credits
+        ]
 
     def all_restricted_flows(self) -> frozenset[str]:
         """Return every flow id that some restricted model is restricted to."""

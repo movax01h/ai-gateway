@@ -82,7 +82,7 @@ class TestProxyVertexAI:
     def test_billing_event(
         self,
         mock_client,
-        mock_track_billing_event,
+        mock_send_billing_event,
         unit_primitive,
         mock_proxy_model,
     ):
@@ -113,7 +113,7 @@ class TestProxyVertexAI:
 
         assert response.status_code == 200
 
-        mock_track_billing_event.assert_called_once_with(
+        mock_send_billing_event.assert_called_once_with(
             ANY,
             BillingEvent.AIGW_PROXY_USE,
             "ai_gateway.proxy.clients.base",

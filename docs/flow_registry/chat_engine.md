@@ -27,7 +27,7 @@ The chat engine is a boundary policy over the shared executor, not a second engi
 | Seam | `ChatFlow` decides |
 |------|--------------------|
 | `_graph_builder`: a builder subclass that seeds the terminal component and rejects graphs that cannot reach it | Where a turn ends |
-| `_initial_entry_dispatch`: the structural dispatch strategy | Where a turn begins |
+| `_resolve_graph_invocation`: classifies each entry from the checkpoint tip and the client event, then starts, continues or rejects it | Where a turn begins |
 | Entry wiring: the builder seeds the ingestion node like the terminals, sets it as the entry point, and hops to the declared entry component | What crosses the line inbound |
 
 Streaming is the shared mechanism end to end. The client's `startRequest.streaming` flag reaches `ChatFlow` through
@@ -39,7 +39,7 @@ component.
 
 ## Invariants
 
-1. **A turn is one invocation.** Each user message enters through ingestion as graph input, runs to `END`, and the
+1. **A turn is one invocation.** A message that starts a turn enters through ingestion as graph input, runs to `END`, and the
    session is at rest between turns.
 1. **The terminal component commits the boundary.** The seeded terminal writes `IDLE` as the last state
    update of the turn. A turn that stops before the terminal runs leaves the tip mid-turn, and the next message
@@ -89,8 +89,15 @@ flowchart LR
 
 ## Where a turn begins
 
-Entry dispatch classifies every client event from the checkpoint tip and its pending writes. The Rails status is a
-projection of the tip, reconciled toward it, and is never the source of classification.
+`ChatFlow` classifies every entry in `_resolve_graph_invocation`, after the checkpointer has sent the entry's status
+event. From the checkpoint the entry continues from, it reads the nodes LangGraph would run next, the raw channel names
+the checkpoint stores, and whether it is LangGraph's pre-run input checkpoint. From Rails it takes one signal: whether
+the entry arrived as a RESUME, which Rails sends only from a status that waits on the user. A tip with nodes to run
+next is a turn in progress. When the entry arrived as a RESUME, the turn waits on the user at a gate or a tool
+approval, which is what the table's pending `__interrupt__` writes stand for. Otherwise it is running, and so is the
+pre-run input checkpoint at the tip. Dispatch doesn't read the writes themselves, because they aren't a reliable
+signal: the checkpoint an entry decodes from GraphQL carries none, and a crash or an out-of-band state update can
+leave none. Beyond that one signal, the Rails status is a projection of the tip, reconciled toward it.
 
 | Tip | Event | Mode | Mechanism |
 |-----|-------|------|-----------|
@@ -99,14 +106,19 @@ projection of the tip, reconciled toward it, and is never the source of classifi
 | Pending `__interrupt__` writes | approval or rejection | RESUME | `Command(resume=)` |
 | Stopped mid-turn | message | TURN | From the last boundary, once `Flow`'s stop recovery rolls the session back. See [Recovery](#recovery) |
 | Failed mid-turn | message | TURN or REJECT | TURN from the last boundary when the walk lands on one. When it lands on an answered gate, an error that asks the user to retry first. See [Recovery](#recovery) |
-| Still running, per Rails | message | REJECT | An error that asks the user to retry first, so no message is dropped |
+| Mid-turn, running | message, approval or rejection | REJECT | An error that asks the user to retry first. No message is dropped, and a decision has nothing paused to answer |
 | Pending `__interrupt__` writes | message | RESUME | `Command(resume=)`: the message answers the wait, see [What crosses the line inbound](#what-crosses-the-line-inbound) |
 | Mid-turn at rest | reconnect, no message | RETRY | Replay from the tip, unchanged. A client can offer it as `/retry` |
 | Any checkpoint pinned by `resume_checkpoint_ts` | message | TURN | New invocation from the pinned checkpoint, through ingestion. LangGraph writes the fork checkpoint |
+| Any checkpoint pinned by `resume_checkpoint_ts` | approval, rejection or reconnect | REJECT | Nothing waits on a pinned checkpoint, so it takes a new message only |
 | Boundary, nothing pending | approval or rejection | REJECT | Stale event, structured error |
+| Boundary, nothing pending | reconnect, no message | REJECT | An error that says the session waits for the next message. Replaying an idle thread would leave nothing to run |
+| Legacy: a channel only `chat.Workflow` declares, pinned or not | any | REJECT | An error that asks the user to start a new chat. See [Sessions in flight](#sessions-in-flight) |
 
-Dispatch is a strategy on the checkpointer. Every other flow keeps the default, `rails_status_dispatch`. `ChatFlow`
-selects `structural_entry_dispatch`. TURN and RESUME project to the same wire event, so clients need no change.
+Dispatch doesn't change the wire event. Every flow, `ChatFlow` included, keeps the checkpointer's
+`rails_status_dispatch`, which sends the event Rails accepts from its current status. TURN and RESUME project to the
+same wire event, so clients need no change. A REJECT raises an `InvalidRequestException`, so `GitLabWorkflow` skips
+the `drop` and reconciles Rails back to the status the tip declares.
 
 ## What crosses the line inbound
 
@@ -253,8 +265,9 @@ prompts:
 A session created on `chat.Workflow` and resumed on the engine would classify as TURN and read its history under the
 wrong key. Three layers prevent that, in order:
 
-1. **Guard.** `ChatFlow` rejects a tip whose channels or node names are not the engine's, with a user-facing error to
-   start a new chat. Ships with the engine.
+1. **Guard.** `ChatFlow` rejects a tip that holds a channel only legacy `chat.Workflow` declares, with a user-facing
+   error to start a new chat. It tells a legacy session from an engine one, not one engine version from another,
+   which is the pin's job. Ships with the engine.
 1. **Pin.** Rails stores the resolved `config_id` and `version` at session creation and sends them on every resume. The
    gateway routes by the pin. In-flight legacy sessions finish on legacy. This is a precondition for the cutover, and
    the decision is owed by Rails.

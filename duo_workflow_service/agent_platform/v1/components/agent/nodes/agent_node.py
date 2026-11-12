@@ -1,8 +1,8 @@
-import re
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any, ClassVar, Literal, NamedTuple, Optional, Sequence, Type, cast
+from uuid import uuid4
 
 import structlog
 from anthropic import APIStatusError as AnthropicAPIStatusError
@@ -12,12 +12,14 @@ from langchain_core.runnables import RunnableConfig
 from openai import APIStatusError as OpenAIAPIStatusError
 from pydantic import ConfigDict, Field, ValidationError
 
+from ai_gateway.models.v2._model_compat import model_supports_vision
 from ai_gateway.prompts import Prompt
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
     UILogWriterAgentTools,
+    log_server_tool_turn,
 )
 from duo_workflow_service.agent_platform.v1.state import (
     FlowState,
@@ -38,18 +40,29 @@ from duo_workflow_service.conversation.history_optimizer.optimizers.compaction i
 from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
+from duo_workflow_service.conversation.history_optimizer.schema import (
+    OptimizationResult,
+)
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.image_blocks import (
+    IMAGE_REJECTED_UI_MESSAGE,
+    IMAGE_SUPPORT_HELP_ANCHOR,
+    IMAGE_SUPPORT_HELP_PATH,
     ImageLimitKind,
     ImageScope,
     image_limit_kind,
+    image_rejection_note,
     without_image_payloads,
 )
+from duo_workflow_service.entities.state import MessageTypeEnum, ToolStatus, UiChatLog
 from duo_workflow_service.errors.error_handler import (
     ModelError,
     ModelErrorHandler,
     ModelErrorType,
 )
+from duo_workflow_service.errors.typing import ModelRefusalError
+from duo_workflow_service.gitlab.help_links import help_page_url
+from duo_workflow_service.monitoring import duo_workflow_metrics
 from duo_workflow_service.tracking.langsmith_tags import tag_current_run
 from lib.context import LLMFinishReason, extract_finish_reason
 from lib.events import GLReportingEventContext
@@ -57,7 +70,13 @@ from lib.events.contextvar import mark_llm_call_retry
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
 from lib.internal_events.event_enum import EventEnum
 
-__all__ = ["AgentFinalOutput", "AgentNode", "AgentStuckError", "CycleBudget"]
+__all__ = [
+    "AgentFinalOutput",
+    "AgentNode",
+    "AgentStuckError",
+    "CycleBudget",
+    "WrapUpPrompt",
+]
 
 log = structlog.stdlib.get_logger("agent_node")
 
@@ -85,6 +104,18 @@ class AgentStuckError(Exception):
     Raised when the LLM, despite recovery attempts, repeatedly produces truncated responses, keeps making tool calls
     after the wrap-up instruction, or keeps sending a final answer that is rejected.
     """
+
+
+@dataclass(frozen=True, kw_only=True)
+class WrapUpPrompt:
+    """The prompt used once ``max_cycles`` is reached, and its build-time template variables.
+
+    It binds fewer tools than the main prompt, so the template can be told different things (for example that it can't
+    search).
+    """
+
+    prompt: Prompt
+    template_inputs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -206,8 +237,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             in schema mode, so it decides whether such a turn is a wrap-up retry or
             a routing error. Defaults to ``"any"``, today's behaviour.
         wrap_up_prompt: Prompt used once ``max_cycles`` is reached, bound to the
-            response schema tool only so the agent cannot keep exploring. When
-            ``None``, wrap-up turns use ``prompt``.
+            response schema tool only so the agent cannot keep exploring, with its own
+            template variables. When ``None``, wrap-up turns use ``prompt`` and
+            ``prompt_template_inputs``.
     """
 
     name: str
@@ -229,6 +261,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
     _cycle_budget: CycleBudget
     _response_schema_tool_choice: Literal["any", "auto"]
     _wrap_up_prompt: Prompt
+    _pending_ui_logs: list[UiChatLog]
+    _image_rejection_notified: bool
 
     def __init__(
         self,
@@ -248,7 +282,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         prompt_template_inputs: Optional[dict[str, Any]] = None,
         response_schema_tool_choice: Literal["any", "auto"] = "any",
         trim_ui_chat_log: bool = True,
-        wrap_up_prompt: Optional[Prompt] = None,
+        wrap_up_prompt: Optional[WrapUpPrompt] = None,
     ):
         self._flow_id = flow_id
         self._flow_type = flow_type
@@ -265,12 +299,19 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         self._invoke_config = invoke_config
         self._cycle_budget = cycle_budget
         self._response_schema_tool_choice = response_schema_tool_choice
+        self._pending_ui_logs = []
+        self._image_rejection_notified = False
         self._trim_ui_chat_log = trim_ui_chat_log
-        self._wrap_up_prompt = wrap_up_prompt or prompt
+        self._wrap_up_prompt = wrap_up_prompt.prompt if wrap_up_prompt else prompt
         # Build-time template variables (e.g. which optional tools/capabilities are
         # active) that the prompt can branch on. Merged into every prompt invocation
         # alongside the runtime variables below.
         self._prompt_template_inputs = prompt_template_inputs or {}
+        self._wrap_up_prompt_template_inputs = (
+            wrap_up_prompt.template_inputs
+            if wrap_up_prompt
+            else self._prompt_template_inputs
+        )
 
     _TRUNCATION_RECOVERY_MESSAGE = (
         "Your response was too long and got cut off. "
@@ -291,36 +332,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
     _MAX_TRUNCATION_RETRIES: int = 5
 
-    _IMAGE_LIMIT_SEEN_MESSAGE = (
-        "Older images were removed because the request exceeded the provider's "
-        "image limit. Rely on what you noted about them."
-    )
-
-    _IMAGE_LIMIT_LATEST_MESSAGE = (
-        "The images from the latest step were removed because the request exceeded "
-        "the provider's image limit. Reading them again will hit the same limit. "
-        "Continue without them."
-    )
-
-    _IMAGE_TOO_LARGE_MESSAGE = (
-        "The images from the latest step were removed: one of them is larger than "
-        "the provider accepts{limit}. Reading it again will hit the same limit. "
-        "If the user needs it read, ask for a smaller copy."
-    )
-
-    _IMAGE_REJECTED_SEEN_MESSAGE = (
-        "Older images were removed because the provider rejected the request "
-        "while they were in it. Rely on what you noted about them."
-    )
-
-    _IMAGE_REJECTED_LATEST_MESSAGE = (
-        "The images from the latest step were removed because the provider "
-        "rejected the request while they were in it. Reading them again will fail "
-        "the same way. If the user needs one read, ask for a smaller or re-saved "
-        "copy of the file."
-    )
-
     _MAX_IMAGE_LIMIT_RETRIES: int = 2
+    MESSAGE_SUB_TYPE_IMAGE_REJECTED = "image_rejected"
     # Consecutive text-only turns in schema mode under "auto" before the wrap-up is sent,
     # independent of max_cycles; a text-only reply to that wrap-up raises AgentStuckError.
     _MAX_TEXT_ONLY_TURNS: int = 3
@@ -363,25 +376,38 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         return ""
 
     def _emit_reasoning(self, completion: AIMessage) -> None:
-        """Emit an ``ON_AGENT_REASONING`` log entry if the completion has non-empty text.
+        """Emit the completion's reasoning text, split around any server-tool cards it carries.
 
-        Only emits when ``ui_history`` is set and ``ON_AGENT_REASONING`` is in its
-        event list.  Empty or whitespace-only content is silently skipped.
+        Text goes out as ``ON_AGENT_REASONING`` entries; empty or whitespace-only text is
+        skipped. Server-tool calls (e.g. a provider-native web search) become TOOL cards
+        between the text segments, see :func:`log_server_tool_turn`.
 
         Args:
             completion: The ``AIMessage`` returned by the LLM.
         """
         if self._ui_history is None:
             return
+        if log_server_tool_turn(
+            self._ui_history,
+            completion,
+            log_text=self._log_reasoning_text,
+            component_name=component_name_from_node(self.name),
+        ):
+            return
+        self._log_reasoning_text(self._extract_text(completion), completion.id)
+
+    def _log_reasoning_text(self, text: str, message_id: Optional[str]) -> None:
+        if self._ui_history is None:
+            return
         if UILogEventsAgent.ON_AGENT_REASONING not in self._ui_history.events:
             return
-        text = self._extract_text(completion).strip()
-        if not text:
+        text = text.strip()
+        if not text or text == _LITELLM_EMPTY_CONTENT_PLACEHOLDER:
             return
         self._ui_history.log.warning(
             text,
             event=UILogEventsAgent.ON_AGENT_REASONING,
-            message_id=completion.id,
+            message_id=message_id,
         )
 
     @staticmethod
@@ -621,6 +647,11 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             history, cycle_count
         )
         prompt = self._wrap_up_prompt if wrap_up_active else self._prompt
+        template_inputs = (
+            self._wrap_up_prompt_template_inputs
+            if wrap_up_active
+            else self._prompt_template_inputs
+        )
 
         wrap_up_retries: int = 0
         truncation_retries: int = 0
@@ -636,7 +667,7 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                         AIMessage,
                         await prompt.ainvoke(
                             input={
-                                **self._prompt_template_inputs,
+                                **template_inputs,
                                 **variables,
                                 "history": history,
                                 **self._predefined_runtime_variables(),
@@ -646,6 +677,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     )
                 retrying_failed_call = False
                 finish_reason = extract_finish_reason(completion.response_metadata)
+                # Before any retry: a refused turn carries no answer, and a retry would
+                # resend the content the model refused.
+                if finish_reason == LLMFinishReason.REFUSAL:
+                    raise self._refusal_error(completion)
                 if finish_reason in LLMFinishReason.truncation_values():
                     truncation_retries = self._count_truncation(
                         truncation_retries, finish_reason
@@ -666,7 +701,12 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                     answer_rejections = self._count_answer_rejection(
                         answer_rejections, check.reason
                     )
-                    history = [*history, *check.corrections]
+                    # The corrections answer ``tool_calls`` only. A completion that also
+                    # carries ``invalid_tool_calls`` would otherwise be retried with those
+                    # calls unanswered, which the provider rejects.
+                    history = restore_message_consistency(
+                        [*history, *check.corrections]
+                    )
                     continue
 
                 if wrap_up_active and self._completion_has_non_final_tool_calls(
@@ -713,27 +753,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
                 # Append new completion to existing history for replace-based reducer.
                 # The reducer will replace this component's conversation history with
                 # the complete list returned here.
-                ui_updates = (
-                    self._ui_history.pop_state_updates() if self._ui_history else {}
+                ui_updates = self._with_extra_ui_logs(
+                    self._ui_history.pop_state_updates() if self._ui_history else {},
+                    optimization_results,
                 )
-                # Surface optimizer UI entries (e.g. the compaction tool card)
-                # when optimization ran and produced any.  Entries are appended
-                # *after* the base ui_chat_log entries (reasoning logs, etc.) so
-                # the front end renders them in the correct order.  Prepending
-                # causes the compaction card to be silently dropped by the
-                # client — see ChatAgent._append_optimizer_ui_logs for the same
-                # convention.
-                optimizer_ui_logs = [
-                    entry
-                    for result in optimization_results
-                    for entry in result.ui_chat_logs
-                ]
-                if optimizer_ui_logs:
-                    base_logs: list = ui_updates.get(FlowStateKeys.UI_CHAT_LOG, [])
-                    ui_updates = {
-                        **ui_updates,
-                        FlowStateKeys.UI_CHAT_LOG: [*base_logs, *optimizer_ui_logs],
-                    }
                 if self._trim_ui_chat_log and any(
                     result.was_modified for result in optimization_results
                 ):
@@ -765,11 +788,23 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             # every model served through LiteLLM.
             except (AnthropicAPIStatusError, OpenAIAPIStatusError) as e:
                 recovered = await self._recover_from_status_error(
-                    history, e, image_limit_retries
+                    history, e, image_limit_retries, prompt
                 )
                 if recovered is not None:
                     history, image_limit_retries = recovered, image_limit_retries + 1
                 retrying_failed_call = True
+
+    def _refusal_error(self, completion: AIMessage) -> ModelRefusalError:
+        stop_details = completion.response_metadata.get("stop_details")
+        category = (
+            stop_details.get("category") if isinstance(stop_details, dict) else None
+        ) or "unknown"
+        log.warning(
+            "Model refused to answer", agent=self.name, refusal_category=category
+        )
+        return ModelRefusalError(
+            internal_detail=f"The model refused (refusal category: {category}) for agent {self.name}"
+        )
 
     def _deliberates_in_text(self) -> bool:
         return (
@@ -834,12 +869,16 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         history: list,
         error: AnthropicAPIStatusError | OpenAIAPIStatusError,
         image_limit_retries: int,
+        prompt: Prompt,
     ) -> Optional[list]:
-        """Return a history to retry with, or let the error handler wait or raise."""
+        """Return a history to retry with, or let the error handler wait or raise.
+
+        ``prompt`` is the one that failed: the wrap-up prompt once the cycle budget is spent, else the main prompt.
+        """
         message = str(error)
-        status_code = error.response.status_code
+        status_code = error.status_code
         recovered = self._without_rejected_images(
-            history, status_code, message, image_limit_retries
+            history, status_code, message, image_limit_retries, prompt
         )
         if recovered is not None:
             return recovered
@@ -853,7 +892,12 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         return None
 
     def _without_rejected_images(
-        self, history: list, status_code: int, message: str, retries: int
+        self,
+        history: list,
+        status_code: int,
+        message: str,
+        retries: int,
+        prompt: Prompt,
     ) -> Optional[list]:
         """Retry a 400 or 413 without the images, whatever the provider's wording.
 
@@ -890,29 +934,86 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             retry=retries + 1,
             provider_message=message[:500],
         )
+        duo_workflow_metrics.count_image_fallback(
+            flow_type=self._flow_type.value,
+            kind=kind.value,
+            model_name=prompt.reported_model_name,
+            model_vendor=prompt.model_vendor or "unknown",
+        )
+        suggest_declaration = self._suggests_declaration(kind, prompt)
+        if suggest_declaration:
+            self._queue_image_rejected_notice()
         return restore_message_consistency(
             [
                 *recovered,
-                HumanMessage(content=self._image_limit_note(scope, kind, message)),
+                HumanMessage(
+                    content=image_rejection_note(
+                        kind,
+                        scope,
+                        message,
+                        suggest_declaration=suggest_declaration,
+                        help_url=self._image_support_url(),
+                    )
+                ),
             ]
         )
 
-    def _image_limit_note(
-        self, scope: ImageScope, kind: ImageLimitKind, message: str
-    ) -> str:
-        if kind is ImageLimitKind.UNCLASSIFIED:
-            return (
-                self._IMAGE_REJECTED_SEEN_MESSAGE
-                if scope is ImageScope.SEEN
-                else self._IMAGE_REJECTED_LATEST_MESSAGE
+    @staticmethod
+    def _suggests_declaration(kind: ImageLimitKind, prompt: Prompt) -> bool:
+        """Point at the image support declaration only where it can be the fix.
+
+        The rejection names images, the model is customer-configured (only those set ``requested_model``), and its
+        image support is neither declared nor known. For a model known to read images, the error is about the file.
+        """
+        model = getattr(prompt, "requested_model", None)
+        if kind is not ImageLimitKind.IMAGE_INPUT or model is None:
+            return False
+        return model_supports_vision(model, prompt.model_vendor) is None
+
+    @staticmethod
+    def _image_support_url() -> str:
+        return help_page_url(IMAGE_SUPPORT_HELP_PATH, IMAGE_SUPPORT_HELP_ANCHOR)
+
+    def _with_extra_ui_logs(
+        self, ui_updates: dict, optimization_results: list[OptimizationResult]
+    ) -> dict:
+        """Append the queued image notice and the optimizer cards after the base entries.
+
+        Appending keeps the client's order; a prepended compaction card is silently dropped (see
+        ChatAgent._append_optimizer_ui_logs).
+        """
+        extra_logs = [
+            *self._pending_ui_logs,
+            *(
+                entry
+                for result in optimization_results
+                for entry in result.ui_chat_logs
+            ),
+        ]
+        self._pending_ui_logs = []
+        if not extra_logs:
+            return ui_updates
+        base_logs: list = ui_updates.get(FlowStateKeys.UI_CHAT_LOG, [])
+        return {**ui_updates, FlowStateKeys.UI_CHAT_LOG: [*base_logs, *extra_logs]}
+
+    def _queue_image_rejected_notice(self) -> None:
+        if self._image_rejection_notified:
+            return
+        self._image_rejection_notified = True
+        self._pending_ui_logs.append(
+            UiChatLog(
+                message_type=MessageTypeEnum.AGENT,
+                message_sub_type=self.MESSAGE_SUB_TYPE_IMAGE_REJECTED,
+                content=IMAGE_REJECTED_UI_MESSAGE.format(url=self._image_support_url()),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                status=ToolStatus.SUCCESS,
+                correlation_id=None,
+                tool_info=None,
+                additional_context=[],
+                message_id=f"agent-{uuid4()!s}",
+                component_name=component_name_from_node(self.name),
             )
-        if scope is ImageScope.SEEN:
-            return self._IMAGE_LIMIT_SEEN_MESSAGE
-        if kind is not ImageLimitKind.SINGLE_IMAGE:
-            return self._IMAGE_LIMIT_LATEST_MESSAGE
-        pixels = re.search(r"(\d[\d,]*) pixels", message)
-        limit = f" (one side is over {pixels.group(1)} px)" if pixels else ""
-        return self._IMAGE_TOO_LARGE_MESSAGE.format(limit=limit)
+        )
 
     def _agent_context_limits_update(self, history_iokey: IOKey) -> dict:
         """Stamp ``{agent_key: max_context_tokens}`` keyed off ``history_iokey``.

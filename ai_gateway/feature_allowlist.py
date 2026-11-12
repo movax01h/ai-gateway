@@ -8,10 +8,10 @@ header, and the routes that build metadata from their own payload, such as the l
 
 The allowlist is the one of the feature that the call site serves. A call site that passes no feature
 uses the client's ``feature_setting``, so the client can name the feature whose allowlist suits it.
-The HTTP prompt routes pass the feature of a prompt with an entry in ``PROMPT_ID_TO_FEATURE_SETTING``.
-The fallback stays for any other prompt, and on the Duo Workflow Service until it derives the feature
-from the flow. For a prompt without an entry, ``note_prompt_feature`` logs where the feature derived
-from the prompt ID would not allow the requested model.
+The HTTP prompt routes pass the ``models_from`` of the prompt version that runs. The client's feature
+stays for a version without ``models_from``, and on the Duo Workflow Service until it derives the feature
+from the flow. For a version without ``models_from``, ``note_prompt_feature`` logs where the feature
+derived from the prompt ID would not allow the requested model.
 
 A gateway without custom models serves GitLab-managed models only. Over HTTP it accepts ``gitlab``
 and ``amazon_q``, which GitLab Rails sends, and ``anthropic``, ``vertex-ai`` and ``fireworks_ai``,
@@ -24,18 +24,20 @@ that the server builds itself is never checked. A gateway that serves custom mod
 (``AIGW_CUSTOM_MODELS__ENABLED``) runs every model on the operator's own keys, so it skips the check
 altogether.
 
-``AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE`` selects the behavior:
+``AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP`` selects the behavior on the HTTP routes, and
+``AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_DWS`` on the Duo Workflow Service:
 
 - ``off``: no check.
-- ``log``: log mismatches, change nothing (default).
-- ``fallback``: serve the feature's default model instead of a model that is not allowed.
+- ``log``: log mismatches, change nothing.
+- ``fallback``: serve the feature's default model instead of a model that is not allowed (the default on both surfaces).
 - ``enforce``: reject a model that is not allowed (HTTP 403, gRPC ``PERMISSION_DENIED``).
 
-``fallback`` and ``enforce`` also rebuild a GitLab-managed model from its definition when a raw
-``identifier`` would rewrite its wire model. ``off`` and ``log`` leave that override in place until
-GitLab-managed models are resolved by their GitLab identifier only.
+In every mode, the model of a GitLab-managed request comes from ``models.yml``: on a gateway without
+custom models, ``create_model_metadata`` ignores a raw ``identifier`` next to ``name``, so no client
+value becomes the wire model.
 """
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Mapping, Optional
 
@@ -45,7 +47,6 @@ from pydantic import BaseModel
 from ai_gateway.config import FeatureAllowlistMode, get_config
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
-    ModelMetadata,
     TypeModelMetadata,
     resolve_provider_aware_metadata,
 )
@@ -64,8 +65,11 @@ from lib.context import StarletteUser
 __all__ = [
     "SERVED_PROVIDERS",
     "ClientModelRequest",
+    "PromptModelCheck",
     "check_client_model_metadata",
+    "dws_client_model_request_context",
     "note_prompt_feature",
+    "prompt_model_check_context",
 ]
 
 log = structlog.stdlib.get_logger("feature_allowlist")
@@ -87,6 +91,31 @@ SERVED_PROVIDERS: dict[Surface, frozenset[str]] = {
 _LOG_VALUE_MAX_LENGTH = 255
 _MISMATCH_EVENT = "Model allowlist mismatch"
 _NOTE_EVENT = "Model allowlist note"
+
+# What a check does with a request, for the `outcome` and `enforce_outcome` log fields: `served` keeps the request,
+# `replaced` serves another model, and `refused` rejects the request.
+Outcome = Literal["served", "replaced", "refused"]
+# The outcome of a check in each mode that runs it. `off` runs no check.
+_SERVED_IN_EVERY_MODE: Mapping[str, Outcome] = {
+    "log": "served",
+    "fallback": "served",
+    "enforce": "served",
+}
+_REPLACED_THEN_REFUSED: Mapping[str, Outcome] = {
+    "log": "served",
+    "fallback": "replaced",
+    "enforce": "refused",
+}
+_REPLACED_UNLESS_LOG: Mapping[str, Outcome] = {
+    "log": "served",
+    "fallback": "replaced",
+    "enforce": "replaced",
+}
+_REFUSED_UNLESS_LOG: Mapping[str, Outcome] = {
+    "log": "served",
+    "fallback": "refused",
+    "enforce": "refused",
+}
 
 
 @dataclass(frozen=True)
@@ -133,6 +162,32 @@ class ClientModelRequest:
         return bool(self.name or self.identifier)
 
 
+@dataclass(frozen=True)
+class PromptModelCheck:
+    """Client model metadata of a prompt route request, which the route checks once it resolves the prompt version.
+
+    The allowlist of a prompt route depends on the ``models_from`` of the prompt version, and only the route resolves
+    the version. So ``ModelConfigMiddleware`` keeps the metadata here unchecked, and sets no model metadata, for the
+    route to check.
+    """
+
+    request: ClientModelRequest
+    metadata: TypeModelMetadata
+    user: Optional[StarletteUser]
+    log_context: Mapping[str, Any]
+
+
+prompt_model_check_context: ContextVar[Optional[PromptModelCheck]] = ContextVar(
+    "prompt_model_check_context", default=None
+)
+
+# What the client asked for in the Duo Workflow Service model metadata header, for the rest of the call. The workflow
+# reads it once the flow is known.
+dws_client_model_request_context: ContextVar[Optional[ClientModelRequest]] = ContextVar(
+    "dws_client_model_request_context", default=None
+)
+
+
 def _text(value: Any) -> Optional[str]:
     if isinstance(value, str) and value:
         return value[:_LOG_VALUE_MAX_LENGTH]
@@ -142,19 +197,6 @@ def _text(value: Any) -> Optional[str]:
 def _use_prompt_default() -> None:
     """Fallback for a request with nothing to fall back to: the prompt's own default model is used."""
     return None
-
-
-def _outcome(
-    mode: FeatureAllowlistMode,
-    metadata: TypeModelMetadata,
-    error: ModelSelectionError,
-    fallback: Callable[[], Optional[TypeModelMetadata]],
-) -> Optional[TypeModelMetadata]:
-    if mode == "log":
-        return metadata
-    if mode == "fallback":
-        return fallback()
-    raise error
 
 
 @dataclass(frozen=True)
@@ -177,7 +219,15 @@ class _AllowlistCheck:
         if self.request.provider not in SERVED_PROVIDERS[self.surface]:
             self._provider_not_served(metadata)
 
-        metadata = self._drop_identifier_override(metadata)
+        if self.request.name and self.request.identifier:
+            if self.request.provider == "gitlab":
+                # The metadata resolved `identifier` and ignored `name`. No GitLab client sends both.
+                self._note("name_ignored", metadata)
+            elif self.request.provider not in SERVER_KEYED_PROVIDERS:
+                # The metadata resolved `name` and ignored the raw `identifier`, so it is not the wire model. The
+                # Mistral builder sets `identifier` itself, which is not a client value.
+                self._note("identifier_ignored", metadata)
+
         if not self.request.pinned:
             return self._feature_default(metadata)
 
@@ -225,10 +275,19 @@ class _AllowlistCheck:
         """
         if self.feature is None or self.request.feature_setting == self.feature:
             return metadata
-        self._warn("feature_mismatch", metadata)
-        if self.mode == "log" or self._unit_primitive_config(self.feature) is None:
-            return metadata
-        return self._default_of(self.feature)
+        known_feature = self._unit_primitive_config(self.feature) is not None
+        served = (
+            metadata
+            if self.mode == "log" or not known_feature
+            else self._default_of(self.feature)
+        )
+        self._warn(
+            "feature_mismatch",
+            metadata,
+            _REPLACED_UNLESS_LOG if known_feature else _SERVED_IN_EVERY_MODE,
+            served=served,
+        )
+        return served
 
     def _provider_not_served(self, metadata: TypeModelMetadata) -> None:
         """Refuse a provider this gateway does not serve; there is nothing valid to fall back to.
@@ -236,8 +295,14 @@ class _AllowlistCheck:
         ``log`` mode records the provider and runs the remaining checks, so the log shows what the
         request would meet once the provider is fixed.
         """
-        self._warn("provider_not_served", metadata)
-        if self.mode != "log":
+        refused = self.mode != "log"
+        self._warn(
+            "provider_not_served",
+            metadata,
+            _REFUSED_UNLESS_LOG,
+            served=None if refused else metadata,
+        )
+        if refused:
             raise ProviderNotServedError(self.request.provider or "")
 
     def _missing_feature(
@@ -250,9 +315,8 @@ class _AllowlistCheck:
             # covers it once the flow is known.
             self._note("missing_feature_setting", metadata)
             return metadata
-        self._warn("missing_feature_setting", metadata)
-        return _outcome(
-            self.mode,
+        return self._replace_or_refuse(
+            "missing_feature_setting",
             metadata,
             FeatureSettingRequiredError(metadata.llm_definition.gitlab_identifier),
             _use_prompt_default,
@@ -262,9 +326,8 @@ class _AllowlistCheck:
         self, metadata: TypeModelMetadata, feature: str
     ) -> Optional[TypeModelMetadata]:
         """Handle a named model whose feature does not exist, on both surfaces: no resume replays this shape."""
-        self._warn("unknown_feature", metadata)
-        return _outcome(
-            self.mode,
+        return self._replace_or_refuse(
+            "unknown_feature",
             metadata,
             ModelNotAllowedForFeatureError(
                 feature, metadata.llm_definition.gitlab_identifier
@@ -272,54 +335,37 @@ class _AllowlistCheck:
             _use_prompt_default,
         )
 
+    def _replace_or_refuse(
+        self,
+        reason: str,
+        metadata: TypeModelMetadata,
+        error: ModelSelectionError,
+        fallback: Callable[[], Optional[TypeModelMetadata]],
+    ) -> Optional[TypeModelMetadata]:
+        """Log a mismatch that ``fallback`` mode replaces and ``enforce`` mode refuses, and apply the mode.
+
+        The mismatch is logged after ``fallback`` chooses the model, so that the log names the model that runs.
+
+        Returns:
+            The request's own metadata in ``log`` mode, and the result of ``fallback`` in ``fallback`` mode.
+
+        Raises:
+            ModelSelectionError: In ``enforce`` mode.
+        """
+        served: Optional[TypeModelMetadata] = None
+        if self.mode == "log":
+            served = metadata
+        elif self.mode == "fallback":
+            served = fallback()
+        self._warn(reason, metadata, _REPLACED_THEN_REFUSED, served=served)
+        if self.mode not in ("log", "fallback"):
+            raise error
+        return served
+
     @staticmethod
     def _unit_primitive_config(feature: str) -> Optional[UnitPrimitiveConfig]:
         configs = ModelSelectionConfig.instance()
         return configs.get_resolved_unit_primitive_config_map().get(feature)
-
-    def _drop_identifier_override(
-        self, metadata: TypeModelMetadata
-    ) -> TypeModelMetadata:
-        """Drop a raw ``identifier`` that would rewrite the wire model of a GitLab-managed request.
-
-        The allowlist checks the model that ``name`` resolved to, but a request such as::
-
-            {
-                "provider": "gitlab",
-                "name": "claude_sonnet_4_6_vertex",
-                "identifier": "vertex_ai/claude-opus-4-8",
-            }
-
-        passes the allowlist as Sonnet and then runs Opus on the gateway's Vertex AI credentials, because
-        ``to_params`` turns the identifier into ``custom_llm_provider="vertex_ai"`` and
-        ``model="claude-opus-4-8"``. There is no endpoint or key for ``validate_custom_endpoint``
-        to refuse. A client ``endpoint`` or ``api_key`` is not handled here: on a gateway without
-        custom models ``validate_custom_endpoint`` already rejects both when the model is built.
-
-        The override is read from the resolved metadata, so the resolution of each surface decides:
-        ``create_model_metadata`` keeps a raw ``identifier`` only next to ``name``, and the Duo
-        Workflow Service resolves a ``gitlab`` request by its ``identifier`` instead. The Mistral
-        builder sets ``identifier`` itself, which is not an override.
-
-        In ``fallback`` and ``enforce`` mode the metadata is rebuilt from the pristine model
-        definition, so only the server decides the wire model and its limits:
-        ``_create_gitlab_metadata`` copies limits and tuning from the models.yml entry the raw
-        identifier matched into the resolved definition. ``log`` mode only records the attempt.
-        """
-        if (
-            not isinstance(metadata, ModelMetadata)
-            or not metadata.identifier
-            or metadata.provider in SERVER_KEYED_PROVIDERS
-        ):
-            return metadata
-        self._warn("managed_identifier_override", metadata)
-        if self.mode == "log":
-            return metadata
-        return self._rebuild(
-            ModelSelectionConfig.instance().get_model(
-                metadata.llm_definition.gitlab_identifier
-            )
-        )
 
     def _check_allowlist(
         self, metadata: TypeModelMetadata, unit_primitive_config: UnitPrimitiveConfig
@@ -327,9 +373,8 @@ class _AllowlistCheck:
         feature = unit_primitive_config.feature_setting
         gitlab_identifier = metadata.llm_definition.gitlab_identifier
         if gitlab_identifier not in unit_primitive_config.allowed_model_identifiers:
-            self._warn("model_not_allowed", metadata)
-            return _outcome(
-                self.mode,
+            return self._replace_or_refuse(
+                "model_not_allowed",
                 metadata,
                 ModelNotAllowedForFeatureError(feature, gitlab_identifier),
                 lambda: self._default_of(feature),
@@ -368,8 +413,21 @@ class _AllowlistCheck:
             using_cache=self.using_cache,
         )
 
-    def _fields(self, reason: str, metadata: TypeModelMetadata) -> dict[str, Any]:
-        """Return the log fields; the event and the check's fields win over a caller key of the same name."""
+    def _fields(
+        self,
+        reason: str,
+        metadata: TypeModelMetadata,
+        outcomes: Mapping[str, Outcome],
+        served: Optional[TypeModelMetadata],
+    ) -> dict[str, Any]:
+        """Return the log fields; the event and the check's fields win over a caller key of the same name.
+
+        ``outcome`` is what the current mode does with the request at this check, and ``enforce_outcome`` is what
+        ``enforce`` mode would do, so the logs of a less strict mode show which requests ``enforce`` would refuse.
+        ``checked_identifier`` is the model that the check got, and ``served_identifier`` is the model that the check
+        serves. ``served_identifier`` is empty when the check refuses the request, or leaves it on the prompt's own
+        default model.
+        """
         context = {
             key: value for key, value in self.log_context.items() if key != "event"
         }
@@ -377,6 +435,8 @@ class _AllowlistCheck:
             **context,
             "reason": reason,
             "mode": self.mode,
+            "outcome": outcomes[self.mode],
+            "enforce_outcome": outcomes["enforce"],
             "surface": self.surface,
             "feature_setting": self.feature,
             "client_feature_setting": self.request.feature_setting,
@@ -384,14 +444,32 @@ class _AllowlistCheck:
             "requested_name": self.request.name,
             "requested_identifier": self.request.identifier,
             "pinned": self.request.pinned,
-            "served_identifier": metadata.llm_definition.gitlab_identifier,
+            "checked_identifier": metadata.llm_definition.gitlab_identifier,
+            "served_identifier": (
+                served.llm_definition.gitlab_identifier if served else None
+            ),
         }
 
-    def _warn(self, reason: str, metadata: TypeModelMetadata) -> None:
-        log.warning(_MISMATCH_EVENT, **self._fields(reason, metadata))
+    def _warn(
+        self,
+        reason: str,
+        metadata: TypeModelMetadata,
+        outcomes: Mapping[str, Outcome],
+        *,
+        served: Optional[TypeModelMetadata],
+    ) -> None:
+        log.warning(_MISMATCH_EVENT, **self._fields(reason, metadata, outcomes, served))
 
     def _note(self, reason: str, metadata: TypeModelMetadata) -> None:
-        log.info(_NOTE_EVENT, **self._fields(reason, metadata))
+        """Log a case that changes nothing, in any mode.
+
+        The note logs the model at this point as ``served_identifier``. A later check of the same request can still
+        replace that model, and then logs a mismatch.
+        """
+        log.info(
+            _NOTE_EVENT,
+            **self._fields(reason, metadata, _SERVED_IN_EVERY_MODE, metadata),
+        )
 
 
 def check_client_model_metadata(
@@ -452,11 +530,10 @@ def note_prompt_feature(
 ) -> None:
     """Log a note when a named model would not pass the allowlist of an HTTP prompt's own feature.
 
-    The prompt routes call it for a prompt without an entry in ``PROMPT_ID_TO_FEATURE_SETTING``. For
-    such a prompt, ``check_client_model_metadata`` still uses the client's ``feature_setting``,
-    because the feature derived from a prompt ID does not always match the one that GitLab Rails
-    sends. The note shows where the two differ, so the prompt can get an entry. It changes nothing,
-    in any mode.
+    The prompt routes call it for a prompt version without ``models_from``. For such a version,
+    ``check_client_model_metadata`` still uses the client's ``feature_setting``, because the feature derived
+    from a prompt ID does not always match the one that GitLab Rails sends. The note shows where the two
+    differ, so the version can declare ``models_from``. It changes nothing, in any mode.
 
     Args:
         request: What the client asked for, read with ``ClientModelRequest.from_raw`` before the
@@ -487,7 +564,11 @@ def _new_check(
 ) -> Optional[_AllowlistCheck]:
     """Return the check for a request, or None when this gateway does not check it."""
     config = get_config()
-    mode = config.model_selection.feature_allowlist_mode
+    mode = (
+        config.model_selection.feature_allowlist_mode_http
+        if surface == "http"
+        else config.model_selection.feature_allowlist_mode_dws
+    )
     if (
         mode == "off"
         or config.custom_models.enabled

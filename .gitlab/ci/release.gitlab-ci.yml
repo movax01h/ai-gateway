@@ -30,7 +30,31 @@ release-docker-image:tag:
   variables:
     RELEASE_VERSION: "$DOCKER_MODEL_GATEWAY:$CI_COMMIT_TAG"
   rules:
+    # Canonical v1.x tags use release-docker-image:version-tag instead.
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG =~ /^v\d/
+      when: never
     - if: $CI_COMMIT_TAG
+
+# Retags only an image that a main pipeline signed for this commit
+# (see sign:model-gateway), by the digest that was verified.
+release-docker-image:version-tag:
+  stage: release
+  extends: .docker
+  # cosign verify fetches Sigstore trust data over the network.
+  retry: 2
+  variables:
+    RELEASE_VERSION: "$DOCKER_MODEL_GATEWAY:$CI_COMMIT_TAG"
+  script:
+    - apk add --no-cache cosign
+    - DIGEST=$(docker buildx imagetools inspect "${TARGET_IMAGE}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+    - cosign verify
+        --certificate-oidc-issuer "${CI_SERVER_URL}"
+        --certificate-identity "${CI_PROJECT_URL}//.gitlab-ci.yml@refs/heads/${CI_DEFAULT_BRANCH}"
+        --annotations "commit-sha=${CI_COMMIT_SHA}"
+        "${DOCKER_MODEL_GATEWAY}@${DIGEST}"
+    - docker buildx imagetools create --tag "${RELEASE_VERSION}" "${DOCKER_MODEL_GATEWAY}@${DIGEST}"
+  rules:
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG =~ /^v\d/
 
 release-docker-hub-image:self-managed-tag:
   stage: release

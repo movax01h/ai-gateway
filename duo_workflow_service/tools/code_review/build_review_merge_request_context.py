@@ -301,12 +301,102 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         if baseline_sha == head_sha:
             return SCOPE_NO_NEW_LINES, set()
 
+        scope_from_versions = await self._scope_from_versions(
+            validation_result, baseline_sha, head_sha
+        )
+        if scope_from_versions:
+            return scope_from_versions, set()
+
         # For a fork, both commits live in the source project, so compare there.
         project_id = mr_data.get("source_project_id") or validation_result.project_id
 
         return await self._changed_lines_since(
             project_id, baseline_sha, head_sha, diffs_and_paths
         )
+
+    async def _scope_from_versions(
+        self, validation_result, baseline_sha: str, head_sha: str
+    ) -> Optional[str]:
+        """Settle the review scope from the merge request versions, when they allow it.
+
+        Returns None when only a compare can tell which lines are new.
+        """
+        baseline_version, head_version = await self._review_versions(
+            validation_result, baseline_sha, head_sha
+        )
+        if not baseline_version or not head_version:
+            return None
+
+        patch_id = head_version.get("patch_id_sha")
+        if patch_id and patch_id == baseline_version.get("patch_id_sha"):
+            logger.info(
+                "Merge request diff is unchanged since the review baseline, skipping the compare",
+                merge_request_iid=validation_result.merge_request_iid,
+                baseline_sha=baseline_sha,
+                head_sha=head_sha,
+            )
+            return SCOPE_NO_NEW_LINES
+
+        # A new base means a rebase or a target merge, so the compare would span every
+        # target branch commit since the baseline (up to hundreds of MB). A retarget
+        # after the push also lands here, which only loses the markers.
+        baseline_base = baseline_version.get("base_commit_sha")
+        head_base = head_version.get("base_commit_sha")
+        if baseline_base and head_base and baseline_base != head_base:
+            logger.info(
+                "Merge request base changed since the review baseline, skipping the compare",
+                merge_request_iid=validation_result.merge_request_iid,
+                baseline_sha=baseline_sha,
+                head_sha=head_sha,
+            )
+            return SCOPE_TRUNCATED
+
+        return None
+
+    async def _review_versions(
+        self, validation_result, baseline_sha: str, head_sha: str
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """Find the merge request versions whose heads are the baseline and the current head.
+
+        Returns `(None, None)` when either is missing, for example when the baseline is older than the newest 100
+        versions.
+        """
+        versions = await self._fetch_versions(validation_result)
+
+        if not versions or versions[0].get("head_commit_sha") != head_sha:
+            return None, None
+
+        # Versions come newest first. Taking the newest baseline match means a retarget
+        # before the push, which repeats the baseline head on the new base, is not read
+        # as a base change.
+        baseline_version = next(
+            (v for v in versions if v.get("head_commit_sha") == baseline_sha), None
+        )
+        if not baseline_version:
+            return None, None
+
+        return baseline_version, versions[0]
+
+    async def _fetch_versions(self, validation_result) -> List[Dict[str, Any]]:
+        """Fetch the newest merge request versions, or an empty list when unavailable."""
+        path = (
+            f"/api/v4/projects/{validation_result.project_id}/"
+            f"merge_requests/{validation_result.merge_request_iid}/versions?per_page=100"
+        )
+
+        versions = await self._get_optional_json(
+            path,
+            rejected_message="Merge request versions were rejected",
+            failed_message="Fetching merge request versions failed",
+            merge_request_iid=validation_result.merge_request_iid,
+        )
+
+        if not isinstance(versions, list) or not all(
+            isinstance(v, dict) for v in versions
+        ):
+            return []
+
+        return versions
 
     async def _changed_lines_since(
         self,
@@ -376,8 +466,7 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
         """Fetch the diff between two commits, or None when it cannot be computed.
 
         Failure is ordinary here: a force push orphans the baseline and 404s, a
-        private fork 403s. Neither deserves an error-level log, so this avoids
-        `_process_http_response`, which logs every non-2xx as an error.
+        private fork 403s.
 
         `straight=true` compares the two commits directly. The merge base default
         would, after a rebase, fall back to the original fork point and return the
@@ -389,15 +478,35 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             "&straight=true"
         )
 
+        return await self._get_optional_json(
+            path,
+            rejected_message="Compare against the review baseline was rejected",
+            failed_message="Compare against the review baseline failed",
+            project_id=project_id,
+        )
+
+    async def _get_optional_json(
+        self,
+        path: str,
+        *,
+        rejected_message: str,
+        failed_message: str,
+        **log_fields: Any,
+    ) -> Any:
+        """GET `path` and return its parsed JSON body, or None when GitLab rejects it or the request fails.
+
+        For reads the review can do without. Their failures do not deserve an error-level log, so this avoids
+        `_process_http_response`, which logs every non-2xx as an error.
+        """
         try:
             response = await self.gitlab_client.aget(path, parse_json=False)
 
             if isinstance(response, GitLabHttpResponse):
                 if not response.is_success():
                     logger.warning(
-                        "Compare against the review baseline was rejected",
+                        rejected_message,
                         status_code=response.status_code,
-                        project_id=project_id,
+                        **log_fields,
                     )
                     return None
                 response = response.body
@@ -405,8 +514,8 @@ class BuildReviewMergeRequestContext(DuoBaseTool):
             return json.loads(response)
         except Exception:
             # Keep the traceback. Without it a genuinely broken feature reads
-            # exactly like an ordinary force push.
-            logger.warning("Compare against the review baseline failed", exc_info=True)
+            # exactly like an ordinary rejection.
+            logger.warning(failed_message, exc_info=True, **log_fields)
             return None
 
     def _added_line_keys(self, pairs: Iterable[tuple]) -> set:

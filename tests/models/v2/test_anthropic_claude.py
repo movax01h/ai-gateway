@@ -4,7 +4,7 @@ import pytest
 from anthropic import AsyncAnthropic
 from anthropic.lib.credentials import AccessToken
 from anthropic.lib.credentials._auth import AccessTokenAuth
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 
 from ai_gateway.model_selection.models import AnthropicWorkloadIdentityParams
@@ -300,3 +300,125 @@ class TestChatAnthropic:
             else {"role": "assistant", "content": "Thought:"}
         )
         assert sent[-1] == expected_last
+
+    @pytest.mark.parametrize(
+        ("model", "messages", "expected_system", "expected_messages"),
+        [
+            pytest.param(
+                "claude-sonnet-5-5",
+                [
+                    HumanMessage(content="squash or merge?"),
+                    AIMessage(
+                        content=[
+                            "",
+                            {"type": "thinking", "thinking": "", "signature": "sig"},
+                            "Squash keeps history linear.",
+                        ]
+                    ),
+                    HumanMessage(content="and for a monorepo?"),
+                ],
+                None,
+                [
+                    {"role": "user", "content": "squash or merge?"},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": "", "signature": "sig"},
+                            {"type": "text", "text": "Squash keeps history linear."},
+                        ],
+                    },
+                    {"role": "user", "content": "and for a monorepo?"},
+                ],
+                id="saved_streamed_reply_from_thinking_by_default_model",
+            ),
+            pytest.param(
+                "claude-sonnet-5-5",
+                [
+                    SystemMessage(
+                        content=[
+                            {"type": "text", "text": " "},
+                            {"type": "text", "text": "You are GitLab Duo."},
+                        ]
+                    ),
+                    HumanMessage(content="hello"),
+                ],
+                [{"type": "text", "text": "You are GitLab Duo."}],
+                [{"role": "user", "content": "hello"}],
+                id="blank_system_block",
+            ),
+            pytest.param(
+                "claude-sonnet-5-5",
+                [
+                    SystemMessage(content=[{"type": "text", "text": " "}]),
+                    HumanMessage(content="hello"),
+                ],
+                None,
+                [{"role": "user", "content": "hello"}],
+                id="only_blank_system_block",
+            ),
+            pytest.param(
+                "claude-sonnet-5-5",
+                [
+                    HumanMessage(content="hello"),
+                    AIMessage(content=["", " "]),
+                    HumanMessage(content="still there?"),
+                ],
+                None,
+                [
+                    {"role": "user", "content": "hello"},
+                    {"role": "user", "content": "still there?"},
+                ],
+                id="assistant_with_only_blank_blocks",
+            ),
+            pytest.param(
+                "claude-sonnet-5-5",
+                [
+                    HumanMessage(content=[{"type": "text", "text": "hi"}, " "]),
+                    AIMessage(content="ok"),
+                    HumanMessage(content=["", " "]),
+                    AIMessage(content="still here"),
+                    HumanMessage(content="continue"),
+                ],
+                None,
+                [
+                    {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                    {"role": "assistant", "content": "ok"},
+                    {"role": "assistant", "content": "still here"},
+                    {"role": "user", "content": "continue"},
+                ],
+                id="user_with_only_blank_blocks",
+            ),
+            pytest.param(
+                "claude-sonnet-5-5",
+                [SystemMessage(content="  "), HumanMessage(content="hello")],
+                None,
+                [{"role": "user", "content": "hello"}],
+                id="blank_system_string",
+            ),
+            pytest.param(
+                "claude-haiku-4-5-20251001",
+                [
+                    HumanMessage(content="hello"),
+                    AIMessage(content=[{"type": "text", "text": "Thought: "}, " "]),
+                ],
+                None,
+                [
+                    {"role": "user", "content": "hello"},
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Thought:"}],
+                    },
+                ],
+                id="blank_trailing_prefill_block",
+            ),
+        ],
+    )
+    def test_payload_has_no_blank_text_block(
+        self, model, messages, expected_system, expected_messages
+    ):
+        chat = ChatAnthropic(async_client=AsyncAnthropic(api_key="test"), model=model)
+
+        payload = chat._get_request_payload(messages)
+
+        assert payload.get("system") == expected_system
+        assert payload["messages"] == expected_messages

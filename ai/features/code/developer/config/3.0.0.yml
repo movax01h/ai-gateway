@@ -88,10 +88,14 @@ prompts:
     unit_primitives:
       - duo_agent_platform
     prompt_template:
-      system: |
-        {% extends 'developer/common/system/1.0.0.jinja' %}
-        {% block tool_instructions %}
-        - Use `glab` for GitLab operations (it's authenticated for this instance).
-        {%- endblock %}
+      system:
+        - |
+          {% extends 'developer/common/system/1.0.0.jinja' %}
+          {% block tool_instructions %}
+          - Available CLI tools: glab (authenticated for this GitLab instance), git
+          - Use `glab` for GitLab operations (it's authenticated for this instance).
+          {%- endblock %}
+        - |
+          {% include 'developer/common/session_context/1.0.0.jinja' %}
       user: |
         {{ goal }}

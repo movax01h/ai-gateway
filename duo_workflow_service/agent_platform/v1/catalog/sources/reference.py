@@ -77,5 +77,14 @@ class CatalogItemRef(BaseModel):
     item_id: str
     version: Optional[str] = None
 
+    def match_key(self) -> tuple[str, str]:
+        """Return the id and version that a served item must have to match this reference.
+
+        Returns:
+            The stripped ``item_id``, and the stripped ``version`` or ``""`` when there is none. A served item strips
+            its id and version too, so the two compare equal.
+        """
+        return self.item_id.strip(), (self.version or "").strip()
+
     def __str__(self) -> str:
         return f"{self.source.value}/{self.item_type.value}/{self.item_id}"

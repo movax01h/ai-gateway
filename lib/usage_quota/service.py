@@ -1,5 +1,6 @@
+from contextvars import ContextVar
 from enum import StrEnum
-from typing import NamedTuple
+from typing import Awaitable, Callable, NamedTuple
 
 import structlog
 
@@ -22,6 +23,7 @@ __all__ = [
     "UsageQuotaCheckUnavailable",
     "UsageQuotaEvent",
     "UsageQuotaService",
+    "recheck_usage_quota",
 ]
 
 
@@ -35,6 +37,13 @@ class UsageQuotaEvent(StrEnum):
     CODE_SUGGESTIONS_CODE_COMPLETIONS = "code_completions"
     AMAZON_Q_INTEGRATION = "amazon_q_integration"
     AIGW_PROXY_USE = "ai_gateway_proxy_use"
+
+
+#: Re-runs the quota check a request passed when it started, for work that keeps
+#: spending after that, such as a long flow run. Unset when the check was skipped.
+recheck_usage_quota: ContextVar[Callable[[], Awaitable[None]] | None] = ContextVar(
+    "recheck_usage_quota", default=None
+)
 
 
 class InsufficientCredits(Exception):

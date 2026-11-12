@@ -21,7 +21,9 @@ In CI pipelines in AI Gateway:
   - `semantic_release_check` job runs to make sure the commits are releasable via semantic-release.
 - On `main` branch:
   - `semantic_release_base` job runs automatically to cut a new release and Git tag when conventional commits are detected.
-- On Git tags:
+- On `v1.x.y` Git tags in the canonical project:
+  - `release-docker-image:version-tag` job verifies the `cosign` signature of the image that `main` built for the tagged commit, then retags that digest. Lint, test and build jobs are skipped.
+- On other Git tags:
   - `release-docker-image:tag` job runs to pushes a new Docker image.
 - On Git tags with format `gitlab-*`:
   - `release-docker-hub-image:tag` job runs to push a new Docker image to DockerHub. Requires `$DOCKERHUB_USERNAME` and `$DOCKERHUB_PASSWORD` to be set as CI variables.
@@ -154,11 +156,9 @@ When you need to backport a fix to a specific AI Gateway release version:
 
 While a security fix is under embargo on the security fork, its branches diverge from the canonical repository. The push mirror then rejects updates, so new canonical commits stop reaching the fork, which can leave the fork's GitLab-managed deployments stuck until the fix is synced back.
 
-To keep deployments moving, a pipeline schedule on the security fork sets `MERGE_TRAIN=true`, which runs the `merge-train-trigger` job in `.gitlab-ci.yml`. That job triggers [`gitlab-org/merge-train`](https://gitlab.com/gitlab-org/merge-train) to copy new canonical commits into the fork. The job only ever runs on the security fork, and only from a schedule.
+To keep deployments moving, an hourly pipeline schedule on the security fork sets `MERGE_TRAIN=true`, which runs the `merge-train-trigger` job in `.gitlab-ci.yml`. That job triggers [`gitlab-org/merge-train`](https://gitlab.com/gitlab-org/merge-train) to copy new canonical commits into the fork. The job only ever runs on the security fork, and only from a schedule. The schedule is managed in Terraform ([infra-mgmt!3449](https://gitlab.com/gitlab-com/gl-infra/infra-mgmt/-/merge_requests/3449)) and stays on all the time, so nobody activates or deactivates it during a fix. To pause it, change `active` in Terraform. Taking ownership of the schedule by hand breaks the job.
 
-Sync only ever flows from canonical into the security fork. Pushing tagged security releases back to canonical stays manual by design; see the [discussion in #2370](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2370#note_3433871034) for details.
-
-For when to activate and deactivate the schedule, see [`security_fixes.md`](./security_fixes.md#process).
+The automatic sync only flows from canonical into the security fork. Pushing security fixes back to canonical stays manual by design; see the [discussion in #2370](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2370#note_3433871034) for details, and [`security_fixes.md`](./security_fixes.md#how-canonical-and-the-fork-stay-in-sync) for how the two directions work.
 
 ## Semantic releases in AI Gateway
 

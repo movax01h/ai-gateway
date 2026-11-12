@@ -39,11 +39,11 @@ The API version (v1, experimental) is already determined by the root path (`agen
 
 ### Syncing Flows from the AI Catalog
 
-The `fetch-foundational-agents` script (`duo_workflow_service/scripts/fetch_foundational_agents.py`) fetches a flow
-config from the GitLab AI Catalog and writes it as a feature under `ai/features/foundational_agents/`, so
-flow-config discovery registers it like any bundled feature. A fetched agent must not share its name with a
-bundled feature: discovery fails at boot on a duplicate flow ID. Fetched agents are gitignored; the Docker images
-run the script at build time.
+The `fetch-foundational-agents` script (`duo_workflow_service/scripts/fetch_foundational_agents.py`) reads the agents
+listed in `ai/features/foundational_agents/config/ai-catalog-agents.yml`, fetches each flow config from the GitLab AI Catalog and writes
+it as a feature under `ai/features/foundational_agents/`, so flow-config discovery registers it like any bundled
+feature. A fetched agent must not share its name with a bundled feature: discovery fails at boot on a duplicate flow
+ID. Fetched agents are gitignored; the Docker images run the script at build time.
 
 **Usage:**
 
@@ -51,18 +51,33 @@ run the script at build time.
 poetry run fetch-foundational-agents \
   <gitlab_url> \
   <gitlab_token> \
-  <agent_ids> \
-  --flow-registry-version <v1|experimental>
+  [<agents>] \
+  --flow-registry-version <v1|experimental> \
+  [--agents-file <path>]
 ```
 
-Where `<agent_ids>` is a comma-separated list of `file_name:catalog_id` pairs, for example:
+`<agents>` is an optional comma-separated list of `reference:catalog_id` pairs, for example `my_flow:348,my_other_flow:349`.
+When given, it replaces the agents file. GDK's fetch script still passes this form and reads the list from a comment
+in the Dockerfile; a test keeps that comment equal to `ai/features/foundational_agents/config/ai-catalog-agents.yml`.
+
+`--agents-file` defaults to the bundled `ai/features/foundational_agents/config/ai-catalog-agents.yml`. To fetch a different set of agents, for example from a local
+GDK where the catalog IDs differ, point it at your own file:
+
+```yaml
+# my_agents.yml
+agents:
+  - reference: my_flow
+    catalog_id: 348
+  - reference: my_other_flow
+    catalog_id: 349
+```
 
 ```shell
 poetry run fetch-foundational-agents \
   http://gdk.test:3000 \
   $TOKEN \
-  my_flow:348,my_other_flow:349 \
-  --flow-registry-version v1
+  --flow-registry-version v1 \
+  --agents-file my_agents.yml
 ```
 
 This writes:
@@ -135,6 +150,7 @@ Set `workflowDefinition` to `"<flow_name>/<api_version>"` (e.g. `"developer/v1"`
 
 When a request arrives, the server resolves the flow in this order:
 
+1. If `fetch_flow_config` is true → fetches the saved AI Catalog flow for `workflowID` from GitLab before the graph is built, and ignores `flowConfig`, `flowConfigSchemaVersion` and `workflowDefinition` for resolution. The same request returns the flow's AI Catalog agents. The token must be bound to `workflowID` and hold a `flow_config_digest` claim, which the fetched definition must match. The request cannot also set `flowConfigId` or `flowVersion`. A GitLab that does not serve the definition fails the run.
 1. If `flowConfigId` + `flowConfigSchemaVersion` + `flowVersion` are set → loads `configs/{flowConfigId}/{flowVersion}.yml`
 1. If `flowConfig` + `flowConfigSchemaVersion` are set → uses the inline config struct directly
 1. If `workflowDefinition` matches a known legacy workflow name (`software_development`, `chat`, etc.) → uses that workflow class directly. Otherwise, parses it as `"flow_name/api_version"` and loads `configs/{flow_name}/1.0.0.yml`

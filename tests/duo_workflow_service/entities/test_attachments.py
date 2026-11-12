@@ -1,7 +1,11 @@
+import asyncio
 import base64
 import json
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.tools import ToolException
+from structlog.testing import capture_logs
 
 from duo_workflow_service.entities.attachments import (
     _MAGIC_NUMBERS,
@@ -16,10 +20,12 @@ from duo_workflow_service.entities.attachments import (
     attachment_reference_envelopes,
     parse_attachments,
     partition_attachment_envelopes,
+    resolve_attachment_envelopes,
     split_attachment_envelopes,
     with_attachment_references,
 )
 from duo_workflow_service.entities.image_blocks import strip_image_payloads
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 
 # Real container headers, because `_verify_declared_type` checks the payload against
@@ -547,3 +553,252 @@ class TestWithAttachmentReferences:
     )
     def test_context_is_unchanged_when_there_are_no_attachments(self, context):
         assert with_attachment_references(context, []) == context
+
+
+SESSION_FILE_URL = "/api/v4/ai/duo_workflows/workflows/1234/session_files/5"
+
+
+@pytest.fixture(name="gitlab_client")
+def gitlab_client_fixture():
+    client = MagicMock()
+    client.aget = AsyncMock(
+        return_value=GitLabHttpResponse(
+            status_code=200,
+            body={"content_type": "image/png", "filename": "dk.png", "data": PNG_B64},
+        )
+    )
+    return client
+
+
+async def resolve(items, gitlab_client):
+    return await resolve_attachment_envelopes(items, gitlab_client, "1234")
+
+
+def payload_of(item: AdditionalContext) -> dict:
+    return json.loads(item.content or "")
+
+
+class TestResolveAttachmentEnvelopes:
+    @pytest.mark.asyncio
+    async def test_none_stays_none(self, gitlab_client):
+        assert await resolve(None, gitlab_client) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "item",
+        [
+            AdditionalContext(category="file", content="ctx"),
+            envelope(mime_type="image/png", data=PNG_B64, filename="a.png"),
+            AdditionalContext(category="attachments", content="not json"),
+            envelope(filename="a.png"),
+        ],
+        ids=["other category", "inline", "malformed", "no url"],
+    )
+    async def test_leaves_everything_but_a_reference_alone(self, item, gitlab_client):
+        assert await resolve([item], gitlab_client) == [item]
+        gitlab_client.aget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_replaces_a_reference_with_the_fetched_payload(self, gitlab_client):
+        (resolved,) = await resolve(
+            [envelope(url=SESSION_FILE_URL, filename="shot.png")], gitlab_client
+        )
+
+        gitlab_client.aget.assert_awaited_once_with(
+            path=SESSION_FILE_URL, parse_json=True
+        )
+        assert payload_of(resolved) == {
+            "mime_type": "image/png",
+            "filename": "shot.png",
+            "data": PNG_B64,
+        }
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_the_stored_filename(self, gitlab_client):
+        (resolved,) = await resolve([envelope(url=SESSION_FILE_URL)], gitlab_client)
+
+        assert payload_of(resolved)["filename"] == "dk.png"
+
+    @pytest.mark.asyncio
+    async def test_keeps_the_context_in_order(self, gitlab_client):
+        context = AdditionalContext(category="file", content="ctx")
+
+        result = await resolve(
+            [envelope(url=SESSION_FILE_URL), context, envelope(url=SESSION_FILE_URL)],
+            gitlab_client,
+        )
+
+        assert [item.category for item in result] == [
+            ATTACHMENTS_CATEGORY,
+            "file",
+            ATTACHMENTS_CATEGORY,
+        ]
+        assert result[1] is context
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/api/v4/ai/duo_workflows/workflows/999/session_files/5",
+            "/api/v4/projects/1/repository/files/secret",
+            f"{SESSION_FILE_URL}/../../../projects/1",
+            "/api/v4/ai/duo_workflows/workflows/1234/session_files/٥",
+        ],
+        ids=[
+            "another session",
+            "another endpoint",
+            "path traversal",
+            "non-ascii digit",
+        ],
+    )
+    async def test_refuses_anything_but_this_sessions_files(self, url, gitlab_client):
+        (resolved,) = await resolve([envelope(url=url)], gitlab_client)
+
+        gitlab_client.aget.assert_not_awaited()
+        assert payload_of(resolved)["error"] == (
+            "it is not a file uploaded to this session"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("response", "error"),
+        [
+            (GitLabHttpResponse(status_code=404, body={}), "GitLab returned HTTP 404"),
+            (
+                GitLabHttpResponse(status_code=200, body={"data": ""}),
+                "GitLab returned no content for it",
+            ),
+            (
+                GitLabHttpResponse(status_code=200, body="not json"),
+                "GitLab returned no content for it",
+            ),
+        ],
+        ids=["http error", "empty data", "non-json body"],
+    )
+    async def test_marks_a_failed_fetch_on_the_envelope(
+        self, response, error, gitlab_client
+    ):
+        gitlab_client.aget.return_value = response
+
+        (resolved,) = await resolve([envelope(url=SESSION_FILE_URL)], gitlab_client)
+
+        assert payload_of(resolved)["error"] == error
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "exception",
+        [asyncio.TimeoutError(), ConnectionError("connection reset"), ToolException()],
+        ids=["timeout", "network error", "tool exception"],
+    )
+    async def test_marks_an_unreachable_gitlab_on_the_envelope(
+        self, exception, gitlab_client
+    ):
+        gitlab_client.aget.side_effect = exception
+
+        (resolved,) = await resolve([envelope(url=SESSION_FILE_URL)], gitlab_client)
+
+        assert payload_of(resolved)["error"] == "GitLab could not be reached"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("url", "aget", "expected"),
+        [
+            (
+                "/api/v4/projects/1/repository/files/secret",
+                {},
+                {"reason": "not_a_session_file_path"},
+            ),
+            (
+                "/api/v4/ai/duo_workflows/workflows/999/session_files/5",
+                {},
+                {
+                    "reason": "other_session",
+                    "url": "/api/v4/ai/duo_workflows/workflows/999/session_files/5",
+                },
+            ),
+            (
+                SESSION_FILE_URL,
+                {"side_effect": asyncio.TimeoutError()},
+                {"exception_class": "TimeoutError", "url": SESSION_FILE_URL},
+            ),
+            (
+                SESSION_FILE_URL,
+                {"return_value": GitLabHttpResponse(status_code=404, body={})},
+                {"status_code": 404, "url": SESSION_FILE_URL},
+            ),
+            (
+                SESSION_FILE_URL,
+                {
+                    "return_value": GitLabHttpResponse(
+                        status_code=200, body={"data": ""}
+                    )
+                },
+                {"reason": "empty_body", "url": SESSION_FILE_URL},
+            ),
+        ],
+        ids=[
+            "another endpoint",
+            "another session",
+            "unreachable",
+            "http error",
+            "empty body",
+        ],
+    )
+    async def test_logs_why_a_reference_was_not_resolved(
+        self, url, aget, expected, gitlab_client
+    ):
+        gitlab_client.aget.configure_mock(**aget)
+
+        with capture_logs() as cap_logs:
+            await resolve([envelope(url=url)], gitlab_client)
+
+        (entry,) = cap_logs
+        assert entry["log_level"] == "warning"
+        assert entry["workflow_id"] == "1234"
+        assert entry.items() >= expected.items()
+
+    @pytest.mark.asyncio
+    async def test_does_not_log_an_unmatched_url(self, gitlab_client):
+        # An unmatched URL is client-supplied, so it never reaches the logs.
+        with capture_logs() as cap_logs:
+            await resolve(
+                [envelope(url="/api/v4/projects/1/repository/files/secret")],
+                gitlab_client,
+            )
+
+        (entry,) = cap_logs
+        assert "url" not in entry
+
+    @pytest.mark.asyncio
+    async def test_fetches_nothing_for_a_turn_over_the_count_cap(self, gitlab_client):
+        items = [envelope(url=SESSION_FILE_URL) for _ in range(MAX_ATTACHMENTS + 1)]
+
+        assert await resolve(items, gitlab_client) == items
+        gitlab_client.aget.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_failed_fetch_is_reported_as_a_rejected_file(self, gitlab_client):
+        gitlab_client.aget.return_value = GitLabHttpResponse(status_code=404, body={})
+
+        resolved = await resolve(
+            [envelope(url=SESSION_FILE_URL, filename="shot.png")], gitlab_client
+        )
+
+        with pytest.raises(ValueError, match="'shot.png' could not be read"):
+            parse_attachments(resolved)
+
+    @pytest.mark.asyncio
+    async def test_a_resolved_file_is_still_checked_against_its_type(
+        self, gitlab_client
+    ):
+        # The stored type comes from the upload's filename, so the bytes are what
+        # catch a file renamed to look like an image.
+        gitlab_client.aget.return_value = GitLabHttpResponse(
+            status_code=200,
+            body={"content_type": "image/png", "data": b64_for("image/jpeg")},
+        )
+
+        resolved = await resolve([envelope(url=SESSION_FILE_URL)], gitlab_client)
+
+        with pytest.raises(ValueError):
+            parse_attachments(resolved)

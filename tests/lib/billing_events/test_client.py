@@ -3,11 +3,17 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from snowplow_tracker import SelfDescribingJson, Snowplow
 
-from lib.billing_events import BillingEvent, BillingEventsClient
+from lib.billing_events import (
+    BillingEvent,
+    BillingEventContext,
+    BillingEventDropReason,
+    BillingEventsClient,
+)
 from lib.feature_flags import FeatureFlag, current_feature_flag_context
 from lib.internal_events.client import InternalEventsClient
 from lib.internal_events.context import (
@@ -739,18 +745,24 @@ class TestBillingEventsClient:
             {"se_ac": "test_event_2", "eid": "event-id-2"},
         ]
 
-        with mock.patch.object(client._logger, "warning") as mock_warning:
-            with mock.patch.object(client, "_log_event") as mock_log_event:
-                client._on_failure(succeeded_count=5, failed_events=failed_events)
+        with (
+            mock.patch.object(client._logger, "warning") as mock_warning,
+            mock.patch.object(client, "_log_event") as mock_log_event,
+            mock.patch.object(
+                client._emitter, "last_failure_is_retryable", return_value=True
+            ),
+        ):
+            client._on_failure(succeeded_count=5, failed_events=failed_events)
 
-                mock_warning.assert_called_once_with(
-                    "Failed to track billing events",
-                    succeeded_count=5,
-                    failed_count=2,
-                )
-                assert mock_log_event.call_count == 2
-                mock_log_event.assert_any_call(failed_events[0], success=False)
-                mock_log_event.assert_any_call(failed_events[1], success=False)
+            mock_warning.assert_called_once_with(
+                "Failed to track billing events",
+                succeeded_count=5,
+                failed_count=2,
+                will_retry=True,
+            )
+            assert mock_log_event.call_count == 2
+            mock_log_event.assert_any_call(failed_events[0], success=False)
+            mock_log_event.assert_any_call(failed_events[1], success=False)
 
     @mock.patch("snowplow_tracker.Tracker.__init__")
     @mock.patch("snowplow_tracker.emitters.AsyncEmitter.__init__")
@@ -913,3 +925,233 @@ class TestBillingEventsClient:
                 emitter_buffer_size=expected_buffer,
                 emitter_total_pending=expected_total,
             )
+
+
+@pytest.fixture(name="live_client")
+def live_client_fixture(metrics):
+    """Enabled client with a real Snowplow emitter and event store; only the HTTP request and retry timer are mocked."""
+    client = BillingEventsClient(
+        enabled=True,
+        endpoint="https://billing.local",
+        app_id="gitlab_ai_gateway-billing",
+        namespace="gl",
+        batch_size=1,
+        thread_count=1,
+        internal_event_client=MagicMock(spec=InternalEventsClient),
+        metrics=metrics,
+    )
+    with mock.patch.object(client._emitter, "_set_retry_timer"):
+        yield client
+    client._session.close()
+
+
+@pytest.fixture(name="mock_post")
+def mock_post_fixture(live_client):
+    with mock.patch.object(live_client._emitter.request_method, "post") as mock_post:
+        yield mock_post
+
+
+def _sample(registry, name, **labels):
+    return registry.get_sample_value(name, labels) or 0
+
+
+def _emitted(registry, event_type):
+    return _sample(registry, "billing_events_emitted_total", event_type=event_type)
+
+
+def _delivered(registry, event_type):
+    return _sample(registry, "billing_events_delivered_total", event_type=event_type)
+
+
+def _dropped(registry, reason, event_type):
+    return _sample(
+        registry,
+        "billing_events_dropped_total",
+        reason=reason.value,
+        event_type=event_type,
+    )
+
+
+def _no_drops(registry, event_type):
+    return all(
+        _dropped(registry, reason, event_type) == 0 for reason in BillingEventDropReason
+    )
+
+
+def _payload(event, eid="event-id-1"):
+    return {"se_ac": event.value, "eid": eid}
+
+
+class TestBillingEventsClientMetrics:
+    @pytest.mark.usefixtures("mock_dependencies")
+    @pytest.mark.parametrize(
+        ("method", "expected_emitted"),
+        [
+            # Direct callers: the client owns the emitted count.
+            ("track_billing_event", 1),
+            # BillingEventService has already counted the attempt, so it must not be counted again.
+            ("send_billing_event", 0),
+        ],
+    )
+    def test_emitted_is_counted_only_by_track_billing_event(
+        self, metered_client, user, registry, method, expected_emitted
+    ):
+        current_event_context.set(EventContext())
+
+        assert getattr(metered_client, method)(
+            user=user,
+            event=BillingEvent.CODE_SUGGESTIONS_CODE_COMPLETIONS,
+            category=__name__,
+        )
+
+        assert _emitted(registry, "code_completions") == expected_emitted
+        assert _no_drops(registry, "code_completions")
+
+    def test_disabled_client_counts_nothing(self, metrics, registry, user):
+        client = BillingEventsClient(
+            enabled=False,
+            endpoint="https://billing.local",
+            app_id="gitlab_ai_gateway-billing",
+            namespace="gl",
+            batch_size=1,
+            thread_count=1,
+            internal_event_client=MagicMock(spec=InternalEventsClient),
+            metrics=metrics,
+        )
+
+        client.track_billing_event(
+            user=user, event=BillingEvent.AIGW_PROXY_USE, category=__name__
+        )
+
+        assert _emitted(registry, "ai_gateway_proxy_use") == 0
+
+    @pytest.mark.usefixtures("mock_dependencies")
+    def test_invalid_quantity_counts_missing_field(
+        self, metered_client, user, registry
+    ):
+        current_event_context.set(EventContext())
+
+        tracked = metered_client.track_billing_event(
+            user=user,
+            event=BillingEvent.AIGW_PROXY_USE,
+            category=__name__,
+            quantity=0,
+        )
+
+        assert tracked is False
+        assert _emitted(registry, "ai_gateway_proxy_use") == 1
+        assert (
+            _dropped(
+                registry, BillingEventDropReason.MISSING_FIELD, "ai_gateway_proxy_use"
+            )
+            == 1
+        )
+
+    @pytest.mark.usefixtures("mock_dependencies")
+    def test_context_validation_error_counts_missing_field_and_reraises(
+        self, metered_client, user, registry
+    ):
+        current_event_context.set(EventContext())
+
+        with (
+            mock.patch(
+                "lib.billing_events.client.BillingEventContext",
+                side_effect=lambda **_: BillingEventContext.model_validate({}),
+            ),
+            pytest.raises(ValidationError),
+        ):
+            metered_client.track_billing_event(
+                user=user,
+                event=BillingEvent.DAP_FLOW_ON_COMPLETION,
+                category=__name__,
+            )
+
+        assert (
+            _dropped(
+                registry,
+                BillingEventDropReason.MISSING_FIELD,
+                "duo_agent_platform_workflow_completion",
+            )
+            == 1
+        )
+
+    def test_successful_send_counts_delivered(self, live_client, mock_post, registry):
+        mock_post.return_value = MagicMock(status_code=200)
+
+        live_client._emitter.send_events(
+            [
+                _payload(BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS, "event-id-1"),
+                _payload(BillingEvent.CODE_SUGGESTIONS_CODE_GENERATIONS, "event-id-2"),
+            ]
+        )
+
+        assert _delivered(registry, "code_generations") == 2
+        assert _no_drops(registry, "code_generations")
+
+    @pytest.mark.parametrize("status_code", [400, 401, 403, 410, 422])
+    def test_non_retryable_status_counts_http_error(
+        self, live_client, mock_post, registry, status_code
+    ):
+        mock_post.return_value = MagicMock(status_code=status_code)
+
+        live_client._emitter.send_events([_payload(BillingEvent.AIGW_PROXY_USE)])
+
+        assert (
+            _dropped(
+                registry, BillingEventDropReason.HTTP_ERROR, "ai_gateway_proxy_use"
+            )
+            == 1
+        )
+        assert live_client._emitter.event_store.size() == 0
+        assert _delivered(registry, "ai_gateway_proxy_use") == 0
+
+    @pytest.mark.parametrize(
+        "post_kwargs",
+        [
+            pytest.param(
+                {"return_value": MagicMock(status_code=500)}, id="server_error"
+            ),
+            pytest.param(
+                {"return_value": MagicMock(status_code=503)}, id="unavailable"
+            ),
+            pytest.param(
+                {"side_effect": requests.ConnectionError("connection refused")},
+                id="request_exception",
+            ),
+        ],
+    )
+    def test_retryable_failure_is_not_counted_as_dropped(
+        self, live_client, mock_post, registry, post_kwargs
+    ):
+        """Snowplow calls on_failure on every failed attempt; a retried event is not lost, so it must not alert."""
+        mock_post.configure_mock(**post_kwargs)
+
+        live_client._emitter.send_events([_payload(BillingEvent.AIGW_PROXY_USE)])
+
+        assert live_client._emitter.event_store.size() == 1
+        assert _no_drops(registry, "ai_gateway_proxy_use")
+
+    def test_retry_after_transient_failure_counts_delivered_once(
+        self, live_client, mock_post, registry
+    ):
+        mock_post.side_effect = [
+            MagicMock(status_code=503),
+            MagicMock(status_code=200),
+        ]
+
+        live_client._emitter.send_events([_payload(BillingEvent.AIGW_PROXY_USE)])
+        live_client._emitter.send_events(
+            live_client._emitter.event_store.get_events_batch()
+        )
+
+        assert _delivered(registry, "ai_gateway_proxy_use") == 1
+        assert _no_drops(registry, "ai_gateway_proxy_use")
+
+    def test_unexpected_event_type_is_labelled_unknown(
+        self, live_client, mock_post, registry
+    ):
+        mock_post.return_value = MagicMock(status_code=400)
+
+        live_client._emitter.send_events([{"se_ac": "not-a-billing-event"}])
+
+        assert _dropped(registry, BillingEventDropReason.HTTP_ERROR, "unknown") == 1

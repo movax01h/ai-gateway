@@ -1,0 +1,15 @@
+---
+name: Codestral 22B Code Generations
+model:
+  params:
+    temperature: 0.3
+    max_tokens: 256
+unit_primitive: generate_code
+models_from: code_generations
+prompt_template:
+  system: |
+    {% include 'code_suggestions/generations/jinja_template/self_hosted/system_codestral/1.0.0.jinja' %}
+  user: |
+    {% include 'code_suggestions/generations/jinja_template/self_hosted/user_codestral/1.0.0.jinja' %}
+params:
+  timeout: 60

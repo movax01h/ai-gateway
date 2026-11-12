@@ -39,7 +39,7 @@ Incoming request
 
 - **`BillingEventsClient`** (`client.py`) — low-level Snowplow emitter; builds and sends `BillingEventContext`
 - **`BillingEventService`** (`service.py`) — higher-level service; resolves LLM operations and wraps the client
-- **`BillingEvent`** (`client.py`) — enum of all billable event types
+- **`BillingEvent`** (`events.py`) — enum of all billable event types
 - **`BillingEventContext`** (`context.py`) — Snowplow context schema ([iglu schemas](https://gitlab.com/gitlab-org/iglu/-/tree/master/public/schemas/com.gitlab/billable_usage/jsonschema))
 - **`ContainerBillingEvent`** (`container.py`) — DI container wiring client and service
 
@@ -69,6 +69,7 @@ See [Further reading](#further-reading) for links to each deployment type's docu
 - `AIGW_BILLING_EVENT__API_KEY` — optional API key, sent as a bearer token to the collector when set
 - `AIGW_BILLING_EVENT__BATCH_SIZE` — events per batch (set to `1` for local testing)
 - `AIGW_BILLING_EVENT__THREAD_COUNT` — number of async emitter worker threads
+- `AIGW_BILLING_EVENT__VALIDATION_MODE_HTTP` / `AIGW_BILLING_EVENT__VALIDATION_MODE_DWS` — how billable requests that miss fields required by billing events are handled: `log` (default) or `enforce` (reject before any LLM call, only for features listed in `_ENFORCED_FEATURE_QUALIFIED_NAMES` in `lib/billing_events/validation.py`)
 
 **Usage quota** (set in `.env`, no `AIGW_` prefix):
 

@@ -359,8 +359,8 @@ class AnthropicChatModel(ChatModelBase):
                 else:
                     continue
                 yield TextGenModelChunk(text=text)
-        except Exception:
-            error_callback()
+        except Exception as ex:
+            error_callback(ex)
             raise
         finally:
             after_callback()

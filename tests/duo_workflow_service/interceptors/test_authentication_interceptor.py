@@ -9,6 +9,7 @@ from duo_workflow_service.interceptors.authentication_interceptor import (
     AuthenticationInterceptor,
     current_user,
 )
+from lib.context.model import paid_credit_models_allowed_ctx
 
 
 @pytest.fixture(name="mock_continuation")
@@ -52,8 +53,9 @@ async def test_intercept_service_health_check_prefetches_keys_but_bypasses_auth(
     method,
     mock_continuation,
     handler_call_details,
+    mock_config,
 ):
-    interceptor = AuthenticationInterceptor()
+    interceptor = AuthenticationInterceptor(mock_config)
     handler_call_details.method = method
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     mock_continuation.assert_awaited_once_with(handler_call_details)
@@ -88,8 +90,9 @@ async def test_intercept_service_reflection_prefetches_keys_but_bypasses_auth_wh
     method,
     mock_continuation,
     handler_call_details,
+    mock_config,
 ):
-    interceptor = AuthenticationInterceptor(reflection_enabled=True)
+    interceptor = AuthenticationInterceptor(mock_config, reflection_enabled=True)
     handler_call_details.method = method
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     mock_continuation.assert_awaited_once_with(handler_call_details)
@@ -121,8 +124,9 @@ async def test_intercept_service_reflection_requires_auth_by_default(
     method,
     mock_continuation,
     handler_call_details,
+    mock_config,
 ):
-    interceptor = AuthenticationInterceptor()
+    interceptor = AuthenticationInterceptor(mock_config)
     handler_call_details.method = method
     handler_call_details.invocation_metadata = ()
     await interceptor.intercept_service(mock_continuation, handler_call_details)
@@ -148,10 +152,11 @@ async def test_intercept_service_auth_enabled_by_default(
     monkeypatch,
     mock_continuation,
     handler_call_details,
+    mock_config,
 ):
     """Auth is enabled when DUO_WORKFLOW_AUTH__ENABLED is not set."""
     monkeypatch.delenv("DUO_WORKFLOW_AUTH__ENABLED", raising=False)
-    interceptor = AuthenticationInterceptor()
+    interceptor = AuthenticationInterceptor(mock_config)
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     mock_cloud_connector_ready.assert_called_once()
 
@@ -168,9 +173,10 @@ async def test_intercept_service_auth_disabled(
     monkeypatch,
     mock_continuation,
     handler_call_details,
+    mock_config,
 ):
     monkeypatch.setenv("DUO_WORKFLOW_AUTH__ENABLED", auth_enabled_value)
-    interceptor = AuthenticationInterceptor()
+    interceptor = AuthenticationInterceptor(mock_config)
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     user = current_user.get()
     assert user.is_authenticated
@@ -202,8 +208,9 @@ async def test_intercept_service_auth_enabled(
     _mock_authenticate,
     mock_continuation,
     handler_call_details,
+    mock_config,
 ):
-    interceptor = AuthenticationInterceptor()
+    interceptor = AuthenticationInterceptor(mock_config)
     await interceptor.intercept_service(mock_continuation, handler_call_details)
     user = current_user.get()
     assert user.is_authenticated
@@ -234,6 +241,7 @@ async def test_intercept_service_allows_saas_without_root_namespace_id(
     _mock_cloud_connector_ready,
     mock_continuation,
     handler_call_details,
+    mock_config,
     extra_claims,
 ):
     with patch(
@@ -245,7 +253,7 @@ async def test_intercept_service_allows_saas_without_root_namespace_id(
             None,
         ),
     ):
-        interceptor = AuthenticationInterceptor()
+        interceptor = AuthenticationInterceptor(mock_config)
         await interceptor.intercept_service(mock_continuation, handler_call_details)
 
     mock_continuation.assert_awaited_once()
@@ -268,6 +276,7 @@ async def test_intercept_service_accepts_saas_with_root_namespace_id(
     _mock_cloud_connector_ready,
     mock_continuation,
     handler_call_details,
+    mock_config,
     extra_claims,
 ):
     with patch(
@@ -279,7 +288,7 @@ async def test_intercept_service_accepts_saas_with_root_namespace_id(
             None,
         ),
     ):
-        interceptor = AuthenticationInterceptor()
+        interceptor = AuthenticationInterceptor(mock_config)
         await interceptor.intercept_service(mock_continuation, handler_call_details)
 
     mock_continuation.assert_awaited_once()
@@ -295,6 +304,7 @@ async def test_intercept_service_accepts_non_saas_without_root_namespace_id(
     _mock_cloud_connector_ready,
     mock_continuation,
     handler_call_details,
+    mock_config,
 ):
     with patch(
         "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
@@ -305,7 +315,110 @@ async def test_intercept_service_accepts_non_saas_without_root_namespace_id(
             None,
         ),
     ):
-        interceptor = AuthenticationInterceptor()
+        interceptor = AuthenticationInterceptor(mock_config)
         await interceptor.intercept_service(mock_continuation, handler_call_details)
 
     mock_continuation.assert_awaited_once()
+
+
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+@pytest.mark.parametrize(
+    ("config_values", "portal_url", "expects_customers_dot"),
+    [
+        pytest.param({}, None, True, id="saas_default_url"),
+        pytest.param({}, "https://cdot.example.com", True, id="saas_explicit"),
+        pytest.param(
+            {"custom_models": {"enabled": True}},
+            None,
+            False,
+            id="self_hosted_default_url",
+        ),
+        pytest.param(
+            {"custom_models": {"enabled": True}},
+            "",
+            False,
+            id="self_hosted_empty_url",
+        ),
+        pytest.param(
+            {"custom_models": {"enabled": True}},
+            "https://cdot.example.com",
+            True,
+            id="self_hosted_explicit",
+        ),
+        pytest.param(
+            {"custom_models": {"enabled": True}},
+            "https://customers.gitlab.com",
+            True,
+            id="self_hosted_explicit_default_value",
+        ),
+    ],
+)
+def test_oidc_customers_dot_provider(
+    _mock_cloud_connector_ready,
+    monkeypatch,
+    mock_config,
+    portal_url,
+    expects_customers_dot,
+):
+    monkeypatch.setenv("DUO_WORKFLOW_AUTH__ENABLED", "true")
+    monkeypatch.setenv(
+        "DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL", "https://gitlab.example.com"
+    )
+    if portal_url is None:
+        monkeypatch.delenv("DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL", raising=False)
+    else:
+        monkeypatch.setenv("DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL", portal_url)
+
+    interceptor = AuthenticationInterceptor(mock_config)
+
+    expected = {"Gitlab": "https://gitlab.example.com"}
+    if expects_customers_dot:
+        expected["CustomersDot"] = portal_url or "https://customers.gitlab.com"
+
+    providers = interceptor.oidc_auth_provider.providers
+    assert providers[1].oidc_providers == expected
+
+
+@patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})
+@patch(
+    "duo_workflow_service.interceptors.authentication_interceptor.cloud_connector_ready",
+    return_value=True,
+)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("extra_claims", "expected"),
+    [
+        pytest.param({"gitlab_paid_credit_models_allowed": False}, False, id="false"),
+        pytest.param({"gitlab_paid_credit_models_allowed": True}, True, id="true"),
+        pytest.param({}, None, id="no_claim"),
+        pytest.param(None, None, id="no_extra_claims"),
+    ],
+)
+async def test_intercept_service_sets_paid_credit_models_allowed(
+    _mock_cloud_connector_ready,
+    mock_continuation,
+    handler_call_details,
+    mock_config,
+    extra_claims,
+    expected,
+):
+    seen = []
+    mock_continuation.side_effect = lambda _details: seen.append(
+        paid_credit_models_allowed_ctx.get()
+    )
+    with patch(
+        "duo_workflow_service.interceptors.authentication_interceptor.authenticate",
+        return_value=(
+            CloudConnectorUser(
+                True, claims=UserClaims(gitlab_realm="self-managed", extra=extra_claims)
+            ),
+            None,
+        ),
+    ):
+        interceptor = AuthenticationInterceptor(mock_config)
+        await interceptor.intercept_service(mock_continuation, handler_call_details)
+
+    assert seen == [expected]

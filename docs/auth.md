@@ -66,9 +66,22 @@ We cache the JWKS for 24 hours and use it to validate the authenticity of all re
 Which OIDC providers should be used depends on who provides tokens in the first place:
 
 - When it's the Customers Portal (CDot) from which your access tokens are synced, set `AIGW_CUSTOMER_PORTAL_URL`
+  (default `https://customers.gitlab.com`)
 - When it's your local GitLab instance that self-issues access tokens, set `AIGW_GITLAB_URL`
 
-You can also set both. Cloud Connector will try to fetch keys from all configured OIDC providers and merge their key sets.
+Cloud Connector fetches keys from all configured OIDC providers and merges their key sets.
+
+When custom models are enabled (`AIGW_CUSTOM_MODELS__ENABLED=true`), the AI gateway uses the Customers Portal only
+if `AIGW_CUSTOMER_PORTAL_URL` is set. A self-hosted AI gateway validates tokens issued by its GitLab instance, so
+it does not need to reach `customers.gitlab.com`. Duo Workflow Service applies the same rule to
+`DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL`.
+
+GitLab 19.5 and earlier sends a flow with the synced Customers Portal token when the flow uses a self-hosted model.
+It does so only when **Agents & flows** does not use a self-hosted model. GitLab before 19.4.2, 19.3.4 and 19.2.8 does the same for chat requests.
+A gateway that skips the Customers Portal rejects those requests with a generic authentication error. A gateway image tagged for your GitLab version, in the format `self-hosted-vX.Y.Z-ee`,
+predates this change and keeps working. If you already run a newer gateway, set `AIGW_CUSTOMER_PORTAL_URL` and
+`DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL` to `https://customers.gitlab.com`, or upgrade GitLab first. For how tags map
+to GitLab versions, see [the self-hosted release process](delivery/release.md#self-hosted-ai-gateway-release-process).
 
 For example, to use OIDC, set the following in `.env`:
 

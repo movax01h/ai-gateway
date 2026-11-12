@@ -17,14 +17,27 @@ _UNRELATED_INCLUDE = "reasoning.encrypted_content"
             [
                 {
                     "type": "function",
-                    "function": {"name": "get_issue", "parameters": []},
+                    "function": {
+                        "name": "get_issue",
+                        "parameters": [],
+                        "strict": False,
+                    },
                 },
                 {"type": "web_search"},
             ],
         ),
         (
             {},
-            [{"type": "function", "function": {"name": "get_issue", "parameters": []}}],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_issue",
+                        "parameters": [],
+                        "strict": False,
+                    },
+                }
+            ],
         ),
     ],
 )

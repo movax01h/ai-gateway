@@ -2,14 +2,17 @@
 """Script to sync foundational agents from GitLab AI Catalog.
 
 Usage:
-    python fetch_foundational_agents.py <gitlab_url> <gitlab_token> <foundational_agent_ids>
-    [--flow-registry-version VERSION] [--dry-run]
+    python fetch_foundational_agents.py <gitlab_url> <gitlab_token> [<agents>]
+    --flow-registry-version VERSION [--agents-file PATH] [--dry-run]
 
 Arguments:
-    gitlab_url: GitLab GraphQL API URL (e.g., http://gdk.test:3000/api/graphql)
+    gitlab_url: GitLab base URL (e.g., http://gdk.test:3000)
     gitlab_token: GitLab API token for authentication
-    foundational_agent_ids: Comma-separated list of foundational agent IDs (e.g., "348,349,350")
+    agents: Comma-separated list of `reference:catalog_id` pairs. Optional;
+        when given, it is used instead of the agents file.
     --flow-registry-version: Flow Registry syntax version to fetch (experimental or v1). Required.
+    --agents-file: YAML file that lists the agents to fetch. Defaults to
+        ai/features/foundational_agents/config/ai-catalog-agents.yml. Ignored when `agents` is given.
     --dry-run: If provided, prints to stdout instead of saving YAML files.
 """
 
@@ -19,6 +22,7 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from requests import request
 
 from duo_workflow_service.agent_platform.experimental.flows import (
@@ -50,6 +54,77 @@ query agentFlowConfig($agentVersionId: AiCatalogItemVersionID!) {
 """
 
 
+class FoundationalAgentEntry(BaseModel):
+    """One entry under ``agents:`` in the agents file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reference: str = Field(min_length=1)
+    catalog_id: int
+
+
+class FoundationalAgentsFile(BaseModel):
+    """Schema of the agents file, see ``DEFAULT_AGENTS_FILE``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agents: List[FoundationalAgentEntry] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _references_are_unique(self) -> "FoundationalAgentsFile":
+        references = [agent.reference for agent in self.agents]
+        duplicates = sorted({r for r in references if references.count(r) > 1})
+        if duplicates:
+            raise ValueError(f"Duplicate agent references: {duplicates}")
+        return self
+
+
+def load_agents(path: str | os.PathLike[str]) -> List[FoundationalAgentEntry]:
+    """Read the agents file and return its validated entries.
+
+    Args:
+        path: Path to a YAML file with the ``FoundationalAgentsFile`` schema,
+            see ``DEFAULT_AGENTS_FILE``.
+
+    Returns:
+        The entries under ``agents:``, in file order.
+
+    Raises:
+        FileNotFoundError: If ``path`` does not exist.
+        yaml.YAMLError: If the file is not valid YAML.
+        pydantic.ValidationError: If the file does not match the schema: no
+            ``agents`` list, an empty list, a missing or unknown key, or a
+            duplicate ``reference``.
+    """
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    return FoundationalAgentsFile.model_validate(data).agents
+
+
+def parse_agent_list(value: str) -> List[FoundationalAgentEntry]:
+    """Parse the positional ``reference:catalog_id,...`` agent list.
+
+    Args:
+        value: Comma-separated ``reference:catalog_id`` pairs, for example
+            ``"duo_planner:348,onboarding_guide:1003979"``.
+
+    Returns:
+        One entry per pair, in the given order.
+
+    Raises:
+        pydantic.ValidationError: If a pair has no ``:``, has an empty
+            ``reference``, has a non-integer ``catalog_id``, or if a
+            ``reference`` appears twice.
+    """
+    entries = []
+    for pair in value.split(","):
+        reference, _, catalog_id = pair.partition(":")
+        entries.append({"reference": reference, "catalog_id": catalog_id})
+
+    return FoundationalAgentsFile.model_validate({"agents": entries}).agents
+
+
 def graphql_request(
     url: str,
     token: str,
@@ -74,11 +149,9 @@ def graphql_request(
 
 
 def fetch_foundational_agent(
-    gitlab_url: str, gitlab_token: str, agent_id: str
+    gitlab_url: str, gitlab_token: str, reference: str, catalog_id: int
 ) -> Tuple[str, str]:
     """Sync a single foundational agent and return its workflow definition."""
-
-    file_name, catalog_id = agent_id.split(":")
 
     agent_response: Dict[str, Any] = graphql_request(
         f"{gitlab_url.rstrip('/')}/api/graphql",
@@ -106,12 +179,16 @@ def fetch_foundational_agent(
 
     flow_config: str = flow_response["data"]["aiCatalogAgentFlowConfig"]
 
-    return file_name, flow_config
+    return reference, flow_config
 
 
 # Domain under ai/features/ that holds catalog-fetched flows. Each agent is a
 # regular feature dir, so flow-config discovery picks it up with no special case.
 FOUNDATIONAL_AGENTS_DIR = default_features_dir() / "foundational_agents"
+
+# The list of agents the Docker images fetch at build time. It sits next to the
+# agents it describes, so `COPY ai/ ai/` ships it with the image.
+DEFAULT_AGENTS_FILE = FOUNDATIONAL_AGENTS_DIR / "config" / "ai-catalog-agents.yml"
 
 
 def _agent_config_dir(
@@ -163,8 +240,7 @@ def save_workflow_to_file(
 
     Args:
         agent_id: The flow name used as the subdirectory name (e.g. ``"my_flow"``).
-            This is the ``file_name`` portion of the ``file_name:catalog_id`` pair
-            passed on the command line.
+            This is the ``reference`` of an entry in the agents file.
         flow_def: Raw YAML string fetched from the AI Catalog.  It is validated
             against ``flow_config_model`` before being written to disk.
         flow_config_model: The Pydantic model class that corresponds to the
@@ -182,14 +258,14 @@ def save_workflow_to_file(
 
     Example::
 
-        # Fetch and save the "my_flow" flow from catalog item 348 using the
-        # v1 flow registry schema:
+        # Fetch and save the agents listed in my_agents.yml using the v1 flow
+        # registry schema:
         #
         #   python fetch_foundational_agents.py \\
-        #       http://gdk.test:3000 $TOKEN my_flow:348 \\
-        #       --flow-registry-version v1
+        #       http://gdk.test:3000 $TOKEN \\
+        #       --flow-registry-version v1 --agents-file my_agents.yml
         #
-        # This writes:
+        # For an entry with reference "my_flow" this writes:
         #   ai/features/foundational_agents/my_flow/config/1.0.0.yml
     """
     # This always saves as the default version (1.0.0). Bundling multiple
@@ -228,15 +304,22 @@ def parse_arguments() -> argparse.Namespace:
         epilog=__doc__,
     )
 
-    parser.add_argument("gitlab_url", help="GitLab GraphQL API URL")
+    parser.add_argument("gitlab_url", help="GitLab base URL")
     parser.add_argument("gitlab_token", help="GitLab API token")
     parser.add_argument(
-        "foundational_agent_ids", help="Comma-separated list of agent IDs"
+        "agents",
+        nargs="?",
+        help="Comma-separated reference:catalog_id pairs. Replaces --agents-file when given.",
     )
     parser.add_argument(
         "--flow-registry-version",
         required=True,
         help="Flow Registry syntax version to fetch. Allowed values: 'experimental' or 'v1'.",
+    )
+    parser.add_argument(
+        "--agents-file",
+        default=str(DEFAULT_AGENTS_FILE),
+        help="YAML file that lists the agents to fetch (default: %(default)s)",
     )
     parser.add_argument(
         "--dry-run",
@@ -249,8 +332,6 @@ def parse_arguments() -> argparse.Namespace:
 def fetch_agents() -> None:
     """Main function to parse arguments and sync foundational agents."""
     args: argparse.Namespace = parse_arguments()
-
-    agent_ids: List[str] = args.foundational_agent_ids.split(",")
 
     # Validate flow registry version
     if args.flow_registry_version not in ["experimental", "v1"]:
@@ -265,9 +346,15 @@ def fetch_agents() -> None:
     }
     flow_config_class = version_to_class[args.flow_registry_version]
 
+    agents: List[FoundationalAgentEntry] = (
+        parse_agent_list(args.agents) if args.agents else load_agents(args.agents_file)
+    )
+
     workflow_definitions: list[tuple[str, str]] = [
-        fetch_foundational_agent(args.gitlab_url, args.gitlab_token, agent_id)
-        for agent_id in agent_ids
+        fetch_foundational_agent(
+            args.gitlab_url, args.gitlab_token, agent.reference, agent.catalog_id
+        )
+        for agent in agents
     ]
 
     if args.dry_run:

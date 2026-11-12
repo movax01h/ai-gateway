@@ -5,14 +5,21 @@ import json
 from unittest.mock import patch
 
 import pytest
+from detect_secrets.plugins.keyword import (
+    PRECEDED_BY_EQUAL_COMPARISON_SIGNS_QUOTES_REQUIRED_REGEX,
+    QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP,
+)
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
 from duo_workflow_service.entities.image_blocks import image_content_block
 from duo_workflow_service.security.secret_redaction import (
+    _ASSIGNMENT_OPENERS,
     REDACTED_PLACEHOLDER,
+    redact_cut_comparison,
     redact_secrets,
     redact_secrets_for_ui,
+    redact_unclosed_assignment,
 )
 
 
@@ -371,6 +378,75 @@ class TestKeywordRedactionCoverage:
         assert "realsecretvalue" not in result
         assert "# allowlisted" in result
 
+    @pytest.mark.parametrize("keyword_exclude", [None, "example|allowlisted"])
+    def test_one_sub_pass_matches_the_per_match_rewrite_it_replaced(
+        self, keyword_exclude
+    ):
+        """One ``Pattern.sub`` pass per pattern gives what rewriting the text once per match gave.
+
+        The per-match rewrite is quadratic in the number of matches, which stalled the event loop on a multi-megabyte
+        log. The reference below is that implementation. Random texts join one to six assignments with varied operators,
+        quotes (some unclosed or mismatched), values and separators, so
+        adjacent and unterminated assignments occur, with and without ``keyword_exclude``.
+        """
+        import random
+
+        from detect_secrets.plugins.keyword import (
+            QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP,
+            KeywordDetector,
+        )
+
+        from duo_workflow_service.security.exceptions import SecurityException
+        from duo_workflow_service.security.secret_redaction import (
+            _line_excluded,
+            _redact_keyword_assignments,
+        )
+
+        def per_match_rewrite(detector, text):
+            for (
+                pattern,
+                group_number,
+            ) in QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP.items():
+                for match in reversed(list(pattern.finditer(text))):
+                    start, end = match.span(group_number)
+                    if start == -1 or end <= start:
+                        raise SecurityException("did not capture")
+                    if _line_excluded(detector, text, start, end):
+                        continue
+                    text = text[:start] + REDACTED_PLACEHOLDER + text[end:]
+            return text
+
+        def outcome(function, detector, text):
+            try:
+                return function(detector, text)
+            except SecurityException:
+                return SecurityException
+
+        keywords = ["password", "api_key", "secret", "passwd", "token"]
+        operators = ["=", " = ", ": ", "==", " != "]
+        values = ["value1", "abc123 example", "x" * 30, "allowlisted", "", "[REDACTED]"]
+
+        def assignment(rng):
+            quote = rng.choice(["'", '"', "`", ""])
+            closing = rng.choice([quote, quote, "", rng.choice("'\"")])
+            return (
+                rng.choice(keywords)
+                + rng.choice(operators)
+                + quote
+                + rng.choice(values)
+                + closing
+            )
+
+        detector = KeywordDetector(keyword_exclude=keyword_exclude)
+        rng = random.Random(3381)
+
+        for _ in range(300):
+            separator = rng.choice(["\n", " ", "; ", " # allowlisted\n", " ... "])
+            text = separator.join(assignment(rng) for _ in range(rng.randint(1, 6)))
+            assert outcome(_redact_keyword_assignments, detector, text) == outcome(
+                per_match_rewrite, detector, text
+            ), repr(text)
+
     def test_non_capturing_group_raises_rather_than_passing_value_through(self):
         """A denylist group that fails to capture must fail closed.
 
@@ -465,6 +541,111 @@ class TestKeywordRedactionCoverage:
 
         assert "sharedvalue" not in result
         assert result.count(REDACTED_PLACEHOLDER) == 2
+
+
+class TestUnclosedAssignment:
+    """Tests for ``redact_unclosed_assignment``, a keyword assignment whose closing quote lies past a cut."""
+
+    @pytest.mark.parametrize(
+        "text, kept, expected",
+        [
+            ("a password = 'hunter2 rest", 1000, "a password = '[REDACTED]"),
+            ('a password: "hunter2 rest', 1000, 'a password: "[REDACTED]'),
+            ("a password = `hunter2 rest", 1000, "a password = `[REDACTED]"),
+            ("a secret => 'hunter2 rest", 1000, "a secret => '[REDACTED]"),
+            ("a password 'hunter2 rest", 1000, "a password '[REDACTED]"),
+            # A backtick does not end a ' value.
+            ("a password = 'hunter2 `x` rest", 1000, "a password = '[REDACTED]"),
+            # The whitespace before the quote has no limit.
+            (
+                "password =" + " " * 10_000 + "'hunter2",
+                20_000,
+                "password =" + " " * 10_000 + "'[REDACTED]",
+            ),
+            # Only a value that starts before ``kept`` is shown. This one starts at index 14.
+            ("a password = 'hunter2 rest", 15, "a password = '[REDACTED]"),
+            ("a password = 'hunter2 rest", 14, None),
+            ("a password = 'hunter2 rest", 0, None),
+            ("a password = 'hunter2' rest", 1000, None),
+            ("a password = `hunter2` rest", 1000, None),
+            # A ' value cannot hold a ", so it is not closed by a quote past the cut.
+            ("a password = 'hunter2 \"rest", 1000, None),
+            ("a password = `hunter2 'rest", 1000, None),
+            # The value of a redacted assignment starts with the placeholder.
+            ("a password = '[REDACTED]' rest", 1000, None),
+            ("password = x rest", 1000, None),
+            ("an apostrophe isn't an assignment", 1000, None),
+        ],
+    )
+    def test_masks_from_the_value_to_the_end_or_leaves_the_text(
+        self, text, kept, expected
+    ):
+        assert redact_unclosed_assignment(text, kept) == expected
+
+    @pytest.mark.parametrize(
+        "index, sample",
+        enumerate(
+            [
+                "password: 'hunter2'",
+                "password = 'hunter2'",
+                "password 'hunter2';",
+                "password => 'hunter2'",
+            ]
+        ),
+    )
+    def test_opener_ends_where_the_pattern_captures_the_value(self, index, sample):
+        patterns = [
+            (pattern, value_group)
+            for pattern, value_group in QUOTES_REQUIRED_DENYLIST_REGEX_TO_GROUP.items()
+            if pattern is not PRECEDED_BY_EQUAL_COMPARISON_SIGNS_QUOTES_REQUIRED_REGEX
+        ]
+        assert len(patterns) == len(_ASSIGNMENT_OPENERS)
+        (pattern, value_group), (opener, quote_group) = (
+            patterns[index],
+            _ASSIGNMENT_OPENERS[index],
+        )
+
+        assert opener.search(sample).end() == pattern.search(sample).start(value_group)
+        assert opener.search(sample).group(quote_group) == "'"
+
+
+class TestCutComparison:
+    """Tests for ``redact_cut_comparison``, a comparison whose keyword may lie past a cut."""
+
+    @pytest.mark.parametrize(
+        "text, kept, expected",
+        [
+            ('if "hunter2"   ', 1000, 'if "[REDACTED]'),
+            ("if `hunter2` ==", 1000, "if `[REDACTED]"),
+            ("if 'hunter2' != ", 1000, "if '[REDACTED]"),
+            ("if 'hunter2'\n\n=== my_", 1000, "if '[REDACTED]"),
+            # The padding before the keyword has no limit.
+            ("if 'hunter2'" + " " * 10_000, 20_000, "if '[REDACTED]"),
+            ("if 'hunter2' == " + "a" * 10_000, 20_000, "if '[REDACTED]"),
+            # Only a value that starts before ``kept`` is shown. This one starts at index 4.
+            ("if 'hunter2' ==", 5, "if '[REDACTED]"),
+            ("if 'hunter2' ==", 4, None),
+            ("if 'hunter2' ==", 0, None),
+            ("plain text", 1000, None),
+            ("if 'hunter2', rest", 1000, None),
+            ("if 'hunter2' and x", 1000, None),
+            ("if 'hunter2'abc", 1000, None),
+            ("if 'hunter2' == password: rest", 1000, None),
+            ("it's fine", 1000, None),
+            ("'", 1000, None),
+        ],
+    )
+    def test_masks_from_the_value_to_the_end_or_leaves_the_text(
+        self, text, kept, expected
+    ):
+        assert redact_cut_comparison(text, kept) == expected
+
+    def test_every_cut_between_the_quote_and_the_keyword_masks_the_value(self):
+        text = "if 'hunter2'  \n == my_password"
+
+        assert PRECEDED_BY_EQUAL_COMPARISON_SIGNS_QUOTES_REQUIRED_REGEX.search(text)
+        for cut in range(text.index("'", 5) + 1, len(text) + 1):
+            assert redact_cut_comparison(text[:cut], 1000) == "if '[REDACTED]"
 
 
 class TestRedactSecretsDictAndList:

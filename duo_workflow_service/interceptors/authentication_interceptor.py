@@ -17,10 +17,14 @@ from gitlab_cloud_connector import (
 )
 from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
 
+from ai_gateway.config import Config
+from duo_workflow_service.gitlab.help_links import gitlab_instance_url
 from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS, abort_handler
 from lib.context import cloud_connector_token_context_var
+from lib.context.model import paid_credit_models_allowed_ctx
 from lib.jwt import (
     GITLAB_ROOT_NAMESPACE_ID_CLAIM,
+    paid_credit_models_allowed_from_claims_extra,
     root_namespace_id_from_claims_extra,
 )
 
@@ -35,13 +39,7 @@ class AuthenticationError(Exception):
 
 def oidc_gitlab_url() -> str:
     """Return the GitLab instance whose OIDC keys sign the instance tokens we accept."""
-    # Reuse the AIGW_GITLAB_URL so that GitLab Self-Hosted Duo customers can
-    # use the same URL for both AIGW and Duo Workflow Service
-    return (
-        os.environ.get("DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL")
-        or os.environ.get("AIGW_GITLAB_URL")
-        or "https://gitlab.com"
-    )
+    return gitlab_instance_url()
 
 
 class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
@@ -50,8 +48,10 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
         "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo",
     )
 
-    def __init__(self, reflection_enabled: bool = False):
-        self.oidc_auth_provider = self._init_oidc_auth_provider()
+    def __init__(self, config: Config, reflection_enabled: bool = False):
+        self.oidc_auth_provider = self._init_oidc_auth_provider(
+            config.custom_models.enabled
+        )
         self._allow_unauthenticated_methods = GRPC_HEALTH_METHODS + (
             self._REFLECTION_METHODS if reflection_enabled else ()
         )
@@ -104,6 +104,12 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
                 ),
             )
 
+        claims = cloud_connector_user.claims
+        paid_credit_models_allowed_ctx.set(
+            paid_credit_models_allowed_from_claims_extra(
+                claims.extra if claims else None
+            )
+        )
         current_user.set(cloud_connector_user)
         return await continuation(handler_call_details)
 
@@ -114,7 +120,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
 
         return root_namespace_id_from_claims_extra(claims.extra) is not None
 
-    def _init_oidc_auth_provider(self) -> AuthProvider:
+    def _init_oidc_auth_provider(self, custom_models_enabled: bool) -> AuthProvider:
         gitlab_url: str = oidc_gitlab_url()
         customer_portal_url: str = os.environ.get(
             "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL",
@@ -127,17 +133,17 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
             "DUO_WORKFLOW_SELF_SIGNED_JWT__VALIDATION_KEY", ""
         )
 
+        oidc_providers = {"Gitlab": gitlab_url}
+        if not custom_models_enabled or os.environ.get(
+            "DUO_WORKFLOW_AUTH__OIDC_CUSTOMER_PORTAL_URL"
+        ):
+            oidc_providers["CustomersDot"] = customer_portal_url
+
         try:
             provider = CompositeProvider(
                 [
                     LocalAuthProvider(structlog, signing_key, validation_key),
-                    GitLabOidcProvider(
-                        structlog,
-                        oidc_providers={
-                            "Gitlab": gitlab_url,
-                            "CustomersDot": customer_portal_url,
-                        },
-                    ),
+                    GitLabOidcProvider(structlog, oidc_providers=oidc_providers),
                 ],
                 structlog,
             )

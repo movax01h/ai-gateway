@@ -1,3 +1,4 @@
+import json
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -16,6 +17,7 @@ from langchain_core.messages.ai import InputTokenDetails, UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_core.runnables import Runnable
 from litellm.types.utils import Delta, PromptTokensDetailsWrapper
+from structlog.testing import capture_logs
 
 from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
@@ -25,9 +27,11 @@ from ai_gateway.models.v2.chat_litellm import (
     ChatLiteLLM,
     _drop_unsupported_web_search,
     _force_gpt_5_max_completion_tokens,
+    _litellm_maps_reasoning_effort,
     _litellm_maps_web_search,
     _remove_deprecated_temperature_parameters,
     _rewrite_trailing_assistant_prefill,
+    litellm_supports_native_web_search,
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 from ai_gateway.vendor.langchain_litellm.litellm import (
@@ -400,6 +404,38 @@ class TestLitellmMapsWebSearch:
         assert _litellm_maps_web_search(model, provider) is expected
 
 
+@pytest.fixture(name="vertex_cleared")
+def vertex_cleared_fixture():
+    with patch(
+        "ai_gateway.models.v2.chat_litellm.NATIVE_WEB_SEARCH_ALLOWED_LITELLM_PROVIDERS",
+        frozenset({"vertex_ai"}),
+    ):
+        yield
+
+
+class TestLitellmSupportsNativeWebSearch:
+    def test_capable_provider_not_cleared(self):
+        assert (
+            litellm_supports_native_web_search("claude-sonnet-4-6", "vertex_ai")
+            is False
+        )
+
+    @pytest.mark.usefixtures("vertex_cleared")
+    def test_capable_provider_once_cleared(self):
+        assert (
+            litellm_supports_native_web_search("claude-sonnet-4-6", "vertex_ai") is True
+        )
+
+    @pytest.mark.usefixtures("vertex_cleared")
+    def test_incapable_provider(self):
+        assert (
+            litellm_supports_native_web_search(
+                "bedrock/global.anthropic.claude-sonnet-4-6", "bedrock"
+            )
+            is False
+        )
+
+
 class TestDropUnsupportedWebSearch:
     @pytest.mark.parametrize(
         ("model", "provider"),
@@ -408,7 +444,8 @@ class TestDropUnsupportedWebSearch:
             pytest.param("claude-haiku-4-5", "vertex_ai", id="vertex-haiku"),
         ],
     )
-    def test_kept_for_capable_provider(self, model, provider):
+    @pytest.mark.usefixtures("vertex_cleared")
+    def test_kept_for_capable_and_cleared_provider(self, model, provider):
         kwargs = {
             "model": model,
             "custom_llm_provider": provider,
@@ -418,6 +455,22 @@ class TestDropUnsupportedWebSearch:
         _drop_unsupported_web_search(kwargs)
 
         assert kwargs["web_search_options"] == {}
+
+    def test_dropped_for_capable_provider_not_cleared(self):
+        kwargs = {
+            "model": "claude-sonnet-4-6",
+            "custom_llm_provider": "vertex_ai",
+            "web_search_options": {},
+        }
+
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            _drop_unsupported_web_search(kwargs)
+
+        assert "web_search_options" not in kwargs
+        assert (
+            mock_log.warning.call_args.kwargs["reason"]
+            == "provider is not cleared for native web search"
+        )
 
     @pytest.mark.parametrize(
         ("model", "provider"),
@@ -509,6 +562,7 @@ class TestDropUnsupportedWebSearch:
             pytest.param("bedrock", False, id="bedrock"),
         ],
     )
+    @pytest.mark.usefixtures("vertex_cleared")
     async def test_gate_applies_on_the_way_to_litellm(self, provider, expect_forwarded):
         """The gate runs in `acompletion_with_retry`, where model and provider are finally merged."""
         chat = ChatLiteLLM(model="claude-sonnet-4-6")
@@ -527,6 +581,7 @@ class TestDropUnsupportedWebSearch:
         assert ("web_search_options" in forwarded) is expect_forwarded
 
 
+@pytest.mark.usefixtures("vertex_cleared")
 class TestWebSearchPolicyFallback:
     POLICY_ERROR = (
         "Organization Policy constraint constraints/vertexai.allowedPartnerModelFeatures "
@@ -1856,6 +1911,197 @@ class TestConvertDeltaToMessageChunk:
         assert merged.tool_calls[0]["args"] == {"id": 5}
 
 
+MR_ARGS = '{"merge_request_iid": 720, "project_id": "63055015"}'
+
+
+def legacy_function_call(name, arguments):
+    return {"name": name, "arguments": arguments}
+
+
+class TestLegacyFunctionCallAlongsideToolCalls:
+    """LiteLLM streams a legacy `function_call` next to `tool_calls`; LangChain concatenates it across chunks.
+
+    See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3211
+    """
+
+    @pytest.fixture(name="parallel_tool_call_deltas")
+    def parallel_tool_call_deltas_fixture(self):
+        """Mirrors the #3238 payload: parallel get_merge_request + list_merge_request_diffs with identical args."""
+        return [
+            {
+                "role": "assistant",
+                "function_call": legacy_function_call("get_merge_request", MR_ARGS),
+                "tool_calls": [
+                    client_tool_call(
+                        index=0,
+                        name="get_merge_request",
+                        arguments=MR_ARGS,
+                        tool_call_id="call_1",
+                    )
+                ],
+            },
+            {
+                "role": "assistant",
+                "function_call": legacy_function_call(
+                    "list_merge_request_diffs", MR_ARGS
+                ),
+                "tool_calls": [
+                    client_tool_call(
+                        index=1,
+                        name="list_merge_request_diffs",
+                        arguments=MR_ARGS,
+                        tool_call_id="call_2",
+                    )
+                ],
+            },
+        ]
+
+    def test_merged_chunks_carry_no_function_call(self, parallel_tool_call_deltas):
+        merged = _merge_deltas(parallel_tool_call_deltas)
+
+        assert "function_call" not in merged.additional_kwargs
+        assert [(tc["name"], tc["args"]) for tc in merged.tool_calls] == [
+            ("get_merge_request", {"merge_request_iid": 720, "project_id": "63055015"}),
+            (
+                "list_merge_request_diffs",
+                {"merge_request_iid": 720, "project_id": "63055015"},
+            ),
+        ]
+
+    def test_regression_3238_message_dict_has_no_concatenated_function_call(
+        self, parallel_tool_call_deltas
+    ):
+        merged = _merge_deltas(parallel_tool_call_deltas)
+        message = AIMessage(
+            content=merged.content,
+            additional_kwargs=merged.additional_kwargs,
+            tool_calls=merged.tool_calls,
+        )
+
+        result = _convert_message_to_dict(message)
+
+        assert "function_call" not in result
+        assert [tc["function"]["name"] for tc in result["tool_calls"]] == [
+            "get_merge_request",
+            "list_merge_request_diffs",
+        ]
+        for tc in result["tool_calls"]:
+            assert json.loads(tc["function"]["arguments"]) == json.loads(MR_ARGS)
+
+    @pytest.mark.parametrize(
+        "delta",
+        [
+            {"function_call": legacy_function_call("get_issue", '{"id": 5}')},
+            Delta(
+                role="assistant",
+                content="",
+                function_call=legacy_function_call("get_issue", '{"id": 5}'),
+            ),
+        ],
+        ids=["dict", "delta_object"],
+    )
+    def test_function_call_only_delta_keeps_function_call(self, delta):
+        merged = _merge_deltas([delta])
+
+        assert merged.additional_kwargs["function_call"] == legacy_function_call(
+            "get_issue", '{"id": 5}'
+        )
+
+    @pytest.mark.parametrize(
+        ("delta", "expect_function_call"),
+        [
+            (
+                {
+                    "function_call": legacy_function_call("get_issue", '{"id": 5}'),
+                    "reasoning_content": "Thinking...",
+                },
+                True,
+            ),
+            (
+                {
+                    "function_call": legacy_function_call("get_issue", '{"id": 5}'),
+                    "reasoning_content": "Thinking...",
+                    "tool_calls": [client_tool_call(arguments='{"id": 5}')],
+                },
+                False,
+            ),
+        ],
+        ids=["function_call_only", "with_tool_calls"],
+    )
+    def test_reasoning_content_preserved_alongside_function_call(
+        self, delta, expect_function_call
+    ):
+        merged = _merge_deltas([delta])
+
+        assert merged.additional_kwargs["reasoning_content"] == "Thinking..."
+        assert ("function_call" in merged.additional_kwargs) is expect_function_call
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            AIMessage(
+                content="",
+                additional_kwargs={
+                    "function_call": legacy_function_call(
+                        "get_merge_requestlist_merge_request_diffs", MR_ARGS + MR_ARGS
+                    )
+                },
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "name": "get_merge_request",
+                        "args": {"merge_request_iid": 720},
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                additional_kwargs={
+                    "function_call": legacy_function_call(
+                        "get_merge_requestlist_merge_request_diffs", MR_ARGS + MR_ARGS
+                    ),
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "id": "call_1",
+                            "function": {
+                                "name": "get_merge_request",
+                                "arguments": '{"merge_request_iid": 720}',
+                            },
+                        }
+                    ],
+                },
+            ),
+        ],
+        ids=["message_tool_calls", "additional_kwargs_tool_calls"],
+    )
+    def test_convert_message_to_dict_omits_function_call_with_tool_calls(self, message):
+        result = _convert_message_to_dict(message)
+
+        assert "function_call" not in result
+        assert result["tool_calls"] == [
+            {
+                "type": "function",
+                "id": "call_1",
+                "function": {
+                    "name": "get_merge_request",
+                    "arguments": '{"merge_request_iid": 720}',
+                },
+            }
+        ]
+
+    def test_legacy_function_call_only_message_round_trips(self):
+        function_call = legacy_function_call("get_issue", '{"id": 5}')
+        message = _convert_dict_to_message(
+            {"role": "assistant", "content": "", "function_call": function_call}
+        )
+
+        result = _convert_message_to_dict(message)
+
+        assert result["function_call"] == function_call
+        assert "tool_calls" not in result
+
+
 def streaming_chunk(delta, finish_reason=None):
     return {
         "choices": [{"delta": delta, "finish_reason": finish_reason, "index": 0}],
@@ -1979,6 +2225,42 @@ class TestReasoningEffort:
             "foo",
             "reasoning_effort",
         ]
+
+    @pytest.mark.parametrize(
+        ("model_name", "custom_llm_provider"),
+        [
+            ("claude-sonnet-5-5", "vertex_ai"),
+            ("bedrock/global.anthropic.claude-sonnet-5-5", "bedrock"),
+        ],
+    )
+    def test_does_not_allow_param_through_when_litellm_maps_it(
+        self, model_name: str, custom_llm_provider: str
+    ):
+        """Anthropic providers map `reasoning_effort` to `output_config`; allowing the raw key through as well makes the
+        API reject it as an extra input."""
+        model = ChatLiteLLM(
+            model=model_name,
+            custom_llm_provider=custom_llm_provider,
+            reasoning_effort="xhigh",
+        )
+
+        assert model.model_kwargs["reasoning_effort"] == "xhigh"
+        assert "allowed_openai_params" not in model.model_kwargs
+
+    def test_allows_param_through_when_litellm_cannot_resolve_the_model(self):
+        _litellm_maps_reasoning_effort.cache_clear()
+        with (
+            patch(
+                "ai_gateway.models.v2.chat_litellm.litellm.get_supported_openai_params",
+                side_effect=ValueError("unknown provider"),
+            ),
+            capture_logs() as logs,
+        ):
+            model = ChatLiteLLM(model="some-model", reasoning_effort="low")
+
+        assert model.model_kwargs["allowed_openai_params"] == ["reasoning_effort"]
+        assert [entry["log_level"] for entry in logs] == ["warning"]
+        assert logs[0]["model"] == "some-model"
 
 
 class TestNonStreamedModelName:

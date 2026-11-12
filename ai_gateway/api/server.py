@@ -27,11 +27,13 @@ from ai_gateway.api.client_disconnect import (
 )
 from ai_gateway.api.middleware import (
     AccessLogMiddleware,
+    ActorLimitMiddleware,
     DistributedTraceMiddleware,
     FeatureFlagMiddleware,
     InternalEventMiddleware,
     MiddlewareAuthentication,
     ModelConfigMiddleware,
+    RequestBodyLimitMiddleware,
     RequestMetadataMiddleware,
 )
 from ai_gateway.api.middleware.self_hosted_logging import (
@@ -43,6 +45,7 @@ from ai_gateway.api.v1 import api_router as http_api_router_v1
 from ai_gateway.api.v2 import api_router as http_api_router_v2
 from ai_gateway.api.v3 import api_router as http_api_router_v3
 from ai_gateway.api.v4 import api_router as http_api_router_v4
+from ai_gateway.code_suggestions.processing.pre import PromptTooLongError
 from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.instrumentators.threads import monitor_threads
@@ -65,6 +68,20 @@ _SKIP_ENDPOINTS = [
     "/metrics",
     "/v1/models/definitions",
 ]
+_CODE_SUGGESTIONS_PATH_PREFIXES = (
+    "/v2/completions",
+    "/v2/code/",
+    "/v3/code/",
+    "/v4/code/",
+)
+_CODE_SUGGESTIONS_MAX_BODY_BYTES = 600_000
+# Proxy requests are larger than the others (up to about 17 MiB) and never carry
+# model_metadata, so the general request body limit leaves them out.
+_PROXY_PATH_PREFIXES = ("/v1/proxy/",)
+_PROMPTS_PATH_PREFIXES = (
+    "/v1/prompts/",
+    "/v2/prompts/",
+)
 CONTAINER_APPLICATION_MODULES = [
     "ai_gateway.api.v1.embeddings.code_embeddings",
     "ai_gateway.api.v1.search.docs",
@@ -84,7 +101,7 @@ ExceptionHandler = Callable[[Request, Exception], Awaitable[Response]]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    config = app.extra["extra"]["config"]
+    config = app.state.config
     container_application = ContainerApplication()
     wire_and_validate(container_application, modules=CONTAINER_APPLICATION_MODULES)
     container_application.config.from_dict(config.model_dump())
@@ -127,6 +144,41 @@ async def lifespan(app: FastAPI):
         )
 
 
+def _oidc_providers(config: Config) -> dict[str, str]:
+    """Return the OIDC key sources: GitLab's own keys always, and the Customers Portal keys unless custom models are
+    enabled, in which case only when `AIGW_CUSTOMER_PORTAL_URL` is explicitly set to a non-empty value.
+    """
+    oidc_providers = {"Gitlab": config.gitlab_url}
+
+    if not config.custom_models.enabled or (
+        config.customer_portal_url and "customer_portal_url" in config.model_fields_set
+    ):
+        oidc_providers["CustomersDot"] = config.customer_portal_url
+
+    return oidc_providers
+
+
+def _request_body_limit(config: Config) -> list[Middleware]:
+    """Return the request body limit for every HTTP route except the proxy routes.
+
+    The limit is off (an empty list) unless ``AIGW_REQUEST_BODY_LIMIT__MAX_BYTES`` is set. GitLab.com sets it, so a
+    caller cannot make the gateway buffer and parse a very large body on these routes. Self-hosted gateways keep the
+    default.
+    """
+    max_bytes = config.request_body_limit.max_bytes
+    if not max_bytes:
+        return []
+
+    return [
+        Middleware(
+            RequestBodyLimitMiddleware,
+            max_bytes=max_bytes,
+            path_prefixes=("/",),
+            excluded_prefixes=_PROXY_PATH_PREFIXES,
+        )
+    ]
+
+
 def create_fast_api_server(config: Config):
     auth_provider = CompositeProvider(
         [
@@ -135,13 +187,7 @@ def create_fast_api_server(config: Config):
                 signing_key=config.self_signed_jwt.signing_key,
                 validation_key=config.self_signed_jwt.validation_key,
             ),
-            GitLabOidcProvider(
-                structlog,
-                oidc_providers={
-                    "Gitlab": config.gitlab_url,
-                    "CustomersDot": config.customer_portal_url,
-                },
-            ),
+            GitLabOidcProvider(structlog, oidc_providers=_oidc_providers(config)),
         ],
         structlog,
         bypass_auth_jwt_signature=config.auth.bypass_jwt_signature,
@@ -191,11 +237,29 @@ def create_fast_api_server(config: Config):
                 skip_endpoints=_SKIP_ENDPOINTS,
                 environment=config.environment,
             ),
-            Middleware(ModelConfigMiddleware),
+            Middleware(
+                RequestBodyLimitMiddleware,
+                max_bytes=_CODE_SUGGESTIONS_MAX_BODY_BYTES,
+                path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
+            ),
+            *_request_body_limit(config),
+            Middleware(
+                ActorLimitMiddleware,
+                limits=config.code_suggestions,
+                path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
+                control_name="code_suggestions_actor_limit",
+            ),
+            Middleware(
+                ActorLimitMiddleware,
+                limits=config.prompts,
+                path_prefixes=_PROMPTS_PATH_PREFIXES,
+                control_name="prompts_actor_limit",
+            ),
+            Middleware(ModelConfigMiddleware, skip_endpoints=_SKIP_ENDPOINTS),
         ],
-        extra={"config": config},
     )
 
+    fastapi_app.state.config = config
     fastapi_app.state.cloud_connector_auth_provider = (
         auth_provider  # For readiness check
     )
@@ -287,9 +351,23 @@ async def assume_role_exception_handler(
     )
 
 
+async def prompt_too_long_exception_handler(
+    request: Request, exc: PromptTooLongError
+) -> Response:
+    return await http_exception_handler(
+        request,
+        StarletteHTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ),
+    )
+
+
 def setup_custom_exception_handlers(app: FastAPI):
     app.add_exception_handler(
         StarletteHTTPException, cast(ExceptionHandler, custom_http_exception_handler)
+    )
+    app.add_exception_handler(
+        PromptTooLongError, cast(ExceptionHandler, prompt_too_long_exception_handler)
     )
     app.add_exception_handler(
         ModelAPIError, cast(ExceptionHandler, model_api_exception_handler)

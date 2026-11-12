@@ -22,7 +22,6 @@ from duo_workflow_service.agents.tool_call_validator import (
     retry_malformed_tool_calls,
     validate_tool_calls,
 )
-from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.audit_events.web_tools import capture_native_web_calls
 from duo_workflow_service.checkpointer.write_mode import (
     compaction_ui_chat_log_update,
@@ -43,6 +42,7 @@ from duo_workflow_service.entities.server_tool_blocks import (
     warn_unmatched_server_tool_results,
 )
 from duo_workflow_service.entities.state import (
+    MAX_TOOL_CALLS_PER_MODEL_CALL,
     TIER_ACCESS_DENIED_SUB_TYPE,
     ApprovalSource,
     ApprovalStateRejection,
@@ -68,12 +68,17 @@ from duo_workflow_service.slash_commands.error_handler import (
 from duo_workflow_service.slash_commands.goal_parser import is_slash_command
 from duo_workflow_service.slash_commands.goal_parser import parse as slash_command_parse
 from duo_workflow_service.tools import Toolset
+from duo_workflow_service.tools.version_compatibility import (
+    supports_chat_tool_call_limits,
+)
+from duo_workflow_service.tools.web_search import WebSearchState
 from duo_workflow_service.tracking.errors import log_exception
 from lib.context import (
     LLMFinishReason,
     extract_finish_reason,
     record_approval_source,
 )
+from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events.event_enum import EventEnum
 
 log = structlog.stdlib.get_logger("chat_agent")
@@ -157,13 +162,18 @@ class ChatAgent:
         self._allow_agent_to_request_user = allow_agent_to_request_user
 
     async def _get_approvals(
-        self, message: AIMessage, preapproved_tools: List[str], state: ChatWorkflowState
+        self,
+        message: AIMessage,
+        preapproved_tools: List[str],
+        state: ChatWorkflowState,
+        max_tool_calls: Optional[int] = None,
     ) -> tuple[bool, list[UiChatLog], list[str]]:
         approval_required = False
         approval_messages = []
         requested_ids: list[str] = []
 
-        for call in message.tool_calls:
+        # Calls past the limit are skipped without running, so they need no approval.
+        for call in message.tool_calls[:max_tool_calls]:
             tool_name = call["name"]
             tool_args = call["args"]
             auto_approved_by_agentic_mock_model = getattr(
@@ -471,24 +481,35 @@ class ChatAgent:
         result: Dict[str, Any],
     ):
         result["status"] = WorkflowStatusEnum.EXECUTION
+        max_tool_calls = (
+            MAX_TOOL_CALLS_PER_MODEL_CALL
+            if is_feature_enabled(FeatureFlag.DUO_CHAT_TOOL_CALL_LIMITS)
+            and supports_chat_tool_call_limits()
+            else None
+        )
+        result["max_tool_calls"] = max_tool_calls
 
         preapproved_tools = state.get("preapproved_tools") or []
         (
             tools_need_approval,
             approval_messages,
             requested_ids,
-        ) = await self._get_approvals(agent_response, preapproved_tools, state)
+        ) = await self._get_approvals(
+            agent_response, preapproved_tools, state, max_tool_calls
+        )
 
         if len(agent_response.tool_calls) > 0 and tools_need_approval:
             # A session that cannot prompt has no one to answer, so halt with an
             # explicit error instead of parking in TOOL_CALL_APPROVAL_REQUIRED forever.
             if not self._allow_agent_to_request_user:
-                requested = set(requested_ids)
-                tool_names = [
-                    call["name"]
-                    for call in agent_response.tool_calls
-                    if call.get("id") in requested
-                ]
+                # approval_messages holds an entry for every call that needs
+                # approval, id-less calls included, which requested_ids would
+                # miss; the ToolsApprovalComponent halt reads names the same way.
+                tool_names = []
+                for message in approval_messages:
+                    info = message.get("tool_info")
+                    if info:
+                        tool_names.append(info["name"])
                 if self._tracker:
                     for tool_name in tool_names:
                         self._tracker.track_tool_governance_event(

@@ -9,7 +9,9 @@ from langchain.tools import BaseTool, ToolException
 from pydantic import BaseModel
 from structlog.testing import capture_logs
 
-from ai_gateway.model_selection.models import ModelClassProvider
+from ai.features.security.secrets_fp_detection.components.post_secret_fp_analysis_to_gitlab import (
+    PostSecretFpAnalysisToGitlab,
+)
 from contract import contract_pb2
 from duo_workflow_service import tools
 from duo_workflow_service.components import tools_registry
@@ -22,6 +24,7 @@ from duo_workflow_service.components.tools_registry import (
     NO_OP_TOOLS,
     Toolset,
     ToolsRegistry,
+    _effective_privileges,
     _merge_feature_tools,
     _reject_unchecked_allowed_flows,
     ceiling_exempt_tool_names,
@@ -53,7 +56,7 @@ from duo_workflow_service.tools.findings.list_security_findings import (
     ListSecurityFindings,
 )
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
-from duo_workflow_service.tools.mcp_tools import convert_mcp_tools_to_configs
+from duo_workflow_service.tools.mcp_tools import McpTool, convert_mcp_tools_to_configs
 from duo_workflow_service.tools.mr_discussions import (
     ListMrDiscussions,
     ReplyToDiscussion,
@@ -72,11 +75,7 @@ from duo_workflow_service.tools.vulnerabilities.get_vulnerability_details import
 from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab import (
     PostSastFpAnalysisToGitlab,
 )
-from duo_workflow_service.tools.vulnerabilities.post_secret_fp_analysis_to_gitlab import (
-    PostSecretFpAnalysisToGitlab,
-)
 from duo_workflow_service.tools.wiki import GetWikiPage
-from lib.context import current_model_metadata_context
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.feature_roots import default_features_dir
 from lib.language_server import LanguageServerVersion
@@ -294,6 +293,7 @@ _outbox = MagicMock(spec=Outbox)
                 "evaluate_vuln_fp_status",
                 "resolve_vulnerability_target_branch",
                 "update_work_item",
+                "workplan_publish_tracks",
                 "revert_to_detected_vulnerability",
                 "create_vulnerability_issue",
                 "get_work_item",
@@ -421,6 +421,41 @@ def test_registry_initialization(tool_metadata, config, expected_tools_set):
     assert set(registry._enabled_tools.keys()) == expected_tools_set
 
 
+@pytest.mark.parametrize(
+    ("enabled", "expected"),
+    [
+        (["read_only_files"], {"read_only_files"}),
+        (["read_write_gitlab"], {"read_write_gitlab", "read_only_gitlab"}),
+        (
+            ["read_write_files", "read_write_gitlab"],
+            {
+                "read_write_files",
+                "read_only_files",
+                "read_write_gitlab",
+                "read_only_gitlab",
+            },
+        ),
+    ],
+)
+def test_effective_privileges_fill_in_read_from_write(enabled, expected):
+    assert _effective_privileges(enabled) == frozenset(expected)
+
+
+def test_registry_hands_effective_privileges_to_tools(tool_metadata):
+    # A tool that gates a step on a privilege reads it from its metadata, so the
+    # superset rule lives in the registry only.
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_gitlab", "read_only_files"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=None,
+    )
+
+    granted = registry._enabled_tools["read_file"].metadata["granted_privileges"]
+    assert {"read_write_gitlab", "read_only_gitlab", "read_only_files"} <= granted
+    assert "granted_privileges" not in tool_metadata
+
+
 def test_registry_initialization_leaves_module_tool_lists_unchanged(
     tool_metadata, mcp_tools
 ):
@@ -447,6 +482,22 @@ def test_registry_initialization_leaves_module_tool_lists_unchanged(
 def test_registry_initialization_initialises_tools_with_correct_attributes(
     tool_metadata,
 ):
+    # The registry hands tools the effective privileges on top of the metadata it
+    # was given; run_mcp_tools is always added, read_only_files comes from
+    # read_write_files.
+    expected_metadata = {
+        **tool_metadata,
+        "granted_privileges": _effective_privileges(
+            [
+                "run_commands",
+                "use_git",
+                "read_write_gitlab",
+                "read_only_gitlab",
+                "read_write_files",
+                "run_mcp_tools",
+            ]
+        ),
+    }
     registry = ToolsRegistry(
         enabled_tools=[
             "run_commands",
@@ -461,183 +512,202 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         registry_flow_id="bl_security",
     )
     expected_tools = {
-        "ci_linter": tools.CiLinter(metadata=tool_metadata),
+        "ci_linter": tools.CiLinter(metadata=expected_metadata),
         "create_plan": tools.CreatePlan(),
         "add_new_task": tools.AddNewTask(),
-        "ascp_create_scan": CreateAscpScan(metadata=tool_metadata),
-        "ascp_create_component": CreateAscpComponent(metadata=tool_metadata),
+        "ascp_create_scan": CreateAscpScan(metadata=expected_metadata),
+        "ascp_create_component": CreateAscpComponent(metadata=expected_metadata),
         "ascp_create_security_context": CreateAscpSecurityContext(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "ascp_list_scans": ListAscpScans(metadata=tool_metadata),
-        "ascp_list_components": ListAscpComponents(metadata=tool_metadata),
+        "ascp_list_scans": ListAscpScans(metadata=expected_metadata),
+        "ascp_list_components": ListAscpComponents(metadata=expected_metadata),
         "remove_task": tools.RemoveTask(),
         "update_task_description": tools.UpdateTaskDescription(),
         "update_vulnerability_severity": tools.UpdateVulnerabilitySeverity(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "get_plan": tools.GetPlan(),
         "set_task_status": tools.SetTaskStatus(),
         "todo_write": tools.TodoWrite(),
-        "run_command": tools.RunCommand(metadata=tool_metadata),
-        "create_issue": tools.CreateIssue(metadata=tool_metadata),
-        "list_issues": tools.ListIssues(metadata=tool_metadata),
-        "get_issue": tools.GetIssue(metadata=tool_metadata),
-        "update_issue": tools.UpdateIssue(metadata=tool_metadata),
-        "get_job_logs": tools.GetLogsFromJob(metadata=tool_metadata),
-        "get_merge_request": tools.GetMergeRequest(metadata=tool_metadata),
-        "gitlab_merge_request_search": tools.ListMergeRequest(metadata=tool_metadata),
-        "list_merge_request_diffs": tools.ListMergeRequestDiffs(metadata=tool_metadata),
+        "run_command": tools.RunCommand(metadata=expected_metadata),
+        "create_issue": tools.CreateIssue(metadata=expected_metadata),
+        "list_issues": tools.ListIssues(metadata=expected_metadata),
+        "get_issue": tools.GetIssue(metadata=expected_metadata),
+        "update_issue": tools.UpdateIssue(metadata=expected_metadata),
+        "get_job_logs": tools.GetLogsFromJob(metadata=expected_metadata),
+        "get_merge_request": tools.GetMergeRequest(metadata=expected_metadata),
+        "gitlab_merge_request_search": tools.ListMergeRequest(
+            metadata=expected_metadata
+        ),
+        "list_merge_request_diffs": tools.ListMergeRequestDiffs(
+            metadata=expected_metadata
+        ),
         "create_merge_request_note": tools.CreateMergeRequestNote(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "create_merge_request_diff_note": tools.CreateMergeRequestDiffNote(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "list_all_merge_request_notes": tools.ListAllMergeRequestNotes(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "update_merge_request": tools.UpdateMergeRequest(metadata=tool_metadata),
+        "update_merge_request": tools.UpdateMergeRequest(metadata=expected_metadata),
         "add_merge_request_reviewers": tools.AddMergeRequestReviewers(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "post_suggested_reviewers": tools.PostSuggestedReviewers(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "get_pipeline_failing_jobs": tools.GetPipelineFailingJobs(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "get_downstream_pipelines": tools.GetDownstreamPipelines(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_failing_bridge_jobs": tools.GetFailingBridgeJobs(metadata=tool_metadata),
-        "get_project": tools.GetProject(metadata=tool_metadata),
-        "gitlab_group_project_search": tools.GroupProjectSearch(metadata=tool_metadata),
-        "gitlab_issue_search": tools.IssueSearch(metadata=tool_metadata),
+        "get_failing_bridge_jobs": tools.GetFailingBridgeJobs(
+            metadata=expected_metadata
+        ),
+        "get_project": tools.GetProject(metadata=expected_metadata),
+        "gitlab_group_project_search": tools.GroupProjectSearch(
+            metadata=expected_metadata
+        ),
+        "gitlab_issue_search": tools.IssueSearch(metadata=expected_metadata),
         "gitlab_documentation_search": tools.DocumentationSearch(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "gitlab_milestone_search": tools.MilestoneSearch(metadata=tool_metadata),
-        "gitlab__user_search": tools.UserSearch(metadata=tool_metadata),
-        "gitlab_blob_search": tools.BlobSearch(metadata=tool_metadata),
-        "gitlab_commit_search": tools.CommitSearch(metadata=tool_metadata),
-        "gitlab_wiki_blob_search": tools.WikiBlobSearch(metadata=tool_metadata),
-        "gitlab_note_search": tools.NoteSearch(metadata=tool_metadata),
-        "read_file": tools.ReadFile(metadata=tool_metadata),
-        "bl_prioritize_and_cap": tools.BlPrioritizeAndCap(metadata=tool_metadata),
-        "read_files": tools.ReadFiles(metadata=tool_metadata),
-        "list_dir": tools.ListDir(metadata=tool_metadata),
-        "create_file_with_contents": tools.WriteFile(metadata=tool_metadata),
-        "edit_file": tools.EditFile(metadata=tool_metadata),
-        "find_files": tools.FindFiles(metadata=tool_metadata),
-        "bl_dedup_findings": tools.BlDedupFindings(metadata=tool_metadata),
-        "bl_write_sast_report": tools.BlWriteSastReport(metadata=tool_metadata),
-        "grep": tools.Grep(metadata=tool_metadata),
-        "mkdir": tools.Mkdir(metadata=tool_metadata),
-        "bl_discover_and_cluster": tools.BlDiscoverAndCluster(metadata=tool_metadata),
-        "run_git_command": tools.git.Command(metadata=tool_metadata),
+        "gitlab_milestone_search": tools.MilestoneSearch(metadata=expected_metadata),
+        "gitlab__user_search": tools.UserSearch(metadata=expected_metadata),
+        "gitlab_blob_search": tools.BlobSearch(metadata=expected_metadata),
+        "gitlab_commit_search": tools.CommitSearch(metadata=expected_metadata),
+        "gitlab_wiki_blob_search": tools.WikiBlobSearch(metadata=expected_metadata),
+        "gitlab_note_search": tools.NoteSearch(metadata=expected_metadata),
+        "read_file": tools.ReadFile(metadata=expected_metadata),
+        "bl_prioritize_and_cap": tools.BlPrioritizeAndCap(metadata=expected_metadata),
+        "read_files": tools.ReadFiles(metadata=expected_metadata),
+        "list_dir": tools.ListDir(metadata=expected_metadata),
+        "create_file_with_contents": tools.WriteFile(metadata=expected_metadata),
+        "edit_file": tools.EditFile(metadata=expected_metadata),
+        "find_files": tools.FindFiles(metadata=expected_metadata),
+        "bl_dedup_findings": tools.BlDedupFindings(metadata=expected_metadata),
+        "bl_write_sast_report": tools.BlWriteSastReport(metadata=expected_metadata),
+        "grep": tools.Grep(metadata=expected_metadata),
+        "mkdir": tools.Mkdir(metadata=expected_metadata),
+        "bl_discover_and_cluster": tools.BlDiscoverAndCluster(
+            metadata=expected_metadata
+        ),
+        "run_git_command": tools.git.Command(metadata=expected_metadata),
         "handover_tool": tools.HandoverTool,
         "request_user_clarification_tool": tools.RequestUserClarificationTool,
         "clarification_question": tools.ClarificationQuestionTool(),
         "render_ui": tools.RenderUiTool(),
-        "get_epic": tools.GetEpic(metadata=tool_metadata),
-        "list_epics": tools.ListEpics(metadata=tool_metadata),
-        "create_epic": tools.CreateEpic(metadata=tool_metadata),
-        "update_epic": tools.UpdateEpic(metadata=tool_metadata),
-        "list_issue_notes": tools.ListIssueNotes(metadata=tool_metadata),
-        "get_issue_note": tools.GetIssueNote(metadata=tool_metadata),
-        "create_issue_note": tools.CreateIssueNote(metadata=tool_metadata),
-        "create_merge_request": tools.CreateMergeRequest(metadata=tool_metadata),
-        "get_repository_file": tools.GetRepositoryFile(metadata=tool_metadata),
-        "list_repository_tree": tools.ListRepositoryTree(metadata=tool_metadata),
-        "get_repository_files": tools.GetRepositoryFiles(metadata=tool_metadata),
-        "list_epic_notes": tools.ListEpicNotes(metadata=tool_metadata),
-        "get_session_context": tools.GetSessionContext(metadata=tool_metadata),
-        "list_vulnerabilities": tools.ListVulnerabilities(metadata=tool_metadata),
-        "get_commit": tools.GetCommit(metadata=tool_metadata),
-        "list_commits": tools.ListCommits(metadata=tool_metadata),
-        "get_commit_diff": tools.GetCommitDiff(metadata=tool_metadata),
-        "get_commit_comments": tools.GetCommitComments(metadata=tool_metadata),
-        "create_commit": tools.CreateCommit(metadata=tool_metadata),
-        "dismiss_vulnerability": tools.DismissVulnerability(metadata=tool_metadata),
-        "confirm_vulnerability": tools.ConfirmVulnerability(metadata=tool_metadata),
+        "get_epic": tools.GetEpic(metadata=expected_metadata),
+        "list_epics": tools.ListEpics(metadata=expected_metadata),
+        "create_epic": tools.CreateEpic(metadata=expected_metadata),
+        "update_epic": tools.UpdateEpic(metadata=expected_metadata),
+        "list_issue_notes": tools.ListIssueNotes(metadata=expected_metadata),
+        "get_issue_note": tools.GetIssueNote(metadata=expected_metadata),
+        "create_issue_note": tools.CreateIssueNote(metadata=expected_metadata),
+        "create_merge_request": tools.CreateMergeRequest(metadata=expected_metadata),
+        "get_repository_file": tools.GetRepositoryFile(metadata=expected_metadata),
+        "list_repository_tree": tools.ListRepositoryTree(metadata=expected_metadata),
+        "get_repository_files": tools.GetRepositoryFiles(metadata=expected_metadata),
+        "list_epic_notes": tools.ListEpicNotes(metadata=expected_metadata),
+        "get_session_context": tools.GetSessionContext(metadata=expected_metadata),
+        "list_vulnerabilities": tools.ListVulnerabilities(metadata=expected_metadata),
+        "get_commit": tools.GetCommit(metadata=expected_metadata),
+        "list_commits": tools.ListCommits(metadata=expected_metadata),
+        "get_commit_diff": tools.GetCommitDiff(metadata=expected_metadata),
+        "get_commit_comments": tools.GetCommitComments(metadata=expected_metadata),
+        "create_commit": tools.CreateCommit(metadata=expected_metadata),
+        "dismiss_vulnerability": tools.DismissVulnerability(metadata=expected_metadata),
+        "confirm_vulnerability": tools.ConfirmVulnerability(metadata=expected_metadata),
         "list_instance_audit_events": tools.ListInstanceAuditEvents(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "list_group_audit_events": tools.ListGroupAuditEvents(metadata=tool_metadata),
+        "list_group_audit_events": tools.ListGroupAuditEvents(
+            metadata=expected_metadata
+        ),
         "list_project_audit_events": tools.ListProjectAuditEvents(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_current_user": tools.GetCurrentUser(metadata=tool_metadata),
-        "create_work_item": tools.CreateWorkItem(metadata=tool_metadata),
-        "create_work_item_note": tools.CreateWorkItemNote(metadata=tool_metadata),
+        "get_current_user": tools.GetCurrentUser(metadata=expected_metadata),
+        "create_work_item": tools.CreateWorkItem(metadata=expected_metadata),
+        "create_work_item_note": tools.CreateWorkItemNote(metadata=expected_metadata),
         "link_vulnerability_to_issue": tools.LinkVulnerabilityToIssue(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "link_vulnerability_to_merge_request": tools.LinkVulnerabilityToMergeRequest(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_vulnerability_details": GetVulnerabilityDetails(metadata=tool_metadata),
+        "get_vulnerability_details": GetVulnerabilityDetails(
+            metadata=expected_metadata
+        ),
         "evaluate_vuln_fp_status": EvaluateVulnerabilityFalsePositiveStatus(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "resolve_vulnerability_target_branch": ResolveVulnerabilityTargetBranch(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "update_work_item": tools.UpdateWorkItem(metadata=tool_metadata),
+        "update_work_item": tools.UpdateWorkItem(metadata=expected_metadata),
+        "workplan_publish_tracks": tools.WorkplanPublishTracks(
+            metadata=expected_metadata
+        ),
         "revert_to_detected_vulnerability": tools.RevertToDetectedVulnerability(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "create_vulnerability_issue": tools.CreateVulnerabilityIssue(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_work_item": tools.GetWorkItem(metadata=tool_metadata),
-        "list_work_items": tools.ListWorkItems(metadata=tool_metadata),
-        "get_work_item_notes": tools.GetWorkItemNotes(metadata=tool_metadata),
-        "get_work_item_statuses": tools.GetWorkItemStatuses(metadata=tool_metadata),
-        "post_duo_code_review": PostDuoCodeReview(metadata=tool_metadata),
+        "get_work_item": tools.GetWorkItem(metadata=expected_metadata),
+        "list_work_items": tools.ListWorkItems(metadata=expected_metadata),
+        "get_work_item_notes": tools.GetWorkItemNotes(metadata=expected_metadata),
+        "get_work_item_statuses": tools.GetWorkItemStatuses(metadata=expected_metadata),
+        "post_duo_code_review": PostDuoCodeReview(metadata=expected_metadata),
         "submit_merge_request_risk_classification": tools.SubmitMergeRequestRiskClassification(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "extract_lines_from_text": tools.ExtractLinesFromText(metadata=tool_metadata),
+        "extract_lines_from_text": tools.ExtractLinesFromText(
+            metadata=expected_metadata
+        ),
         "finalize_code_review_findings": tools.FinalizeCodeReviewFindings(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "detect_review_context_truncation": tools.DetectReviewContextTruncation(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "get_glql_schema": tools.GetGlqlSchema(metadata=tool_metadata),
-        "fetch_glql_schema": tools.FetchGlqlSchema(metadata=tool_metadata),
-        "run_glql_query": tools.RunGLQLQuery(metadata=tool_metadata),
+        "get_glql_schema": tools.GetGlqlSchema(metadata=expected_metadata),
+        "fetch_glql_schema": tools.FetchGlqlSchema(metadata=expected_metadata),
+        "run_glql_query": tools.RunGLQLQuery(metadata=expected_metadata),
         "post_sast_fp_analysis_to_gitlab": PostSastFpAnalysisToGitlab(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "post_secret_fp_analysis_to_gitlab": PostSecretFpAnalysisToGitlab(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "run_tests": tools.RunTests(metadata=tool_metadata),
-        "bl_collect_and_flatten": tools.BlCollectAndFlatten(metadata=tool_metadata),
+        "run_tests": tools.RunTests(metadata=expected_metadata),
+        "bl_collect_and_flatten": tools.BlCollectAndFlatten(metadata=expected_metadata),
         "build_review_merge_request_context": BuildReviewMergeRequestContext(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "post_duo_code_review_findings": tools.PostDuoCodeReviewFindings(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
         "get_security_finding_details": GetSecurityFindingDetails(
-            metadata=tool_metadata
+            metadata=expected_metadata
         ),
-        "list_security_findings": ListSecurityFindings(metadata=tool_metadata),
-        "get_wiki_page": GetWikiPage(metadata=tool_metadata),
-        "create_branch": CreateBranch(metadata=tool_metadata),
-        "gitlab_api_get": GitLabApiGet(metadata=tool_metadata),
-        "gitlab_graphql": GitLabGraphQL(metadata=tool_metadata),
-        "update_form_fields": UpdateFormFields(metadata=tool_metadata),
-        "update_form_permissions": UpdateFormPermissions(metadata=tool_metadata),
-        "submit_mr_review": SubmitMrReview(metadata=tool_metadata),
-        "list_mr_discussions": ListMrDiscussions(metadata=tool_metadata),
-        "reply_to_discussion": ReplyToDiscussion(metadata=tool_metadata),
-        "set_discussion_resolved": SetDiscussionResolved(metadata=tool_metadata),
-        "set_form_permissions": SetFormPermissions(metadata=tool_metadata),
+        "list_security_findings": ListSecurityFindings(metadata=expected_metadata),
+        "get_wiki_page": GetWikiPage(metadata=expected_metadata),
+        "create_branch": CreateBranch(metadata=expected_metadata),
+        "gitlab_api_get": GitLabApiGet(metadata=expected_metadata),
+        "gitlab_graphql": GitLabGraphQL(metadata=expected_metadata),
+        "update_form_fields": UpdateFormFields(metadata=expected_metadata),
+        "update_form_permissions": UpdateFormPermissions(metadata=expected_metadata),
+        "submit_mr_review": SubmitMrReview(metadata=expected_metadata),
+        "list_mr_discussions": ListMrDiscussions(metadata=expected_metadata),
+        "reply_to_discussion": ReplyToDiscussion(metadata=expected_metadata),
+        "set_discussion_resolved": SetDiscussionResolved(metadata=expected_metadata),
+        "set_form_permissions": SetFormPermissions(metadata=expected_metadata),
     }
 
     assert registry._enabled_tools == expected_tools
@@ -1183,6 +1253,7 @@ def test_toolset_method(
 
         mock_toolset_class.assert_called_once_with(
             pre_approved=expected_preapproved,
+            promoted=set(),
             all_tools=expected_all_tools,
             tool_options={},
             approval_policy=registry,
@@ -1353,8 +1424,8 @@ class TestUnavailableTools:
                 {"enabled_tools": []},
                 True,
                 ["web_search"],
-                {"unsupported_client_tools": ["web_search"]},
-                id="unsupported_client_is_available",
+                {"session_disabled_tools": ["web_search"]},
+                id="session_disabled",
             ),
             pytest.param(
                 {"enabled_tools": ["use_git"]},
@@ -1423,7 +1494,9 @@ class TestUnavailableTools:
             tools_registry, "is_client_capable", lambda _caps: client_capable
         )
         monkeypatch.setattr(
-            tools.AgentCoreWebSearch, "is_available", classmethod(lambda cls: False)
+            tools.AgentCoreWebSearch,
+            "is_available",
+            classmethod(lambda cls, _config: False),
         )
         registry = ToolsRegistry(
             preapproved_tools=[], tool_metadata=tool_metadata, **registry_kwargs
@@ -1438,6 +1511,7 @@ class TestUnavailableTools:
                 "flow_restricted_tools",
                 "missing_privilege_tools",
                 "unsupported_client_tools",
+                "session_disabled_tools",
                 "unknown_tools",
             )
             for name in expected_fields.get(key, [])
@@ -2342,122 +2416,67 @@ class TestMcpToolApprovals:
         assert "mcp__context7__get_docs" not in toolset._all_tools
 
 
-class TestWebSearchFallbackRegistration:
-    """`AgentCoreWebSearch` is a fallback: it registers only when native search cannot run."""
+class TestWebSearchRegistration:
+    """`web_search` is offered when the session may search; the model and the gateway are the binding's call."""
 
-    @pytest.fixture(name="capable_client")
+    @pytest.fixture(name="capable_client", autouse=True)
     def capable_client_fixture(self):
-        with patch(
-            "duo_workflow_service.components.tools_registry.is_client_capable",
-            return_value=True,
+        with (
+            patch(
+                "duo_workflow_service.components.tools_registry.is_client_capable",
+                return_value=True,
+            ),
+            patch(
+                "duo_workflow_service.tools.web_search.is_client_capable",
+                return_value=True,
+            ),
         ):
+            token = current_feature_flag_context.set({FeatureFlag.DAP_WEB_SEARCH.value})
             yield
+            current_feature_flag_context.reset(token)
 
-    @pytest.fixture(name="model_class_provider")
-    def model_class_provider_fixture(self, request):
-        metadata = MagicMock()
-        metadata.llm_definition.model_class_provider = request.param
-        token = current_model_metadata_context.set(metadata)
-        yield
-        current_model_metadata_context.reset(token)
-
-    @pytest.fixture(name="web_search_flag")
-    def web_search_flag_fixture(self, request):
-        flags = {FeatureFlag.DAP_WEB_SEARCH.value} if request.param else set()
-        token = current_feature_flag_context.set(flags)
-        yield
-        current_feature_flag_context.reset(token)
-
-    @pytest.fixture(name="configured_gateway", autouse=True)
-    def configured_gateway_fixture(self, monkeypatch):
-        """Point the tool at a gateway, since it does not register without one.
-
-        Set explicitly rather than inherited from the environment: the test process loads the
-        repository `.env`, so these tests would otherwise pass only for developers who have
-        configured a real gateway locally.
-        """
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__ENABLED", "true")
-        monkeypatch.setenv(
-            "DUO_WORKFLOW_WEB_SEARCH__GATEWAY_URL",
-            "https://gw-abcdefghij.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp",
-        )
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__TARGET_NAME", "websearch")
-
-    @pytest.mark.parametrize(
-        "web_search_flag,model_class_provider",
-        [(True, ModelClassProvider.LITE_LLM)],
-        indirect=True,
-    )
-    def test_not_registered_without_a_configured_gateway(
-        self,
-        capable_client,
-        web_search_flag,
-        model_class_provider,
-        tool_metadata,
-        monkeypatch,
-    ):
-        """Every other gate can be open; with no gateway the tool still must not be offered."""
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__ENABLED", "false")
-
+    def test_offered_pre_approved_when_the_session_opted_in(self, tool_metadata):
         registry = ToolsRegistry(
             enabled_tools=[],
             preapproved_tools=[],
             tool_metadata=tool_metadata,
+            workflow_config={
+                "web_search_enabled": True,
+                "web_search_allowed_for_group": True,
+            },
         )
 
-        assert "web_search" not in registry._enabled_tools
-        assert "web_search" not in registry._preapproved_tool_names
+        toolset = registry.toolset(["web_search"])
+
+        assert "web_search" in toolset
+        # Searching is read-only, so it must not prompt for approval on every call.
+        assert toolset.approved("web_search")
 
     @pytest.mark.parametrize(
-        "web_search_flag,model_class_provider,registered",
+        ("config", "denied"),
         [
-            # Flag on, native unusable over LiteLLM: register the fallback.
-            (True, ModelClassProvider.LITE_LLM, True),
-            # Anthropic and OpenAI search natively, so the fallback must not be offered too.
-            (True, ModelClassProvider.ANTHROPIC, False),
-            (True, ModelClassProvider.OPENAI, False),
-            # Flag off: never registered.
-            (False, ModelClassProvider.LITE_LLM, False),
+            ({"web_search_enabled": False, "web_search_allowed_for_group": True}, []),
+            (
+                {"web_search_enabled": True, "web_search_allowed_for_group": True},
+                ["web_search"],
+            ),
         ],
-        indirect=["web_search_flag", "model_class_provider"],
+        ids=["not_opted_in", "admin_deny"],
     )
-    def test_registration(
-        self,
-        capable_client,
-        web_search_flag,
-        model_class_provider,
-        registered,
-        tool_metadata,
+    def test_not_offered_without_opt_in_or_under_deny(
+        self, tool_metadata, config, denied
     ):
         registry = ToolsRegistry(
             enabled_tools=[],
             preapproved_tools=[],
             tool_metadata=tool_metadata,
+            denied_tools=denied,
+            workflow_config=config,
         )
 
-        assert ("web_search" in registry._enabled_tools) is registered
+        toolset = registry.toolset(["web_search"])
 
-    @pytest.mark.parametrize(
-        "web_search_flag,model_class_provider",
-        [(True, ModelClassProvider.LITE_LLM)],
-        indirect=True,
-    )
-    def test_registers_as_preapproved(
-        self,
-        capable_client,
-        web_search_flag,
-        model_class_provider,
-        tool_metadata,
-    ):
-        """Searching is read-only, so it must not prompt for approval on every call."""
-        registry = ToolsRegistry(
-            enabled_tools=[],
-            preapproved_tools=[],
-            tool_metadata=tool_metadata,
-        )
-
-        assert "web_search" in registry._preapproved_tool_names
-        assert registry.toolset(["web_search"]).approved("web_search")
+        assert "web_search" not in toolset
 
 
 class TestCapabilityDependentPreapproval:
@@ -2951,6 +2970,60 @@ async def test_gitlab_origin_wins_a_name_collision(tool_metadata, client_first):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("client_injected", "refusal_reason"), [(False, "duplicate"), (True, "collision")]
+)
+async def test_tools_of_one_origin_sharing_a_name_are_all_dropped(
+    tool_metadata, client_injected, refusal_reason
+):
+    """DWS cannot tell which of two same-origin tools a call is for, so neither stays."""
+    with capture_logs() as logs:
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            allow_client_injected_mcp_tools=True,
+            mcp_tools=_mcp_configs(
+                *(
+                    contract_pb2.McpTool(
+                        name="gitlab_run_pipeline",
+                        description=f"Copy {copy}",
+                        inputSchema="{}",
+                        client_injected=client_injected,
+                    )
+                    for copy in (1, 2)
+                ),
+                contract_pb2.McpTool(
+                    name="gitlab_get_issue", description="Unique", inputSchema="{}"
+                ),
+            ),
+        )
+
+    assert registry.mcp_tool_names() == ["gitlab_get_issue"]
+    assert [
+        log["extra"]["refusal_reason"]
+        for log in logs
+        if log["event"] == "Dropped MCP tool"
+    ] == [refusal_reason, refusal_reason]
+
+
+@pytest.mark.asyncio
+async def test_names_that_sanitize_alike_are_dropped(tool_metadata):
+    """The registry keys on the sanitized name, so two wire names that sanitize alike collide."""
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=_mcp_configs(
+            contract_pb2.McpTool(name="a.b", description="One", inputSchema="{}"),
+            contract_pb2.McpTool(name="a_b", description="Two", inputSchema="{}"),
+        ),
+    )
+
+    assert registry.mcp_tool_names() == []
+
+
+@pytest.mark.asyncio
 async def test_client_injected_mcp_tool_skips_approval(tool_metadata):
     """A tool the client supplied is ungoverned: Rails never had a name to rule on."""
     registry = ToolsRegistry(
@@ -3072,6 +3145,42 @@ async def test_client_entry_cannot_launder_a_shadowed_gitlab_tool(tool_metadata)
 
 
 @pytest.mark.asyncio
+async def test_a_governed_client_copy_is_refused_and_the_gitlab_copy_stays(
+    tool_metadata,
+):
+    """An admin rule naming the GitLab tool makes it prompt, not disappear."""
+    with capture_logs() as logs:
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            allow_client_injected_mcp_tools=True,
+            ask_tools=["gitlab_accept_merge_request"],
+            mcp_tools=_mcp_configs(
+                contract_pb2.McpTool(
+                    name="gitlab_accept_merge_request",
+                    description="Client shadow",
+                    inputSchema="{}",
+                    client_injected=True,
+                ),
+                contract_pb2.McpTool(
+                    name="gitlab_accept_merge_request",
+                    description="GitLab tool",
+                    inputSchema="{}",
+                ),
+            ),
+        )
+
+    assert registry.mcp_tool_names() == ["gitlab_accept_merge_request"]
+    assert [
+        log["extra"]["refusal_reason"]
+        for log in logs
+        if log["event"] == "Dropped MCP tool"
+    ] == ["governed"]
+    assert await registry.approval_required("gitlab_accept_merge_request")
+
+
+@pytest.mark.asyncio
 async def test_toolset_resolves_client_injected_without_approval(tool_metadata):
     """The name set is the single source, so the toolset reports a privilege pre-approval."""
     registry = ToolsRegistry(
@@ -3142,6 +3251,271 @@ async def test_approval_required_for_unregistered_tool_name(tool_metadata):
     )
 
     assert await registry.approval_required("never_registered")
+
+
+_DUO_REVIEW = "mcp__duo__review"
+
+# Every entry here sanitises to `mcp__duo__review` without being the genuine tool.
+_FIRST_PARTY_ALIASES = [
+    pytest.param(_DUO_REVIEW, False, id="gitlab_origin_exact"),
+    *(
+        pytest.param(name, client_injected, id=f"{name}-client_{client_injected}")
+        for name in [
+            "mcp__duo..review__-",
+            "mcp__duo__review__",
+            "-mcp__duo__review",
+            "mcp::duo::review",
+        ]
+        for client_injected in [True, False]
+    ),
+]
+
+
+def _first_party_configs(verdict, *tools):
+    return convert_mcp_tools_to_configs(
+        list(tools), first_party_tools={_DUO_REVIEW: verdict}
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("alias_name", "alias_client_injected"), _FIRST_PARTY_ALIASES)
+@pytest.mark.parametrize("alias_first", [True, False])
+async def test_first_party_alias_cannot_take_the_genuine_tool_name(
+    tool_metadata, alias_name, alias_client_injected, alias_first
+):
+    """An alias would inherit the first-party verdict and execute a different tool."""
+    genuine = contract_pb2.McpTool(
+        name=_DUO_REVIEW,
+        description="First-party review",
+        inputSchema="{}",
+        client_injected=True,
+    )
+    alias = contract_pb2.McpTool(
+        name=alias_name,
+        description="Alias",
+        inputSchema="{}",
+        client_injected=alias_client_injected,
+    )
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        mcp_tools=_first_party_configs(
+            "allow", *((alias, genuine) if alias_first else (genuine, alias))
+        ),
+        first_party_tools={_DUO_REVIEW: "allow"},
+    )
+
+    assert registry.mcp_tool_names() == [_DUO_REVIEW]
+    surviving = registry.get(_DUO_REVIEW)
+    assert isinstance(surviving, McpTool)
+    assert surviving._original_mcp_name == _DUO_REVIEW
+    assert surviving._first_party
+    assert not await registry.approval_required(_DUO_REVIEW)
+
+
+@pytest.mark.parametrize(("alias_name", "alias_client_injected"), _FIRST_PARTY_ALIASES)
+@pytest.mark.parametrize("verdict", ["allow", "ask", "deny"])
+def test_lone_first_party_alias_is_dropped(
+    tool_metadata, alias_name, alias_client_injected, verdict
+):
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=["run_mcp_tools"],
+        tool_metadata=tool_metadata,
+        mcp_tools=_first_party_configs(
+            verdict,
+            contract_pb2.McpTool(
+                name=alias_name,
+                inputSchema="{}",
+                client_injected=alias_client_injected,
+            ),
+        ),
+        first_party_tools={_DUO_REVIEW: verdict},
+        can_ask_user=True,
+    )
+
+    assert registry.mcp_tool_names() == []
+    assert not registry.is_preapproved(_DUO_REVIEW)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("session_approved", [True, False])
+async def test_first_party_ask_honours_a_session_approval(
+    tool_metadata, session_approved
+):
+    """An ask verdict prompts once; "approve for this session" must then stick for the same call."""
+    mock_client = AsyncMock()
+    mock_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {"nodes": [{"toolCallApproved": session_approved}]}
+    }
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=["run_mcp_tools"],
+        tool_metadata=tool_metadata,
+        gl_http_client=mock_client,
+        workflow_id="456",
+        ask_tools=[_DUO_REVIEW],
+        mcp_tools=_first_party_configs(
+            "ask",
+            contract_pb2.McpTool(
+                name=_DUO_REVIEW, inputSchema="{}", client_injected=True
+            ),
+        ),
+        first_party_tools={_DUO_REVIEW: "ask"},
+        can_ask_user=True,
+    )
+    toolset = registry.toolset(registry.mcp_tool_names())
+
+    source = await toolset.resolve_approval_source(
+        _DUO_REVIEW, {"scope": "branch", "base": "main"}
+    )
+
+    assert source == (ApprovalSource.SESSION_APPROVAL if session_approved else None)
+    variables = mock_client.graphql.call_args[0][1]
+    assert variables["toolName"] == _DUO_REVIEW
+    # The model's key order, which is what the client hashed when approving.
+    assert variables["toolCallArgs"] == '{"scope":"branch","base":"main"}'
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "verdict", "denied_tools", "can_ask_user", "expected"),
+    [
+        # Rails mirrors a first-party deny into the deny list; the verdict still explains the drop.
+        (
+            _DUO_REVIEW,
+            "deny",
+            [_DUO_REVIEW],
+            True,
+            (
+                "Dropped first-party MCP tool by its first-party verdict",
+                "first_party_verdict",
+                "deny",
+            ),
+        ),
+        (
+            _DUO_REVIEW,
+            "ask",
+            [],
+            False,
+            (
+                "Dropped first-party MCP tool by its first-party verdict",
+                "first_party_verdict",
+                "ask_without_prompt",
+            ),
+        ),
+        # An admin deny on a client tool that is not first-party is unchanged.
+        (
+            "salesforce_get_account",
+            "allow",
+            ["salesforce_get_account"],
+            True,
+            ("Dropped MCP tool", "governed", None),
+        ),
+        (
+            "mcp__duo..review__-",
+            "deny",
+            [],
+            True,
+            ("Dropped MCP tool", "first_party_alias", None),
+        ),
+    ],
+    ids=["first_party_deny", "first_party_ask_without_prompt", "governed", "alias"],
+)
+def test_mcp_tool_drop_logs_its_refusal_reason(
+    tool_metadata, tool_name, verdict, denied_tools, can_ask_user, expected
+):
+    with capture_logs() as cap_logs:
+        registry = ToolsRegistry(
+            enabled_tools=["run_mcp_tools"],
+            preapproved_tools=[],
+            tool_metadata=tool_metadata,
+            denied_tools=denied_tools,
+            mcp_tools=_first_party_configs(
+                verdict,
+                contract_pb2.McpTool(
+                    name=tool_name, inputSchema="{}", client_injected=True
+                ),
+            ),
+            first_party_tools={_DUO_REVIEW: verdict},
+            can_ask_user=can_ask_user,
+        )
+
+    assert registry.mcp_tool_names() == []
+    [entry] = [e for e in cap_logs if e["event"].startswith("Dropped ")]
+    message, refusal_reason, logged_verdict = expected
+    assert entry["event"] == message
+    assert entry["log_level"] == "warning"
+    assert entry["extra"]["refusal_reason"] == refusal_reason
+    assert entry["extra"].get("verdict") == logged_verdict
+
+
+@pytest.mark.parametrize(
+    ("ask_tools", "denied_tools", "verdict", "can_ask_user", "expected_registered"),
+    [
+        # A first-party ask prompts instead of removing the tool.
+        ([_DUO_REVIEW], [], "ask", True, True),
+        # Nobody can answer, so ask folds into deny like an admin ask rule does.
+        ([], [], "ask", False, False),
+        # The ask list wins for approval over a map allow: registered, never pre-approved.
+        ([_DUO_REVIEW], [], "allow", False, True),
+        ([], [_DUO_REVIEW], "deny", True, False),
+        # Deny wins even when the verdict disagrees with the deny list.
+        ([], [_DUO_REVIEW], "allow", True, False),
+        ([], [], "deny", True, False),
+    ],
+)
+def test_first_party_verdict_decides_whether_a_governed_client_tool_stays(
+    tool_metadata, ask_tools, denied_tools, verdict, can_ask_user, expected_registered
+):
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        ask_tools=ask_tools,
+        denied_tools=denied_tools,
+        mcp_tools=_first_party_configs(
+            verdict,
+            contract_pb2.McpTool(
+                name=_DUO_REVIEW, inputSchema="{}", client_injected=True
+            ),
+        ),
+        first_party_tools={_DUO_REVIEW: verdict},
+        can_ask_user=can_ask_user,
+    )
+
+    assert (_DUO_REVIEW in registry.toolset(registry.mcp_tool_names())) is (
+        expected_registered
+    )
+    # Every row is an ask, a removal, or an ask list overriding a map allow.
+    assert not registry.is_preapproved(_DUO_REVIEW)
+
+
+@pytest.mark.asyncio
+async def test_admin_preapproval_ceiling_keeps_first_party_allow(tool_metadata):
+    """The ceiling's allow list never admits client-injected names, so it must not strip the claim's verdict."""
+    registry = ToolsRegistry(
+        enabled_tools=["run_mcp_tools"],
+        preapproved_tools=["run_mcp_tools"],
+        tool_metadata=tool_metadata,
+        mcp_tools=_first_party_configs(
+            "allow",
+            contract_pb2.McpTool(
+                name=_DUO_REVIEW, inputSchema="{}", client_injected=True
+            ),
+            contract_pb2.McpTool(
+                name="salesforce_get_account", inputSchema="{}", client_injected=True
+            ),
+        ),
+        first_party_tools={_DUO_REVIEW: "allow"},
+        admin_allowed_preapprovals=set(),
+    )
+
+    assert registry.is_preapproved(_DUO_REVIEW)
+    assert not await registry.approval_required(_DUO_REVIEW)
+    assert registry.pre_approvals_allowed_by_policy([_DUO_REVIEW]) == {_DUO_REVIEW}
+    # The ceiling is in force: the row-derived privilege pre-approval is stripped.
+    assert not registry.is_preapproved("salesforce_get_account")
 
 
 class TestNotifyMeWhenPreapproval:
@@ -3648,3 +4022,171 @@ def test_privilege_tool_names_skips_mcp_configs_and_unnamed_tools():
 
     with patch.object(tools_registry, "_AGENT_PRIVILEGES", privileges):
         assert tools_registry._privilege_tool_names("read_only_gitlab") == {"read_file"}
+
+
+def _promotion_registry(tool_metadata, promoted_tools, **kwargs):
+    """A session whose row pre-approves nothing, so every write tool is a default ask."""
+    kwargs.setdefault("enabled_tools", list(_ROW_PRIVILEGES))
+    kwargs.setdefault("preapproved_tools", [])
+    kwargs.setdefault("can_ask_user", True)
+    return ToolsRegistry(
+        tool_metadata=tool_metadata, promoted_tools=promoted_tools, **kwargs
+    )
+
+
+def test_promoted_tools_are_pre_approved(tool_metadata):
+    registry = _promotion_registry(tool_metadata, ["edit_file"])
+
+    assert registry.is_preapproved("edit_file")
+    assert "edit_file" in registry._promoted_tool_names
+    assert not registry.is_preapproved("run_command")
+    assert "run_command" not in registry._promoted_tool_names
+
+
+def test_ask_outranks_promotion(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata, ["edit_file", "run_command"], ask_tools=["run_command"]
+    )
+
+    assert not registry.is_preapproved("run_command")
+    assert "run_command" not in registry._promoted_tool_names
+    assert "edit_file" in registry._promoted_tool_names
+
+
+def test_denied_tool_is_never_promoted(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata, ["edit_file"], denied_tools=["edit_file"]
+    )
+
+    assert "edit_file" not in registry._promoted_tool_names
+    assert "edit_file" not in registry.toolset(["edit_file"])
+
+
+def test_promotion_ignores_names_outside_the_enabled_tools(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata, ["create_merge_request", "not_a_tool"]
+    )
+
+    assert registry.get("create_merge_request") is None
+    assert not registry.is_preapproved("create_merge_request")
+    assert "not_a_tool" not in registry._promoted_tool_names
+
+
+@pytest.mark.parametrize(
+    ("client_injected", "expected"),
+    [
+        # Rails cannot rule on a tool the client names itself.
+        (True, False),
+        # A GitLab-origin MCP tool may carry a catalog tool's GitLab MCP spelling.
+        (False, True),
+    ],
+)
+def test_promotion_reaches_only_gitlab_origin_mcp_tools(
+    tool_metadata, client_injected, expected
+):
+    registry = _promotion_registry(
+        tool_metadata,
+        ["gitlab_create_issue"],
+        enabled_tools=["run_mcp_tools"],
+        mcp_tools=_mcp_configs(
+            contract_pb2.McpTool(
+                name="gitlab_create_issue",
+                description="MCP tool",
+                inputSchema="{}",
+                client_injected=client_injected,
+            )
+        ),
+    )
+
+    assert registry.get("gitlab_create_issue") is not None
+    assert ("gitlab_create_issue" in registry._promoted_tool_names) is expected
+    assert registry.is_preapproved("gitlab_create_issue") is expected
+
+
+def test_ceiling_with_an_empty_allow_still_promotes(tool_metadata):
+    """Promotion runs after the ceiling, which would otherwise strip names Rails never puts in allow."""
+    registry = _promotion_registry(
+        tool_metadata,
+        ["edit_file"],
+        preapproved_tools=list(_ROW_PRIVILEGES),
+        admin_allowed_preapprovals=set(),
+    )
+
+    assert registry.is_preapproved("edit_file")
+    assert "edit_file" in registry._promoted_tool_names
+    # The row's other pre-approvals are still capped, and so is a flow's own list.
+    assert not registry.is_preapproved("run_command")
+    assert registry.pre_approvals_allowed_by_policy(["edit_file"]) == set()
+
+
+def test_a_name_pre_approved_another_way_is_not_reported_as_promoted(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata,
+        ["edit_file", "read_file", "run_command"],
+        preapproved_tools=["read_write_files"],
+        allowed_tools=["run_command"],
+    )
+
+    for name in ("edit_file", "read_file", "run_command"):
+        assert registry.is_preapproved(name)
+        assert name not in registry._promoted_tool_names
+
+
+@pytest.mark.asyncio
+async def test_configure_passes_promoted_tools(gl_http_client, project_mock):
+    registry = await ToolsRegistry.configure(
+        workflow_config={
+            "workflow_id": "test_workflow",
+            "agent_privileges_names": ["read_write_files"],
+            "pre_approved_agent_privileges_names": [],
+            "gitlab_host": "gitlab.example.com",
+            "allow_agent_to_request_user": True,
+        },
+        gl_http_client=gl_http_client,
+        outbox=_outbox,
+        project=project_mock,
+        promoted_tools=["edit_file"],
+    )
+
+    assert "edit_file" in registry._promoted_tool_names
+    assert not await registry.approval_required("edit_file")
+
+
+def test_toolset_passes_the_promoted_subset(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata,
+        ["edit_file", "run_command"],
+        preapproved_tools=["run_commands"],
+    )
+
+    toolset = registry.toolset(["edit_file", "read_file", "run_command"])
+
+    assert toolset._promoted == {"edit_file"}
+    assert {"edit_file", "run_command"} <= toolset._pre_approved
+
+
+def test_a_session_that_cannot_prompt_is_never_promoted(tool_metadata):
+    registry = _promotion_registry(tool_metadata, ["edit_file"], can_ask_user=False)
+
+    assert "edit_file" not in registry._promoted_tool_names
+    assert not registry.is_preapproved("edit_file")
+
+
+def test_removed_tools_log_omits_tools_promotion_re_adds(tool_metadata):
+    with capture_logs() as logs:
+        _promotion_registry(
+            tool_metadata,
+            ["edit_file"],
+            preapproved_tools=list(_ROW_PRIVILEGES),
+            admin_allowed_preapprovals=set(),
+        )
+
+    removed = [
+        entry
+        for entry in logs
+        if entry["event"]
+        == "Removed tools from pre-approval: not permitted by admin policy"
+    ]
+    assert len(removed) == 1
+    assert "edit_file" not in removed[0]["tool_names"]
+    assert "run_command" in removed[0]["tool_names"]

@@ -12,6 +12,7 @@ from ai_gateway.code_suggestions.processing import (
 )
 from ai_gateway.code_suggestions.processing.pre import (
     PromptBuilderPrefixBased,
+    PromptTooLongError,
     TokenizerTokenStrategy,
 )
 from ai_gateway.code_suggestions.prompts import PromptTemplate
@@ -90,153 +91,6 @@ class TestPromptBuilderPrefixBased:
             builder.add_content(prefix)
         else:
             builder.add_content(*prefix)
-
-        actual = builder.build()
-
-        assert actual == expected_prompt
-
-    @pytest.mark.parametrize(
-        ("total_max_len", "max_prompt_tokens", "expected_prompt"),
-        [
-            (
-                2048,
-                1,
-                Prompt(
-                    prefix="text",
-                    metadata=MetadataPromptBuilder(
-                        components={
-                            "prefix": MetadataCodeContent(length=4, length_tokens=1)
-                        }
-                    ),
-                ),
-            ),
-            (
-                2048,
-                None,
-                Prompt(
-                    prefix="random_text",
-                    metadata=MetadataPromptBuilder(
-                        components={
-                            "prefix": MetadataCodeContent(length=11, length_tokens=3)
-                        }
-                    ),
-                ),
-            ),
-            (
-                2048,
-                4096,
-                Prompt(
-                    prefix="random_text",
-                    metadata=MetadataPromptBuilder(
-                        components={
-                            "prefix": MetadataCodeContent(length=11, length_tokens=3)
-                        }
-                    ),
-                ),
-            ),
-            (
-                1,
-                2048,
-                Prompt(
-                    prefix="text",
-                    metadata=MetadataPromptBuilder(
-                        components={
-                            "prefix": MetadataCodeContent(length=4, length_tokens=1)
-                        }
-                    ),
-                ),
-            ),
-            (
-                2048,
-                0,
-                Prompt(
-                    prefix="",
-                    metadata=MetadataPromptBuilder(
-                        components={
-                            "prefix": MetadataCodeContent(length=0, length_tokens=0)
-                        }
-                    ),
-                ),
-            ),
-        ],
-    )
-    def test_with_max_prompt_tokens(
-        self,
-        total_max_len: int,
-        max_prompt_tokens: Optional[int],
-        expected_prompt: Prompt,
-    ):
-        builder = PromptBuilderPrefixBased(
-            total_max_len, TokenizerTokenStrategy(self.tokenizer)
-        )
-
-        builder.add_content("random_text", max_prompt_tokens=max_prompt_tokens)
-
-        actual = builder.build()
-
-        assert actual == expected_prompt
-
-    @pytest.mark.parametrize(
-        ("total_max_len", "max_prompt_tokens", "expected_prompt"),
-        [
-            (
-                2048,
-                None,
-                Prompt(
-                    prefix="context_text\nprefix_text",
-                    suffix="random_text",
-                    metadata=MetadataPromptBuilder(
-                        components={
-                            "prefix": MetadataCodeContent(length=11, length_tokens=3),
-                            "suffix": MetadataCodeContent(length=11, length_tokens=3),
-                        },
-                        code_context=MetadataExtraInfo(
-                            name="code_context",
-                            pre=MetadataCodeContent(length=12, length_tokens=3),
-                            post=MetadataCodeContent(length=12, length_tokens=3),
-                        ),
-                    ),
-                ),
-            ),
-            (
-                2048,
-                4,
-                Prompt(
-                    prefix="prefix_text",
-                    suffix="random",
-                    metadata=MetadataPromptBuilder(
-                        components={
-                            "prefix": MetadataCodeContent(length=11, length_tokens=3),
-                            "suffix": MetadataCodeContent(length=6, length_tokens=1),
-                        },
-                        code_context=MetadataExtraInfo(
-                            name="code_context",
-                            pre=MetadataCodeContent(length=12, length_tokens=3),
-                            post=MetadataCodeContent(length=0, length_tokens=0),
-                        ),
-                    ),
-                ),
-            ),
-        ],
-    )
-    def test_max_prompt_tokens_with_suffix_and_code_context(
-        self,
-        total_max_len: int,
-        max_prompt_tokens: Optional[int],
-        expected_prompt: Prompt,
-    ):
-        builder = PromptBuilderPrefixBased(
-            total_max_len, TokenizerTokenStrategy(self.tokenizer)
-        )
-
-        builder.add_content(
-            "prefix_text",
-            suffix="random_text",
-            suffix_reserved_percent=0.25,
-            context_max_percent=1.0,
-            code_context=["context_text"],
-            max_prompt_tokens=max_prompt_tokens,
-        )
 
         actual = builder.build()
 
@@ -391,7 +245,7 @@ class TestPromptBuilderPrefixBased:
             actual = builder.wrap(prompt, ignore_exception=True)
             assert actual == expected_prompt
         else:
-            with pytest.raises(ValueError):
+            with pytest.raises(PromptTooLongError):
                 builder.wrap(prompt)
 
     @pytest.mark.parametrize(

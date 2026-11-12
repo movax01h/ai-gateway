@@ -1,13 +1,14 @@
 # pylint: disable=direct-environment-variable-reference,invalid-overridden-method,too-many-branches,too-many-lines,too-many-statements
 import ast
 import asyncio
+import contextvars
 import functools
-import hashlib
 import hmac
 import json
 import os
 import re
 import signal
+from concurrent.futures import ThreadPoolExecutor
 from itertools import chain
 from typing import Any, AsyncIterable, AsyncIterator, Optional, cast, override
 
@@ -38,6 +39,7 @@ from pydantic import ValidationError as PydanticValidationError
 import duo_workflow_service.workflows.registry as flow_registry
 from ai_gateway.config import Config, get_config, setup_litellm
 from ai_gateway.container import ContainerApplication
+from ai_gateway.model_metadata import TypeModelMetadata
 from ai_gateway.model_selection import (
     ModelSelectionConfig,
     RestrictedModelAccessError,
@@ -46,13 +48,19 @@ from ai_gateway.model_selection import (
 from ai_gateway.prompts import BasePromptRegistry
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import (
+    FlowConfigLimitExceededError,
     FlowValidationError,
     MissingAdditionalContextError,
 )
 from duo_workflow_service.agent_platform.utils.validation import FlowValidator
+from duo_workflow_service.agent_platform.v1.catalog.errors import (
+    CatalogItemsFetchError,
+    is_catalog_refusal,
+)
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     discover_feature_flow_configs,
 )
+from duo_workflow_service.asyncio_io_context import install_clean_io_handle_context
 from duo_workflow_service.components import tools_registry
 from duo_workflow_service.errors.error_handler import ModelError
 from duo_workflow_service.errors.typing import (
@@ -68,7 +76,10 @@ from duo_workflow_service.executor.outbox import (
     OutboxSignal,
     OutgoingMessageTooLargeError,
 )
+from duo_workflow_service.flow_config_digest import flow_config_digest
 from duo_workflow_service.flow_request import (
+    FetchedFlowRequest,
+    FlowRequest,
     InlineFlowRequest,
     RegistryFlowRequest,
     normalize_catalog_items,
@@ -104,6 +115,13 @@ from duo_workflow_service.interceptors.request_metadata_log_interceptor import (
     RequestMetadataLogInterceptor,
 )
 from duo_workflow_service.interceptors.route import has_sufficient_usage_quota
+from duo_workflow_service.interceptors.trusted_restricted_issuers import (
+    TrustedRestrictedIssuerVerifier,
+)
+from duo_workflow_service.model_scope import (
+    log_flow_model_feature,
+    scope_flat_rate_flow_models,
+)
 from duo_workflow_service.monitoring import duo_workflow_metrics, setup_monitoring
 from duo_workflow_service.profiling import setup_profiling
 from duo_workflow_service.security.exceptions import SecurityException
@@ -150,6 +168,10 @@ from lib.billing_events import (
     ExecutionEnvironment,
     SelfHostedLLMOperations,
 )
+from lib.billing_events.validation import (
+    is_billing_validation_enforced,
+    validate_billing_event_context,
+)
 from lib.container_wiring import wire_and_validate
 from lib.context import client_capabilities, language_server_version
 from lib.context.model import (
@@ -164,6 +186,7 @@ from lib.flow_enablement import (
     GATED_FLOWS,
     GITLAB_COM_VERIFIED_CLAIM,
     SAAS_REALM,
+    _canonical_uid,
     flow_enablement_enforced,
     is_flow_enabled,
     is_gitlab_com_caller,
@@ -173,10 +196,16 @@ from lib.flow_enablement import (
 from lib.internal_events import InternalEventsClient
 from lib.internal_events.context import (
     InternalEventAdditionalProperties,
+    current_event_context,
     merge_event_context_extra,
 )
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum, EventPropertyEnum
-from lib.jwt import FEATURE_ENABLEMENT_TYPE_CLAIM, instance_uid_claim
+from lib.jwt import (
+    FEATURE_ENABLEMENT_TYPE_CLAIM,
+    PAID_CREDIT_MODELS_ALLOWED_CLAIM,
+    instance_uid_claim,
+    trusted_instance_id,
+)
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
@@ -193,16 +222,28 @@ WORKFLOW_ID_CLAIM = "workflow_id"
 # Rails sets this on every token it self-signs for DWS, so with no workflow_id the token is unbound.
 BINDS_WORKFLOW_CLAIM = "binds_workflow"
 WORKFLOW_BINDING_DETAILS = "Workflow token is not authorized for the requested workflow"
+CATALOG_REFUSAL_DETAILS = "The AI Catalog items for this flow are not available"
+# A fetch failure GitLab could not refuse (5xx with retries exhausted, or a 2xx with a
+# malformed body) is a server fault. Its message embeds GitLab's raw response body, so
+# the details are static like the refusal branch and the body stays in the server log.
+CATALOG_FETCH_FAILED_DETAILS = "The AI Catalog items for this flow could not be loaded"
+FETCHED_FLOW_BINDING_DETAILS = (
+    "fetch_flow_config requires a plain workflow ID and a workflow token bound to it"
+)
 # Comma-separated instance UUIDs (the `sub` of GitLab.com's own instance token). Only
 # these get workflow tokens that unlock the restricted models of the flow they are
 # minted for, and ExecuteWorkflow accepts their instance token's flow claim for
 # restricted models. Empty means no instance qualifies.
 RESTRICTED_FLOW_INSTANCE_UIDS_ENV = "DUO_WORKFLOW_AUTH__RESTRICTED_FLOW_INSTANCE_UIDS"
+# A trusted restricted-flow issuer's proof for one flow and workflow (see trusted_restricted_issuers), sent on
+# ExecuteWorkflow next to the usual token.
+RESTRICTED_FLOW_PROOF_HEADER = "x-gitlab-restricted-flow-proof"
 
 _PROPAGATED_EXTRA_CLAIMS = {
     SKIP_USAGE_CUTOFF_CLAIM,
     BINDS_WORKFLOW_CLAIM,
     FEATURE_ENABLEMENT_TYPE_CLAIM,
+    PAID_CREDIT_MODELS_ALLOWED_CLAIM,
     "tool_access_policies",
     "gitlab_root_namespace_id",
 }
@@ -261,11 +302,7 @@ def _workflow_binding_matches(bound: Any, requested: str) -> bool:
     )
 
 
-def _flow_config_digest(flow_config: Struct) -> str:
-    canonical_json = json.dumps(
-        MessageToDict(flow_config), sort_keys=True, separators=(",", ":")
-    )
-    return hashlib.sha256(canonical_json.encode()).hexdigest()
+_flow_config_digest = flow_config_digest
 
 
 async def _require_registry_claim(
@@ -294,6 +331,15 @@ _FLOW_VERSION_MAPPING = [
 ]
 
 log = structlog.stdlib.get_logger("server")
+
+# ValidateFlowConfig runs its CPU-bound validation off the event loop. A dedicated single worker, rather than the
+# shared default executor, keeps N concurrent validations from becoming N threads competing with the event loop and
+# with workflow graph compiles for the GIL. Because calls queue behind the single worker, one the caller has already
+# cancelled is dropped before it starts. The GIL serialises the work anyway, so one worker costs no throughput; the
+# trade is latency, since a validation waits for the ones queued ahead of it, each bounded by the caps.
+_FLOW_VALIDATION_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="flow-validation"
+)
 
 catalog = data_model.load_catalog()
 allowed_ijwt_scopes = {
@@ -556,14 +602,40 @@ def _is_gitlab_com_instance_token(user: CloudConnectorUser) -> bool:
     claims = user.claims
     if user.is_debug or not claims:
         return False
-    allowlist = {
-        uid.strip()
-        for uid in os.environ.get(RESTRICTED_FLOW_INSTANCE_UIDS_ENV, "").split(",")
-        if uid.strip()
-    }
-    return (
-        is_gitlab_com_signed(claims, oidc_gitlab_url()) and claims.subject in allowlist
+    allowlist = _restricted_flow_instance_uids(
+        os.environ.get(RESTRICTED_FLOW_INSTANCE_UIDS_ENV, "")
     )
+    return (
+        is_gitlab_com_signed(claims, oidc_gitlab_url())
+        and _canonical_uid(claims.subject) in allowlist
+    )
+
+
+@functools.lru_cache(maxsize=4)
+def _restricted_flow_instance_uids(raw: str) -> frozenset[str]:
+    """Parse the comma-separated instance UUID allowlist; invalid entries are dropped."""
+    canonical = [
+        _canonical_uid(entry.strip()) for entry in raw.split(",") if entry.strip()
+    ]
+    if None in canonical:
+        log.warning(
+            "Ignoring invalid instance UUIDs",
+            env_var=RESTRICTED_FLOW_INSTANCE_UIDS_ENV,
+            dropped=canonical.count(None),
+        )
+    return frozenset(uid for uid in canonical if uid)
+
+
+def warn_if_restricted_flows_lack_instance_uids() -> None:
+    """Warn at startup when restricted models are configured but the instance UUID allowlist is empty."""
+    flows = ModelSelectionConfig.instance().all_restricted_flows()
+    raw = os.environ.get(RESTRICTED_FLOW_INSTANCE_UIDS_ENV, "")
+    if flows and not _restricted_flow_instance_uids(raw):
+        log.warning(
+            "Restricted models are configured but the instance UUID allowlist is empty",
+            env_var=RESTRICTED_FLOW_INSTANCE_UIDS_ENV,
+            restricted_flows=sorted(flows),
+        )
 
 
 def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
@@ -590,6 +662,101 @@ def _restricted_access_flow(user: CloudConnectorUser) -> Optional[str]:
     if not issued_by_dws and not _is_gitlab_com_instance_token(user):
         return None
     return flow_config_id
+
+
+def _model_references(
+    metadata: TypeModelMetadata,
+) -> dict[str, list[Optional[str]]]:
+    """Return the identifiers and provider model strings a restricted model is matched on."""
+    llm_definition = metadata.llm_definition
+    return {
+        "identifiers": [
+            llm_definition.gitlab_identifier,
+            getattr(metadata, "name", None),
+        ],
+        "models": [metadata.to_params().get("model"), llm_definition.params.model],
+    }
+
+
+def _drop_denied_tagged_models(authorized_flow: Optional[str]) -> None:
+    """Remove tags whose restricted model the authorized flow may not use.
+
+    Tags are routing hints, not a security boundary, so a step asking for such a tag gets the default model instead of
+    refusing the run.
+    """
+    by_tag_metadata = current_model_metadata_with_size_context.get()
+    if by_tag_metadata is None:
+        return
+    config = ModelSelectionConfig.instance()
+    kept = {}
+    for tag, metadata in by_tag_metadata.by_tag.items():
+        allowed = config.restricted_flows_for(**_model_references(metadata))
+        if allowed is None or authorized_flow in allowed:
+            kept[tag] = metadata
+            continue
+        log.warning(
+            "Restricted tagged model falls back to the default model",
+            flow_config_id=authorized_flow,
+            feature_setting=by_tag_metadata.feature_setting,
+            tag=tag,
+            model=metadata.llm_definition.gitlab_identifier,
+        )
+    if len(kept) < len(by_tag_metadata.by_tag):
+        current_model_metadata_with_size_context.set(
+            by_tag_metadata.model_copy(update={"by_tag": kept})
+        )
+
+
+@functools.cache
+def _restricted_flow_proof_verifier() -> TrustedRestrictedIssuerVerifier:
+    return TrustedRestrictedIssuerVerifier()
+
+
+async def _restricted_access_flow_from_proof(
+    context: grpc.ServicerContext,
+    user: CloudConnectorUser,
+    flow_request: FlowRequest,
+    workflow_id: str,
+) -> Optional[str]:
+    """Return the requested flow if a trusted restricted-flow issuer's proof grants it restricted models.
+
+    The proof must verify against its issuer's own keys, the issuer's configured `uid` must be the instance ID the
+    request's signed main token vouches for (lib.jwt.trusted_instance_id), and the proof must name the requested
+    registry flow, enabled for that issuer, and the requested workflow. Request headers are not used for this binding:
+    they are not signed. Any other proof, or none, grants nothing; the request goes on without restricted access.
+    Debug users never qualify.
+    """
+    metadata = dict(context.invocation_metadata() or ())
+    proof_token = metadata.get(RESTRICTED_FLOW_PROOF_HEADER)
+    if user.is_debug or not isinstance(proof_token, str) or not proof_token:
+        return None
+
+    # Off the event loop: a cache miss fetches the issuer's keys.
+    proof = await asyncio.to_thread(
+        _restricted_flow_proof_verifier().verify_proof, proof_token
+    )
+    if proof is None:
+        log.info("Restricted-flow proof ignored", reason="not verified")
+        return None
+
+    requested_flow = (
+        flow_request.config_id
+        if isinstance(flow_request, RegistryFlowRequest)
+        else None
+    )
+    reason = None
+    if trusted_instance_id(user.claims) != proof.issuer.uid:
+        reason = "instance id mismatch"
+    elif proof.flow_config_id != requested_flow:
+        reason = "flow mismatch"
+    elif not _workflow_binding_matches(proof.workflow_id, workflow_id):
+        reason = "workflow mismatch"
+    if reason:
+        log.info(
+            "Restricted-flow proof ignored", reason=reason, issuer=proof.issuer.issuer
+        )
+        return None
+    return proof.flow_config_id
 
 
 class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
@@ -683,7 +850,22 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 "Workflow token is not authorized for the requested flow schema version",
             )
 
-        if (
+        # A fetched flow has no inline config to compare yet. Its token must hold a
+        # digest, which the flow compares with the definition GitLab serves, so a client
+        # that answers the fetch itself cannot change the flow.
+        authorized_fetched_digest: Optional[str] = None
+        if isinstance(flow_request, FetchedFlowRequest) and not user.is_debug:
+            authorized_fetched_digest = (claims_extra or {}).get(
+                FLOW_CONFIG_DIGEST_CLAIM
+            )
+            if not isinstance(authorized_fetched_digest, str) or not (
+                authorized_fetched_digest
+            ):
+                await context.abort(
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    "Workflow token is not authorized for the supplied flow config",
+                )
+        elif (
             not user.is_debug
             and claims_extra is not None
             and FLOW_CONFIG_DIGEST_CLAIM in claims_extra
@@ -701,6 +883,21 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     grpc.StatusCode.PERMISSION_DENIED,
                     "Workflow token is not authorized for the supplied flow config",
                 )
+
+        # The flow of a fetched request is chosen by workflow ID alone, so its token must
+        # be bound to a workflow. The match itself is checked below with every other
+        # request. The ID goes into the fetch path, so only a plain ID is accepted.
+        if isinstance(flow_request, FetchedFlowRequest) and (
+            not _names_a_session(start_req.workflowID)
+            or (not user.is_debug and WORKFLOW_ID_CLAIM not in (claims_extra or {}))
+        ):
+            log.warning(
+                "Fetched flow requested without a plain workflow ID and a bound token",
+                requested_workflow_id=start_req.workflowID[:64],
+            )
+            await context.abort(
+                grpc.StatusCode.PERMISSION_DENIED, FETCHED_FLOW_BINDING_DETAILS
+            )
 
         token_rejection: WorkflowTokenRejectedError | None = None
         if not user.is_debug and claims_extra is not None:
@@ -758,30 +955,19 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         # Restricted models (model_restrictions.yml) are usable only by the flows they are
         # restricted to, on a signed flow claim; no debug bypass. Prompt construction
-        # enforces this for every model; the default model and every tagged model are
-        # checked here so a denied run fails before any workflow setup.
-        authorized_flow = _restricted_access_flow(user)
+        # enforces this for every model. A tagged model the caller may not use falls back
+        # to the default model; the default model is checked here so a denied run fails
+        # before any workflow setup.
+        authorized_flow = _restricted_access_flow(
+            user
+        ) or await _restricted_access_flow_from_proof(
+            context, user, flow_request, start_req.workflowID
+        )
         restricted_access_ctx.set(authorized_flow)
-        by_tag_metadata = current_model_metadata_with_size_context.get()
-        for metadata in filter(
-            None,
-            [
-                current_model_metadata_context.get(),
-                *(by_tag_metadata.by_tag.values() if by_tag_metadata else []),
-            ],
-        ):
-            llm_definition = metadata.llm_definition
+        if (default_metadata := current_model_metadata_context.get()) is not None:
+            llm_definition = default_metadata.llm_definition
             try:
-                ensure_restricted_model_access(
-                    identifiers=[
-                        llm_definition.gitlab_identifier,
-                        getattr(metadata, "name", None),
-                    ],
-                    models=[
-                        metadata.to_params().get("model"),
-                        llm_definition.params.model,
-                    ],
-                )
+                ensure_restricted_model_access(**_model_references(default_metadata))
             except RestrictedModelAccessError as e:
                 log.warning(
                     "Restricted model denied at workflow start",
@@ -795,6 +981,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                     model=llm_definition.gitlab_identifier,
                 )
                 await context.abort(grpc.StatusCode.PERMISSION_DENIED, str(e))
+        _drop_denied_tagged_models(authorized_flow)
 
         workflow_id = start_req.workflowID
         set_workflow_id(workflow_id)
@@ -811,8 +998,38 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
         flow_config = start_req.flowConfig
         gl_event_context = GLReportingEventContext.from_workflow_definition(
-            workflow_definition, bool(flow_config)
+            workflow_definition,
+            bool(flow_config) or isinstance(flow_request, FetchedFlowRequest),
         )
+        # Log the client's feature before the flat-rate check replaces the models.
+        log_flow_model_feature(
+            gl_event_context.feature_qualified_name, workflow_definition
+        )
+        # A flat-rate flow is billed once whatever models it runs, so its models come from the allowlist of the
+        # feature it is billed as, not from the client's choice.
+        scope_flat_rate_flow_models(gl_event_context.feature_qualified_name, user)
+
+        # Validate billing mandatory fields once the flow is known and before the
+        # workflow runs, so an invalid request is rejected before any LLM call.
+        # See https://gitlab.com/gitlab-org/gitlab/-/work_items/605103
+        billing_config = get_config().billing_event
+        if billing_config.enabled:
+            feature = gl_event_context.feature_qualified_name
+            enforce = is_billing_validation_enforced(
+                billing_config.validation_mode_dws, feature
+            )
+            missing_billing_fields = validate_billing_event_context(
+                current_event_context.get(),
+                feature,
+                enforce=enforce,
+                grpc_method="/DuoWorkflow/ExecuteWorkflow",
+            )
+            if missing_billing_fields and enforce:
+                await context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    "Missing mandatory billing fields: "
+                    + ", ".join(missing_billing_fields),
+                )
 
         duo_workflow_metrics.count_agent_platform_receive_start_counter(
             flow_type=gl_event_context.value
@@ -880,13 +1097,15 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         # structured logs already use (structured_logging.add_workflow_identity).
         merge_event_context_extra(**monitoring_context.event_context_fields())
 
-        # Only some request shapes can carry items; the workflow classes behind the rest
+        # Only some request shapes can carry items or a digest; the workflow classes behind the rest
         # do not accept the argument.
-        catalog_kwargs = (
+        flow_kwargs: dict[str, Any] = (
             {"catalog_items": catalog_items}
             if flow_request.supports_catalog_items()
             else {}
         )
+        if isinstance(flow_request, FetchedFlowRequest):
+            flow_kwargs["authorized_flow_config_digest"] = authorized_fetched_digest
 
         workflow: AbstractWorkflow = resolved_flow.factory(
             workflow_id=workflow_id,
@@ -905,7 +1124,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             # the workflow only pins a checkpoint when one was actually requested.
             resume_checkpoint_ts=start_workflow_request.startRequest.resume_checkpoint_ts
             or None,
-            **catalog_kwargs,
+            **flow_kwargs,
         )
         workflow.token_rejection = token_rejection
 
@@ -1068,6 +1287,18 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
             elif isinstance(workflow.last_error, WorkflowTokenRejectedError):
                 context.set_code(grpc.StatusCode.PERMISSION_DENIED)
                 context.set_details(workflow.last_error.details)
+            elif is_catalog_refusal(workflow.last_error):
+                # Every turn gets the same answer, so this is a refusal and not a service fault.
+                # The error text can hold GitLab's answer, so the details are static.
+                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                context.set_details(CATALOG_REFUSAL_DETAILS)
+            elif isinstance(workflow.last_error, CatalogItemsFetchError):
+                # A fetch failure that is not a refusal (a 5xx with retries exhausted, or a 2xx
+                # with a malformed body) is a server fault, so INTERNAL. Its message embeds
+                # GitLab's raw response body via _message_of, so the details are static like the
+                # refusal branch; the body stays in the server log, never the gRPC status.
+                context.set_code(grpc.StatusCode.INTERNAL)
+                context.set_details(CATALOG_FETCH_FAILED_DETAILS)
             elif restricted_error := _find_restricted_model_access_error(
                 workflow.last_error
             ):
@@ -1337,15 +1568,26 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         return response
 
     @override
+    @inject
     async def ValidateFlowConfig(
         self,
         request: contract_pb2.ValidateFlowConfigRequest,
         context: grpc.ServicerContext,
+        max_bytes: int = Provide[
+            ContainerApplication.config.duo_workflow.flow_validation.max_bytes
+        ],
+        max_components: int = Provide[
+            ContainerApplication.config.duo_workflow.flow_validation.max_components
+        ],
     ) -> contract_pb2.ValidateFlowConfigResponse:
         """Validate a flow configuration without executing it.
 
         Accepts a flow config payload and returns a structured validation result (valid/invalid + list of errors). Uses
         the existing DryRunFlowValidator to exercise the full compilation path without touching external systems.
+
+        Validation is CPU-bound, so it runs on a dedicated worker thread to keep the event loop responsive for other
+        sessions. The GIL still serialises the work, so the request is also rejected up front when it exceeds the
+        configured size or component-count caps; those bound how much CPU a single call can take.
         """
         log.info("Validating flow config")
 
@@ -1355,14 +1597,51 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 errors=["Missing required field: flow_config"],
             )
 
+        size_bytes = request.flow_config.ByteSize()
+        if size_bytes > max_bytes:
+            log.warning(
+                "Flow config rejected: exceeds size limit",
+                size_bytes=size_bytes,
+                max_bytes=max_bytes,
+            )
+            return contract_pb2.ValidateFlowConfigResponse(
+                valid=False,
+                errors=[
+                    f"Flow config is {size_bytes} bytes; the maximum is {max_bytes} bytes"
+                ],
+            )
+
         try:
             # FlowValidator uses @inject in its __init__ to resolve the prompt registry.
-            flow_validator = FlowValidator()
-            flow_validator.validate_dict(MessageToDict(request.flow_config))
-            log.info("Flow config validation succeeded")
+            flow_validator = FlowValidator(max_components=max_components)
+            # Struct decoding and validation are both CPU-bound; run them on the dedicated worker so the event loop
+            # stays responsive. Unlike asyncio.to_thread, run_in_executor does not copy contextvars, so copy them
+            # explicitly to keep the request-bound logging context in the worker.
+            context_copy = contextvars.copy_context()
+            await asyncio.get_running_loop().run_in_executor(
+                _FLOW_VALIDATION_EXECUTOR,
+                context_copy.run,
+                lambda: flow_validator.validate_dict(
+                    MessageToDict(request.flow_config)
+                ),
+            )
+            log.info("Flow config validation succeeded", size_bytes=size_bytes)
             return contract_pb2.ValidateFlowConfigResponse(valid=True, errors=[])
+        except FlowConfigLimitExceededError as e:
+            log.warning(
+                "Flow config rejected: exceeds component limit",
+                errors=e.errors,
+                max_components=max_components,
+                size_bytes=size_bytes,
+            )
+            return contract_pb2.ValidateFlowConfigResponse(
+                valid=False,
+                errors=e.errors,
+            )
         except FlowValidationError as e:
-            log.info("Flow config validation failed", errors=e.errors)
+            log.info(
+                "Flow config validation failed", errors=e.errors, size_bytes=size_bytes
+            )
             return contract_pb2.ValidateFlowConfigResponse(
                 valid=False,
                 errors=e.errors,
@@ -1695,7 +1974,7 @@ async def serve(config: Config, port: int) -> None:
             MetadataContextInterceptor(config),
             CorrelationIdInterceptor(),
             RequestMetadataLogInterceptor(),
-            AuthenticationInterceptor(reflection_enabled=reflection_enabled),
+            AuthenticationInterceptor(config, reflection_enabled=reflection_enabled),
             FeatureFlagInterceptor(),
             InternalEventsInterceptor(),
             ModelMetadataInterceptor(),
@@ -1911,10 +2190,16 @@ def run(config: Config):
     # After observability setup, so a duplicate feature id is reported, not lost.
     discover_feature_flow_configs()
     setup_profiling()
+    loop = asyncio.get_event_loop()
+    # Before validate_llm_access() opens the first pooled connection, so every
+    # I/O handle of this process goes through the wrapper; see asyncio_io_context.
+    if config.duo_workflow.clean_io_handle_context:
+        install_clean_io_handle_context(loop)
     if not self_hosted_mode:
         validate_llm_access()
+        warn_if_restricted_flows_lack_instance_uids()
     port = int(os.environ.get("PORT", "50052"))
-    asyncio.get_event_loop().run_until_complete(serve(config, port))
+    loop.run_until_complete(serve(config, port))
 
 
 def run_app():

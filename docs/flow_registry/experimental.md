@@ -41,6 +41,7 @@ flow:
 - **name**: User-readable name for the flow
 - **description**: Description of the flow
 - **product_group**: Attributes team ownership of flow (e.g. `agent_foundations`)
+- **requires_for_each**: Registry flows only: run `for_each` fan-outs even while the `dap_for_each` flag is off (see [Feature flag](#feature-flag))
 
 ## IOKey Abstractions
 
@@ -568,19 +569,23 @@ The fan-out is gated on the `dap_for_each` feature flag. While the flag is off a
 warning is logged: the flow still loads, and the component runs once over the flow's own state. Enable the flag
 for the instance or group a flow runs in before that flow depends on fanning out.
 
+A registry flow that cannot work without its fan-outs sets `requires_for_each: true` at the top level of its config.
+Its `for_each` blocks then run whether or not the flag is on, for example on GitLab instances that never send it.
+An inline config sent by a client cannot opt out of the flag this way.
+
 #### Configuration
 
 | Field | Required | Default | Description |
 |---|---|---|---|
 | `items` | yes | — | Path to the list to iterate over, written like any other input path, for example `context:discover.final_answer.files`. It must resolve to a list when the component runs; anything else fails the flow with a `TypeError` naming the component, this field and the value it found. An empty list is not an error: nothing runs, `results` is published empty, and the flow carries on. An agent's `final_answer` is a list only when the agent declares a response schema with an array field, so point `items` at that field. |
-| `as` | yes | — | Path under which one item is published to the body for one run, for example `context:item`. Unlike an input path this one is written to, so it has to be a `context:` path with at least one subkey; while the flag is on, the flow is rejected at load time otherwise. It also may not write into the namespace `items` reads from, because each item would overwrite the list being iterated. Give the item a namespace of its own. |
+| `as` | yes | — | Path under which one item is published to the body for one run, for example `context:item`. Unlike an input path this one is written to, so it has to be a `context:` path with at least one subkey; while fan-out is enabled (the flag is on, or the flow sets `requires_for_each`), the flow is rejected at load time otherwise. It also may not write into the namespace `items` reads from, because each item would overwrite the list being iterated. Give the item a namespace of its own. |
 | `max_items` | no | `1000` | How many items are run at all. Must be between `1` and `1000`, and it defaults to that ceiling, so nothing is dropped unless a flow asks for it. **A longer list is not an error: the items past `max_items` are never run, and the flow still succeeds.** The list's own order decides which survive, so order the list upstream to put what matters first. The run publishes `total_items` and `truncated` either way, so a later component can tell what was left out; the service also logs a warning naming the component and both counts. |
 | `max_concurrency` | no | `10` | How many of this component's branches run at once. Must be between `1` and `100`. The cap belongs to this one fan-out: each wrapped component has a gate of its own, and it bounds neither the rest of the flow nor the model concurrency of the fleet. Raising it trades a larger burst of concurrent model calls for a shorter wall-clock run. An approval inside a capped fan-out is reached after about `total items / max_concurrency` rounds of the body rather than one round, which is true of any cap. |
 
-These are all the fields there are: while the flag is on, a key that is not one of them is rejected when the flow
-is loaded, and the message names it. A mistyped `max_items` therefore fails rather than running on the default.
-The block is only validated once the flag has been checked, so while the flag is off it is ignored whatever it
-contains.
+These are all the fields there are: while fan-out is enabled, a key that is not one of them is rejected when the
+flow is loaded, and the message names it. A mistyped `max_items` therefore fails rather than running on the default.
+The block is only validated while fan-out is enabled (the flag is on, or the flow sets `requires_for_each`);
+otherwise it is ignored whatever it contains.
 
 #### How a fan-out runs
 
@@ -713,7 +718,7 @@ sibling is about to hit the same thing, so they propagate and fail the flow with
 | `ModelError` | The provider failed after its retries ran out, or failed non-retryably: authentication, permission, invalid request, context too large. |
 | `NotifiableAgentException`, `NotifiableException` | Both carry a message meant for the user, which an error record buries. |
 | `SecurityException` | Prompt injection and its relatives. The result must never reach a model again. |
-| `InsufficientCredits`, `UsageQuotaError` | Out of credits or entitlements, or the quota check is unavailable. Every sibling fails the same way. |
+| `InsufficientCredits`, `UsageQuotaError` | Out of credits or entitlements, or the quota check is unavailable. Every sibling fails the same way. The fan-out's own credit re-check raises these too; see [Credits are re-checked per item](#limitations). |
 | `CheckpointAccessDeniedError` | GitLab refused a checkpoint with 401 or 403: the session lost access, for example because GitLab Duo was turned off. No sibling can save its work either. |
 
 ##### Every item failing is a bug, not a result
@@ -730,6 +735,12 @@ flow continues.
 
 #### Limitations
 
+- **Credits are re-checked per item, not per model call.** When the flow's start-of-run credit check ran, each
+  item re-checks the same quota once it has a concurrency slot, before its body runs. A denial ends the whole
+  fan-out: out of credits shows the user "This flow stopped because the namespace ran out of GitLab Credits.",
+  while an unavailable check or a missing entitlement ends it with the generic error. Most re-checks are cache
+  hits; each one still increments the quota metrics. A single long item, and parallel subagents outside
+  `for_each`, are not re-checked.
 - **The concurrency cap is per fan-out, not fleet-wide.** `max_concurrency` bounds the branches of one
   component. It says nothing about what the rest of the flow, other flows, or other instances are asking of the
   same model at the same time, so it is a blast-radius control rather than a rate limit.

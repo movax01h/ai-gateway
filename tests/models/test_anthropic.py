@@ -781,11 +781,11 @@ class TestAnthropicChatModel:
             # Make sure we haven't called finish before completions are consumed
             watcher.finish.assert_not_called()
 
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError) as exc_info:
                 _ = [item async for item in r]
 
             mock_watch.assert_called_once_with(stream=True)
-            watcher.register_error.assert_called_once()
+            watcher.register_error.assert_called_once_with(exc_info.value)
             watcher.finish.assert_called_once()
 
     @pytest.mark.asyncio

@@ -1,10 +1,13 @@
 from datetime import datetime
 
 from asgi_correlation_id.context import correlation_id
+from fastapi import status
 from starlette.datastructures import CommaSeparatedStrings
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 from starlette_context import context as starlette_context
 
+from ai_gateway.api.feature_category import X_GITLAB_UNIT_PRIMITIVE
 from ai_gateway.api.middleware.base import _PathResolver
 from ai_gateway.api.middleware.headers import (
     X_GITLAB_CLIENT_NAME,
@@ -30,6 +33,12 @@ from ai_gateway.api.middleware.headers import (
     X_GITLAB_VERSION_HEADER,
 )
 from ai_gateway.api.middleware_utils import get_valid_namespace_ids
+from ai_gateway.config import get_config
+from lib.billing_events.validation import (
+    billable_feature_for_unit_primitive,
+    is_billing_validation_enforced,
+    validate_billing_event_context,
+)
 from lib.internal_events import (
     RESERVED_AI_CONTEXT_EXTRA_KEYS,
     EventContext,
@@ -162,6 +171,38 @@ class InternalEventMiddleware:
 
         current_event_context.set(context)
         tracked_internal_events.set(set())
+
+        # Validate billing mandatory fields before the request is processed, so an
+        # invalid request can be rejected before any 3rd party LLM call is made.
+        # See https://gitlab.com/gitlab-org/gitlab/-/work_items/605103
+        billing_config = get_config().billing_event
+        unit_primitive = request.headers.get(X_GITLAB_UNIT_PRIMITIVE)
+        feature = billable_feature_for_unit_primitive(user, unit_primitive)
+        if billing_config.enabled and feature:
+            enforce = is_billing_validation_enforced(
+                billing_config.validation_mode_http, feature
+            )
+            missing_billing_fields = validate_billing_event_context(
+                context,
+                feature,
+                enforce=enforce,
+                endpoint=scope["path"],
+                unit_primitive=unit_primitive,
+            )
+        else:
+            enforce = False
+            missing_billing_fields = []
+
+        if missing_billing_fields and enforce:
+            response = JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                content={
+                    "detail": "Missing mandatory billing fields",
+                    "missing_fields": missing_billing_fields,
+                },
+            )
+            await response(scope, receive, send)
+            return
 
         await self.app(scope, receive, send)
 

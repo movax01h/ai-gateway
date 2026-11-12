@@ -19,16 +19,21 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = [
+    "ActorLimitMode",
     "Config",
+    "ConfigActorLimits",
     "ConfigAuditEvent",
     "ConfigAuth",
     "ConfigBedrockGuardrail",
     "ConfigCachingProxy",
+    "ConfigCodeSuggestions",
     "ConfigCustomModels",
     "ConfigCustomersDot",
+    "ConfigDecision",
     "ConfigDuoChat",
     "ConfigDuoWorkflow",
     "ConfigFastApi",
+    "ConfigFlowValidation",
     "ConfigGoogleCloudProfiler",
     "ConfigInstrumentator",
     "ConfigLogging",
@@ -37,7 +42,9 @@ __all__ = [
     "ConfigModelLimits",
     "ConfigModelSelection",
     "ConfigMtls",
+    "ConfigPrompts",
     "ConfigProxyEndpoints",
+    "ConfigRequestBodyLimit",
     "ConfigSnowplow",
     "ConfigTLS",
     "ConfigVertexTextModel",
@@ -194,6 +201,9 @@ class ConfigInternalEvent(BaseModel):
     )
 
 
+BillingValidationMode = Literal["log", "enforce"]
+
+
 class ConfigBillingEvent(BaseModel):
     enabled: bool = False
     app_id: str = "gitlab_ai_gateway-billing"
@@ -202,6 +212,22 @@ class ConfigBillingEvent(BaseModel):
     api_key: Optional[SecretStr] = None
     batch_size: Optional[int] = 1
     thread_count: Optional[int] = 1
+    validation_mode_http: BillingValidationMode = Field(
+        default="log",
+        description=(
+            "How the HTTP routes handle billable requests that miss fields required by billing events. "
+            "'log': log the missing fields only. 'enforce': reject the request (HTTP 422) "
+            "before any LLM call when its feature is in the enforced features list, "
+            "and log otherwise."
+        ),
+    )
+    validation_mode_dws: BillingValidationMode = Field(
+        default="log",
+        description=(
+            "The same check on the Duo Workflow Service ExecuteWorkflow RPC, with the same modes. "
+            "'enforce' rejects the call with gRPC INVALID_ARGUMENT."
+        ),
+    )
 
 
 class ConfigAuditEvent(BaseModel):
@@ -313,6 +339,36 @@ class ConfigDuoChat(BaseModel):
             "value. Increase this for long-running agentic prompts against "
             "slower self-hosted models. "
             "Set via AIGW_DUO_CHAT__MODEL_REQUEST_TIMEOUT."
+        ),
+    )
+
+
+class ConfigDecision(BaseModel):
+    """OpenAI Decisions classification calls.
+
+    A decision is a fast classification that callers fall back from, so it must fail quickly rather than retry or wait
+    out a slow request.
+    """
+
+    request_timeout: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "Timeout in seconds for a single OpenAI Decisions request on the "
+            "AI Gateway -> model leg. Decision calls classify and are meant to "
+            "fail fast so callers can fall back, so this is far shorter than "
+            "the chat model request timeout. "
+            "Set via AIGW_DECISION__REQUEST_TIMEOUT."
+        ),
+    )
+    max_retries: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Retries the OpenAI client attempts for a failed Decisions request. "
+            "Defaults to 0 so a classification fails fast and the caller can "
+            "fall back instead of waiting on retries. "
+            "Set via AIGW_DECISION__MAX_RETRIES."
         ),
     )
 
@@ -473,6 +529,7 @@ class ModelReleasesPayload(BaseModel):
 
 
 FeatureAllowlistMode = Literal["off", "log", "fallback", "enforce"]
+ActorLimitMode = Literal["off", "log", "enforce"]
 
 
 class ConfigModelSelection(BaseModel):
@@ -514,15 +571,92 @@ class ConfigModelSelection(BaseModel):
             "gitlab_identifier when the ai_model_release feature flag is enabled."
         ),
     )
-    feature_allowlist_mode: FeatureAllowlistMode = Field(
-        default="log",
+    feature_allowlist_mode_http: FeatureAllowlistMode = Field(
+        default="fallback",
         description=(
-            "How client-supplied model metadata that names a GitLab-managed model is checked "
-            "against the feature's allowlist (default, selectable, beta, dev and tag models). "
-            "'off': no check. 'log': log mismatches only. 'fallback': serve the feature's "
-            "default model instead, and rebuild a managed model whose raw identifier would "
-            "rewrite it. 'enforce': reject a model that is not allowed (HTTP 403, gRPC "
-            "PERMISSION_DENIED), and rebuild an identifier override as in 'fallback'."
+            "How the HTTP routes check client-supplied model metadata that names a "
+            "GitLab-managed model against the feature's allowlist (default, selectable, beta, "
+            "dev and tag models). 'off': no check. 'log': log mismatches only. 'fallback': "
+            "serve the feature's default model instead. 'enforce': reject a model that is not "
+            "allowed (HTTP 403)."
+        ),
+    )
+    feature_allowlist_mode_dws: FeatureAllowlistMode = Field(
+        default="fallback",
+        description=(
+            "The same check on the Duo Workflow Service, with the same modes. 'enforce' "
+            "rejects the call with gRPC PERMISSION_DENIED."
+        ),
+    )
+
+
+class ConfigActorLimits(BaseModel):
+    """Per-actor limits on in-flight requests for one route group, counted per gateway process."""
+
+    actor_limit_mode: ActorLimitMode = Field(
+        default="off",
+        description=(
+            "How the per-actor limits on in-flight requests are applied on each gateway "
+            "process. Every request counts against its user; a request from a self-managed "
+            "instance also counts against that instance, and a GitLab.com request against "
+            "its root namespace. 'off': no check. 'log': log and count the requests that "
+            "would be rejected, then serve them. 'enforce': answer HTTP 429 when any of "
+            "those counters is at its limit. A request without a user id counts only "
+            "against its instance or namespace."
+        ),
+    )
+    user_limit: int = Field(
+        default=5,
+        ge=1,
+        description="Maximum in-flight requests per user on one gateway process.",
+    )
+    instance_limit: int = Field(
+        default=20,
+        ge=1,
+        description=(
+            "Maximum in-flight requests per self-managed instance on one gateway process; "
+            "the token's duo_seat_count times instance_limit_per_seat applies instead when "
+            "it is larger."
+        ),
+    )
+    instance_limit_per_seat: float = Field(
+        default=0.05,
+        ge=0,
+        allow_inf_nan=False,
+        description=(
+            "In-flight requests granted per Duo seat of a self-managed instance when that "
+            "exceeds instance_limit."
+        ),
+    )
+    namespace_limit: int = Field(
+        default=20,
+        ge=1,
+        description=(
+            "Maximum in-flight requests per GitLab.com root namespace on one gateway process."
+        ),
+    )
+
+
+class ConfigCodeSuggestions(ConfigActorLimits):
+    """Limits on the code suggestion routes (/v2/completions, /v2/code/, /v3/code/, /v4/code/)."""
+
+
+class ConfigPrompts(ConfigActorLimits):
+    """Limits on the prompt routes: /v1/prompts/ and /v2/prompts/."""
+
+
+class ConfigRequestBodyLimit(BaseModel):
+    """A size limit on request bodies for the HTTP routes, except the proxy routes (/v1/proxy/)."""
+
+    max_bytes: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Answer HTTP 413 for a request body larger than this many bytes, before the gateway "
+            "buffers it. It applies to every HTTP route except /v1/proxy/, where legitimate "
+            "bodies are larger. The code suggestion routes keep their own 600 KB limit. "
+            "0 (the default) turns the limit off. GitLab.com sets it; self-hosted gateways "
+            "do not need it."
         ),
     )
 
@@ -611,6 +745,31 @@ class ConfigCachingProxy(BaseSettings):
     )
 
 
+class ConfigFlowValidation(BaseModel):
+    """Input caps for the ``ValidateFlowConfig`` gRPC method.
+
+    Validating a flow config is CPU-bound: it parses the config with Pydantic, scans the prompts, and dry-run compiles
+    the graph. The cost grows with the number of components, so an unbounded request can occupy an instance for
+    seconds. Requests above either cap are rejected before that work starts.
+
+    ``max_bytes`` applies to the serialized ``flow_config`` Struct and is checked before decoding. ``max_components``
+    applies to the ``components`` list and is checked before parsing. GitLab already limits flow YAML to 40 KiB, but
+    its request can carry the raw YAML alongside the parsed config, so a flow at that limit arrives as roughly 80 KiB.
+    The byte default stays above that so this service never rejects a config GitLab accepted.
+    """
+
+    max_bytes: int = Field(
+        default=160 * 1024,
+        gt=0,
+        description="Maximum serialized size of the flow_config Struct, in bytes",
+    )
+    max_components: int = Field(
+        default=100,
+        gt=0,
+        description="Maximum number of entries allowed in the flow config components list",
+    )
+
+
 class ConfigDuoWorkflow(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DUO_WORKFLOW_",
@@ -623,6 +782,14 @@ class ConfigDuoWorkflow(BaseSettings):
     )
     caching_proxy: ConfigCachingProxy = Field(default_factory=ConfigCachingProxy)
     tls: ConfigTLS = Field(default_factory=ConfigTLS)
+    clean_io_handle_context: bool = Field(
+        default=True,
+        description=(
+            "Create asyncio I/O handles outside the request context so that pooled "
+            "connections do not keep finished workflows in memory"
+        ),
+    )
+    flow_validation: ConfigFlowValidation = Field(default_factory=ConfigFlowValidation)
 
     def caching_proxy_url(self) -> str | None:
         if self.use_caching_proxy:
@@ -717,6 +884,7 @@ class Config(BaseSettings):
     ]
     mtls: Annotated[ConfigMtls, Field(default_factory=ConfigMtls)]
     duo_chat: Annotated[ConfigDuoChat, Field(default_factory=ConfigDuoChat)]
+    decision: Annotated[ConfigDecision, Field(default_factory=ConfigDecision)]
     model_keys: Annotated[ConfigModelKeys, Field(default_factory=ConfigModelKeys)]
     vertex_text_model: Annotated[
         ConfigVertexTextModel, Field(default_factory=ConfigVertexTextModel)
@@ -729,6 +897,13 @@ class Config(BaseSettings):
     ]
     model_selection: Annotated[
         ConfigModelSelection, Field(default_factory=ConfigModelSelection)
+    ]
+    code_suggestions: Annotated[
+        ConfigCodeSuggestions, Field(default_factory=ConfigCodeSuggestions)
+    ]
+    prompts: Annotated[ConfigPrompts, Field(default_factory=ConfigPrompts)]
+    request_body_limit: Annotated[
+        ConfigRequestBodyLimit, Field(default_factory=ConfigRequestBodyLimit)
     ]
     bind_tools_cache: Annotated[
         ConfigBindToolsCache, Field(default_factory=ConfigBindToolsCache)

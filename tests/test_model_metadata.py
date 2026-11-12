@@ -20,6 +20,7 @@ from ai_gateway.model_metadata import (
     completion_context_max_percent_for_model_metadata,
     create_model_metadata,
     create_model_metadata_by_tag,
+    drop_default_model_ref,
 )
 from ai_gateway.model_selection import ModelSelectionConfig, UnitPrimitiveConfig
 from ai_gateway.model_selection.model_selection_config import (
@@ -191,6 +192,7 @@ def test_create_amazon_q_model_metadata():
     assert result.role_arn == "arn:aws:iam::123456789012:role/example-role"
 
 
+@pytest.mark.usefixtures("custom_models_gateway")
 def test_create_regular_model_metadata():
     # Arrange
     data = {
@@ -252,6 +254,19 @@ class TestCreateModelMetadata:
 
         assert result.llm_definition == gitlab_model1
 
+    def test_create_gitlab_model_metadata_with_the_load_balanced_default(
+        self, gitlab_model1
+    ):
+        data = {
+            "provider": "gitlab",
+            "identifier": "__default__duo_chat",
+            "feature_setting": "duo_chat",
+        }
+
+        result = create_model_metadata(data)
+
+        assert result.llm_definition == gitlab_model1
+
     def test_create_gitlab_model_metadata_with_identifier_and_feature_setting(
         self, gitlab_model2
     ):
@@ -286,6 +301,53 @@ class TestCreateModelMetadata:
             create_model_metadata(data)
 
 
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        pytest.param(
+            {
+                "provider": "gitlab",
+                "identifier": "__default__duo_chat",
+                "feature_setting": "duo_chat",
+            },
+            {"provider": "gitlab", "feature_setting": "duo_chat"},
+            id="load-balanced-default",
+        ),
+        pytest.param(
+            {
+                "provider": "gitlab",
+                "identifier": "gitlab_model1",
+                "feature_setting": "duo_chat",
+            },
+            {
+                "provider": "gitlab",
+                "identifier": "gitlab_model1",
+                "feature_setting": "duo_chat",
+            },
+            id="model",
+        ),
+        pytest.param(
+            {
+                "provider": "openai",
+                "name": "gitlab_model1",
+                "identifier": "__default__duo_chat",
+            },
+            {
+                "provider": "openai",
+                "name": "gitlab_model1",
+                "identifier": "__default__duo_chat",
+            },
+            id="self-hosted-model",
+        ),
+        pytest.param(None, None, id="no-metadata"),
+    ],
+)
+def test_drop_default_model_ref(data, expected):
+    drop_default_model_ref(data)
+
+    assert data == expected
+
+
 def test_create_model_metadata_invalid_data():
     # Arrange
     invalid_data = {
@@ -298,6 +360,7 @@ def test_create_model_metadata_invalid_data():
         create_model_metadata(invalid_data)
 
 
+@pytest.mark.usefixtures("custom_models_gateway")
 class TestModelMetadataToParams:
     def test_without_identifier(self):
         model_metadata = create_model_metadata(
@@ -595,6 +658,7 @@ class TestModelMetadataToParams:
         assert remap_logs[0]["log_level"] == "warning"
 
 
+@pytest.mark.usefixtures("custom_models_gateway")
 class TestModelMetadataResolvedIdentifier:
     @pytest.mark.parametrize(
         ("identifier", "expected_identifier"),
@@ -882,9 +946,19 @@ class TestBedrockIamRole:
         assert self._bedrock_metadata(iam_role="").iam_role is None
 
 
-def test_create_model_metadata_with_none_data():
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param(None, id="none"),
+        pytest.param(5, id="number"),
+        pytest.param(True, id="boolean"),
+        pytest.param("provider", id="string"),
+        pytest.param(["provider"], id="list"),
+    ],
+)
+def test_create_model_metadata_with_data_that_is_not_an_object(data):
     with pytest.raises(ValueError, match="provider must be present"):
-        create_model_metadata(None)
+        create_model_metadata(data)
 
 
 def test_create_model_metadata_without_provider():
@@ -1348,9 +1422,19 @@ class TestCreateModelMetadataByTag:
         assert result.default.llm_definition == gitlab_model1
         assert result.by_tag == {}
 
-    def test_invalid_data_raises(self):
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param(None, id="none"),
+            pytest.param(5, id="number"),
+            pytest.param(True, id="boolean"),
+            pytest.param("provider", id="string"),
+            pytest.param(["provider"], id="list"),
+        ],
+    )
+    def test_invalid_data_raises(self, data):
         with pytest.raises(ValueError, match="provider must be present"):
-            create_model_metadata_by_tag(None)
+            create_model_metadata_by_tag(data)
 
     def test_unresolvable_tag_is_skipped_not_raised(self, gitlab_model1, gitlab_model2):
         # An unresolvable models_for_tags entry must not drop the whole context:
@@ -1924,6 +2008,34 @@ class TestCompletionContextMaxPercentForModelMetadata:
         assert completion_context_max_percent_for_model_metadata(metadata) is None
 
 
+class TestRawIdentifierNextToName:
+    """A raw `identifier` next to `name` is the operator's model, so only a gateway that serves custom models keeps
+    it."""
+
+    RAW = {
+        "provider": "vertex-ai",
+        "name": "claude_sonnet_4_6_vertex",
+        "identifier": "vertex_ai/claude-opus-4-8",
+    }
+
+    @pytest.mark.usefixtures("cloud_gateway")
+    def test_a_gateway_without_custom_models_ignores_it(self):
+        metadata = create_model_metadata(dict(self.RAW))
+
+        assert isinstance(metadata, ModelMetadata)
+        assert metadata.llm_definition.gitlab_identifier == "claude_sonnet_4_6_vertex"
+        assert metadata.identifier is None
+        assert "claude-opus-4-8" not in str(metadata.to_params())
+
+    @pytest.mark.usefixtures("custom_models_gateway")
+    def test_a_gateway_with_custom_models_keeps_it(self):
+        metadata = create_model_metadata(dict(self.RAW))
+
+        assert isinstance(metadata, ModelMetadata)
+        assert metadata.identifier == "vertex_ai/claude-opus-4-8"
+
+
+@pytest.mark.usefixtures("custom_models_gateway")
 class TestSelfHostedIdentifierMatching:
     @pytest.fixture(name="family")
     def family_fixture(self):

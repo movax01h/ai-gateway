@@ -13,12 +13,13 @@ from langchain_core.runnables import (
     Runnable,
     RunnableBinding,
     RunnableLambda,
+    RunnableParallel,
     RunnableSequence,
 )
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, SecretStr
 from pyfakefs.fake_filesystem import FakeFilesystem
 
-from ai_gateway.config import ConfigModelLimits
+from ai_gateway.config import ConfigModelLimits, get_config
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
 from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
@@ -28,17 +29,21 @@ from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.litellm import KindLiteLlmModel
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
+from ai_gateway.models.v2.openai_decisions import OpenAIDecisionsModel
 from ai_gateway.prompts import LocalPromptRegistry, Prompt, feature_roots
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
-from ai_gateway.prompts.registry import (
-    PROMPT_ID_TO_FEATURE_SETTING,
-    feature_setting_for_prompt_id,
-    mapped_feature_setting_for_prompt_id,
-)
+from ai_gateway.prompts.registry import feature_setting_for_prompt_id
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
+from tests.prompts.prompt_dirs import (
+    FEATURE_SETTINGS_THAT_RAILS_SENDS,
+    REPO_ROOT,
+    prompt_dir,
+    prompt_ids_by_dir,
+    version_files,
+)
 
 _SECURITY_BLOCK = "<test security block>test</test security block>"
 
@@ -176,6 +181,13 @@ models:
     params:
         model: embedding_test
         custom_llm_provider: vertex_ai
+  - name: OpenAI Test
+    gitlab_identifier: openai_test
+    max_context_tokens: 200000
+    model_class_provider: openai
+    params:
+        model: openai_test
+        max_tokens: 128000
 """,
     )
     fs.create_file(
@@ -233,7 +245,7 @@ model:
     top_p: 0.1
     top_k: 50
     max_tokens: 256
-    max_retries: 10
+    max_retries: 3
 unit_primitive: explain_code
 prompt_template:
   system: Template1
@@ -274,7 +286,7 @@ model:
     top_p: 0.1
     top_k: 50
     max_tokens: 256
-    max_retries: 10
+    max_retries: 3
 unit_primitive: explain_code
 prompt_template:
   system: Template1
@@ -290,7 +302,7 @@ model:
     top_p: 0.1
     top_k: 50
     max_tokens: 256
-    max_retries: 10
+    max_retries: 3
 unit_primitive: explain_code
 prompt_template:
   system: Template1
@@ -306,7 +318,7 @@ model:
     top_p: 0.1
     top_k: 50
     max_tokens: 256
-    max_retries: 10
+    max_retries: 3
 unit_primitive: explain_code
 prompt_template:
   system: Template1
@@ -323,7 +335,7 @@ model:
     top_p: 0.8
     top_k: 40
     max_tokens: 256
-    max_retries: 6
+    max_retries: 2
 unit_primitive: duo_chat
 prompt_template:
   system: Template1
@@ -362,7 +374,7 @@ model:
     top_p: 0.8
     top_k: 40
     max_tokens: 256
-    max_retries: 6
+    max_retries: 2
 unit_primitive: duo_chat
 prompt_template:
   system: Template1
@@ -386,7 +398,7 @@ model:
     top_p: 0.8
     top_k: 40
     max_tokens: 256
-    max_retries: 6
+    max_retries: 2
 unit_primitive: duo_chat
 prompt_template:
   system: Template1
@@ -409,7 +421,7 @@ model:
     top_p: 0.9
     top_k: 50
     max_tokens: 512
-    max_retries: 8
+    max_retries: 0
 unit_primitive: duo_chat
 prompt_template:
   system: Claude 4.5 Template
@@ -432,7 +444,7 @@ model:
     top_p: 0.9
     top_k: 50
     max_tokens: 512
-    max_retries: 8
+    max_retries: 0
 unit_primitive: duo_chat
 prompt_template:
   system: Claude Vertex 4.5 Template
@@ -443,6 +455,17 @@ params:
   stop:
     - Foo
     - Bar
+""",
+    )
+    fs.create_file(
+        prompts_definitions_dir / "decision_test" / "base" / "1.0.0.yml",
+        contents="""
+---
+name: Decision test
+unit_primitive: duo_agent_platform
+operation_type: decision
+prompt_template:
+  user: "{{request}}"
 """,
     )
     # embeddings_code lives under ai/features/, so fake it at the moved root.
@@ -520,7 +543,10 @@ def registry_fixture(
     model_limits: ConfigModelLimits,
     custom_models_enabled: bool,
     disable_streaming: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    # The model metadata builders read the global config, so it serves custom models exactly when the registry does.
+    monkeypatch.setattr(get_config().custom_models, "enabled", custom_models_enabled)
     # Use from_local_yaml for lazy loading version
     return LocalPromptRegistry.from_local_yaml(
         prompt_template_factories={},
@@ -529,6 +555,11 @@ def registry_fixture(
         model_limits=model_limits,
         custom_models_enabled=custom_models_enabled,
         disable_streaming=disable_streaming,
+        decision_model_factories={
+            ModelClassProvider.OPENAI: lambda model, **kwargs: OpenAIDecisionsModel(
+                model=model, api_key=SecretStr("test-key"), **kwargs
+            ),
+        },
     )
 
 
@@ -778,7 +809,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 1.0.1",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-5-sonnet-20241022",
@@ -791,7 +823,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.1,
                     "top_k": 50,
                     "max_tokens": 256,
-                    "max_retries": 10,
+                    "max_retries": 3,
                 },
                 ChatLiteLLM,
             ),
@@ -802,7 +834,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 1.0.2-dev",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-5-sonnet-20241022",
@@ -815,7 +848,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.1,
                     "top_k": 50,
                     "max_tokens": 256,
-                    "max_retries": 10,
+                    "max_retries": 3,
                 },
                 ChatLiteLLM,
             ),
@@ -826,7 +859,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 1.0.0",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-5-sonnet-20241022",
@@ -839,7 +873,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.1,
                     "top_k": 50,
                     "max_tokens": 256,
-                    "max_retries": 10,
+                    "max_retries": 3,
                 },
                 ChatLiteLLM,
             ),
@@ -850,7 +884,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Test prompt 0.0.1",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     MessagesPlaceholder("history", optional=True),
                 ],
                 "claude-3-haiku-20240307",
@@ -859,7 +894,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.1,
                     "top_k": 50,
                     "max_tokens": 256,
-                    "max_retries": 10,
+                    "max_retries": 3,
                 },
                 ChatAnthropic,
             ),
@@ -870,7 +905,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -881,7 +917,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatAnthropic,
             ),
@@ -896,7 +932,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Amazon Q React prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -923,7 +960,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 True,
                 "Chat react custom prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -945,7 +983,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatLiteLLM,
             ),
@@ -962,7 +1000,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react custom prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -984,7 +1023,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatLiteLLM,
             ),
@@ -1001,7 +1040,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react custom prompt",
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1023,7 +1063,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatLiteLLM,
             ),
@@ -1037,7 +1077,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react claude_3 prompt",  # Should map to claude_3 variant
                 [
-                    ("system", _SECURITY_BLOCK + "Template1"),
+                    ("system", "Template1"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1054,7 +1095,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.8,
                     "top_k": 40,
                     "max_tokens": 256,
-                    "max_retries": 6,
+                    "max_retries": 2,
                 },
                 ChatLiteLLM,
             ),
@@ -1068,7 +1109,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react claude_4_5 prompt",  # Should use claude_4_5 specific prompt
                 [
-                    ("system", _SECURITY_BLOCK + "Claude 4.5 Template"),
+                    ("system", "Claude 4.5 Template"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1085,7 +1127,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.9,
                     "top_k": 50,
                     "max_tokens": 512,
-                    "max_retries": 8,
+                    "max_retries": 0,
                 },
                 ChatLiteLLM,
             ),
@@ -1099,10 +1141,8 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                 False,
                 "Chat react claude_vertex_4_5 prompt",  # Should use claude_vertex_4_5 specific prompt
                 [
-                    (
-                        "system",
-                        _SECURITY_BLOCK + "Claude Vertex 4.5 Template",
-                    ),
+                    ("system", "Claude Vertex 4.5 Template"),
+                    ("system", _SECURITY_BLOCK),
                     ("user", "Template2"),
                     MessagesPlaceholder("history", optional=True),
                 ],
@@ -1120,7 +1160,7 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
                     "top_p": 0.9,
                     "top_k": 50,
                     "max_tokens": 512,
-                    "max_retries": 8,
+                    "max_retries": 0,
                 },
                 ChatLiteLLM,
             ),
@@ -1337,6 +1377,38 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
 
         assert isinstance(prompt, Prompt)
         assert isinstance(prompt.prompt_tpl, RunnableLambda)
+
+    def test_decision_prompt_calls_the_models_decision_endpoint(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        prompt = registry.get(
+            "decision_test",
+            "^1.0.0",
+            model_metadata=create_model_metadata(
+                {"provider": "gitlab", "identifier": "openai_test"}
+            ),
+        )
+
+        assert isinstance(prompt.prompt_tpl, RunnableParallel)
+        assert isinstance(prompt.model, OpenAIDecisionsModel)
+        assert prompt.model_name == "openai_test"
+        assert prompt.operation_type == "decision"
+        assert prompt.model_provider == "openai"
+        assert prompt.model_vendor == "openai"
+
+    def test_decision_prompt_needs_a_provider_with_a_decision_endpoint(
+        self,
+        registry: LocalPromptRegistry,
+    ):
+        with pytest.raises(ValueError, match="no decision endpoint"):
+            registry.get(
+                "decision_test",
+                "^1.0.0",
+                model_metadata=create_model_metadata(
+                    {"provider": "gitlab", "identifier": "haiku"}
+                ),
+            )
 
     @pytest.mark.usefixtures("mock_fs")
     def test_build_prompt_with_azure_model_adjusts_tool_choice(
@@ -1690,10 +1762,26 @@ class TestGetRequiredVariables:
 
     @pytest.mark.usefixtures("mock_fs")
     def test_non_graph_node_raises_for_unknown_feature_setting(
-        self, registry: LocalPromptRegistry
+        self, fs: FakeFilesystem, registry: LocalPromptRegistry
     ):
-        """Non-graph-node callers get a ValueError for unknown feature settings."""
-        with pytest.raises(ValueError, match="Invalid feature setting: unknown_step"):
+        """Non-graph-node callers get a ValueError when neither `models_from` nor the prompt ID names a feature."""
+        fs.create_file(
+            self._PROMPT_BASE_DIR / "unknown_step" / "base" / "1.0.0.yml",
+            contents="\n".join(
+                [
+                    "---",
+                    "name: Unknown step",
+                    "unit_primitive: duo_chat",
+                    "prompt_template:",
+                    "  user: Hello",
+                ]
+            ),
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Prompt 'unknown_step' has no default model. Send `model_metadata` with a `feature_setting`.",
+        ):
             registry._default_model_metadata(
                 "unknown_step", "1.0.0", is_graph_node=False
             )
@@ -1777,8 +1865,7 @@ class TestGetRequiredVariables:
 
 # Prompt IDs that are exclusively invoked as DAP graph nodes (is_graph_node=True).
 # is_graph_node=True bypasses feature_setting_for_prompt_id entirely and provides
-# the duo_agent_platform feature setting directly, so these do not need an entry in
-# PROMPT_ID_TO_FEATURE_SETTING.
+# the duo_agent_platform feature setting directly, so these do not declare `models_from`.
 # When adding a new graph-node prompt with unit_primitive=duo_agent_platform, add its
 # ID here.
 _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
@@ -1791,6 +1878,7 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "convert_ci_push_changes",
         "convert_to_gl_ci",
         "deep_code_review_reviewer",
+        "deep_code_review_summarizer",
         "developer_agent_prompt",
         "ensure_clean_git_state",
         "explore_directories_for_prescan",
@@ -1839,19 +1927,29 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
     }
 )
 
+# Prompt IDs that the Duo Workflow Service runs in-process, never over the prompt routes. It always passes model
+# metadata, so these do not declare `models_from`.
+_IN_PROCESS_PROMPT_IDS: frozenset[str] = frozenset(
+    {
+        # The model routing step runs it with the model of the `classifier` or `small` tag.
+        "classify_goal_tier",
+    }
+)
+
 
 class TestDuoAgentPlatformPromptRegistration:
     """
     Safeguard: every prompt with unit_primitive=duo_agent_platform that is called
-    directly via HTTP from Rails (not as a DAP graph node) must appear in
-    PROMPT_ID_TO_FEATURE_SETTING so AIGW can route requests when model_metadata is
-    absent (e.g. self-managed instance with ai_gateway_url set but no model selected).
+    directly via HTTP from Rails (not as a DAP graph node) must declare `models_from`
+    so AIGW can route requests when model_metadata is absent (e.g. self-managed
+    instance with ai_gateway_url set but no model selected).
 
     When adding a new prompt with unit_primitive=duo_agent_platform you must do one of:
-    1. Add it to PROMPT_ID_TO_FEATURE_SETTING in ai_gateway/prompts/registry.py
+    1. Set `models_from` in each version of the prompt
         (for prompts called directly via HTTP without model_metadata).
     2. Add its ID to _GRAPH_NODE_PROMPT_IDS in this file
-        (for prompts always invoked as DAP graph nodes via is_graph_node=True).
+        (for prompts always invoked as DAP graph nodes via is_graph_node=True),
+        or to _IN_PROCESS_PROMPT_IDS (for prompts that the Duo Workflow Service runs in-process).
     3. Add a matching entry to ai_gateway/model_selection/unit_primitives.yml
         (if the prompt warrants its own standalone feature setting).
     """
@@ -1907,11 +2005,11 @@ class TestDuoAgentPlatformPromptRegistration:
             # Passes if the prompt has its own feature setting in unit_primitives.yml
             if feature_setting_for_prompt_id(prompt_id) in valid_feature_settings:
                 continue
-            # Passes if explicitly registered for direct-HTTP routing
-            if prompt_id in PROMPT_ID_TO_FEATURE_SETTING:
+            # Passes if each version declares the models it runs on
+            if all(_declared_models(prompt_dir(prompt_id)).values()):
                 continue
-            # Passes if acknowledged as a graph-node-only prompt
-            if prompt_id in _GRAPH_NODE_PROMPT_IDS:
+            # Passes if acknowledged as a graph-node-only or in-process prompt
+            if prompt_id in _GRAPH_NODE_PROMPT_IDS | _IN_PROCESS_PROMPT_IDS:
                 continue
             missing.append(prompt_id)
 
@@ -1923,161 +2021,376 @@ class TestDuoAgentPlatformPromptRegistration:
         )
 
 
-# Prompts besides `_GRAPH_NODE_PROMPT_IDS` that need no entry in PROMPT_ID_TO_FEATURE_SETTING,
-# because no GitLab client calls them on the prompt routes with a feature setting of its own.
-_PROMPTS_WITHOUT_AN_ENTRY: frozenset[str] = _GRAPH_NODE_PROMPT_IDS | frozenset(
-    {
-        # GitLab Rails calls these on the prompt routes without a feature setting:
-        # `generate_description` sends no model metadata, and `model_configuration/check`
-        # sends self-hosted model metadata only.
-        "generate_description",
-        "model_configuration/check",
-        # Clients reach these through other routes.
-        "chat/agent",
-        "chat/react",
-        "embeddings_code",
-        # The Duo Workflow Service runs these.
-        "create_merge_request",
-        "create_repository_branch",
-        "list_available_tools",
-        "programming_agent",
-        "push_to_remote",
-        "recommend_reviewers_assign",
-        "recommend_reviewers_post",
-        "review_merge_request_dap",
-        "workflow/context_builder",
-        "workflow/convert_to_gitlab_ci",
-        "workflow/create_branch",
-        "workflow/executor",
-        "workflow/issue_to_merge_request",
-        "workflow/planner",
+def _declared_models(directory: Path) -> dict[Path, str | None]:
+    """Return the `models_from` of each version in `directory`, except the `amazon_q` versions.
+
+    The `amazon_q` versions set none: no feature setting lists their `amazon_q_integration` unit primitive, and the
+    allowlist check skips the Amazon Q model metadata that selects them.
+    """
+    return {
+        version_file.relative_to(REPO_ROOT): yaml.safe_load(
+            version_file.read_text()
+        ).get("models_from")
+        for version_file in version_files(directory)
+        if version_file.parent.name != "amazon_q"
     }
+
+
+# Prompts besides `_GRAPH_NODE_PROMPT_IDS` and `_IN_PROCESS_PROMPT_IDS` that declare no `models_from`, because no
+# GitLab client calls them on the prompt routes with a feature setting of its own.
+_PROMPTS_WITHOUT_MODELS_FROM: frozenset[str] = (
+    _GRAPH_NODE_PROMPT_IDS
+    | _IN_PROCESS_PROMPT_IDS
+    | frozenset(
+        {
+            # GitLab Rails calls this on the prompt routes with self-hosted model metadata only.
+            "model_configuration/check",
+            # Clients reach these through other routes.
+            "chat/agent",
+            "chat/react",
+            "embeddings_code",
+            # The Duo Workflow Service runs these.
+            "create_merge_request",
+            "create_repository_branch",
+            "list_available_tools",
+            "programming_agent",
+            "push_to_remote",
+            "recommend_reviewers_assign",
+            "recommend_reviewers_post",
+            "review_merge_request_dap",
+            "workflow/context_builder",
+            "workflow/convert_to_gitlab_ci",
+            "workflow/create_branch",
+            "workflow/executor",
+            "workflow/issue_to_merge_request",
+            "workflow/planner",
+        }
+    )
 )
 
 
-class TestPromptFeatureSettings:
-    """Safeguard: every prompt has an entry in PROMPT_ID_TO_FEATURE_SETTING or is listed as needing none.
+# Prompt versions that declare a unit primitive that the feature setting that GitLab Rails sends doesn't list, with the
+# feature setting that they declare as `models_from`.
+_VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE: dict[Path, str] = {
+    # The Agent Platform edition of the prompt. It declares `duo_agent_platform`. GitLab 18.9 to 18.11 call it from
+    # the comment processing step of the Agent Platform code review flow (gitlab!218609). Later releases do not call it.
+    Path(
+        "ai/features/review/summarize_review/prompts/base/3.0.0.yml"
+    ): "duo_agent_platform",
+}
 
-    ModelConfigMiddleware checks client model metadata on the prompt routes against the feature
-    setting of the prompt's entry. For a prompt without an entry, the client's `feature_setting`
-    selects the allowlist. When you add a prompt that GitLab Rails or another client calls on the
-    prompt routes, add it to PROMPT_ID_TO_FEATURE_SETTING in ai_gateway/prompts/registry.py with
-    the feature setting that the client sends for it. Otherwise add it to
-    `_GRAPH_NODE_PROMPT_IDS` (graph-node prompts) or `_PROMPTS_WITHOUT_AN_ENTRY` in this file.
+
+class TestPromptFeatureSettings:
+    """Safeguard: every prompt declares `models_from` in each version, or is listed as declaring none.
+
+    The prompt routes check client model metadata against the `models_from` of the prompt version that runs. For a
+    version without `models_from`, the client's `feature_setting` selects the allowlist. When you add a prompt that
+    GitLab Rails or another client calls on the prompt routes, set `models_from` in each version to the feature setting
+    that the client sends for it. `models_from` is only for prompts that the AI Gateway serves over HTTP. Otherwise add
+    the prompt to `_GRAPH_NODE_PROMPT_IDS` (graph-node prompts), `_IN_PROCESS_PROMPT_IDS` or
+    `_PROMPTS_WITHOUT_MODELS_FROM` in this file.
     """
 
-    _repo_root = Path(__file__).parent.parent.parent
-    _legacy_dir = _repo_root / "ai_gateway" / "prompts" / "definitions"
-    _features_dir = _repo_root / "ai" / "features"
-    _shared_dir = _repo_root / "ai" / "shared"
-
-    @staticmethod
-    def _defines_a_prompt(prompts_dir: Path) -> bool:
-        """Return whether ``prompts_dir`` has a ``<model family or base>/<version>.yml``.
-
-        A flow-only feature keeps only Jinja fragments in its `prompts/` dir. Its ID loads no prompt, so it needs no
-        entry.
-        """
-        return any(prompts_dir.glob("*/*.yml"))
-
-    def _feature_prompt_dirs(self) -> dict[str, Path]:
-        """Return the `prompts/` dir of each prompt ID that `discover_feature_prompts` registers and that loads a
-        prompt."""
-        dirs: dict[str, Path] = {}
-        for feature_dir in self._features_dir.glob("*/*"):
-            if self._defines_a_prompt(prompts_dir := feature_dir / "prompts"):
-                dirs[feature_dir.name] = prompts_dir
-                dirs[f"{feature_dir.parent.name}/{feature_dir.name}"] = prompts_dir
-        for shared_dir in self._shared_dir.glob("*"):
-            if self._defines_a_prompt(prompts_dir := shared_dir / "prompts"):
-                dirs[shared_dir.name] = prompts_dir
-        return dirs
-
-    def _prompt_dir(self, prompt_id: str) -> Path:
-        """Return the directory that the registry resolves ``prompt_id`` to."""
-        return self._feature_prompt_dirs().get(prompt_id, self._legacy_dir / prompt_id)
-
-    def _prompt_ids_by_dir(self) -> dict[Path, set[str]]:
-        """Return every prompt directory, with the prompt IDs that resolve to it."""
-        prompt_ids: dict[Path, set[str]] = {}
-        for version_file in self._legacy_dir.rglob("*.yml"):
-            # <prompt_id>/<model family or base>/<version>.yml
-            parts = version_file.relative_to(self._legacy_dir).parts[:-2]
-            if parts:
-                prompt_ids.setdefault(self._legacy_dir.joinpath(*parts), set()).add(
-                    "/".join(parts)
-                )
-        for prompt_id, prompts_dir in self._feature_prompt_dirs().items():
-            prompt_ids.setdefault(prompts_dir, set()).add(prompt_id)
-        return prompt_ids
-
-    def test_every_prompt_has_an_entry_or_is_listed(self) -> None:
-        classified = {
-            self._prompt_dir(prompt_id)
-            for prompt_id in [*PROMPT_ID_TO_FEATURE_SETTING, *_PROMPTS_WITHOUT_AN_ENTRY]
-        }
+    def test_every_prompt_declares_its_models_or_is_listed(self) -> None:
+        listed = {prompt_dir(prompt_id) for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM}
 
         unclassified = sorted(
             sorted(prompt_ids)
-            for prompt_dir, prompt_ids in self._prompt_ids_by_dir().items()
-            if prompt_dir not in classified
+            for directory, prompt_ids in prompt_ids_by_dir().items()
+            if directory not in listed and not any(_declared_models(directory).values())
         )
 
         assert not unclassified, (
-            "These prompts have no entry in PROMPT_ID_TO_FEATURE_SETTING and are not listed as "
-            f"needing none: {unclassified}. See the TestPromptFeatureSettings docstring."
+            "These prompts declare no `models_from` and are not listed as declaring none: "
+            f"{unclassified}. See the TestPromptFeatureSettings docstring."
         )
 
-    def test_every_classified_prompt_exists(self) -> None:
-        prompt_dirs = self._prompt_ids_by_dir()
+    def test_every_listed_prompt_exists(self) -> None:
+        known_dirs = prompt_ids_by_dir()
 
         missing = sorted(
             prompt_id
-            for prompt_id in {*PROMPT_ID_TO_FEATURE_SETTING, *_PROMPTS_WITHOUT_AN_ENTRY}
-            if self._prompt_dir(prompt_id) not in prompt_dirs
+            for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM
+            if prompt_dir(prompt_id) not in known_dirs
         )
 
         assert not missing
 
-    def test_every_spelling_of_a_prompt_with_an_entry_finds_it(self) -> None:
-        """The middleware gets the entry for each ID that loads the prompt, so another spelling can't skip it."""
-        feature_roots.discover_feature_prompts()
-        entries = {
-            self._prompt_dir(prompt_id): feature_setting
-            for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items()
-        }
+    def test_no_listed_prompt_declares_its_models(self) -> None:
+        """A listed prompt sets no `models_from` in any version.
 
-        missed = sorted(
-            spelling
-            for prompt_dir, prompt_ids in self._prompt_ids_by_dir().items()
-            if prompt_dir in entries
-            for prompt_id in prompt_ids
-            for spelling in (
-                prompt_id,
-                f"{prompt_id}/",
-                f"./{prompt_id}",
-                prompt_id.replace("/", "//"),
-            )
-            if mapped_feature_setting_for_prompt_id(spelling) != entries[prompt_dir]
+        A listed prompt is a graph-node or Duo Workflow Service prompt, or a prompt that a client calls on the prompt
+        routes without a feature setting of its own, like `model_configuration/check`. A prompt that only runs in a flow
+        must never set `models_from`: the prompt routes would then serve it. The prompts that clients call get
+        `models_from` before the prompt routes reject versions without it.
+        """
+        declared = sorted(
+            str(version)
+            for directory in {
+                prompt_dir(prompt_id) for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM
+            }
+            for version, models_from in _declared_models(directory).items()
+            if models_from is not None
         )
+
+        assert not declared
+
+    def test_every_version_of_a_prompt_with_models_declares_them(self) -> None:
+        """A prompt that declares `models_from` declares it in each version.
+
+        The registry picks the default model of a version without `models_from` from the prompt ID, which does not
+        always name a feature setting. The prompt routes check such a version against the client's `feature_setting`.
+        """
+        listed = {prompt_dir(prompt_id) for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM}
+
+        undeclared = sorted(
+            str(version)
+            for directory in prompt_ids_by_dir()
+            if directory not in listed
+            for version, models_from in _declared_models(directory).items()
+            if models_from is None
+        )
+
+        assert not undeclared
+
+    def test_every_version_of_a_prompt_that_rails_calls_declares_the_feature_that_rails_sends(
+        self,
+    ) -> None:
+        """Each version sets `models_from` to the feature setting that GitLab Rails sends for the prompt, or to the one
+        listed for it in `_VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE`."""
+        mismatched = []
+        for prompt_id, feature_setting in FEATURE_SETTINGS_THAT_RAILS_SENDS.items():
+            for version, models_from in _declared_models(prompt_dir(prompt_id)).items():
+                expected = _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE.get(
+                    version, feature_setting
+                )
+                if models_from != expected:
+                    mismatched.append(
+                        f"{version}: models_from is {models_from!r}, expected {expected!r}"
+                    )
+
+        assert not mismatched
+        assert all(
+            (REPO_ROOT / version).is_file()
+            for version in _VERSIONS_WITH_THE_UNIT_PRIMITIVE_OF_ANOTHER_FEATURE
+        )
+
+    def test_every_spelling_of_a_prompt_with_models_finds_them(
+        self, repo_registry: LocalPromptRegistry
+    ) -> None:
+        """Each ID that loads a prompt version gets the `models_from` of that version.
+
+        The prompt routes take `models_from` from the ID in the path, so another spelling of the ID must not skip it.
+        """
+        feature_roots.discover_feature_prompts()
+        listed = {prompt_dir(prompt_id) for prompt_id in _PROMPTS_WITHOUT_MODELS_FROM}
+
+        missed = []
+        with patch.object(
+            LocalPromptRegistry,
+            "_build_prompt",
+            lambda self, **kwargs: kwargs["config"],
+        ):
+            for directory, prompt_ids in prompt_ids_by_dir().items():
+                if directory in listed:
+                    continue
+                for prompt_id in prompt_ids:
+                    for spelling in (
+                        prompt_id,
+                        f"{prompt_id}/",
+                        f"./{prompt_id}",
+                        prompt_id.replace("/", "//"),
+                    ):
+                        try:
+                            served = repo_registry.get(spelling, None)
+                        except ValueError:
+                            continue
+                        found = repo_registry.models_from(spelling, None)
+                        if found is None or found != served.models_from:
+                            missed.append(
+                                f"{spelling}: {found!r}, serves {served.models_from!r}"
+                            )
 
         assert not missed
 
-    def test_no_prompt_has_an_entry_and_is_listed(self) -> None:
-        with_entry = {self._prompt_dir(p) for p in PROMPT_ID_TO_FEATURE_SETTING}
-        listed = {self._prompt_dir(p) for p in _PROMPTS_WITHOUT_AN_ENTRY}
+    def test_every_model_family_of_a_prompt_declares_the_same_models(self) -> None:
+        """A prompt with more than one model family declares one `models_from` in all of them.
 
-        assert with_entry.isdisjoint(listed)
+        The prompt routes check the model against the `models_from` of the version that the model's family resolves.
+        When `fallback` mode serves another model, its family can resolve another version. That version must check
+        against the same models. The `amazon_q` versions set no `models_from`.
+        """
+        mixed = {}
+        for directory in prompt_ids_by_dir():
+            families: dict[str, set[str | None]] = {}
+            for version_file in version_files(directory):
+                if version_file.parent.name == "amazon_q":
+                    continue
+                families.setdefault(version_file.parent.name, set()).add(
+                    yaml.safe_load(version_file.read_text()).get("models_from")
+                )
+            declared = set().union(*families.values())
+            if len(families) > 1 and len(declared) > 1:
+                mixed[str(directory.relative_to(REPO_ROOT))] = sorted(
+                    map(str, declared)
+                )
 
-    def test_every_entry_names_a_feature_setting(self) -> None:
-        feature_settings = (
-            ModelSelectionConfig.instance().get_unit_primitive_config_map()
+        assert not mixed
+
+
+@pytest.fixture(name="repo_registry")
+def repo_registry_fixture():
+    """A registry that loads the prompt definitions of the repository."""
+    return LocalPromptRegistry.from_local_yaml(
+        prompt_template_factories={},
+        model_factories={},
+        internal_event_client=Mock(),
+        model_limits=ConfigModelLimits(),
+    )
+
+
+class TestModelsFrom:
+    @pytest.mark.parametrize(
+        ("prompt_version", "expected"),
+        [
+            ("3.0.0", "duo_agent_platform"),
+            ("^2.0.0", "summarize_review"),
+            (None, "summarize_review"),
+        ],
+    )
+    def test_returns_the_models_of_the_version(
+        self, repo_registry: LocalPromptRegistry, prompt_version, expected
+    ):
+        assert repo_registry.models_from("summarize_review", prompt_version) == expected
+
+    @pytest.mark.parametrize(
+        "model_metadata",
+        [
+            pytest.param(
+                {"provider": "gitlab", "identifier": "amazon_q"}, id="gitlab-model"
+            ),
+            pytest.param(
+                {"name": "amazon_q", "provider": "amazon_q", "role_arn": "role-arn"},
+                id="amazon-q-model",
+            ),
+        ],
+    )
+    def test_resolves_the_version_in_base_when_the_folder_of_the_model_family_declares_none(
+        self, repo_registry: LocalPromptRegistry, model_metadata
+    ):
+        """The `amazon_q` versions declare no `models_from`, and the `amazon_q` model family resolves their folder.
+
+        In fallback mode, the client's `feature_setting` would otherwise select the allowlist, and the request could
+        run on the default model of another feature.
+        """
+        assert (
+            repo_registry.models_from(
+                "chat/explain_code", "1.0.0", create_model_metadata(model_metadata)
+            )
+            == "duo_chat_explain_code"
         )
 
-        unknown = sorted(
-            prompt_id
-            for prompt_id, feature_setting in PROMPT_ID_TO_FEATURE_SETTING.items()
-            if feature_setting not in feature_settings
+    @pytest.mark.parametrize(
+        ("prompt_id", "prompt_version", "identifier", "expected"),
+        [
+            (
+                "code_suggestions/generations",
+                "^2.0.0",
+                "codestral_2508_vertex",
+                "code_generations",
+            ),
+            ("chat/write_tests", "1.2.0", "mistral", "duo_chat_write_tests"),
+        ],
+    )
+    def test_resolves_the_version_in_base_when_the_folder_of_the_model_family_lacks_it(
+        self,
+        repo_registry: LocalPromptRegistry,
+        prompt_id,
+        prompt_version,
+        identifier,
+        expected,
+    ):
+        """In fallback mode, the allowlist check can serve another model whose family resolves `base`."""
+        model_metadata = create_model_metadata(
+            {"provider": "gitlab", "identifier": identifier}
         )
 
-        assert not unknown
+        assert (
+            repo_registry.models_from(prompt_id, prompt_version, model_metadata)
+            == expected
+        )
+
+    @pytest.mark.parametrize(
+        ("prompt_id", "prompt_version"),
+        [
+            pytest.param("classify_goal_tier", None, id="version-without-models-from"),
+            pytest.param("no/such/prompt", None, id="unknown-prompt"),
+            pytest.param("summarize_review", "^9.0.0", id="unknown-version"),
+            pytest.param("summarize_review", "not a version", id="invalid-version"),
+        ],
+    )
+    def test_returns_none(
+        self, repo_registry: LocalPromptRegistry, prompt_id, prompt_version
+    ):
+        assert repo_registry.models_from(prompt_id, prompt_version) is None
+
+
+class TestDefaultModelOfAPromptVersion:
+    @pytest.mark.parametrize(
+        ("prompt_version", "feature_setting"),
+        [
+            ("3.0.0", "duo_agent_platform"),
+            ("^2.0.0", "summarize_review"),
+        ],
+    )
+    def test_serves_the_default_of_the_version_models(
+        self, repo_registry: LocalPromptRegistry, prompt_version, feature_setting
+    ):
+        metadata = repo_registry._default_model_metadata(
+            "summarize_review", prompt_version
+        )
+
+        assert (
+            metadata.llm_definition.gitlab_identifier
+            == ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()[feature_setting]
+            .default_model_identifiers[0]
+        )
+
+    @pytest.mark.parametrize(
+        ("prompt_version", "message"),
+        [
+            ("^9.0.0", "No version matching '\\^9.0.0'"),
+            (
+                "not a version",
+                "Version 'not a version' is not a valid PEP 440 constraint",
+            ),
+        ],
+    )
+    def test_raises_for_an_unknown_version_before_the_feature_of_the_prompt_id(
+        self, repo_registry: LocalPromptRegistry, prompt_version, message
+    ):
+        """The ID of `classify_goal_tier` names no feature setting, so the version error must come first."""
+        with pytest.raises(ValueError, match=message):
+            repo_registry._default_model_metadata("classify_goal_tier", prompt_version)
+
+    def test_raises_for_a_version_without_models_from_whose_prompt_id_names_no_feature(
+        self, repo_registry: LocalPromptRegistry
+    ):
+        with pytest.raises(
+            ValueError,
+            match="Prompt 'classify_goal_tier' has no default model. Send `model_metadata` with a `feature_setting`.",
+        ):
+            repo_registry._default_model_metadata("classify_goal_tier", "^1.0.0")
+
+    def test_serves_the_default_of_the_prompt_id_for_a_version_without_models_from(
+        self, repo_registry: LocalPromptRegistry
+    ):
+        metadata = repo_registry._default_model_metadata("workflow/planner", "^1.0.0")
+
+        assert (
+            metadata.llm_definition.gitlab_identifier
+            == ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()["workflow"]
+            .default_model_identifiers[0]
+        )

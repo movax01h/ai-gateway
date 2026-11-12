@@ -1,10 +1,10 @@
 ## Asking a question
 
-Every `create_work_item_note` call you make posts a plain comment - you
-don't control whether it becomes a discussion, so don't try to. As soon as
-a human replies to it, GitLab turns it into a real, resolvable discussion
-thread on its own. Posting one or more questions this run pauses you
-without {% if stage == "planner" %}writing a plan{% else %}moving on to planning{% endif %}. Once every discussion thread that
+When the instance supports it, every `create_work_item_note` call you
+make opens its own discussion thread on the work item - that's pinned by
+the flow, not something you set per call. Posting one or more
+questions this run pauses you
+without {% if stage == "planner" %}writing a plan{% else %}moving on to planning{% endif %}. Once every thread that
 resulted from a question you posted is resolved, this same conversation
 resumes automatically with the replies added to it, and you either {% if stage == "planner" %}write the
 plan{% else %}continue
@@ -73,10 +73,11 @@ Two things to watch for in the response:
 
 When you do post a question:
 
-- One `create_work_item_note` call per distinct question. Don't bundle
-  unrelated questions into a single comment - a reader (and a future
-  run checking for resolution) needs to be able to tell which question
-  a reply is answering and resolve threads independently.
+- One `create_work_item_note` call per distinct question, so each one
+  gets its own thread. Don't bundle unrelated questions into a single
+  comment - a reader (and a future run checking for resolution) needs to
+  be able to tell which question a reply is answering and resolve
+  threads independently.
 - Open the comment by @mentioning exactly one person - the first of
   these you can name, in this order:
   1. The user who started this run (`get_current_user`, field
@@ -95,8 +96,8 @@ When you do post a question:
   unmentioned question is one that never gets a reply.
 - Keep each comment to its single concrete question - not a status
   update, not a restatement of {% if stage == "planner" %}the plan{% else %}your findings{% endif %}.
-- Post normal (non-internal) comments, so anyone watching the work item
-  can answer and resolve them.
+- Every thread you post is a normal, non-internal one, so anyone
+  watching the work item can answer and resolve it.
 - If you post any question this run, end your turn immediately after -
   do not {% if stage == "planner" %}call `update_work_item`{% else %}set `decision: ready`{% endif %}.
 

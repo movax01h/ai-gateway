@@ -105,3 +105,14 @@ To reproduce that test for high memory usage in the checkpoint notifier, with me
    Note that this test will take several minutes to complete.
 
 1. When the test is complete, stop the DWS and execute the command you're shown to generate a flamegraph.
+
+## Finished workflows held by I/O handles
+
+DWS creates asyncio reader and writer handles in a copy of the startup context (`duo_workflow_service/asyncio_io_context.py`).
+Without that, the selector event loop copies the current `contextvars.Context` into each handle. Pooled HTTP sockets are
+registered from inside a running workflow, so the copy holds that workflow through LangChain's `child_runnable_config`
+until the connection closes, 30 to 120 seconds later.
+
+To reproduce the retention, set `DUO_WORKFLOW_CLEAN_IO_HANDLE_CONTEXT=false`, run one workflow, wait a few seconds, then
+run `gc.collect()` and look for `Workflow` objects in `gc.get_objects()`. Their reference path ends in an
+`asyncio.Handle` for `_SelectorSocketTransport._read_ready`. With the default setting there are none.

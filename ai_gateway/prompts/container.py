@@ -67,6 +67,9 @@ class ContainerPrompts(containers.DeclarativeContainer):
                 models.google_chat_gen_vertex_ai_global_fn
             ),
         },
+        decision_model_factories={
+            ModelClassProvider.OPENAI: providers.Factory(models.openai_decisions_fn),
+        },
         internal_event_client=internal_event.client,
         model_limits=providers.Factory(ConfigModelLimits, config.model_engine_limits),
         custom_models_enabled=config.custom_models.enabled,

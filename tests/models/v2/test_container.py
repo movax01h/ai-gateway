@@ -1,7 +1,10 @@
+import json
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from google.genai.client import Client
+from langchain_openai.decisions import Choice
 
 from ai_gateway.model_selection.models import CompletionType
 from ai_gateway.models.base import log_request
@@ -11,6 +14,7 @@ from ai_gateway.models.v2.container import (
     _mock_selector,
     litellm,
 )
+from ai_gateway.models.v2.openai_decisions import decision_response
 
 
 def test_litellm_override():
@@ -241,3 +245,96 @@ async def test_google_chat_gen_vertex_ai_http_client_shared_across_resolutions()
     assert model_a.client.http_client is container.google_gen_vertex_ai_http_client()
 
     await container.google_gen_vertex_ai_http_client().aclose()
+
+
+@pytest.mark.asyncio
+async def test_openai_decisions_fn_answers_questions():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "model": "gpt-6-luna",
+                "answers": [
+                    {
+                        "type": "choice",
+                        "name": "tier",
+                        "choice": "small",
+                        "probabilities": [
+                            {"value": "small", "probability": 0.9},
+                            {"value": "large", "probability": 0.1},
+                        ],
+                        "confidence": 0.8,
+                    }
+                ],
+            },
+        )
+
+    container = ContainerModels()
+    container.config.from_dict(
+        {"decision": {"request_timeout": 10.0, "max_retries": 0}}
+    )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        decisions = container.openai_decisions_fn(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            http_async_client=client,
+        )
+        response = await decisions.ainvoke(
+            {
+                "input": "Fix the typo in the README",
+                "questions": {
+                    "tier": Choice(
+                        instructions="Which model tier does this request need?",
+                        choices={"small": "A small change.", "large": "Many files."},
+                    )
+                },
+            }
+        )
+
+    assert decision_response(response).choices["tier"].choice == "small"
+    assert str(requests[0].url) == "https://api.openai.com/v1/decisions"
+    assert json.loads(requests[0].content)["model"] == decisions.model
+
+
+@pytest.mark.asyncio
+async def test_openai_decisions_fn_instances_share_one_http_client():
+    container = ContainerModels()
+    container.config.from_dict(
+        {"decision": {"request_timeout": 10.0, "max_retries": 0}}
+    )
+
+    first = container.openai_decisions_fn(api_key="test-key")
+    second = container.openai_decisions_fn(api_key="test-key")
+
+    assert first is not second
+    assert first.http_async_client is second.http_async_client
+    assert first.http_async_client is container.http_async_client_openai()
+
+    await container.http_async_client_openai().aclose()
+
+
+@pytest.mark.parametrize(
+    ("request_timeout", "max_retries"),
+    [
+        (10.0, 0),
+        (2.5, 1),
+    ],
+)
+def test_openai_decisions_fn_uses_configured_timeout_and_retries(
+    request_timeout, max_retries
+):
+    """A decision classifies so a caller can fall back, so the factory wires a short timeout and no client retries from
+    config instead of the OpenAI SDK defaults (a ~600s read timeout and two retries)."""
+    container = ContainerModels()
+    container.config.from_dict(
+        {"decision": {"request_timeout": request_timeout, "max_retries": max_retries}}
+    )
+
+    model = container.openai_decisions_fn(api_key="[REDACTED]")
+
+    assert model.timeout == request_timeout
+    assert model.max_retries == max_retries

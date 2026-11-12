@@ -1,21 +1,27 @@
 import json
 from typing import Optional
 
+import structlog
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette_context import context as starlette_context
 
+from ai_gateway.api.middleware.base import _PathResolver
 from ai_gateway.feature_allowlist import (
     ClientModelRequest,
+    PromptModelCheck,
     check_client_model_metadata,
-    note_prompt_feature,
+    prompt_model_check_context,
 )
-from ai_gateway.model_metadata import IamRoleNotAllowedError, create_model_metadata
+from ai_gateway.model_metadata import (
+    IamRoleNotAllowedError,
+    create_model_metadata,
+    drop_default_model_ref,
+)
 from ai_gateway.model_selection import ModelSelectionError
-from ai_gateway.prompts.registry import (
-    feature_setting_for_prompt_id,
-    mapped_feature_setting_for_prompt_id,
-)
 from lib.context import StarletteUser, current_model_metadata_context
+
+log = structlog.stdlib.get_logger("model_config")
 
 # Routes that serve one feature. The allowlist check uses this feature, so the client's
 # `feature_setting` does not select the allowlist on these routes. GitLab Rails sends code
@@ -24,15 +30,19 @@ _ROUTE_FEATURE_SETTINGS = {
     "/v1/embeddings/code_embeddings": "embeddings_code",
 }
 
-# Routes whose path ends with a prompt ID. The allowlist check uses the feature setting of the
-# prompt from `PROMPT_ID_TO_FEATURE_SETTING`, so the client's `feature_setting` does not select the
-# allowlist for these prompts.
+# Routes whose path ends with a prompt ID. The allowlist depends on the prompt version, which only the
+# route resolves, so the route checks the model metadata of these requests (`PromptModelCheck`).
 _PROMPT_ROUTES = ("/v1/prompts/", "/v2/prompts/")
+
+# Routes that forward the body to a model provider. They do not use `model_metadata`, so the middleware does not parse
+# their body. It still reads the body, so the access log records its size.
+_PROXY_ROUTES = ("/v1/proxy/",)
 
 
 class ModelConfigMiddleware:
-    def __init__(self, app: ASGIApp):
+    def __init__(self, app: ASGIApp, skip_endpoints: Optional[list[str]] = None):
         self.app = app
+        self.path_resolver = _PathResolver.from_optional_list(skip_endpoints)
 
     async def __call__(
         self,
@@ -40,11 +50,18 @@ class ModelConfigMiddleware:
         receive: Receive,
         send: Send,
     ) -> None:
-        if scope["type"] != "http":
+        # GET routes and the skipped endpoints do not use `model_metadata`. Do not read the body
+        # for them, because the skipped endpoints accept requests without authentication.
+        if (
+            scope["type"] != "http"
+            or scope["method"] == "GET"
+            or self.path_resolver.skip_path(scope["path"])
+        ):
             await self.app(scope, receive, send)
             return
 
         async def fetch_model_metadata() -> Message | JSONResponse:
+            prompt_model_check_context.set(None)
             body_parts = []
             max_chunks = 1000
             chunk_count = 0
@@ -66,6 +83,9 @@ class ModelConfigMiddleware:
                     return message
 
             full_body = b"".join(body_parts) if body_parts else b""
+            # The access log records these fields. We use them to choose a size cap for the parse.
+            starlette_context["request_body_bytes"] = len(full_body)
+            starlette_context["request_body_has_model_metadata"] = False
 
             replay: Message = {
                 "type": "http.request",
@@ -73,53 +93,69 @@ class ModelConfigMiddleware:
                 "more_body": False,
             }
 
-            if b"model_metadata" not in full_body:
+            if (
+                scope["path"].startswith(_PROXY_ROUTES)
+                or b"model_metadata" not in full_body
+            ):
                 return replay
 
+            request: Optional[ClientModelRequest] = None
             try:
                 body_str = full_body.decode("utf-8")
                 data = json.loads(body_str)
+                # A JSON array or string can contain the text `model_metadata`, but it has no such key.
+                if not isinstance(data, dict):
+                    return replay
 
                 if "model_metadata" in data:
+                    starlette_context["request_body_has_model_metadata"] = True
                     raw_metadata = data["model_metadata"]
+                    # The load-balanced default is no model choice, so the check sees an unpinned request.
+                    drop_default_model_ref(raw_metadata)
                     # Read the request first: create_model_metadata changes the mapping it gets.
                     request = ClientModelRequest.from_raw(raw_metadata)
                     client_model_metadata = create_model_metadata(raw_metadata)
                     path = scope.get("path", "")
-                    prompt_id = _route_prompt_id(path)
-                    prompt_feature_setting = _prompt_feature_setting(prompt_id)
-                    log_context = {"path": path}
-                    if prompt_id:
-                        log_context["prompt_id"] = prompt_id
-                    # A prompt without an entry logs a note when its derived feature would not
-                    # allow the model, but the check still uses the client's feature for it.
-                    if prompt_id and prompt_feature_setting is None:
-                        note_prompt_feature(
+                    if prompt_id := _route_prompt_id(path):
+                        prompt_model_check_context.set(
+                            PromptModelCheck(
+                                request=request,
+                                metadata=client_model_metadata,
+                                user=_authenticated_user(scope),
+                                log_context={"path": path, "prompt_id": prompt_id},
+                            )
+                        )
+                    else:
+                        model_metadata = check_client_model_metadata(
                             request,
                             client_model_metadata,
-                            prompt_feature_setting=feature_setting_for_prompt_id(
-                                prompt_id
-                            ),
-                            log_context=log_context,
+                            surface="http",
+                            feature_setting=_route_feature_setting(path),
+                            user=_authenticated_user(scope),
+                            log_context={"path": path},
                         )
-                    model_metadata = check_client_model_metadata(
-                        request,
-                        client_model_metadata,
-                        surface="http",
-                        feature_setting=prompt_feature_setting
-                        or _route_feature_setting(path),
-                        user=_authenticated_user(scope),
-                        log_context=log_context,
-                    )
-                    # None leaves the request on the prompt's own default model.
-                    current_model_metadata_context.set(model_metadata)
+                        # None leaves the request on the prompt's own default model.
+                        current_model_metadata_context.set(model_metadata)
 
             except IamRoleNotAllowedError as exc:
                 return JSONResponse(status_code=422, content={"detail": str(exc)})
             except ModelSelectionError as exc:
                 return JSONResponse(status_code=403, content={"detail": str(exc)})
-            except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
+            except ValueError as error:
+                # The request runs without the client's model metadata, for example when a `gitlab` request names
+                # an identifier that is not in models.yml. Never log the raw metadata or the error text: both can
+                # carry a provider API key.
+                log.warning(
+                    "Model metadata not applied",
+                    path=scope.get("path", ""),
+                    error_type=type(error).__name__,
+                    provider=request.provider if request else None,
+                    requested_name=request.name if request else None,
+                    requested_identifier=request.identifier if request else None,
+                    feature_setting=request.feature_setting if request else None,
+                )
 
             return replay
 
@@ -158,8 +194,3 @@ def _route_prompt_id(path: str) -> Optional[str]:
         if path.startswith(prefix) and (prompt_id := path.removeprefix(prefix)):
             return prompt_id
     return None
-
-
-def _prompt_feature_setting(prompt_id: Optional[str]) -> Optional[str]:
-    """Return the feature setting of ``prompt_id`` from the prompt registry, or None for a prompt without an entry."""
-    return mapped_feature_setting_for_prompt_id(prompt_id) if prompt_id else None

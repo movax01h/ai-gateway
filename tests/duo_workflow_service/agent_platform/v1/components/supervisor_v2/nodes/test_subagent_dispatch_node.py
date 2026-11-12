@@ -8,6 +8,7 @@ from langgraph.errors import GraphInterrupt, GraphRecursionError, ParentCommand
 from langgraph.types import Command
 
 from duo_workflow_service.agent_platform.utils.exceptions import (
+    ModelRefusalError,
     NotifiableAgentException,
 )
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
@@ -435,6 +436,10 @@ class TestSubagentDispatchNodeErrorHandling:
             pytest.param(
                 NotifiableAgentException("Something you should know."),
                 id="notifiable-agent-exception",
+            ),
+            # Containing it would let the supervisor re-delegate, resending the content the model refused.
+            pytest.param(
+                ModelRefusalError(internal_detail="refused"), id="model-refusal"
             ),
             pytest.param(NotifiableException("nope"), id="notifiable-exception"),
             # `PromptInjectionDetectedError` and friends subclass this.

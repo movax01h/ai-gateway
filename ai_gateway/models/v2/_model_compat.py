@@ -58,6 +58,66 @@ def remove_trailing_assistant_message(payload: dict) -> dict:
     return payload
 
 
+def remove_blank_text_blocks(payload: dict) -> dict:
+    """Drop empty and whitespace-only text blocks, which Anthropic rejects with a 400.
+
+    langchain-anthropic sends a bare string content item as a text block without its blank check. A reply streamed
+    with no tools from a model that thinks by default (Claude 5.x) is saved as ["", {thinking}, "text"], so every later
+    turn of the thread fails: https://github.com/langchain-ai/langchain/issues/39687
+    """
+    system = payload.get("system")
+    if isinstance(system, list):
+        system = [block for block in system if not _is_blank_text(block)]
+    if isinstance(system, str):
+        system = system if system.strip() else None
+    if system:
+        payload["system"] = system
+    else:
+        payload.pop("system", None)
+
+    if "messages" in payload:
+        cleaned = map(_without_blank_text, payload["messages"])
+        payload["messages"] = _rstrip_final_assistant_text(
+            [message for message in cleaned if message is not None]
+        )
+    return payload
+
+
+def _without_blank_text(message: dict) -> dict | None:
+    """Return the message unchanged, a copy without its blank text blocks, or None when nothing is left."""
+    content = message.get("content")
+    if not isinstance(content, list) or not any(map(_is_blank_text, content)):
+        return message
+
+    kept = [block for block in content if not _is_blank_text(block)]
+    return {**message, "content": kept} if kept else None
+
+
+def _rstrip_final_assistant_text(messages: list[dict]) -> list[dict]:
+    """Strip trailing whitespace from the last text block of a final assistant turn.
+
+    Anthropic rejects a prefill that ends with whitespace. langchain-anthropic strips the last block before the blank
+    filter runs, so dropping a blank last block exposes a block it never stripped.
+    """
+    if not messages or messages[-1].get("role") != "assistant":
+        return messages
+
+    content = messages[-1].get("content")
+    if not (isinstance(content, list) and content and _is_text(content[-1])):
+        return messages
+
+    last_block = {**content[-1], "text": content[-1]["text"].rstrip()}
+    return [*messages[:-1], {**messages[-1], "content": [*content[:-1], last_block]}]
+
+
+def _is_text(block: Any) -> bool:
+    return isinstance(block, dict) and block.get("type") == "text"
+
+
+def _is_blank_text(block: Any) -> bool:
+    return _is_text(block) and not str(block.get("text", "")).strip()
+
+
 def _extract_text(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -245,42 +305,59 @@ def _split_tool_images(content: list) -> tuple[list, list[dict]]:
     return kept, images
 
 
-# Providers whose endpoint validates assistant content strictly: a string, or a
-# list of bare {"type": "text", "text": ...} blocks. A conversation started on
-# another provider carries content blocks this endpoint rejects, e.g. Anthropic
+# Providers whose endpoint validates assistant messages strictly: content is a
+# string, or a list of bare {"type": "text", "text": ...} blocks, and no keys
+# beyond the plain chat-completions ones. A conversation started on another
+# provider carries content blocks this endpoint rejects, e.g. Anthropic
 # `tool_use` / `thinking`, OpenAI `reasoning` / `function_call`, and the
-# streaming `index` key on every block.
+# streaming `index` key on every block, plus the legacy top-level
+# `function_call` key on the message itself.
 _ASSISTANT_TEXT_ONLY_PROVIDERS = frozenset({"fireworks_ai"})
+
+# Top-level assistant message keys the strict providers reject. Fireworks fails
+# with "Extra inputs are not permitted, field: 'messages[N].function_call'".
+_ASSISTANT_REJECTED_KEYS = frozenset({"function_call"})
 
 
 def flatten_assistant_content(
     messages: list[dict], custom_llm_provider: Optional[str]
 ) -> list[dict]:
-    """Collapse list-shaped assistant content into a string of its text blocks.
+    """Make assistant messages acceptable to providers that validate them strictly.
 
-    Tool calls are unaffected: the converter rebuilds ``tool_calls`` from ``AIMessage.tool_calls``, so ``tool_use`` and
-    ``function_call`` blocks in the content are duplicates. Reasoning blocks are provider-specific and dropped.
-    Request-time only, never persisted.
+    List-shaped assistant content is collapsed into a string of its text blocks, and the legacy top-level
+    ``function_call`` key is removed. Tool calls are unaffected: the converter rebuilds ``tool_calls`` from
+    ``AIMessage.tool_calls``, so ``tool_use`` and ``function_call`` blocks in the content, and the ``function_call``
+    key, are duplicates. Reasoning blocks are provider-specific and dropped. Request-time only, never persisted.
 
     Args:
         messages: Message dicts from the LiteLLM converter.
         custom_llm_provider: litellm provider tag used for the gate.
 
     Returns:
-        A new list with assistant content flattened, or ``messages`` itself when the gate is closed.
+        A new list with assistant messages sanitized, or ``messages`` itself when the gate is closed.
     """
     if custom_llm_provider not in _ASSISTANT_TEXT_ONLY_PROVIDERS:
         return messages
 
     return [
         (
-            {**message, "content": _join_text_blocks(message["content"])}
+            _sanitize_assistant_message(message)
             if message.get("role") == "assistant"
-            and isinstance(message.get("content"), list)
             else message
         )
         for message in messages
     ]
+
+
+def _sanitize_assistant_message(message: dict) -> dict:
+    sanitized = {
+        key: value
+        for key, value in message.items()
+        if key not in _ASSISTANT_REJECTED_KEYS
+    }
+    if isinstance(sanitized.get("content"), list):
+        sanitized["content"] = _join_text_blocks(sanitized["content"])
+    return sanitized
 
 
 def _join_text_blocks(content: list) -> str:
@@ -378,6 +455,13 @@ def _model_supports_vision(
         if verdict is not None:
             return verdict
     return _litellm_vision_verdict(model, None)
+
+
+def model_supports_vision(
+    model: str, custom_llm_provider: Optional[str]
+) -> Optional[bool]:
+    """Return the vision verdict for one model, the same one the request-time strip uses."""
+    return _model_supports_vision(model, custom_llm_provider)
 
 
 def current_model_supports_vision() -> Optional[bool]:

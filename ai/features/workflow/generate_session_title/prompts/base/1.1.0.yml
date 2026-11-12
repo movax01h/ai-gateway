@@ -5,6 +5,7 @@ model:
     max_retries: 3
     max_tokens: 40
 unit_primitive: duo_agent_platform
+models_from: duo_agent_platform
 prompt_template:
   system: |
     {% include 'generate_session_title/system/1.1.0.jinja' %}

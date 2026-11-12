@@ -12,7 +12,12 @@ from ai_gateway.models import Message
 
 __all__ = [
     "PromptBuilderBase",
+    "PromptTooLongError",
 ]
+
+
+class PromptTooLongError(ValueError):
+    """A raw prompt exceeds the builder's token budget; the routes answer 422."""
 
 
 class PromptBuilderBase(ABC):
@@ -48,7 +53,7 @@ class PromptBuilderBase(ABC):
             prompt_text = prompt
         token_length = self.tkn_strategy.estimate_length(prompt_text)[0]
         if token_length > self.total_max_len and not ignore_exception:
-            raise ValueError("the prompt size exceeds overall maximum length")
+            raise PromptTooLongError("the prompt size exceeds overall maximum length")
 
         return Prompt(
             prefix=prompt,

@@ -7,7 +7,12 @@ and still reports success. A truncated listing is not a complete list, so caller
 
 import re
 
-__all__ = ["EXIT_CODE_HEADER", "complete_lines", "executor_truncated"]
+__all__ = [
+    "EXIT_CODE_HEADER",
+    "complete_lines",
+    "executor_truncated",
+    "strip_size_limit_notice",
+]
 
 EXIT_CODE_HEADER = re.compile(r"\AExit code: (\S*)\n")
 _OUTPUT_TRUNCATED = re.compile(r"^\[\.\.\. output truncated: .*\]$", re.MULTILINE)
@@ -19,12 +24,17 @@ def executor_truncated(text: str) -> bool:
     return bool(_SIZE_LIMIT_NOTICE.match(text) or _OUTPUT_TRUNCATED.search(text))
 
 
+def strip_size_limit_notice(text: str) -> str:
+    """``text`` without the leading size-limit notice, if it carries one."""
+    return _SIZE_LIMIT_NOTICE.sub("", text, count=1)
+
+
 def complete_lines(text: str) -> list[str]:
     """The lines of a truncated listing that survived whole.
 
     Drops the notice, the marker, and the two lines the byte cut split.
     """
-    lines = _SIZE_LIMIT_NOTICE.sub("", text, count=1).splitlines()
+    lines = strip_size_limit_notice(text).splitlines()
     for i, line in enumerate(lines):
         if _OUTPUT_TRUNCATED.match(line):
             return lines[: max(i - 1, 0)] + lines[i + 2 :]

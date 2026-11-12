@@ -26,6 +26,7 @@ from ai_gateway.models.v2._model_compat import (
     current_model_supports_vision,
     flatten_assistant_content,
     hoist_tool_result_images,
+    model_supports_vision,
     normalize_image_blocks,
     strip_image_blocks_for_non_vision_model,
 )
@@ -630,6 +631,61 @@ class TestFlattenAssistantContent:
 
         assert flatten_assistant_content(messages, provider) is messages
 
+    @pytest.mark.parametrize(
+        "content",
+        [
+            pytest.param("Reading it.", id="string_content"),
+            pytest.param(
+                [{"type": "text", "text": "Reading it.", "index": 0}],
+                id="list_content",
+            ),
+        ],
+    )
+    def test_function_call_key_is_dropped(self, content):
+        tool_calls = [{"id": "call_1", "type": "function"}]
+
+        messages = flatten_assistant_content(
+            [
+                {
+                    "role": "assistant",
+                    "content": content,
+                    "function_call": {"name": "read_file", "arguments": "{}"},
+                    "tool_calls": tool_calls,
+                }
+            ],
+            "fireworks_ai",
+        )
+
+        assert messages == [
+            {
+                "role": "assistant",
+                "content": "Reading it.",
+                "tool_calls": tool_calls,
+            }
+        ]
+
+    def test_function_call_key_is_only_dropped_from_assistant_messages(self):
+        user_message = {
+            "role": "user",
+            "content": "hi",
+            "function_call": {"name": "read_file"},
+        }
+
+        messages = flatten_assistant_content([user_message], "fireworks_ai")
+
+        assert messages == [user_message]
+
+    def test_other_providers_keep_function_call_key(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": "Reading it.",
+                "function_call": {"name": "read_file", "arguments": "{}"},
+            }
+        ]
+
+        assert flatten_assistant_content(messages, "openai") is messages
+
 
 class TestChatLiteLLMFlattenIntegration:
     """History from another provider must reach Fireworks as plain assistant text."""
@@ -680,6 +736,59 @@ class TestChatLiteLLMFlattenIntegration:
 
         assert isinstance(message_dicts[1]["content"], list)
         assert isinstance(message_dicts[3]["content"], list)
+
+    def function_call_history(self):
+        return [
+            HumanMessage(content="read the file"),
+            AIMessage(
+                content="Reading it.",
+                additional_kwargs={
+                    "function_call": {"name": "read_file", "arguments": "{}"}
+                },
+                tool_calls=[{"name": "read_file", "args": {}, "id": "call_1"}],
+            ),
+            ToolMessage(content="file body", tool_call_id="call_1"),
+            HumanMessage(content="thanks"),
+        ]
+
+    def test_fireworks_does_not_receive_function_call_key(self):
+        message_dicts = self.convert("fireworks_ai", self.function_call_history())
+
+        assert all("function_call" not in message for message in message_dicts)
+        assert message_dicts[1]["content"] == "Reading it."
+        assert message_dicts[1]["tool_calls"][0]["id"] == "call_1"
+
+    def legacy_function_call_only_history(self):
+        # Without tool calls the converter keeps `function_call` (see #3211), so
+        # the key reaches the provider gate.
+        return [
+            HumanMessage(content="read the file"),
+            AIMessage(
+                content="Reading it.",
+                additional_kwargs={
+                    "function_call": {"name": "read_file", "arguments": "{}"}
+                },
+            ),
+            HumanMessage(content="thanks"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("provider", "expect_function_call"),
+        [("fireworks_ai", False), ("openai", True)],
+    )
+    def test_function_call_key_is_dropped_only_for_fireworks(
+        self, provider, expect_function_call
+    ):
+        message_dicts = self.convert(provider, self.legacy_function_call_only_history())
+
+        assert ("function_call" in message_dicts[1]) is expect_function_call
+        assert message_dicts[1]["content"] == "Reading it."
+
+    def test_function_call_key_is_dropped_next_to_tool_calls_for_all_providers(self):
+        message_dicts = self.convert("openai", self.function_call_history())
+
+        assert all("function_call" not in message for message in message_dicts)
+        assert message_dicts[1]["tool_calls"][0]["id"] == "call_1"
 
 
 class TestStripImageBlocksForNonVisionModel:
@@ -1096,6 +1205,7 @@ class TestModelSupportsVision:
         )
 
         assert _model_supports_vision("my-model", "custom_openai") is None
+        assert model_supports_vision("my-model", "custom_openai") is None
 
     def test_flag_of_another_model_in_the_context_is_ignored(self, litellm_mock):
         # A tag-routed component runs on a model other than the context's default.

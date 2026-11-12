@@ -38,7 +38,9 @@ def mock_get_usage_metadata_fixture(token_usage: TokenUsage | None):
 
 
 class TestPrompt:
-    @pytest.mark.usefixtures("mock_get_usage_metadata", "frozen_datetime_now")
+    @pytest.mark.usefixtures(
+        "mock_get_usage_metadata", "frozen_datetime_now", "custom_models_gateway"
+    )
     @pytest.mark.parametrize(
         (
             "inputs",
@@ -96,6 +98,7 @@ class TestPrompt:
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
+                        requires_paid_credits=False,
                     ),
                 ),
                 None,
@@ -111,6 +114,7 @@ class TestPrompt:
                             name="Mistral",
                             gitlab_identifier="mistral",
                             max_context_tokens=128000,
+                            requires_paid_credits=False,
                             family=["mistral"],
                             params=ChatLiteLLMParams(
                                 model="mistral",
@@ -138,6 +142,7 @@ class TestPrompt:
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=200000,
+                        requires_paid_credits=False,
                     ),
                 ),
                 None,
@@ -152,6 +157,7 @@ class TestPrompt:
                             gitlab_identifier="amazon_q",
                             name="Amazon Q",
                             max_context_tokens=200000,
+                            requires_paid_credits=False,
                             family=["amazon_q"],
                             params=ChatAmazonQParams(
                                 model="amazon_q",
@@ -445,6 +451,31 @@ class TestUnauthorizedScopes:
         assert response.json() == {"detail": "Unauthorized to access 'test'"}
 
 
+@pytest.mark.usefixtures(
+    "frozen_datetime_now", "mock_ai_gateway_container", "mock_registry_get"
+)
+class TestTokenIssuer:
+    """The prompt routes serve GitLab-issued tokens only, not tokens the AI Gateway signs for direct access."""
+
+    @pytest.mark.parametrize(
+        ("issuer", "expected_status"),
+        [("gitlab.com", 200), ("gitlab-ai-gateway", 403)],
+    )
+    def test_issuer(self, mock_client, expected_status):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == expected_status
+        if expected_status == 403:
+            assert response.json() == {"detail": "Unauthorized to access 'test'"}
+
+
 class TestMisdirectedRequest:
     @pytest.fixture(name="mock_model_misdirection")
     def mock_model_misdirection_fixture(self):
@@ -455,7 +486,7 @@ class TestMisdirectedRequest:
 
             yield mock
 
-    @pytest.mark.usefixtures("mock_model_misdirection")
+    @pytest.mark.usefixtures("mock_model_misdirection", "custom_models_gateway")
     def test_misdirected_request(self, mock_registry_get, mock_client, model_metadata):
         response = mock_client.post(
             "/prompts/test",

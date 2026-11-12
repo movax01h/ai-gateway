@@ -7,6 +7,7 @@ from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from structlog.testing import capture_logs
 
 from ai_gateway.config import get_config
+from ai_gateway.model_metadata import DEFAULT_MODEL_REF_PREFIX
 from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from duo_workflow_service.entities.state import (
@@ -41,7 +42,7 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
                 {
                     "model": "claude-3-5-sonnet-20240620",
                     "version": "1.0",
-                    "provider": "anthropic",
+                    "provider": "gitlab",
                 }
             ),
         ),
@@ -82,7 +83,7 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
             {
                 "model": "claude-3-5-sonnet-20240620",
                 "version": "1.0",
-                "provider": "anthropic",
+                "provider": "gitlab",
                 "provider_keys": {"fireworks_provider_api_key": "fw"},
                 "fireworks_api_base_url": "https://fw",
             }
@@ -94,8 +95,20 @@ async def test_model_metadata_interceptor_sets_metadata(mock_user):
 
 
 @pytest.mark.asyncio
-async def test_model_metadata_interceptor_null_json_skips_context_setting(mock_user):
-    """JSON 'null' parses to None, which create_model_metadata_by_tag rejects with ValueError.
+@pytest.mark.parametrize(
+    "header",
+    [
+        pytest.param("null", id="null"),
+        pytest.param("5", id="number"),
+        pytest.param("true", id="boolean"),
+        pytest.param('"provider"', id="string"),
+        pytest.param('["provider"]', id="array"),
+    ],
+)
+async def test_model_metadata_interceptor_non_object_json_skips_context_setting(
+    mock_user, header
+):
+    """JSON that is not an object fails in create_model_metadata_by_tag with ValueError.
 
     Both context vars must remain unset and the request must still continue.
     """
@@ -104,7 +117,7 @@ async def test_model_metadata_interceptor_null_json_skips_context_setting(mock_u
 
     handler_call_details = MagicMock()
     handler_call_details.invocation_metadata = [
-        ("x-gitlab-agent-platform-model-metadata", "null"),
+        ("x-gitlab-agent-platform-model-metadata", header),
     ]
 
     continuation = AsyncMock(return_value="mocked_response")
@@ -394,12 +407,14 @@ async def test_stickiness_replay_of_fireworks_model_still_gets_a_working_key(moc
     ],
 )
 async def test_self_hosted_identifier_sets_matched_context_limit(
-    mock_user, identifier, expected_limit
+    monkeypatch, mock_user, identifier, expected_limit
 ):
     """A self-hosted request gets the context window of the matched models.yml entry.
 
-    Uses the real ModelSelectionConfig and context vars, from the header to the limit that DWS reads.
+    Uses the real ModelSelectionConfig and context vars, from the header to the limit that DWS reads. Self-hosted models
+    reach only a gateway that serves custom models.
     """
+    monkeypatch.setattr(get_config().custom_models, "enabled", True)
     current_user.set(mock_user)
     interceptor = ModelMetadataInterceptor()
 
@@ -433,6 +448,7 @@ async def test_self_hosted_identifier_sets_matched_context_limit(
 
 
 AGENT_PLATFORM = "duo_agent_platform"
+AGENTIC_CHAT = "duo_agent_platform_agentic_chat"
 METHOD = "/DuoWorkflow/ExecuteWorkflow"
 NOT_ALLOWED_FOR_AGENT_PLATFORM = {
     "provider": "gitlab",
@@ -593,6 +609,33 @@ class TestFeatureAllowlist:
             for entry in logs
             if entry["event"] == "Model allowlist note"
         ] == [("missing_feature_setting", "dws", METHOD)]
+
+    @pytest.mark.parametrize(
+        "feature_allowlist_mode", ["log", "fallback", "enforce"], indirect=True
+    )
+    async def test_serves_the_feature_default_for_the_load_balanced_default(self):
+        defaults = (
+            ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()[AGENTIC_CHAT]
+            .default_model_identifiers
+        )
+        # `/v1/models/definitions` lists the load-balanced default for a feature with several default models.
+        assert len(defaults) > 1
+
+        with capture_logs() as logs:
+            result, seen = await _intercept(
+                {
+                    "provider": "gitlab",
+                    "identifier": f"{DEFAULT_MODEL_REF_PREFIX}{AGENTIC_CHAT}",
+                    "feature_setting": AGENTIC_CHAT,
+                }
+            )
+
+        assert result == "continued"
+        assert seen["default"].llm_definition.gitlab_identifier in defaults
+        # Model routing can rewrite the default, as for a request without an identifier.
+        assert seen["by_tag"].feature_setting == AGENTIC_CHAT
+        assert [entry for entry in logs if entry["log_level"] == "warning"] == []
 
     @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
     async def test_enforce_mode_rejects_a_provider_the_gateway_does_not_serve(self):

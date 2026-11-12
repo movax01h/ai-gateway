@@ -196,6 +196,69 @@ class TestCodeContextPayload:
         assert response.status_code == expected_status
 
 
+def _prompt_component(component_type: str) -> dict:
+    if component_type == "code_context":
+        payload = {"type": "file", "name": "utils.py", "content": "def helper(): pass"}
+    else:
+        payload = {
+            "file_name": "main.py",
+            "content_above_cursor": "def hello_world():\n    print(",
+            "content_below_cursor": "",
+            "language_identifier": "python",
+        }
+
+    return {"type": component_type, "payload": payload}
+
+
+@pytest.mark.usefixtures("mock_completions", "mock_generations")
+class TestPromptComponentOrder:
+    def _post(self, mock_client: TestClient, route: str, component_types: list[str]):
+        return mock_client.post(
+            route,
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+                "X-Gitlab-Global-User-Id": "test-user-id",
+            },
+            json={"prompt_components": [_prompt_component(t) for t in component_types]},
+        )
+
+    @pytest.mark.parametrize(
+        "component_types",
+        [
+            ["code_editor_completion"],
+            ["code_editor_completion", "code_context"],
+            ["code_editor_generation", "code_context", "code_context"],
+        ],
+        ids="-".join,
+    )
+    def test_accepts_editor_component_first(
+        self, mock_client: TestClient, route: str, component_types: list[str]
+    ):
+        response = self._post(mock_client, route, component_types)
+
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize(
+        "component_types",
+        [
+            ["code_context"],
+            ["code_context", "code_editor_completion"],
+            ["code_context", "code_editor_generation"],
+        ],
+        ids="-".join,
+    )
+    def test_rejects_code_context_first(
+        self, mock_client: TestClient, route: str, component_types: list[str]
+    ):
+        response = self._post(mock_client, route, component_types)
+
+        assert response.status_code == 422
+        assert "the first prompt component must be" in response.text
+
+
 class TestEditorContentGenerationStream:
     @pytest.mark.parametrize(
         (
@@ -403,7 +466,53 @@ class TestCustomModelsSSRF:
     def route_fixture(self):
         return "/code/suggestions"
 
+    def _post(self, mock_client: TestClient, route: str):
+        return mock_client.post(
+            route,
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "self-managed",
+                "X-Gitlab-Global-User-Id": "test-user-id",
+            },
+            json={
+                "prompt_components": [
+                    {
+                        "type": "code_editor_completion",
+                        "payload": {
+                            "file_name": "main.py",
+                            "content_above_cursor": "# test",
+                            "content_below_cursor": "\n",
+                            "language_identifier": "python",
+                        },
+                    }
+                ],
+                "model_metadata": {
+                    "endpoint": "http://internal-server.local/ssrf",
+                    "api_key": "malicious-key",
+                    "identifier": "provider/model",
+                    "name": "mistral",
+                    "provider": "litellm",
+                },
+            },
+        )
+
+    @pytest.mark.usefixtures("cloud_gateway")
     def test_suggestions_ssrf_model_metadata_endpoint_rejected_when_custom_models_disabled(
+        self,
+        mock_client: TestClient,
+        route: str,
+    ):
+        response = self._post(mock_client, route)
+
+        assert response.status_code == 403
+        assert response.json() == {
+            "detail": "This gateway does not serve models from provider 'litellm'"
+        }
+
+    @pytest.mark.usefixtures("cloud_gateway", "feature_allowlist_mode")
+    def test_suggestions_ssrf_model_metadata_endpoint_rejected_in_log_mode(
         self,
         mock_client: TestClient,
         route: str,
@@ -411,33 +520,4 @@ class TestCustomModelsSSRF:
         with pytest.raises(
             ValueError, match="specifying custom models endpoint is disabled"
         ):
-            mock_client.post(
-                route,
-                headers={
-                    "Authorization": "Bearer 12345",
-                    "X-Gitlab-Authentication-Type": "oidc",
-                    "X-GitLab-Instance-Id": "1234",
-                    "X-GitLab-Realm": "self-managed",
-                    "X-Gitlab-Global-User-Id": "test-user-id",
-                },
-                json={
-                    "prompt_components": [
-                        {
-                            "type": "code_editor_completion",
-                            "payload": {
-                                "file_name": "main.py",
-                                "content_above_cursor": "# test",
-                                "content_below_cursor": "\n",
-                                "language_identifier": "python",
-                            },
-                        }
-                    ],
-                    "model_metadata": {
-                        "endpoint": "http://internal-server.local/ssrf",
-                        "api_key": "malicious-key",
-                        "identifier": "provider/model",
-                        "name": "mistral",
-                        "provider": "litellm",
-                    },
-                },
-            )
+            self._post(mock_client, route)

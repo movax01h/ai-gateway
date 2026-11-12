@@ -1,6 +1,6 @@
 import pytest
 
-from lib.version import resolve_version
+from lib.version import MAX_VERSION_QUERY_LENGTH, resolve_version
 
 
 class TestResolveVersion:
@@ -36,3 +36,12 @@ class TestResolveVersion:
     def test_non_pep440_no_match_raises(self):
         with pytest.raises(ValueError, match="not a valid PEP 440 constraint"):
             resolve_version(["1.0.0"], "2.0.0-orbit")
+
+    def test_query_at_length_limit_resolves(self):
+        query = "1.0.0".ljust(MAX_VERSION_QUERY_LENGTH)
+        assert resolve_version(["1.0.0"], query) == "1.0.0"
+
+    def test_query_over_length_limit_raises(self):
+        query = "1.0.0".ljust(MAX_VERSION_QUERY_LENGTH + 1)
+        with pytest.raises(ValueError, match="longer than 256 characters"):
+            resolve_version(["1.0.0"], query)

@@ -37,9 +37,11 @@ from duo_workflow_service.conversation.history_optimizer.schema import (
 )
 from duo_workflow_service.entities.attachments import (
     Attachment,
+    AttachmentsNotAllowedError,
     attachment_content_blocks,
     attachment_rejection_block,
     partition_attachment_envelopes,
+    resolve_attachment_envelopes,
     split_attachment_envelopes,
     with_attachment_references,
 )
@@ -231,8 +233,8 @@ CHAT_SESSION_CONTEXT_TOOLS = ["get_session_context"]
 # composition here (`["render_ui"]`), gated behind DUO_CHAT_GENERATIVE_UI.
 CHAT_GENUI_TOOLS: list[str] = []
 
-# Fallback web search, for models that cannot search natively. The registry only enables it in
-# that case, and `toolset` drops names that are not enabled.
+# Web search. The registry offers it only when the session may search, and binding turns it
+# into the provider's own search for models that run it.
 CHAT_WEB_SEARCH_TOOLS = ["web_search"]
 
 
@@ -240,6 +242,7 @@ CHAT_WEB_SEARCH_TOOLS = ["web_search"]
 class Workflow(AbstractWorkflow):
     _stream: bool = True
     _agent: ChatAgent
+    _tools_executor: ToolsExecutor
     _tools_override: list[str]
     _workflow_id: str
     _workflow_type: GLReportingEventContext
@@ -366,6 +369,25 @@ class Workflow(AbstractWorkflow):
 
         return Routes.CONTINUE
 
+    async def _run_tools(self, state: ChatWorkflowState) -> list[Any]:
+        """Run the requested tool calls, skipping those past the limit ``ChatAgent`` stored for the response."""
+        max_tool_calls = state.get("max_tool_calls")
+        if max_tool_calls is None:
+            return await self._tools_executor.run(state)
+
+        last_message = state["conversation_history"][self._agent.name][-1]
+        # Malformed calls never run, so the limit does not count them.
+        requested = len(getattr(last_message, "tool_calls", []))
+        if requested > max_tool_calls:
+            logger.warning(
+                "Skipping chat tool calls over the limit",
+                workflow_id=self._workflow_id,
+                requested=requested,
+                limit=max_tool_calls,
+            )
+
+        return await self._tools_executor.run(state, max_tool_calls=max_tool_calls)
+
     def _turn_completed_a_forced_call(self, state: ChatWorkflowState) -> bool:
         """Whether the tool results just written answer a call the client chose, and that call succeeded.
 
@@ -478,7 +500,19 @@ class Workflow(AbstractWorkflow):
         goes ahead without the files instead, and both the user and the model
         are told they are missing (see ``_attachments_rejected_log`` and
         :func:`attachment_rejection_block`).
+
+        Attachments this workflow does not allow are the exception and do raise:
+        that is a policy violation rather than a bad file, so the whole turn is
+        refused. ``AttachmentsNotAllowedError`` is a ``NotifiableException``, so
+        the user is shown why.
         """
+        if not self._workflow_config.get("file_attachments_allowed", False):
+            _, dropped = partition_attachment_envelopes(self._additional_context)
+            if dropped:
+                raise AttachmentsNotAllowedError(
+                    "File attachments are not allowed for this session."
+                )
+
         try:
             remaining, attachments = split_attachment_envelopes(
                 self._additional_context
@@ -495,6 +529,19 @@ class Workflow(AbstractWorkflow):
         # Normalise an emptied list back to None so an attachments-only turn
         # looks like a turn that never carried additional context at all.
         return remaining or None, attachments, None
+
+    async def _resolve_attachments(self) -> None:
+        """Inline the session files this turn references, for a turn that builds a user message.
+
+        Skipped when the session does not allow attachments: ``_turn_context`` refuses the turn anyway, and
+        the user's files should not be read first.
+        """
+        if not self._workflow_config.get("file_attachments_allowed", False):
+            return
+
+        self._additional_context = await resolve_attachment_envelopes(
+            self._additional_context, self._http_client, self._workflow_id
+        )
 
     def get_workflow_state(self, goal: str) -> ChatWorkflowState:
         additional_context, attachments, rejection = self._turn_context()
@@ -558,6 +605,7 @@ class Workflow(AbstractWorkflow):
 
         match status_event:
             case WorkflowStatusEventEnum.START:
+                await self._resolve_attachments()
                 return self.get_workflow_state(goal)
 
             case _ if checkpoint_tuple is None:
@@ -570,6 +618,7 @@ class Workflow(AbstractWorkflow):
                     workflow_id=self._workflow_id,
                     status_event=str(status_event),
                 )
+                await self._resolve_attachments()
                 return self.get_workflow_state(goal)
 
             case _:
@@ -590,6 +639,7 @@ class Workflow(AbstractWorkflow):
                     attachments = []
                     rejection = None
                 else:
+                    await self._resolve_attachments()
                     additional_context, attachments, rejection = self._turn_context()
                     dropped = []
 
@@ -875,7 +925,13 @@ class Workflow(AbstractWorkflow):
 
         agents_toolset = tools_registry.toolset(tools + tools_registry.mcp_tool_names())
 
-        web_search_enabled, web_search_allowed_for_group = self._web_search_settings()
+        # An agent that doesn't list the tool has no web search at all, so the prompt mustn't
+        # suggest the user's toggle would turn it on.
+        web_search_enabled, web_search_allowed_for_group = (
+            self._web_search_settings()
+            if CHAT_WEB_SEARCH_TOOLS[0] in tools
+            else (False, False)
+        )
 
         self._agent: ChatAgent = create_agent(
             user=self._user,
@@ -896,16 +952,16 @@ class Workflow(AbstractWorkflow):
             ),
         )
 
-        tools_runner = ToolsExecutor(
+        self._tools_executor = ToolsExecutor(
             tools_agent_name=self._agent.name,
             toolset=agents_toolset,
             workflow_id=self._workflow_id,
             workflow_type=self._workflow_type,
             skip_agent_msg=True,
-        ).run
+        )
 
         graph.add_node("agent", self._agent.run)
-        graph.add_node("run_tools", tools_runner)
+        graph.add_node("run_tools", self._run_tools)
         graph.add_node("forced_call_complete", self._forced_call_complete)
 
         graph.set_conditional_entry_point(
@@ -976,18 +1032,9 @@ class Workflow(AbstractWorkflow):
             else []
         )
 
-        # The opt-in and the group grant gate the fallback tool just as they gate
-        # native `web_search_options`, so turning search off holds for every model.
-        web_search_enabled, web_search_allowed_for_group = self._web_search_settings()
-        web_search_tools = (
-            CHAT_WEB_SEARCH_TOOLS
-            if web_search_enabled and web_search_allowed_for_group
-            else []
-        )
-
         available_tools = (
             read_only_tools
-            + web_search_tools
+            + CHAT_WEB_SEARCH_TOOLS
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS

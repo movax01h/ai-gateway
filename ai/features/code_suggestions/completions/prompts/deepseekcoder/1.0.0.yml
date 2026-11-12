@@ -1,0 +1,12 @@
+---
+name: DeepSeekCoder Code Completions
+model:
+  params:
+    max_tokens: 128
+unit_primitive: complete_code
+models_from: code_completions
+tool_output_security: false
+prompt_template:
+  user: <｜fim▁begin｜>{{prefix}}<｜fim▁hole｜>{{suffix}}<｜fim▁end｜>
+params:
+  timeout: 60

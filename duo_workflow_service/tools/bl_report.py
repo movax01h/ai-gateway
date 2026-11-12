@@ -15,14 +15,9 @@ from pydantic import BaseModel, Field
 from duo_workflow_service.bl_security.findings import (
     TRIAGE_CLAUSE_MAX,
     Finding,
-    audit_clause_of,
+    FindingDict,
     coerce_to_list,
-    cwe_digits,
-    dedup_key,
     findings_input,
-    line_of,
-    norm_excerpt,
-    verdict_of,
 )
 from duo_workflow_service.security.secret_redaction import redact_secrets
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
@@ -110,13 +105,11 @@ def _dominant_cwe_per_statement(
     """
     counts: dict[tuple[str, str], dict[str, int]] = {}
     for f in findings:
-        exc = norm_excerpt(f)
-        cwe = cwe_digits(f)
-        if not exc or not cwe:
+        exc = f.norm_excerpt
+        if not exc or not f.cwe:
             continue
-        group = (f.get("file") or f.get("path") or "", exc)
-        per_cwe = counts.setdefault(group, {})
-        per_cwe[cwe] = per_cwe.get(cwe, 0) + 1
+        per_cwe = counts.setdefault((f.file, exc), {})
+        per_cwe[f.cwe] = per_cwe.get(f.cwe, 0) + 1
     return {
         group: max(per_cwe, key=per_cwe.__getitem__)
         for group, per_cwe in counts.items()
@@ -146,13 +139,8 @@ def _second_pass_collapse(findings: List[Finding]) -> List[Finding]:
     dominant = _dominant_cwe_per_statement(findings)
     kept: List[Finding] = []
     for f in findings:
-        exc = norm_excerpt(f)
-        if not exc:
-            kept.append(f)
-            continue
-        group = (f.get("file") or f.get("path") or "", exc)
-        cwe = cwe_digits(f)
-        if cwe and cwe != dominant[group]:
+        exc = f.norm_excerpt
+        if exc and f.cwe and f.cwe != dominant[(f.file, exc)]:
             continue
         kept.append(f)
     return kept
@@ -160,16 +148,16 @@ def _second_pass_collapse(findings: List[Finding]) -> List[Finding]:
 
 def _flatten_findings(batches: Any) -> List[Finding]:
     """Flatten a JSON array (or string) whose elements are per-batch arrays of finding dicts (each possibly a JSON
-    string)."""
+    string), and parse each dict."""
     out: List[Finding] = []
     for element in coerce_to_list(batches):
         for item in coerce_to_list(element):
             if isinstance(item, dict):
-                out.append(item)
+                out.append(Finding.from_dict(item))
             elif isinstance(item, str):
                 for sub in coerce_to_list(item):
                     if isinstance(sub, dict):
-                        out.append(sub)
+                        out.append(Finding.from_dict(sub))
     return out
 
 
@@ -198,15 +186,6 @@ def _flatten_findings(batches: Any) -> List[Finding]:
 # --------------------------------------------------------------------------- #
 
 
-def _audit_evidence_of(finding: Finding) -> str:
-    """The code fact justifying the verdict.
-
-    Prefers ``evidence`` and falls back to ``triage_evidence``, which the
-    adjudicator may set on KEEP only.
-    """
-    return str(finding.get("evidence") or finding.get("triage_evidence") or "").strip()
-
-
 def _log_safe(text: str, limit: int) -> str:
     """Redact secrets from model-written text, then bound it for the audit log."""
     return str(redact_secrets(text, "bl_dedup_findings"))[:limit]
@@ -218,28 +197,29 @@ def _record_triage_verdicts(findings: List[Finding]) -> List[Finding]:
     Returns ``findings`` unchanged (same list object) when no finding carries a
     verdict, so this is a no-op on every non-triage caller.
     """
-    adjudicated = sum(1 for f in findings if verdict_of(f))
+    adjudicated = sum(1 for f in findings if f.verdict)
     if not adjudicated:
         return findings
 
     kept: List[Finding] = []
     dropped = 0
     for f in findings:
-        verdict = verdict_of(f)
+        verdict = f.verdict
         if verdict:
             # One structured record per decision: this IS the audit trail. Bodies
             # and evidence are bounded so a 500-finding scan cannot flood the log.
             _log.info(
                 "bl_triage_verdict",
                 verdict=verdict,
-                clause=_log_safe(audit_clause_of(f), TRIAGE_CLAUSE_MAX)
-                or "UNSPECIFIED",
-                evidence=_log_safe(_audit_evidence_of(f), 600) or "UNSPECIFIED",
-                file=f.get("file") or f.get("path") or "",
-                line=line_of(f),
-                cwe=cwe_digits(f),
-                severity=str(f.get("severity", "")),
-                body=_log_safe(str(f.get("body") or f.get("description") or ""), 240),
+                clause=_log_safe(f.clause, TRIAGE_CLAUSE_MAX) or "UNSPECIFIED",
+                # ``evidence``, else ``triage_evidence``, which the
+                # adjudicator may set on KEEP only.
+                evidence=_log_safe(f.evidence, 600) or "UNSPECIFIED",
+                file=f.file,
+                line=f.line,
+                cwe=f.cwe,
+                severity=f.severity,
+                body=_log_safe(f.text, 240),
             )
         if verdict == "DROP":
             dropped += 1
@@ -310,7 +290,7 @@ class BlDedupFindings(DuoBaseTool):
 
     async def _execute(
         self, batches: Any, batches2: Any = None, drop_out_of_scope: bool = False
-    ) -> list[Finding]:
+    ) -> list[FindingDict]:
         # Both sources are flattened independently, then concatenated, before dedup.
         findings = _flatten_findings(findings_input(batches, "batches"))
         if batches2 is not None:
@@ -328,13 +308,12 @@ class BlDedupFindings(DuoBaseTool):
         kept: List[Finding] = []
         seen: set[tuple[str, str, int, str]] = set()
         for f in findings:
-            cwe = cwe_digits(f)
             if drop_out_of_scope:
-                if _is_out_of_scope_cwe(cwe):
+                if _is_out_of_scope_cwe(f.cwe):
                     continue
-                if _DROP_KEYWORDS.search(str(f.get("body", ""))):
+                if _DROP_KEYWORDS.search(f.body):
                     continue
-            key = dedup_key(f, cwe=cwe)
+            key = f.dedup_key()
             if key in seen:
                 continue
             seen.add(key)
@@ -350,4 +329,4 @@ class BlDedupFindings(DuoBaseTool):
             after_exact_dedup=after_exact,
             collapsed_facets=after_exact - len(kept),
         )
-        return kept
+        return [f.to_dict() for f in kept]

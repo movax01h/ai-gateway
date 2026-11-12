@@ -122,11 +122,15 @@ model:
         top_p: <float>                # Optional. 0.0-1.0. Controls diversity (default: 1.0)
         top_k: <integer>              # Optional. Token consideration limit (default: 40)
         max_tokens: <integer>         # Optional. Maximum tokens to generate
+        max_retries: <integer>        # Optional. 0-3. Provider SDK retry attempts (default: 1)
         stop: <string[]>              # Optional. Array of stopping sequences
 
-unit_primitives: # Required. Features that can use this prompt
-    - duo_chat                      # For GitLab Duo chat conversations
-    # Additional primitives as needed
+unit_primitive: duo_chat          # Required. The unit primitive that a request needs to use this prompt
+
+# Optional. Only for prompts that the AI Gateway serves over HTTP. The feature setting in `unit_primitives.yml`
+# that lists the models of this prompt version. That entry must list `unit_primitive`.
+# See "Models of prompts served over HTTP" below.
+models_from: duo_chat
 
 prompt_template: # Required. Templates for model interaction
     system: <string>                # Optional. System-level instructions (supports Jinja2)
@@ -137,7 +141,6 @@ prompt_template: # Required. Templates for model interaction
 
 params: # Optional. Request handling parameters
     timeout: <integer>              # Optional. Maximum response time in seconds (default: 30)
-    max_retries: <integer>          # Optional. Maximum retry attempts (default: 3)
     context_management:             # Optional. Anthropic-only context window management
         edits:
             - type: <string>        # Edit strategy (e.g., "clear_tool_uses_20250919")
@@ -161,17 +164,42 @@ model:
     params:
         temperature: 0.2
         max_tokens: 1024
+        max_retries: 3
         stop:
             - "End"
-unit_primitives:
-    - duo_chat
+unit_primitive: duo_chat
 prompt_template:
     system: "You are a code review assistant with access to previous conversations. {{ context }}"
     user: "Review this code: {{ code_diff }}"
 params:
     timeout: 120
-    max_retries: 3
 ```
+
+### Models of prompts served over HTTP
+
+The AI Gateway serves some prompts over HTTP, for example on the prompt routes (`/v1/prompts/<prompt_id>` and
+`/v2/prompts/<prompt_id>`) that GitLab Rails calls. For each version of such a prompt, `models_from` names the feature
+setting in `unit_primitives.yml` whose models the version can run on.
+
+- Set `models_from` only on prompts that the AI Gateway serves over HTTP. For a feature under `ai/features/`, its
+  `serving.py` must declare `ServingSurface(transport="rest", deployable="aigw")`. A test checks this.
+- Do not set `models_from` on a prompt that only the Duo Workflow Service runs, for example the prompt of a flow
+  component or `classify_goal_tier`. The flow selects the models of its prompts.
+- `InMemoryPromptConfig`, the inline prompt of a custom flow, does not accept `models_from`. A client must not select
+  the models of its own prompt.
+- The `amazon_q` versions do not set `models_from`, because no entry in `unit_primitives.yml` lists
+  `amazon_q_integration`.
+
+The prompt routes check the client's model against the `models_from` of the version that runs, and the registry picks
+the default model of a request without model metadata from it. For a version without `models_from`, the check uses the
+client's `feature_setting`, and the default model comes from the first part of the prompt ID.
+
+- A prompt with more than one model family must declare one `models_from` in all of them. In `fallback` mode the
+  check can serve another model, and its family can resolve another version. A test checks this.
+- When the folder of the client's model family has no matching version, or its version declares no `models_from`
+  like the `amazon_q` versions, the check uses the `models_from` of the same version in `base`, or else of the
+  version that the constraint resolves in `base`. For example, `code_suggestions/generations` has 2.0.0 only in `base`, so a Codestral model
+  with `^2.0.0` gets the `models_from` of `base/2.0.0`.
 
 ### Message Placeholders
 
@@ -383,6 +411,7 @@ model:
         temperature: 0.2
         top_p: 0.7
         max_tokens: 300
+        max_retries: 3
 unit_primitives:
     - duo_chat
 prompt_template:
@@ -390,7 +419,6 @@ prompt_template:
     user: "What can I help with?"
 params:
     timeout: 60
-    max_retries: 5
     stop:
         - "End"
 ```

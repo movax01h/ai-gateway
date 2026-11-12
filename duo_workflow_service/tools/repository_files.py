@@ -234,13 +234,15 @@ class GetRepositoryFile(RepositoryFileBaseTool):
 
         result = "\n".join(lines[start:end])
 
+        # Labels are 1-indexed like GitLab's line numbers and the local read_file
+        # footer; offsets stay 0-indexed. Agents quote these labels as line numbers.
         if end < total_lines:
             result += (
-                f"\n\n[Showing lines {start}-{end - 1} of {total_lines} total. "
+                f"\n\n[Showing lines {start + 1}-{end} of {total_lines} total. "
                 f"Use offset={end} to continue reading.]"
             )
         elif start > 0:
-            result += f"\n\n[Showing lines {start}-{end - 1} of {total_lines} total.]"
+            result += f"\n\n[Showing lines {start + 1}-{end} of {total_lines} total.]"
 
         return result
 

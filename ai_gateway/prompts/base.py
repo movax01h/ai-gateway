@@ -55,7 +55,12 @@ from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate, string
 from langchain_core.prompts.string import DEFAULT_FORMATTER_MAPPING
-from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig
+from langchain_core.runnables import (
+    Runnable,
+    RunnableBinding,
+    RunnableConfig,
+    RunnableLambda,
+)
 from langchain_core.runnables.config import merge_configs
 from langchain_core.tools import BaseTool
 from langsmith import tracing_context
@@ -72,11 +77,12 @@ from tenacity import (
     retry,
     retry_if_exception,
     stop_after_attempt,
-    wait_exponential,
+    wait_random_exponential,
 )
 
 from ai_gateway.config import ConfigModelLimits, ModelLimits, get_config
 from ai_gateway.instrumentators.model_requests import ModelRequestInstrumentator
+from ai_gateway.instrumentators.timeouts import is_timeout_error
 from ai_gateway.model_metadata import (
     TypeModelMetadata,
     resolve_provider_aware_metadata,
@@ -98,17 +104,25 @@ from ai_gateway.prompts.caching import (
     CacheControlInjectionPointsConverter,
     default_cache_control_injection_points,
     filter_cache_control_injection_points,
+    merges_system_messages,
     should_inject_default_cache_control,
 )
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
-from ai_gateway.prompts.feature_roots import feature_prompt_root
+from ai_gateway.prompts.feature_roots import (
+    LEGACY_INCLUDE_ALIASES,
+    feature_prompt_root,
+)
 from ai_gateway.prompts.model_variables import bind_model_variables
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.structured_logging import get_request_logger
 from lib.billing_events.service import LLMOperationType
 from lib.context import StarletteUser, current_model_metadata_context
 from lib.internal_events.client import InternalEventsClient
-from lib.prompts.utilities import prompt_template_to_messages, render_security_block
+from lib.prompts.utilities import (
+    merge_leading_system_messages,
+    prompt_template_to_messages,
+    render_security_block,
+)
 
 __all__ = [
     "BasePromptCallbackHandler",
@@ -133,10 +147,6 @@ class TemplateNotFoundError(Exception):
 # Total attempts (initial call + retries) performed by `_ainvoke_with_retry`.
 # Named so the retry logging below can tell "will retry" apart from "gave up".
 _RETRY_STOP_AFTER_ATTEMPT = 4
-
-# aiohttp's idle-read timer message; litellm surfaces it as a generic
-# APIConnectionError, so it can't be classified by exception type alone.
-_SOCKET_READ_TIMEOUT_MESSAGE = "Timeout on reading data from socket"
 
 # Transient network errors that are safe to retry
 _RETRYABLE_NETWORK_ERRORS = (
@@ -243,29 +253,6 @@ def _is_retryable(exc: BaseException) -> bool:
     return False
 
 
-def _is_timeout_error(exc: BaseException | None) -> bool:
-    """Best-effort check whether an exception (or its causes) is a timeout.
-
-    Covers httpx timeout classes plus the aiohttp idle-read timeout that
-    litellm wraps in ``APIConnectionError``/``MidStreamFallbackError`` with a
-    fixed message rather than a distinct type. Walks ``__cause__`` and
-    litellm's ``original_exception`` a bounded number of steps to avoid
-    reference cycles.
-    """
-    for _ in range(5):
-        if exc is None:
-            return False
-        if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
-            return True
-        message = str(exc)
-        if _SOCKET_READ_TIMEOUT_MESSAGE in message or "timed out" in message.lower():
-            # NOTE: "timed out" is a broad heuristic and may over-match
-            # exceptions unrelated to the request timeout.
-            return True
-        exc = exc.__cause__ or getattr(exc, "original_exception", None)
-    return False
-
-
 # Provider chat classes name the factory-level request timeout differently:
 # ChatLiteLLM/ChatOpenAI use `request_timeout`, ChatAnthropic uses
 # `default_request_timeout`, and ChatGoogleGenerativeAI uses `timeout` (its
@@ -319,7 +306,7 @@ def _attempt_failure_log_fields(retry_state: RetryCallState) -> dict[str, Any] |
         "total_elapsed_s": round(retry_state.seconds_since_start or 0.0, 3),
         "exception_class": type(exc).__name__,
         "exception_message": str(exc)[:200],
-        "timeout_suspected": _is_timeout_error(exc),
+        "timeout_suspected": is_timeout_error(exc),
     }
 
 
@@ -361,7 +348,9 @@ def _log_retries_exhausted(retry_state: RetryCallState) -> None:
 @retry(
     reraise=True,
     stop=stop_after_attempt(_RETRY_STOP_AFTER_ATTEMPT),
-    wait=wait_exponential(multiplier=3, min=3, max=29, exp_base=3),
+    # Full jitter: each wait is random between 1.5s and the exponential cap
+    # (3s, 9s, 27s), so sessions failing together don't retry in waves.
+    wait=wait_random_exponential(multiplier=3, min=1.5, max=29, exp_base=3),
     retry=retry_if_exception(_is_retryable),
     before=_record_attempt_start,
     after=_log_retries_exhausted,
@@ -695,10 +684,26 @@ class FeatureRootLoader(BaseLoader):
         )
 
 
-# Legacy root first, then moved features; first match wins.
-jinja_loader = ChoiceLoader(
+class LegacyIncludeLoader(BaseLoader):
+    """Serve an include name that a move retired, from the current name of the file."""
+
+    def __init__(self, delegate: BaseLoader) -> None:
+        self._delegate = delegate
+
+    def get_source(
+        self, environment: Environment, template: str
+    ) -> tuple[str, str | None, Callable[[], bool] | None]:
+        target = LEGACY_INCLUDE_ALIASES.get(template)
+        if target is None:
+            raise TemplateNotFound(template)
+        return self._delegate.get_source(environment, target)
+
+
+# Legacy root first, then moved features, then retired names; first match wins.
+_current_loaders = ChoiceLoader(
     [PackageLoader("ai_gateway.prompts", "definitions"), FeatureRootLoader()]
 )
+jinja_loader = ChoiceLoader([_current_loaders, LegacyIncludeLoader(_current_loaders)])
 jinja_env = PromptSandboxedEnvironment(loader=jinja_loader)
 jinja_env.filters["split"] = split_filter
 jinja_env.filters["parse_json"] = parse_json
@@ -781,13 +786,15 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     model_vendor: Optional[str] = None
     model: Model
     unit_primitive: GitLabUnitPrimitive
-    operation_type: LLMOperationType = "standard"
+    operation_type: LLMOperationType = LLMOperationType.STANDARD
     prompt_tpl: Runnable[Any, PromptValue]
     internal_event_client: Optional[InternalEventsClient] = None
     limits: Optional[ModelLimits] = None
     internal_event_extra: dict[str, Any] = {}
     internal_callbacks: list[BasePromptCallbackHandler] = []
     requested_model: Optional[str] = None
+    binds_web_search: bool = False
+    """Whether binding gave the model a web search route (native or the fallback tool)."""
 
     def __init__(
         self,
@@ -846,6 +853,25 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         factory_timeout = _model_request_timeout(model)
         base_model = model
 
+        # Decided here because only the binding knows the model: a `web_search` tool becomes the
+        # provider's own search for models that run it, and stays a local tool otherwise.
+        bound_tools: list[BaseTool] = list(tools or [])
+        binds_web_search = False
+        if bound_tools:
+            # Imported here: `ai_gateway.models.v2` imports the prompts package while it loads.
+            from ai_gateway.models.v2.web_search_support import (  # pylint: disable=import-outside-toplevel
+                WEB_SEARCH_TOOL_NAME,
+                bind_web_search,
+            )
+
+            bound_tools, bind_tools_params = bind_web_search(
+                bound_tools, llm_definition, bind_tools_params
+            )
+            binds_web_search = "web_search_options" in (bind_tools_params or {}) or any(
+                getattr(tool, "name", None) == WEB_SEARCH_TOOL_NAME
+                for tool in bound_tools
+            )
+
         if tools and isinstance(model, BaseChatModel):
             if bind_tools_cache:
                 # Use cached bind_tools to avoid expensive repeated operations
@@ -859,19 +885,19 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 model = bind_tools_cache.get_or_bind(  # type: ignore[assignment]
                     model=model,
                     model_id=model_id,
-                    tools=tools,
+                    tools=bound_tools,
                     tool_choice=tool_choice,
                     model_provider=model_provider,
                     **(bind_tools_params or {}),
                 )
             else:
                 model = model.bind_tools(  # type: ignore[assignment]
-                    tools,
+                    bound_tools,
                     tool_choice=tool_choice,
                     **(bind_tools_params or {}),
                 )
 
-        prompt_tpl = (
+        prompt_tpl: Runnable[Any, PromptValue] = (
             prompt_template_factory(model_provider, config)
             if prompt_template_factory
             else bind_model_variables(
@@ -880,6 +906,13 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 model_metadata,
             )
         )
+        # A decision template returns the `{"input", "questions"}` request, not chat messages, so it has none to merge.
+        if (
+            config.operation_type != LLMOperationType.DECISION
+            and merges_system_messages(model_provider, llm_definition)
+        ):
+            prompt_tpl = prompt_tpl | RunnableLambda(merge_leading_system_messages)
+
         prompt = self._chain_cache_control_injection_points_converter(
             model_kwargs, prompt_tpl, model_provider
         )
@@ -939,6 +972,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 if model_metadata and model_metadata.is_custom_model
                 else None
             ),
+            binds_web_search=binds_web_search,
             **kwargs,
         )  # type: ignore[call-arg]
 
@@ -1160,10 +1194,15 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 *[cb.on_before_llm_call() for cb in self.internal_callbacks]
             )
 
-            # super() cannot be used inside a lambda; call RunnableBinding.ainvoke directly
-            result = await _ainvoke_with_retry(
-                lambda: RunnableBinding.ainvoke(self, input, config, **kwargs)
-            )
+            async def invoke() -> BaseMessage:
+                # super() cannot be used inside a closure; call RunnableBinding.ainvoke directly
+                return await RunnableBinding.ainvoke(self, input, config, **kwargs)
+
+            # A decision fails fast so its caller can fall back (see `ConfigDecision`), so it skips this retry too.
+            if self.operation_type == LLMOperationType.DECISION:
+                result = await invoke()
+            else:
+                result = await _ainvoke_with_retry(invoke)
 
             watcher.register_message(result)
             self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
@@ -1195,16 +1234,20 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 *[cb.on_before_llm_call() for cb in self.internal_callbacks]
             )
 
-            async for item in super().astream(
-                input,
-                config,
-                **kwargs,
-            ):
-                watcher.register_message(item)
+            try:
+                async for item in super().astream(
+                    input,
+                    config,
+                    **kwargs,
+                ):
+                    watcher.register_message(item)
 
-                if previous_item:
-                    yield previous_item
-                previous_item = item
+                    if previous_item:
+                        yield previous_item
+                    previous_item = item
+            except asyncio.CancelledError:
+                self._handle_early_exit_usage(watcher, usage_cb.usage_metadata)
+                raise
 
             self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
 
@@ -1232,12 +1275,16 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             # See `astream` comments for why we yield off by one
             previous_item: BaseMessage | None = None
 
-            async for item in super().atransform(input, config, **kwargs):
-                watcher.register_message(item)
+            try:
+                async for item in super().atransform(input, config, **kwargs):
+                    watcher.register_message(item)
 
-                if previous_item:
-                    yield previous_item
-                previous_item = item
+                    if previous_item:
+                        yield previous_item
+                    previous_item = item
+            except asyncio.CancelledError:
+                self._handle_early_exit_usage(watcher, usage_cb.usage_metadata)
+                raise
 
             self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
 
@@ -1245,6 +1292,35 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 yield previous_item
 
             await watcher.afinish()
+
+    def _handle_early_exit_usage(
+        self,
+        watcher: ModelRequestInstrumentator.WatchContainer,
+        usage_metadata: dict[str, UsageMetadata],
+    ) -> None:
+        """Register usage for a stream whose task was cancelled, for example when the client disconnects.
+
+        The provider reports usage once, when the stream ends. If the provider already did, register it as for a
+        completed call. If not, the consumer would find no operation and could not bill the request, so register an
+        operation with zero tokens for billing only. The call did not finish, so no event, log or counter is sent for
+        it.
+
+        Only `CancelledError` is handled. `GeneratorExit` also fires when an abandoned generator is garbage-collected,
+        possibly in the context of an unrelated request, and must not register usage there.
+
+        This relies on Starlette cancelling the task on client disconnect. Starlette does that only when the server
+        reports ASGI ``spec_version`` below 2.4 (uvicorn reports 2.3 today). See
+        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3551
+        """
+        if usage_metadata:
+            self.handle_usage_metadata(watcher, usage_metadata)
+            return
+
+        watcher.register_llm_operation(
+            self.reported_model_name,
+            UsageMetadata(input_tokens=0, output_tokens=0, total_tokens=0),
+            {**self.internal_event_extra, "operation_type": self.operation_type},
+        )
 
     def handle_usage_metadata(
         self,
@@ -1325,6 +1401,28 @@ class BasePromptRegistry(ABC):
                 exception explicitly.
         """
 
+    def models_from(
+        self,
+        prompt_id: str,
+        prompt_version: Optional[str],
+        model_metadata: Optional[TypeModelMetadata] = None,
+    ) -> Optional[str]:
+        """Return the ``models_from`` of the prompt version that ``get`` resolves for this model.
+
+        When the folder of the model's family has no matching version, or its version declares no ``models_from``, the
+        version in the ``base`` folder applies.
+
+        Args:
+            prompt_id: Identifier of the prompt.
+            prompt_version: Version constraint of the request, or ``None`` for the default version.
+            model_metadata: The model the prompt runs on. Its family selects the prompt definition.
+
+        Returns:
+            The feature setting that lists the models of the version, or ``None`` when the version does not declare
+            one or the registry cannot resolve it.
+        """
+        return None
+
     def get_on_behalf(
         self,
         # TODO: We should allow only `CloudConnectorUser` in the future.
@@ -1338,6 +1436,7 @@ class BasePromptRegistry(ABC):
         is_graph_node: bool = False,
         unit_primitive: Optional[GitLabUnitPrimitive] = None,
         track_event: bool = True,
+        disallowed_issuers: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> Prompt:
         if not model_metadata:
@@ -1361,7 +1460,9 @@ class BasePromptRegistry(ABC):
         # prompt against duo_chat instead of duo_classic_chat).
         authorized_unit_primitive = unit_primitive or prompt.unit_primitive
 
-        if not user.can(authorized_unit_primitive):
+        if not user.can(
+            authorized_unit_primitive, disallowed_issuers=disallowed_issuers
+        ):
             raise WrongUnitPrimitives
 
         # Only record internal events once we know the user has access to the Unit Primitive

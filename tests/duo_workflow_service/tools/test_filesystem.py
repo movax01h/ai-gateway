@@ -39,7 +39,11 @@ from duo_workflow_service.tools.filesystem import (  # Mkdir,
     _is_trusted_absolute_path,
     validate_duo_context_exclusions,
 )
-from lib.context import client_capabilities, gitlab_user_id, gitlab_version
+from lib.context import (
+    client_capabilities,
+    gitlab_user_id,
+    gitlab_version,
+)
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from tests.duo_workflow_service.tools.conftest import (
     create_mock_client_event_with_image_response,
@@ -73,7 +77,12 @@ def metadata_with_project_fixture(mock_project):
         return_value=create_mock_client_event_with_response("test contents")
     )
 
-    return {"outbox": mock_outbox, "project": mock_project}
+    return {
+        "outbox": mock_outbox,
+        "project": mock_project,
+        # What the registry sets for a flow with file and GitLab read access.
+        "granted_privileges": frozenset({"read_only_files", "read_only_gitlab"}),
+    }
 
 
 @pytest.mark.asyncio
@@ -527,6 +536,7 @@ class TestReadFile:
             "outcome": "success",
             "provider": "duo_workflow_service",
             "response_type": "text",
+            "reason": None,
         }
         assert fields["gitlab"] == {"data_type": "upload", "size_bytes": None}
         assert self.UPLOAD_SECRET not in str(security_log.info.call_args)
@@ -593,6 +603,83 @@ class TestReadFile:
         mock_outbox.put_action_and_wait_for_response.assert_not_called()
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    async def test_upload_downloads_under_a_gitlab_privilege(
+        self, metadata_with_project
+    ):
+        # The registry expands read_write_gitlab to read_only_gitlab before the
+        # tool sees the set, so the tool checks the read name only.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = {
+            **metadata_with_project,
+            "granted_privileges": frozenset({"read_only_files", "read_only_gitlab"}),
+        }
+        await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
+
+        action = metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.filepath.startswith("/api/v4/projects/1/uploads/")
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked])
+    async def test_upload_is_refused_without_a_gitlab_privilege(
+        self, metadata_with_project, tool_cls
+    ):
+        # The download is a GitLab API read, so a files-only flow must not get it,
+        # and the attempt still leaves a trail that names the refusal.
+        tool = tool_cls(description="Read file content")
+        tool.metadata = {
+            **metadata_with_project,
+            "granted_privileges": frozenset({"read_only_files"}),
+        }
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            response = await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
+
+        assert response == (
+            f'Cannot read upload: "/uploads/{self.UPLOAD_SECRET}/screenshot.png" is an '
+            "issue or merge request upload, and this flow has no GitLab API access."
+        )
+        metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+        security_log.info.assert_called_once()
+        _, fields = security_log.info.call_args
+        assert fields["event_type"] == "data.read.upload"
+        assert fields["details"]["outcome"] == "failure"
+        assert fields["details"]["reason"] == "missing_privilege"
+        assert self.UPLOAD_SECRET not in str(security_log.info.call_args)
+
+    @pytest.mark.usefixtures("image_support_enabled")
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked])
+    @pytest.mark.parametrize(
+        ("metadata", "mentions_uploads"),
+        [
+            (
+                {
+                    "granted_privileges": frozenset(
+                        {"read_only_files", "read_only_gitlab"}
+                    )
+                },
+                True,
+            ),
+            ({"granted_privileges": frozenset({"read_only_files"})}, False),
+            # ListTools builds tools without a run, so without metadata.
+            (None, False),
+        ],
+    )
+    def test_upload_paragraph_follows_the_gitlab_privilege(
+        self, tool_cls, metadata, mentions_uploads
+    ):
+        description = tool_cls(metadata=metadata).description
+
+        assert "Image files" in description
+        assert ("uploaded" in description) is mentions_uploads
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("path_prefix", ["/", ""])
     @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_chunked_rewrites_upload_reference(
@@ -628,7 +715,11 @@ class TestReadFile:
             )
         )
         tool = tool_class(description="Read file content")
-        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+        tool.metadata = {
+            "outbox": mock_outbox,
+            "project": mock_project,
+            "granted_privileges": frozenset({"read_only_gitlab"}),
+        }
 
         with patch(
             "duo_workflow_service.tools.filesystem._security_log"
@@ -661,7 +752,11 @@ class TestReadFile:
             )
         )
         tool = ReadFile(description="Read file content")
-        tool.metadata = {"outbox": mock_outbox, "project": mock_project}
+        tool.metadata = {
+            "outbox": mock_outbox,
+            "project": mock_project,
+            "granted_privileges": frozenset({"read_only_gitlab"}),
+        }
 
         with patch(
             "duo_workflow_service.tools.filesystem._security_log"

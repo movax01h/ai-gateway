@@ -68,6 +68,7 @@ def _is_rate_limit(exc: BaseException) -> bool:
 
 class CodeCompletions:
     SUFFIX_RESERVED_PERCENT = 0.07
+    MAX_PROMPT_TOKENS = 32_767
 
     def __init__(
         self,
@@ -87,7 +88,7 @@ class CodeCompletions:
         self.tokenization_strategy = tokenization_strategy
 
         self.prompt_builder = PromptBuilderPrefixBased(
-            model.input_token_limit, tokenization_strategy
+            min(model.input_token_limit, self.MAX_PROMPT_TOKENS), tokenization_strategy
         )
 
     def _track_billing_event(self, user: Optional[CloudConnectorUser]) -> None:
@@ -121,7 +122,6 @@ class CodeCompletions:
         raw_prompt: Optional[str | list[Message]] = None,
         code_context: Optional[list] = None,
         context_max_percent: Optional[float] = None,
-        max_prompt_tokens: Optional[int] = None,
     ) -> Prompt:
         if raw_prompt:
             return self.prompt_builder.wrap(raw_prompt)
@@ -131,7 +131,6 @@ class CodeCompletions:
             suffix=suffix,
             suffix_reserved_percent=self.SUFFIX_RESERVED_PERCENT,
             context_max_percent=context_max_percent,
-            max_prompt_tokens=max_prompt_tokens,
             code_context=code_context,
         )
 
@@ -157,14 +156,12 @@ class CodeCompletions:
         context_max_percent = kwargs.pop(
             "context_max_percent", 1.0
         )  # default is full context window
-        max_prompt_tokens = kwargs.pop("max_prompt_tokens", None)
         prompt = self._get_prompt(
             prefix,
             suffix,
             raw_prompt=raw_prompt,
             code_context=code_context,
             context_max_percent=context_max_percent,
-            max_prompt_tokens=max_prompt_tokens,
         )
         init_llm_operations()
 

@@ -67,6 +67,8 @@
         "max_retries": {
           "anyOf": [
             {
+              "maximum": 3,
+              "minimum": 0,
               "type": "integer"
             },
             {
@@ -315,6 +317,7 @@
         "malware_advisories",
         "measure_comment_temperature",
         "observability_all",
+        "package_advisories",
         "package_licenses",
         "refactor_code",
         "resolve_vulnerability",
@@ -392,14 +395,8 @@
           "default": null
         },
         "operation_type": {
-          "default": "standard",
-          "enum": [
-            "standard",
-            "compaction_auto",
-            "compaction_manual"
-          ],
-          "title": "Operation Type",
-          "type": "string"
+          "$ref": "#/$defs/LLMOperationType",
+          "default": "standard"
         },
         "tool_output_security": {
           "default": true,
@@ -443,6 +440,16 @@
       ],
       "title": "InlineResponseSchemaConfig",
       "type": "object"
+    },
+    "LLMOperationType": {
+      "enum": [
+        "standard",
+        "compaction_auto",
+        "compaction_manual",
+        "decision"
+      ],
+      "title": "LLMOperationType",
+      "type": "string"
     },
     "LiteLLMProviderParams": {
       "additionalProperties": false,

@@ -4,7 +4,7 @@ from typing import Any, List, Optional
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 from langchain_core.messages.ai import AIMessage, AIMessageChunk
 from pydantic import AnyUrl
@@ -17,11 +17,13 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import (
     ChatAmazonQDefinition,
     ChatLiteLLMDefinition,
 )
 from ai_gateway.model_selection.models import ChatAmazonQParams, ChatLiteLLMParams
+from lib.version import MAX_VERSION_QUERY_LENGTH
 from tests.conftest import FakeModel
 
 
@@ -72,6 +74,7 @@ class TestPrompt:
                         gitlab_identifier="mistral",
                         name="Mistral",
                         max_context_tokens=128000,
+                        requires_paid_credits=False,
                     ),
                 ),
                 (
@@ -86,6 +89,7 @@ class TestPrompt:
                             name="Mistral",
                             gitlab_identifier="mistral",
                             max_context_tokens=128000,
+                            requires_paid_credits=False,
                             family=["mistral"],
                             params=ChatLiteLLMParams(
                                 model="mistral",
@@ -113,6 +117,7 @@ class TestPrompt:
                         gitlab_identifier="amazon_q",
                         name="Amazon Q",
                         max_context_tokens=200000,
+                        requires_paid_credits=False,
                     ),
                 ),
                 (
@@ -126,6 +131,7 @@ class TestPrompt:
                             gitlab_identifier="amazon_q",
                             name="Amazon Q",
                             max_context_tokens=200000,
+                            requires_paid_credits=False,
                             family=["amazon_q"],
                             params=ChatAmazonQParams(
                                 model="amazon_q",
@@ -170,7 +176,7 @@ class TestPrompt:
             ),
         ],
     )
-    @pytest.mark.usefixtures("frozen_datetime_now")
+    @pytest.mark.usefixtures("frozen_datetime_now", "custom_models_gateway")
     def test_request(
         self,
         mock_registry_get,
@@ -246,6 +252,34 @@ class TestPrompt:
         assert response.status_code == 200
         assert response.text == "Hi John!"
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
+
+
+@pytest.mark.usefixtures("frozen_datetime_now")
+class TestPromptVersionLength:
+    @pytest.mark.parametrize(
+        ("length", "expected_status"),
+        [
+            (MAX_VERSION_QUERY_LENGTH, 200),
+            (MAX_VERSION_QUERY_LENGTH + 1, 422),
+        ],
+    )
+    def test_long_version_is_rejected_before_the_registry(
+        self, mock_client, mock_registry_get, length: int, expected_status: int
+    ):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "inputs": {"name": "John", "age": 20},
+                "prompt_version": "1.0.0".ljust(length),
+            },
+        )
+
+        assert response.status_code == expected_status
+        assert mock_registry_get.called == (expected_status == 200)
 
 
 def _post_prompt(mock_client, stream: bool = False):
@@ -333,6 +367,147 @@ class TestUnauthorizedScopes:
         assert _logged_feature_category(cap_logs) == "ai_abstraction_layer"
 
 
+@pytest.mark.usefixtures(
+    "frozen_datetime_now", "mock_ai_gateway_container", "mock_registry_get"
+)
+class TestTokenIssuer:
+    """The prompt routes serve GitLab-issued tokens only, not tokens the AI Gateway signs for direct access."""
+
+    @pytest.mark.parametrize(
+        ("issuer", "expected_status"),
+        [("gitlab.com", 200), ("gitlab-ai-gateway", 403)],
+    )
+    def test_issuer(self, mock_client, expected_status):
+        response = _post_prompt(mock_client)
+
+        assert response.status_code == expected_status
+        if expected_status == 403:
+            assert response.json() == {"detail": "Unauthorized to access 'test'"}
+
+
+@pytest.mark.usefixtures("frozen_datetime_now", "cloud_gateway")
+@pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+class TestModelsOfThePromptVersion:
+    """The route checks the client's model against the `models_from` of the prompt version that runs."""
+
+    @pytest.fixture(name="fast_api_router", scope="class")
+    def fast_api_router_fixture(self):
+        # ModelConfigMiddleware leaves the check to the route only under the `/v1/prompts/` path.
+        router = APIRouter()
+        router.include_router(api_router, prefix="/v1")
+        return router
+
+    @staticmethod
+    def _post(mock_client, prompt_version: str):
+        return mock_client.post(
+            "/v1/prompts/summarize_review",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "inputs": {"name": "John", "age": 20},
+                "prompt_version": prompt_version,
+                "model_metadata": {
+                    "provider": "gitlab",
+                    "identifier": "claude_fable_5_1_vertex",
+                    "feature_setting": "summarize_review",
+                },
+            },
+        )
+
+    def test_serves_a_model_that_the_version_allows(
+        self, mock_client, mock_registry_get, feature_allowlist_mode
+    ):
+        response = self._post(mock_client, "3.0.0")
+
+        assert response.status_code == 200
+        served = mock_registry_get.call_args.args[2]
+        assert served.llm_definition.gitlab_identifier == "claude_fable_5_1_vertex"
+
+    def test_rejects_a_model_that_the_version_does_not_allow(
+        self, mock_client, mock_registry_get, feature_allowlist_mode
+    ):
+        response = self._post(mock_client, "^2.0.0")
+
+        assert response.status_code == 403
+        assert response.json() == {
+            "detail": "Model 'claude_fable_5_1_vertex' is not available for 'summarize_review'"
+        }
+        mock_registry_get.assert_not_called()
+
+
+@pytest.mark.usefixtures("frozen_datetime_now", "cloud_gateway")
+@pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+class TestModelsOfThePromptInFallbackMode:
+    """A model that the prompt version does not allow runs on the default of the version's models.
+
+    The client claims another feature. Its default must not run the prompt.
+    """
+
+    @pytest.fixture(name="fast_api_router", scope="class")
+    def fast_api_router_fixture(self):
+        # ModelConfigMiddleware leaves the check to the route only under the `/v1/prompts/` path.
+        router = APIRouter()
+        router.include_router(api_router, prefix="/v1")
+        return router
+
+    @pytest.mark.parametrize(
+        ("prompt_id", "prompt_version", "identifier", "models_from"),
+        [
+            pytest.param(
+                "code_suggestions/generations",
+                "^2.0.0",
+                "codestral_2508_vertex",
+                "code_generations",
+                id="version-only-in-base",
+            ),
+            pytest.param(
+                "chat/summarize_comments",
+                None,
+                "amazon_q",
+                "duo_chat_summarize_comments",
+                id="family-folder-without-models-from",
+            ),
+        ],
+    )
+    def test_serves_the_default_of_the_version_models(
+        self,
+        mock_client,
+        mock_registry_get,
+        feature_allowlist_mode,
+        prompt_id,
+        prompt_version,
+        identifier,
+        models_from,
+    ):
+        response = mock_client.post(
+            f"/v1/prompts/{prompt_id}",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={
+                "inputs": {"name": "John", "age": 20},
+                "prompt_version": prompt_version,
+                "model_metadata": {
+                    "provider": "gitlab",
+                    "identifier": identifier,
+                    "feature_setting": "duo_agent_platform",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        served = mock_registry_get.call_args.args[2]
+        assert (
+            served.llm_definition.gitlab_identifier
+            == ModelSelectionConfig.instance()
+            .get_unit_primitive_config_map()[models_from]
+            .default_model_identifiers[0]
+        )
+
+
 class TestMisdirectedRequest:
     @pytest.fixture(name="mock_model_misdirection")
     def mock_model_misdirection_fixture(self):
@@ -343,7 +518,7 @@ class TestMisdirectedRequest:
 
             yield mock
 
-    @pytest.mark.usefixtures("mock_model_misdirection")
+    @pytest.mark.usefixtures("mock_model_misdirection", "custom_models_gateway")
     def test_misdirected_request(self, mock_registry_get, mock_client, model_metadata):
         response = mock_client.post(
             "/prompts/test",

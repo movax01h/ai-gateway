@@ -7,12 +7,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.tools import ToolException
+from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
 from duo_workflow_service.gitlab.executor_http_client import (
     RESOURCE_NOT_AVAILABLE_MESSAGE,
     ExecutorGitLabHttpClient,
+    ExecutorRequestTimeoutError,
     GitLabGraphQLError,
     _is_retryable_error,
     _RetryableStatusError,
@@ -549,6 +551,203 @@ async def test_graphql_exhausts_retries_on_repeated_timeouts(
 
 
 # ---------------------------------------------------------------------------
+# Tests for the DWS-side timeout on REST calls
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(name="silent_executor_client")
+def silent_executor_client_fixture() -> ExecutorGitLabHttpClient:
+    """A client whose executor never answers, with a short timeout to keep the test fast."""
+    return ExecutorGitLabHttpClient(Outbox(), rest_timeout=0.01)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method_name, kwargs, method, attempts",
+    [
+        # Safe methods are retried on timeout.
+        ("aget", {"path": "/api/v4/test", "params": {"q": "secret"}}, "GET", 4),
+        # A timed-out write has most likely already reached Rails, so retrying it
+        # could duplicate it: the timeout surfaces after one attempt.
+        ("apost", {"path": "/api/v4/test", "body": "{}"}, "POST", 1),
+        ("aput", {"path": "/api/v4/test", "body": "{}"}, "PUT", 1),
+        ("apatch", {"path": "/api/v4/test", "body": "{}"}, "PATCH", 1),
+    ],
+)
+async def test_rest_call_times_out_when_executor_never_answers(
+    silent_executor_client: ExecutorGitLabHttpClient,
+    mock_tenacity_sleep: AsyncMock,
+    method_name: str,
+    kwargs: dict,
+    method: str,
+    attempts: int,
+):
+    """An executor that never answers a REST request is timed out per attempt, retried for safe methods only, then
+    surfaced, and no timed-out request is left registered in the outbox."""
+    with (
+        patch("duo_workflow_service.gitlab.executor_http_client.logger"),
+        patch(
+            "duo_workflow_service.gitlab.executor_http_client.get_workflow_id",
+            return_value="wf-1",
+        ),
+        capture_logs() as cap_logs,
+    ):
+        with pytest.raises(ExecutorRequestTimeoutError) as exc_info:
+            await getattr(silent_executor_client, method_name)(**kwargs)
+
+    assert isinstance(exc_info.value, ToolException)
+    assert exc_info.value.method == method
+    assert exc_info.value.path == "/api/v4/test"
+    assert "timed out after 0.01 seconds" in str(exc_info.value)
+    # Every attempt is sent to the executor, and every one times out.
+    outbox = silent_executor_client.outbox
+    assert outbox._queue.qsize() == attempts
+    assert mock_tenacity_sleep.await_count == attempts - 1
+    assert outbox._action_response == {}
+    assert outbox._legacy_action_response == {}
+    timeouts = [
+        log for log in cap_logs if log["event"] == "Executor HTTP request timed out"
+    ]
+    assert (
+        timeouts
+        == [
+            {
+                "event": "Executor HTTP request timed out",
+                "log_level": "warning",
+                "workflow_id": "wf-1",
+                "method": method,
+                # Logged without the query string.
+                "path": "/api/v4/test",
+                "timeout_s": 0.01,
+            }
+        ]
+        * attempts
+    )
+
+
+@pytest.mark.asyncio
+async def test_graphql_timeout_deregisters_request_from_outbox(
+    silent_executor_client: ExecutorGitLabHttpClient,
+):
+    """A GraphQL attempt that times out leaves no request registered in the outbox."""
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(Exception, match="GraphQL request timed out"):
+            await silent_executor_client.graphql(
+                "{ currentUser { username } }", timeout=0.01
+            )
+
+    outbox = silent_executor_client.outbox
+    assert outbox._queue.qsize() == 4
+    assert outbox._action_response == {}
+    assert outbox._legacy_action_response == {}
+
+
+@pytest.mark.asyncio
+async def test_rest_retry_receives_legacy_response_after_timeout():
+    """A legacy executor that doesn't echo ``requestID`` has its response delivered to the retry, not to the timed-out
+    attempt it would otherwise be matched with."""
+    outbox = Outbox()
+    client = ExecutorGitLabHttpClient(outbox, rest_timeout=0.01)
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        request = asyncio.create_task(client.aget("/api/v4/test"))
+
+        timed_out = await outbox.get()
+        # The first attempt's timeout is already running; give the retry time to be answered.
+        client._rest_timeout = 5.0
+        retry = await outbox.get()
+
+        assert timed_out.requestID not in outbox._action_response
+        assert timed_out.requestID not in outbox._legacy_action_response
+        assert list(outbox._legacy_action_response) == [retry.requestID]
+
+        legacy_response = http_action_response('{"key": "value"}')
+        outbox.set_action_response(
+            contract_pb2.ClientEvent(actionResponse=legacy_response)
+        )
+        result = await request
+
+    assert result.status_code == 200
+    assert result.body == {"key": "value"}
+    assert outbox._action_response == {}
+    assert outbox._legacy_action_response == {}
+
+
+@pytest.mark.asyncio
+async def test_rest_call_retries_after_executor_timeout_and_succeeds(
+    client, monkeypatch_execute_http_response
+):
+    """A GET attempt that times out on the DWS side is retried like any other timeout."""
+
+    responses = iter([None, http_action_response('{"key": "value"}')])
+
+    async def first_attempt_never_answered(*_args, **_kwargs):
+        response = next(responses)
+        if response is None:
+            await asyncio.Event().wait()
+        return response
+
+    monkeypatch_execute_http_response.side_effect = first_attempt_never_answered
+    client._rest_timeout = 0.01
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        result = await client.aget("/api/v4/test")
+
+    assert result.status_code == 200
+    assert result.body == {"key": "value"}
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method_name, kwargs",
+    [
+        ("apost", {"path": "/api/v4/test", "body": "{}"}),
+        ("apatch", {"path": "/api/v4/test", "body": "{}"}),
+    ],
+)
+async def test_rest_write_retries_on_5xx_but_not_after_timeout(
+    client, monkeypatch_execute_http_response, method_name: str, kwargs: dict
+):
+    """A write is still retried on a 5xx response, but a DWS-side timeout surfaces at once without a retry."""
+
+    # A 503, then an attempt the executor never answers, then a success that must not be reached.
+    responses = iter(
+        [http_action_response("{}", status_code=503), None, http_action_response("{}")]
+    )
+
+    async def answer(*_args, **_kwargs):
+        response = next(responses)
+        if response is None:
+            await asyncio.Event().wait()
+        return response
+
+    monkeypatch_execute_http_response.side_effect = answer
+    client._rest_timeout = 0.01
+
+    with patch("duo_workflow_service.gitlab.executor_http_client.logger"):
+        with pytest.raises(ExecutorRequestTimeoutError):
+            await getattr(client, method_name)(**kwargs)
+
+    # The 503 is retried; the timeout of the retry is not.
+    assert monkeypatch_execute_http_response.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "env, expected",
+    [({}, 60.0), ({"DUO_WORKFLOW_EXECUTOR_HTTP__REST_TIMEOUT_SECONDS": "5"}, 5.0)],
+)
+def test_rest_timeout_is_configurable(monkeypatch, env: dict, expected: float):
+    monkeypatch.delenv(
+        "DUO_WORKFLOW_EXECUTOR_HTTP__REST_TIMEOUT_SECONDS", raising=False
+    )
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+
+    assert ExecutorGitLabHttpClient(Outbox())._rest_timeout == expected
+
+
+# ---------------------------------------------------------------------------
 # Tests for _is_retryable_error
 # ---------------------------------------------------------------------------
 
@@ -561,6 +760,14 @@ async def test_graphql_exhausts_retries_on_repeated_timeouts(
         (_RetryableStatusError(503, "Service Unavailable", {}), True),
         (Exception("HTTP action error: request timed out"), True),
         (Exception("GraphQL request timed out after 10.0 seconds"), True),
+        (ExecutorRequestTimeoutError("GET", "/api/v4/test", 60.0), True),
+        (ExecutorRequestTimeoutError("HEAD", "/api/v4/test", 60.0), True),
+        (ExecutorRequestTimeoutError("OPTIONS", "/api/v4/test", 60.0), True),
+        (ExecutorRequestTimeoutError("get", "/api/v4/test", 60.0), True),
+        (ExecutorRequestTimeoutError("POST", "/api/v4/test", 60.0), False),
+        (ExecutorRequestTimeoutError("PUT", "/api/v4/test", 60.0), False),
+        (ExecutorRequestTimeoutError("PATCH", "/api/v4/test", 60.0), False),
+        (ExecutorRequestTimeoutError("DELETE", "/api/v4/test", 60.0), False),
         (ToolException("HTTP action error: connection refused"), True),
         (ToolException("HTTP action error: connection reset by peer"), True),
         (ToolException("HTTP action error: broken pipe"), True),

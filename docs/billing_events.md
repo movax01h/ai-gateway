@@ -123,6 +123,8 @@ Key configuration options:
 - `AIGW_BILLING_EVENT__API_KEY`: Optional. Sent as a bearer token in the `Authorization` header of every request to the collector, for collectors that require authentication such as a GitLab instance's events collector endpoint
 - `AIGW_BILLING_EVENT__BATCH_SIZE`: Number of events per batch (set to 1 for local testing)
 - `AIGW_BILLING_EVENT__THREAD_COUNT`: Number of worker threads
+- `AIGW_BILLING_EVENT__VALIDATION_MODE_HTTP`: How AI Gateway handles billable requests that miss fields required by billing events. `log` (default): log the missing fields. `enforce`: reject the request with HTTP 422 before any LLM call when its feature is listed in `_ENFORCED_FEATURE_QUALIFIED_NAMES` (`lib/billing_events/validation.py`), and log otherwise. Only requests whose `X-Gitlab-Unit-Primitive` is billable and allowed by the token are checked.
+- `AIGW_BILLING_EVENT__VALIDATION_MODE_DWS`: The same check for the Duo Workflow Service `ExecuteWorkflow` RPC, once the requested flow is known and before the workflow is built and run. The feature is the flow name without its version (for example `fix_pipeline`). `enforce` rejects the call with gRPC `INVALID_ARGUMENT`.
 
 When testing locally, make sure that `AIGW_BILLING_EVENT__BATCH_SIZE` is `1`.
 Otherwise, no events are visible in the UI until the batch size has been reached.

@@ -4,12 +4,17 @@ import grpc
 import structlog
 
 from ai_gateway.config import get_config
-from ai_gateway.feature_allowlist import ClientModelRequest, check_client_model_metadata
+from ai_gateway.feature_allowlist import (
+    ClientModelRequest,
+    check_client_model_metadata,
+    dws_client_model_request_context,
+)
 from ai_gateway.model_metadata import (
     ModelMetadataByTag,
     build_default_feature_setting_metadata,
     build_model_metadata_by_tag,
     create_model_metadata_by_tag,
+    drop_default_model_ref,
 )
 from ai_gateway.model_selection import ModelSelectionError
 from duo_workflow_service.interceptors import abort_handler
@@ -34,8 +39,11 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
 
         metadata = dict(handler_call_details.invocation_metadata)
         raw_metadata = metadata.get(self.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA, "")
+        dws_client_model_request_context.set(None)
         try:
             data = json.loads(raw_metadata)
+            # The load-balanced default is no model choice, so the check and model routing see an unpinned request.
+            drop_default_model_ref(data)
             # Read the request first: the builders below change the mapping they get.
             request = ClientModelRequest.from_raw(data)
 
@@ -95,6 +103,8 @@ class ModelMetadataInterceptor(grpc.aio.ServerInterceptor):
 
                 model_metadata_by_tag = create_model_metadata_by_tag(data)
 
+            # Keep the request only once its metadata is built: a header that fails to build runs without it.
+            dws_client_model_request_context.set(request)
             user = current_user_context_var.get()
             # The tag models come from the same client `feature_setting` as the allowlist,
             # so only the default model needs the check.

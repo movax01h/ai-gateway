@@ -33,6 +33,8 @@ CLIENT_MCP_TRUST_STRIPPED_BACKPORT_VERSIONS: dict[tuple[int, ...], Version] = {
 VULNERABILITY_TRACKED_REF_VERSION = Version("19.5.0")
 ASCP_SECURITY_BOUNDARY_VERSION = Version("19.5.0")
 CREATE_DISCUSSION_AI_WORKFLOWS_SCOPE_VERSION = Version("19.4.0")
+TOOL_ACCESS_POLICIES_FIELD_VERSION = Version("19.6.0")
+CHAT_TOOL_CALL_LIMITS_VERSION = Version("19.6.0")
 
 # Leading X.Y or X.Y.Z of a version string GitLab reports but PEP 440 cannot
 # parse, such as a GDK's `19.3.0-pre-g1234abcd`.
@@ -255,6 +257,20 @@ def supports_glql_schema_endpoint() -> bool:
     )
 
 
+def supports_tool_access_policies_field() -> bool:
+    """Check if the GitLab instance serves the workflow's `toolAccessPolicies` GraphQL field.
+
+    An instance that reports no version falls back to a version below the floor, so a token
+    without the policy claim runs as it did before the field existed.
+
+    Returns:
+        True if the field is available, False otherwise.
+    """
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        TOOL_ACCESS_POLICIES_FIELD_VERSION
+    )
+
+
 def supports_suggested_reviewers_endpoint() -> bool:
     """Check if the GitLab instance serves the merge request suggested_reviewers endpoint.
 
@@ -271,4 +287,16 @@ def supports_suggested_reviewers_endpoint() -> bool:
     # Compare .release so GitLab.com's 19.4.0-pre passes the 19.4.0 floor.
     return _padded_release(get_gitlab_version()) >= _padded_release(
         SUGGESTED_REVIEWERS_ENDPOINT_VERSION
+    )
+
+
+def supports_chat_tool_call_limits() -> bool:
+    """Check if the instance can decode the max_tool_calls checkpoint channel (GitLab 19.6).
+
+    Older versions fail to decode a checkpoint blob holding a bare number. An unknown version fails closed, because such
+    an instance could then not load the chat.
+    """
+    # Compare .release so GitLab.com's 19.6.0-pre passes the 19.6.0 floor.
+    return _padded_release(get_gitlab_version()) >= _padded_release(
+        CHAT_TOOL_CALL_LIMITS_VERSION
     )

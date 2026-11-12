@@ -16,11 +16,28 @@ from pathlib import Path
 from lib.feature_roots import default_features_dir
 
 __all__ = [
+    "LEGACY_INCLUDE_ALIASES",
+    "RETIRED_INCLUDE_NAMES",
     "discover_feature_prompts",
-    "feature_prompt_aliases",
     "feature_prompt_root",
     "register_prompt_root",
 ]
+
+# Include names that a move retired, mapped to the current name of the file.
+# Custom AI Catalog flows include by the old name, so the Flow Registry must
+# keep serving it (ai-assist#3494).
+LEGACY_INCLUDE_ALIASES: dict[str, str] = {
+    "common/api_assistant/system/1.0.0.jinja": "slack_assistant/common/api_assistant/system/1.0.0.jinja",
+    "common/branch_naming/1.0.0.jinja": "developer/common/branch_naming/1.0.0.jinja",
+    "common/developer/system/1.0.0.jinja": "developer/common/system/1.0.0.jinja",
+    "common/git_commits/1.0.0.jinja": "developer/common/git_commits/1.0.0.jinja",
+    "common/merge_request_guidelines/1.0.0.jinja": "developer/common/merge_request_guidelines/1.0.0.jinja",
+}
+
+# Include names deleted on purpose, with no replacement. Only
+# scripts/check_include_names.py reads this. Before you add a name, check that
+# no AI Catalog flow includes it.
+RETIRED_INCLUDE_NAMES: frozenset[str] = frozenset()
 
 # prompt id -> the `prompts/` directory that owns it
 _FEATURE_PROMPT_ROOTS: dict[str, Path] = {}
@@ -52,22 +69,6 @@ def register_prompt_root(feature_id: str, prompts_dir: Path) -> None:
 def feature_prompt_root(feature_id: str) -> Path | None:
     """Return the registered ``prompts/`` dir for a prompt id, or ``None``."""
     return _FEATURE_PROMPT_ROOTS.get(feature_id)
-
-
-def feature_prompt_aliases(feature_id: str) -> list[str]:
-    """Return every prompt id registered to the ``prompts/`` dir of ``feature_id``.
-
-    A feature under ``ai/features/`` registers as ``<feature>`` and as ``<domain>/<feature>``, so
-    both ids load the same prompts. The list is empty for an id that is not registered.
-    """
-    prompts_dir = _FEATURE_PROMPT_ROOTS.get(feature_id)
-    if prompts_dir is None:
-        return []
-    return [
-        prompt_id
-        for prompt_id, registered_dir in _FEATURE_PROMPT_ROOTS.items()
-        if registered_dir == prompts_dir
-    ]
 
 
 def discover_feature_prompts(features_dir: Path | None = None) -> None:

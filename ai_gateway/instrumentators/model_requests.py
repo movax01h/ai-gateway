@@ -11,6 +11,7 @@ from prometheus_client import Counter, Gauge, Histogram
 
 from ai_gateway.api.feature_category import current_feature_category
 from ai_gateway.config import ModelLimits
+from ai_gateway.instrumentators.timeouts import is_timeout_error
 from ai_gateway.tracking.errors import log_exception
 from lib.billing_events.service import LLMOperationType
 from lib.context import (
@@ -42,6 +43,7 @@ ERROR_TYPE_HTTP_400 = "http_400"
 ERROR_TYPE_PERMISSION_ERROR = "permission_error"
 ERROR_TYPE_SERVICE_UNAVAILABLE = "service_unavailable"
 ERROR_TYPE_CONNECTION_ERROR = "connection_error"
+ERROR_TYPE_TIMEOUT = "timeout"
 ERROR_TYPE_OTHER = "other"
 
 
@@ -217,6 +219,13 @@ class ModelRequestInstrumentator:
                 self.error_type = ERROR_TYPE_OVERLOADED
                 return
 
+            # Check for timeouts before the connection-error and status-code checks:
+            # litellm.Timeout carries status_code=408, which would otherwise fall
+            # through to "other".
+            if is_timeout_error(exception):
+                self.error_type = ERROR_TYPE_TIMEOUT
+                return
+
             # Check for transient network/connection errors (e.g. httpx.ReadError)
             # These have no HTTP status code and represent dropped connections
             if isinstance(
@@ -257,7 +266,9 @@ class ModelRequestInstrumentator:
 
             extra = internal_event_extra or {}
             agent_name = extra.get("agent_name")
-            operation_type: LLMOperationType = extra.get("operation_type", "standard")
+            operation_type: LLMOperationType = extra.get(
+                "operation_type", LLMOperationType.STANDARD
+            )
             self._update_llm_operations(model, usage, agent_name, operation_type)
             self._track_usage(model, usage, extra)
 
@@ -270,6 +281,23 @@ class ModelRequestInstrumentator:
 
             INFERENCE_TOTAL_TOKENS.labels(**token_usage_labels).inc(
                 usage["total_tokens"]
+            )
+
+        def register_llm_operation(
+            self,
+            model: str,
+            usage: UsageMetadata,
+            internal_event_extra: dict[str, Any] | None = None,
+        ) -> None:
+            """Register an LLM operation for billing only.
+
+            Unlike `register_token_usage`, this does not update the token accumulator or the counters and sends no
+            internal event or log. Use it for a call that did not finish, such as a stream that the client left.
+            """
+            extra = internal_event_extra or {}
+            operation_type: LLMOperationType = extra.get("operation_type", "standard")
+            self._update_llm_operations(
+                model, usage, extra.get("agent_name"), operation_type
             )
 
         def register_message(self, message: BaseMessage):
@@ -388,7 +416,7 @@ class ModelRequestInstrumentator:
             model: str,
             usage: UsageMetadata,
             agent_name: str | None = None,
-            operation_type: LLMOperationType = "standard",
+            operation_type: LLMOperationType = LLMOperationType.STANDARD,
         ) -> None:
             current_llm_operations = llm_operations.get()
 

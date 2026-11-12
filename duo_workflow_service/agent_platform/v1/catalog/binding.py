@@ -65,23 +65,18 @@ def _as_ref(entry: Any) -> Optional[CatalogItemRef]:
         ) from exc
 
 
-def _claims(components_config: list[dict]) -> list[tuple[dict, CatalogItemRef]]:
-    """Find the components that claim a catalog item reference.
+def _claims(components_config: list[dict]) -> list[tuple[dict, list[CatalogItemRef]]]:
+    """Find the components that claim catalog item references.
 
     Args:
         components_config: The flow's authored component config dicts.
 
     Returns:
-        One ``(config, reference)`` pair per claiming component, in config order. The config itself rather than
-        its name, so a source can rewrite it by identity. A component claiming the same reference twice is
-        counted once.
-
-    Raises:
-        CatalogItemConfigError: If one component claims two different references. Only one of them is served.
-            Binding removes every reference from the claiming component, so the others would be ignored and
-            nothing would report it.
+        One ``(config, references)`` pair per claiming component, in config order. The config itself rather
+        than its name, so a source can rewrite it by identity. A component claiming the same reference twice
+        is counted once.
     """
-    found: list[tuple[dict, CatalogItemRef]] = []
+    found: list[tuple[dict, list[CatalogItemRef]]] = []
     for comp_config in components_config:
         claimed: list[CatalogItemRef] = []
         for entry in comp_config.get("subagents") or []:
@@ -89,15 +84,8 @@ def _claims(components_config: list[dict]) -> list[tuple[dict, CatalogItemRef]]:
             if ref is not None and ref not in claimed:
                 claimed.append(ref)
 
-        if len(claimed) > 1:
-            raise CatalogItemConfigError(
-                f"Component '{comp_config.get('name')}' claims catalog entries "
-                f"{[str(ref) for ref in claimed]}, but a component can claim only "
-                f"one entry. Keep one and remove the others."
-            )
-
         if claimed:
-            found.append((comp_config, claimed[0]))
+            found.append((comp_config, claimed))
 
     return found
 
@@ -106,8 +94,8 @@ def _resolve_claim(
     components_config: list[dict],
     include: Optional[list[CatalogItemRef]],
     items: CatalogItems,
-) -> Optional[tuple[dict, CatalogItemRef]]:
-    """Find the one component that claims a reference the flow declares.
+) -> Optional[tuple[dict, list[CatalogItemRef]]]:
+    """Find the one component that claims references the flow declares.
 
     Args:
         components_config: The flow's authored component config dicts.
@@ -115,8 +103,8 @@ def _resolve_claim(
         items: The items the request carried, used only to warn when they are dropped.
 
     Returns:
-        The claiming component's config and the reference it claimed, or ``None`` when no component claims one.
-        The flow then builds as authored and any items are dropped.
+        The claiming component's config and the references it claimed, or ``None`` when no component claims
+        any. The flow then builds as authored and any items are dropped.
 
     Raises:
         CatalogItemConfigError: If a claim is not declared in ``include``, or if more than one component
@@ -145,15 +133,16 @@ def _resolve_claim(
             f"coordinated by only one component per flow."
         )
 
-    claimant_config, ref = claims[0]
-    if ref not in declared:
-        raise CatalogItemConfigError(
-            f"Component '{claimant_config.get('name')}' claims catalog items "
-            f"'{ref}', but this flow's 'include' section does not declare them. A "
-            f"claim must repeat a declared entry exactly, version included."
-        )
+    claimant_config, refs = claims[0]
+    for ref in refs:
+        if ref not in declared:
+            raise CatalogItemConfigError(
+                f"Component '{claimant_config.get('name')}' claims catalog items "
+                f"'{ref}', but this flow's 'include' section does not declare them. A "
+                f"claim must repeat a declared entry exactly, version included."
+            )
 
-    return claimant_config, ref
+    return claimant_config, refs
 
 
 def bind_catalog_items(
@@ -178,9 +167,8 @@ def bind_catalog_items(
 
     Raises:
         CatalogItemConfigError: If the flow declares a reference no source can serve, if
-            a component claims a reference the flow does not declare, if one component
-            claims more than one reference, or if more than one component claims a
-            reference.
+            a component claims a reference the flow does not declare, or if more than
+            one component claims a reference.
         CatalogItemsError: If the items themselves cannot be used with this flow.
     """
     # Every declared entry, not just the claimed one: a flow declaring something no
@@ -193,7 +181,51 @@ def bind_catalog_items(
         return components_config
 
     # The claim equals a declared entry, so it needs no second validate_ref.
-    claimant_config, ref = resolved
+    claimant_config, refs = resolved
+    claimant_index = _index_of(claimant_config, components_config)
+    _warn_about_unclaimed_agents(refs, items)
+
+    bound = components_config
+    for ref in refs:
+        bound = _bind_one(ref, bound, claimant_index, items, tools_registry)
+
+    return bound
+
+
+def _warn_about_unclaimed_agents(
+    refs: list[CatalogItemRef], items: CatalogItems
+) -> None:
+    """Log the AI Catalog agents no claim binds, so a silent drop is visible."""
+    claimed = {ref.match_key() for ref in refs}
+    dropped = [
+        f"{agent.item_id}@{agent.version}"
+        for agent in items.ai_catalog_agents
+        if (agent.item_id, agent.version) not in claimed
+    ]
+    if dropped:
+        logger.warning(
+            "Dropping AI Catalog agents no component claims",
+            dropped=dropped,
+        )
+
+
+def _index_of(claimant_config: dict, components_config: list[dict]) -> int:
+    """Return the claimant's position, found by identity because a source rewrites the claimant in place."""
+    return next(
+        index
+        for index, comp_config in enumerate(components_config)
+        if comp_config is claimant_config
+    )
+
+
+def _bind_one(
+    ref: CatalogItemRef,
+    components_config: list[dict],
+    claimant_index: int,
+    items: CatalogItems,
+    tools_registry: ToolsRegistry,
+) -> list[dict]:
+    """Bind one claimed reference against the claimant, with earlier ones already bound in *components_config*."""
     source = source_for(ref)
 
     # An experimental kind is off while its flag is. Bind as though the request carried
@@ -210,7 +242,7 @@ def bind_catalog_items(
     return source.bind(
         BindRequest(
             ref=ref,
-            claimant_config=claimant_config,
+            claimant_config=components_config[claimant_index],
             components_config=components_config,
             items=items,
             tools_registry=tools_registry,

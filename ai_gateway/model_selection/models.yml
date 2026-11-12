@@ -3,6 +3,7 @@ models:
   - name: "Kimi K3"
     provider: "Fireworks"
     gitlab_identifier: "kimi_k3_fireworks"
+    requires_paid_credits: false
     description: "Open-source 2.8T MoE multimodal model with strong coding, visual reasoning, and agentic capabilities."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
@@ -15,9 +16,26 @@ models:
       top_p: 0.95
       max_tokens: 32_768
 
+  - name: "Kimi K3.1 Pro"
+    provider: "Fireworks"
+    gitlab_identifier: "kimi_k3_1_pro_fireworks"
+    requires_paid_credits: false
+    description: "Open-weight 2.8T MoE multimodal model with 1M context for coding and agentic tasks."
+    cost_indicator: "$"
+    max_context_tokens: 1_048_576
+    supports_vision: true  # https://fireworks.ai/models/fireworks/kimi-k3p1-pro
+    model_class_provider: litellm
+    params:
+      model: "accounts/fireworks/models/kimi-k3p1-pro"
+      custom_llm_provider: "fireworks_ai"
+      temperature: 1.0
+      top_p: 0.95
+      max_tokens: 32_768
+
   - name: "Minimax M3"
     provider: "Fireworks"
     gitlab_identifier: "minimax_m3_fireworks"
+    requires_paid_credits: false
     description: "Native multimodal MoE model for coding, agentic tasks, and reasoning."
     cost_indicator: "$"
     max_context_tokens: 512_000  # https://app.fireworks.ai/models/fireworks/minimax-m3
@@ -33,6 +51,7 @@ models:
   - name: "GLM 5.3"
     provider: "Fireworks"
     gitlab_identifier: "glm_5_3_fireworks"
+    requires_paid_credits: false
     description: "Open-source 1M-context MoE model for agentic coding and long-horizon engineering tasks."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
@@ -48,13 +67,13 @@ models:
   - name: "Qwen3.8-27B"
     provider: "Fireworks"
     gitlab_identifier: "qwen_3_8_27b_fireworks"
+    requires_paid_credits: false
     description: "Open-source model for agentic coding."
     cost_indicator: "$"
     max_context_tokens: 262_144  # https://huggingface.co/Qwen/Qwen3.8-27B
     supports_vision: true  # 2026-09-29 - https://huggingface.co/Qwen/Qwen3.8-27B and confirmed via manual testing
     model_class_provider: litellm
     strip_reasoning: true
-    requires_single_system_message: true
     family:
       - qwen
     params:
@@ -67,6 +86,7 @@ models:
   - name: "Codestral 25.01"
     provider: "Fireworks"
     gitlab_identifier: "codestral_2501_fireworks"
+    requires_paid_credits: false
     description: "Fast code generation and assistance."
     cost_indicator: "$"
     max_context_tokens: 32767  # Fireworks has limited the max tokens to 32k to avoid OOM errors
@@ -83,11 +103,11 @@ models:
       fim_format: "</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]"
       temperature: 0.7
       max_tokens: 48
-      max_retries: 10
 
   - name: "Codestral 25.08"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "codestral_2508_vertex"
+    requires_paid_credits: false
     description: "Fast code generation and assistance."
     cost_indicator: "$"
     max_context_tokens: 128000  # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/partner-models/mistral/codestral-2
@@ -103,6 +123,7 @@ models:
   - name: "Codestral 25.08"
     provider: "Fireworks"
     gitlab_identifier: "codestral_2508_fireworks"
+    requires_paid_credits: false
     description: "Fast code generation and assistance."
     cost_indicator: "$"
     supports_vision: false  # 2026-09-29 - https://docs.mistral.ai/models/codestral-25-08
@@ -119,16 +140,17 @@ models:
       fim_format: "</s>[SUFFIX]{suffix}[PREFIX]{prefix}[MIDDLE]"
       temperature: 0.7
       max_tokens: 48
-      max_retries: 10
 
   - name: "Claude Opus 4.5"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_5_20251101"
+    requires_paid_credits: false
     description: "Claude's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 200000  # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     supports_assistant_prefill: true
     family:
       - claude
@@ -140,11 +162,13 @@ models:
   - name: "Claude Opus 4.5"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_opus_4_5_20251101_vertex"
+    requires_paid_credits: false
     description: "Claude's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 200000  # https://platform.claude.com/docs/en/about-claude/models/overview#latest-models-comparison
     proxy_provider: vertex-ai
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     supports_assistant_prefill: true
     family:
       - claude
@@ -160,11 +184,13 @@ models:
   - name: "Claude Opus 4.6"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_6_20260205"
+    requires_paid_credits: false
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -175,11 +201,13 @@ models:
   - name: "Claude Opus 4.6"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_opus_4_6_vertex"
+    requires_paid_credits: false
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     proxy_provider: vertex-ai
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -194,11 +222,13 @@ models:
   - name: "Claude Opus 4.7"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_opus_4_7_vertex"
+    requires_paid_credits: false
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     proxy_provider: vertex-ai
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -217,7 +247,7 @@ models:
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -231,7 +261,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     model_class_provider: litellm
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -249,7 +279,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-fable-5
     model_class_provider: litellm
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -266,12 +296,37 @@ models:
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
       model: "claude-fable-5-1"
       max_tokens: 128_000
+
+  - name: "Claude Fable 5.2"
+    provider: "Anthropic"
+    gitlab_identifier: "claude_fable_5_2"
+    description: "Anthropic's most capable generally available model for autonomous knowledge work and coding."
+    cost_indicator: "$$$$"
+    max_context_tokens: 1_000_000
+    proxy_provider: anthropic
+    model_class_provider: anthropic
+    uses_cache_breakpoints: true
+    family:
+      - claude
+    params:
+      model: "claude-fable-5-2"
+      max_tokens: 128_000
+      # Fable 5.2 enforces preserved thinking, and DWS edits history (model switch, trim, compaction).
+      # Drop stale thinking blocks instead of failing the turn with a 400.
+      thinking:
+        type: "adaptive"
+        block_binding:
+          prefix_mismatch_behavior: "drop_block"
+      # Replaces the container's default betas, so keep context-1m-2025-08-07 listed.
+      betas:
+        - "context-1m-2025-08-07"
+        - "thinking-binding-controls-2026-08-01"
 
   - name: "Claude Mythos 5.1"
     provider: "Anthropic"
@@ -280,6 +335,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     requires_paid_credits: true
     family:
       - claude
@@ -294,7 +350,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     model_class_provider: litellm
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -312,7 +368,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-fable-5-1
     model_class_provider: litellm
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -324,11 +380,13 @@ models:
   - name: "Claude Opus 4.7"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_7"
+    requires_paid_credits: false
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -338,10 +396,12 @@ models:
   - name: "Claude Opus 4.7"
     provider: "Bedrock"
     gitlab_identifier: "claude_opus_4_7_bedrock"
+    requires_paid_credits: false
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-7
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -353,11 +413,13 @@ models:
   - name: "Claude Opus 4.8"
     provider: "Anthropic"
     gitlab_identifier: "claude_opus_4_8"
+    requires_paid_credits: false
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -367,11 +429,13 @@ models:
   - name: "Claude Opus 4.8"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_opus_4_8_vertex"
+    requires_paid_credits: false
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     proxy_provider: vertex-ai
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -385,10 +449,12 @@ models:
   - name: "Claude Opus 4.8"
     provider: "Bedrock"
     gitlab_identifier: "claude_opus_4_8_bedrock"
+    requires_paid_credits: false
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-8
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -405,7 +471,7 @@ models:
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -420,7 +486,7 @@ models:
     max_context_tokens: 1_000_000
     proxy_provider: vertex-ai
     model_class_provider: litellm
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -438,7 +504,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-5
     model_class_provider: litellm
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -455,7 +521,7 @@ models:
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -469,7 +535,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000
     model_class_provider: litellm
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -487,7 +553,7 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-5-5
     model_class_provider: litellm
-    requires_paid_credits: true
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -499,10 +565,12 @@ models:
   - name: "Claude Opus 4.6"
     provider: "Bedrock"
     gitlab_identifier: "claude_opus_4_6_bedrock"
+    requires_paid_credits: false
     description: "Anthropic's most intelligent model, combining maximum capability with practical performance."
     cost_indicator: "$$$$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-opus-4-6-v1
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     params:
       model: bedrock/global.anthropic.claude-opus-4-6-v1
       custom_llm_provider: bedrock
@@ -513,11 +581,13 @@ models:
   - name: "Claude Sonnet 5"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_5"
+    requires_paid_credits: false
     description: "Anthropic's latest Sonnet model; an upgrade to Sonnet 4.6 with gains across agentic coding and professional work."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -527,11 +597,13 @@ models:
   - name: "Claude Sonnet 5.5"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_5_5"
+    requires_paid_credits: false
     description: "Anthropic's latest Sonnet model; an upgrade to Sonnet 5 with gains across agentic coding and professional work."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -541,12 +613,14 @@ models:
   - name: "Claude Sonnet 5.5"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_sonnet_5_5_vertex"
+    requires_paid_credits: false
     description: "Anthropic's latest Sonnet model; an upgrade to Sonnet 5 with gains across agentic coding and professional work."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
     family:
       - claude
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     params:
       model: "claude-sonnet-5-5"
       custom_llm_provider: "vertex_ai"
@@ -559,12 +633,14 @@ models:
   - name: "Claude Sonnet 5.5"
     provider: "Bedrock"
     gitlab_identifier: "claude_sonnet_5_5_bedrock"
+    requires_paid_credits: false
     description: "Anthropic's latest Sonnet model; an upgrade to Sonnet 5 with gains across agentic coding and professional work."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
     family:
       - claude
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     params:
       model: bedrock/global.anthropic.claude-sonnet-5-5
       custom_llm_provider: bedrock
@@ -574,6 +650,7 @@ models:
   - name: "Claude Sonnet 5"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_sonnet_5_vertex"
+    requires_paid_credits: false
     description: "Anthropic's latest Sonnet model; an upgrade to Sonnet 4.6 with gains across agentic coding and professional work."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
@@ -581,6 +658,7 @@ models:
       - claude
     proxy_provider: vertex-ai
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     params:
       model: "claude-sonnet-5"
       custom_llm_provider: "vertex_ai"
@@ -592,12 +670,14 @@ models:
   - name: "Claude Sonnet 5"
     provider: "Bedrock"
     gitlab_identifier: "claude_sonnet_5_bedrock"
+    requires_paid_credits: false
     description: "Anthropic's latest Sonnet model; an upgrade to Sonnet 4.6 with gains across agentic coding and professional work."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
     family:
       - claude
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     params:
       model: bedrock/global.anthropic.claude-sonnet-5
       custom_llm_provider: bedrock
@@ -607,9 +687,11 @@ models:
   - name: "Claude Sonnet 4.6"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_6"
+    requires_paid_credits: false
     max_context_tokens: 1_000_000
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     family:
       - claude
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
@@ -622,6 +704,7 @@ models:
   - name: "Claude Sonnet 4.6"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_sonnet_4_6_vertex"
+    requires_paid_credits: false
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
@@ -629,6 +712,7 @@ models:
       - claude
     proxy_provider: vertex-ai
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     params:
       model: "claude-sonnet-4-6"
       custom_llm_provider: "vertex_ai"
@@ -641,12 +725,14 @@ models:
   - name: "Claude Sonnet 4.6"
     provider: "Bedrock"
     gitlab_identifier: "claude_sonnet_4_6_bedrock"
+    requires_paid_credits: false
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
     family:
       - claude
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     params:
       model: bedrock/global.anthropic.claude-sonnet-4-6
       custom_llm_provider: bedrock
@@ -657,9 +743,11 @@ models:
   - name: "Claude Sonnet 4.5"
     provider: "Anthropic"
     gitlab_identifier: "claude_sonnet_4_5_20250929"
+    requires_paid_credits: false
     max_context_tokens: 200000  # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     supports_assistant_prefill: true
     family:
       - claude
@@ -676,6 +764,7 @@ models:
   - name: "Claude Sonnet 4.5"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_sonnet_4_5_20250929_vertex"
+    requires_paid_credits: false
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
     max_context_tokens: 200000  # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-sonnet-4-5
@@ -683,6 +772,7 @@ models:
       - claude
     proxy_provider: vertex-ai
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     supports_assistant_prefill: true
     params:
       model: "claude-sonnet-4-5@20250929"
@@ -699,12 +789,14 @@ models:
   - name: "Claude Sonnet 4.5"
     provider: "Bedrock"
     gitlab_identifier: "claude_sonnet_4_5_20250929_bedrock"
+    requires_paid_credits: false
     description: "Anthropic's flagship model for real-world coding, reasoning, and agentic workflows."
     cost_indicator: "$$$"
     max_context_tokens: 200000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-sonnet-4-5-20250929-v1:0
     family:
       - claude
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     supports_assistant_prefill: true
     params:
       model: bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0
@@ -714,14 +806,16 @@ models:
       max_retries: 1
     deprecation:
       deprecation_date: "2026-09-30"
-      removal_version: "19.6"
+      removal_version: "19.7"
 
   - name: "Claude Haiku 4.5"
     provider: "Anthropic"
     gitlab_identifier: "claude_haiku_4_5_20251001"
+    requires_paid_credits: false
     max_context_tokens: 200000  # https://docs.claude.com/en/docs/about-claude/models/overview#latest-models-comparison
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     supports_assistant_prefill: true
     family:
       - claude
@@ -735,6 +829,7 @@ models:
   - name: "Claude Haiku 4.5"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_haiku_4_5_20251001_vertex"
+    requires_paid_credits: false
     description: "Fast, cost-effective responses."
     cost_indicator: "$"
     max_context_tokens: 200000  # https://console.cloud.google.com/vertex-ai/publishers/anthropic/model-garden/claude-haiku-4-5
@@ -742,6 +837,7 @@ models:
       - claude
     proxy_provider: vertex-ai
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     supports_assistant_prefill: true
     params:
       model: "claude-haiku-4-5@20251001"
@@ -755,12 +851,14 @@ models:
   - name: "Claude Haiku 4.5"
     provider: "Bedrock"
     gitlab_identifier: "claude_haiku_4_5_20251001_bedrock"
+    requires_paid_credits: false
     description: "Fast, cost-effective responses."
     cost_indicator: "$"
     max_context_tokens: 200000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-haiku-4-5-20251001-v1:0
     family:
       - claude
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     supports_assistant_prefill: true
     params:
       model: bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0
@@ -772,11 +870,13 @@ models:
   - name: "Claude Haiku 5.5"
     provider: "Anthropic"
     gitlab_identifier: "claude_haiku_5_5"
+    requires_paid_credits: false
     description: "Anthropic's fastest model, for high-volume, latency-sensitive tasks such as classification, extraction, and routing."
     cost_indicator: "$"
     max_context_tokens: 1_000_000  # https://platform.claude.com/docs/en/models/haiku-5-5/overview
     proxy_provider: anthropic
     model_class_provider: anthropic
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -786,10 +886,12 @@ models:
   - name: "Claude Haiku 5.5"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "claude_haiku_5_5_vertex"
+    requires_paid_credits: false
     description: "Anthropic's fastest model, for high-volume, latency-sensitive tasks such as classification, extraction, and routing."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -803,10 +905,12 @@ models:
   - name: "Claude Haiku 5.5"
     provider: "Bedrock"
     gitlab_identifier: "claude_haiku_5_5_bedrock"
+    requires_paid_credits: false
     description: "Anthropic's fastest model, for high-volume, latency-sensitive tasks such as classification, extraction, and routing."
     cost_indicator: "$"
     max_context_tokens: 1_000_000  # https://console.aws.amazon.com/bedrock/home#/model-catalog/serverless/anthropic.claude-haiku-5-5
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     family:
       - claude
     params:
@@ -818,6 +922,7 @@ models:
   - name: "Gemini 3.1 Pro Preview"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_1_pro_preview_vertex"
+    requires_paid_credits: false
     description: "Designed to deliver strong agentic capabilities (near-Pro level) at substantial speed and value."
     cost_indicator: "$"  # To be confirmed
     max_context_tokens: 1_000_000
@@ -833,6 +938,7 @@ models:
   - name: "Gemini 3.5 Flash"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_5_flash_vertex"
+    requires_paid_credits: false
     description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
     cost_indicator: "$"  # To be confirmed
     max_context_tokens: 1_000_000
@@ -849,6 +955,7 @@ models:
   - name: "Gemini 3.7 Flash"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_7_flash_vertex"
+    requires_paid_credits: false
     description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
@@ -867,6 +974,7 @@ models:
   - name: "Gemini 3.7 Flash Medium"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_7_flash_medium_vertex"
+    requires_paid_credits: false
     description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
@@ -885,6 +993,7 @@ models:
   - name: "Gemini 3.7 Flash Low"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_7_flash_low_vertex"
+    requires_paid_credits: false
     description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
@@ -903,6 +1012,7 @@ models:
   - name: "Gemini 3.8 Flash"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_3_8_flash_vertex"
+    requires_paid_credits: false
     description: "Multimodal model balancing strong agentic capabilities with high speed and low cost."
     cost_indicator: "$"
     max_context_tokens: 1_000_000
@@ -918,6 +1028,7 @@ models:
   - name: "Gemini 4 Argon"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "gemini_4_argon_vertex"
+    requires_paid_credits: false
     description: "Google's frontier Gemini model for coding, agentic, and complex reasoning tasks."
     cost_indicator: "$$$"
     max_context_tokens: 1_000_000
@@ -938,7 +1049,6 @@ models:
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-6-astra
     proxy_provider: openai
     model_class_provider: "openai"
-    requires_paid_credits: true
     family:
       - gpt_5
     params:
@@ -953,7 +1063,6 @@ models:
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-6.1-sol
     proxy_provider: openai
     model_class_provider: "openai"
-    requires_paid_credits: true
     family:
       - gpt_5
     params:
@@ -968,7 +1077,6 @@ models:
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-6-sol
     proxy_provider: openai
     model_class_provider: "openai"
-    requires_paid_credits: true
     family:
       - gpt_5
     params:
@@ -978,6 +1086,7 @@ models:
   - name: "GPT-6.1 Terra"
     provider: "OpenAI"
     gitlab_identifier: "gpt_6_1_terra"
+    requires_paid_credits: false
     description: "OpenAI's fast and efficient model for everyday work."
     cost_indicator: "$$"
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-6.1-terra
@@ -992,6 +1101,7 @@ models:
   - name: "GPT-6 Luna"
     provider: "OpenAI"
     gitlab_identifier: "gpt_6_luna"
+    requires_paid_credits: false
     description: "OpenAI's fastest and most affordable model."
     cost_indicator: "$$"
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-6-luna
@@ -1011,7 +1121,6 @@ models:
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.6-sol
     proxy_provider: openai
     model_class_provider: "openai"
-    requires_paid_credits: true
     family:
       - gpt_5
     params:
@@ -1021,6 +1130,7 @@ models:
   - name: "GPT-5.6 Terra"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_6_terra"
+    requires_paid_credits: false
     description: "OpenAI's balanced model for everyday work."
     cost_indicator: "$$$"
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.6-terra
@@ -1035,6 +1145,7 @@ models:
   - name: "GPT-5.6 Luna"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_6_luna"
+    requires_paid_credits: false
     description: "OpenAI's fast and affordable model."
     cost_indicator: "$$"
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.6-luna
@@ -1053,7 +1164,6 @@ models:
     cost_indicator: "$$$$"
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.6-sol
     model_class_provider: litellm
-    requires_paid_credits: true
     family:
       - gpt_5
     params:
@@ -1064,6 +1174,7 @@ models:
   - name: "GPT-5.6 Terra"
     provider: "Bedrock"
     gitlab_identifier: "gpt_5_6_terra_bedrock"
+    requires_paid_credits: false
     description: "OpenAI's balanced model for everyday work."
     cost_indicator: "$$$"
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.6-terra
@@ -1078,6 +1189,7 @@ models:
   - name: "GPT-5.6 Luna"
     provider: "Bedrock"
     gitlab_identifier: "gpt_5_6_luna_bedrock"
+    requires_paid_credits: false
     description: "OpenAI's fast and affordable model."
     cost_indicator: "$$"
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.6-luna
@@ -1092,6 +1204,7 @@ models:
   - name: "GPT-6.1 Terra"
     provider: "Bedrock"
     gitlab_identifier: "gpt_6_1_terra_bedrock"
+    requires_paid_credits: false
     description: "OpenAI's fast and efficient model for everyday work."
     cost_indicator: "$$"
     max_context_tokens: 1050000  # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-terra.html
@@ -1106,6 +1219,7 @@ models:
   - name: "GPT-5.5"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_5"
+    requires_paid_credits: false
     description: "OpenAI's most capable frontier model with tiered context-length pricing."
     cost_indicator: "$$$$"
     max_context_tokens: 1050000  # https://platform.openai.com/docs/models/gpt-5.5
@@ -1120,6 +1234,7 @@ models:
   - name: "GPT-5.4"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_4"
+    requires_paid_credits: false
     description: "OpenAI's most capable frontier model for complex professional work."
     cost_indicator: "$$$"
     max_context_tokens: 1050000  # https://developers.openai.com/api/docs/models/gpt-5.4
@@ -1134,6 +1249,7 @@ models:
   - name: "GPT-5.2"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_2"
+    requires_paid_credits: false
     description: "OpenAI's best general-purpose model, part of the GPT-5 flagship model family."
     cost_indicator: "$$$"
     max_context_tokens: 400000  # https://platform.openai.com/docs/models/gpt-5
@@ -1149,6 +1265,7 @@ models:
   - name: "GPT-5.1"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5"
+    requires_paid_credits: false
     description: "OpenAI's flagship model for coding, reasoning, writing, and agentic tasks."
     cost_indicator: "$$"
     max_context_tokens: 400000  # https://platform.openai.com/docs/models/gpt-5
@@ -1167,6 +1284,7 @@ models:
   - name: "GPT-5-Mini"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_mini"
+    requires_paid_credits: false
     description: "Model for high-volume coding, reasoning, and routine workflows."
     cost_indicator: "$"
     max_context_tokens: 400000  # https://platform.openai.com/docs/models/gpt-5-mini
@@ -1184,6 +1302,7 @@ models:
   - name: "GPT-5.4-Mini"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_4_mini"
+    requires_paid_credits: false
     description: "Model for high-volume coding, reasoning, and routine workflows."
     cost_indicator: "$"
     max_context_tokens: 400000  # https://developers.openai.com/api/docs/models/gpt-5.4-mini
@@ -1198,6 +1317,7 @@ models:
   - name: "GPT-5.4-Nano"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_4_nano"
+    requires_paid_credits: false
     description: "Model for high-volume coding, reasoning, and routine workflows."
     cost_indicator: "$"
     max_context_tokens: 400000  # https://developers.openai.com/api/docs/models/gpt-5.4-nano
@@ -1216,6 +1336,7 @@ models:
   - name: "GPT-5 (alias)"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_alias"
+    requires_paid_credits: false
     description: "Alias for GPT-5.1, maintained for backward compatibility."
     max_context_tokens: 400000
     proxy_provider: openai
@@ -1228,6 +1349,7 @@ models:
   - name: "GPT-5.1 (alias)"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_1_alias"
+    requires_paid_credits: false
     description: "Alias for GPT-5.1, maintained for backward compatibility."
     max_context_tokens: 400000
     proxy_provider: openai
@@ -1242,6 +1364,7 @@ models:
   - name: "GPT-5.3-Codex"
     provider: "OpenAI"
     gitlab_identifier: "gpt_5_3_codex"
+    requires_paid_credits: false
     description: "Latest GPT-5.3 Codex release for coding tasks."
     cost_indicator: "$$$"
     max_context_tokens: 400000
@@ -1256,6 +1379,7 @@ models:
 
   - name: Amazon Q
     gitlab_identifier: amazon_q
+    requires_paid_credits: false
     max_context_tokens: 200000  # https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/q-in-ides-chat-models.html
     model_class_provider: amazon_q
     family:
@@ -1265,6 +1389,7 @@ models:
 
   - name: Mistral
     gitlab_identifier: mistral
+    requires_paid_credits: false
     max_context_tokens: 128000  # https://docs.mistral.ai/models/mistral-medium-3-1-25-08
     model_class_provider: litellm
     family:
@@ -1276,6 +1401,7 @@ models:
 
   - name: Mixtral
     gitlab_identifier: mixtral
+    requires_paid_credits: false
     max_context_tokens: 32000  # Mixtral 8x7B: https://www.prompthub.us/models/mixtral-8x7b
     # Note: Mixtral 8x22B supports 64K context window (https://www.prompthub.us/models/mixtral-8x22b)
     model_class_provider: litellm
@@ -1289,6 +1415,7 @@ models:
 
   - name: Codestral
     gitlab_identifier: codestral
+    requires_paid_credits: false
     max_context_tokens: 128000  # https://docs.mistral.ai/models/codestral-25-08
     model_class_provider: litellm
     family:
@@ -1301,6 +1428,7 @@ models:
 
   - name: Llama3
     gitlab_identifier: llama3
+    requires_paid_credits: false
     max_context_tokens: 128000  # https://codesphere.com/articles/taking-advantage-of-the-long-context-of-llama-3-1-2
     model_class_provider: litellm
     family:
@@ -1312,6 +1440,7 @@ models:
 
   - name: Codellama
     gitlab_identifier: codellama
+    requires_paid_credits: false
     max_context_tokens: 16000  # https://huggingface.co/blog/codellama
     model_class_provider: litellm
     family:
@@ -1323,6 +1452,7 @@ models:
 
   - name: GPT
     gitlab_identifier: gpt
+    requires_paid_credits: false
     max_context_tokens: 128000
     model_class_provider: litellm
     family:
@@ -1332,6 +1462,7 @@ models:
 
   - name: Codegemma
     gitlab_identifier: codegemma
+    requires_paid_credits: false
     max_context_tokens: 8000  # https://ollama.com/library/codegemma
     model_class_provider: litellm
     family:
@@ -1343,6 +1474,7 @@ models:
 
   - name: DeepSeekCoder
     gitlab_identifier: deepseekcoder
+    requires_paid_credits: false
     max_context_tokens: 16000  # https://ollama.com/library/deepseek-coder
     model_class_provider: litellm
     family:
@@ -1354,14 +1486,17 @@ models:
 
   - name: "Self-Hosted Claude"
     gitlab_identifier: "claude_3"  # For backwards compatibility with requests asking for [prompt_id]/claude_3
+    requires_paid_credits: false
     max_context_tokens: 200000
     model_class_provider: litellm
+    uses_cache_breakpoints: true
     params:
       temperature: 0.0
       max_tokens: 64_000
 
   - name: "Self-Hosted Gemini"
     gitlab_identifier: gemini
+    requires_paid_credits: false
     max_context_tokens: 1_000_000
     model_class_provider: litellm
     family:
@@ -1372,10 +1507,10 @@ models:
 
   - name: "Self-Hosted Qwen"
     gitlab_identifier: qwen
+    requires_paid_credits: false
     max_context_tokens: 262_144
     model_class_provider: litellm
     strip_reasoning: true
-    requires_single_system_message: true
     family:
       - qwen
     params:
@@ -1385,6 +1520,7 @@ models:
 
   - name: "Self-Hosted General Models"
     gitlab_identifier: "general"  # For backwards compatibility with requests asking for [prompt_id]/general
+    requires_paid_credits: false
     max_context_tokens: 200000
     model_class_provider: litellm
     params:
@@ -1394,6 +1530,7 @@ models:
   - name: "text-embedding-005"
     provider: "Gemini Enterprise Agent Platform"
     gitlab_identifier: "text_embedding_005_vertex"
+    requires_paid_credits: false
     description: "Natural language processing technique that converts textual data into numerical vectors."
     cost_indicator: "$"
     max_context_tokens: 20000  # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-text-embeddings#api_limits
@@ -1407,6 +1544,7 @@ models:
 
   - name: "Self-Hosted Embedding Models"
     gitlab_identifier: "embedding"
+    requires_paid_credits: false
     description: "Code embeddings tasks"
     max_context_tokens: 200000
     model_class_provider: litellm_embedding

@@ -1,4 +1,5 @@
 import asyncio
+from contextvars import ContextVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,6 +13,8 @@ from ai_gateway.api.client_disconnect import (
 )
 
 ROUTE = "/v2/code/completions"
+
+seen_by_caller: ContextVar[str | None] = ContextVar("seen_by_caller", default=None)
 
 
 @pytest.fixture(name="request_")
@@ -61,6 +64,16 @@ async def test_returns_the_result_while_the_client_stays(request_):
 
 
 @pytest.mark.asyncio
+async def test_keeps_the_context_the_awaitable_sets(request_):
+    async def set_inside():
+        seen_by_caller.set("set inside the awaitable")
+
+    await run_unless_disconnected(request_, set_inside())
+
+    assert seen_by_caller.get() == "set inside the awaitable"
+
+
+@pytest.mark.asyncio
 async def test_reraises_the_awaitable_error(request_):
     async def failing():
         raise ValueError("boom")
@@ -82,6 +95,7 @@ async def test_cancels_the_awaitable_once_the_client_disconnects(
 
     assert cancelled.is_set()
     assert _disconnects(ROUTE) == before + 1
+    assert asyncio.current_task().cancelling() == 0
 
 
 @pytest.mark.asyncio
@@ -104,6 +118,27 @@ async def test_outer_cancellation_reaches_the_awaitable(request_, hanging, cance
         await outer
 
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fast_poll")
+async def test_outer_cancellation_wins_over_a_simultaneous_disconnect(
+    request_, hanging, cancelled
+):
+    outer = asyncio.ensure_future(run_unless_disconnected(request_, hanging()))
+
+    async def disconnect_and_cancel_from_outside():
+        outer.cancel()
+        return True
+
+    request_.is_disconnected.side_effect = disconnect_and_cancel_from_outside
+    before = _disconnects(ROUTE)
+
+    with pytest.raises(asyncio.CancelledError):
+        await outer
+
+    assert cancelled.is_set()
+    assert _disconnects(ROUTE) == before
 
 
 @pytest.mark.asyncio

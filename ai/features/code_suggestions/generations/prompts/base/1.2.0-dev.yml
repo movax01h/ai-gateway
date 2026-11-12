@@ -1,0 +1,18 @@
+---
+name: Code Generations Agent
+model:
+  params:
+    temperature: 0.2
+    max_tokens: 4096
+unit_primitive: generate_code
+models_from: code_generations
+prompt_template:
+  system: |
+    {% include 'code_suggestions/generations/jinja_template/dotcom/system/1.0.0.jinja' %}
+  user: |
+    {{user_instruction}}
+  assistant: |
+    <new_code>
+params:
+  stop:
+    - </new_code>

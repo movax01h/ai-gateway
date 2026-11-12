@@ -1,0 +1,35 @@
+# Create the v1.x tag only after main's per-commit image is built and signed.
+# The tag pipeline no longer builds, and release-docker-image:version-tag
+# verifies and retags that image. The shared job sets `needs: []`, so without
+# this it tags ~6 minutes before the image exists.
+#
+# The v1.x tag pipeline no longer runs lint or tests either, so the tag also
+# waits for main's core lint and test jobs. They are optional because commits
+# with `pipeline_expedited: true` skip those includes on main, and an undefined
+# need would stop the pipeline from being created.
+#
+# The shared job pulls main before tagging. Checking out this pipeline's commit
+# makes semantic-release skip when main has moved on, so the newer commit's
+# pipeline cuts the tag after its own image is signed.
+#
+# Only before_script is extended. The shared `script` and its token handling stay
+# whatever the pinned common-ci-tasks version defines, including after a bump.
+semantic_release:
+  needs:
+    - job: sign:model-gateway
+      artifacts: false
+    - job: lint
+      artifacts: false
+      optional: true
+    - job: lint:ruff
+      artifacts: false
+      optional: true
+    - job: tests:unit
+      artifacts: false
+      optional: true
+    - job: tests:integration
+      artifacts: false
+      optional: true
+  before_script:
+    - !reference [.semantic_release_base, before_script]
+    - git checkout -B "$CI_COMMIT_BRANCH" "$CI_COMMIT_SHA"

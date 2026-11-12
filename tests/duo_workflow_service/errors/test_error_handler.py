@@ -1,3 +1,5 @@
+from unittest import mock
+
 import pytest
 
 from duo_workflow_service.errors.error_handler import (
@@ -58,3 +60,23 @@ async def test_handle_retryable_error():
             await handler.handle_error(error)
 
         assert exc_info.value.error_type == error_type
+
+
+@pytest.mark.parametrize(
+    ("retry_count", "upper_bound"),
+    [(0, 1.0), (1, 2.0), (2, 4.0)],
+)
+def test_get_retry_after_is_jittered_within_bounds(retry_count, upper_bound):
+    handler = ModelErrorHandler(base_delay=1.0)
+    handler._retry_count = retry_count
+
+    with mock.patch(
+        "duo_workflow_service.errors.error_handler.random.uniform",
+        side_effect=lambda low, high: high,
+    ) as mock_uniform:
+        assert handler._get_retry_after() == upper_bound
+
+    mock_uniform.assert_called_once_with(0.5, upper_bound)
+
+    for _ in range(50):
+        assert 0.5 <= handler._get_retry_after() <= upper_bound

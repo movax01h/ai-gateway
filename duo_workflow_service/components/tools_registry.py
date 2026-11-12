@@ -2,12 +2,15 @@ import copy
 import importlib.util
 import json
 import keyword
+from collections import Counter
 from functools import cached_property
 from pathlib import Path
 from typing import (
     Any,
+    Collection,
     Iterable,
     Literal,
+    Mapping,
     NamedTuple,
     NotRequired,
     Optional,
@@ -15,6 +18,7 @@ from typing import (
     Type,
     TypedDict,
     Union,
+    cast,
 )
 
 import boto3
@@ -35,7 +39,11 @@ from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.tools import Toolset, ToolType
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_api_generic import GitLabApiGet, GitLabGraphQL
-from duo_workflow_service.tools.mcp_tools import McpTool, McpToolConfig
+from duo_workflow_service.tools.mcp_tools import (
+    FirstPartyVerdict,
+    McpTool,
+    McpToolConfig,
+)
 from duo_workflow_service.tools.mr_discussions import (
     ListMrDiscussions,
     ReplyToDiscussion,
@@ -62,6 +70,10 @@ class ToolMetadata(TypedDict):
     # Signs AgentCore gateway requests for web search. None whenever web search is disabled,
     # which AgentCoreWebSearch reports as a configuration error rather than searching unsigned.
     boto_session: NotRequired[Optional[boto3.Session]]
+    # Privileges Rails granted the run, with each read privilege filled in from its
+    # write superset, so a tool checks one name. Absent only when ListTools builds
+    # tools without a registry.
+    granted_privileges: NotRequired[frozenset[str]]
 
 
 # This tools agent uses to interact with its internal state, they are required for
@@ -193,7 +205,11 @@ _RUN_MCP_TOOLS_PRIVILEGE = "run_mcp_tools"
 
 # Why ``ToolsRegistry.toolset`` dropped a requested tool; see ``_unavailable_reason``.
 UnavailableReason = Literal[
-    "flow_restricted", "missing_privilege", "unsupported_client", "unknown"
+    "flow_restricted",
+    "missing_privilege",
+    "unsupported_client",
+    "session_disabled",
+    "unknown",
 ]
 
 # Using Sequence instead of list because it's covariant, allowing subclasses
@@ -241,10 +257,10 @@ _AGENT_PRIVILEGES: dict[str, list[Type[BaseTool]]] = {
         tools.LinkVulnerabilityToIssue,
         tools.LinkVulnerabilityToMergeRequest,
         tools.UpdateWorkItem,
+        tools.WorkplanPublishTracks,
         tools.RevertToDetectedVulnerability,
         tools.CreateVulnerabilityIssue,
         tools.PostSastFpAnalysisToGitlab,
-        tools.PostSecretFpAnalysisToGitlab,
         tools.PostDuoCodeReview,
         tools.PostDuoCodeReviewFindings,
         SubmitMrReview,
@@ -337,6 +353,15 @@ _PRIVILEGE_SUPERSETS: dict[str, list[str]] = {
     "read_only_gitlab": ["read_only_gitlab", "read_write_gitlab"],
     "read_only_files": ["read_only_files", "read_write_files"],
 }
+
+
+def _effective_privileges(enabled: Iterable[str]) -> frozenset[str]:
+    """The granted privileges plus every read privilege that a granted write privilege implies."""
+    granted = set(enabled)
+    for read_privilege, supersets in _PRIVILEGE_SUPERSETS.items():
+        if granted.intersection(supersets):
+            granted.add(read_privilege)
+    return frozenset(granted)
 
 
 def _tool_name(tool_cls: Union[Type[BaseTool], Type[BaseModel]]) -> str:
@@ -494,51 +519,94 @@ def ceiling_exempt_tool_names(
     return exempt
 
 
+def _mcp_tool_from_config(
+    config: McpToolConfig, tool_metadata: ToolMetadata
+) -> McpTool:
+    tool = McpTool(
+        name=config["llm_name"],
+        description=config["description"],
+        args_schema=config["args_schema"],
+        metadata=tool_metadata,  # type: ignore[arg-type]
+    )
+    tool._original_mcp_name = config["original_name"]
+    tool._client_injected = config["client_injected"]
+    tool._first_party = config["first_party"]
+    return tool
+
+
 def _drop_shadowing_mcp_tools(
-    mcp_tools: list[McpToolConfig], reserved: set[str], governed_names: set[str]
+    mcp_tools: list[McpToolConfig],
+    reserved: set[str],
+    governed_names: set[str],
+    first_party_names: Collection[str],
+    first_party_drops: Mapping[str, str],
 ) -> list[McpToolConfig]:
-    """Drop MCP tools that would answer for a tool GitLab owns.
+    """Drop MCP tools that would answer for a tool GitLab owns, or for a shared name.
 
     A reserved name is refused whatever the entry claims about its origin, because
     client_injected is only trustworthy behind Workhorse. Tools from a server GitLab
     configured are always server-prefixed, so they never hold a reserved name anyway.
 
+    A first-party name is held only by the entry whose raw name matched the claim exactly
+    (`first_party`). Any other entry sanitising to it, GitLab-origin or a client alias such
+    as `mcp__duo..review__-`, is refused: it would inherit the first-party verdict and
+    execute a different tool.
+
+    The first-party tool itself is refused when its own verdict removes it (`first_party_drops`,
+    name to `deny` or `ask_without_prompt`), logged as such rather than as a GitLab-owned name.
+
     A governed name is refused only for client-injected entries: an admin rule naming a
     GitLab MCP tool must make it prompt, not remove it.
 
-    On a name collision the non-client-injected entry wins. Workhorse already orders the
-    lists so that it does, but that contract lives in another repo, so enforce it here
-    rather than depend on it.
+    Workhorse routes a call by name alone, and it runs any name it registered on its own
+    server. When a client tool and a GitLab-side tool share a name, the GitLab copy is the one
+    that runs, so only the client copy is refused. When two GitLab-side tools share a name,
+    or two client tools do, DWS cannot tell which one a call is for, so every copy is refused.
+
+    First-party aliases do not count toward a name: the claim names the genuine tool by its
+    raw name, so an alias cannot take the genuine tool down with it.
     """
-    kept: dict[str, McpToolConfig] = {}
+    counted = [
+        config
+        for config in mcp_tools
+        if config["first_party"] or config["llm_name"] not in first_party_names
+    ]
+    name_counts = Counter(config["llm_name"] for config in counted)
+    gitlab_counts = Counter(
+        config["llm_name"] for config in counted if not config["client_injected"]
+    )
+    kept: list[McpToolConfig] = []
     for config in mcp_tools:
-        incumbent = kept.get(config["llm_name"])
         if config["llm_name"] in reserved:
             refusal_reason = "reserved"
+        elif config["llm_name"] in first_party_names and not config["first_party"]:
+            refusal_reason = "first_party_alias"
+        elif config["first_party"] and config["llm_name"] in first_party_drops:
+            refusal_reason = "first_party_verdict"
         elif config["client_injected"] and config["llm_name"] in governed_names:
             refusal_reason = "governed"
-        elif (
-            incumbent is not None
-            and config["client_injected"]
-            and not incumbent["client_injected"]
-        ):
+        elif config["client_injected"] and name_counts[config["llm_name"]] > 1:
             refusal_reason = "collision"
+        elif gitlab_counts[config["llm_name"]] > 1:
+            refusal_reason = "duplicate"
         else:
             refusal_reason = None
 
         if refusal_reason:
-            log.warning(
-                "Dropped MCP tool shadowing a name GitLab owns",
-                extra={
-                    "original_name": config["original_name"],
-                    "llm_name": config["llm_name"],
-                    "client_injected": config["client_injected"],
-                    "refusal_reason": refusal_reason,
-                },
-            )
+            extra = {
+                "original_name": config["original_name"],
+                "llm_name": config["llm_name"],
+                "client_injected": config["client_injected"],
+                "refusal_reason": refusal_reason,
+            }
+            message = "Dropped MCP tool"
+            if refusal_reason == "first_party_verdict":
+                message = "Dropped first-party MCP tool by its first-party verdict"
+                extra["verdict"] = first_party_drops[config["llm_name"]]
+            log.warning(message, extra=extra)
             continue
-        kept[config["llm_name"]] = config
-    return list(kept.values())
+        kept.append(config)
+    return kept
 
 
 TOOL_CALL_APPROVED_QUERY = """
@@ -556,6 +624,7 @@ class ToolsRegistry:
     _enabled_tools: dict[str, Union[BaseTool, Type[BaseModel]]]
     _preapproved_tool_names: set[str]
     _ask_tool_names: set[str]
+    _promoted_tool_names: set[str]
     _policy_permitted_preapprovals: Optional[set[str]]
     _mcp_tool_names: list[str]
     _enabled_privileges: set[str]
@@ -576,6 +645,8 @@ class ToolsRegistry:
         allowed_tools: Optional[list[str]] = None,
         admin_allowed_preapprovals: Optional[set[str]] = None,
         registry_flow_id: Optional[str] = None,
+        first_party_tools: Optional[Mapping[str, FirstPartyVerdict]] = None,
+        promoted_tools: Optional[list[str]] = None,
     ):
         if not workflow_config:
             raise RuntimeError("Failed to find tools configuration for workflow")
@@ -610,9 +681,13 @@ class ToolsRegistry:
             allow_client_injected_mcp_tools=allow_client_injected_mcp_tools,
             allowed_tools=allowed_tools or [],
             admin_allowed_preapprovals=admin_allowed_preapprovals,
+            first_party_tools=first_party_tools or {},
+            promoted_tools=promoted_tools or [],
+            can_ask_user=workflow_config.get("allow_agent_to_request_user", False),
             gl_http_client=gl_http_client,
             workflow_id=workflow_id,
             registry_flow_id=registry_flow_id,
+            workflow_config=workflow_config,
         )
 
     def __init__(
@@ -630,23 +705,50 @@ class ToolsRegistry:
         allowed_tools: Optional[list[str]] = None,
         admin_allowed_preapprovals: Optional[set[str]] = None,
         registry_flow_id: Optional[str] = None,
+        first_party_tools: Optional[Mapping[str, FirstPartyVerdict]] = None,
+        can_ask_user: bool = False,
+        workflow_config: Optional[Mapping[str, Any]] = None,
+        promoted_tools: Optional[list[str]] = None,
     ):
         """Build the tools a workflow can use.
 
         ``registry_flow_id`` is the Flow Registry id of the config the workflow runs, ``None`` for any other config.
+        ``workflow_config`` is the session's settings, for tools whose ``is_available`` depends on them.
         """
         tools_for_agent_privileges: dict[str, ToolsOrConfigs] = dict(_AGENT_PRIVILEGES)
+        first_party_tools = first_party_tools or {}
+        # Matches how the workflow folds admin `ask` into deny when the flow cannot prompt:
+        # a pending approval nobody can answer would stall the session.
+        first_party_drops = {
+            name: "deny" if verdict == "deny" else "ask_without_prompt"
+            for name, verdict in first_party_tools.items()
+            if verdict == "deny" or (verdict == "ask" and not can_ask_user)
+        }
+        denied_tool_names = set(denied_tools or []) | first_party_drops.keys()
 
         # Always enable mcp tools until it's reliably passed by clients as an agent privilege
         enabled_tools.append(_RUN_MCP_TOOLS_PRIVILEGE)
         self._enabled_privileges = set(enabled_tools)
+
+        # Tools that gate a step on a privilege read it from their metadata, so the
+        # superset rules stay in this one place.
+        tool_metadata = cast(
+            ToolMetadata,
+            {
+                **tool_metadata,
+                "granted_privileges": _effective_privileges(enabled_tools),
+            },
+        )
 
         registered_mcp_tools: list[McpToolConfig] = []
         if _RUN_MCP_TOOLS_PRIVILEGE in enabled_tools:
             registered_mcp_tools = _drop_shadowing_mcp_tools(
                 mcp_tools or [],
                 _reserved_tool_names(tools_for_agent_privileges),
-                set(ask_tools or []) | set(denied_tools or []),
+                # A first-party `ask` keeps the tool and prompts; only deny removes it.
+                (set(ask_tools or []) - first_party_tools.keys()) | denied_tool_names,
+                first_party_tools.keys(),
+                first_party_drops,
             )
             tools_for_agent_privileges[_RUN_MCP_TOOLS_PRIVILEGE] = registered_mcp_tools
 
@@ -658,13 +760,15 @@ class ToolsRegistry:
         # Not privilege-derived, so the governance ceiling never strips them.
         baseline_preapproved = set(self._enabled_tools.keys())
         self._preapproved_tool_names = set(baseline_preapproved)
-        self._denied_tools: set[str] = set(denied_tools or [])
+        self._denied_tools: set[str] = denied_tool_names
         self._ask_tool_names: set[str] = set(ask_tools or [])
         self._mcp_tool_names = [tool["llm_name"] for tool in registered_mcp_tools]
 
         self._gl_http_client = gl_http_client
         self._workflow_id = workflow_id
         self._approved_cache: set[tuple[str, str]] = set()
+        # Tools whose own `is_available` ruled them out for this session, for the dropped-tool log.
+        self._session_disabled_tool_names: set[str] = set()
 
         self._registry_flow_id = registry_flow_id
         for privilege in enabled_tools:
@@ -677,14 +781,7 @@ class ToolsRegistry:
                     isinstance(tool_cls_or_config, dict)
                     and "llm_name" in tool_cls_or_config
                 ):
-                    tool = McpTool(
-                        name=tool_cls_or_config["llm_name"],
-                        description=tool_cls_or_config["description"],
-                        args_schema=tool_cls_or_config["args_schema"],
-                        metadata=tool_metadata,  # type: ignore[arg-type]
-                    )
-                    tool._original_mcp_name = tool_cls_or_config["original_name"]
-                    tool._client_injected = tool_cls_or_config["client_injected"]
+                    tool = _mcp_tool_from_config(tool_cls_or_config, tool_metadata)
                 else:
                     tool = tool_cls_or_config(metadata=tool_metadata)  # type: ignore[assignment]
 
@@ -700,6 +797,89 @@ class ToolsRegistry:
                 if privilege in preapproved_tools:
                     self._preapproved_tool_names.add(tool.name)
 
+        self._add_capability_dependent_tools(
+            tool_metadata, baseline_preapproved, workflow_config or {}
+        )
+
+        if allow_client_injected_mcp_tools:
+            client_injected = {
+                name
+                for name, tool in self._enabled_tools.items()
+                if getattr(tool, "_client_injected", False)
+            }
+            self._preapproved_tool_names.update(client_injected)
+            # A client names its own MCP tools, so no admin allow list can rule on them.
+            baseline_preapproved.update(client_injected)
+
+        # Per-tool admin `allow` rules pre-approve a tool even when its privilege group
+        # is not pre-approved as a whole (a mixed group). Scoped to enabled tools so an
+        # allow cannot introduce a tool the flow never had, and to GitLab-origin tools:
+        # a client names its own MCP tools, so an allow on a GitLab MCP tool name must
+        # not reach a client entry that shares it. The flag above covers the opted-in case.
+        self._preapproved_tool_names |= {
+            name
+            for name in allowed_tools or []
+            if name in self._enabled_tools
+            and not getattr(self._enabled_tools[name], "_client_injected", False)
+        }
+
+        # Already the admin's resolved verdict from the signed claim, and the ceiling's
+        # allow list never admits client-injected names, so allows join the baseline.
+        baseline_preapproved |= self._apply_first_party_verdicts(first_party_tools)
+
+        # The workflow row is writable by the session owner, so the pre-approvals derived
+        # from it are capped at what admin policy allows. `None` means the ceiling is off.
+        # An allowed name only admits a GitLab-origin tool, matching the union above.
+        if admin_allowed_preapprovals is None:
+            self._policy_permitted_preapprovals = None
+        else:
+            self._policy_permitted_preapprovals = {
+                name
+                for name in admin_allowed_preapprovals
+                if not getattr(self._enabled_tools.get(name), "_client_injected", False)
+            } | baseline_preapproved
+        removed = self._preapproved_tool_names - self.pre_approvals_allowed_by_policy(
+            self._preapproved_tool_names
+        )
+        self._preapproved_tool_names -= removed
+
+        # The workflow already gates on this; kept here so no caller can skip a prompt
+        # a headless session would otherwise halt on.
+        if not can_ask_user:
+            promoted_tools = []
+        # Applied after the ceiling, which would otherwise strip these (never in the
+        # admin allow list). Client-injected names are dropped: Rails cannot rule on them.
+        self._promoted_tool_names = {
+            name
+            for name in promoted_tools or []
+            if name in self._enabled_tools
+            and name not in self._denied_tools
+            and not getattr(self._enabled_tools[name], "_client_injected", False)
+        } - self._preapproved_tool_names
+        self._preapproved_tool_names |= self._promoted_tool_names
+        if removed - self._promoted_tool_names:
+            log.info(
+                "Removed tools from pre-approval: not permitted by admin policy",
+                workflow_id=workflow_id,
+                tool_names=sorted(removed - self._promoted_tool_names),
+            )
+
+        # Applied last so it outranks every pre-approval source above. Only binds where
+        # a user can be prompted: headless sessions arrive with `ask_tools` already
+        # emptied upstream, so an ask rule cannot force a prompt there.
+        self._preapproved_tool_names -= self._ask_tool_names
+        self._promoted_tool_names -= self._ask_tool_names
+
+    def _add_capability_dependent_tools(
+        self,
+        tool_metadata: ToolMetadata,
+        baseline_preapproved: set[str],
+        workflow_config: Mapping[str, Any],
+    ) -> None:
+        """Add the tools whose presence depends on what the client declared.
+
+        Split out of ``__init__``. ``workflow_config`` is for tools whose ``is_available`` depends on it.
+        """
         # Add capability-dependent tools if condition is met.
         # Each tool's required_capability frozenset encodes all capabilities needed,
         # so is_client_capable alone resolves to the correct supersession tool.
@@ -718,9 +898,10 @@ class ToolsRegistry:
                 continue
 
             # Skip tool if it declares additional runtime conditions that are not met,
-            # such as a feature flag or a fallback that only applies for some models.
+            # such as a feature flag or a session setting.
             is_available = getattr(tool_cls, "is_available", None)
-            if is_available is not None and not is_available():
+            if is_available is not None and not is_available(workflow_config):
+                self._session_disabled_tool_names.add(_tool_name(tool_cls))
                 continue
 
             # Don't add capability dependent tool if it supersedes another tool
@@ -747,54 +928,25 @@ class ToolsRegistry:
                 self._preapproved_tool_names.add(tool_name)
                 baseline_preapproved.add(tool_name)
 
-        if allow_client_injected_mcp_tools:
-            client_injected = {
-                name
-                for name, tool in self._enabled_tools.items()
-                if getattr(tool, "_client_injected", False)
-            }
-            self._preapproved_tool_names.update(client_injected)
-            # A client names its own MCP tools, so no admin allow list can rule on them.
-            baseline_preapproved.update(client_injected)
+    def _apply_first_party_verdicts(
+        self, first_party_tools: Mapping[str, FirstPartyVerdict]
+    ) -> set[str]:
+        """Apply first-party verdicts and return the names they pre-approve.
 
-        # Per-tool admin `allow` rules pre-approve a tool even when its privilege group
-        # is not pre-approved as a whole (a mixed group). Scoped to enabled tools so an
-        # allow cannot introduce a tool the flow never had, and to GitLab-origin tools:
-        # a client names its own MCP tools, so an allow on a GitLab MCP tool name must
-        # not reach a client entry that shares it. The flag above covers the opted-in case.
-        self._preapproved_tool_names |= {
-            name
-            for name in allowed_tools or []
-            if name in self._enabled_tools
-            and not getattr(self._enabled_tools[name], "_client_injected", False)
-        }
-
-        # The workflow row is writable by the session owner, so the pre-approvals derived
-        # from it are capped at what admin policy allows. `None` means the ceiling is off.
-        # An allowed name only admits a GitLab-origin tool, matching the union above.
-        if admin_allowed_preapprovals is None:
-            self._policy_permitted_preapprovals = None
-        else:
-            self._policy_permitted_preapprovals = {
-                name
-                for name in admin_allowed_preapprovals
-                if not getattr(self._enabled_tools.get(name), "_client_injected", False)
-            } | baseline_preapproved
-        removed = self._preapproved_tool_names - self.pre_approvals_allowed_by_policy(
-            self._preapproved_tool_names
-        )
-        if removed:
-            log.info(
-                "Removed tools from pre-approval: not permitted by admin policy",
-                workflow_id=workflow_id,
-                tool_names=sorted(removed),
-            )
-        self._preapproved_tool_names -= removed
-
-        # Applied last so it outranks every pre-approval source above. Only binds where
-        # a user can be prompted: headless sessions arrive with `ask_tools` already
-        # emptied upstream, so an ask rule cannot force a prompt there.
-        self._preapproved_tool_names -= self._ask_tool_names
+        Verdicts reach only the entry that matched the claim exactly: every other entry with the name was dropped as an
+        alias. An `ask` that reaches here can be answered (otherwise it was folded into deny), and joining the ask set
+        also revokes a privilege-wide pre-approval.
+        """
+        preapproved: set[str] = set()
+        for name, verdict in first_party_tools.items():
+            if not getattr(self._enabled_tools.get(name), "_first_party", False):
+                continue
+            if verdict == "allow":
+                preapproved.add(name)
+            elif verdict == "ask":
+                self._ask_tool_names.add(name)
+        self._preapproved_tool_names |= preapproved
+        return preapproved
 
     def pre_approvals_allowed_by_policy(self, tool_names: Iterable[str]) -> set[str]:
         """Reduce a pre-approval list, such as a flow config's, to what admin policy permits.
@@ -832,8 +984,8 @@ class ToolsRegistry:
         """Check if a tool is preapproved (no approval ever needed).
 
         This is a local check against the registry's pre-approved names, which come from privilege groups, capability
-        tools, admin `allow` rules, and client-injected tools where a session opted in. Use this for routing decisions
-        where you don't need per-call checks.
+        tools, admin `allow` rules, first-party `allow` verdicts, auto mode promotion, and client-injected tools where a
+        session opted in. Use this for routing decisions where you don't need per-call checks.
         """
         return tool_name in self._preapproved_tool_names
 
@@ -1002,6 +1154,7 @@ class ToolsRegistry:
 
         return Toolset(
             pre_approved=pre_approved,
+            promoted=pre_approved & self._promoted_tool_names,
             all_tools=all_tools,
             tool_options=tool_options or {},
             approval_policy=self,
@@ -1016,8 +1169,12 @@ class ToolsRegistry:
         enabled, typically a flow asking for more than its privileges in gitlab-org/gitlab allow.
         ``unsupported_client``:
         the privilege was enabled (or none is needed), but the client cannot run the tool.
+        ``session_disabled``: the client can run the tool, but the tool's own ``is_available`` ruled
+        it out for this session, such as web search without the user's opt-in.
         ``unknown``: the registry does not know the name, typically a typo in a custom flow.
         """
+        if tool_name in self._session_disabled_tool_names:
+            return "session_disabled"
         grant = self._tool_grants.get(tool_name)
         if grant is None:
             if tool_name in self._capability_dependent_tool_names:
@@ -1069,6 +1226,7 @@ def _report_unavailable_tools(
         "flow_restricted_tools": tools_with("flow_restricted"),
         "missing_privilege_tools": missing_privilege_tools,
         "unsupported_client_tools": tools_with("unsupported_client"),
+        "session_disabled_tools": tools_with("session_disabled"),
         "unknown_tools": tools_with("unknown"),
         "granting_privileges": sorted(
             {

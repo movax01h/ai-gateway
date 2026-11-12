@@ -536,6 +536,25 @@ class TestTriageVerdictAudit:
         (audit,) = _events(logs, "bl_triage_verdict")
         assert audit["evidence"] == "svc/hooks.py:42 legacy field"
 
+    def test_the_audit_file_resolves_the_path_alias(self, tool):
+        finding = _finding(verdict="KEEP")
+        finding["path"] = finding.pop("file")
+        _, logs = self._audit(tool, [finding])
+        (audit,) = _events(logs, "bl_triage_verdict")
+        assert audit["file"] == "svc/hooks.py"
+
+    def test_the_audit_body_falls_back_to_the_description(self, tool):
+        finding = _finding(verdict="KEEP", description="described, not bodied")
+        del finding["body"]
+        _, logs = self._audit(tool, [finding])
+        (audit,) = _events(logs, "bl_triage_verdict")
+        assert audit["body"] == "described, not bodied"
+
+    def test_the_audit_severity_is_not_blank(self, tool):
+        _, logs = self._audit(tool, [_finding(verdict="KEEP", severity="high")])
+        (audit,) = _events(logs, "bl_triage_verdict")
+        assert audit["severity"] == "high"
+
     @pytest.mark.parametrize(
         ("field", "bound"),
         [("clause", TRIAGE_CLAUSE_MAX), ("evidence", 600), ("body", 240)],

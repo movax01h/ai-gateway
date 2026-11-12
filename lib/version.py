@@ -13,6 +13,10 @@ from poetry.core.constraints.version import Version, parse_constraint
 
 logger = structlog.stdlib.get_logger(__name__)
 
+# Maximum version query length. The SemVer spec sets no maximum, so this uses node-semver's MAX_LENGTH:
+# https://github.com/npm/node-semver/blob/main/internal/constants.js
+MAX_VERSION_QUERY_LENGTH = 256
+
 
 def resolve_version(available: Iterable[str], version_query: str) -> str:
     """Resolve a version constraint against a set of available version strings.
@@ -32,8 +36,13 @@ def resolve_version(available: Iterable[str], version_query: str) -> str:
         The highest compatible version string.
 
     Raises:
-        ValueError: If no compatible version is found.
+        ValueError: If *version_query* is longer than ``MAX_VERSION_QUERY_LENGTH``, or no compatible version is found.
     """
+    if len(version_query) > MAX_VERSION_QUERY_LENGTH:
+        raise ValueError(
+            f"Version query is longer than {MAX_VERSION_QUERY_LENGTH} characters"
+        )
+
     available_list = list(available)
 
     try:
