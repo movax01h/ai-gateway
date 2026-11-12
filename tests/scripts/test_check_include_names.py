@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from lib.subprompts_index import SUBPROMPTS_INDEX
 from scripts import check_include_names
 from scripts.check_include_names import (
     ALIASES_FILE,
@@ -18,6 +19,7 @@ from scripts.check_include_names import (
     scan,
     scan_at,
     served_names,
+    show_at,
 )
 
 
@@ -33,6 +35,10 @@ def _write(repo: Path, rel: str, text: str = "x") -> None:
     path = repo / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
+
+
+def _no_read(path: str) -> str:
+    raise AssertionError(f"unexpected read of {path}")
 
 
 def _write_constants(repo: Path, aliases: str, retired: str) -> None:
@@ -95,7 +101,44 @@ class TestIncludeNames:
             "ai_gateway/prompts/definitions/a/1.0.0.jinja",
             "ai/shared/b/prompts/c/1.0.0.jinja",
         ]
-        assert served_names(paths) == {"a/1.0.0.jinja", "b/c/1.0.0.jinja"}
+        assert served_names(paths, _no_read) == {"a/1.0.0.jinja", "b/c/1.0.0.jinja"}
+
+    def test_prompts_in_a_subprompts_index_serve_their_prompt_id(self):
+        prompts = "ai/features/insights/my_flow/prompts"
+        index = f"{prompts}/{SUBPROMPTS_INDEX}"
+        paths = [
+            index,
+            f"{prompts}/fetch/base/1.0.0.yml",
+            f"{prompts}/fetch/user/1.0.0.jinja",
+            f"{prompts}/stray/base/1.0.0.yml",
+            f"{prompts}/stray/user/1.0.0.jinja",
+        ]
+
+        names = served_names(paths, {index: "my_flow_fetch: fetch\n"}.__getitem__)
+
+        # Like the loader: a listed prompt serves only its own ID, and an unlisted
+        # directory serves only under the feature ID.
+        assert names == {
+            "my_flow_fetch/user/1.0.0.jinja",
+            "my_flow/stray/user/1.0.0.jinja",
+            "insights/my_flow/stray/user/1.0.0.jinja",
+        }
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            f"ai/features/insights/my_flow/{SUBPROMPTS_INDEX}",
+            f"ai/features/insights/my_flow/prompts/fetch/{SUBPROMPTS_INDEX}",
+            f"ai/shared/common/prompts/{SUBPROMPTS_INDEX}",
+        ],
+    )
+    def test_index_outside_a_feature_prompts_dir_is_not_read(self, path: str):
+        assert served_names([path], _no_read) == set()
+
+    def test_malformed_index_raises(self):
+        index = f"ai/features/insights/my_flow/prompts/{SUBPROMPTS_INDEX}"
+        with pytest.raises(ValueError, match="expected"):
+            served_names([index], {index: "my_flow/fetch: fetch\n"}.__getitem__)
 
 
 class TestScan:
@@ -122,6 +165,11 @@ class TestScan:
 
     def test_scan_at_returns_none_for_unknown_ref(self, repo: Path):
         assert scan_at(repo, "no-such-ref") is None
+
+    def test_show_at_reads_the_committed_file(self, repo: Path):
+        path = "ai_gateway/prompts/definitions/common/naming/1.0.0.jinja"
+        (repo / path).write_text("changed")
+        assert show_at(repo, "HEAD", path) == "x"
 
 
 class TestParse:
@@ -273,6 +321,42 @@ class TestMain:
         _write_constants(lint_repo, "{}", 'frozenset({"common/naming/1.0.0.jinja"})')
 
         assert check_include_names.main(["--base", "HEAD"]) == 0
+
+    def test_passes_on_a_move_into_a_prompt_that_an_index_lists(
+        self, lint_repo: Path, capsys
+    ):
+        _write(lint_repo, "ai_gateway/prompts/definitions/my_flow_fetch/base/1.0.0.yml")
+        _write(
+            lint_repo, "ai_gateway/prompts/definitions/my_flow_fetch/user/1.0.0.jinja"
+        )
+        _git(lint_repo, "add", ".")
+        _git(lint_repo, "commit", "-q", "-m", "legacy prompt")
+        _git(
+            lint_repo, "rm", "-q", "-r", "ai_gateway/prompts/definitions/my_flow_fetch"
+        )
+        prompts = "ai/features/insights/my_flow/prompts"
+        _write(lint_repo, f"{prompts}/fetch/base/1.0.0.yml")
+        _write(lint_repo, f"{prompts}/fetch/user/1.0.0.jinja")
+        _write(lint_repo, f"{prompts}/{SUBPROMPTS_INDEX}", "my_flow_fetch: fetch\n")
+
+        assert check_include_names.main(["--base", "HEAD"]) == 0, (
+            capsys.readouterr().err
+        )
+
+    def test_reads_the_index_at_the_base_ref(self, lint_repo: Path, capsys):
+        prompts = "ai/features/insights/my_flow/prompts"
+        _write(lint_repo, f"{prompts}/fetch/base/1.0.0.yml")
+        _write(lint_repo, f"{prompts}/fetch/user/1.0.0.jinja")
+        _write(lint_repo, f"{prompts}/{SUBPROMPTS_INDEX}", "my_flow_fetch: fetch\n")
+        _git(lint_repo, "add", ".")
+        _git(lint_repo, "commit", "-q", "-m", "listed prompt")
+        _write(lint_repo, f"{prompts}/{SUBPROMPTS_INDEX}", "my_flow_get: fetch\n")
+
+        assert check_include_names.main(["--base", "HEAD"]) == 1
+        assert (
+            "my_flow_fetch/user/1.0.0.jinja: no template serves"
+            in capsys.readouterr().err
+        )
 
     def test_unknown_base_only_warns(self, lint_repo: Path, capsys):
         (

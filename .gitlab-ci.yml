@@ -275,7 +275,7 @@ pages:
   stage: deploy_pages
   script:
     - mkdir -p public
-    - python scripts/prompt_directory_json_builder.py
+    - python -m scripts.prompt_directory_json_builder
   artifacts:
     paths:
       - public
