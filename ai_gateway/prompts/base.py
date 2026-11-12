@@ -111,6 +111,7 @@ from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.feature_roots import (
     LEGACY_INCLUDE_ALIASES,
     feature_prompt_root,
+    nested_prompt_roots,
 )
 from ai_gateway.prompts.model_variables import bind_model_variables
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
@@ -654,7 +655,9 @@ class FeatureRootLoader(BaseLoader):
 
     Template name ``<prompt_id>/<rest>`` maps to ``<registered_root>/<rest>``,
     so include strings need no rewrite when a prompt moves. A two-part id such
-    as ``chat/react`` is tried before a one-part id.
+    as ``chat/react`` is tried before a one-part id. A file in the dir of a
+    prompt that a ``subprompts_index.yml`` lists resolves only under that
+    prompt's id.
     """
 
     def get_source(
@@ -673,6 +676,8 @@ class FeatureRootLoader(BaseLoader):
     ) -> tuple[str, str, Callable[[], bool] | None]:
         path = (root / rest).resolve()
         if not path.is_relative_to(root.resolve()) or not path.is_file():
+            raise TemplateNotFound(template)
+        if any(path.is_relative_to(n.resolve()) for n in nested_prompt_roots(root)):
             raise TemplateNotFound(template)
 
         source = path.read_text(encoding="utf-8")

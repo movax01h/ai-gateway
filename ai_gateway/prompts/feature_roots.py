@@ -1,7 +1,9 @@
 """Registry of prompt roots under ``ai/features/`` and ``ai/shared/``.
 
 A feature owns its prompts in ``ai/features/<domain>/<feature>/prompts/``. A
-definition that several features use lives in ``ai/shared/<name>/prompts/``.
+feature with several file-based prompts lists them in
+``prompts/subprompts_index.yml``. A definition that several features use lives
+in ``ai/shared/<name>/prompts/``.
 Both discovery paths consult this registry by prompt id:
 
 - version-file discovery in ``LocalPromptRegistry._resolve_id``
@@ -14,12 +16,14 @@ Registration strips the prompt-id prefix, so a self-namespaced include such as
 from pathlib import Path
 
 from lib.feature_roots import default_features_dir
+from lib.subprompts_index import read_subprompts_index
 
 __all__ = [
     "LEGACY_INCLUDE_ALIASES",
     "RETIRED_INCLUDE_NAMES",
     "discover_feature_prompts",
     "feature_prompt_root",
+    "nested_prompt_roots",
     "register_prompt_root",
 ]
 
@@ -41,6 +45,9 @@ RETIRED_INCLUDE_NAMES: frozenset[str] = frozenset()
 
 # prompt id -> the `prompts/` directory that owns it
 _FEATURE_PROMPT_ROOTS: dict[str, Path] = {}
+
+# feature `prompts/` directory -> the dirs its `subprompts_index.yml` lists
+_NESTED_PROMPT_ROOTS: dict[Path, tuple[Path, ...]] = {}
 
 
 def register_prompt_root(feature_id: str, prompts_dir: Path) -> None:
@@ -71,21 +78,41 @@ def feature_prompt_root(feature_id: str) -> Path | None:
     return _FEATURE_PROMPT_ROOTS.get(feature_id)
 
 
+def nested_prompt_roots(prompts_dir: Path) -> tuple[Path, ...]:
+    """Return the dirs of the prompts that the index in ``prompts_dir`` lists.
+
+    A file in one of these dirs resolves only under that prompt's id.
+
+    Args:
+        prompts_dir: A registered ``prompts/`` dir.
+
+    Returns:
+        The dirs that ``discover_feature_prompts`` read from the
+        ``subprompts_index.yml`` in ``prompts_dir``, or an empty tuple.
+    """
+    return _NESTED_PROMPT_ROOTS.get(prompts_dir, ())
+
+
 def discover_feature_prompts(features_dir: Path | None = None) -> None:
     """Register the ``prompts/`` dirs under ``ai/features/`` and ``ai/shared/``.
 
     ``ai/features/<domain>/<feature>/prompts/`` registers as ``<feature>`` and as
     ``<domain>/<feature>``, so a nested id such as ``chat/react`` keeps its name
-    after it moves to ``ai/features/chat/react/``. ``ai/shared/<name>/prompts/``
-    registers as ``<name>``. A directory without ``prompts/`` (for example a
-    flow-only feature) is skipped. Idempotent and silent when a tree is absent.
+    after it moves to ``ai/features/chat/react/``. Each prompt that the
+    feature's ``prompts/subprompts_index.yml`` lists registers under its listed
+    ID, and its files resolve only under that ID.
+    ``ai/shared/<name>/prompts/`` registers as ``<name>``. A directory
+    without ``prompts/`` (for example a flow-only feature) is skipped.
+    Idempotent and silent when a tree is absent.
 
     Args:
         features_dir: The ``ai/features`` directory to scan. ``ai/shared`` is its
             sibling. Defaults to ``default_features_dir()`` when not provided.
 
     Raises:
-        ValueError: If two directories register the same prompt id.
+        ValueError: If two directories register the same prompt id, or if a
+            ``subprompts_index.yml`` is malformed or lists a directory without
+            ``base/``.
     """
     root = features_dir or default_features_dir()
     shared_root = root.parent / "shared"
@@ -99,6 +126,11 @@ def discover_feature_prompts(features_dir: Path | None = None) -> None:
                 register_prompt_root(
                     f"{feature_dir.parent.name}/{feature_dir.name}", prompts_dir
                 )
+                subprompts = read_subprompts_index(prompts_dir)
+                for prompt_id, prompt_dir in subprompts.items():
+                    register_prompt_root(prompt_id, prompt_dir)
+                if subprompts:
+                    _NESTED_PROMPT_ROOTS[prompts_dir] = tuple(subprompts.values())
 
     if shared_root.is_dir():
         for shared_dir in sorted(shared_root.glob("*")):

@@ -11,7 +11,12 @@ from duo_workflow_service.agent_platform.serving_surface import (
     ServingSurface,
     collect_serving_surfaces,
 )
-from tests.prompts.prompt_dirs import REPO_ROOT, feature_prompt_dirs, version_files
+from tests.prompts.prompt_dirs import (
+    REPO_ROOT,
+    feature_dir_of,
+    feature_prompt_dirs,
+    version_files,
+)
 
 _DECLARATION = (
     "from duo_workflow_service.agent_platform.serving_surface import ServingSurface\n"
@@ -186,21 +191,22 @@ class TestFeaturesThatDeclareModelsFrom:
         self,
     ):
         surfaces = collect_serving_surfaces()
-        feature_dirs = {
-            prompts_dir.parent
-            for prompts_dir in feature_prompt_dirs().values()
-            if prompts_dir.is_relative_to(REPO_ROOT / "ai" / "features")
-        }
+        prompt_dirs_by_feature: dict[Path, set[Path]] = {}
+        for prompts_dir in feature_prompt_dirs().values():
+            if prompts_dir.is_relative_to(REPO_ROOT / "ai" / "features"):
+                prompt_dirs_by_feature.setdefault(
+                    feature_dir_of(prompts_dir), set()
+                ).add(prompts_dir)
 
         undeclared = sorted(
             str(feature_dir.relative_to(REPO_ROOT))
-            for feature_dir in feature_dirs
-            if self._declares_models_from(feature_dir / "prompts")
+            for feature_dir, prompt_dirs in prompt_dirs_by_feature.items()
+            if any(self._declares_models_from(d) for d in prompt_dirs)
             and ServingSurface(transport="rest", deployable="aigw")
             not in surfaces.get(feature_dir.name, [])
         )
 
-        assert feature_dirs
+        assert prompt_dirs_by_feature
         assert not undeclared, (
             "These features declare `models_from` but their `serving.py` does not declare "
             f"`ServingSurface(transport='rest', deployable='aigw')`: {undeclared}"

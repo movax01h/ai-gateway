@@ -2,6 +2,8 @@ import json
 import os
 from pathlib import Path
 
+from lib.subprompts_index import read_subprompts_index
+
 
 def get_yaml_versions(directory):
     versions = []
@@ -65,6 +67,8 @@ if __name__ == "__main__":
         if prompts.is_dir()
         and prompts.parent.parent.name not in target_features_with_subfeatures
     }
+    for prompts in sorted(Path("ai/features").glob("*/*/prompts")):
+        FEATURE_PROMPT_ROOTS.update(read_subprompts_index(prompts))
     feature_models = {}
 
     all_features = [

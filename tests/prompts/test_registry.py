@@ -40,6 +40,7 @@ from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from tests.prompts.prompt_dirs import (
     FEATURE_SETTINGS_THAT_RAILS_SENDS,
     REPO_ROOT,
+    feature_prompt_dirs,
     prompt_dir,
     prompt_ids_by_dir,
     version_files,
@@ -1957,7 +1958,6 @@ class TestDuoAgentPlatformPromptRegistration:
     _definitions_dir = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"
     )
-    _features_dir = Path(__file__).parent.parent.parent / "ai" / "features"
     _unit_primitives_path = (
         Path(__file__).parent.parent.parent
         / "ai_gateway"
@@ -1986,15 +1986,15 @@ class TestDuoAgentPlatformPromptRegistration:
                 content = yaml.safe_load(f)
             if content and content.get("unit_primitive") == "duo_agent_platform":
                 prompt_ids.append(str(prompt_id_with_family.parent))
-        # Moved features keep their flat id; scan their prompts/ roots too.
-        for base_dir in sorted(self._features_dir.glob("*/*/prompts/base")):
-            yml_files = sorted(base_dir.glob("*.yml"))
-            if not yml_files:
+        # Moved prompts keep their flat id; skip the <domain>/<feature> alias of each.
+        for prompt_id, prompts_dir in sorted(feature_prompt_dirs().items()):
+            yml_files = sorted((prompts_dir / "base").glob("*.yml"))
+            if "/" in prompt_id or not yml_files:
                 continue
             with open(yml_files[0]) as f:
                 content = yaml.safe_load(f)
             if content and content.get("unit_primitive") == "duo_agent_platform":
-                prompt_ids.append(base_dir.parent.parent.name)
+                prompt_ids.append(prompt_id)
         return prompt_ids
 
     def test_direct_http_prompts_are_registered(self) -> None:

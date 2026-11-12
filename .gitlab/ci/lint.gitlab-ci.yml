@@ -104,6 +104,7 @@ lint:include_names:
         - "ai/features/**/prompts/**/*"
         - "ai/shared/**/prompts/**/*"
         - "ai_gateway/prompts/feature_roots.py"
+        - "lib/subprompts_index.py"
         - "scripts/check_include_names.py"
   script:
     - BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"

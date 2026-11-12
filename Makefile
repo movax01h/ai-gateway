@@ -256,7 +256,7 @@ check-legacy-roots:
 INCLUDE_NAMES_BASE ?=
 .PHONY: check-include-names
 check-include-names:
-	@poetry run python scripts/check_include_names.py $(if $(INCLUDE_NAMES_BASE),--base $(INCLUDE_NAMES_BASE))
+	@poetry run python -m scripts.check_include_names $(if $(INCLUDE_NAMES_BASE),--base $(INCLUDE_NAMES_BASE))
 
 .PHONY: install-test-deps
 install-test-deps:

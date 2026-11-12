@@ -14,9 +14,12 @@ from ai_gateway.prompts.registry import LocalPromptRegistry
 def restore_feature_roots():
     """Keep the module-global feature-root registry isolated per test."""
     saved = dict(feature_roots._FEATURE_PROMPT_ROOTS)
+    saved_nested = dict(feature_roots._NESTED_PROMPT_ROOTS)
     yield
     feature_roots._FEATURE_PROMPT_ROOTS.clear()
     feature_roots._FEATURE_PROMPT_ROOTS.update(saved)
+    feature_roots._NESTED_PROMPT_ROOTS.clear()
+    feature_roots._NESTED_PROMPT_ROOTS.update(saved_nested)
 
 
 def _make_registry() -> LocalPromptRegistry:
@@ -46,6 +49,16 @@ def _write_prompts(prompts: Path, prompt_id: str) -> Path:
 
 def _write_moved_feature(features_dir: Path, domain: str, feature: str) -> Path:
     return _write_prompts(features_dir / domain / feature / "prompts", feature)
+
+
+def _write_flow_with_subprompts(features_dir: Path) -> Path:
+    prompts = features_dir / "insights" / "my_flow" / "prompts"
+    _write_prompts(prompts / "fetch", "my_flow_fetch")
+    _write_prompts(prompts / "summarize", "my_flow_summarize")
+    (prompts / "subprompts_index.yml").write_text(
+        "my_flow_fetch: fetch\nmy_flow_summarize: summarize\n"
+    )
+    return prompts
 
 
 class TestDiscovery:
@@ -115,6 +128,101 @@ class TestDiscovery:
 
         assert feature_roots.feature_prompt_root("with_prompts") is not None
         assert feature_roots.feature_prompt_root("flow_only") is None
+
+
+class TestSubpromptsIndex:
+    def test_registers_each_listed_prompt(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        prompts = _write_flow_with_subprompts(features)
+
+        feature_roots.discover_feature_prompts(features)
+
+        assert feature_roots.feature_prompt_root("my_flow_fetch") == prompts / "fetch"
+        assert feature_roots.feature_prompt_root("my_flow_summarize") == (
+            prompts / "summarize"
+        )
+        # The feature's own prompts/ still registers, so my_flow/common/... resolves.
+        assert feature_roots.feature_prompt_root("my_flow") == prompts
+        assert feature_roots.feature_prompt_root("insights/my_flow") == prompts
+
+    def test_unlisted_directory_with_base_is_not_registered(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        prompts = _write_flow_with_subprompts(features)
+        (prompts / "common" / "base").mkdir(parents=True)
+
+        feature_roots.discover_feature_prompts(features)
+
+        assert feature_roots.feature_prompt_root("my_flow_common") is None
+        assert feature_roots.feature_prompt_root("common") is None
+
+    def test_listed_directory_without_base_fails_discovery(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        prompts = _write_flow_with_subprompts(features)
+        (prompts / "subprompts_index.yml").write_text("my_flow_missing: missing\n")
+
+        with pytest.raises(ValueError, match="'my_flow_missing' lists"):
+            feature_roots.discover_feature_prompts(features)
+
+    def test_malformed_index_fails_discovery(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        prompts = _write_flow_with_subprompts(features)
+        (prompts / "subprompts_index.yml").write_text("my_flow/fetch: fetch\n")
+
+        with pytest.raises(ValueError, match=r"subprompts_index\.yml:1: expected"):
+            feature_roots.discover_feature_prompts(features)
+
+    def test_listed_id_colliding_with_a_feature_fails_discovery(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        _write_flow_with_subprompts(features)
+        _write_moved_feature(features, "cli", "my_flow_fetch")
+
+        with pytest.raises(
+            ValueError, match="Duplicate prompt feature id 'my_flow_fetch'"
+        ):
+            feature_roots.discover_feature_prompts(features)
+
+    def test_resolves_listed_prompt_and_its_includes(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        prompts = _write_flow_with_subprompts(features)
+        feature_roots.discover_feature_prompts(features)
+
+        assert _make_registry()._resolve_id("my_flow_fetch", family=[]) == (
+            prompts / "fetch" / "base"
+        )
+        rendered = base.jinja_env.from_string(
+            "{% include 'my_flow_fetch/system/1.0.0.jinja' %}"
+        ).render(target="world")
+        assert rendered == "Hello world"
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "my_flow/fetch/system/1.0.0.jinja",
+            "insights/my_flow/fetch/system/1.0.0.jinja",
+            "my_flow/fetch/../fetch/system/1.0.0.jinja",
+        ],
+    )
+    def test_listed_prompt_files_do_not_resolve_under_the_feature_id(
+        self, tmp_path: Path, template: str
+    ):
+        features = tmp_path / "ai" / "features"
+        _write_flow_with_subprompts(features)
+        feature_roots.discover_feature_prompts(features)
+
+        with pytest.raises(TemplateNotFound):
+            base.FeatureRootLoader().get_source(base.jinja_env, template)
+
+    def test_unlisted_files_still_resolve_under_the_feature_id(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        prompts = _write_flow_with_subprompts(features)
+        (prompts / "common").mkdir()
+        (prompts / "common" / "1.0.0.jinja").write_text("Common {{ target }}")
+        feature_roots.discover_feature_prompts(features)
+
+        rendered = base.jinja_env.from_string(
+            "{% include 'my_flow/common/1.0.0.jinja' %}"
+        ).render(target="part")
+        assert rendered == "Common part"
 
 
 class TestResolveId:
