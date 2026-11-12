@@ -6,7 +6,7 @@ index 13128a1c1..510742850 100644
  from anthropic import APIStatusError
  from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
  
-+from ai_gateway.app import get_config
++from ai_gateway.config import get_config
  from duo_workflow_service.agents.prompt_adapter import BasePromptAdapter
  from duo_workflow_service.components.tools_registry import ToolsRegistry
  from duo_workflow_service.entities.state import (
