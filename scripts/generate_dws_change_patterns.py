@@ -10,6 +10,7 @@ HEADER_TEXT = """# Dependencies for Duo Workflow Service. Extended tests are run
     - tests/duo_workflow_service/**/*
     - contract/**/*
     - pyproject.toml
+    - ai/apps/dws/**/*
     - ai/features/code/developer/**/*
     - ai/features/code/developer_agent_prompt/**/*
     - ai/features/code/local_code_review/**/*
