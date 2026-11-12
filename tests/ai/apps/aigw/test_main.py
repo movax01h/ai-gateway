@@ -1,11 +1,13 @@
-"""Tests for ai_gateway.main.run_app."""
+"""Tests for ai.apps.aigw.main.run_app."""
 
+import importlib
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ai.apps.aigw.app import get_app
+from ai.apps.aigw.main import run_app
 from ai_gateway.config import ConfigFastApi, ConfigTLS
-from ai_gateway.main import run_app
 
 
 def _make_config(tls_enabled: bool, cert_file=None, key_file=None, ssl_ciphers=""):
@@ -26,8 +28,8 @@ def _make_config(tls_enabled: bool, cert_file=None, key_file=None, ssl_ciphers="
 
 
 class TestRunAppTLS:
-    @patch("ai_gateway.main.uvicorn.run")
-    @patch("ai_gateway.main.get_config")
+    @patch("ai.apps.aigw.main.uvicorn.run")
+    @patch("ai.apps.aigw.main.get_config")
     def test_tls_disabled_does_not_pass_ssl_kwargs(
         self, mock_get_config, mock_uvicorn_run
     ):
@@ -40,8 +42,8 @@ class TestRunAppTLS:
         assert kwargs["ssl_keyfile"] is None
         assert kwargs["ssl_ciphers"] == "TLSv1"
 
-    @patch("ai_gateway.main.uvicorn.run")
-    @patch("ai_gateway.main.get_config")
+    @patch("ai.apps.aigw.main.uvicorn.run")
+    @patch("ai.apps.aigw.main.get_config")
     def test_tls_enabled_passes_ssl_kwargs(
         self, mock_get_config, mock_uvicorn_run, tmp_path
     ):
@@ -66,8 +68,8 @@ class TestRunAppTLS:
 
 
 class TestRunAppValidation:
-    @patch("ai_gateway.main.uvicorn.run")
-    @patch("ai_gateway.main.get_config")
+    @patch("ai.apps.aigw.main.uvicorn.run")
+    @patch("ai.apps.aigw.main.get_config")
     def test_validates_config_before_starting_server(
         self, mock_get_config, mock_uvicorn_run
     ):
@@ -79,8 +81,8 @@ class TestRunAppValidation:
         config.validate_required.assert_called_once_with()
         mock_uvicorn_run.assert_called_once()
 
-    @patch("ai_gateway.main.uvicorn.run")
-    @patch("ai_gateway.main.get_config")
+    @patch("ai.apps.aigw.main.uvicorn.run")
+    @patch("ai.apps.aigw.main.get_config")
     def test_does_not_start_server_when_validation_fails(
         self, mock_get_config, mock_uvicorn_run
     ):
@@ -92,3 +94,14 @@ class TestRunAppValidation:
             run_app()
 
         mock_uvicorn_run.assert_not_called()
+
+
+@patch("ai.apps.aigw.main.uvicorn.run")
+@patch("ai.apps.aigw.main.get_config")
+def test_app_factory_path_resolves(mock_get_config, mock_uvicorn_run):
+    mock_get_config.return_value = _make_config(tls_enabled=False)
+
+    run_app()
+
+    module_name, attribute = mock_uvicorn_run.call_args.args[0].split(":")
+    assert getattr(importlib.import_module(module_name), attribute) is get_app

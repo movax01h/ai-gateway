@@ -177,7 +177,7 @@ async def validate_cloud_connector_ready(
     """Always pass for Self-Hosted-Models.
 
     With custom models enabled, the auth provider skips CustomersDot unless `customer_portal_url` is set explicitly
-    (see `ai_gateway.api.server`). The probe still passes without prefetching keys, so a key source that is unreachable
+    (see `ai.apps.aigw.server`). The probe still passes without prefetching keys, so a key source that is unreachable
     at probe time does not take a self-hosted gateway out of service; keys are fetched on the first authenticated
     request instead.
     """

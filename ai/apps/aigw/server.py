@@ -85,7 +85,7 @@ CONTAINER_APPLICATION_MODULES = [
     "ai_gateway.api.v3.code.completions",
     "ai_gateway.api.v4.code.suggestions",
     "ai_gateway.code_suggestions.handler",
-    "ai_gateway.api.server",
+    "ai.apps.aigw.server",
     "ai_gateway.api.monitoring",
     "ai_gateway.async_dependency_resolver",
     "ai_gateway.api.middleware.route.usage_quota",

@@ -2,7 +2,7 @@ from logging.config import dictConfig
 
 from fastapi import FastAPI
 
-from ai_gateway.api import create_fast_api_server
+from ai.apps.aigw.server import create_fast_api_server
 from ai_gateway.config import get_config
 from ai_gateway.prometheus import start_metrics_server
 from ai_gateway.structured_logging import setup_logging

@@ -78,4 +78,4 @@ Find the `Request body exceeds limit` warning for the request, then the drain li
 
 Look at the `path` and `max_bytes` of the `Request body exceeds limit` warnings. If the limit is too low for a route,
 increase `AIGW_REQUEST_BODY_LIMIT__MAX_BYTES`. The 600,000-byte limit on the code suggestion routes is set in the
-code, in `ai_gateway/api/server.py`.
+code, in `ai/apps/aigw/server.py`.

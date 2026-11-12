@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import FastAPI
 
-from ai_gateway.app import get_app, get_config
+from ai.apps.aigw.app import get_app, get_config
 from ai_gateway.config import Config, ConfigFastApi
 
 
@@ -22,11 +22,11 @@ class TestGetAppMockUsageQuotaServer:
     @pytest.fixture(name="mock_app_dependencies")
     def mock_app_dependencies_fixture(self):
         with (
-            patch("ai_gateway.app.config") as mock_config,
+            patch("ai.apps.aigw.app.config") as mock_config,
             patch("lib.usage_quota.mock_server.start_mock_server") as mock_start,
-            patch("ai_gateway.app.create_fast_api_server") as mock_create,
-            patch("ai_gateway.app.setup_logging"),
-            patch("ai_gateway.app.start_metrics_server"),
+            patch("ai.apps.aigw.app.create_fast_api_server") as mock_create,
+            patch("ai.apps.aigw.app.setup_logging"),
+            patch("ai.apps.aigw.app.start_metrics_server"),
         ):
             mock_create.return_value = FastAPI()
 

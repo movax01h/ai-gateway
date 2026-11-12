@@ -12,8 +12,8 @@ authors = [{ name = "GitLab Engineering", email = "engineering@gitlab.com" }]
 readme = "README.md"
 
 [project.scripts]
-ai_gateway = "ai_gateway.main:run_app"
-ai-gateway = "ai_gateway.main:run_app"
+ai_gateway = "ai.apps.aigw.main:run_app"
+ai-gateway = "ai.apps.aigw.main:run_app"
 validate-model-selection-config = "ai_gateway.model_selection:validate_model_selection_config"
 index_docs = "ai_gateway.scripts.index_docs_as_sqlite:build_indexed_docs"
 troubleshoot = "ai_gateway.scripts.troubleshoot_selfhosted_installation:troubleshoot"

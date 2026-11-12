@@ -28,7 +28,7 @@ def run_app():
 
     # For now, trust all IPs for proxy headers until https://github.com/encode/uvicorn/pull/1611 is available.
     uvicorn.run(
-        "ai_gateway.app:get_app",
+        "ai.apps.aigw.app:get_app",
         host=config.fastapi.api_host,
         port=config.fastapi.api_port,
         log_config=config.fastapi.uvicorn_logger,
