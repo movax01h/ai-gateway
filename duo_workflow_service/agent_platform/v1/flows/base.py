@@ -38,6 +38,7 @@ from duo_workflow_service.agent_platform.v1.flows.inputs import (
 )
 from duo_workflow_service.agent_platform.v1.state import FlowState
 from duo_workflow_service.agent_platform.v1.state.base import FlowEvent, FlowEventType
+from duo_workflow_service.checkpointer.content_retention import ERROR_NOTICE_ID_PREFIX
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     TOP_LEVEL_CHECKPOINT_NS,
     GitLabWorkflow,
@@ -121,21 +122,26 @@ async def persist_error_to_ui_chat_log(
         error: The exception that caused the failure, used to extract a safe
             user-facing message when available.
     """
+    # Only text the service writes itself is marked as a notice, which metadata-only
+    # sessions still show; any branch that does not opt in keeps the plain prefix.
+    message_id_prefix = "error-"
     if isinstance(error, NotifiableAgentException):
         error_message = error.ui_message
+        message_id_prefix = ERROR_NOTICE_ID_PREFIX
     elif isinstance(error, ValueError):
         error_str = str(error)
         error_message = GENERIC_WORKFLOW_ERROR_MESSAGE + f"\n```\n{error_str}\n```"
     else:
         typestr = type(error).__name__
         error_message = GENERIC_WORKFLOW_ERROR_MESSAGE + f"\n```\nError: {typestr}\n```"
+        message_id_prefix = ERROR_NOTICE_ID_PREFIX
 
     error_log = UiChatLog(
         message_type=MessageTypeEnum.AGENT,
         message_sub_type=None,
         content=error_message,
         timestamp=datetime.now(timezone.utc).isoformat(),
-        message_id=f"error-{uuid4()!s}",
+        message_id=f"{message_id_prefix}{uuid4()!s}",
         status=ToolStatus.FAILURE,
         correlation_id=None,
         tool_info=None,

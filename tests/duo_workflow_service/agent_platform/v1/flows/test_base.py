@@ -47,6 +47,10 @@ from duo_workflow_service.agent_platform.v1.flows.flow_config import (
 from duo_workflow_service.agent_platform.v1.flows.inputs import CANCELLED_TURN_CATEGORY
 from duo_workflow_service.agent_platform.v1.routers.router import Router
 from duo_workflow_service.agent_platform.v1.state.base import FlowEventType
+from duo_workflow_service.checkpointer.content_retention import (
+    ERROR_NOTICE_ID_PREFIX,
+    reduce_ui_chat_log_entry,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow import (
     GitLabWorkflow,
     WorkflowStatusEventEnum,
@@ -1664,6 +1668,47 @@ class TestFlow:  # pylint: disable=too-many-public-methods
         assert ui_chat_log[0] == {**pending, "status": ToolStatus.FAILURE}
         assert ui_chat_log[1] == done
         assert pending["status"] == ToolStatus.PENDING
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error",
+        [RuntimeError("boom"), NotifiableAgentException("Safe message for user")],
+        ids=["generic_message", "notifiable_agent_exception"],
+    )
+    async def test_handle_workflow_failure_marks_fixed_text_as_notice(
+        self, flow_instance, error
+    ):
+        """Fixed failure text is marked as a notice that metadata-only sessions still show."""
+        notifier = MagicMock()
+        notifier.ui_chat_log = []
+        flow_instance.checkpoint_notifier = notifier
+        graph = AsyncMock()
+
+        await flow_instance._handle_workflow_failure(error, graph, {})
+
+        error_entry = graph.aupdate_state.call_args[0][1]["ui_chat_log"].value[0]
+        assert error_entry["message_id"].startswith(ERROR_NOTICE_ID_PREFIX)
+        reduced = reduce_ui_chat_log_entry(error_entry)
+        assert reduced["content"] == error_entry["content"]
+
+    @pytest.mark.asyncio
+    async def test_handle_workflow_failure_run_text_is_not_marked_as_notice(
+        self, flow_instance
+    ):
+        """Text that comes from the run keeps the plain id prefix and is blanked."""
+        notifier = MagicMock()
+        notifier.ui_chat_log = []
+        flow_instance.checkpoint_notifier = notifier
+        graph = AsyncMock()
+
+        await flow_instance._handle_workflow_failure(
+            ValueError("text from the run"), graph, {}
+        )
+
+        error_entry = graph.aupdate_state.call_args[0][1]["ui_chat_log"].value[0]
+        assert error_entry["message_id"].startswith("error-")
+        assert not error_entry["message_id"].startswith(ERROR_NOTICE_ID_PREFIX)
+        assert reduce_ui_chat_log_entry(error_entry)["content"] == ""
 
     @pytest.mark.asyncio
     async def test_handle_workflow_failure_does_not_leak_details(self, flow_instance):

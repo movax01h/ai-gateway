@@ -30,6 +30,10 @@ from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent
+from duo_workflow_service.checkpointer.content_retention import (
+    ERROR_NOTICE_ID_PREFIX,
+    reduce_ui_chat_log_entry,
+)
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     WorkflowStatusEventEnum,
 )
@@ -1718,6 +1722,46 @@ async def test_handle_compile_and_run_exception_flushes_notifier(workflow, error
         await workflow._handle_compile_and_run_exception(error, MagicMock(), {})
 
     workflow.checkpoint_notifier.flush_deferred_checkpoint.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [Exception("boom"), NotifiableAgentException("Safe message for user")],
+    ids=["generic_message", "notifiable_agent_exception"],
+)
+async def test_handle_compile_and_run_exception_marks_fixed_text_as_notice(
+    workflow, error
+):
+    """Fixed failure text is marked as a notice that metadata-only sessions still show."""
+    workflow.checkpoint_notifier = AsyncMock()
+
+    with pytest.raises(TraceableException):
+        await workflow._handle_compile_and_run_exception(error, MagicMock(), {})
+
+    state = workflow.checkpoint_notifier.send_event.call_args.kwargs["state"]
+    entry = state["ui_chat_log"][0]
+    assert entry["message_id"].startswith(ERROR_NOTICE_ID_PREFIX)
+    assert reduce_ui_chat_log_entry(entry)["content"] == entry["content"]
+
+
+@pytest.mark.asyncio
+async def test_handle_compile_and_run_exception_run_text_is_not_marked_as_notice(
+    workflow,
+):
+    """Text that comes from the run keeps the plain id prefix and is blanked."""
+    workflow.checkpoint_notifier = AsyncMock()
+
+    with pytest.raises(TraceableException):
+        await workflow._handle_compile_and_run_exception(
+            NotifiableException("Custom error message for user"), MagicMock(), {}
+        )
+
+    state = workflow.checkpoint_notifier.send_event.call_args.kwargs["state"]
+    entry = state["ui_chat_log"][0]
+    assert entry["message_id"].startswith("error-")
+    assert not entry["message_id"].startswith(ERROR_NOTICE_ID_PREFIX)
+    assert reduce_ui_chat_log_entry(entry)["content"] == ""
 
 
 @pytest.mark.asyncio
