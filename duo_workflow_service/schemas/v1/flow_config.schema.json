@@ -446,7 +446,8 @@
         "standard",
         "compaction_auto",
         "compaction_manual",
-        "decision"
+        "decision",
+        "web_search_agentcore"
       ],
       "title": "LLMOperationType",
       "type": "string"

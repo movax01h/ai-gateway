@@ -191,7 +191,12 @@ _TOOL_FIXTURE_ARGS: dict[str, dict[str, Any]] = {
         "target_files": "a.rb",
     },
     "bl_prioritize_and_cap": {"units": []},
-    "bl_collect_and_flatten": {"results": [], "emitted_count": 0},
+    "bl_collect_and_flatten": {
+        "results": [],
+        "succeeded": 0,
+        "failed": 0,
+        "emitted_count": 0,
+    },
     "bl_dedup_findings": {"batches": []},
 }
 
@@ -631,6 +636,15 @@ class TestResponseSchemas:
         assert TUNER_SCHEMA_ID not in _tool_names(_component("tuner")["toolset"])
         assert TUNER_SCHEMA_ID not in _registered_tools()
 
+    def test_every_collect_step_takes_its_fan_out_s_own_counts(self):
+        for stage in FAN_OUT_STAGES:
+            declared = {i["as"]: i for i in _component(f"{stage}_collect")["inputs"]}
+            inputs = {name: i["from"] for name, i in declared.items()}
+            assert inputs["succeeded"] == f"context:{stage}.succeeded"
+            assert inputs["failed"] == f"context:{stage}.failed"
+            assert not declared["succeeded"].get("optional")
+            assert not declared["failed"].get("optional")
+
     def test_only_triage_collect_merges_verdicts_onto_the_items_triage_judged(self):
         def verdict_items(name):
             inputs = _component(name)["inputs"]
@@ -779,7 +793,7 @@ class TestResponseSchemas:
         # The collect step publishes the flattened findings inline.
         out = asyncio.run(
             BlCollectAndFlatten(metadata=None)._execute(
-                results=[{"final_answer": answer}]
+                results=[{"final_answer": answer}], succeeded=1, failed=0
             )
         )
 

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.tools import ToolException
 
+from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.tools.search_system import (
     ExtractLinesFromText,
     ExtractLinesFromTextInput,
@@ -12,9 +13,19 @@ from duo_workflow_service.tools.search_system import (
     GrepLiteral,
     GrepLiteralInput,
 )
+from lib.context import language_server_version
+from lib.language_server import LanguageServerVersion
 from tests.duo_workflow_service.tools.conftest import (
     create_mock_client_event_with_response,
 )
+
+
+@pytest.fixture(name="lsp_version")
+def lsp_version_fixture(request):
+    version = request.param and LanguageServerVersion.from_string(request.param)
+    token = language_server_version.set(version)
+    yield
+    language_server_version.reset(token)
 
 
 class TestGrep:
@@ -187,6 +198,367 @@ class TestGrep:
 
         with pytest.raises(ToolException, match="ripgrep failed"):
             await grep_tool._arun(keywords="end")
+
+    @staticmethod
+    def _project(exclusion_rules):
+        return Project(
+            id=1,
+            name="test-project",
+            description="Test project",
+            http_url_to_repo="http://example.com/repo.git",
+            web_url="http://example.com/repo",
+            languages=[],
+            exclusion_rules=exclusion_rules,
+        )
+
+    def _setup_grep_tool_with_project(self, mock_response, exclusion_rules):
+        grep_tool = self._setup_grep_tool_with_mocks(mock_response)
+        grep_tool.metadata["project"] = self._project(exclusion_rules)
+        return grep_tool
+
+    # Shaped like the node executor's formatter (gitlab-lsp workflow_executor grep.ts).
+    snippet_output = (
+        "Found 4 matches across 4 files\n"
+        "src/app.py:3_4\n"
+        "token = load()\n"
+        "ratio = 1:16_9\n"
+        "secrets/key.pem:1_1\n"
+        "token: abc:12_30\n"
+        "docs/internal/notes.md:2_2\n"
+        "token here\n"
+        "lib/util.py:7_7\n"
+        "return token\n"
+    )
+    hidden_note = (
+        "Some matches are hidden by the project's file exclusion settings;"
+        " searching again will not return them.\n"
+    )
+    unfilterable = (
+        "Grep results from this client cannot be checked against the project's file exclusion"
+        " settings. Use find_files and read_file instead."
+    )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool_class", [Grep, GrepLiteral])
+    async def test_grep_drops_snippets_of_excluded_files(self, tool_class):
+        grep_tool = self._setup_grep_tool_with_mocks(self.snippet_output, tool_class)
+        grep_tool.metadata["project"] = self._project(["secrets/", "docs/internal/"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == (
+            "Found 4 matches across 4 files\n"
+            "src/app.py:3_4\n"
+            "token = load()\n"
+            "ratio = 1:16_9\n"
+            "lib/util.py:7_7\n"
+            "return token\n" + self.hidden_note
+        )
+
+    @pytest.mark.asyncio
+    async def test_grep_drops_default_exclusions_without_project_rules(self):
+        output = (
+            "Found 2 matches across 2 files\n"
+            ".gitlab/duo/flows.yml:1_1\n"
+            "token\n"
+            ".gitlab/ci.yml:2_2\n"
+            "token\n"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, None)
+
+        result = await grep_tool._arun(keywords="token", search_directory=".gitlab")
+
+        assert result == (
+            "Found 2 matches across 2 files\n.gitlab/ci.yml:2_2\ntoken\n"
+            + self.hidden_note
+        )
+
+    @pytest.mark.asyncio
+    async def test_grep_ends_a_snippet_only_where_the_executor_trimmed(self):
+        long_line = "x" * 5000 + "... (trimmed)"
+        output = (
+            "Found 3 matches across 3 files (showing first 2)\n"
+            f"secrets/a.pem:1_3\n{long_line}\n"
+            "src/b.py:4_5\n"
+            "log(... (trimmed)\n"
+            "ok\n"
+            "(Results truncated: showing 2 of 3 matches (1 hidden).)\n"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == (
+            "Found 3 matches across 3 files (showing first 2)\n"
+            "src/b.py:4_5\n"
+            "log(... (trimmed)\n"
+            "ok\n"
+            "(Results truncated: showing 2 of 3 matches (1 hidden).)\n"
+            + self.hidden_note
+        )
+
+    @pytest.mark.asyncio
+    async def test_grep_keeps_lines_ending_like_the_trim_note_as_content(self):
+        output = (
+            "Found 2 matches across 2 files\n"
+            "secrets/a.pem:1_3\n"
+            "log(... (trimmed)\n"
+            "SECRET=abc\n"
+            "more\n"
+            "src/b.py:4_4\n"
+            "ok\n"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == (
+            "Found 2 matches across 2 files\nsrc/b.py:4_4\nok\n" + self.hidden_note
+        )
+
+    @pytest.mark.asyncio
+    async def test_grep_handles_output_that_ends_inside_a_snippet(self):
+        output = (
+            "Found 2 matches across 2 files\nsrc/b.py:4_4\nok\nsecrets/a.pem:1_3\nkey"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == (
+            "Found 2 matches across 2 files\nsrc/b.py:4_4\nok\n" + self.hidden_note
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "output",
+        [
+            pytest.param("src/a.py:token\nconfig/x.secret:token", id="path_preview"),
+            pytest.param(
+                "src/a.py:1_5\nconfig/x.secret:token", id="path_preview_header_like"
+            ),
+            pytest.param(
+                "Snippet: config/x.secret?start_line=1&end_line=1\ntoken",
+                id="go_executor",
+            ),
+        ],
+    )
+    async def test_grep_refuses_other_formats_when_the_project_has_rules(self, output):
+        grep_tool = self._setup_grep_tool_with_project(output, ["*.secret"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == self.unfilterable
+
+    @pytest.mark.asyncio
+    async def test_grep_refuses_other_formats_that_name_a_default_exclusion(self):
+        grep_tool = self._setup_grep_tool_with_project(
+            "src/a.py:token\n.ssh/id_rsa:token", None
+        )
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == self.unfilterable
+
+    @pytest.mark.asyncio
+    async def test_grep_passes_no_matches_through_when_the_project_has_rules(self):
+        grep_tool = self._setup_grep_tool_with_project(
+            "No matches found.\n", ["secrets/"]
+        )
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == "No matches found.\n"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exclusion_rules", [None, []])
+    async def test_grep_without_exclusion_rules_keeps_non_sensitive_output(
+        self, exclusion_rules
+    ):
+        output = "Found 1 match across 1 file\nsrc/app.py:3_3\ntoken = load()\n"
+        grep_tool = self._setup_grep_tool_with_project(output, exclusion_rules)
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == output
+
+    @pytest.mark.parametrize(
+        "lsp_version", ["8.51.0", "8.60.0", "8.76.0"], indirect=True
+    )
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exclusion_rules", [None, []])
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "src/app.js:3_3\n// token here\n",
+            "src/app.ts:7_7\n  emit(...tokens)\n",
+            "src/app.rb:2_2\n  (1..token).each\n",
+        ],
+    )
+    async def test_grep_keeps_snippets_without_a_result_header(
+        self, lsp_version, output, exclusion_rules
+    ):
+        grep_tool = self._setup_grep_tool_with_project(output, exclusion_rules)
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == output
+
+    @pytest.mark.parametrize(
+        "lsp_version", ["8.51.0", "8.60.0", "8.76.0"], indirect=True
+    )
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "output,expected",
+        [
+            pytest.param(
+                "src/app.js:3_3\nconst token = 1\nsecrets/key.pem:1_1\ntoken=abc\n",
+                "src/app.js:3_3\nconst token = 1\n",
+                id="some_hidden",
+            ),
+            pytest.param("secrets/key.pem:1_1\ntoken=abc\n", "", id="all_hidden"),
+        ],
+    )
+    async def test_grep_drops_excluded_snippets_without_a_result_header(
+        self, lsp_version, output, expected
+    ):
+        grep_tool = self._setup_grep_tool_with_project(output, ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == expected + self.hidden_note
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("lsp_version", [None, "8.50.0"], indirect=True)
+    @pytest.mark.parametrize(
+        "output,exclusion_rules",
+        [
+            ("cfg/app.yml:  timeout:30_000\nsecrets/key.pem:token=abc\n", ["secrets/"]),
+            ("src/a.py:1_000\nsecrets/key.pem:token=abc\n", ["secrets/"]),
+            ("src/a.py:2_5\nsecrets/key.pem:token=abc\n", ["secrets/"]),
+            ("src/a.py:1_000\n.ssh/id_rsa:token\n", None),
+            ("src/a.py:1_1\nhome/.ssh/id_rsa:token", None),
+            ("src/a.py:1_1\nhome/.ssh/id_rsa:token\n", None),
+            ("a.txt:x:1_1\nconfig/x.secret:token\n", ["*.secret"]),
+            (
+                "Found 1 match across 1 file:token\n"
+                "Found 1 match across 1 file:token:1_99999\n"
+                "secrets/key.pem:token=abc\n",
+                ["secrets/"],
+            ),
+        ],
+    )
+    async def test_grep_refuses_match_rows_that_look_like_a_snippet_header(
+        self, lsp_version, output, exclusion_rules
+    ):
+        grep_tool = self._setup_grep_tool_with_project(output, exclusion_rules)
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == self.unfilterable
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("lsp_version", [None, "8.77.0", "8.80.0"], indirect=True)
+    async def test_grep_refuses_headerless_snippets_from_other_clients(
+        self, lsp_version
+    ):
+        grep_tool = self._setup_grep_tool_with_project(
+            "src/app.js:3_3\nconst token = 1\n", ["secrets/"]
+        )
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == self.unfilterable
+
+    @pytest.mark.parametrize("lsp_version", ["8.60.0"], indirect=True)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "output",
+        [
+            pytest.param(
+                "Found 2 matches across 2 files\nsrc/a.py:1_1\nok\nconfig/x.secret:token\n",
+                id="result_header",
+            ),
+            pytest.param("src/a.py:1_1\nok\nconfig/x.secret:token\n", id="headerless"),
+            pytest.param(
+                "a.txt:x:1_1\nsrc/b.py:token\nconfig/x.secret:token\n",
+                id="match_rows_with_a_header_like_first_row",
+            ),
+            pytest.param(
+                "Found 2 matches across 2 files\nsrc/a.py:1_1\nok\n\nconfig/x.secret:token\n",
+                id="empty_line_between_snippets",
+            ),
+            pytest.param(
+                "Found 2 matches across 2 files (showing first 1)\nsrc/a.py:1_1\nok\n"
+                "(Results truncated: showing 1 of 2 matches (1 hidden).)\nconfig/x.secret:token\n",
+                id="lines_after_the_truncation_footer",
+            ),
+            pytest.param(
+                "src/a.py:1_1\nok\n(Results truncated: showing 1 of 2 matches (1 hidden).)\n",
+                id="truncation_footer_without_a_result_header",
+            ),
+        ],
+    )
+    async def test_grep_refuses_lines_outside_snippet_blocks(self, lsp_version, output):
+        grep_tool = self._setup_grep_tool_with_project(output, ["*.secret"])
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == self.unfilterable
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exclusion_rules", [None, ["secrets/"]])
+    async def test_grep_keeps_the_truncation_footer_after_the_last_snippet(
+        self, exclusion_rules
+    ):
+        output = (
+            "Found 2 matches across 2 files (showing first 1)\nsrc/a.py:1_1\nok\n"
+            "(Results truncated: showing 1 of 2 matches (1 hidden).)\n"
+        )
+        grep_tool = self._setup_grep_tool_with_project(output, exclusion_rules)
+
+        result = await grep_tool._arun(keywords="token")
+
+        assert result == output
+
+    @pytest.mark.asyncio
+    async def test_grep_refuses_an_absolute_search_directory(self):
+        grep_tool = self._setup_grep_tool_with_project("unused", None)
+
+        with pytest.raises(ToolException):
+            await grep_tool._arun(keywords="token", search_directory="/etc")
+
+        grep_tool.metadata[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_grep_searches_the_root_when_no_directory_is_given(self):
+        grep_tool = self._setup_grep_tool_with_project("No matches found.\n", None)
+
+        result = await grep_tool._arun(keywords="token", search_directory=None)
+
+        assert result == "No matches found.\n"
+
+    @pytest.mark.asyncio
+    async def test_grep_refuses_an_excluded_search_directory(self):
+        grep_tool = self._setup_grep_tool_with_project("unused", ["secrets/"])
+
+        result = await grep_tool._arun(keywords="token", search_directory="secrets")
+
+        assert result == (
+            "Files excluded due to policy, continue without files:\nsecrets"
+        )
+        grep_tool.metadata[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_grep_refuses_a_sensitive_search_directory(self):
+        grep_tool = self._setup_grep_tool_with_project("unused", None)
+
+        with pytest.raises(ToolException, match="Duo Context Exclusion"):
+            await grep_tool._arun(keywords="token", search_directory=".ssh")
 
     @pytest.mark.asyncio
     async def test_grep_security_check(self):

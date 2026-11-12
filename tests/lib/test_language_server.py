@@ -76,6 +76,20 @@ class TestLanguageServer:
         )
 
     @pytest.mark.parametrize(
+        ("semver", "supports_upload_owner_urls"),
+        [
+            (None, False),
+            ("10.1.9", False),
+            ("10.2.0-beta.1", False),
+            ("10.2.0", True),
+            ("10.3.0", True),
+        ],
+    )
+    async def test_supports_upload_owner_urls(self, semver, supports_upload_owner_urls):
+        subject = LanguageServerVersion.from_string(semver)
+        assert subject.supports_upload_owner_urls() == supports_upload_owner_urls
+
+    @pytest.mark.parametrize(
         ("semver", "ignore_broken_flow_schema_version"),
         [
             (None, True),

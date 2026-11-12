@@ -13,6 +13,11 @@ def workflow_global_id(workflow_id: str) -> str:
     return f"gid://gitlab/Ai::DuoWorkflows::Workflow/{workflow_id}"
 
 
+def project_global_id(project_id: int) -> str:
+    """Build a GitLab global ID for a project."""
+    return f"gid://gitlab/Project/{project_id}"
+
+
 class Language(TypedDict):
     name: str
     share: float
@@ -76,6 +81,7 @@ class WorkflowConfig(TypedDict):
     stalled: bool
     features: NotRequired[WorkflowFeatures]
     source_type: NotRequired[Optional[str]]
+    tool_access_policies: NotRequired[Optional[dict]]
 
 
 def _group_allows_web_search(project_data: dict, namespace_data: dict) -> bool:
@@ -93,12 +99,33 @@ def _group_allows_web_search(project_data: dict, namespace_data: dict) -> bool:
     return False
 
 
+def _web_search_allowed(
+    workflow: dict, project_data: dict, namespace_data: dict
+) -> bool:
+    """Web-search grant as resolved by GitLab, else the top-level group setting.
+
+    GitLab >= 19.6 resolves webSearchAllowed (the instance setting outside GitLab.com); older versions strip it to None.
+    """
+    allowed = workflow.get("webSearchAllowed")
+    if allowed is not None:
+        return allowed
+
+    return _group_allows_web_search(project_data, namespace_data)
+
+
 async def fetch_workflow_and_container_data(
-    client: GitlabHttpClient, workflow_id: str
+    client: GitlabHttpClient,
+    workflow_id: str,
+    tool_access_policies_project_id: Optional[int] = None,
+    with_tool_access_policies: bool = False,
 ) -> Tuple[Project | None, Namespace | None, WorkflowConfig]:
     query = fetch_query_for_version(gitlab_version.get())
 
-    variables = {"workflowId": workflow_global_id(workflow_id)}
+    variables: dict = {"workflowId": workflow_global_id(workflow_id)}
+    if with_tool_access_policies:
+        variables["withToolAccessPolicies"] = True
+        if tool_access_policies_project_id:
+            variables["projectId"] = project_global_id(tool_access_policies_project_id)
 
     try:
         response = await client.graphql(query, variables)
@@ -200,8 +227,8 @@ async def fetch_workflow_and_container_data(
         ),
         allow_agent_to_request_user=workflow.get("allowAgentToRequestUser", False),
         web_search_enabled=workflow.get("webSearchEnabled", False),
-        web_search_allowed_for_group=_group_allows_web_search(
-            project_data, namespace_data
+        web_search_allowed_for_group=_web_search_allowed(
+            workflow, project_data, namespace_data
         ),
         first_checkpoint=workflow.get("firstCheckpoint", None),
         latest_checkpoint=workflow.get("latestCheckpoint", None),
@@ -210,6 +237,7 @@ async def fetch_workflow_and_container_data(
         archived=workflow.get("archived", None),
         stalled=workflow.get("stalled", None),
         source_type=source_type,
+        tool_access_policies=workflow.get("toolAccessPolicies"),
         features={
             "foundational_flows": {
                 "enabled": status_check.get("foundationalFlowsEnabled", True),

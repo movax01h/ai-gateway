@@ -45,7 +45,7 @@ from ai_gateway.model_selection.types import (
     DevConfig,
     FeatureDeprecatedModel,
 )
-from lib.context.model import restricted_access_ctx
+from lib.context.model import paid_credit_models_allowed_ctx, restricted_access_ctx
 from lib.feature_flags import FeatureFlag, is_feature_enabled
 
 log = structlog.stdlib.get_logger(__name__)
@@ -58,8 +58,18 @@ class RestrictedModelAccessError(Exception):
     another model silently, and a denial must never be swallowed that way.
     """
 
+    def __init__(self, message: str = "Model not available for this flow") -> None:
+        super().__init__(message)
+
+
+class PaidCreditsModelAccessError(RestrictedModelAccessError):
+    """A model marked requires_paid_credits was requested by a trial without purchased credits.
+
+    A RestrictedModelAccessError, so every handler that reports a restricted model denial reports this one the same way.
+    """
+
     def __init__(self) -> None:
-        super().__init__("Model not available for this flow")
+        super().__init__("Model requires purchased GitLab Credits")
 
 
 def _safe_error_details(exc: Exception) -> list[dict]:
@@ -231,6 +241,19 @@ def _match_identifier(definition: LLMDefinition) -> Optional[str]:
 
     # Bedrock entries include the provider in `params.model`, Vertex entries do not.
     return f"{provider}/{model.removeprefix(f'{provider}/')}"
+
+
+def _definition_matches(
+    llm_def: LLMDefinition, ids: set[str], model_strings: list[str]
+) -> bool:
+    """Whether ``ids`` or ``model_strings`` name ``llm_def``; see restricted_flows_for."""
+    if llm_def.gitlab_identifier in ids:
+        return True
+    model = (llm_def.params.model or "").lower()
+    return bool(model) and any(
+        re.search(rf"(?:^|[/.:@]){re.escape(model)}(?=$|[@:_-])", m)
+        for m in model_strings
+    )
 
 
 def _build_match_index(
@@ -699,6 +722,30 @@ class ModelSelectionConfig:
             ]
         return []
 
+    def _validate_paid_credit_models(
+        self,
+        unit_primitive_configs: Iterable[UnitPrimitiveConfig],
+        models: dict[str, LLMDefinition],
+    ) -> list[str]:
+        paid = {i for i, d in models.items() if d.requires_paid_credits}
+        errors = [
+            f"Tag '{tag}' of '{config.feature_setting}' needs a model that does not "
+            "require paid credits"
+            for config in unit_primitive_configs
+            for tag, entry in config.models_for_tags.items()
+            if paid.issuperset(entry.models)
+        ]
+        errors.extend(
+            f"Model '{identifier}' does not require paid credits but its model name "
+            f"matches paid model(s) {matched}"
+            for identifier, llm_def in chain(
+                models.items(), self._env_llm_definitions.items()
+            )
+            if not llm_def.requires_paid_credits
+            and (matched := self.paid_credit_models_for(models=[llm_def.params.model]))
+        )
+        return errors
+
     def _validate_restricted_models(
         self,
         unit_primitive_configs: Iterable[UnitPrimitiveConfig],
@@ -819,6 +866,7 @@ class ModelSelectionConfig:
                 unit_primitive_configs, models, models_ids
             ),
             *self._validate_restricted_models(unit_primitive_configs, models),
+            *self._validate_paid_credit_models(unit_primitive_configs, models),
         ]
 
         if error_messages:
@@ -894,21 +942,39 @@ class ModelSelectionConfig:
         model_strings = [m.lower() for m in models if m]
         allowed: Optional[frozenset[str]] = None
         for llm_def, flows in self._restricted_definitions():
-            restricted_model = (llm_def.params.model or "").lower()
-            matched = llm_def.gitlab_identifier in ids or (
-                bool(restricted_model)
-                and any(
-                    re.search(
-                        rf"(?:^|[/.:@]){re.escape(restricted_model)}"
-                        r"(?=$|[@:_-])",
-                        m,
-                    )
-                    for m in model_strings
-                )
-            )
-            if matched:
+            if _definition_matches(llm_def, ids, model_strings):
                 allowed = flows if allowed is None else allowed & flows
         return allowed
+
+    def paid_credit_models_for(
+        self,
+        identifiers: Iterable[Optional[str]] = (),
+        models: Iterable[Optional[str]] = (),
+    ) -> list[str]:
+        """Return the identifiers of the requires_paid_credits definitions the given names match.
+
+        Matches like restricted_flows_for, so a provider prefix or a date, version or alias suffix on a model string
+        still names the paid model.
+        """
+        ids = {i for i in identifiers if i}
+        model_strings = [m.lower() for m in models if m]
+        return sorted(
+            {
+                llm_def.gitlab_identifier
+                for llm_def in self._paid_credit_definitions()
+                if _definition_matches(llm_def, ids, model_strings)
+            }
+        )
+
+    def _paid_credit_definitions(self) -> list[LLMDefinition]:
+        return [
+            llm_def
+            for llm_def in chain(
+                self.get_llm_definitions().values(),
+                self._env_llm_definitions.values(),
+            )
+            if llm_def.requires_paid_credits
+        ]
 
     def all_restricted_flows(self) -> frozenset[str]:
         """Return every flow id that some restricted model is restricted to."""
@@ -1042,6 +1108,42 @@ def ensure_restricted_model_access(
             allowed_flows=sorted(allowed),
         )
         raise RestrictedModelAccessError()
+
+
+def paid_credit_models_gate_mode() -> Optional[Literal["log", "enforce"]]:
+    """Return how paid models are gated for this request, or None when they are not gated."""
+    if paid_credit_models_allowed_ctx.get() is not False:
+        return None
+    mode = get_config().model_selection.paid_credit_models_gate_mode
+    return None if mode == "off" else mode
+
+
+def ensure_paid_credits_model_access(
+    identifiers: Iterable[Optional[str]] = (),
+    models: Iterable[Optional[str]] = (),
+) -> None:
+    """Raise PaidCreditsModelAccessError if a trial without credits requests a paid model.
+
+    Applies only when the token's signed ``gitlab_paid_credit_models_allowed`` claim is
+    false (``paid_credit_models_allowed_ctx``). The ``paid_credit_models_gate_mode`` setting
+    decides whether a denial is only logged or also raised.
+    """
+    mode = paid_credit_models_gate_mode()
+    if mode is None:
+        return
+    identifiers = [i for i in identifiers if i]
+    models = [m for m in models if m]
+    paid = ModelSelectionConfig.instance().paid_credit_models_for(identifiers, models)
+    if not paid:
+        return
+    log.warning(
+        "Paid credits model denied",
+        identifiers=identifiers,
+        paid_models=paid,
+        mode=mode,
+    )
+    if mode == "enforce":
+        raise PaidCreditsModelAccessError()
 
 
 def validate_model_selection_config():

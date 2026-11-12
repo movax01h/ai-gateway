@@ -92,6 +92,7 @@ from ai_gateway.prompts.config.base import (
 )
 from ai_gateway.prompts.typing import TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
+from lib.billing_events.service import LLMOperationType
 from lib.context import StarletteUser, current_model_metadata_context
 from lib.prompts.utilities import prompt_template_to_messages, render_security_block
 from tests.conftest import FakeModel
@@ -936,6 +937,27 @@ configurable_unit_primitives:
             prompt.model_name,
             usage_metadata,
             {**prompt.internal_event_extra, "operation_type": prompt.operation_type},
+        )
+
+    @pytest.mark.asyncio
+    async def test_ainvoke_per_call_operation_type(
+        self,
+        mock_watch: mock.Mock,
+        prompt: Prompt,
+        usage_metadata: UsageMetadata,
+    ):
+        mock_watcher = mock_watch.return_value.__enter__.return_value
+
+        with self._mock_usage_metadata(prompt.model_name, usage_metadata):
+            await prompt.ainvoke(
+                {"name": "Duo", "content": "What's up?"},
+                operation_type=LLMOperationType.WEB_SEARCH_AGENTCORE,
+            )
+
+        mock_watcher.register_token_usage.assert_called_once_with(
+            prompt.model_name,
+            usage_metadata,
+            {**prompt.internal_event_extra, "operation_type": "web_search_agentcore"},
         )
 
     @pytest.mark.asyncio
@@ -1850,6 +1872,49 @@ configurable_unit_primitives:
         kwargs = mock_bind_tool.call_args.kwargs
 
         assert kwargs["tool_choice"] == tool_choice
+
+    def test_bind_tools_turns_web_search_into_the_models_route(
+        self,
+        model_provider: ModelClassProvider,
+        prompt_config: PromptConfig,
+        model_factory: TypeModelFactory,
+        model: FakeModel,
+    ):
+        """The binding swaps a `web_search` tool for the provider's own search; see `bind_web_search`."""
+        with mock.patch.object(FakeModel, "bind_tools") as mock_bind_tool:
+            mock_bind_tool.return_value = model
+            web_search = mock.Mock(spec=BaseTool)
+            web_search.name = "web_search"
+            web_search.description = "Search the web"
+
+            prompt = Prompt(
+                model_provider=model_provider,
+                model_factory=model_factory,
+                config=prompt_config,
+                model_metadata=None,
+                tools=[web_search],
+            )
+
+        assert mock_bind_tool.call_args.args[0] == []
+        assert mock_bind_tool.call_args.kwargs["web_search_options"] == {}
+        assert prompt.binds_web_search is True
+
+    def test_web_search_options_without_tools_do_not_count_as_search(
+        self,
+        model_provider: ModelClassProvider,
+        prompt_config: PromptConfig,
+        model_factory: TypeModelFactory,
+    ):
+        """Nothing is bound without tools, so the prompt must not be told it can search."""
+        prompt = Prompt(
+            model_provider=model_provider,
+            model_factory=model_factory,
+            config=prompt_config,
+            model_metadata=None,
+            bind_tools_params={"web_search_options": {}},
+        )
+
+        assert prompt.binds_web_search is False
 
     @pytest.mark.parametrize(
         ("model_metadata_identifier", "config_model_name", "expected_model_id_suffix"),
@@ -2800,7 +2865,7 @@ class TestPromptCallbacks:
         call_log = []
 
         class TestCallback(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 call_log.append("ainvoke_callback")
 
         # Set internal_callbacks directly on the prompt instance
@@ -2812,12 +2877,31 @@ class TestPromptCallbacks:
         assert "ainvoke_callback" in call_log
 
     @pytest.mark.asyncio
+    async def test_callbacks_receive_operation_type_on_ainvoke(self, prompt: Prompt):
+        """Test that the per-call operation_type passed to ainvoke reaches internal callbacks."""
+        received = []
+
+        class TestCallback(BasePromptCallbackHandler):
+            async def on_before_llm_call(self, operation_type=None):
+                received.append(operation_type)
+
+        prompt.internal_callbacks = [TestCallback()]
+
+        await prompt.ainvoke({"name": "Duo", "content": "What's up?"})
+        await prompt.ainvoke(
+            {"name": "Duo", "content": "What's up?"},
+            operation_type=LLMOperationType.WEB_SEARCH_AGENTCORE,
+        )
+
+        assert received == [None, "web_search_agentcore"]
+
+    @pytest.mark.asyncio
     async def test_callbacks_executed_on_astream(self, prompt: Prompt):
         """Test that internal callbacks are executed during astream."""
         call_log = []
 
         class TestCallback(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 call_log.append("astream_callback")
 
         prompt.internal_callbacks = [TestCallback()]
@@ -2834,15 +2918,15 @@ class TestPromptCallbacks:
         call_log = []
 
         class Callback1(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 call_log.append("first")
 
         class Callback2(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 call_log.append("second")
 
         class Callback3(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 call_log.append("third")
 
         prompt.internal_callbacks = [Callback1(), Callback2(), Callback3()]
@@ -2857,7 +2941,7 @@ class TestPromptCallbacks:
         """Test that exceptions in callbacks are propagated and stop execution."""
 
         class FailingCallback(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 raise RuntimeError("Callback error")
 
         prompt.internal_callbacks = [FailingCallback()]
@@ -2871,7 +2955,7 @@ class TestPromptCallbacks:
         call_log = []
 
         class TestCallback(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 call_log.append("config_callback")
 
         prompt.internal_callbacks = [TestCallback()]
@@ -2899,7 +2983,7 @@ class TestPromptCallbacks:
             def __init__(self):
                 self.call_count = 0
 
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 self.call_count += 1
 
         callback = StatefulCallback()
@@ -2920,7 +3004,7 @@ class TestPromptCallbacks:
             def __init__(self, prompt_instance: Prompt):
                 self.prompt = prompt_instance
 
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 captured_data["model_name"] = self.prompt.model_name
 
         prompt.internal_callbacks = [ContextCallback(prompt)]
@@ -2936,7 +3020,7 @@ class TestPromptCallbacks:
         execution_order = []
 
         class OrderTrackingCallback(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 execution_order.append("callback")
 
         prompt.internal_callbacks = [OrderTrackingCallback()]
@@ -2958,12 +3042,12 @@ class TestPromptCallbacks:
         call_log = []
 
         class FailingCallback(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 call_log.append("failing")
                 raise RuntimeError("Callback error")
 
         class SuccessCallback(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 call_log.append("success")
 
         # asyncio.gather will execute all callbacks concurrently

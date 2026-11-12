@@ -7,6 +7,10 @@ from lib.jwt.feature_enablement import (
     resolve_feature_enablement_type,
 )
 from lib.jwt.instance_id import instance_uid_claim, trusted_instance_id
+from lib.jwt.paid_credit_models import (
+    PAID_CREDIT_MODELS_ALLOWED_CLAIM,
+    paid_credit_models_allowed_from_claims_extra,
+)
 from lib.jwt.root_namespace import (
     GITLAB_ROOT_NAMESPACE_ID_CLAIM,
     MISSING_SAAS_ROOT_NAMESPACE_CLAIM_ERROR,
@@ -21,8 +25,10 @@ __all__ = [
     "GITLAB_ROOT_NAMESPACE_ID_CLAIM",
     "MAX_FEATURE_ENABLEMENT_TYPE_LENGTH",
     "MISSING_SAAS_ROOT_NAMESPACE_CLAIM_ERROR",
+    "PAID_CREDIT_MODELS_ALLOWED_CLAIM",
     "instance_uid_claim",
     "lacks_saas_root_namespace_claim",
+    "paid_credit_models_allowed_from_claims_extra",
     "parse_feature_enablement_type",
     "parse_root_namespace_id",
     "resolve_feature_enablement_type",

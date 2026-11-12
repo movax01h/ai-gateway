@@ -8,11 +8,15 @@ import litellm
 import pytest
 from fastapi.responses import JSONResponse
 
+from ai_gateway.config import get_config
 from ai_gateway.instrumentators.model_requests import (
     ModelRequestInstrumentator,
     init_llm_operations,
 )
-from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    PaidCreditsModelAccessError,
+)
 from ai_gateway.proxy.clients.base import (
     ProxyClient,
     ProxyModel,
@@ -22,6 +26,7 @@ from ai_gateway.proxy.clients.base import (
 )
 from lib.billing_events import BillingEvent
 from lib.billing_events.service import ExecutionEnvironment
+from lib.context.model import paid_credit_models_allowed_ctx
 
 
 @pytest.fixture(name="proxy_client")
@@ -379,6 +384,39 @@ class TestEnforceModelAllowlist:
             excinfo.value.detail
             == "Model is not allowed by the namespace model allowlist"
         )
+
+    def test_paid_credit_models_deny_trial_paid_model(
+        self, request_with_claims, monkeypatch
+    ):
+        monkeypatch.setattr(
+            get_config().model_selection, "paid_credit_models_gate_mode", "enforce"
+        )
+        token = paid_credit_models_allowed_ctx.set(False)
+        try:
+            with pytest.raises(PaidCreditsModelAccessError):
+                enforce_model_allowlist(request_with_claims(None), "claude-opus-5-5")
+        finally:
+            paid_credit_models_allowed_ctx.reset(token)
+
+    @pytest.mark.parametrize(
+        ("claim", "model_name"),
+        [
+            pytest.param(False, "claude-haiku-4-5-20251001", id="trial_free"),
+            pytest.param(True, "claude-opus-5-5", id="paid_credits"),
+            pytest.param(None, "claude-opus-5-5", id="no_claim"),
+        ],
+    )
+    def test_paid_credit_models_allow_other_cases(
+        self, request_with_claims, monkeypatch, claim, model_name
+    ):
+        monkeypatch.setattr(
+            get_config().model_selection, "paid_credit_models_gate_mode", "enforce"
+        )
+        token = paid_credit_models_allowed_ctx.set(claim)
+        try:
+            enforce_model_allowlist(request_with_claims(None), model_name)
+        finally:
+            paid_credit_models_allowed_ctx.reset(token)
 
 
 def test_provider_variants_have_a_base_model():

@@ -2,7 +2,7 @@
 name: Classify Code Review Mention Intent
 model:
   params:
-    max_tokens: 50
+    max_tokens: 1024
 unit_primitive: duo_agent_platform
 models_from: duo_agent_platform
 prompt_template:

@@ -26,6 +26,7 @@ class LLMOperationType(StrEnum):
     COMPACTION_AUTO = "compaction_auto"
     COMPACTION_MANUAL = "compaction_manual"
     DECISION = "decision"
+    WEB_SEARCH_AGENTCORE = "web_search_agentcore"
 
 
 BILL_ONCE_PER_WORKFLOW_FEATURES: frozenset[str] = frozenset(

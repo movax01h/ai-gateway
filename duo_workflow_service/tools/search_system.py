@@ -1,18 +1,46 @@
 import json
+import re
 from typing import Any, ClassVar, Optional, Type
 
 from langchain_core.tools import ToolException
+from packaging.version import Version
 from pydantic import BaseModel, Field
 
 from contract import contract_pb2
 from duo_workflow_service.executor.action import _execute_action
+from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-from duo_workflow_service.tools.filesystem import _format_no_matches_message
+from duo_workflow_service.tools.filesystem import (
+    _format_no_matches_message,
+    validate_duo_context_exclusions,
+)
+from lib.context import language_server_version
 
 _OUTPUT_OVERFLOW_MARKER = "stdout maxBuffer length exceeded"
 _OUTPUT_OVERFLOW_MESSAGE = (
     "Too many matches to return. Retry with a more distinctive search term,"
     " or set `search_directory` to a narrower directory."
+)
+# The node executor's result: a "Found N matches" line, then per snippet a `path:start_end` header and its lines.
+_RESULT_HEADER = re.compile(
+    r"^Found \d+ match(?:es)? across \d+ files?(?: \(showing first \d+\))?$"
+)
+_SNIPPET_HEADER = re.compile(r"^(?P<path>.+):(?P<start>\d+)_(?P<end>\d+)$")
+# gitlab-lsp in this range sends the snippets without the "Found N matches" line;
+# earlier versions send one `path:matched-line` row per match, which can look like a header.
+_HEADERLESS_SNIPPETS_FROM = Version("8.51.0")
+_HEADERLESS_SNIPPETS_BEFORE = Version("8.77.0")
+# The executor cuts a snippet's text at this many UTF-16 units and appends the suffix.
+_MAX_SNIPPET_LENGTH = 5000
+_TRIMMED_SUFFIX = "... (trimmed)"
+_TRUNCATED_FOOTER = "(Results truncated: "
+_HIDDEN_NOTE = (
+    "Some matches are hidden by the project's file exclusion settings;"
+    " searching again will not return them."
+)
+_UNFILTERABLE_MESSAGE = (
+    "Grep results from this client cannot be checked against the project's file exclusion"
+    " settings. Use find_files and read_file instead."
 )
 
 
@@ -77,8 +105,19 @@ class Grep(DuoBaseTool):
         case_insensitive: bool = True,
     ) -> str:
         """Execute the standard grep command with the specified parameters."""
-        if search_directory and ".." in search_directory:
+        search_directory = search_directory or "."
+        if ".." in search_directory:
             return "Searching above the current directory is not allowed"
+
+        if search_directory not in ("", ".", "./"):
+            policy = FileExclusionPolicy(self.project)
+            # Directory rules such as `secrets/` match the files under it, not the bare name.
+            child = search_directory.rstrip("/") + "/_"
+            if not (policy.is_allowed(search_directory) and policy.is_allowed(child)):
+                return FileExclusionPolicy.format_llm_exclusion_message(
+                    [search_directory]
+                )
+            validate_duo_context_exclusions(search_directory)
 
         # Executors split on ","; an empty term matches every line, and not all trim.
         terms = [term.strip() for term in keywords.split(",")]
@@ -110,7 +149,55 @@ class Grep(DuoBaseTool):
         ):
             return _format_no_matches_message(keywords, search_directory)
 
-        return result
+        return self._drop_excluded(result)
+
+    def _drop_excluded(self, result: str) -> str:
+        """Drop snippets of files excluded by the project's Duo context exclusions or the defaults."""
+        lines = result.split("\n")
+        start = 1 if _RESULT_HEADER.match(lines[0]) else 0
+        if not start and not (
+            _sends_headerless_snippets() and _SNIPPET_HEADER.match(lines[0])
+        ):
+            return result if self._unparsed_allowed(lines) else _UNFILTERABLE_MESSAGE
+        policy = FileExclusionPolicy(self.project)
+        kept, hidden, i = lines[:start], False, start
+        while i < len(lines):
+            match = _SNIPPET_HEADER.match(lines[i])
+            if not match and not _is_tail(lines[i:], start):
+                return (
+                    result if self._unparsed_allowed(lines) else _UNFILTERABLE_MESSAGE
+                )
+            block = [lines[i]]
+            if match:
+                for _ in range(int(match["end"]) - int(match["start"]) + 1):
+                    if i + len(block) >= len(lines):
+                        break
+                    block.append(lines[i + len(block)])
+                    if _is_trimmed("\n".join(block[1:])):
+                        break
+            i += len(block)
+            if match and not self._is_allowed(policy, match["path"]):
+                hidden = True
+                continue
+            kept.extend(block)
+        if not hidden:
+            return result
+        body = "\n".join(kept).rstrip("\n")
+        return f"{body}\n{_HIDDEN_NOTE}\n".lstrip("\n")
+
+    def _unparsed_allowed(self, lines: list[str]) -> bool:
+        """Output in another format passes only when no exclusion can apply to it."""
+        if lines[0].startswith("No matches found"):
+            return True
+        if self.project and self.project.get("exclusion_rules"):
+            return False
+        # Older formats start each line with the path (`path:text`, `Snippet: path?...`).
+        paths = (re.split(r"[:?]", line.removeprefix("Snippet: "))[0] for line in lines)
+        return all(_passes_default_exclusions(p) for p in paths if p)
+
+    @staticmethod
+    def _is_allowed(policy: FileExclusionPolicy, path: str) -> bool:
+        return _passes_default_exclusions(path) and policy.is_allowed(path)
 
     def format_display_message(
         self, args: GrepInput, _tool_response: Any = None
@@ -119,6 +206,38 @@ class Grep(DuoBaseTool):
             search_dir = "directory"
         message = f"Search for '{args.keywords}' in files in '{search_dir}'"
         return message
+
+
+def _is_tail(rest: list[str], has_result_header: int) -> bool:
+    """The final empty line, or the truncation footer the executor adds after the last snippet."""
+    if rest == [""]:
+        return True
+    return (
+        bool(has_result_header)
+        and rest[0].startswith(_TRUNCATED_FOOTER)
+        and rest[1:] in ([], [""])
+    )
+
+
+def _sends_headerless_snippets() -> bool:
+    lsp_version = language_server_version.get()
+    return lsp_version is not None and (
+        _HEADERLESS_SNIPPETS_FROM <= lsp_version.version < _HEADERLESS_SNIPPETS_BEFORE
+    )
+
+
+def _passes_default_exclusions(path: str) -> bool:
+    try:
+        validate_duo_context_exclusions(path)
+    except ToolException:
+        return False
+    return True
+
+
+def _is_trimmed(content: str) -> bool:
+    """True only where the executor trimmed: the suffix right after the length limit."""
+    text = content.removesuffix(_TRIMMED_SUFFIX)
+    return text != content and len(text.encode("utf-16-le")) // 2 >= _MAX_SNIPPET_LENGTH
 
 
 class GrepLiteralInput(GrepInput):

@@ -360,6 +360,7 @@ ai/features/pipeline/fix_pipeline/
   config/
     1.0.0.yml
   prompts/
+    subprompts_index.yml   # lists each prompt ID and its directory
     context/
     create_plan/
     decide_approach/
@@ -378,6 +379,8 @@ ai/features/pipeline/fix_pipeline/
 
 - Prompt and schema identifiers keep a feature prefix (`fix_pipeline_create_plan`)
   because the registry namespace is flat: the directory provides organization, the
-  identifier provides uniqueness.
+  identifier provides uniqueness. `prompts/subprompts_index.yml` maps each prompt
+  identifier to its directory. See
+  [Several prompts in one feature](adding_and_moving_features.md#several-prompts-in-one-feature).
 - Shared prompts it uses (`commit_changes`, `create_repository_branch`) live in
   `ai/shared/`, since several flows reference them.

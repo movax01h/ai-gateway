@@ -39,3 +39,24 @@ class TestToolDescription:
         as an instruction."""
         assert tool_schema["description"] == DelegateTask.tool_description
         assert tool_schema["description"] != DelegateTask.__doc__
+
+
+class TestSubagentNames:
+    @pytest.mark.parametrize(
+        ("model", "expected"),
+        [
+            pytest.param(
+                build_delegate_task_model(
+                    [
+                        {"name": "developer", "description": "Writes code."},
+                        {"name": "tester", "description": "Runs tests."},
+                    ]
+                ),
+                ["developer", "tester"],
+                id="built_model",
+            ),
+            pytest.param(DelegateTask, [], id="base_class"),
+        ],
+    )
+    def test_lists_the_names_subagent_name_accepts(self, model, expected):
+        assert model.subagent_names() == expected

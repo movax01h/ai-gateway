@@ -17,12 +17,15 @@ from gitlab_cloud_connector import (
 from gitlab_cloud_connector.auth import AUTH_HEADER, PREFIX_BEARER_HEADER
 
 from ai_gateway.config import Config
+from duo_workflow_service.gitlab.help_links import gitlab_instance_url
 from duo_workflow_service.interceptors import GRPC_HEALTH_METHODS, abort_handler
 from lib.context import cloud_connector_token_context_var
+from lib.context.model import paid_credit_models_allowed_ctx
 from lib.jwt import (
     GITLAB_ROOT_NAMESPACE_ID_CLAIM,
     MISSING_SAAS_ROOT_NAMESPACE_CLAIM_ERROR,
     lacks_saas_root_namespace_claim,
+    paid_credit_models_allowed_from_claims_extra,
 )
 
 logger = structlog.get_logger(__name__)
@@ -36,13 +39,7 @@ class AuthenticationError(Exception):
 
 def oidc_gitlab_url() -> str:
     """Return the GitLab instance whose OIDC keys sign the instance tokens we accept."""
-    # Reuse the AIGW_GITLAB_URL so that GitLab Self-Hosted Duo customers can
-    # use the same URL for both AIGW and Duo Workflow Service
-    return (
-        os.environ.get("DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL")
-        or os.environ.get("AIGW_GITLAB_URL")
-        or "https://gitlab.com"
-    )
+    return gitlab_instance_url()
 
 
 class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
@@ -111,6 +108,12 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
                 MISSING_SAAS_ROOT_NAMESPACE_CLAIM_ERROR,
             )
 
+        claims = cloud_connector_user.claims
+        paid_credit_models_allowed_ctx.set(
+            paid_credit_models_allowed_from_claims_extra(
+                claims.extra if claims else None
+            )
+        )
         current_user.set(cloud_connector_user)
         return await continuation(handler_call_details)
 

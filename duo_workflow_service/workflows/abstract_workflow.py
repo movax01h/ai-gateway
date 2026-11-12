@@ -52,6 +52,7 @@ from duo_workflow_service.audit_events.context import (
 from duo_workflow_service.audit_events.event_types import (
     SessionStartedEvent,
 )
+from duo_workflow_service.checkpointer.content_retention import ERROR_NOTICE_ID_PREFIX
 from duo_workflow_service.checkpointer.gitlab_workflow import GitLabWorkflow
 from duo_workflow_service.checkpointer.gitlab_workflow_utils import (
     SUCCESSFUL_WORKFLOW_EXECUTION_STATUSES,
@@ -98,6 +99,7 @@ from duo_workflow_service.gitlab.gitlab_api import (
     empty_workflow_config,
     fetch_workflow_and_container_data,
 )
+from duo_workflow_service.gitlab.help_links import gitlab_web_url
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.gitlab.schema import PromptInjectionProtectionLevel
 from duo_workflow_service.gitlab.url_parser import (
@@ -119,6 +121,7 @@ from duo_workflow_service.tools.mcp_tools import (
 )
 from duo_workflow_service.tools.version_compatibility import (
     strips_client_mcp_trust,
+    supports_tool_access_policies_field,
 )
 from duo_workflow_service.tracking import (
     MonitoringContext,
@@ -136,6 +139,7 @@ from lib.context.orbit import is_orbit_tool
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import InternalEventAdditionalProperties, InternalEventsClient
+from lib.internal_events.context import current_event_context
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from lib.langsmith_tracing import get_langsmith_trace_headers
 from lib.language_server import LanguageServerVersion
@@ -148,7 +152,7 @@ MAX_TOKENS_TO_SAMPLE = 8192
 DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 # Same bound the executor HTTP client puts on a GraphQL round trip.
-TOKEN_REJECTION_DROP_TIMEOUT_S = 10.0
+SESSION_DROP_TIMEOUT_S = 10.0
 
 
 def _claim_requests_ceiling(raw: Any) -> bool:
@@ -182,6 +186,13 @@ def _token_issued_by_dws(user: CloudConnectorUser) -> bool:
         return False
 
     return claims.issuer == self_issued_by
+
+
+TOOL_ACCESS_POLICIES_UNAVAILABLE_MESSAGE = (
+    "GitLab Duo could not load the tool rules for this session. Try again later."
+)
+TOOL_ACCESS_POLICIES_DROP_REASON = "tool_rules_unavailable"
+_TOOL_ACCESS_POLICY_KEYS = {"allow", "ask", "deny"}
 
 
 class ToolAccessPolicies(BaseModel):
@@ -390,7 +401,9 @@ class AbstractWorkflow(ABC):
         ],
         resume_checkpoint_ts: Optional[str] = None,
     ):
-        self._outbox = Outbox()
+        self._outbox = Outbox(
+            exact_http_responses=supports_tool_access_policies_field()
+        )
         self._workflow_id = workflow_id
         # Strip any embedded userinfo from git_url at the boundary: executors
         # may forward an origin URL carrying the workflow OAuth token, and the
@@ -407,45 +420,16 @@ class AbstractWorkflow(ABC):
         # Parsed once here because tool conversion needs the first-party names before
         # _merge_jwt_governance_claims runs.
         self._claimed_tool_access_policies = _parse_tool_access_policies(user)
-        claimed_first_party_tools: dict[str, FirstPartyVerdict] = (
+        self._language_server_version = language_server_version
+        self._raw_mcp_tools = mcp_tools
+        self._first_party_untrusted_reason = _first_party_untrusted_reason(
+            user, client_type.get(), language_server_version
+        )
+        self._use_first_party_tools(
             self._claimed_tool_access_policies.first_party_tools
             if isinstance(self._claimed_tool_access_policies, ToolAccessPolicies)
             else {}
         )
-        request_client_type = client_type.get()
-        untrusted_reason = _first_party_untrusted_reason(
-            user, request_client_type, language_server_version
-        )
-        self._first_party_tools: dict[str, FirstPartyVerdict] = (
-            {} if untrusted_reason else claimed_first_party_tools
-        )
-        if claimed_first_party_tools and untrusted_reason:
-            self.log.info(
-                "Ignoring first-party MCP tools from tool_access_policies claim",
-                reason=untrusted_reason,
-                client_type=request_client_type,
-                language_server_version=(
-                    str(language_server_version.version)
-                    if language_server_version
-                    else None
-                ),
-                first_party_tools=sorted(claimed_first_party_tools),
-            )
-        self._mcp_tools = convert_mcp_tools_to_configs(
-            mcp_tools=mcp_tools,
-            force_client_injected=_token_issued_by_dws(user),
-            first_party_tools=self._first_party_tools,
-        )
-        if self._first_party_tools:
-            self.log.info(
-                "Recognised first-party MCP tools from tool_access_policies claim",
-                first_party_tools=self._first_party_tools,
-                recognised_tool_names=sorted(
-                    tool["llm_name"]
-                    for tool in self._mcp_tools
-                    if tool.get("first_party", False)
-                ),
-            )
         self._approval = approval
         if approval is not None and approval.HasField("approval"):
             approved = approval.approval
@@ -471,7 +455,6 @@ class AbstractWorkflow(ABC):
         self._prompt_registry = prompt_registry
         self._workflow_config = empty_workflow_config()
         self._internal_event_client = internal_event_client
-        self._language_server_version = language_server_version
         self._preapproved_tools = preapproved_tools
         self._denied_tools: list[str] = []
         self._ask_tools: list[str] = []
@@ -631,6 +614,42 @@ class AbstractWorkflow(ABC):
             )
             self._first_response_metric_recorded = True
 
+    def _use_first_party_tools(
+        self, claimed_first_party_tools: dict[str, FirstPartyVerdict]
+    ) -> None:
+        """Take the policy's first-party verdicts, if the client can be held to them, and convert the MCP tools."""
+        untrusted_reason = self._first_party_untrusted_reason
+        self._first_party_tools: dict[str, FirstPartyVerdict] = (
+            {} if untrusted_reason else claimed_first_party_tools
+        )
+        if claimed_first_party_tools and untrusted_reason:
+            self.log.info(
+                "Ignoring first-party MCP tools from tool_access_policies",
+                reason=untrusted_reason,
+                client_type=client_type.get(),
+                language_server_version=(
+                    str(self._language_server_version.version)
+                    if self._language_server_version
+                    else None
+                ),
+                first_party_tools=sorted(claimed_first_party_tools),
+            )
+        self._mcp_tools = convert_mcp_tools_to_configs(
+            mcp_tools=self._raw_mcp_tools,
+            force_client_injected=_token_issued_by_dws(self._user),
+            first_party_tools=self._first_party_tools,
+        )
+        if self._first_party_tools:
+            self.log.info(
+                "Recognised first-party MCP tools from tool_access_policies",
+                first_party_tools=self._first_party_tools,
+                recognised_tool_names=sorted(
+                    tool["llm_name"]
+                    for tool in self._mcp_tools
+                    if tool.get("first_party", False)
+                ),
+            )
+
     def _mcp_enabled(self) -> bool:
         """Whether the root namespace allows MCP tools (``duo_workflow_mcp_enabled``).
 
@@ -683,10 +702,23 @@ class AbstractWorkflow(ABC):
             ]
         return tools_registry
 
-    def _merge_jwt_governance_claims(self) -> None:
+    def _record_container_urls(self) -> None:
+        """Keep the session link and the browser URL that user-facing links are built from.
+
+        Both come from the container's web URL, which is the address the user's browser opened. The service may reach
+        GitLab through an internal address instead.
+        """
+        project_url = self._project.get("web_url", "") if self._project else ""
+        if project_url:
+            self._session_url = f"{project_url}{SESSION_URL_PATH}{self._workflow_id}"
+        namespace_url = self._namespace.get("web_url", "") if self._namespace else ""
+        gitlab_web_url.set(project_url or namespace_url)
+
+    def _merge_jwt_governance_claims(self) -> bool:
+        """Apply the policy claim, and return whether the token carried one."""
         policies = self._claimed_tool_access_policies
         if policies is None:
-            return
+            return False
         if isinstance(policies, _UnparsableClaim):
             # Fail closed: a present-but-unparsable claim must not leave the
             # client-supplied preapproved_tools in effect. Log it -- a malformed
@@ -700,7 +732,61 @@ class AbstractWorkflow(ABC):
             if policies.requests_ceiling:
                 self._admin_allowed_preapprovals = set()
                 self._ceiling_claim_unparsable = True
+            return True
+
+        self._apply_tool_access_policies(policies)
+        return True
+
+    @staticmethod
+    def _requested_project_id() -> Optional[int]:
+        event_context = current_event_context.get()
+        return event_context.project_id if event_context else None
+
+    def _loads_tool_access_policies(self) -> bool:
+        return (
+            self._claimed_tool_access_policies is None
+            and supports_tool_access_policies_field()
+        )
+
+    async def _merge_governance_policies(self) -> None:
+        """Merge the policy claim, or the policy Rails returned when the token has none."""
+        if (
+            self._merge_jwt_governance_claims()
+            or not supports_tool_access_policies_field()
+        ):
             return
+
+        loaded = self._workflow_config.get("tool_access_policies")
+        try:
+            # A null or partial answer would otherwise apply as "no governance".
+            if (
+                not isinstance(loaded, dict)
+                or not _TOOL_ACCESS_POLICY_KEYS <= loaded.keys()
+            ):
+                raise ValueError("tool access policies missing from the workflow query")
+            policies = ToolAccessPolicies.model_validate(loaded)
+        except Exception as error:
+            self.log.error(
+                "Stopping the session: tool access policies could not be loaded",
+                workflow_id=self._workflow_id,
+                error_type=type(error).__name__,
+            )
+            # The stop comes before GitLabWorkflow is entered, so nothing else
+            # moves a new session out of `created`. A resumed session keeps its
+            # status, since a failed fetch is often temporary.
+            if (
+                self._workflow_config.get("workflow_status")
+                == WorkflowStatusEnum.CREATED
+            ):
+                await self._drop_session(TOOL_ACCESS_POLICIES_DROP_REASON)
+            raise NotifiableException(
+                TOOL_ACCESS_POLICIES_UNAVAILABLE_MESSAGE
+            ) from error
+
+        self._use_first_party_tools(policies.first_party_tools)
+        self._apply_tool_access_policies(policies)
+
+    def _apply_tool_access_policies(self, policies: ToolAccessPolicies) -> None:
         can_ask_user = self._workflow_config.get("allow_agent_to_request_user", False)
         ask = set(policies.ask)
         deny = set(policies.deny) if can_ask_user else set(policies.deny) | ask
@@ -928,9 +1014,11 @@ class AbstractWorkflow(ABC):
             ) = await fetch_workflow_and_container_data(
                 client=self._http_client,
                 workflow_id=self._workflow_id,
+                tool_access_policies_project_id=self._requested_project_id(),
+                with_tool_access_policies=self._loads_tool_access_policies(),
             )
 
-            self._merge_jwt_governance_claims()
+            await self._merge_governance_policies()
 
             incremental_checkpoints_enabled.set(
                 self._workflow_config.get("incremental_checkpoints_enabled", False)
@@ -945,10 +1033,7 @@ class AbstractWorkflow(ABC):
                 )
             )
 
-            if self._project and self._project.get("web_url"):
-                self._session_url = (
-                    f"{self._project['web_url']}{SESSION_URL_PATH}{self._workflow_id}"
-                )
+            self._record_container_urls()
 
             if self._namespace and self._support_namespace_level_workflow() is False:
                 raise NamespaceLevelWorkflowNotSupportedException()
@@ -1202,12 +1287,17 @@ class AbstractWorkflow(ABC):
             # str() of a NotifiableException; all other exceptions fall back to the generic
             # message to avoid leaking internal details (stack traces, tokens, infra hints)
             # to end users.
+            # Only text the service writes itself is marked as a notice, which metadata-only
+            # sessions still show; any branch that does not opt in keeps the plain prefix.
+            message_id_prefix = "error-"
             if isinstance(e, NotifiableAgentException):
                 content = e.ui_message
+                message_id_prefix = ERROR_NOTICE_ID_PREFIX
             elif isinstance(e, NotifiableException):
                 content = str(e)
             else:
                 content = GENERIC_WORKFLOW_ERROR_MESSAGE
+                message_id_prefix = ERROR_NOTICE_ID_PREFIX
             ui_chat_log = [
                 UiChatLog(
                     message_type=MessageTypeEnum.AGENT,
@@ -1218,7 +1308,7 @@ class AbstractWorkflow(ABC):
                     correlation_id=None,
                     tool_info=None,
                     additional_context=None,
-                    message_id=f"error-{uuid4()!s}",
+                    message_id=f"{message_id_prefix}{uuid4()!s}",
                 )
             ]
 
@@ -1404,30 +1494,37 @@ class AbstractWorkflow(ABC):
             category=self._workflow_type,
         )
 
+        await self._drop_session(error.drop_reason)
+
+        # A client-disconnect cancel raises CancelledError (a BaseException) from the
+        # drop above; the drop does not catch it, so it skips this raise by design.
+        # The client is gone so the terminal status is moot, the reject count+event
+        # above already recorded the rejection, and catching the cancel would suppress
+        # cooperative cancellation.
+        raise NotifiableException(error.user_message) from error
+
+    async def _drop_session(self, drop_reason: str) -> None:
+        """Drop the Rails session straight away, for a run that stops before ``GitLabWorkflow`` is entered.
+
+        A failed or timed-out drop is logged and does not mask the caller's error.
+        """
         # The timeout bounds the drop against an executor (CI) client that never
         # answers its action stream; a Workhorse session runs the HTTP action
-        # itself, so the drop there does not depend on the rejected client.
+        # itself, so the drop there does not depend on the client.
         try:
             await asyncio.wait_for(
                 GitLabStatusUpdater(self._http_client).update_workflow_status(
                     self._workflow_id,
                     WorkflowStatusEventEnum.DROP,
-                    drop_reason=error.drop_reason,
+                    drop_reason=drop_reason,
                 ),
-                timeout=TOKEN_REJECTION_DROP_TIMEOUT_S,
+                timeout=SESSION_DROP_TIMEOUT_S,
             )
         except Exception as status_error:
             log_exception(
                 status_error,
                 extra={"workflow_id": self._workflow_id, "source": __name__},
             )
-
-        # A client-disconnect cancel raises CancelledError (a BaseException) from the
-        # await above; it propagates past the except and skips this raise by design.
-        # The client is gone so the terminal status is moot, the reject count+event
-        # above already recorded the rejection, and catching the cancel would suppress
-        # cooperative cancellation.
-        raise NotifiableException(error.user_message) from error
 
     def _track_internal_event(
         self,

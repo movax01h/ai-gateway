@@ -66,13 +66,20 @@ fi
 
 # Find all potential prompt files matching the prompt name. A moved prompt
 # lives under ai/features/<domain>/<feature>/prompts/ or ai/shared/<name>/prompts/.
+# A feature's prompts/subprompts_index.yml maps more prompt names to directories
+# in its prompts/, one "<prompt_name>: <directory>" entry on each line.
 echo "Searching for prompt definitions matching '$PROMPT_NAME'..."
 FEATURES_ROOT="$BASE_DIR/ai/features"
 SHARED_ROOT="$BASE_DIR/ai/shared"
 FOUND_FILES=$(
   {
     find "$DEFINITIONS_ROOT" -type f -path "*/$PROMPT_NAME/*" -name "*.yml"
-    [ -d "$FEATURES_ROOT" ] && find "$FEATURES_ROOT" -type f -path "*/$PROMPT_NAME/prompts/*" -name "*.yml"
+    [ -d "$FEATURES_ROOT" ] && find "$FEATURES_ROOT" -type f -path "*/$PROMPT_NAME/prompts/*/*.yml" ! -path "*/$PROMPT_NAME/prompts/*/*/*"
+    [ -d "$FEATURES_ROOT" ] && find "$FEATURES_ROOT" -mindepth 4 -maxdepth 4 -type f -path "*/prompts/subprompts_index.yml" |
+      while read -r index; do
+        directory=$(awk -F: -v id="$PROMPT_NAME" '$1 == id { sub(/[ \t]+#.*/, "", $2); gsub(/[ \t\r]/, "", $2); print $2 }' "$index")
+        [ -n "$directory" ] && find "$(dirname "$index")/$directory" -mindepth 2 -maxdepth 2 -type f -name "*.yml"
+      done
     [ -d "$SHARED_ROOT" ] && find "$SHARED_ROOT" -type f -path "*/$PROMPT_NAME/prompts/*" -name "*.yml"
   } | sort
 )

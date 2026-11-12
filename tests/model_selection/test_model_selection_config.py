@@ -1078,6 +1078,7 @@ def test_validate_with_tags_field(selection_config, fs: FakeFilesystem):
             models:
               - name: Small Model
                 gitlab_identifier: small-model
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$"
@@ -1180,6 +1181,7 @@ def size_preference_model_dir_fixture(fs: FakeFilesystem):
             models:
               - name: Small Model
                 gitlab_identifier: small-model
+                requires_paid_credits: false
                 max_context_tokens: 200000
                 model_class_provider: anthropic
                 cost_indicator: "$"

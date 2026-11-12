@@ -16,7 +16,11 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from ai_gateway.config import get_config
-from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
+from ai_gateway.model_selection import (
+    LLMDefinition,
+    ModelSelectionConfig,
+    paid_credit_models_gate_mode,
+)
 from ai_gateway.model_selection.models import ModelClassProvider
 from lib.aws_assume_role import (
     IAM_ROLE_ARN_MAX_LENGTH,
@@ -375,10 +379,18 @@ def build_model_metadata_by_tag(
     configs = ModelSelectionConfig.instance()
     unit_primitive_config = configs.get_unit_primitive_config_map().get(feature_setting)
     if unit_primitive_config:
+        exclude_paid = paid_credit_models_gate_mode() == "enforce"
         for tag, entry in unit_primitive_config.models_for_tags.items():
+            candidates = [
+                model_id
+                for model_id in entry.models
+                if not (exclude_paid and configs.paid_credit_models_for([model_id]))
+            ]
+            if not candidates:
+                continue
             # The interceptor builds this once per gRPC call, so a tag's model
             # stays stable for the whole flow.
-            model_id = random.choice(entry.models)
+            model_id = random.choice(candidates)
             try:
                 llm_def = configs.get_model(model_id)
                 by_tag[tag] = resolve_provider_aware_metadata(

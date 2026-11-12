@@ -14,7 +14,6 @@ from ai_gateway.prompts.model_variables import (
     model_friendly_name,
     should_show_current_time,
 )
-from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.conversation.trimmer import restore_message_consistency
 from duo_workflow_service.entities.message_ingestion import (
     non_blank_text_block,
@@ -35,6 +34,7 @@ from duo_workflow_service.slash_commands.goal_parser import parse as slash_comma
 from duo_workflow_service.tools.version_compatibility import (
     supports_chat_tool_call_limits,
 )
+from duo_workflow_service.tools.web_search import WebSearchState
 from lib.context import get_model_metadata
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.prompts.utilities import render_security_block

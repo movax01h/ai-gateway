@@ -126,7 +126,9 @@ Then add the instruction if none of those fits, or if the human still wants it.
 The deliverable is one `<version>.yml` plus its prompts, and no flow carries a README or
 a usage page. Keep the prompt in the config unless more than one flow or version uses it;
 only then is a file-based prompt worth the extra files. A new flow's file-based prompt goes in
-its own `prompts/` directory with `prompt_id` set to the flow ID.
+its own `prompts/` directory with `prompt_id` set to the flow ID. A flow with several
+file-based prompts lists them in `prompts/subprompts_index.yml`, see
+`docs/adding_and_moving_features.md`.
 
 Validate before you claim it works:
 

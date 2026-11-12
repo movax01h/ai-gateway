@@ -11,8 +11,10 @@ import argparse
 import ast
 import subprocess
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
+
+from lib.subprompts_index import SUBPROMPTS_INDEX, parse_subprompts_index
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ALIASES_FILE = Path("ai_gateway/prompts/feature_roots.py")
@@ -53,11 +55,60 @@ def include_names(path: str) -> set[str]:
     return set()
 
 
-def served_names(paths: Iterable[str]) -> set[str]:
-    """Return the include names that a set of file paths serves."""
+def _is_subprompts_index(path: str) -> bool:
+    parts = PurePosixPath(path).parts
+    return (
+        _under(path, FEATURES_ROOT)
+        and len(parts) == 6
+        and parts[4:] == ("prompts", SUBPROMPTS_INDEX)
+    )
+
+
+def listed_prompt_dirs(paths: set[str], read: Callable[[str], str]) -> dict[str, str]:
+    """Return the dir prefix of each prompt that a ``subprompts_index.yml`` lists, mapped to its prompt ID.
+
+    Args:
+        paths: The file paths to scan.
+        read: Returns the text of the file at a path in ``paths``.
+
+    Returns:
+        Each ``<prompts_dir>/<directory>/`` prefix mapped to the listed prompt ID.
+
+    Raises:
+        ValueError: If an index is malformed.
+    """
+    prefixes: dict[str, str] = {}
+    for index in sorted(filter(_is_subprompts_index, paths)):
+        prompts_dir = index.rsplit("/", 1)[0]
+        for prompt_id, directory in parse_subprompts_index(read(index), index).items():
+            prefixes[f"{prompts_dir}/{directory}/"] = prompt_id
+    return prefixes
+
+
+def served_names(paths: Iterable[str], read: Callable[[str], str]) -> set[str]:
+    """Return the include names that a set of file paths serves.
+
+    A template in the dir of a listed prompt serves only ``<prompt_id>/<rest>``, like the loader.
+
+    Args:
+        paths: The file paths to scan.
+        read: Returns the text of the file at a path in ``paths``.
+
+    Returns:
+        The include names that the files serve.
+
+    Raises:
+        ValueError: If a ``subprompts_index.yml`` in ``paths`` is malformed.
+    """
+    paths = set(paths)
+    listed = listed_prompt_dirs(paths, read)
     names: set[str] = set()
     for path in paths:
-        names |= include_names(path)
+        prefix = next((p for p in listed if path.startswith(p)), None)
+        if prefix is None:
+            names |= include_names(path)
+        elif path.endswith(".jinja"):
+            names.add(f"{listed[prefix]}/{path[len(prefix) :]}")
     return names
 
 
@@ -84,6 +135,15 @@ def scan_at(repo_root: Path, ref: str) -> set[str] | None:
     if result.returncode != 0:
         return None
     return {p for p in result.stdout.decode("utf-8").split("\0") if p}
+
+
+def show_at(repo_root: Path, ref: str, path: str) -> str:
+    """Return the text of the file at ``path`` in ``ref``."""
+    return subprocess.run(
+        ["git", "-C", str(repo_root), "show", f"{ref}:{path}"],
+        check=True,
+        capture_output=True,
+    ).stdout.decode("utf-8")
 
 
 def _literal(node: ast.expr) -> object:
@@ -197,11 +257,16 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
         else:
-            base = served_names(base_files)
+            base = served_names(
+                base_files, lambda path: show_at(REPO_ROOT, args.base, path)
+            )
 
     source = (REPO_ROOT / ALIASES_FILE).read_text(encoding="utf-8")
     aliases, retired = parse_aliases(source), parse_retired(source)
-    messages = check(served_names(scan(REPO_ROOT)), aliases, retired, base)
+    current = served_names(
+        scan(REPO_ROOT), lambda path: (REPO_ROOT / path).read_text(encoding="utf-8")
+    )
+    messages = check(current, aliases, retired, base)
     for message in messages:
         print(message, file=sys.stderr)
     return 1 if messages else 0

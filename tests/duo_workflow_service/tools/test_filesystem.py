@@ -13,9 +13,11 @@ from duo_workflow_service.entities.image_response import (
     MAX_IMAGE_DECODED_BYTES,
     supported_image_formats_display,
 )
+from duo_workflow_service.executor.action import ToolExceptionWithResponse
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.filesystem import (  # Mkdir,
+    _UPLOAD_HINT_BARE,
     DEFAULT_CONTEXT_EXCLUSIONS,
     DEFAULT_READ_FILE_LIMIT,
     DEFAULT_READ_FILE_OFFSET,
@@ -43,8 +45,10 @@ from lib.context import (
     client_capabilities,
     gitlab_user_id,
     gitlab_version,
+    language_server_version,
 )
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
+from lib.language_server import LanguageServerVersion
 from tests.duo_workflow_service.tools.conftest import (
     create_mock_client_event_with_image_response,
     create_mock_client_event_with_response,
@@ -80,6 +84,8 @@ def metadata_with_project_fixture(mock_project):
     return {
         "outbox": mock_outbox,
         "project": mock_project,
+        # The instance host, as the registry derives it from the project web_url.
+        "gitlab_host": "example.com",
         # What the registry sets for a flow with file and GitLab read access.
         "granted_privileges": frozenset({"read_only_files", "read_only_gitlab"}),
     }
@@ -405,22 +411,372 @@ class TestReadFile:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("image_support_enabled")
-    async def test_read_file_accepts_slashless_upload_reference(
+    async def test_read_file_reads_slashless_upload_reference_as_a_path(
         self, metadata_with_project
     ):
-        # Models routinely normalize the markdown's `/uploads/...` to a
-        # repo-relative-looking `uploads/...` (observed live in the M3 run).
+        # Without the leading slash the string is also a valid repository
+        # path, the only shape where the two collide, so it is read as a file.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+        path = f"uploads/{self.UPLOAD_SECRET}/screenshot.png"
+
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            await tool._arun(path)
+
+        action = metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.filepath == path
+        security_log.info.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    @pytest.mark.parametrize(
+        ("reference", "api_path"),
+        [
+            (
+                "https://example.com/-/project/7/uploads/{s}/shot.png",
+                "/api/v4/projects/7/uploads/{s}/shot.png",
+            ),
+            (
+                "https://example.com/-/group/9970/uploads/{s}/shot.png",
+                "/api/v4/groups/9970/uploads/{s}/shot.png",
+            ),
+            (
+                "http://example.com/gitlab-org/gitlab/uploads/{s}/shot.png",
+                "/api/v4/projects/gitlab-org%2Fgitlab/uploads/{s}/shot.png",
+            ),
+            (
+                "https://example.com/groups/gitlab-org/modelops/applied-ml/-/uploads/{s}/shot.png",
+                "/api/v4/groups/gitlab-org%2Fmodelops%2Fapplied-ml/uploads/{s}/shot.png",
+            ),
+            (
+                "https://example.com/my.group-1/my_project.js/uploads/{s}/a b.png",
+                "/api/v4/projects/my.group-1%2Fmy_project.js/uploads/{s}/a%20b.png",
+            ),
+        ],
+    )
+    async def test_read_file_rewrites_upload_urls_to_the_owner_api_path(
+        self, metadata_with_project, reference, api_path
+    ):
+        # The four URL forms GitLab produces, by id and by path. The path is
+        # percent-encoded as one API segment, which the client allowlist expects.
         tool = ReadFile(description="Read file content")
         tool.metadata = metadata_with_project
 
-        await tool._arun(f"uploads/{self.UPLOAD_SECRET}/screenshot.png")
+        await tool._arun(reference.format(s=self.UPLOAD_SECRET))
+
+        action = metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.call_args[0][0]
+        assert action.runReadFile.filepath == api_path.format(s=self.UPLOAD_SECRET)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    @pytest.mark.parametrize(
+        "reference",
+        [
+            # Another host is not this instance: no credential is spent on it.
+            "https://evil.example/-/group/1/uploads/{s}/shot.png",
+            "https://example.com:8443/-/group/1/uploads/{s}/shot.png",
+            # Directory or reserved segments in the owner or the filename.
+            "https://example.com/-/group/1/uploads/{s}/..",
+            "https://example.com/-/group/1/uploads/{s}/%2E%2E",
+            # A decoded filename must not add a path segment.
+            "https://example.com/-/group/1/uploads/{s}/..%2F..%2Fx",
+            "https://example.com/-/group/1/uploads/{s}/a%2Fb.png",
+            "https://example.com/groups/a/../b/-/uploads/{s}/shot.png",
+            "https://example.com/-/user/1/uploads/{s}/shot.png",
+            # Not shapes GitLab produces.
+            "https://example.com/-/group/1/uploads/{s}/shot.png?x=1",
+            "https://example.com/a%2Fb/uploads/{s}/shot.png",
+            "https://example.com/-/group/abc/uploads/{s}/shot.png",
+            "https://example.com/-/group/1/uploads/NOT-A-SECRET/shot.png",
+            # Non-ASCII digits, and reserved top-level paths.
+            "https://example.com/-/group/\u0663/uploads/{s}/shot.png",
+            "https://example.com/groups/foo/uploads/{s}/shot.png",
+            "https://example.com/api/v4/projects/uploads/{s}/shot.png",
+            # Shapes `urlsplit` would quietly change: a trailing slash, an
+            # empty query, an upper-case scheme, leading space, user info, and
+            # a tab or newline it would drop from the filename.
+            "https://example.com/-/group/1/uploads/{s}/shot.png/",
+            "https://example.com/-/group/1/uploads/{s}/shot.png?",
+            "HTTPS://example.com/-/group/1/uploads/{s}/shot.png",
+            " https://example.com/-/group/1/uploads/{s}/shot.png",
+            "https://user@example.com/-/group/1/uploads/{s}/shot.png",
+            "https://example.com/-/group/1/uploads/{s}/a\tb.png",
+            "https://example.com/-/group/1/uploads/{s}/a\nb.png",
+            # A host `urlsplit` cannot parse: an unbalanced IPv6 bracket.
+            "https://[::1/-/group/1/uploads/{s}/shot.png",
+            # An id longer than a bigint, past what `int()` converts.
+            "https://example.com/-/group/" + "1" * 4301 + "/uploads/{s}/shot.png",
+        ],
+    )
+    async def test_upload_url_lookalikes_are_not_downloads(
+        self, metadata_with_project, reference
+    ):
+        # Falls through to the ordinary path checks, which refuse the `//` as
+        # traversal: no download, no credential spent, no log.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            with pytest.raises(ToolException, match="Access denied"):
+                await tool._arun(reference.format(s=self.UPLOAD_SECRET))
+
+        metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+        security_log.info.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    async def test_upload_url_without_a_session_host_is_not_a_download(
+        self, metadata_with_project
+    ):
+        # No host to compare against means no URL can be trusted as ours.
+        del metadata_with_project["gitlab_host"]
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+
+        with pytest.raises(ToolException, match="Access denied"):
+            await tool._arun(
+                f"https://example.com/-/group/1/uploads/{self.UPLOAD_SECRET}/shot.png"
+            )
+
+        metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    @pytest.mark.parametrize(
+        ("reference", "entity_type", "entity_id", "entity_path"),
+        [
+            (
+                "https://example.com/-/group/9970/uploads/{s}/shot.png",
+                "Group",
+                9970,
+                None,
+            ),
+            (
+                "https://example.com/groups/gitlab-org/modelops/-/uploads/{s}/shot.png",
+                "Group",
+                None,
+                "gitlab-org/modelops",
+            ),
+            (
+                "https://example.com/-/project/7/uploads/{s}/shot.png",
+                "Project",
+                7,
+                None,
+            ),
+            (
+                "https://example.com/gitlab-org/gitlab/uploads/{s}/shot.png",
+                "Project",
+                None,
+                "gitlab-org/gitlab",
+            ),
+        ],
+    )
+    async def test_upload_url_read_is_logged_with_its_owner(
+        self, metadata_with_project, reference, entity_type, entity_id, entity_path
+    ):
+        # The trail names the owner the request was addressed to, as given.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            await tool._arun(reference.format(s=self.UPLOAD_SECRET))
+
+        security_log.info.assert_called_once()
+        _, fields = security_log.info.call_args
+        assert fields["entity_type"] == entity_type
+        assert fields["entity_id"] == entity_id
+        assert fields["entity_path"] == entity_path
+        assert fields["target_details"] == "shot.png"
+        assert self.UPLOAD_SECRET not in str(security_log.info.call_args)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    async def test_escaped_upload_url_filename_is_encoded_once(
+        self, metadata_with_project
+    ):
+        # GitLab escapes the filename when it renders the link (non-ASCII names
+        # keep their letters), so a copied link must not be escaped again.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+        escaped = "%E3%82%B9%E3%82%AF.png"
+
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            await tool._arun(
+                f"https://example.com/-/group/9970/uploads/{self.UPLOAD_SECRET}/{escaped}"
+            )
+
+        action = metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.call_args[0][0]
+        assert (
+            action.runReadFile.filepath
+            == f"/api/v4/groups/9970/uploads/{self.UPLOAD_SECRET}/{escaped}"
+        )
+        _, fields = security_log.info.call_args
+        assert fields["target_details"] == "\u30b9\u30af.png"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled", "language_server_10_1")
+    async def test_upload_url_needs_a_client_that_takes_other_owners(
+        self, metadata_with_project
+    ):
+        # Before Language Server 10.2.0 the client allowlist takes the session
+        # project only, so a URL stays an ordinary path: no download, no log.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            with pytest.raises(ToolException, match="Access denied"):
+                await tool._arun(
+                    f"https://example.com/-/group/9970/uploads/{self.UPLOAD_SECRET}/shot.png"
+                )
+
+        metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+        security_log.info.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled", "language_server_10_1")
+    async def test_markdown_form_failure_has_no_url_hint_for_an_older_client(
+        self, metadata_with_project
+    ):
+        # The Markdown form still downloads, but the hint suggests a URL, which
+        # this client cannot fetch.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+        metadata_with_project["outbox"].put_action_and_wait_for_response = AsyncMock(
+            side_effect=ToolExceptionWithResponse(
+                "Action error: not found", server_error="404"
+            )
+        )
+
+        with pytest.raises(ToolExceptionWithResponse) as raised:
+            await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/shot.png")
+
+        assert str(raised.value) == "Action error: not found"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    async def test_upload_url_is_refused_without_a_gitlab_privilege(
+        self, metadata_with_project
+    ):
+        tool = ReadFile(description="Read file content")
+        tool.metadata = {
+            **metadata_with_project,
+            "granted_privileges": frozenset({"read_only_files"}),
+        }
+        url = f"https://example.com/-/group/9970/uploads/{self.UPLOAD_SECRET}/shot.png"
+
+        with patch(
+            "duo_workflow_service.tools.filesystem._security_log"
+        ) as security_log:
+            response = await tool._arun(url)
+
+        assert response == (
+            f'Cannot read upload: "{url}" is a GitLab upload, and this flow has no '
+            "GitLab API access."
+        )
+        metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+        _, fields = security_log.info.call_args
+        assert fields["entity_type"] == "Group"
+        assert fields["entity_id"] == 9970
+        assert fields["details"]["reason"] == "missing_privilege"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    async def test_read_file_chunked_rewrites_upload_url(self, metadata_with_project):
+        # The class modern clients actually get takes the URL forms too.
+        tool = ReadFileChunked(description="Read file content")
+        tool.metadata = metadata_with_project
+
+        await tool._arun(
+            f"https://example.com/groups/gitlab-org/-/uploads/{self.UPLOAD_SECRET}/shot.png"
+        )
 
         action = metadata_with_project[
             "outbox"
         ].put_action_and_wait_for_response.call_args[0][0]
         assert action.runReadFile.filepath == (
-            f"/api/v4/projects/1/uploads/{self.UPLOAD_SECRET}/screenshot.png"
+            f"/api/v4/groups/gitlab-org/uploads/{self.UPLOAD_SECRET}/shot.png"
         )
+
+    @pytest.mark.asyncio
+    async def test_upload_url_is_not_a_download_with_image_support_off(
+        self, metadata_with_project
+    ):
+        # Flag off on a current client: the URL is an ordinary path, refused by
+        # the path checks before any action is sent.
+        token = language_server_version.set(LanguageServerVersion.from_string("10.2.0"))
+        try:
+            tool = ReadFile(description="Read file content")
+            tool.metadata = metadata_with_project
+            with pytest.raises(ToolException, match="Access denied"):
+                await tool._arun(
+                    f"https://example.com/-/group/9970/uploads/{self.UPLOAD_SECRET}/shot.png"
+                )
+        finally:
+            language_server_version.reset(token)
+
+        metadata_with_project[
+            "outbox"
+        ].put_action_and_wait_for_response.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked])
+    @pytest.mark.parametrize(
+        ("privileges", "hinted"),
+        [
+            (frozenset({"read_only_files", "read_only_gitlab"}), True),
+            (frozenset({"read_only_files"}), False),
+        ],
+    )
+    async def test_failed_slashless_upload_read_points_at_the_leading_slash(
+        self, metadata_with_project, tool_cls, privileges, hinted
+    ):
+        # Without the slash the reference is a repository path. When that read
+        # fails and this run may read uploads, the model is told the form that
+        # downloads it. No message text is matched.
+        tool = tool_cls(description="Read file content")
+        tool.metadata = {**metadata_with_project, "granted_privileges": privileges}
+        metadata_with_project["outbox"].put_action_and_wait_for_response = AsyncMock(
+            side_effect=ToolExceptionWithResponse(
+                "Action error: File not found", server_error="File not found"
+            )
+        )
+        path = f"uploads/{self.UPLOAD_SECRET}/shot.png"
+
+        with pytest.raises(ToolExceptionWithResponse) as raised:
+            await tool._arun(path)
+
+        hint = (
+            f'\nIf this is a GitLab upload, pass it with the leading slash: "/{path}".'
+        )
+        assert str(raised.value) == "Action error: File not found" + (
+            hint if hinted else ""
+        )
+        assert raised.value.server_error == "File not found"
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("image_support_enabled")
@@ -591,6 +947,62 @@ class TestReadFile:
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("image_support_enabled")
+    @pytest.mark.parametrize(
+        ("reference", "suffix"),
+        [
+            ("/uploads/{s}/shot.png", f"\n{_UPLOAD_HINT_BARE}"),
+            ("https://example.com/-/group/9970/uploads/{s}/shot.png", ""),
+        ],
+    )
+    async def test_failed_upload_text_response_hints_only_the_markdown_form(
+        self, metadata_with_project, reference, suffix
+    ):
+        # The Markdown form always asks the session project, so its failure says
+        # to pass the full URL. A URL failure is passed through as it is.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+        metadata_with_project["outbox"].put_action_and_wait_for_response = AsyncMock(
+            return_value=create_mock_client_event_with_response(
+                'Could not download upload "shot.png": not found'
+            )
+        )
+
+        response = await tool._arun(reference.format(s=self.UPLOAD_SECRET))
+
+        assert response == f'Could not download upload "shot.png": not found{suffix}'
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
+    @pytest.mark.parametrize(
+        ("reference", "suffix"),
+        [
+            ("/uploads/{s}/shot.png", f"\n{_UPLOAD_HINT_BARE}"),
+            ("https://example.com/-/group/9970/uploads/{s}/shot.png", ""),
+        ],
+    )
+    async def test_failed_upload_action_error_hints_only_the_markdown_form(
+        self, metadata_with_project, reference, suffix
+    ):
+        # The executor refused the download as an action error. Any hint is
+        # appended to the same exception, so the response and server_error the
+        # error handler reads are still there.
+        tool = ReadFile(description="Read file content")
+        tool.metadata = metadata_with_project
+        metadata_with_project["outbox"].put_action_and_wait_for_response = AsyncMock(
+            side_effect=ToolExceptionWithResponse(
+                "Action error: not found", response="body", server_error="404"
+            )
+        )
+
+        with pytest.raises(ToolExceptionWithResponse) as raised:
+            await tool._arun(reference.format(s=self.UPLOAD_SECRET))
+
+        assert str(raised.value) == f"Action error: not found{suffix}"
+        assert raised.value.response == "body"
+        assert raised.value.server_error == "404"
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_denies_upload_reference_without_project(self):
         mock_outbox = MagicMock()
         mock_outbox.put_action_and_wait_for_response = AsyncMock()
@@ -640,8 +1052,8 @@ class TestReadFile:
             response = await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
 
         assert response == (
-            f'Cannot read upload: "/uploads/{self.UPLOAD_SECRET}/screenshot.png" is an '
-            "issue or merge request upload, and this flow has no GitLab API access."
+            f'Cannot read upload: "/uploads/{self.UPLOAD_SECRET}/screenshot.png" is a '
+            "GitLab upload, and this flow has no GitLab API access."
         )
         metadata_with_project[
             "outbox"
@@ -678,18 +1090,32 @@ class TestReadFile:
 
         assert "Image files" in description
         assert ("uploaded" in description) is mentions_uploads
+        assert ("/groups/<group path>/-/uploads/" in description) is mentions_uploads
+
+    @pytest.mark.usefixtures("image_support_enabled", "language_server_10_1")
+    @pytest.mark.parametrize("tool_cls", [ReadFile, ReadFileChunked])
+    def test_upload_paragraph_keeps_the_old_scope_for_an_older_client(self, tool_cls):
+        # The URL sentence would send this client to a form it cannot fetch.
+        description = tool_cls(
+            metadata={"granted_privileges": frozenset({"read_only_gitlab"})}
+        ).description
+
+        assert "uploaded" in description
+        assert "/groups/<group path>/-/uploads/" not in description
+        assert (
+            "Uploads on epics or other groups' items are not reachable" in description
+        )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("path_prefix", ["/", ""])
     @pytest.mark.usefixtures("image_support_enabled")
     async def test_read_file_chunked_rewrites_upload_reference(
-        self, metadata_with_project, path_prefix
+        self, metadata_with_project
     ):
         # The class modern clients actually get, so it needs the same branch.
         tool = ReadFileChunked(description="Read file content")
         tool.metadata = metadata_with_project
 
-        await tool._arun(f"{path_prefix}uploads/{self.UPLOAD_SECRET}/screenshot.png")
+        await tool._arun(f"/uploads/{self.UPLOAD_SECRET}/screenshot.png")
 
         action = metadata_with_project[
             "outbox"
@@ -1852,16 +2278,26 @@ def image_client_capable_fixture():
 
 @pytest.fixture(name="image_support_enabled")
 def image_support_enabled_fixture():
-    """Both switches on: what a capable client on a flagged instance sees."""
+    """Both switches on: what a current capable client on a flagged instance sees."""
     flag_token = current_feature_flag_context.set(
         {FeatureFlag.DAP_TOOL_IMAGE_INPUT.value}
     )
     caps_token = client_capabilities.set({IMAGE_READ_CAPABILITY})
     version_token = gitlab_version.set("19.5.0")
+    lsp_token = language_server_version.set(LanguageServerVersion.from_string("10.2.0"))
     yield
+    language_server_version.reset(lsp_token)
     gitlab_version.reset(version_token)
     client_capabilities.reset(caps_token)
     current_feature_flag_context.reset(flag_token)
+
+
+@pytest.fixture(name="language_server_10_1")
+def language_server_10_1_fixture():
+    """A client from before the allowlist took other owners (gitlab-lsp!4663 shipped in 10.2.0)."""
+    token = language_server_version.set(LanguageServerVersion.from_string("10.1.0"))
+    yield
+    language_server_version.reset(token)
 
 
 @pytest.mark.usefixtures("image_support_enabled")

@@ -2,9 +2,12 @@
 
 from pathlib import Path
 
+from lib.subprompts_index import read_subprompts_index
+
 __all__ = [
     "FEATURE_SETTINGS_THAT_RAILS_SENDS",
     "REPO_ROOT",
+    "feature_dir_of",
     "feature_prompt_dirs",
     "prompt_dir",
     "prompt_ids_by_dir",
@@ -58,17 +61,34 @@ def version_files(prompts_dir: Path) -> list[Path]:
 def feature_prompt_dirs() -> dict[str, Path]:
     """Return the `prompts/` dir of each prompt ID that `discover_feature_prompts` registers and that loads a prompt.
 
-    A flow-only feature keeps only Jinja fragments in its `prompts/` dir. Its ID loads no prompt.
+    A flow-only feature keeps only Jinja fragments in its `prompts/` dir. Its ID loads no prompt. Each prompt that a
+    `prompts/subprompts_index.yml` lists maps to its own dir.
     """
     dirs: dict[str, Path] = {}
     for feature_dir in _FEATURES_DIR.glob("*/*"):
         if version_files(prompts_dir := feature_dir / "prompts"):
             dirs[feature_dir.name] = prompts_dir
             dirs[f"{feature_dir.parent.name}/{feature_dir.name}"] = prompts_dir
+        dirs.update(read_subprompts_index(prompts_dir))
     for shared_dir in _SHARED_DIR.glob("*"):
         if version_files(prompts_dir := shared_dir / "prompts"):
             dirs[shared_dir.name] = prompts_dir
     return dirs
+
+
+def feature_dir_of(prompts_dir: Path) -> Path:
+    """Return the ``ai/features/<domain>/<feature>`` dir that owns ``prompts_dir``.
+
+    Args:
+        prompts_dir: A feature's ``prompts/`` dir, or the dir of a prompt that its ``subprompts_index.yml`` lists.
+
+    Raises:
+        ValueError: If ``prompts_dir`` is not under ``ai/features/<domain>/<feature>/``.
+    """
+    parts = prompts_dir.relative_to(_FEATURES_DIR).parts
+    if len(parts) < 3:
+        raise ValueError(f"{prompts_dir} is not under ai/features/<domain>/<feature>/")
+    return _FEATURES_DIR / parts[0] / parts[1]
 
 
 def prompt_dir(prompt_id: str) -> Path:

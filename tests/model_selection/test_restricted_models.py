@@ -241,25 +241,35 @@ def test_gpt_style_dash_suffixes_are_restricted(
 
 
 @pytest.mark.parametrize(
-    ("model", "expected"),
+    ("base", "model", "expected"),
     [
-        ("claude-mythos-5-1-latest", {"bl_security"}),
-        ("claude-mythos-5-1-2026-10-01", {"bl_security"}),
-        ("claude-mythos-5-1-20261001", {"bl_security"}),
-        ("claude-mythos-5-1@20261001", {"bl_security"}),
-        ("claude-mythos-5-1-v1:0", {"bl_security"}),
-        ("claude-mythos-5-1_preview", {"bl_security"}),
-        ("claude-mythos-5-10", None),
+        (base, f"{base}{suffix}", {"bl_security"})
+        for base in ("claude-mythos-5-1", "claude-mythos-5-2")
+        for suffix in (
+            "-latest",
+            "-2026-10-01",
+            "-20261001",
+            "@20261001",
+            "-v1:0",
+            "_preview",
+        )
+    ]
+    + [
+        ("claude-mythos-5-1", "claude-mythos-5-10", None),
+        ("claude-mythos-5-2", "claude-mythos-5-20", None),
+        # Versions are restricted separately: one version's entry does not cover another.
+        ("claude-mythos-5-1", "claude-mythos-5-2", None),
+        ("claude-mythos-5-2", "claude-mythos-5-1", None),
     ],
 )
 def test_alias_suffixes_on_restricted_base_fail_closed(
-    model_restrictions: list[ModelRestriction], model: str, expected
+    model_restrictions: list[ModelRestriction], base: str, model: str, expected
 ):
     config = _config_with(
         {
             **FAKE_RESTRICTED_MODEL,
             "gitlab_identifier": "restricted_mythos",
-            "params": {"model": "claude-mythos-5-1"},
+            "params": {"model": base},
         },
         model_restrictions,
     )

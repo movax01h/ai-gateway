@@ -35,17 +35,6 @@ _NO_TRUNCATION = TruncationConfig(
 # The fields a triage verdict adds to the finding it judges.
 _VERDICT_FIELDS = ("verdict", "clause", "evidence", "triage_evidence")
 
-# The key `for_each` puts in a unit's results entry instead of an answer when the
-# unit raised. Mirrors `ITEM_ERROR_SUBKEY` in
-# experimental/components/for_each/errors.py, spelled out here so a tool does not
-# import the component package.
-_UNIT_ERROR_KEY = "for_each_error"
-
-
-def _unit_failed(entry: Any) -> bool:
-    """Whether ``for_each`` recorded this unit as failed rather than answered."""
-    return isinstance(entry, dict) and _UNIT_ERROR_KEY in entry
-
 
 def _maybe_json(value: Any) -> Any:
     if isinstance(value, str):
@@ -145,6 +134,10 @@ class BlCollectAndFlattenInput(BaseModel):
         "ran holds its agent's `final_answer` (a dict, or a JSON string); a unit "
         "that failed holds a `for_each_error` record instead."
     )
+    succeeded: int = Field(
+        description="`for_each`'s count of units that ran without raising."
+    )
+    failed: int = Field(description="`for_each`'s count of units that raised.")
     emitted_count: Optional[int] = Field(
         default=None,
         description="The pre-cap unit count from `bl_prioritize_and_cap`, for "
@@ -168,9 +161,9 @@ class BlCollectAndFlatten(DuoBaseTool):
     name: str = "bl_collect_and_flatten"
     description: str = (
         "Read each unit's `final_answer` from the fan-out's collected per-unit "
-        "results, count the units that carry a `for_each_error` record as "
-        "errored, and assemble the aggregate `final_answer` plus per-stage "
-        "coverage. Deterministic, no LLM call."
+        "results and assemble the aggregate `final_answer` plus per-stage "
+        "coverage, from `for_each`'s own counts plus the units it could not "
+        "read. Deterministic, no LLM call."
     )
     args_schema: Type[BaseModel] = BlCollectAndFlattenInput
     # Below 1.0.0: not a stable tool.
@@ -191,27 +184,22 @@ class BlCollectAndFlatten(DuoBaseTool):
         count = len(results) if isinstance(results, list) else "?"
         return f"Collecting and flattening {count} unit results"
 
-    @staticmethod
-    def _resolve_entry(entry: Any) -> Any:
-        """A completed unit's ``final_answer``; ``None`` for a failed unit or a non-dict entry."""
-        if not isinstance(entry, dict) or _unit_failed(entry):
-            return None
-        return entry.get("final_answer")
-
     async def _execute(
         self,
         results: List[Any],
+        succeeded: int,
+        failed: int,
         emitted_count: Optional[int] = None,
         unit_noun: Optional[str] = None,
         verdict_items: Optional[List[Any]] = None,
     ) -> dict:
-        successes = [
-            (i, r)
+        # A failed unit's entry is only its `for_each_error` record, so it has no
+        # answer to read.
+        answered = [
+            (i, r.get("final_answer"))
             for i, r in enumerate(results)
-            if isinstance(r, dict) and not _unit_failed(r)
+            if isinstance(r, dict) and r.get("final_answer") is not None
         ]
-        resolved = [(i, self._resolve_entry(r)) for i, r in successes]
-        answered = [(i, answer) for i, answer in resolved if answer is not None]
         if verdict_items is not None:
             answered = [
                 (
@@ -234,23 +222,21 @@ class BlCollectAndFlatten(DuoBaseTool):
         flat = [f for _, found in read for f in found or []]
         final_answer = json.dumps(flat, ensure_ascii=False)
 
-        errored = sum(1 for r in results if _unit_failed(r))
-
         return {
             "final_answer": final_answer,
             "coverage": {
                 "emitted": emitted_count,
                 "dispatched": len(results),
-                "completed": len(successes),
-                "errored": errored,
+                "completed": succeeded,
+                "errored": failed,
                 "unit_noun": unit_noun,
                 **_coverage_sentences(
                     noun=unit_noun or "units",
                     emitted=emitted_count,
                     dispatched=len(results),
-                    completed=len(successes),
-                    errored=errored,
-                    unread=len(successes) - len(answered) + len(garbled),
+                    completed=succeeded,
+                    errored=failed,
+                    unread=succeeded - (len(read) - len(garbled)),
                 ),
             },
         }

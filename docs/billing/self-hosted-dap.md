@@ -105,6 +105,13 @@ never billed again.
 This rule applies to self-hosted billing only. Cloud AI Gateway billing does not use the
 self-hosted billing callback.
 
+### Operation types that are not billed
+
+The self-hosted DWS sends no billing signal for
+[non-billable operation types](index.md#operation-types-that-are-not-billed). For
+`compaction_auto`, `PromptRegistrySelfHostedBillingSupport.get` does not attach the billing
+callback. For `web_search_agentcore`, the callback skips the call.
+
 ## Key components
 
 ### Context variable: `self_hosted_dap_billing_enabled`

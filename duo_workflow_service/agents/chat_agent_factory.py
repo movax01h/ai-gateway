@@ -6,7 +6,6 @@ from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
 )
 from duo_workflow_service.agents.chat_agent import ChatAgent
 from duo_workflow_service.agents.prompt_adapter import DefaultPromptAdapter
-from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.components.tools_registry import Toolset, ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.builder import (
     FlowContext,
@@ -19,7 +18,7 @@ from duo_workflow_service.conversation.history_optimizer.pipeline import (
     HistoryOptimizerPipeline,
 )
 from duo_workflow_service.conversation.history_optimizer.schema import CompactionConfig
-from duo_workflow_service.tools.web_search import native_web_search_available
+from duo_workflow_service.tools.web_search import WebSearchState
 from lib.events import GLReportingEventContext
 
 
@@ -67,30 +66,24 @@ def create_agent(
         user_toggle=web_search_enabled, group_allowed=web_search_allowed_for_group
     )
 
-    # Include web_search_options when the feature flag is on, the client can
-    # render search results, AND the user enabled web search for this session.
-    #
-    # The last condition keeps this to models that run search themselves. Models that do not get
-    # the AgentCoreWebSearch tool in their toolset instead, and the two routes must stay mutually
-    # exclusive: binding both offers the model two ways to answer one query and bills the fallback
-    # for work the provider would have done.
-    bind_tools_params: dict[str, dict] = {}
-    if web_search.active and native_web_search_available():
-        bind_tools_params["web_search_options"] = {}
-
     prompt: Prompt = prompt_registry.get_on_behalf(
         user=user,
         prompt_id="chat/agent",
         prompt_version="^1.0.0",
         internal_event_category=internal_event_category,
         tools=tools.bindable,  # type: ignore[arg-type]
-        bind_tools_params=bind_tools_params,
         internal_event_extra={
             "agent_name": agent_name,
             "workflow_id": workflow_id,
             "workflow_type": workflow_type.value,
         },
     )
+
+    # The binding picked the route (native, fallback tool, or none, see `bind_web_search`). With the
+    # toggle on and no route (no native search and no gateway, or an admin deny), the toggle can't
+    # help, so the prompt doesn't mention web search at all.
+    if web_search.active and not prompt.binds_web_search:
+        web_search = WebSearchState()
 
     flow_context = FlowContext(
         flow_id=workflow_id,

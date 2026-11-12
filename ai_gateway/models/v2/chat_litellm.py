@@ -33,6 +33,9 @@ from ai_gateway.models.v2.litellm_model_registry import (
     register_fireworks_models,
     register_fireworks_vision_flags,
 )
+from ai_gateway.models.v2.web_search_policy import (
+    NATIVE_WEB_SEARCH_ALLOWED_LITELLM_PROVIDERS,
+)
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
 __all__ = ["ChatLiteLLM", "litellm_supports_native_web_search"]
@@ -61,9 +64,10 @@ def _litellm_maps_web_search(
 def litellm_supports_native_web_search(
     model: Optional[str], custom_llm_provider: Optional[str]
 ) -> bool:
-    """Whether a litellm-routed model runs a provider-hosted web search."""
+    """Whether a litellm-routed model runs a provider-hosted web search and its provider is cleared for it."""
     return (
         custom_llm_provider in _WEB_SEARCH_CAPABLE_PROVIDERS
+        and custom_llm_provider in NATIVE_WEB_SEARCH_ALLOWED_LITELLM_PROVIDERS
         and _litellm_maps_web_search(model, custom_llm_provider)
     )
 
@@ -89,7 +93,7 @@ def _litellm_maps_reasoning_effort(
 
 
 def _drop_unsupported_web_search(kwargs: Dict[str, Any]) -> None:
-    """Drop `web_search_options` unless the model can run a hosted web search."""
+    """Drop `web_search_options` unless the model can run a hosted web search and its provider is cleared for it."""
     if kwargs.get("web_search_options") is None:
         return
 
@@ -100,6 +104,8 @@ def _drop_unsupported_web_search(kwargs: Dict[str, Any]) -> None:
         reason = "provider does not run a hosted web search"
     elif not _litellm_maps_web_search(model, custom_llm_provider):
         reason = "litellm does not map web_search_options for this model"
+    elif custom_llm_provider not in NATIVE_WEB_SEARCH_ALLOWED_LITELLM_PROVIDERS:
+        reason = "provider is not cleared for native web search"
     else:
         return
 

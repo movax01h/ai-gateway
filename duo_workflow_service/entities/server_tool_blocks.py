@@ -40,6 +40,33 @@ def native_web_call(call_block: Any) -> Optional[str]:
     return None
 
 
+def native_web_call_succeeded(call_block: dict, content: list) -> bool:
+    """Whether the provider completed this call without an error, even when it found nothing.
+
+    OpenAI marks the call block itself; Anthropic reports the outcome in the paired result block, and a call with no
+    result block never completed.
+    """
+    if openai_web_search.is_call_block(call_block):
+        return call_block.get("status") == "completed"
+
+    result = next(
+        (
+            block
+            for block in content
+            if _is_anthropic_server_tool_result_block(block)
+            and block.get("tool_use_id") == call_block.get("id")
+        ),
+        None,
+    )
+    if result is None:
+        return False
+    outcome = result.get("content")
+    return not (
+        isinstance(outcome, dict)
+        and str(outcome.get("type", "")).endswith("_tool_result_error")
+    )
+
+
 def fetched_url(call_block: dict) -> Optional[str]:
     """The URL a fetch call read, when the block carries one as a string."""
     if openai_web_search.is_call_block(call_block):

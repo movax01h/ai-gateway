@@ -1,13 +1,14 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 from structlog.testing import capture_logs
 
 from duo_workflow_service.agent_platform.experimental.components.for_each import (
     ITEM_ERROR_SUBKEY,
+    failed_item_errors,
 )
 from duo_workflow_service.tools.bl_collect_and_flatten import (
-    _UNIT_ERROR_KEY,
     BlCollectAndFlatten,
     BlCollectAndFlattenInput,
     _coverage_sentences,
@@ -22,6 +23,14 @@ def _failed(message: str = "boom") -> dict:
     return {ITEM_ERROR_SUBKEY: {"type": "RuntimeError", "message": message}}
 
 
+async def _collect(results: list, **kwargs) -> dict:
+    """Run the tool with the counts `for_each` publishes beside these results."""
+    failed = len(failed_item_errors({str(i): r for i, r in enumerate(results)}))
+    return await BlCollectAndFlatten(metadata=None)._execute(
+        results=results, succeeded=len(results) - failed, failed=failed, **kwargs
+    )
+
+
 def _unit(*findings: dict) -> str:
     """A unit answer as it is stored: JSON of the structured answer."""
     return json.dumps(
@@ -34,13 +43,12 @@ class TestBlCollectAndFlatten:
     async def test_units_with_a_for_each_error_record_are_errored_without_losing_completed(
         self,
     ):
-        tool = BlCollectAndFlatten(metadata={})
         results = [
             {"final_answer": _unit({"id": "ok"})},
             _failed("could not parse"),
             _failed("boom"),
         ]
-        result = await tool._execute(results=results, emitted_count=3)
+        result = await _collect(results, emitted_count=3)
         parsed = json.loads(result["final_answer"])
         assert parsed == [{"id": "ok"}]
         assert result["coverage"]["completed"] == 1
@@ -48,33 +56,31 @@ class TestBlCollectAndFlatten:
         assert "2 of 3" in result["coverage"]["loss"]
         assert "2 failed" in result["coverage"]["loss"]
 
-    async def test_a_for_each_error_record_wins_over_an_answer_in_the_same_entry(
-        self,
-    ):
-        # The record is what marks a unit failed: an answer sitting beside it is
-        # not a completed unit's answer.
-        results = [
-            {"final_answer": _unit({"id": "ok"})},
-            {"final_answer": _unit({"id": "stale"}), **_failed()},
-        ]
-        result = await BlCollectAndFlatten(metadata={})._execute(results=results)
-        assert json.loads(result["final_answer"]) == [{"id": "ok"}]
+    async def test_the_counts_are_for_each_s_not_recounted_from_the_entries(self):
+        # The counts disagree with the entries on purpose: one answered entry,
+        # but `for_each` reports two failures.
+        result = await BlCollectAndFlatten(metadata=None)._execute(
+            results=[{"final_answer": _unit({"id": "ok"})}], succeeded=1, failed=2
+        )
         assert result["coverage"]["completed"] == 1
-        assert result["coverage"]["errored"] == 1
+        assert result["coverage"]["errored"] == 2
 
-    async def test_the_error_key_is_the_one_for_each_writes(self):
-        assert _UNIT_ERROR_KEY == ITEM_ERROR_SUBKEY
+    @pytest.mark.parametrize("field", ["succeeded", "failed"])
+    async def test_for_each_s_counts_are_required_inputs(self, field):
+        assert BlCollectAndFlattenInput.model_fields[field].is_required()
+        counts = {"succeeded": 1, "failed": 0}
+        del counts[field]
+        with pytest.raises(ValidationError):
+            BlCollectAndFlattenInput(results=[], **counts)
 
     async def test_final_answer_is_the_flattened_findings_not_the_unit_answers(self):
-        tool = BlCollectAndFlatten(metadata=None)
         results = [{"final_answer": _unit({"id": "x"})}]
-        result = await tool._execute(results=results)
+        result = await _collect(results)
         parsed = json.loads(result["final_answer"])
         assert parsed == [{"id": "x"}]
 
     async def test_empty_results_yields_empty_aggregate(self):
-        tool = BlCollectAndFlatten(metadata={})
-        result = await tool._execute(results=[])
+        result = await _collect([])
         assert json.loads(result["final_answer"]) == []
         assert result["coverage"]["completed"] == 0
         assert result["coverage"]["dispatched"] == 0
@@ -91,26 +97,12 @@ class TestFormatDisplayMessage:
 
     def test_reports_result_count_not_content(self):
         tool = BlCollectAndFlatten(metadata={})
-        args = BlCollectAndFlattenInput(results=[{"final_answer": "x" * 10_000}] * 50)
+        args = BlCollectAndFlattenInput(
+            results=[{"final_answer": "x" * 10_000}] * 50, succeeded=50, failed=0
+        )
         message = tool.format_display_message(args, None)
         assert message == "Collecting and flattening 50 unit results"
         assert "x" * 100 not in message
-
-
-@pytest.mark.asyncio
-class TestResolveEntry:
-    """Only a completed unit's own answer contributes to the aggregate."""
-
-    async def test_a_non_dict_entry_resolves_to_nothing(self):
-        tool = BlCollectAndFlatten(metadata={})
-
-        assert tool._resolve_entry("not an entry") is None
-
-    async def test_a_failed_entry_resolves_to_nothing(self):
-        """A unit carrying a `for_each_error` record contributes no answer -- its `final_answer`, if any, is not one."""
-        tool = BlCollectAndFlatten(metadata={})
-
-        assert tool._resolve_entry({"final_answer": '[{"i": 1}]', **_failed()}) is None
 
 
 @pytest.mark.asyncio
@@ -118,10 +110,9 @@ class TestADictFinalAnswer:
     """In schema mode the plain AgentComponent stores `final_answer` as the decoded dict, not its JSON string."""
 
     async def test_its_findings_are_flattened_and_the_unit_counted_completed(self):
-        tool = BlCollectAndFlatten(metadata=None)
         answer = {"explanation": "walked every handler", "findings": [{"id": "d1"}]}
 
-        out = await tool._execute(results=[{"final_answer": answer}])
+        out = await _collect([{"final_answer": answer}])
 
         assert json.loads(out["final_answer"]) == [{"id": "d1"}]
         assert out["coverage"]["completed"] == 1
@@ -136,72 +127,73 @@ class TestCoverageSentencesReachTheReport:
     covered one.
     """
 
-    def test_summary_names_the_stage_s_own_unit_noun(self):
-        cov = _coverage_sentences(
-            noun="findings",
-            emitted=12,
-            dispatched=12,
-            completed=12,
-            errored=0,
-        )
-        assert cov["summary"] == "Reviewed 12 of 12 findings."
-        # A clean stage discloses no cap and no loss.
-        assert "truncation" not in cov
-        assert "loss" not in cov
-
-    def test_a_cap_that_bound_is_disclosed_separately_from_loss(self):
-        cov = _coverage_sentences(
-            noun="review units",
-            emitted=150,
-            dispatched=62,
-            completed=62,
-            errored=0,
-        )
-        assert "62 of 150 review units were sent for review" in cov["truncation"]
-        assert "88 were never reviewed" in cov["truncation"]
-        # A cap is a CHOICE; it must not read as discarded findings.
-        assert "loss" not in cov
-
-    def test_discarded_units_are_reported_as_loss_not_as_a_cap(self):
-        cov = _coverage_sentences(
-            noun="review units",
-            emitted=40,
-            dispatched=40,
-            completed=40,
-            errored=0,
-            unread=14,
-        )
-        assert "14 of 40 review units are missing from the results" in cov["loss"]
-        assert "14 returned an answer that could not be read" in cov["loss"]
-        assert "truncation" not in cov
-
-    def test_errored_and_unread_units_are_counted_together_but_named_apart(self):
-        cov = _coverage_sentences(
-            noun="units",
-            emitted=10,
-            dispatched=10,
-            completed=9,
-            errored=1,
-            unread=2,
-        )
-        assert "3 of 10 units are missing from the results" in cov["loss"]
-        assert "2 returned an answer that could not be read" in cov["loss"]
-        assert "1 failed" in cov["loss"]
-
-    def test_a_stage_that_dispatched_nothing_still_says_so(self):
-        cov = _coverage_sentences(
-            noun="findings",
-            emitted=0,
-            dispatched=0,
-            completed=0,
-            errored=0,
-        )
-        assert cov["summary"] == "No findings were dispatched for this stage."
+    @pytest.mark.parametrize(
+        ("noun", "counts", "expected"),
+        [
+            pytest.param(
+                "findings",
+                {"emitted": 12, "dispatched": 12, "completed": 12, "errored": 0},
+                {"summary": "Reviewed 12 of 12 findings."},
+                id="clean",
+            ),
+            pytest.param(
+                "review units",
+                {"emitted": 150, "dispatched": 62, "completed": 62, "errored": 0},
+                {
+                    "summary": "Reviewed 62 of 62 review units.",
+                    "truncation": "The scan limit was reached: 62 of 150 review units "
+                    "were sent for review; 88 were never reviewed.",
+                },
+                id="cap-bound",
+            ),
+            pytest.param(
+                "review units",
+                {
+                    "emitted": 40,
+                    "dispatched": 40,
+                    "completed": 40,
+                    "errored": 0,
+                    "unread": 14,
+                },
+                {
+                    "summary": "Reviewed 26 of 40 review units.",
+                    "loss": "14 of 40 review units are missing from the results "
+                    "(14 returned an answer that could not be read).",
+                },
+                id="loss-unread",
+            ),
+            pytest.param(
+                "units",
+                {
+                    "emitted": 10,
+                    "dispatched": 10,
+                    "completed": 9,
+                    "errored": 1,
+                    "unread": 2,
+                },
+                {
+                    "summary": "Reviewed 7 of 10 units.",
+                    "loss": "3 of 10 units are missing from the results "
+                    "(2 returned an answer that could not be read; 1 failed).",
+                },
+                id="loss-errored-and-unread",
+            ),
+            pytest.param(
+                "findings",
+                {"emitted": 0, "dispatched": 0, "completed": 0, "errored": 0},
+                {"summary": "No findings were dispatched for this stage."},
+                id="nothing-dispatched",
+            ),
+        ],
+    )
+    def test_coverage_sentences(self, noun, counts, expected):
+        # The whole dict is asserted, so a sentence that should not apply fails
+        # the case: a cap must never read as a loss, nor a loss as a cap.
+        assert _coverage_sentences(noun=noun, **counts) == expected
 
     @pytest.mark.asyncio
     async def test_the_tool_publishes_the_sentences_alongside_the_counts(self):
-        tool = BlCollectAndFlatten(name="bl_collect_and_flatten", description="d")
-        out = await tool._execute(
+        out = await _collect(
             results=[{"final_answer": _unit()}],
             unit_noun="findings",
         )
@@ -226,7 +218,7 @@ async def test_what_collect_publishes_is_what_dedup_reads():
         {"final_answer": _unit({"cwe": "CWE-284", "file": "b.py", "line": 2})},
     ]
 
-    collected = await BlCollectAndFlatten(metadata={})._execute(results=results)
+    collected = await _collect(results)
     published = json.loads(collected["final_answer"])
     deduped = await BlDedupFindings(metadata={})._execute(collected["final_answer"])
 
@@ -254,18 +246,16 @@ class TestTriageVerdictMerge:
     """Triage answers with a verdict only; the collect step records it on the finding that unit judged."""
 
     @staticmethod
-    async def _collect(verdicts: list, items: list) -> list:
+    async def _merge(verdicts: list, items: list) -> list:
         results = [{"final_answer": json.dumps(v)} for v in verdicts]
-        out = await BlCollectAndFlatten(metadata=None)._execute(
-            results=results, verdict_items=items
-        )
+        out = await _collect(results=results, verdict_items=items)
         return json.loads(out["final_answer"])
 
     async def test_each_verdict_is_merged_onto_its_own_item(self):
         other = {**_FINDING, "file": "app/d.rb"}
         drop = {**_VERDICT, "verdict": "DROP", "clause": "DROP-2"}
 
-        merged = await self._collect([_VERDICT, drop], [dict(_FINDING), other])
+        merged = await self._merge([_VERDICT, drop], [dict(_FINDING), other])
 
         assert merged == [
             {**_FINDING, **{k: v for k, v in _VERDICT.items() if k != "explanation"}},
@@ -290,7 +280,7 @@ class TestTriageVerdictMerge:
             "finding": {"file": "app/other.rb"},
         }
 
-        (merged,) = await self._collect([verdict], [stale])
+        (merged,) = await self._merge([verdict], [stale])
 
         assert merged == {
             **_FINDING,
@@ -303,13 +293,13 @@ class TestTriageVerdictMerge:
     async def test_an_unset_optional_field_is_not_merged(self):
         verdict = {**_VERDICT, "verdict": "DROP", "triage_evidence": None}
 
-        (merged,) = await self._collect([verdict], [dict(_FINDING)])
+        (merged,) = await self._merge([verdict], [dict(_FINDING)])
 
         assert "triage_evidence" not in merged
         assert merged["verdict"] == "DROP"
 
     async def test_a_json_string_item_is_merged_too(self):
-        (merged,) = await self._collect([_VERDICT], [json.dumps(_FINDING)])
+        (merged,) = await self._merge([_VERDICT], [json.dumps(_FINDING)])
 
         assert merged["anchor_status"] == "exact"
 
@@ -323,7 +313,7 @@ class TestTriageVerdictMerge:
         }
 
         with capture_logs() as logs:
-            merged = await self._collect([verdict], [item])
+            merged = await self._merge([verdict], [item])
 
         assert merged == [{"verdict": "DROP", "clause": "c", "evidence": "e"}]
         assert any("item is not a finding" in log["event"] for log in logs)
@@ -333,7 +323,7 @@ class TestTriageVerdictMerge:
             _failed(),
             {"final_answer": json.dumps(_VERDICT)},
         ]
-        out = await BlCollectAndFlatten(metadata=None)._execute(
+        out = await _collect(
             results=results,
             verdict_items=[{"file": "first.rb"}, dict(_FINDING)],
         )
@@ -417,7 +407,7 @@ class TestFlatten:
             {"final_answer": json.loads(_unit({"cwe": "CWE-862"}))},
         ]
 
-        out = await BlCollectAndFlatten(metadata=None)._execute(results=results)
+        out = await _collect(results)
 
         assert json.loads(out["final_answer"]) == [_ONE_FINDING, {"cwe": "CWE-862"}]
 
@@ -430,7 +420,7 @@ class TestFlatten:
             {"final_answer": _unit()},
         ]
 
-        out = await BlCollectAndFlatten(metadata=None)._execute(results=results)
+        out = await _collect(results)
 
         assert json.loads(out["final_answer"]) == [_ONE_FINDING]
         assert out["coverage"]["summary"] == "Reviewed 2 of 5 units."
@@ -473,9 +463,7 @@ async def test_a_completed_unit_with_no_readable_answer_is_counted_unread(
     entry, verdict_items
 ):
     """What counts as unread: a unit that completed, but whose answer is not a findings list we can read."""
-    out = await BlCollectAndFlatten(metadata=None)._execute(
-        results=[entry], verdict_items=verdict_items
-    )
+    out = await _collect([entry], verdict_items=verdict_items)
 
     assert json.loads(out["final_answer"]) == []
     assert out["coverage"] == {

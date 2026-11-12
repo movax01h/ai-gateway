@@ -28,11 +28,22 @@ class SelfHostedBillingPromptCallbackHandler(BasePromptCallbackHandler):
         self.outbox = outbox
         self.source_type = source_type
 
-    async def on_before_llm_call(self):
+    async def on_before_llm_call(
+        self, operation_type: Optional[LLMOperationType] = None
+    ):
         # A retry repeats a call that failed and was already billed, so it is the same logical call.
         if llm_call_is_retry.get():
             log.info(
                 "Skipping self-hosted billing for a retried LLM call",
+                workflow_id=self.workflow_id,
+                feature_qualified_name=self.gl_reporting_event_context.feature_qualified_name,
+            )
+            return
+
+        # The extra call AgentCore web search adds is not billed, so search costs the same as native search.
+        if operation_type == LLMOperationType.WEB_SEARCH_AGENTCORE:
+            log.info(
+                "Skipping self-hosted billing for the LLM call after an AgentCore web search",
                 workflow_id=self.workflow_id,
                 feature_qualified_name=self.gl_reporting_event_context.feature_qualified_name,
             )

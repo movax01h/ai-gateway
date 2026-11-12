@@ -90,6 +90,7 @@ from ai_gateway.model_metadata import (
 from ai_gateway.model_selection import (
     ModelSelectionConfig,
     PromptParams,
+    ensure_paid_credits_model_access,
     ensure_restricted_model_access,
 )
 from ai_gateway.model_selection.model_selection_config import fallback_models
@@ -111,6 +112,7 @@ from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
 from ai_gateway.prompts.feature_roots import (
     LEGACY_INCLUDE_ALIASES,
     feature_prompt_root,
+    nested_prompt_roots,
 )
 from ai_gateway.prompts.model_variables import bind_model_variables
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
@@ -654,7 +656,9 @@ class FeatureRootLoader(BaseLoader):
 
     Template name ``<prompt_id>/<rest>`` maps to ``<registered_root>/<rest>``,
     so include strings need no rewrite when a prompt moves. A two-part id such
-    as ``chat/react`` is tried before a one-part id.
+    as ``chat/react`` is tried before a one-part id. A file in the dir of a
+    prompt that a ``subprompts_index.yml`` lists resolves only under that
+    prompt's id.
     """
 
     def get_source(
@@ -673,6 +677,8 @@ class FeatureRootLoader(BaseLoader):
     ) -> tuple[str, str, Callable[[], bool] | None]:
         path = (root / rest).resolve()
         if not path.is_relative_to(root.resolve()) or not path.is_file():
+            raise TemplateNotFound(template)
+        if any(path.is_relative_to(n.resolve()) for n in nested_prompt_roots(root)):
             raise TemplateNotFound(template)
 
         source = path.read_text(encoding="utf-8")
@@ -761,7 +767,7 @@ class BasePromptCallbackHandler:
 
     Example:
         class MyCustomCallback(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 # Custom logic before LLM call
                 print("About to call LLM")
 
@@ -769,11 +775,13 @@ class BasePromptCallbackHandler:
         prompt.register_internal_callbacks([MyCustomCallback()])
     """
 
-    async def on_before_llm_call(self):
+    async def on_before_llm_call(
+        self, operation_type: Optional[LLMOperationType] = None
+    ):
         """Called before an LLM request is made.
 
         Override this method to implement custom logic that should execute before the LLM is invoked (e.g., logging,
-        metrics, billing tracking).
+        metrics, billing tracking). `operation_type` is the per-call tag passed to `ainvoke`, if any.
         """
 
 
@@ -793,6 +801,8 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     internal_event_extra: dict[str, Any] = {}
     internal_callbacks: list[BasePromptCallbackHandler] = []
     requested_model: Optional[str] = None
+    binds_web_search: bool = False
+    """Whether binding gave the model a web search route (native or the fallback tool)."""
 
     def __init__(
         self,
@@ -817,19 +827,21 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         llm_definition = model_metadata.llm_definition if model_metadata else None
         # Default-deny for restricted models, on every name the model can be reached
         # by: the resolved definition, a custom-provider identifier, a raw model string, or a fallback.
-        ensure_restricted_model_access(
-            identifiers=[
+        model_names = {
+            "identifiers": [
                 llm_definition.gitlab_identifier if llm_definition else None,
                 getattr(model_metadata, "name", None),
             ],
-            models=[
+            "models": [
                 model_kwargs.get("model"),
                 model_kwargs.get("model_id"),
                 config.model.params.model,
                 llm_definition.params.model if llm_definition else None,
                 *fallback_models(llm_definition.params if llm_definition else None),
             ],
-        )
+        }
+        ensure_restricted_model_access(**model_names)
+        ensure_paid_credits_model_access(**model_names)
 
         if not self._is_anthropic_provider(model_provider, config.model.params):
             for key in ANTHROPIC_ONLY_MODEL_KWARGS:
@@ -851,6 +863,25 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         factory_timeout = _model_request_timeout(model)
         base_model = model
 
+        # Decided here because only the binding knows the model: a `web_search` tool becomes the
+        # provider's own search for models that run it, and stays a local tool otherwise.
+        bound_tools: list[BaseTool] = list(tools or [])
+        binds_web_search = False
+        if bound_tools:
+            # Imported here: `ai_gateway.models.v2` imports the prompts package while it loads.
+            from ai_gateway.models.v2.web_search_support import (  # pylint: disable=import-outside-toplevel
+                WEB_SEARCH_TOOL_NAME,
+                bind_web_search,
+            )
+
+            bound_tools, bind_tools_params = bind_web_search(
+                bound_tools, llm_definition, bind_tools_params
+            )
+            binds_web_search = "web_search_options" in (bind_tools_params or {}) or any(
+                getattr(tool, "name", None) == WEB_SEARCH_TOOL_NAME
+                for tool in bound_tools
+            )
+
         if tools and isinstance(model, BaseChatModel):
             if bind_tools_cache:
                 # Use cached bind_tools to avoid expensive repeated operations
@@ -864,14 +895,14 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 model = bind_tools_cache.get_or_bind(  # type: ignore[assignment]
                     model=model,
                     model_id=model_id,
-                    tools=tools,
+                    tools=bound_tools,
                     tool_choice=tool_choice,
                     model_provider=model_provider,
                     **(bind_tools_params or {}),
                 )
             else:
                 model = model.bind_tools(  # type: ignore[assignment]
-                    tools,
+                    bound_tools,
                     tool_choice=tool_choice,
                     **(bind_tools_params or {}),
                 )
@@ -951,6 +982,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 if model_metadata and model_metadata.is_custom_model
                 else None
             ),
+            binds_web_search=binds_web_search,
             **kwargs,
         )  # type: ignore[call-arg]
 
@@ -1098,9 +1130,12 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     additional_allowed=operator_allowed_headers,
                 )
 
-        ensure_restricted_model_access(
-            models=[model_factory_args.get("model"), model_factory_args.get("model_id")]
-        )
+        factory_models = [
+            model_factory_args.get("model"),
+            model_factory_args.get("model_id"),
+        ]
+        ensure_restricted_model_access(models=factory_models)
+        ensure_paid_credits_model_access(models=factory_models)
 
         return model_factory(**model_factory_args)
 
@@ -1160,6 +1195,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         self,
         input: Any,
         config: Optional[RunnableConfig] = None,
+        operation_type: Optional[LLMOperationType] = None,
         **kwargs: Optional[Any],
     ) -> BaseMessage:
         usage_cb, config = self._make_usage_callback(config)
@@ -1169,7 +1205,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             internal_event_client=self.internal_event_client,
         ) as watcher:
             await asyncio.gather(
-                *[cb.on_before_llm_call() for cb in self.internal_callbacks]
+                *[
+                    cb.on_before_llm_call(operation_type)
+                    for cb in self.internal_callbacks
+                ]
             )
 
             async def invoke() -> BaseMessage:
@@ -1183,7 +1222,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 result = await _ainvoke_with_retry(invoke)
 
             watcher.register_message(result)
-            self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
+            self.handle_usage_metadata(
+                watcher, usage_cb.usage_metadata, operation_type=operation_type
+            )
 
             return result
 
@@ -1304,14 +1345,18 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         self,
         watcher: ModelRequestInstrumentator.WatchContainer,
         usage_metadata: dict[str, UsageMetadata],
+        operation_type: Optional[LLMOperationType] = None,
     ) -> None:
         for model, usage in usage_metadata.items():
-            # operation_type is authoritative from the prompt YAML; override any
-            # caller-supplied value in internal_event_extra.
+            # A per-call operation_type wins; otherwise the prompt YAML value overrides
+            # any caller-supplied value in internal_event_extra.
             watcher.register_token_usage(
                 model,
                 usage,
-                {**self.internal_event_extra, "operation_type": self.operation_type},
+                {
+                    **self.internal_event_extra,
+                    "operation_type": operation_type or self.operation_type,
+                },
             )
 
     @classmethod

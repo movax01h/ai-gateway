@@ -60,6 +60,18 @@ Billing behavior differs by deployment type:
 
 See [Further reading](#further-reading) for links to each deployment type's documentation.
 
+## Operation types that are not billed
+
+LLM calls with these `operation_type` values are not billed:
+
+- `compaction_auto`: automatic context compaction.
+- `web_search_agentcore`: the call that passes AgentCore web search results back to the model.
+  Native web search needs no such call.
+
+On SaaS and self-managed, CustomersDot skips them through `NON_BILLABLE_OPERATION_TYPES`. On
+self-hosted, the DWS sends no billing signal for them. See
+[Self-Hosted DAP Usage Billing](self-hosted-dap.md#operation-types-that-are-not-billed).
+
 ## Configuration at a glance
 
 **Billing events** (`AIGW_BILLING_EVENT__*` in `.env`):

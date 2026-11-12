@@ -3,8 +3,8 @@ import re
 import uuid
 from enum import IntEnum
 from textwrap import dedent
-from typing import Any, ClassVar, List, Optional, Type
-from urllib.parse import quote, unquote, urlparse
+from typing import Any, ClassVar, List, NamedTuple, Optional, Type
+from urllib.parse import quote, unquote, urlparse, urlsplit
 
 import gitmatch
 import structlog
@@ -31,7 +31,7 @@ from duo_workflow_service.policies.file_exclusion_policy import (
 )
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-from lib.context import gitlab_user_id
+from lib.context import gitlab_user_id, language_server_version
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
 DEFAULT_READ_FILE_OFFSET = 0
@@ -223,13 +223,23 @@ _READ_FILE_CHUNKED_IMAGE_NOTE = f"""\
 
     """
 
+# Only a client whose allowlist takes other owners can download these URLs
+# (_upload_owner_urls_supported); an older client is told the old scope instead.
+_READ_FILE_UPLOAD_URL_SENTENCE = """For an upload on an epic, a group
+    work item, or another project you can read, pass its full GitLab URL, as
+    GitLab shows it or built from the owner's full path, e.g.
+    `https://<host>/groups/<group path>/-/uploads/<secret>/shot.png` or
+    `https://<host>/<project path>/uploads/<secret>/shot.png`."""
+_READ_FILE_UPLOAD_NO_URL_SENTENCE = (
+    "Uploads on epics or other groups' items are not reachable this way."
+)
+
 # Shown only when this run may download uploads: image support on, and a GitLab
 # privilege granted, since the download is a GitLab API read.
-_READ_FILE_UPLOAD_NOTE = """Images uploaded to issues or merge requests in the current project are
+_READ_FILE_UPLOAD_NOTE = f"""Images uploaded to issues or merge requests in the current project are
     also supported: pass the upload reference exactly as it appears in the
     markdown, e.g. `/uploads/<secret>/screenshot.png`. It is downloaded
-    using the user's own GitLab credentials. Uploads on epics or other
-    groups' items are not reachable this way.
+    using the user's own GitLab credentials. {_READ_FILE_UPLOAD_URL_SENTENCE}
 
     """
 
@@ -263,6 +273,12 @@ def _upload_reads_enabled(metadata: Any) -> bool:
     )
 
 
+def _upload_owner_urls_supported() -> bool:
+    """Whether the client's allowlist takes uploads of groups and other projects (Language Server 10.2.0)."""
+    version = language_server_version.get()
+    return bool(version and version.supports_upload_owner_urls())
+
+
 def _strip_note_unless(tool: DuoBaseTool, note: str, enabled: bool) -> None:
     if not enabled:
         tool.description = tool.description.replace(note, "")
@@ -273,6 +289,10 @@ def _gate_read_file_notes(tool: DuoBaseTool, image_note: str) -> None:
     _strip_note_unless(
         tool, _READ_FILE_UPLOAD_NOTE, _upload_reads_enabled(tool.metadata)
     )
+    if not _upload_owner_urls_supported():
+        tool.description = tool.description.replace(
+            _READ_FILE_UPLOAD_URL_SENTENCE, _READ_FILE_UPLOAD_NO_URL_SENTENCE
+        )
 
 
 _NO_VISION_NOTE = (
@@ -306,25 +326,209 @@ def _image_response_to_blocks_if_enabled(
     )
 
 
-# `/uploads/<secret>/<filename>`, as GitLab stores it in issue and MR markdown.
+# The two shapes GitLab gives an upload reference. In Markdown it is
+# `/uploads/<secret>/<filename>` with no owner: the owner is whatever the
+# Markdown belongs to, which for this tool is the session project. Rendered, or
+# copied from the browser, it is a full URL that names the owner, in one of the
+# four forms GitLab itself produces:
+#   https://<host>/-/project/<id>/uploads/...     Banzai::Filter::UploadLinkFilter
+#   https://<host>/-/group/<id>/uploads/...       same filter, group-owned
+#   https://<host>/<group>/<project>/uploads/...  project web route
+#   https://<host>/groups/<group>/-/uploads/...   group web route
 # Secrets are 32 hex chars today, 10 to 32 on old uploads (FileUploader
-# VALID_SECRET_PATTERN), and a filename never contains a slash. The leading
-# slash is optional because models routinely drop it (seen live).
-_UPLOAD_REF_PATTERN = re.compile(
-    r"\A(?P<leading_slash>/?)uploads/(?P<secret>[0-9a-f]{10,32})/(?P<filename>[^/]+)\Z"
+# VALID_SECRET_PATTERN), and a filename never contains a slash. The slashless
+# `uploads/<secret>/<filename>` form is not a reference: it is also a valid
+# repository path, and it is the only shape where the two collide.
+_UPLOAD_SECRET = r"[0-9a-f]{10,32}"
+_UPLOAD_SECRET_RE = re.compile(_UPLOAD_SECRET)
+_BARE_UPLOAD_REF = re.compile(
+    rf"\A/uploads/(?P<secret>{_UPLOAD_SECRET})/(?P<filename>[^/]+)\Z"
+)
+# The characters GitLab allows in a namespace path segment.
+_PATH_SEGMENT_RE = re.compile(r"[A-Za-z0-9_.-]+")
+# ASCII digits only: `isdigit()` and `\d` also take other scripts' digits,
+# which `int()` reads back as a different id for the log. At most 19 digits,
+# the width of a bigint id; `int()` refuses strings past 4300 digits.
+_ASCII_ID_RE = re.compile(r"[0-9]{1,19}")
+# `.` and `..` address a directory, never a file or a namespace; `-` is the
+# segment GitLab reserves for its own routes, never a namespace.
+_RESERVED_SEGMENTS = frozenset({".", "..", "-"})
+
+# Appended to a failed download of the Markdown form. That form always asks
+# the session project, so a "not found" may mean another owner. Worded as a
+# condition, so a "too large" or "not an image" failure does not send the
+# model to retry with a URL.
+_UPLOAD_HINT_BARE = (
+    "If the error says not found, this upload may be on an epic, a group work "
+    "item, or another project: pass its full GitLab URL instead."
 )
 
-# Length of the secret current GitLab mints. Only relevant for the slashless
-# form, which is indistinguishable from a repository path.
-_UPLOAD_SECRET_LENGTH = 32
+# Without the leading slash an upload reference is read as a repository path
+# (see above). When that read fails, the model is pointed at the form that
+# downloads it.
+_SLASHLESS_UPLOAD_REF = re.compile(rf"\Auploads/{_UPLOAD_SECRET}/[^/]+\Z")
 
 
-def _resolve_upload_reference(file_path: str, project: Optional[Project]) -> str | None:
-    """Map a markdown upload reference onto its REST API download path.
+def _add_slashless_upload_hint(
+    error: ToolException, metadata: Any, file_path: str
+) -> None:
+    """Extend a failed read of ``uploads/<secret>/<file>`` with the slashed form, when this run may read uploads."""
+    if _SLASHLESS_UPLOAD_REF.match(file_path) and _upload_reads_enabled(metadata):
+        error.args = (
+            f"{error}\nIf this is a GitLab upload, pass it with the leading slash: "
+            f'"/{file_path}".',
+            *error.args[1:],
+        )
 
-    Needs a project: the reference carries none and the API lookup is parent-scoped. The
-    executor matches the returned path strictly before attaching the user's credential, so
-    this shape and the client-side check have to stay in sync.
+
+class UploadTarget(NamedTuple):
+    """Where an upload reference resolves to, and how the security log names its owner."""
+
+    request_path: str
+    entity_type: str
+    entity_id: Optional[int]
+    entity_path: Optional[str]
+    bare: bool
+
+
+def _upload_api_path(kind: str, owner: str, secret: str, filename: str) -> str:
+    return f"/api/v4/{kind}/{owner}/uploads/{secret}/{quote(filename, safe='')}"
+
+
+def _resolve_bare_reference(
+    match: re.Match[str], project: Optional[Project]
+) -> UploadTarget | None:
+    # The Markdown form carries no owner and the API lookup is parent-scoped,
+    # so it means the session project.
+    if not project or not project.get("id"):
+        return None
+    if match["filename"] in _RESERVED_SEGMENTS:
+        return None
+    web_url = project.get("web_url")
+    return UploadTarget(
+        request_path=_upload_api_path(
+            "projects", str(project["id"]), match["secret"], match["filename"]
+        ),
+        entity_type="Project",
+        entity_id=project["id"],
+        entity_path=(urlparse(web_url).path.strip("/") or None) if web_url else None,
+        bare=True,
+    )
+
+
+class _UploadOwner(NamedTuple):
+    """An upload's owner as a URL names it: how the API path addresses it, and how the log names it."""
+
+    is_group: bool
+    # The numeric id as given, or the full path as one percent-encoded segment.
+    api_ref: str
+    entity_id: Optional[int]
+    entity_path: Optional[str]
+
+
+def _upload_url_segments(
+    file_path: str, gitlab_host: Optional[str]
+) -> list[str] | None:
+    """The path segments of a URL on this GitLab instance, or ``None`` for anything else."""
+    # `urlsplit` would quietly lower-case the scheme, strip leading spaces, drop
+    # tabs and newlines, and split off a query or fragment, so a URL it would
+    # change is not a reference.
+    if (
+        not gitlab_host
+        or not file_path.startswith(("http://", "https://"))
+        or any(char in file_path for char in "\t\n\r?#")
+    ):
+        return None
+    try:
+        url = urlsplit(file_path)
+    except ValueError:  # for example an unbalanced IPv6 bracket in the host
+        return None
+    # A URL on another host is not a reference to this instance. It stays an
+    # ordinary path, so no credential is spent on it; the client only talks to
+    # its own GitLab anyway.
+    segments = url.path[1:].split("/")
+    if url.netloc != gitlab_host or "" in segments:
+        return None
+    return segments
+
+
+def _is_namespace_path(segments: list[str]) -> bool:
+    return bool(segments) and all(
+        _PATH_SEGMENT_RE.fullmatch(segment) and segment not in _RESERVED_SEGMENTS
+        for segment in segments
+    )
+
+
+def _owner_by_path(segments: list[str], *, is_group: bool) -> _UploadOwner:
+    path = "/".join(segments)
+    return _UploadOwner(is_group, quote(path, safe=""), None, path)
+
+
+def _upload_url_owner(segments: list[str]) -> _UploadOwner | None:
+    """The owner named by the part of the URL before ``/uploads/``, in the four forms GitLab produces."""
+    if segments[0] == "-":
+        # `/-/project/<id>` or `/-/group/<id>`, as Rails renders a link.
+        if (
+            len(segments) == 3
+            and segments[1] in ("project", "group")
+            and _ASCII_ID_RE.fullmatch(segments[2])
+        ):
+            return _UploadOwner(
+                segments[1] == "group", segments[2], int(segments[2]), None
+            )
+        return None
+    if segments[0] == "groups":
+        # `/groups/<group path>/-`, the group web route.
+        if segments[-1] == "-" and _is_namespace_path(segments[1:-1]):
+            return _owner_by_path(segments[1:-1], is_group=True)
+        return None
+    # `/<project path>`, the project web route. `api` is a reserved top-level
+    # path, so it never starts one.
+    if segments[0] != "api" and _is_namespace_path(segments):
+        return _owner_by_path(segments, is_group=False)
+    return None
+
+
+def _resolve_url_reference(
+    file_path: str, gitlab_host: Optional[str]
+) -> UploadTarget | None:
+    segments = _upload_url_segments(file_path, gitlab_host)
+    if segments is None or len(segments) < 4:
+        return None
+    *owner_segments, marker, secret, raw_filename = segments
+    owner = _upload_url_owner(owner_segments)
+    # GitLab escapes the filename when it renders the link, so decode it once
+    # before the API path quotes it again. A decoded `/` would change the path
+    # the API sees, and GitLab filenames never hold one.
+    filename = unquote(raw_filename)
+    if (
+        owner is None
+        or marker != "uploads"
+        or not _UPLOAD_SECRET_RE.fullmatch(secret)
+        or "/" in filename
+        or filename in _RESERVED_SEGMENTS
+    ):
+        return None
+    return UploadTarget(
+        request_path=_upload_api_path(
+            "groups" if owner.is_group else "projects", owner.api_ref, secret, filename
+        ),
+        entity_type="Group" if owner.is_group else "Project",
+        entity_id=owner.entity_id,
+        entity_path=owner.entity_path,
+        bare=False,
+    )
+
+
+def _resolve_upload_reference(
+    file_path: str, project: Optional[Project], gitlab_host: Optional[str]
+) -> UploadTarget | None:
+    """Map an upload reference onto its REST API download path and its owner.
+
+    The executor matches the returned path strictly before attaching the user's credential:
+    ``projects`` or ``groups``, then the owner as a numeric id or a percent-encoded full path
+    (uppercase ``%2F`` between segments, as ``quote`` emits), so this shape and the
+    client-side check have to stay in sync.
     """
     # Upload reading is part of gated image support, both switches: with the
     # flag off or a client that has not declared the capability, the reference
@@ -332,26 +536,13 @@ def _resolve_upload_reference(file_path: str, project: Optional[Project]) -> str
     # ever asked for. An older client could not fetch the API path anyway.
     if not _image_support_enabled():
         return None
-    match = _UPLOAD_REF_PATTERN.match(file_path)
-    if not match or not project or not project.get("id"):
-        return None
-
-    # `.` and `..` match the filename group but address the upload directory
-    # rather than a file; sending either would spend the user's credential on
-    # a request that was never a file read.
-    if match["filename"] in (".", ".."):
-        return None
-
-    # Without the leading slash the reference is shaped exactly like a
-    # repository path, so accept only the secret length GitLab mints today:
-    # `uploads/<10 hex>/thing.png` is a believable directory in a real tree,
-    # and rewriting it would send a file read to the API instead. Legacy
-    # short secrets still resolve in their markdown form, with the slash.
-    if not match["leading_slash"] and len(match["secret"]) != _UPLOAD_SECRET_LENGTH:
-        return None
-
-    filename = quote(match["filename"], safe="")
-    return f"/api/v4/projects/{project['id']}/uploads/{match['secret']}/{filename}"
+    if match := _BARE_UPLOAD_REF.match(file_path):
+        return _resolve_bare_reference(match, project)
+    # Only a client whose allowlist takes other owners can fetch these; for an
+    # older one the URL stays an ordinary path.
+    if _upload_owner_urls_supported():
+        return _resolve_url_reference(file_path, gitlab_host)
+    return None
 
 
 def _author_id() -> Optional[int]:
@@ -361,8 +552,7 @@ def _author_id() -> Optional[int]:
 
 
 def _log_upload_read(
-    project: Optional[Project],
-    request_path: str,
+    target: UploadTarget,
     *,
     outcome: str,
     response_type: Optional[str],
@@ -383,23 +573,25 @@ def _log_upload_read(
     differently from a failed download in a SIEM search; it is ``None`` whenever the download was attempted. The
     standard allows only ``success``, ``failure`` and ``unknown`` for ``outcome``, hence a separate field.
 
+    ``entity_type``, ``entity_id`` and ``entity_path`` name the owner the request was addressed to. For a URL
+    reference that is what the model gave, by id or by path, not what Rails answered.
+
     Fields this layer cannot fill: ``author_name`` (only ids reach the service), ``target_id`` (uploads are addressed
     by secret and filename), ``ip_address`` (the request arrives over gRPC) and ``details.token_type`` (the client
     holds the credential). The upload secret stays out because it is part of the download URL.
     """
-    web_url = project.get("web_url") if project else None
     _security_log.info(
         "Tool read resolved a GitLab upload reference",
         id=str(uuid.uuid4()),
         event_type="data.read.upload",
         author_id=_author_id(),
-        entity_type="Project",
-        entity_id=project.get("id") if project else None,
-        entity_path=urlparse(web_url).path.strip("/") if web_url else None,
+        entity_type=target.entity_type,
+        entity_id=target.entity_id,
+        entity_path=target.entity_path,
         target_type="upload",
         # Not `filename`: stdlib LogRecord reserves that name and raises.
         # Decoded, so the value matches the upload's own name in a SIEM search.
-        target_details=unquote(request_path.rsplit("/", 1)[-1]),
+        target_details=unquote(target.request_path.rsplit("/", 1)[-1]),
         details={
             "outcome": outcome,
             "provider": "duo_workflow_service",
@@ -428,28 +620,31 @@ async def _read_upload_reference(
         The tool response for an upload reference, or ``None`` when
         ``file_path`` is an ordinary path the caller should handle itself.
     """
-    request_path = _resolve_upload_reference(file_path, project)
-    if request_path is None:
+    target = _resolve_upload_reference(
+        file_path, project, (metadata or {}).get("gitlab_host")
+    )
+    if target is None:
         return None
 
     # Refuse readably rather than fall through to a file read: a planted
     # reference in a flow without GitLab access is what the trail is for.
     if _UPLOAD_READ_PRIVILEGE not in _granted_privileges(metadata):
         _log_upload_read(
-            project,
-            request_path,
+            target,
             outcome="failure",
             response_type=None,
             size_bytes=None,
             reason="missing_privilege",
         )
         return (
-            f'Cannot read upload: "{file_path}" is an issue or merge request upload, '
+            f'Cannot read upload: "{file_path}" is a GitLab upload, '
             "and this flow has no GitLab API access."
         )
 
-    # An agent pulling a project upload into model context is worth a trail;
+    # An agent pulling an upload into model context is worth a trail;
     # see _log_upload_read for what the trail is and is not.
+    # The hint suggests a URL, so only a client that can fetch one gets it.
+    hint = _UPLOAD_HINT_BARE if target.bare and _upload_owner_urls_supported() else None
     outcome = "failure"
     response_type: Optional[str] = None
     size_bytes: Optional[int] = None
@@ -458,7 +653,7 @@ async def _read_upload_reference(
         response = await _execute_action_accepting_image(
             metadata,
             contract_pb2.Action(
-                runReadFile=contract_pb2.ReadFile(filepath=request_path)
+                runReadFile=contract_pb2.ReadFile(filepath=target.request_path)
             ),
         )
         converted: str | list
@@ -466,14 +661,24 @@ async def _read_upload_reference(
             size_bytes = len(response.data)
             converted = _image_response_to_blocks_if_enabled(response, file_path)
         else:
-            converted = response
+            # The client answered with text, so the download itself failed
+            # (not found, too large, not an image, or an older client that read
+            # the API path as a file). For the Markdown form, tell the model
+            # what to try next.
+            converted = f"{response}\n{hint}" if hint else response
         response_type = "image" if isinstance(converted, list) else "text"
         outcome = "success"
         return converted
+    except ToolException as error:
+        # The executor reports a refused download as an action error. Keep the
+        # exception as it is, with its response and server_error for the
+        # error handler, and only extend the message the model reads.
+        if hint:
+            error.args = (f"{error}\n{hint}", *error.args[1:])
+        raise
     finally:
         _log_upload_read(
-            project,
-            request_path,
+            target,
             outcome=outcome,
             response_type=response_type,
             size_bytes=size_bytes,
@@ -513,17 +718,23 @@ class ReadFile(DuoBaseTool):
 
         # Upload references are remote GitLab content, not workspace paths, so
         # they skip the filesystem exclusion check (which rejects all absolute
-        # paths) and go to the executor as the project-scoped API path.
+        # paths) and go to the executor as the owner's API path.
         upload = await _read_upload_reference(self.metadata, self.project, file_path)
         if upload is not None:
             return upload
 
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
-        response = await _execute_action_accepting_image(
-            self.metadata,  # type: ignore
-            contract_pb2.Action(runReadFile=contract_pb2.ReadFile(filepath=file_path)),
-        )
+        try:
+            response = await _execute_action_accepting_image(
+                self.metadata,  # type: ignore
+                contract_pb2.Action(
+                    runReadFile=contract_pb2.ReadFile(filepath=file_path)
+                ),
+            )
+        except ToolException as error:
+            _add_slashless_upload_hint(error, self.metadata, file_path)
+            raise
         if isinstance(response, ImageActionResult):
             return _image_response_to_blocks_if_enabled(response, file_path)
         return response
@@ -600,14 +811,18 @@ class ReadFileChunked(DuoBaseTool):
 
         validate_duo_context_exclusions(file_path, allow_trusted_absolute=True)
 
-        response = await _execute_action_accepting_image(
-            self.metadata,  # type: ignore
-            contract_pb2.Action(
-                runReadFile=contract_pb2.ReadFile(
-                    filepath=file_path, offset=offset, limit=limit
-                )
-            ),
-        )
+        try:
+            response = await _execute_action_accepting_image(
+                self.metadata,  # type: ignore
+                contract_pb2.Action(
+                    runReadFile=contract_pb2.ReadFile(
+                        filepath=file_path, offset=offset, limit=limit
+                    )
+                ),
+            )
+        except ToolException as error:
+            _add_slashless_upload_hint(error, self.metadata, file_path)
+            raise
         if isinstance(response, ImageActionResult):
             return _image_response_to_blocks_if_enabled(response, file_path)
         return response

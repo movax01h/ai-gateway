@@ -132,15 +132,22 @@ Two of the concerns in that note need more than tests:
 
 ### 5. Rows carry an address the engine never reads
 
-`recipient` names the component the client was showing when the user hit send. The engine never reads or writes it.
+`recipient` names a place in the flow's address tree: a top-level component (`developer_agent`), a component it runs
+below it (`developer_agent/review_agent`), or one running instance of it (`developer_agent/review_agent#call-7`). The
+engine never reads or writes it.
 
-- A node claims the rows addressed to its own name.
-- A row with no address goes to the component the turn is at: the flow's entry on a new turn and mid-run, and the
-  component that paused on an interrupt resume. When several components paused in one turn, the first to resume takes
-  it. That's the limit of unaddressed rows, and the client capability removes it.
+- A node claims the rows addressed to its place. A row addressed to a component also reaches its running instances,
+  and never the components below it.
+- Each component declares whether it accepts unaddressed rows. A flow's top-level components do by default. The
+  components it runs nested, such as subagents, don't: they're workers their parent speaks for.
+- A row with no address goes to the first accepting component that claims after it arrives: the flow's entry on a new
+  turn, whichever accepting component claims next mid-run, and the component that paused on an interrupt resume.
+  Parallel components take it in the order they claim. That's the limit of unaddressed rows, and the client
+  capability removes it.
 - A row with an `in_reply_to` is never claimed by address: only a lookup by that ID reads it (§6). So an answer
   ignores any `recipient` (ADR-002 §1). Forwarding a `HumanInputComponent` answer to its receiver would add one to
   answers, as an additive field (see the open question on how that answer reaches its receiver).
+- On the mailbox path, a row without `in_reply_to` is a steer, even while a subagent is paused.
 
 ### 6. Every decision is a row with one claimer
 
@@ -165,12 +172,12 @@ Two of the concerns in that note need more than tests:
   reject keeps today's "User rejected this action" message, written by the gate. `message_template` stays the
   question the gate shows.
 
-### 7. Nested runs see a view of the parent's inbox
+### 7. Nested runs claim through the run's inbox
 
-A dispatch forwards the rows addressed to its subagent into a child inbox that shares the parent's claims. On an
-interrupt resume it also forwards unaddressed rows (§5). A nested render is acked under the nested checkpoint
-namespace. A dispatch clears `cancelled_turn` from the subagent's state, so a subagent never reads the user's
-cancelled transcript.
+A nested run claims through the run's inbox, so it shares the parent's pending rows and claims, and what it leaves
+stays pending for the parent. By default a subagent takes no unaddressed row (§5), because its parent speaks for it.
+A nested render is acked under the nested checkpoint namespace. A dispatch clears `cancelled_turn` from the
+subagent's state, so a subagent never reads the user's cancelled transcript.
 
 Delegations a supervisor creates are not mailbox rows. They're addressed to the subagent and never acked. The
 supervisor still writes the subsession `goal`, but the subagent's tail renders the delegated message, because a
@@ -255,9 +262,15 @@ resume doesn't rewrite `goal`.
   the `AIMessage` ID in its own history. A HumanInput question rarely comes with tool calls, so it needs its own ID
   source, and the receiver doesn't hold it. The gate has to hand it over, by recording it where the receiver reads it
   or by forwarding the answer addressed to the receiver. The ID also has to be reproducible on re-entry.
-- **The stage race.** A steer pending when a stage completes, or when a `HumanInputComponent` gate asks, in a staged
-  `chat` flow ([note](https://gitlab.com/gitlab-org/gitlab/-/work_items/633236#note_4097286679)).
-- Telling the entry apart in staged flows that opt in.
+- **The stage race.** A steer pending when a stage completes goes to the next accepting component that claims (§5).
+  The scenarios on [633236](https://gitlab.com/gitlab-org/gitlab/-/work_items/633236#note_4097286679) check that
+  before a staged `chat` flow opts in.
+- **Who the user is talking to.** One direction: the engine works out a focus, the component holding the
+  conversation at any depth, and reports it, so a client shows it and stamps `recipient` with it. Each nested run
+  would claim in a frame of its own, keyed by these addresses. It's needed once a subagent can be the one the user
+  talks to, and the event's shape settles with clients before they stamp `recipient`
+  ([#3585](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3585)
+  workstream 10).
 - Authors reference inbound messages through `inputs`, with a default input (follow-up MR).
 - Rethinking cancellation on top of the inbox
   ([issue 2998](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2998)).
@@ -272,9 +285,15 @@ resume doesn't rewrite `goal`.
 1. **Consumed IDs in state.** A sibling in the same superstep can't see them until the next one, and the set needs a
    bound.
 1. **No address, so the first claimer takes everything** (!7710 as first proposed). Parallel claimers and parallel
-   resumes take each other's messages. Unaddressed rows keep that limit on an interrupt resume (§5), and only there.
+   resumes take each other's messages. Unaddressed rows keep that limit for parallel components in one run (§5), and
+   only there.
 1. **Separate child inboxes for nested runs.** The parent's checkpointer never sees the nested claim, so a follow-up
    rendered before a second pause renders twice. !7722 shows it with a control.
+1. **Nesting depth from the checkpoint namespace.** LangGraph adds a numeric segment for a task's second nested run
+   and for a retried task's, and has no public helper to count levels.
+1. **Nesting depth in `configurable`.** A nested site that doesn't set it reads the root's depth, so it claims as the
+   root.
+1. **Only the entry takes unaddressed rows, set at build time.** Later stages of a staged flow get no steers.
 1. **Acking outside the checkpoint transaction,** by reading the `tasks` stream or with a separate call. There's a
    window where Rails shows a message as queued after the agent read it.
 1. **Acking the row IDs the saved checkpoint contains,** with each render carrying its row ID. The saver would read

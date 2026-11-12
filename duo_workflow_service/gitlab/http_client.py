@@ -24,7 +24,8 @@ class GitLabHttpResponse:
         self.body = body
         # Executors differ in how they case header names: the Node executor lowercases them, Workhorse canonicalises
         # them. httpx.Headers makes every lookup case-insensitive, so callers can use either form.
-        self.headers = httpx.Headers(headers or {})
+        # GitLab returns UTF-8 header values (e.g. X-Gitlab-File-Path), while httpx defaults to ASCII.
+        self.headers = httpx.Headers(headers or {}, encoding="utf-8")
 
     def is_success(self) -> bool:
         """Check if the HTTP response indicates success (2xx status codes)."""

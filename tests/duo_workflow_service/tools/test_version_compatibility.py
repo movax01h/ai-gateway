@@ -34,6 +34,7 @@ from duo_workflow_service.tools.version_compatibility import (
     supports_labels_by_name,
     supports_licensed_feature_availability,
     supports_note_resolved_and_resolvable_fields,
+    supports_tool_access_policies_field,
     supports_vulnerability_tracked_ref,
 )
 
@@ -190,6 +191,12 @@ class TestVersionCompatibilityFunctions:
             (supports_glql_schema_endpoint, "19.2.0", False),
             (supports_glql_schema_endpoint, "19.2.9", False),
             (supports_glql_schema_endpoint, "18.6.0", False),
+            # supports_tool_access_policies_field (threshold: 19.6.0)
+            (supports_tool_access_policies_field, "19.6.0", True),
+            # A GDK or GitLab.com pre-release build already serves the field.
+            (supports_tool_access_policies_field, "19.6.0-pre", True),
+            (supports_tool_access_policies_field, "19.5.9", False),
+            (supports_tool_access_policies_field, "18.6.0", False),
         ],
     )
     def test_version_compatibility(
@@ -254,6 +261,24 @@ class TestVersionCompatibilityFunctions:
         """End to end from the header string, without mocking the parser."""
         mock_gitlab_version.get.return_value = reported
         assert supports_vulnerability_tracked_ref() is expected
+
+    @pytest.mark.parametrize(
+        "reported,expected",
+        [
+            ("19.6.0", True),
+            ("19.6.0-pre", True),
+            ("19.5.9", False),
+            (None, False),
+            ("", False),
+            ("garbage", False),
+        ],
+    )
+    @patch("duo_workflow_service.tools.version_compatibility.gitlab_version")
+    def test_tool_access_policies_field_reads_raw_version_strings(
+        self, mock_gitlab_version, reported, expected
+    ):
+        mock_gitlab_version.get.return_value = reported
+        assert supports_tool_access_policies_field() is expected
 
     @pytest.mark.parametrize(
         "reported,expected",

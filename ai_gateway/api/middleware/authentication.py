@@ -26,9 +26,11 @@ from starlette_context import context as starlette_context
 from ai_gateway.api.middleware.base import _PathResolver
 from ai_gateway.api.timing import timing
 from lib.context import StarletteUser, cloud_connector_token_context_var
+from lib.context.model import paid_credit_models_allowed_ctx
 from lib.jwt import (
     MISSING_SAAS_ROOT_NAMESPACE_CLAIM_ERROR,
     lacks_saas_root_namespace_claim,
+    paid_credit_models_allowed_from_claims_extra,
 )
 
 log = logging.getLogger("authentication")
@@ -121,6 +123,13 @@ class MiddlewareAuthentication(Middleware):
             # Set cloud connector token context var so that we don't have to propagate it everywhere nor rely
             # on StarletteUser and instead can make use of vanilla CloudConnectorUser
             cloud_connector_token_context_var.set(cloud_connector_token)
+            paid_credit_models_allowed_ctx.set(
+                paid_credit_models_allowed_from_claims_extra(
+                    cloud_connector_user.claims.extra
+                    if cloud_connector_user.claims
+                    else None
+                )
+            )
 
             return AuthCredentials(cloud_connector_user.claims.scopes), StarletteUser(
                 cloud_connector_user,

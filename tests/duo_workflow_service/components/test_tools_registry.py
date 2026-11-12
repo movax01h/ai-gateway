@@ -12,7 +12,6 @@ from structlog.testing import capture_logs
 from ai.features.security.secrets_fp_detection.components.post_secret_fp_analysis_to_gitlab import (
     PostSecretFpAnalysisToGitlab,
 )
-from ai_gateway.model_selection.models import ModelClassProvider
 from contract import contract_pb2
 from duo_workflow_service import tools
 from duo_workflow_service.components import tools_registry
@@ -77,7 +76,6 @@ from duo_workflow_service.tools.vulnerabilities.post_sast_fp_analysis_to_gitlab 
     PostSastFpAnalysisToGitlab,
 )
 from duo_workflow_service.tools.wiki import GetWikiPage
-from lib.context import current_model_metadata_context
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
 from lib.feature_roots import default_features_dir
 from lib.language_server import LanguageServerVersion
@@ -1426,8 +1424,8 @@ class TestUnavailableTools:
                 {"enabled_tools": []},
                 True,
                 ["web_search"],
-                {"unsupported_client_tools": ["web_search"]},
-                id="unsupported_client_is_available",
+                {"session_disabled_tools": ["web_search"]},
+                id="session_disabled",
             ),
             pytest.param(
                 {"enabled_tools": ["use_git"]},
@@ -1496,7 +1494,9 @@ class TestUnavailableTools:
             tools_registry, "is_client_capable", lambda _caps: client_capable
         )
         monkeypatch.setattr(
-            tools.AgentCoreWebSearch, "is_available", classmethod(lambda cls: False)
+            tools.AgentCoreWebSearch,
+            "is_available",
+            classmethod(lambda cls, _config: False),
         )
         registry = ToolsRegistry(
             preapproved_tools=[], tool_metadata=tool_metadata, **registry_kwargs
@@ -1511,6 +1511,7 @@ class TestUnavailableTools:
                 "flow_restricted_tools",
                 "missing_privilege_tools",
                 "unsupported_client_tools",
+                "session_disabled_tools",
                 "unknown_tools",
             )
             for name in expected_fields.get(key, [])
@@ -2415,122 +2416,67 @@ class TestMcpToolApprovals:
         assert "mcp__context7__get_docs" not in toolset._all_tools
 
 
-class TestWebSearchFallbackRegistration:
-    """`AgentCoreWebSearch` is a fallback: it registers only when native search cannot run."""
+class TestWebSearchRegistration:
+    """`web_search` is offered when the session may search; the model and the gateway are the binding's call."""
 
-    @pytest.fixture(name="capable_client")
+    @pytest.fixture(name="capable_client", autouse=True)
     def capable_client_fixture(self):
-        with patch(
-            "duo_workflow_service.components.tools_registry.is_client_capable",
-            return_value=True,
+        with (
+            patch(
+                "duo_workflow_service.components.tools_registry.is_client_capable",
+                return_value=True,
+            ),
+            patch(
+                "duo_workflow_service.tools.web_search.is_client_capable",
+                return_value=True,
+            ),
         ):
+            token = current_feature_flag_context.set({FeatureFlag.DAP_WEB_SEARCH.value})
             yield
+            current_feature_flag_context.reset(token)
 
-    @pytest.fixture(name="model_class_provider")
-    def model_class_provider_fixture(self, request):
-        metadata = MagicMock()
-        metadata.llm_definition.model_class_provider = request.param
-        token = current_model_metadata_context.set(metadata)
-        yield
-        current_model_metadata_context.reset(token)
-
-    @pytest.fixture(name="web_search_flag")
-    def web_search_flag_fixture(self, request):
-        flags = {FeatureFlag.DAP_WEB_SEARCH.value} if request.param else set()
-        token = current_feature_flag_context.set(flags)
-        yield
-        current_feature_flag_context.reset(token)
-
-    @pytest.fixture(name="configured_gateway", autouse=True)
-    def configured_gateway_fixture(self, monkeypatch):
-        """Point the tool at a gateway, since it does not register without one.
-
-        Set explicitly rather than inherited from the environment: the test process loads the
-        repository `.env`, so these tests would otherwise pass only for developers who have
-        configured a real gateway locally.
-        """
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__ENABLED", "true")
-        monkeypatch.setenv(
-            "DUO_WORKFLOW_WEB_SEARCH__GATEWAY_URL",
-            "https://gw-abcdefghij.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp",
-        )
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__TARGET_NAME", "websearch")
-
-    @pytest.mark.parametrize(
-        "web_search_flag,model_class_provider",
-        [(True, ModelClassProvider.LITE_LLM)],
-        indirect=True,
-    )
-    def test_not_registered_without_a_configured_gateway(
-        self,
-        capable_client,
-        web_search_flag,
-        model_class_provider,
-        tool_metadata,
-        monkeypatch,
-    ):
-        """Every other gate can be open; with no gateway the tool still must not be offered."""
-        monkeypatch.setenv("DUO_WORKFLOW_WEB_SEARCH__ENABLED", "false")
-
+    def test_offered_pre_approved_when_the_session_opted_in(self, tool_metadata):
         registry = ToolsRegistry(
             enabled_tools=[],
             preapproved_tools=[],
             tool_metadata=tool_metadata,
+            workflow_config={
+                "web_search_enabled": True,
+                "web_search_allowed_for_group": True,
+            },
         )
 
-        assert "web_search" not in registry._enabled_tools
-        assert "web_search" not in registry._preapproved_tool_names
+        toolset = registry.toolset(["web_search"])
+
+        assert "web_search" in toolset
+        # Searching is read-only, so it must not prompt for approval on every call.
+        assert toolset.approved("web_search")
 
     @pytest.mark.parametrize(
-        "web_search_flag,model_class_provider,registered",
+        ("config", "denied"),
         [
-            # Flag on, native unusable over LiteLLM: register the fallback.
-            (True, ModelClassProvider.LITE_LLM, True),
-            # Anthropic and OpenAI search natively, so the fallback must not be offered too.
-            (True, ModelClassProvider.ANTHROPIC, False),
-            (True, ModelClassProvider.OPENAI, False),
-            # Flag off: never registered.
-            (False, ModelClassProvider.LITE_LLM, False),
+            ({"web_search_enabled": False, "web_search_allowed_for_group": True}, []),
+            (
+                {"web_search_enabled": True, "web_search_allowed_for_group": True},
+                ["web_search"],
+            ),
         ],
-        indirect=["web_search_flag", "model_class_provider"],
+        ids=["not_opted_in", "admin_deny"],
     )
-    def test_registration(
-        self,
-        capable_client,
-        web_search_flag,
-        model_class_provider,
-        registered,
-        tool_metadata,
+    def test_not_offered_without_opt_in_or_under_deny(
+        self, tool_metadata, config, denied
     ):
         registry = ToolsRegistry(
             enabled_tools=[],
             preapproved_tools=[],
             tool_metadata=tool_metadata,
+            denied_tools=denied,
+            workflow_config=config,
         )
 
-        assert ("web_search" in registry._enabled_tools) is registered
+        toolset = registry.toolset(["web_search"])
 
-    @pytest.mark.parametrize(
-        "web_search_flag,model_class_provider",
-        [(True, ModelClassProvider.LITE_LLM)],
-        indirect=True,
-    )
-    def test_registers_as_preapproved(
-        self,
-        capable_client,
-        web_search_flag,
-        model_class_provider,
-        tool_metadata,
-    ):
-        """Searching is read-only, so it must not prompt for approval on every call."""
-        registry = ToolsRegistry(
-            enabled_tools=[],
-            preapproved_tools=[],
-            tool_metadata=tool_metadata,
-        )
-
-        assert "web_search" in registry._preapproved_tool_names
-        assert registry.toolset(["web_search"]).approved("web_search")
+        assert "web_search" not in toolset
 
 
 class TestCapabilityDependentPreapproval:

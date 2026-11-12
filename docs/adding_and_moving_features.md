@@ -13,6 +13,7 @@ design, and some parts of that design are not implemented yet.
 | Asset | Location | Registered as |
 |-------|----------|---------------|
 | Prompt | `ai/features/<domain>/<feature>/prompts/<family>/<version>.yml`, plus `.jinja` includes | prompt IDs `<feature>` and `<domain>/<feature>` |
+| One of several prompts of a feature | `ai/features/<domain>/<feature>/prompts/<directory>/<family>/<version>.yml`, listed in `prompts/subprompts_index.yml` | the prompt ID that the index lists |
 | Shared prompt | `ai/shared/<name>/prompts/<family>/<version>.yml`, plus `.jinja` includes | prompt ID `<name>` |
 | Flow configuration | `ai/features/<domain>/<feature>/config/<version>.yml` | flow ID `<feature>` |
 | Feature tools | `ai/features/<domain>/<feature>/components/__init__.py`, in `FEATURE_TOOLS` | tools in the tools registry |
@@ -21,20 +22,67 @@ design, and some parts of that design are not implemented yet.
 
 Follow these rules:
 
-- The directory name is the ID. Feature and shared directory names must be unique across
-  `ai/features/` and `ai/shared/`. The AI Gateway fails at boot on a duplicate, and
-  `tests/test_feature_ids_unique.py` catches it in CI.
+- The directory name is the ID. Feature and shared directory names, and the prompt IDs in
+  each `subprompts_index.yml`, must be unique across `ai/features/` and `ai/shared/`.
+  `tests/test_feature_ids_unique.py` catches a duplicate in CI. When both duplicates
+  register a prompt, the AI Gateway also fails at boot.
 - Name a domain after the capability, not after a team. `cli` and `insights` exist today.
   `foundational_agents` holds flows that are fetched from the AI Catalog at image build, so
   do not add bundled features there.
 - A nested prompt ID fixes its domain. `chat/react` lives in `ai/features/chat/react/`,
   because the second registered ID, `<domain>/<feature>`, must match the name that callers
   use.
-- The two prompt IDs of a feature point at the same `prompts/` directory. A flow that needs
-  a second file-based prompt defines it inline in the flow configuration, or puts it in a
-  second feature directory.
+- The two prompt IDs of a feature point at the same `prompts/` directory. A flow with
+  several file-based prompts lists them in an index. See
+  [Several prompts in one feature](#several-prompts-in-one-feature).
 - Use Python identifiers for domain and feature names. The tools registry skips a feature
   whose name it cannot import.
+
+### Several prompts in one feature
+
+A flow with several file-based prompts keeps each prompt in a directory in `prompts/`, and
+lists it in `prompts/subprompts_index.yml`. Each line maps a prompt ID to its directory:
+
+```yaml
+# ai/features/pipeline/fix_pipeline/prompts/subprompts_index.yml
+fix_pipeline_create_plan: create_plan
+fix_pipeline_execution: execution
+```
+
+```plaintext
+ai/features/pipeline/fix_pipeline/
+  config/1.0.0.yml                # prompt_id: "fix_pipeline_create_plan", ...
+  prompts/
+    subprompts_index.yml
+    common/job_log/1.0.0.jinja    # include-only, not in the index
+    create_plan/
+      base/1.0.0.yml
+      system/1.0.0.jinja
+    execution/
+      base/1.0.0.yml
+      system/1.0.0.jinja
+```
+
+Follow these rules:
+
+- Each ID in the index registers its directory. A directory that the index does not list
+  registers no prompt ID. The feature's own IDs, `<feature>` and `<domain>/<feature>`,
+  still point at `prompts/`.
+- The prompt ID namespace is flat, so start a new ID with the feature name. A prompt that
+  moves from a legacy root keeps its ID.
+- An include starts with the listed ID, for example
+  `fix_pipeline_create_plan/system/1.0.0.jinja`. A file in a listed directory resolves only
+  under the listed ID, so `fix_pipeline/create_plan/system/1.0.0.jinja` does not resolve.
+  A file outside the listed directories resolves under the feature ID, for example
+  `fix_pipeline/common/job_log/1.0.0.jinja`.
+- Write one `<prompt_id>: <directory>` entry on each line, with letters, digits, and
+  underscores only, and one space or more after the colon. Comments, blank lines, and a
+  `---` before the first entry are allowed. The AI Gateway and the scripts read the file
+  without a YAML library, so other YAML syntax fails.
+- The AI Gateway fails at boot when an entry is malformed, or when the listed directory has
+  no `base/<version>.yml` file. `tests/test_feature_ids_unique.py` fails when a
+  `prompts/<directory>/base/` directory holds a `.yml` file and the index has no entry for
+  `<directory>`.
 
 ### Shared prompts
 
@@ -130,7 +178,10 @@ lint rejects it, so move the feature first.
      prompts/base/1.0.0.yml
    ```
 
-   Do not set `models_from` in this prompt: the flow selects its models. See
+   If the flow needs several file-based prompts, list them in an index. See
+   [Several prompts in one feature](#several-prompts-in-one-feature).
+
+   Do not set `models_from` in these prompts: the flow selects its models. See
    [Models of prompts served over HTTP](aigw_prompt_registry.md#models-of-prompts-served-over-http).
 
 1. Put the tools that only this flow uses in `components/`. Export them from
@@ -212,6 +263,8 @@ Move the whole feature in one merge request:
    git mv ai_gateway/prompts/definitions/<feature> ai/features/<domain>/<feature>/prompts
    # a nested prompt ID, for example chat/react
    git mv ai_gateway/prompts/definitions/chat/react ai/features/chat/react/prompts
+   # one of several prompts of a flow, then list it in prompts/subprompts_index.yml
+   git mv ai_gateway/prompts/definitions/<prompt_id> ai/features/<domain>/<feature>/prompts/<directory>
    # a shared prompt or include directory
    git mv ai_gateway/prompts/definitions/<name> ai/shared/<name>/prompts
    # a flow

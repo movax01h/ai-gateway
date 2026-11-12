@@ -22,7 +22,6 @@ from duo_workflow_service.agents.tool_call_validator import (
     retry_malformed_tool_calls,
     validate_tool_calls,
 )
-from duo_workflow_service.agents.web_search import WebSearchState
 from duo_workflow_service.audit_events.web_tools import capture_native_web_calls
 from duo_workflow_service.checkpointer.write_mode import (
     compaction_ui_chat_log_update,
@@ -72,7 +71,9 @@ from duo_workflow_service.tools import Toolset
 from duo_workflow_service.tools.version_compatibility import (
     supports_chat_tool_call_limits,
 )
+from duo_workflow_service.tools.web_search import AgentCoreWebSearch, WebSearchState
 from duo_workflow_service.tracking.errors import log_exception
+from lib.billing_events.service import LLMOperationType
 from lib.context import (
     LLMFinishReason,
     extract_finish_reason,
@@ -349,12 +350,36 @@ class ChatAgent:
         history.extend(messages)
         return bool(messages)
 
-    async def _get_agent_response(self, state: ChatWorkflowState) -> BaseMessage:
+    async def _get_agent_response(
+        self,
+        state: ChatWorkflowState,
+        operation_type: Optional[LLMOperationType] = None,
+    ) -> BaseMessage:
         return await self.prompt_adapter.get_response(
             state,
             system_template_override=self.system_template_override,
             web_search=self.web_search,
+            operation_type=operation_type,
         )
+
+    def _operation_type(self, state: ChatWorkflowState) -> Optional[LLMOperationType]:
+        # Native search needs no call after the search, so the one AgentCore adds is not billed.
+        history = state.get("conversation_history", {}).get(self.name, [])
+        if not history or not isinstance(history[-1], ToolMessage):
+            return None
+
+        last_ai = next((m for m in reversed(history) if isinstance(m, AIMessage)), None)
+        if (
+            last_ai
+            and last_ai.tool_calls
+            and all(
+                isinstance(self.toolset.get(call["name"]), AgentCoreWebSearch)
+                for call in last_ai.tool_calls
+            )
+        ):
+            return LLMOperationType.WEB_SEARCH_AGENTCORE
+
+        return None
 
     async def _build_response(
         self, agent_response: BaseMessage, state: ChatWorkflowState
@@ -666,6 +691,7 @@ class ChatAgent:
 
     async def run(self, state: ChatWorkflowState) -> Dict[str, Any]:
         approval_state = state.get("approval", None)
+        operation_type = self._operation_type(state)
 
         # Work on a copy: the input state aliases the live channel value and the
         # checkpointer's delta baseline (see _replace_history_update), so every
@@ -759,7 +785,7 @@ class ChatAgent:
                 project=state.get("project"),
                 namespace=state.get("namespace"),
             ):
-                agent_response = await self._get_agent_response(state)
+                agent_response = await self._get_agent_response(state, operation_type)
 
                 # Check for abnormal finish reasons
                 finish_reason = extract_finish_reason(agent_response.response_metadata)

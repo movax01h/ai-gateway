@@ -233,8 +233,8 @@ CHAT_SESSION_CONTEXT_TOOLS = ["get_session_context"]
 # composition here (`["render_ui"]`), gated behind DUO_CHAT_GENERATIVE_UI.
 CHAT_GENUI_TOOLS: list[str] = []
 
-# Fallback web search, for models that cannot search natively. The registry only enables it in
-# that case, and `toolset` drops names that are not enabled.
+# Web search. The registry offers it only when the session may search, and binding turns it
+# into the provider's own search for models that run it.
 CHAT_WEB_SEARCH_TOOLS = ["web_search"]
 
 
@@ -925,7 +925,13 @@ class Workflow(AbstractWorkflow):
 
         agents_toolset = tools_registry.toolset(tools + tools_registry.mcp_tool_names())
 
-        web_search_enabled, web_search_allowed_for_group = self._web_search_settings()
+        # An agent that doesn't list the tool has no web search at all, so the prompt mustn't
+        # suggest the user's toggle would turn it on.
+        web_search_enabled, web_search_allowed_for_group = (
+            self._web_search_settings()
+            if CHAT_WEB_SEARCH_TOOLS[0] in tools
+            else (False, False)
+        )
 
         self._agent: ChatAgent = create_agent(
             user=self._user,
@@ -1026,18 +1032,9 @@ class Workflow(AbstractWorkflow):
             else []
         )
 
-        # The opt-in and the group grant gate the fallback tool just as they gate
-        # native `web_search_options`, so turning search off holds for every model.
-        web_search_enabled, web_search_allowed_for_group = self._web_search_settings()
-        web_search_tools = (
-            CHAT_WEB_SEARCH_TOOLS
-            if web_search_enabled and web_search_allowed_for_group
-            else []
-        )
-
         available_tools = (
             read_only_tools
-            + web_search_tools
+            + CHAT_WEB_SEARCH_TOOLS
             + CHAT_MUTATION_TOOLS
             + RUN_COMMAND_TOOLS
             + CHAT_GITLAB_MUTATION_TOOLS

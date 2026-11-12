@@ -320,8 +320,9 @@ tmp/
 !.gitlab/duo/agent-config.yml
 !.gitlab/duo/mr-review-instructions.yaml
 
-# Caproni local setup marker
+# Caproni local setup marker and credentials symlink
 .caproni-duo-setup-complete
+/.caproni/
 
 .llm_cache.db
 

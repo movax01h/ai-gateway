@@ -1563,6 +1563,130 @@
           ]
         }
       ]
+    },
+    {
+      "name": "DuoWorkflows",
+      "label": "Duo workflows",
+      "modes": [
+        {
+          "mode": "Analytics",
+          "allowed_scopes": [
+            "project",
+            "group"
+          ],
+          "multi_scope": true,
+          "filter_fields": [
+            {
+              "name": "type",
+              "value_types": [
+                {
+                  "kind": "Enum",
+                  "operators": [
+                    "="
+                  ],
+                  "values": [
+                    "DuoWorkflow"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "created",
+              "aliases": [
+                "opened",
+                "openedat",
+                "createdat"
+              ],
+              "value_types": [
+                {
+                  "kind": "Date",
+                  "operators": [
+                    "=",
+                    ">",
+                    ">=",
+                    "<",
+                    "<="
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "flowType",
+              "value_types": [
+                {
+                  "kind": "String",
+                  "operators": [
+                    "=",
+                    "!="
+                  ]
+                },
+                {
+                  "kind": "List",
+                  "operators": [
+                    "in",
+                    "not in"
+                  ],
+                  "items": [
+                    {
+                      "kind": "String"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "sort_fields": [
+            "created",
+            "flowType",
+            "user",
+            "project",
+            "totalCount",
+            "usersCount",
+            "projectsCount",
+            "creditsUsedSum"
+          ],
+          "dimensions": [
+            "created",
+            "flowType",
+            "user",
+            "project"
+          ],
+          "metrics": [
+            "totalCount",
+            "usersCount",
+            "projectsCount",
+            "creditsUsedSum"
+          ],
+          "parameterized_fields": [
+            {
+              "name": "created",
+              "parameters": [
+                {
+                  "name": "granularity",
+                  "kind": "Granularity",
+                  "values": [
+                    "daily",
+                    "weekly",
+                    "monthly"
+                  ],
+                  "min_days": 1,
+                  "max_days": 399,
+                  "default": "monthly"
+                },
+                {
+                  "name": "origin",
+                  "kind": "Timestamp",
+                  "optional": true,
+                  "requires": {
+                    "parameter": "granularity",
+                    "value": "a fixed-day granularity such as `30d`, not a calendar bucket (`daily`, `weekly`, `monthly`)"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "operators": [
@@ -1638,6 +1762,14 @@
     {
       "name": "List",
       "description": "A parenthesised list of values, for example (a, b). `operators` says which comparisons the list accepts, and `items` the value types allowed inside it."
+    },
+    {
+      "name": "Granularity",
+      "description": "A date-bucket size: one of the calendar tokens listed in values, or a fixed number of days between min_days and max_days spelled with a d suffix, for example 30d."
+    },
+    {
+      "name": "Timestamp",
+      "description": "A quoted ISO 8601 date or date-time, for example \"2026-07-16\" or \"2026-07-16T00:00:00Z\". An offset is converted to UTC."
     }
   ],
   "reference_types": [

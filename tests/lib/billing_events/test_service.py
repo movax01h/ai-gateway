@@ -656,6 +656,19 @@ class TestLLMOperationType:
         )
         assert op.operation_type == "compaction_auto"
 
+    def test_llm_operation_accepts_web_search_agentcore(self):
+        """Test that LLMOperation accepts 'web_search_agentcore' as operation_type."""
+        op = LLMOperation(
+            model_id="claude-3-5-sonnet",
+            model_engine="anthropic",
+            model_provider="anthropic",
+            token_count=100,
+            prompt_tokens=80,
+            completion_tokens=20,
+            operation_type="web_search_agentcore",
+        )
+        assert op.operation_type == "web_search_agentcore"
+
     def test_llm_operation_type_is_exported(self):
         """Test that LLMOperationType is importable from lib.billing_events.service."""
         # If this import works, the type is properly exported

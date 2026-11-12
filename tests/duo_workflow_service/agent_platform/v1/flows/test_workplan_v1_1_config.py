@@ -421,7 +421,9 @@ class TestWorkplanV110GraphBuilds:
                 prompt_id=prompt_config.prompt_id,
                 prompt_data=prompt_config.to_prompt_data(),
             )
-        flow_prompt_registry.get_on_behalf = MagicMock(return_value=Mock(spec=Prompt))
+        flow_prompt_registry.get_on_behalf = MagicMock(
+            return_value=Mock(spec=Prompt, binds_web_search=False)
+        )
         return FlowGraphBuilder(
             tools_registry=ToolsRegistry(
                 enabled_tools=["read_write_gitlab"],

@@ -9,10 +9,12 @@
 #
 # Prerequisites:
 #   - `caproni up` has completed
-#   - ANTHROPIC_API_KEY is set (only needed on first run)
+#   - Model access, one of:
+#     - Google Application Default Credentials for Anthropic on Vertex AI
+#       (`gcloud auth application-default login`), the default
+#     - ANTHROPIC_API_KEY set (only needed on first run)
 #
 # Usage:
-#   export ANTHROPIC_API_KEY=<your-key>
 #   ./.gitlab/caproni/setup-ai-gateway.sh
 
 set -euo pipefail
@@ -71,7 +73,26 @@ override_env DUO_WORKFLOW_AUTH__ENABLED         true
 override_env DUO_WORKFLOW_AUTH__OIDC_GITLAB_URL "$gitlab_base_url"
 
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  # Undo the keyless path's commented-out placeholder so override_env finds it.
+  sed 's|^# ANTHROPIC_API_KEY=<API_KEY>$|ANTHROPIC_API_KEY=<API_KEY>|' .env >.env.tmp && mv .env.tmp .env
   override_env ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+fi
+
+# Without an Anthropic key, use the default keyless path: Anthropic models on
+# Vertex AI, authenticated with Google Application Default Credentials.
+adc_file="${GOOGLE_APPLICATION_CREDENTIALS:-$HOME/.config/gcloud/application_default_credentials.json}"
+use_vertex=false
+if [[ -z "${ANTHROPIC_API_KEY:-}" && -f "$adc_file" ]]; then
+  use_vertex=true
+  # The example.env placeholder would otherwise be sent as a real key.
+  sed 's|^ANTHROPIC_API_KEY=<API_KEY>$|# ANTHROPIC_API_KEY=<API_KEY>|' .env >.env.tmp && mv .env.tmp .env
+fi
+
+# mirrord hides ~/.config/gcloud from the edit-mode processes, so
+# caproni-project.yaml points GOOGLE_APPLICATION_CREDENTIALS at this symlink.
+if [[ -f "$adc_file" ]]; then
+  mkdir -p .caproni
+  ln -sfn "$adc_file" .caproni/gcloud-adc.json
 fi
 
 echo "BASE URL: $gitlab_base_url"
@@ -87,11 +108,18 @@ mise exec -- poetry install
 success "  ✓ Dependencies installed."
 
 # ---------------------------------------------------------------------------
-# Most features default to Vertex/Fireworks/Bedrock models, but we're using
-# Anthropic here, so we need to remap them. Edit .env if needed.
+# Most features default to Vertex/Fireworks/Bedrock models. With an Anthropic
+# key instead of Vertex access, remap them to Anthropic. Edit .env if needed.
 # ---------------------------------------------------------------------------
 
-if grep -qE "^#* *AIGW_MODEL_SELECTION__DEFAULT_MODELS='\{\}'" .env; then
+if [[ "$use_vertex" == true ]]; then
+  echo ""
+  if grep -qE "^#* *AIGW_MODEL_SELECTION__DEFAULT_MODELS='\{\}'" .env; then
+    success "==> Using the default Vertex AI models with Google ADC ($adc_file)."
+  else
+    warn "Using Google ADC ($adc_file), but .env sets AIGW_MODEL_SELECTION__DEFAULT_MODELS, so those models apply instead of the Vertex defaults."
+  fi
+elif grep -qE "^#* *AIGW_MODEL_SELECTION__DEFAULT_MODELS='\{\}'" .env; then
   echo ""
   echo "==> Switching default models to Anthropic..."
 
@@ -114,9 +142,13 @@ caproni kubectl create namespace ai-gateway 2>/dev/null || true
 
 if caproni kubectl get secret anthropic-api-key --namespace ai-gateway &>/dev/null; then
   success "  ✓ Secret anthropic-api-key already exists – skipping."
+elif [[ "$use_vertex" == true ]]; then
+  success "  ✓ No ANTHROPIC_API_KEY set – using Vertex AI, no secret needed."
 else
   if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-    error "ANTHROPIC_API_KEY is not set. Export it before running this script."
+    error "No model access: ANTHROPIC_API_KEY is not set and no Google ADC was found."
+    error "Run 'gcloud auth application-default login' to use Vertex AI (the default),"
+    error "or export ANTHROPIC_API_KEY, then re-run 'caproni run'."
     exit 1
   fi
   caproni kubectl create secret generic anthropic-api-key \

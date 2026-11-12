@@ -336,6 +336,45 @@ class TestUnifiedEventServiceTrack:
 
         assert posted_body().get("unique_instance_id") == expected
 
+    @pytest.mark.parametrize(
+        ("user_type", "expected"),
+        [
+            ("human", "human"),
+            (None, None),
+        ],
+    )
+    def test_user_type_comes_from_context(
+        self, service, posted_body, tracked_events, user_type, expected
+    ):
+        context = EventContext(realm="saas", user_type=user_type)
+        token = current_event_context.set(context)
+        try:
+            service.track("request_duo_chat")
+        finally:
+            current_event_context.reset(token)
+
+        assert posted_body().get("user_type") == expected
+        assert "subject_type" not in posted_body()
+
+    @pytest.mark.parametrize(
+        ("instance_id", "expected"),
+        [
+            ("instance-uuid", "instance-uuid"),
+            (None, None),
+        ],
+    )
+    def test_instance_id_comes_from_context(
+        self, service, posted_body, tracked_events, instance_id, expected
+    ):
+        context = EventContext(realm="saas", instance_id=instance_id)
+        token = current_event_context.set(context)
+        try:
+            service.track("request_duo_chat")
+        finally:
+            current_event_context.reset(token)
+
+        assert posted_body().get("instance_id") == expected
+
     def test_records_tracked_event_name(self, service, event_context, tracked_events):
         service.track("request_duo_chat")
 

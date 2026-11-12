@@ -133,6 +133,32 @@ class TestSelfHostedBillingPromptCallbackHandler:
         mock_outbox.put_action_and_wait_for_response.assert_not_called()
 
     @pytest.mark.parametrize(
+        ("operation_type", "billed"),
+        [
+            pytest.param(None, True, id="untagged"),
+            pytest.param("standard", True, id="standard"),
+            pytest.param("web_search_agentcore", False, id="after_agentcore_search"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_on_before_llm_call_skips_call_after_agentcore_search(
+        self,
+        workflow_id,
+        gl_reporting_event_context,
+        mock_outbox,
+        operation_type,
+        billed,
+    ):
+        """Test that the LLM call after an AgentCore web search does not send a tracking action."""
+        handler = SelfHostedBillingPromptCallbackHandler(
+            workflow_id, gl_reporting_event_context, mock_outbox
+        )
+
+        await handler.on_before_llm_call(operation_type)
+
+        assert mock_outbox.put_action_and_wait_for_response.called is billed
+
+    @pytest.mark.parametrize(
         "retry_raises",
         [
             pytest.param(False, id="retry_succeeded"),
