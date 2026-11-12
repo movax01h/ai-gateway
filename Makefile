@@ -128,7 +128,7 @@ bin/protoc: tmp/protoc-${PROTOC_VERSION}/bin/protoc
 .PHONY: lint-proto
 lint-proto:
 	@echo "Running buf lint check..."
-	@buf lint contract/
+	@BUF_CACHE_DIR="$${BUF_CACHE_DIR:-$(CURDIR)/.cache/buf}" buf lint contract/
 
 .PHONY: clean-proto
 clean-proto:
