@@ -131,9 +131,11 @@ flowchart TD
   of the graph and its whole job is to assemble a deployable, so it is the one place
   allowed to statically import features and serving adapters. Nothing imports
   `apps/` except the deprecated shims at the old entrypoint paths, until they are
-  removed. The DWS wiring walk imports `duo_workflow_service/bootstrap.py`,
-  so every DWS boot imports `ai/apps/dws/main.py` through it. The guardrail lint
-  permits feature imports under `apps/` and nowhere else.
+  removed. The DWS wiring walk of `duo_workflow_service` imports the
+  `duo_workflow_service.bootstrap` shim, so every DWS boot imports
+  `ai.apps.dws.main` through it. With the `duo-workflow-service` script,
+  `ai.apps.dws.main` is already loaded, so that import is a cache hit. The
+  guardrail lint permits feature imports under `apps/` and nowhere else.
 - `lib/` imports nothing above it: no platform, no features.
 
 This shape follows the same pattern as a thin platform that declares the contract
