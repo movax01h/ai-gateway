@@ -21,9 +21,15 @@ reloaders:
         kubernetes_type: deployment
         name: ai-gateway
       edit_mode_processes:
+        # mirrord hides ~/.config/gcloud from these processes, so point Google
+        # ADC at the symlink that setup-ai-gateway.sh creates.
         ai-gateway:
           command: poetry run ai_gateway
+          env:
+            GOOGLE_APPLICATION_CREDENTIALS: .caproni/gcloud-adc.json
         duo-workflow-service:
           # duo-workflow-service crashes if GitLab's OIDC endpoint is not up
           # yet, so gate it behind a readiness poll.
           command: bash -c '.gitlab/caproni/wait-for-gitlab.sh && exec poetry run duo-workflow-service'
+          env:
+            GOOGLE_APPLICATION_CREDENTIALS: .caproni/gcloud-adc.json
