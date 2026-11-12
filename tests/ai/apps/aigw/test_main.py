@@ -108,6 +108,20 @@ def test_app_factory_path_resolves(mock_get_config, mock_uvicorn_run):
     assert getattr(importlib.import_module(module_name), attribute) is get_app
 
 
+@pytest.mark.filterwarnings("ignore:.*found in sys.modules:RuntimeWarning")
+def test_runs_as_main_module():
+    with (
+        patch("uvicorn.run") as mock_uvicorn_run,
+        patch(
+            "ai_gateway.config.get_config",
+            return_value=_make_config(tls_enabled=False),
+        ),
+    ):
+        runpy.run_module("ai.apps.aigw.main", run_name="__main__")
+
+    mock_uvicorn_run.assert_called_once()
+
+
 def test_deprecated_path_reexports_run_app():
     import ai_gateway.main  # pylint: disable=import-outside-toplevel
 

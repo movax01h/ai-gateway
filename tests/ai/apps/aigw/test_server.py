@@ -927,6 +927,70 @@ async def test_lifespan_snowplow_shutdown_exception():
     assert warning_logs[0]["error"] == "snowplow unavailable"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("client", "event"),
+    [
+        ("billing_event", "Failed to shutdown billing events client"),
+        ("internal_event", "Failed to shutdown internal events client"),
+    ],
+)
+async def test_lifespan_client_shutdown_exception(client, event):
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = False
+    app = MagicMock()
+    app.state.config = config
+
+    with (
+        patch("ai.apps.aigw.server.ContainerApplication") as mock_container,
+        patch("ai.apps.aigw.server.wire_and_validate"),
+        patch("ai.apps.aigw.server.discover_feature_prompts"),
+        patch("ai.apps.aigw.server.setup_litellm"),
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        shutdown = getattr(mock_container.return_value, client).client.return_value
+        shutdown.shutdown.side_effect = RuntimeError("unavailable")
+
+        with capture_logs() as cap_logs:
+            async with server.lifespan(app):
+                pass
+
+    assert [log["error"] for log in cap_logs if log.get("event") == event] == [
+        "unavailable"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_thread_monitoring():
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = True
+    config.instrumentator.thread_monitoring_interval = 7
+    app = MagicMock()
+    app.state.config = config
+    loop = MagicMock()
+
+    with (
+        patch("ai.apps.aigw.server.ContainerApplication") as mock_container,
+        patch("ai.apps.aigw.server.wire_and_validate"),
+        patch("ai.apps.aigw.server.discover_feature_prompts"),
+        patch("ai.apps.aigw.server.setup_litellm"),
+        patch("ai.apps.aigw.server.asyncio.get_running_loop", return_value=loop),
+        patch(
+            "ai.apps.aigw.server.monitor_threads", new_callable=MagicMock
+        ) as mock_monitor_threads,
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        async with server.lifespan(app):
+            pass
+
+    mock_monitor_threads.assert_called_once_with(loop, interval=7)
+    loop.create_task.assert_called_once_with(mock_monitor_threads.return_value)
+
+
 def test_deprecated_paths_reexport_create_fast_api_server():
     import ai_gateway.api  # pylint: disable=import-outside-toplevel
     import ai_gateway.api.server  # pylint: disable=import-outside-toplevel
@@ -941,3 +1005,5 @@ def test_deprecated_paths_reexport_create_fast_api_server():
     assert (
         deprecated.CONTAINER_APPLICATION_MODULES is server.CONTAINER_APPLICATION_MODULES
     )
+    with pytest.raises(AttributeError, match="no attribute 'missing'"):
+        getattr(ai_gateway.api, "missing")
