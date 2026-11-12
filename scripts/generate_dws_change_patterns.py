@@ -1,4 +1,5 @@
 import ast
+import itertools
 from pathlib import Path
 
 # editorconfig-checker-disable
@@ -8,6 +9,7 @@ HEADER_TEXT = """# Dependencies for Duo Workflow Service. Extended tests are run
   changes:
     - duo_workflow_service/**/*
     - tests/duo_workflow_service/**/*
+    - tests/ai/apps/dws/**/*
     - contract/**/*
     - pyproject.toml
     - ai/apps/dws/**/*
@@ -21,13 +23,15 @@ OUTPUT_FILE_PATH = ".gitlab/ci/dws-dependencies.yml"
 
 
 def main():
-    target_directory = "duo_workflow_service/"
+    target_directories = ("duo_workflow_service/", "ai/apps/dws/")
 
     # Get lines that reference ai_gateway
     change_patterns = []
-    target_dir_path = Path(target_directory)
     search_string = "ai_gateway"
-    for root, _, filenames in target_dir_path.walk():
+    walks = itertools.chain.from_iterable(
+        Path(directory).walk() for directory in target_directories
+    )
+    for root, _, filenames in walks:
         for filename in filenames:
             full_path = Path(root) / filename
             if full_path.suffix == ".py":
