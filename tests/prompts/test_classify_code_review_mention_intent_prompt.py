@@ -6,7 +6,10 @@ thread that a Duo review started goes to a new review. See
 https://gitlab.com/gitlab-org/gitlab/-/work_items/635111.
 """
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from ai_gateway.prompts.base import jinja_env
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
@@ -73,3 +76,32 @@ def test_reply_in_a_duo_review_thread():
 
     assert "Thread started by a Duo review: yes" in rendered
     assert f"Earlier messages in this thread, oldest first:\n{thread}" in rendered
+
+
+_PROMPT_DIR = (
+    Path(__file__).parent.parent.parent
+    / "ai"
+    / "features"
+    / "review"
+    / "classify_code_review_mention_intent"
+    / "prompts"
+)
+_BASE_DEFINITIONS = sorted((_PROMPT_DIR / "base").glob("*.yml"))
+
+
+def test_base_definitions_are_discovered():
+    # Guards the parametrized test below against silently matching no versions.
+    assert {path.stem for path in _BASE_DEFINITIONS} >= {"1.0.0", "2.0.0"}
+
+
+@pytest.mark.parametrize(
+    "definition", _BASE_DEFINITIONS, ids=[path.stem for path in _BASE_DEFINITIONS]
+)
+def test_max_tokens_leaves_room_to_classify(definition):
+    """A too-low limit truncates the classification, so the mention is routed to legacy chat without tool access.
+
+    See https://gitlab.com/gitlab-org/gitlab/-/work_items/639435.
+    """
+    config = yaml.safe_load(definition.read_text())
+
+    assert config["model"]["params"]["max_tokens"] == 1024
