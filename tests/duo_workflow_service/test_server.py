@@ -158,6 +158,7 @@ from lib.context.model import (
     current_model_metadata_context,
     current_model_metadata_with_size_context,
     get_model_metadata,
+    paid_credit_models_allowed_ctx,
     restricted_access_ctx,
 )
 from lib.events import GLReportingEventContext
@@ -7596,6 +7597,88 @@ async def test_execute_workflow_other_flow_runs_without_restricted_access(
 
     mock_context.abort.assert_not_called()
     assert seen == ["developer"]
+
+
+@pytest.fixture(name="paid_model_metadata")
+def paid_model_metadata_fixture():
+    llm_definition = ModelSelectionConfig.instance().get_model("claude_opus_5_5")
+    metadata = ModelMetadata(
+        provider="gitlab",
+        name=llm_definition.gitlab_identifier,
+        llm_definition=llm_definition,
+    )
+    by_tag_token = current_model_metadata_with_size_context.set(
+        ModelMetadataByTag(default=metadata)
+    )
+    default_token = current_model_metadata_context.set(metadata)
+    yield metadata
+    current_model_metadata_context.reset(default_token)
+    current_model_metadata_with_size_context.reset(by_tag_token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled", "paid_model_metadata")
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_denies_paid_credit_model_at_start(
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_context,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        get_config().model_selection, "paid_credit_models_gate_mode", "enforce"
+    )
+    current_user.set(_workflow_token_user(flow_config_id="developer"))
+    token = paid_credit_models_allowed_ctx.set(False)
+    try:
+        with pytest.raises(grpc.RpcError):
+            await _execute_registry_flow(
+                "developer", mock_context, mock_resolve_flow, mock_workflow_class
+            )
+    finally:
+        paid_credit_models_allowed_ctx.reset(token)
+
+    mock_context.abort.assert_awaited_once_with(
+        grpc.StatusCode.PERMISSION_DENIED,
+        "Model requires purchased GitLab Credits",
+    )
+    mock_resolve_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flow_enabled", "paid_model_metadata")
+@pytest.mark.parametrize(
+    ("claim", "mode"),
+    [
+        pytest.param(False, "log", id="trial-log"),
+        pytest.param(True, "enforce", id="paid-credits"),
+        pytest.param(None, "enforce", id="no-claim"),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_allows_paid_credit_model_at_start(
+    mock_resolve_flow,
+    mock_workflow_class,
+    mock_context,
+    monkeypatch,
+    claim,
+    mode,
+):
+    monkeypatch.setattr(
+        get_config().model_selection, "paid_credit_models_gate_mode", mode
+    )
+    current_user.set(_workflow_token_user(flow_config_id="developer"))
+    token = paid_credit_models_allowed_ctx.set(claim)
+    try:
+        await _execute_registry_flow(
+            "developer", mock_context, mock_resolve_flow, mock_workflow_class
+        )
+    finally:
+        paid_credit_models_allowed_ctx.reset(token)
+
+    mock_context.abort.assert_not_called()
 
 
 async def _mint_flow_token(

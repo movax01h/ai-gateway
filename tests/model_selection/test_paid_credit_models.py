@@ -1,14 +1,32 @@
 # These tests cover a cross-module feature (paid credit models), not one module.
 # pylint: disable=file-naming-for-tests
-import pytest
+from unittest.mock import patch
 
-from ai_gateway.model_selection import ModelSelectionConfig
+import pytest
+from structlog.testing import capture_logs
+
+from ai_gateway.config import get_config
+from ai_gateway.model_metadata import ModelMetadata, build_model_metadata_by_tag
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    PaidCreditsModelAccessError,
+    RestrictedModelAccessError,
+    ensure_paid_credits_model_access,
+)
 from ai_gateway.model_selection.model_selection_config import (
+    LLMDefinition,
     ModelTagEntry,
 )
+from lib.context.model import paid_credit_models_allowed_ctx
 
 PAID_MODEL = "paid_model"
 FREE_MODEL = "free_model"
+
+
+def _metadata_for(llm_def: LLMDefinition, **_kwargs) -> ModelMetadata:
+    return ModelMetadata(
+        provider="gitlab", name=llm_def.gitlab_identifier, llm_definition=llm_def
+    )
 
 
 @pytest.fixture(name="config")
@@ -34,6 +52,29 @@ def models_fixture(config, monkeypatch):
     return models
 
 
+@pytest.fixture(name="claim")
+def claim_fixture():
+    return False
+
+
+@pytest.fixture(name="mode")
+def mode_fixture():
+    return "enforce"
+
+
+@pytest.fixture(autouse=True)
+def paid_credit_models_gate(
+    config: ModelSelectionConfig, claim: bool | None, mode: str, monkeypatch
+):
+    monkeypatch.setattr(
+        get_config().model_selection, "paid_credit_models_gate_mode", mode
+    )
+    token = paid_credit_models_allowed_ctx.set(claim)
+    with patch.object(ModelSelectionConfig, "instance", return_value=config):
+        yield
+    paid_credit_models_allowed_ctx.reset(token)
+
+
 @pytest.mark.usefixtures("models")
 @pytest.mark.parametrize(
     ("identifiers", "model_names", "paid"),
@@ -56,6 +97,103 @@ def test_paid_credit_models_for(
 
     assert (PAID_MODEL in matched) is paid
     assert bool(matched) is paid
+
+
+@pytest.mark.usefixtures("models")
+def test_ensure_paid_credits_model_access_denies_trial_paid_model():
+    with pytest.raises(PaidCreditsModelAccessError):
+        ensure_paid_credits_model_access(identifiers=[PAID_MODEL])
+
+
+@pytest.mark.usefixtures("models")
+def test_ensure_paid_credits_model_access_logs_denial_in_log_mode(monkeypatch):
+    monkeypatch.setattr(
+        get_config().model_selection, "paid_credit_models_gate_mode", "log"
+    )
+
+    with capture_logs() as cap_logs:
+        ensure_paid_credits_model_access(identifiers=[PAID_MODEL])
+
+    assert [entry["event"] for entry in cap_logs] == ["Paid credits model denied"]
+    assert cap_logs[0]["log_level"] == "warning"
+    assert cap_logs[0]["mode"] == "log"
+    assert PAID_MODEL in cap_logs[0]["paid_models"]
+
+
+@pytest.mark.usefixtures("models")
+@pytest.mark.parametrize(
+    ("claim", "mode"),
+    [
+        (False, "off"),
+        (None, "enforce"),
+    ],
+)
+def test_ensure_paid_credits_model_access_does_not_log_when_ungated(claim, mode):
+    with capture_logs() as cap_logs:
+        ensure_paid_credits_model_access(identifiers=[PAID_MODEL])
+
+    assert cap_logs == []
+
+
+@pytest.mark.usefixtures("models")
+@pytest.mark.parametrize(
+    ("claim", "mode", "identifier"),
+    [
+        (False, "enforce", FREE_MODEL),
+        (True, "enforce", PAID_MODEL),
+    ],
+)
+def test_ensure_paid_credits_model_access_allows(identifier: str):
+    ensure_paid_credits_model_access(identifiers=[identifier])
+
+
+def test_paid_credits_denial_is_a_restricted_model_denial():
+    """Existing restricted-model handlers report it as HTTP 403 / PERMISSION_DENIED."""
+    with pytest.raises(RestrictedModelAccessError, match="purchased GitLab Credits"):
+        ensure_paid_credits_model_access(models=["vertex_ai/claude-opus-5-5"])
+
+
+@pytest.mark.parametrize(
+    ("claim", "mode", "large_model"),
+    [
+        (False, "enforce", "kimi_k3_fireworks"),
+        (False, "log", "claude_opus_5_5"),
+        (True, "enforce", "claude_opus_5_5"),
+        (None, "enforce", "claude_opus_5_5"),
+    ],
+)
+def test_tag_models_exclude_paid_models_only_when_enforced(large_model: str):
+    with (
+        patch(
+            "ai_gateway.model_metadata.random.choice",
+            side_effect=lambda candidates: candidates[0],
+        ),
+        patch(
+            "ai_gateway.model_metadata.resolve_provider_aware_metadata",
+            side_effect=_metadata_for,
+        ),
+    ):
+        by_tag = build_model_metadata_by_tag("duo_developer")
+
+    large = by_tag["large"]
+    assert isinstance(large, ModelMetadata)
+    assert large.llm_definition.gitlab_identifier == large_model
+
+
+@pytest.mark.usefixtures("models")
+def test_tag_with_only_paid_models_falls_back_to_default(
+    config: ModelSelectionConfig,
+):
+    duo_developer = config.get_unit_primitive_config_map()["duo_developer"]
+    duo_developer.models_for_tags["large"] = ModelTagEntry(models=[PAID_MODEL])
+
+    with patch(
+        "ai_gateway.model_metadata.resolve_provider_aware_metadata",
+        side_effect=_metadata_for,
+    ):
+        by_tag = build_model_metadata_by_tag("duo_developer")
+
+    assert "large" not in by_tag
 
 
 def test_validate_accepts_shipped_config(config: ModelSelectionConfig):

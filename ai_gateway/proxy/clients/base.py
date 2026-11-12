@@ -20,7 +20,10 @@ from ai_gateway.instrumentators.model_requests import (
     ModelRequestInstrumentator,
     init_llm_operations,
 )
-from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    ensure_paid_credits_model_access,
+)
 from ai_gateway.vendor.langchain_litellm.litellm import _create_usage_metadata
 from lib.billing_events import BillingEvent
 from lib.billing_events.service import BillingEventService, ExecutionEnvironment
@@ -73,7 +76,11 @@ def enforce_model_allowlist(request: fastapi.Request, model_name: str) -> None:
 
     Raises:
         fastapi.HTTPException: 403 if the claim is present and does not allow the model.
+        PaidCreditsModelAccessError: if a trial without purchased credits targets a paid
+            model; reported as HTTP 403.
     """
+    ensure_paid_credits_model_access(models=[model_name])
+
     claims = getattr(request.user, "claims", None)
     extra = (claims.extra if claims else None) or {}
     if ALLOWED_MODEL_REFS_CLAIM not in extra:
