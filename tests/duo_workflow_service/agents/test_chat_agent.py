@@ -56,7 +56,7 @@ from duo_workflow_service.slash_commands.error_handler import (
     SlashCommandValidationError,
 )
 from duo_workflow_service.tools import MalformedToolCallError, Toolset
-from duo_workflow_service.tools.web_search import WebSearchState
+from duo_workflow_service.tools.web_search import AgentCoreWebSearch, WebSearchState
 from lib.context import current_model_metadata_context, gitlab_version
 from lib.context.approval_sources import (
     approval_sources,
@@ -502,6 +502,7 @@ class TestChatAgentToolCallMessageOrdering:
             },
             system_template_override=system_template_override,
             web_search=WebSearchState(),
+            operation_type=None,
         )
 
     @pytest.mark.asyncio
@@ -2536,6 +2537,180 @@ def _web_search_ai_message(msg_id="agent-msg-id"):
         id=msg_id,
         response_metadata={"model_name": "claude-haiku-4-5"},
     )
+
+
+def _tool_call(name, call_id):
+    return {"name": name, "args": {}, "id": call_id, "type": "tool_call"}
+
+
+class TestOperationType:
+    """The LLM call that only follows AgentCore searches is tagged as non-billable."""
+
+    @pytest.fixture(autouse=True)
+    def toolset_tools(self, mock_toolset):
+        tools = {"web_search": Mock(spec=AgentCoreWebSearch), "read_file": Mock()}
+        mock_toolset.get.side_effect = tools.get
+
+    @staticmethod
+    def _state(*messages):
+        return {"conversation_history": {"Chat Agent": list(messages)}}
+
+    @pytest.mark.parametrize(
+        ("messages", "expected"),
+        [
+            (
+                [
+                    HumanMessage(content="Latest Rails?"),
+                    AIMessage(content="", tool_calls=[_tool_call("web_search", "1")]),
+                    ToolMessage(content="results", tool_call_id="1"),
+                ],
+                "web_search_agentcore",
+            ),
+            (
+                [
+                    HumanMessage(content="Latest Rails?"),
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            _tool_call("web_search", "1"),
+                            _tool_call("web_search", "2"),
+                        ],
+                    ),
+                    ToolMessage(content="results", tool_call_id="1"),
+                    ToolMessage(content="results", tool_call_id="2"),
+                ],
+                "web_search_agentcore",
+            ),
+            (
+                [
+                    HumanMessage(content="Compare"),
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            _tool_call("web_search", "1"),
+                            _tool_call("read_file", "2"),
+                        ],
+                    ),
+                    ToolMessage(content="results", tool_call_id="1"),
+                    ToolMessage(content="file", tool_call_id="2"),
+                ],
+                None,
+            ),
+            (
+                [
+                    HumanMessage(content="Read it"),
+                    AIMessage(content="", tool_calls=[_tool_call("read_file", "1")]),
+                    ToolMessage(content="file", tool_call_id="1"),
+                ],
+                None,
+            ),
+            (
+                [
+                    AIMessage(content="", tool_calls=[_tool_call("web_search", "1")]),
+                    ToolMessage(content="results", tool_call_id="1"),
+                    HumanMessage(content="Thanks, now something else"),
+                ],
+                None,
+            ),
+            ([HumanMessage(content="Hi")], None),
+            ([], None),
+        ],
+        ids=[
+            "after_agentcore_search",
+            "after_parallel_agentcore_searches",
+            "after_search_mixed_with_other_tool",
+            "after_other_tool",
+            "new_user_message_after_search",
+            "no_tool_results",
+            "empty_history",
+        ],
+    )
+    def test_operation_type(self, chat_agent, messages, expected):
+        assert chat_agent._operation_type(self._state(*messages)) == expected
+
+    def test_native_web_search_is_not_tagged(self, chat_agent):
+        """Native searches are server-side content blocks, not tool calls."""
+        state = self._state(HumanMessage(content="Hi"), _web_search_ai_message())
+
+        assert chat_agent._operation_type(state) is None
+
+    @staticmethod
+    def _run_state(*messages):
+        return {
+            "conversation_history": {"Chat Agent": list(messages)},
+            "approval": None,
+            "plan": {"steps": []},
+            "status": WorkflowStatusEnum.EXECUTION,
+            "ui_chat_log": [],
+            "last_human_input": None,
+            "project": None,
+            "namespace": None,
+        }
+
+    @staticmethod
+    def _operation_types(get_response):
+        return [c.kwargs["operation_type"] for c in get_response.call_args_list]
+
+    @pytest.mark.asyncio
+    async def test_main_call_after_search_is_tagged(self, chat_agent):
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(content="Rails 8.1", id="r1")
+        )
+
+        await chat_agent.run(
+            self._run_state(
+                HumanMessage(content="Latest Rails?"),
+                AIMessage(content="", tool_calls=[_tool_call("web_search", "1")]),
+                ToolMessage(content="results", tool_call_id="1"),
+            )
+        )
+
+        assert self._operation_types(chat_agent.prompt_adapter.get_response) == [
+            "web_search_agentcore"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_call_after_interrupted_search_is_not_tagged(self, chat_agent):
+        """Synthetic "interrupted" tool results are not search results."""
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            return_value=AIMessage(content="Interrupted", id="r1")
+        )
+
+        await chat_agent.run(
+            self._run_state(
+                HumanMessage(content="Latest Rails?"),
+                AIMessage(content="", tool_calls=[_tool_call("web_search", "1")]),
+            )
+        )
+
+        assert self._operation_types(chat_agent.prompt_adapter.get_response) == [None]
+
+    @pytest.mark.asyncio
+    async def test_retry_after_malformed_call_is_not_tagged(self, chat_agent):
+        """Only the main call is tagged; the self-correction retry is billed."""
+        chat_agent.prompt_adapter.get_response = AsyncMock(
+            side_effect=[
+                AIMessage(content="", tool_calls=[_tool_call("web_search", "2")]),
+                AIMessage(content="Rails 8.1", id="r2"),
+            ]
+        )
+
+        with patch(
+            "duo_workflow_service.agents.chat_agent.validate_tool_calls",
+            return_value=[ToolMessage(content="bad args", tool_call_id="2")],
+        ):
+            await chat_agent.run(
+                self._run_state(
+                    HumanMessage(content="Latest Rails?"),
+                    AIMessage(content="", tool_calls=[_tool_call("web_search", "1")]),
+                    ToolMessage(content="results", tool_call_id="1"),
+                )
+            )
+
+        assert self._operation_types(chat_agent.prompt_adapter.get_response) == [
+            "web_search_agentcore",
+            None,
+        ]
 
 
 class TestServerToolResponse:

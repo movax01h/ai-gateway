@@ -767,7 +767,7 @@ class BasePromptCallbackHandler:
 
     Example:
         class MyCustomCallback(BasePromptCallbackHandler):
-            async def on_before_llm_call(self):
+            async def on_before_llm_call(self, operation_type=None):
                 # Custom logic before LLM call
                 print("About to call LLM")
 
@@ -775,11 +775,13 @@ class BasePromptCallbackHandler:
         prompt.register_internal_callbacks([MyCustomCallback()])
     """
 
-    async def on_before_llm_call(self):
+    async def on_before_llm_call(
+        self, operation_type: Optional[LLMOperationType] = None
+    ):
         """Called before an LLM request is made.
 
         Override this method to implement custom logic that should execute before the LLM is invoked (e.g., logging,
-        metrics, billing tracking).
+        metrics, billing tracking). `operation_type` is the per-call tag passed to `ainvoke`, if any.
         """
 
 
@@ -1193,6 +1195,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         self,
         input: Any,
         config: Optional[RunnableConfig] = None,
+        operation_type: Optional[LLMOperationType] = None,
         **kwargs: Optional[Any],
     ) -> BaseMessage:
         usage_cb, config = self._make_usage_callback(config)
@@ -1202,7 +1205,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             internal_event_client=self.internal_event_client,
         ) as watcher:
             await asyncio.gather(
-                *[cb.on_before_llm_call() for cb in self.internal_callbacks]
+                *[
+                    cb.on_before_llm_call(operation_type)
+                    for cb in self.internal_callbacks
+                ]
             )
 
             async def invoke() -> BaseMessage:
@@ -1216,7 +1222,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                 result = await _ainvoke_with_retry(invoke)
 
             watcher.register_message(result)
-            self.handle_usage_metadata(watcher, usage_cb.usage_metadata)
+            self.handle_usage_metadata(
+                watcher, usage_cb.usage_metadata, operation_type=operation_type
+            )
 
             return result
 
@@ -1337,14 +1345,18 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         self,
         watcher: ModelRequestInstrumentator.WatchContainer,
         usage_metadata: dict[str, UsageMetadata],
+        operation_type: Optional[LLMOperationType] = None,
     ) -> None:
         for model, usage in usage_metadata.items():
-            # operation_type is authoritative from the prompt YAML; override any
-            # caller-supplied value in internal_event_extra.
+            # A per-call operation_type wins; otherwise the prompt YAML value overrides
+            # any caller-supplied value in internal_event_extra.
             watcher.register_token_usage(
                 model,
                 usage,
-                {**self.internal_event_extra, "operation_type": self.operation_type},
+                {
+                    **self.internal_event_extra,
+                    "operation_type": operation_type or self.operation_type,
+                },
             )
 
     @classmethod
