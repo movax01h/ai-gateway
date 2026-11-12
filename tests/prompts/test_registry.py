@@ -1923,6 +1923,8 @@ _GRAPH_NODE_PROMPT_IDS: frozenset[str] = frozenset(
         "security_review_prescan",
         "security_review_respond",
         "security_review_validate",
+        "standard_code_review_reviewer",
+        "standard_code_review_summarizer",
         "validate_sast_fix_has_changes",
         "validate_sast_vulnerability_agent_prompt",
     }
