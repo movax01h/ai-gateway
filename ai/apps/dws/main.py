@@ -1,7 +1,6 @@
-"""Bootstrap module for duo_workflow_service.
+"""Process entrypoint of the Duo Workflow Service, in its composition root.
 
-This module serves as the entry point for the duo-workflow-service command. It imports production-only modules before
-starting the server.
+The duo-workflow-service command runs this module. It imports production-only modules before starting the server.
 """
 
 # pylint: disable=unused-import
