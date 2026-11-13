@@ -690,6 +690,12 @@ class TestGenerateTokenVersionBasedQuotaCheck:
             gitlab_version.reset(version_token)
 
 
+QUOTA_DENIALS = [
+    (InsufficientEntitlements, "Error code: USAGE_QUOTA_NOT_ENTITLED"),
+    (UsageQuotaCheckUnavailable, "Error code: USAGE_QUOTA_UNAVAILABLE"),
+]
+
+
 class TestQuotaExceptionHandlingGrpc:
     """Tests for gRPC interceptor exception handling on quota denials."""
 
@@ -707,14 +713,13 @@ class TestQuotaExceptionHandlingGrpc:
         current_user.reset(token)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "exc_class", [InsufficientEntitlements, UsageQuotaCheckUnavailable]
-    )
+    @pytest.mark.parametrize("exc_class,expected_error_code", QUOTA_DENIALS)
     async def test_execute_workflow_aborts_with_permission_denied_on_quota_denial(
         self,
         mock_context,
         mock_usage_quota_service,
         exc_class,
+        expected_error_code,
     ):
         """ExecuteWorkflow should abort with PERMISSION_DENIED on quota denial."""
         from duo_workflow_service.interceptors.route.usage_quota import (
@@ -742,16 +747,16 @@ class TestQuotaExceptionHandlingGrpc:
         mock_context.abort.assert_called_once()
         call_args = mock_context.abort.call_args[0]
         assert call_args[0] == grpc.StatusCode.PERMISSION_DENIED
+        assert call_args[1].endswith(expected_error_code)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "exc_class", [InsufficientEntitlements, UsageQuotaCheckUnavailable]
-    )
+    @pytest.mark.parametrize("exc_class,expected_error_code", QUOTA_DENIALS)
     async def test_track_self_hosted_execute_workflow_aborts_with_permission_denied_on_quota_denial(
         self,
         mock_context,
         mock_usage_quota_service,
         exc_class,
+        expected_error_code,
     ):
         """TrackSelfHostedExecuteWorkflow should abort with PERMISSION_DENIED on quota denial."""
         from duo_workflow_service.interceptors.route.usage_quota import (
@@ -779,16 +784,16 @@ class TestQuotaExceptionHandlingGrpc:
         mock_context.abort.assert_called_once()
         call_args = mock_context.abort.call_args[0]
         assert call_args[0] == grpc.StatusCode.PERMISSION_DENIED
+        assert call_args[1].endswith(expected_error_code)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "exc_class", [InsufficientEntitlements, UsageQuotaCheckUnavailable]
-    )
+    @pytest.mark.parametrize("exc_class,expected_error_code", QUOTA_DENIALS)
     async def test_generate_token_aborts_with_permission_denied_on_quota_denial(
         self,
         mock_context,
         mock_usage_quota_service,
         exc_class,
+        expected_error_code,
     ):
         """GenerateToken should abort with PERMISSION_DENIED on quota denial (self-managed path)."""
         from duo_workflow_service.interceptors.route.usage_quota import (
@@ -820,3 +825,4 @@ class TestQuotaExceptionHandlingGrpc:
         mock_context.abort.assert_called_once()
         call_args = mock_context.abort.call_args[0]
         assert call_args[0] == grpc.StatusCode.PERMISSION_DENIED
+        assert call_args[1].endswith(expected_error_code)

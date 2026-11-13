@@ -10,6 +10,13 @@ import structlog
 from aiocache import Cache
 from aiocache.plugins import BasePlugin
 from gitlab_cloud_connector import CloudConnectorUser
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_random,
+)
 
 from ai_gateway.instrumentators.usage_quota import (
     USAGE_QUOTA_CUSTOMERSDOT_LATENCY_SECONDS,
@@ -19,7 +26,9 @@ from lib.billing_events.context import UsageQuotaEventContext
 from lib.context import StarletteUser
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 from lib.internal_events import current_event_context
+from lib.usage_quota.circuit_breaker import CircuitBreaker
 from lib.usage_quota.errors import (
+    UsageQuotaCircuitOpenError,
     UsageQuotaConnectionError,
     UsageQuotaHTTPError,
     UsageQuotaTimeoutError,
@@ -36,6 +45,23 @@ CACHE_TTL = (
 MAX_KEEPALIVE_CONNECTIONS = 20  # Per client instance
 MAX_CONNECTIONS = 100  # Total connection pool size
 JITTER_FACTOR = 0.1  # ±10% jitter on cache TTLs to stagger expiry across instances
+
+# Retry transient CustomersDot failures once. The check is on the request path of
+# latency-sensitive features such as code completions, so the worst case is kept to two
+# request timeouts plus a short backoff.
+_MAX_ATTEMPTS = 2
+_RETRY_WAIT_MIN_SECONDS = 0.1
+_RETRY_WAIT_MAX_SECONDS = 0.2
+# Only server errors that are usually temporary. Other 5xx codes, such as 501, would fail
+# the same way again.
+_TRANSIENT_STATUS_CODES = frozenset({500, 502, 503, 504})
+
+# Without a breaker, the retry would double the requests to CustomersDot and the wait for
+# callers during an outage. After this many consecutive transient failures, checks that
+# miss the cache fail fast. The short recovery time keeps a brief outage from turning into
+# a much longer one.
+_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 10
+_CIRCUIT_BREAKER_RECOVERY_SECONDS = 5.0
 
 SKIP_USAGE_CUTOFF_CLAIM = "skip_usage_cutoff"
 
@@ -104,6 +130,30 @@ def _apply_jitter(ttl: int) -> float:
     return ttl + random.uniform(-delta, delta)
 
 
+def _is_transient_error(exc: BaseException) -> bool:
+    """Return whether a failed quota request is worth retrying.
+
+    Timeouts, connection failures and 500, 502, 503 or 504 responses are transient. Any other HTTP status is an answer
+    from CustomersDot (for example 403 for missing entitlements), so retrying it would only repeat the answer.
+    """
+    if isinstance(exc, (UsageQuotaTimeoutError, UsageQuotaConnectionError)):
+        return True
+    return (
+        isinstance(exc, UsageQuotaHTTPError)
+        and exc.status_code in _TRANSIENT_STATUS_CODES
+    )
+
+
+def _log_retry(retry_state: RetryCallState) -> None:
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    log.warning(
+        "Retrying usage quota request to CustomersDot",
+        attempt=retry_state.attempt_number,
+        error_type=type(exc).__name__,
+        correlation_id=getattr(current_event_context.get(), "correlation_id", None),
+    )
+
+
 class UsageQuotaClient:
     """Client for checking usage quota availability via CustomersDot API.
 
@@ -113,6 +163,11 @@ class UsageQuotaClient:
 
     Results are cached in-memory using Cache-Control max-age from CustomersDot
     responses, with a fallback TTL when the header is absent.
+
+    Timeouts, connection failures and 500, 502, 503 or 504 responses are retried
+    once before the error is raised. A circuit breaker stops requests to CustomersDot after
+    repeated transient failures, so checks that miss the cache fail fast instead
+    of each waiting for the timeouts. Cached results are served either way.
 
     Args:
         customersdot_url: Base URL of the CustomersDot service
@@ -138,6 +193,10 @@ class UsageQuotaClient:
             self.customersdot_api_user and self.customersdot_api_user.strip()
         ) and bool(self.customersdot_api_token and self.customersdot_api_token.strip())
         self.request_timeout = request_timeout
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+            recovery_timeout=_CIRCUIT_BREAKER_RECOVERY_SECONDS,
+        )
         self._http_client: httpx.AsyncClient | None = None
         self._client_lock = asyncio.Lock()
         self.cache = Cache(Cache.MEMORY, plugins=[LoggingCachePlugin()])
@@ -193,6 +252,7 @@ class UsageQuotaClient:
             UsageQuotaTimeoutError: Request timed out
             UsageQuotaHTTPError: Unexpected HTTP error from CustomersDot
             UsageQuotaConnectionError: Connection to CustomersDot failed
+            UsageQuotaCircuitOpenError: Circuit breaker is open, no request was made
         """
         if not self.enabled:
             log.debug("Usage quota is disabled")
@@ -223,6 +283,51 @@ class UsageQuotaClient:
             self._inflight.pop(cache_key, None)
 
     async def _fetch_quota(
+        self, context: UsageQuotaEventContext, cache_key: str
+    ) -> FetchedQuota:
+        """Fetch the quota decision through the circuit breaker.
+
+        Runs inside the coalesced task, so concurrent checks for the same key share one fetch, retry included. A check
+        counts as one breaker outcome, however many attempts it took.
+        """
+        token = self.circuit_breaker.try_acquire()
+        if token is None:
+            # The service logs the denial, so only count it here.
+            USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL.labels(
+                outcome="circuit_open", status="circuit_open"
+            ).inc()
+            raise UsageQuotaCircuitOpenError()
+
+        try:
+            result = await self._request_quota(context, cache_key)
+        except (
+            UsageQuotaTimeoutError,
+            UsageQuotaConnectionError,
+            UsageQuotaHTTPError,
+        ) as e:
+            if _is_transient_error(e):
+                self.circuit_breaker.record_failure(token)
+            else:
+                # Any other HTTP status is an answer, so CustomersDot is reachable.
+                self.circuit_breaker.record_reachable(token)
+            raise
+        except BaseException:
+            # No outcome about CustomersDot's health, for example on cancellation. Free a
+            # half-open probe so the breaker can't get stuck.
+            self.circuit_breaker.release(token)
+            raise
+
+        self.circuit_breaker.record_reachable(token)
+        return result
+
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(_MAX_ATTEMPTS),
+        wait=wait_random(min=_RETRY_WAIT_MIN_SECONDS, max=_RETRY_WAIT_MAX_SECONDS),
+        retry=retry_if_exception(_is_transient_error),
+        before_sleep=_log_retry,
+    )
+    async def _request_quota(
         self, context: UsageQuotaEventContext, cache_key: str
     ) -> FetchedQuota:
         realm = getattr(context, "realm", "unknown")

@@ -7,6 +7,7 @@ import structlog
 from packaging.version import InvalidVersion, Version
 
 from duo_workflow_service.audit_events.event_types import AuditEvent
+from duo_workflow_service.executor.outbox import ClientStreamClosedError
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient
 from duo_workflow_service.monitoring import duo_workflow_metrics
 from lib.context import gitlab_version
@@ -114,6 +115,18 @@ class AuditEventClient:
                 duo_workflow_metrics.count_audit_events_dropped(
                     reason="retries_exhausted" if is_retryable else "http_error",
                     amount=len(events),
+                )
+                return False
+            except ClientStreamClosedError:
+                # Retrying cannot help: no executor is left to relay the request.
+                logger.warning(
+                    "Dropping audit events: client stream is closed",
+                    workflow_id=self._workflow_id,
+                    count=len(events),
+                    event_types=[event.event_type.value for event in events],
+                )
+                duo_workflow_metrics.count_audit_events_dropped(
+                    reason="client_stream_closed", amount=len(events)
                 )
                 return False
             except Exception as e:

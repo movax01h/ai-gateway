@@ -23,7 +23,7 @@ from contract import contract_pb2
 from duo_workflow_service.executor.action import (
     _execute_action_and_get_action_response,
 )
-from duo_workflow_service.executor.outbox import Outbox
+from duo_workflow_service.executor.outbox import ClientStreamClosedError, Outbox
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 from lib.context.workflow import get_workflow_id
 
@@ -284,14 +284,17 @@ def _is_retryable_error(exc: BaseException) -> bool:
     - Other timeout errors (asyncio.TimeoutError or messages containing "timed out")
     - Network connectivity errors (connection refused, reset, etc.)
     - Retryable HTTP statuses: 5xx, and 401 caused by database replica lag
+
+    ``ClientStreamClosedError`` is never retried.
     """
+    # The executor can never answer once the client stream is closed.
+    if isinstance(exc, ClientStreamClosedError):
+        return False
     # Checked before the "timed out" message match below, which would retry it
     # regardless of method.
     if isinstance(exc, ExecutorRequestTimeoutError):
         return exc.method.upper() in _TIMEOUT_RETRYABLE_METHODS
-    if isinstance(exc, asyncio.TimeoutError):
-        return True
-    if isinstance(exc, _RetryableStatusError):
+    if isinstance(exc, (asyncio.TimeoutError, _RetryableStatusError)):
         return True
     if isinstance(exc, Exception):
         message = str(exc).lower()

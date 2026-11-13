@@ -1,6 +1,7 @@
 """Unit tests for UsageQuotaClient."""
 
 import asyncio
+from contextlib import nullcontext
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -8,10 +9,12 @@ import httpx
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from structlog.testing import capture_logs
+from tenacity import wait_none
 
 from lib.billing_events.context import UsageQuotaEventContext
 from lib.context import StarletteUser
 from lib.feature_flags.context import FeatureFlag, current_feature_flag_context
+from lib.usage_quota.circuit_breaker import CircuitBreaker, CircuitState
 from lib.usage_quota.client import (
     JITTER_FACTOR,
     SKIP_USAGE_CUTOFF_CLAIM,
@@ -21,11 +24,20 @@ from lib.usage_quota.client import (
     should_skip_usage_quota_for_user,
 )
 from lib.usage_quota.errors import (
+    UsageQuotaCircuitOpenError,
     UsageQuotaConnectionError,
     UsageQuotaHTTPError,
     UsageQuotaTimeoutError,
 )
 from tests.lib.usage_quota.conftest import _make_response
+from tests.lib.usage_quota.test_circuit_breaker import FakeClock
+
+
+@pytest.fixture(autouse=True)
+def no_retry_backoff():
+    """Skip the real backoff between retry attempts so tests don't sleep."""
+    with patch.object(UsageQuotaClient._request_quota.retry, "wait", wait_none()):
+        yield
 
 
 @pytest.mark.parametrize(
@@ -1121,3 +1133,294 @@ class TestConcurrentRequests:
 
         for result in results:
             assert isinstance(result, UsageQuotaTimeoutError)
+
+
+def _head_outcome(kind: str | int) -> Any:
+    """Build one `head` outcome: a raised transport error or a response with a status code."""
+    if kind == "timeout":
+        return httpx.TimeoutException("timeout")
+    if kind == "connection":
+        return httpx.RequestError("connection failed")
+    assert isinstance(kind, int)
+    response = _make_response(kind, "max-age=120, private")
+    if kind >= 400 and kind != 402:
+        response.raise_for_status = MagicMock(
+            side_effect=httpx.HTTPStatusError(
+                f"HTTP {kind}", request=MagicMock(), response=response
+            )
+        )
+    return response
+
+
+class TestRetry:
+    """Tests for retrying transient CustomersDot failures."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["timeout", "connection", 500, 502, 503, 504])
+    @pytest.mark.parametrize("answer,expected", [(200, True), (402, False)])
+    async def test_retries_transient_failure_once(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        failure,
+        answer,
+        expected,
+    ):
+        """A transient failure followed by an answer returns that answer."""
+        with patch("httpx.AsyncClient", return_value=mock_http_client):
+            mock_http_client.head = AsyncMock(
+                side_effect=[_head_outcome(failure), _head_outcome(answer)]
+            )
+
+            result = await usage_quota_client.check_quota_available(usage_quota_context)
+
+        assert result is expected
+        assert mock_http_client.head.call_count == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "failure,expected_error",
+        [
+            ("timeout", UsageQuotaTimeoutError),
+            ("connection", UsageQuotaConnectionError),
+            (503, UsageQuotaHTTPError),
+        ],
+    )
+    async def test_raises_after_second_transient_failure(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        failure,
+        expected_error,
+    ):
+        with patch("httpx.AsyncClient", return_value=mock_http_client):
+            mock_http_client.head = AsyncMock(
+                side_effect=[_head_outcome(failure), _head_outcome(failure)]
+            )
+
+            with pytest.raises(expected_error):
+                await usage_quota_client.check_quota_available(usage_quota_context)
+
+        assert mock_http_client.head.call_count == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status_code", [400, 403, 404, 429, 501, 505])
+    async def test_does_not_retry_non_transient_http_errors(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        status_code: int,
+    ):
+        """A 4xx or a non-transient 5xx is an answer from CustomersDot, so retrying would only repeat it."""
+        with patch("httpx.AsyncClient", return_value=mock_http_client):
+            mock_http_client.head = AsyncMock(return_value=_head_outcome(status_code))
+
+            with pytest.raises(UsageQuotaHTTPError):
+                await usage_quota_client.check_quota_available(usage_quota_context)
+
+        mock_http_client.head.assert_called_once()
+
+
+class TestCircuitBreaker:
+    """Tests for the circuit breaker around the retried CustomersDot request."""
+
+    @pytest.fixture(name="clock")
+    def clock_fixture(self) -> FakeClock:
+        return FakeClock()
+
+    @pytest.fixture(autouse=True)
+    def small_breaker(self, usage_quota_client: UsageQuotaClient, clock: FakeClock):
+        usage_quota_client.circuit_breaker = CircuitBreaker(
+            failure_threshold=2, recovery_timeout=5.0, clock=clock
+        )
+
+    @pytest.fixture(name="other_context")
+    def other_context_fixture(self, usage_quota_context: UsageQuotaEventContext):
+        return usage_quota_context.model_copy(
+            update={"user_id": "user_456", "global_user_id": "gid://gitlab/User/456"}
+        )
+
+    def test_uses_configured_defaults(self):
+        client = UsageQuotaClient(
+            customersdot_url="https://customers.gitlab.local/",
+            customersdot_api_user=None,
+            customersdot_api_token=None,
+        )
+
+        assert client.circuit_breaker.failure_threshold == 10
+        assert client.circuit_breaker.recovery_timeout == 5.0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "failure,expected_error",
+        [
+            ("timeout", UsageQuotaTimeoutError),
+            ("connection", UsageQuotaConnectionError),
+            (503, UsageQuotaHTTPError),
+        ],
+    )
+    async def test_opens_after_failed_checks_and_fails_fast(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        failure,
+        expected_error,
+    ):
+        with (
+            patch("httpx.AsyncClient", return_value=mock_http_client),
+            patch(
+                "lib.usage_quota.client.USAGE_QUOTA_CUSTOMERSDOT_REQUESTS_TOTAL"
+            ) as mock_requests,
+        ):
+            # Two checks of two attempts each.
+            mock_http_client.head = AsyncMock(
+                side_effect=[_head_outcome(failure) for _ in range(4)]
+            )
+            for _ in range(2):
+                with pytest.raises(expected_error):
+                    await usage_quota_client.check_quota_available(usage_quota_context)
+
+            with pytest.raises(UsageQuotaCircuitOpenError):
+                await usage_quota_client.check_quota_available(usage_quota_context)
+
+        assert mock_http_client.head.call_count == 4
+        mock_requests.labels.assert_any_call(
+            outcome="circuit_open", status="circuit_open"
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_that_succeeds_on_retry_counts_as_success(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        other_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+    ):
+        with patch("httpx.AsyncClient", return_value=mock_http_client):
+            mock_http_client.head = AsyncMock(
+                side_effect=[
+                    _head_outcome("timeout"),
+                    _head_outcome("timeout"),
+                    _head_outcome("timeout"),
+                    _head_outcome(200),
+                ]
+            )
+            with pytest.raises(UsageQuotaTimeoutError):
+                await usage_quota_client.check_quota_available(usage_quota_context)
+            assert await usage_quota_client.check_quota_available(other_context)
+
+        assert usage_quota_client.circuit_breaker.state is CircuitState.CLOSED
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status_code", [400, 403, 429, 501, 505])
+    async def test_non_transient_errors_keep_it_closed(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        status_code: int,
+    ):
+        """CustomersDot answering with an error is still a reachable CustomersDot."""
+        with patch("httpx.AsyncClient", return_value=mock_http_client):
+            mock_http_client.head = AsyncMock(return_value=_head_outcome(status_code))
+            for _ in range(3):
+                with pytest.raises(UsageQuotaHTTPError):
+                    await usage_quota_client.check_quota_available(usage_quota_context)
+
+        assert usage_quota_client.circuit_breaker.state is CircuitState.CLOSED
+        assert mock_http_client.head.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_serves_cached_results_while_open(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        other_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+    ):
+        with patch("httpx.AsyncClient", return_value=mock_http_client):
+            mock_http_client.head = AsyncMock(
+                side_effect=[_head_outcome(200)]
+                + [_head_outcome("timeout") for _ in range(4)]
+            )
+            assert await usage_quota_client.check_quota_available(usage_quota_context)
+            for _ in range(2):
+                with pytest.raises(UsageQuotaTimeoutError):
+                    await usage_quota_client.check_quota_available(other_context)
+
+            assert usage_quota_client.circuit_breaker.state is CircuitState.OPEN
+            assert await usage_quota_client.check_quota_available(usage_quota_context)
+            with pytest.raises(UsageQuotaCircuitOpenError):
+                await usage_quota_client.check_quota_available(other_context)
+
+        assert mock_http_client.head.call_count == 5
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "probe,expectation,expected_state",
+        [
+            (200, nullcontext(), CircuitState.CLOSED),
+            (
+                "timeout",
+                pytest.raises(UsageQuotaTimeoutError),
+                CircuitState.OPEN,
+            ),
+        ],
+    )
+    async def test_probe_after_recovery_decides_the_state(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        clock: FakeClock,
+        probe,
+        expectation,
+        expected_state,
+    ):
+        with patch("httpx.AsyncClient", return_value=mock_http_client):
+            mock_http_client.head = AsyncMock(
+                side_effect=[_head_outcome("timeout") for _ in range(4)]
+                + [_head_outcome(probe), _head_outcome(probe)]
+            )
+            for _ in range(2):
+                with pytest.raises(UsageQuotaTimeoutError):
+                    await usage_quota_client.check_quota_available(usage_quota_context)
+
+            clock.now += 5.0
+            with expectation:
+                assert await usage_quota_client.check_quota_available(
+                    usage_quota_context
+                )
+
+        assert usage_quota_client.circuit_breaker.state is expected_state
+
+    @pytest.mark.asyncio
+    async def test_unexpected_error_frees_the_probe(
+        self,
+        usage_quota_client: UsageQuotaClient,
+        usage_quota_context: UsageQuotaEventContext,
+        mock_http_client: AsyncMock,
+        clock: FakeClock,
+    ):
+        """An error that says nothing about CustomersDot must not leave the breaker stuck half-open."""
+        with patch("httpx.AsyncClient", return_value=mock_http_client):
+            mock_http_client.head = AsyncMock(
+                side_effect=[_head_outcome("timeout") for _ in range(4)]
+                + [RuntimeError("bug"), _head_outcome(200)]
+            )
+            for _ in range(2):
+                with pytest.raises(UsageQuotaTimeoutError):
+                    await usage_quota_client.check_quota_available(usage_quota_context)
+
+            clock.now += 5.0
+            with pytest.raises(RuntimeError):
+                await usage_quota_client.check_quota_available(usage_quota_context)
+            assert usage_quota_client.circuit_breaker.state is CircuitState.HALF_OPEN
+
+            assert await usage_quota_client.check_quota_available(usage_quota_context)
+
+        assert usage_quota_client.circuit_breaker.state is CircuitState.CLOSED

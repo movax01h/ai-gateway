@@ -6,6 +6,7 @@ import pytest
 
 from duo_workflow_service.audit_events.client import AuditEventClient
 from duo_workflow_service.audit_events.event_types import ToolInvokedEvent
+from duo_workflow_service.executor.outbox import ClientStreamClosedError
 from duo_workflow_service.gitlab.http_client import GitlabHttpClient, GitLabHttpResponse
 
 
@@ -326,6 +327,32 @@ class TestSendBatchMetrics:
         )
         mock_metrics.count_audit_events_dropped.assert_called_once_with(
             reason="retries_exhausted", amount=len(events)
+        )
+
+    @pytest.mark.asyncio
+    async def test_client_stream_closed_drops_without_retry(
+        self, _mock_supported, http_client, events
+    ):
+        http_client.apost.side_effect = ClientStreamClosedError()
+        mock_metrics = MagicMock()
+        with (
+            patch(
+                "duo_workflow_service.audit_events.client.duo_workflow_metrics",
+                mock_metrics,
+            ),
+            patch(
+                "duo_workflow_service.audit_events.client.asyncio.sleep",
+                new_callable=AsyncMock,
+            ) as mock_sleep,
+        ):
+            client = _make_client(http_client, max_retries=3)
+            result = await client.send_batch(events)
+
+        assert result is False
+        assert http_client.apost.call_count == 1
+        mock_sleep.assert_not_awaited()
+        mock_metrics.count_audit_events_dropped.assert_called_once_with(
+            reason="client_stream_closed", amount=len(events)
         )
 
     @pytest.mark.asyncio

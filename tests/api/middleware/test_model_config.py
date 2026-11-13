@@ -683,6 +683,32 @@ class TestFeatureAllowlist:
         assert response.json()["name"] in _feature(CHAT).default_model_identifiers
 
     @pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+    @pytest.mark.parametrize(
+        ("pinned", "feature_setting"),
+        [
+            ("claude_sonnet_4_5_20250929", "code_completions"),
+            ("claude_sonnet_4_5_20250929_vertex", "code_completions"),
+            ("claude_sonnet_4_5_20250929", "code_generations"),
+            ("claude_sonnet_4_5_20250929_vertex", "code_generations"),
+        ],
+    )
+    def test_fallback_mode_serves_pinned_sonnet_4_5_from_bedrock(
+        self, middleware_test_client, pinned, feature_setting
+    ):
+        response = middleware_test_client.post(
+            "/test",
+            json={
+                "model_metadata": {
+                    "provider": "gitlab",
+                    "identifier": pinned,
+                    "feature_setting": feature_setting,
+                }
+            },
+        )
+
+        assert response.json()["name"] == "claude_sonnet_4_5_20250929_bedrock"
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
     def test_fallback_mode_leaves_a_model_without_a_feature_on_the_prompt_default(
         self, middleware_test_client
     ):

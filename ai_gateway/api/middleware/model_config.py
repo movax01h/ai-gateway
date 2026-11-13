@@ -7,6 +7,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette_context import context as starlette_context
 
 from ai_gateway.api.middleware.base import _PathResolver
+from ai_gateway.code_suggestions.retired_models import remap_code_suggestion_metadata
 from ai_gateway.feature_allowlist import (
     ClientModelRequest,
     PromptModelCheck,
@@ -114,7 +115,10 @@ class ModelConfigMiddleware:
                     drop_default_model_ref(raw_metadata)
                     # Read the request first: create_model_metadata changes the mapping it gets.
                     request = ClientModelRequest.from_raw(raw_metadata)
-                    client_model_metadata = create_model_metadata(raw_metadata)
+                    metadata = raw_metadata
+                    if isinstance(metadata, dict):
+                        metadata = remap_code_suggestion_metadata(metadata)
+                    client_model_metadata = create_model_metadata(metadata)
                     path = scope.get("path", "")
                     if prompt_id := _route_prompt_id(path):
                         prompt_model_check_context.set(
