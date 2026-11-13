@@ -1,7 +1,12 @@
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Reasoning effort levels a model may list, in the providers' own names and in
+# ascending order. A model declares the subset its provider accepts.
+EffortLevel = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
+EFFORT_LEVELS: tuple[str, ...] = get_args(EffortLevel)
 
 
 class DevConfig(BaseModel):

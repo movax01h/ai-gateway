@@ -40,9 +40,11 @@ from ai_gateway.model_selection.models import (
     ModelClassProvider,
 )
 from ai_gateway.model_selection.types import (
+    EFFORT_LEVELS,
     DefaultModelEntry,
     DeprecationInfo,
     DevConfig,
+    EffortLevel,
     FeatureDeprecatedModel,
 )
 from lib.context.model import paid_credit_models_allowed_ctx, restricted_access_ctx
@@ -157,6 +159,21 @@ class BaseLLMDefinition(BaseModel):
     # Some models return an empty 404 on streaming requests when max_tokens is at the
     # model's max. Opt in to use this model's max_tokens from models.yml
     use_model_max_tokens: bool = False
+    # Reasoning effort levels a user may pick for this model, in ascending order.
+    # Empty means the picker offers no effort choice for it.
+    effort_levels: list[EffortLevel] = Field(default_factory=list)
+
+    @field_validator("effort_levels")
+    @classmethod
+    def _effort_levels_ascending_and_unique(
+        cls, levels: list[EffortLevel]
+    ) -> list[EffortLevel]:
+        ranks = [EFFORT_LEVELS.index(level) for level in levels]
+        if ranks != sorted(set(ranks)):
+            raise ValueError(
+                f"effort_levels must be unique and ascending, in the order {list(EFFORT_LEVELS)}"
+            )
+        return levels
 
 
 class ChatLiteLLMDefinition(BaseLLMDefinition):

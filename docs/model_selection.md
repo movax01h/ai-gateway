@@ -163,6 +163,14 @@ Models are defined in `ai_gateway/model_selection/models.yml`, and each model ha
   prompt up to explicit breakpoints, so these models get the per-session security block as a separate system message
   behind the stable system prompt. All other models get one merged system message. This flag is independent of
   `family`, which only selects prompt files.
+- `effort_levels` (optional, defaults to `[]`): the reasoning effort levels a user can pick for this model, in the
+  provider's own names. Accepted values are `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. List only the
+  subset the provider accepts for this model, in that ascending order and without duplicates; validation rejects any
+  other order. Surfaced in the `/v1/models/definitions` response. An empty list hides the effort picker for the model.
+  A load-balanced default model offers only the levels every member lists, and none if a member is missing. Models that
+  offer the same levels share one list through a YAML anchor: define it at its first use with
+  `effort_levels: &claude_adaptive_effort [low, medium, high, xhigh, max]` and reuse it with
+  `effort_levels: *claude_adaptive_effort`.
 - `params`: Dictionary with custom parameters to be passed to the model client
 - `prompt_params`: Dictionary with custom parameters to be passed to LLM invocations
 
