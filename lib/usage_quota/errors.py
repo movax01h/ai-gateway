@@ -44,6 +44,13 @@ class UsageQuotaConnectionError(UsageQuotaError):
         )
 
 
+class UsageQuotaCircuitOpenError(UsageQuotaError):
+    """Raised without a request when the circuit breaker for the Usage Quota API is open."""
+
+    def __init__(self):
+        super().__init__("Usage Quota API circuit breaker is open")
+
+
 class InsufficientEntitlements(UsageQuotaError):
     """Raised when the consumer does not have entitlements to use a feature."""
 

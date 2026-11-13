@@ -99,6 +99,17 @@ def _not_entitled_response() -> JSONResponse:
     )
 
 
+def _quota_check_unavailable_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": "usage_quota_unavailable",
+            "error_code": "USAGE_QUOTA_UNAVAILABLE",
+            "message": "Usage quota check is temporarily unavailable.",
+        },
+    )
+
+
 @inject
 async def _usage_quota_wrapper(
     func: Callable,
@@ -135,13 +146,13 @@ async def _usage_quota_wrapper(
             event_to_use,
             model_metadata=ModelMetadata(name=model_name) if model_name else None,
         )
-    except (InsufficientEntitlements, UsageQuotaCheckUnavailable):
-        # Intentional: both a permanent denial (InsufficientEntitlements) and a
-        # transient service failure (UsageQuotaCheckUnavailable) return 403 here
-        # because the client only handles 402 (credits exhausted) and 403 (not
-        # entitled / service unavailable). The distinction between the two is
-        # surfaced via the error_code field in the response body if needed.
+    except InsufficientEntitlements:
         return _not_entitled_response()
+    except UsageQuotaCheckUnavailable:
+        # Intentional: a transient service failure also returns 403, because clients
+        # only handle 402 (credits exhausted) and 403 (not entitled / service
+        # unavailable). The error_code field tells it apart from a denied entitlement.
+        return _quota_check_unavailable_response()
     except InsufficientCredits:
         return _insufficient_credits_response()
 

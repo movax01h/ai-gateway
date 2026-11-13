@@ -57,13 +57,19 @@ async def abort_route_interceptor(
 async def _abort_for_quota_denied(grpc_context: ServicerContext, e: Exception):
     """Abort the gRPC call with PERMISSION_DENIED for quota-related denials.
 
-    Handles both InsufficientEntitlements (permanent) and UsageQuotaCheckUnavailable (transient) by aborting with the
-    same status code and error string, since the gRPC caller only observes PERMISSION_DENIED.
+    Both InsufficientEntitlements (permanent) and UsageQuotaCheckUnavailable (transient) abort with PERMISSION_DENIED,
+    so callers keep the same status handling. The error code in the message tells them apart: USAGE_QUOTA_NOT_ENTITLED
+    for a denied entitlement, USAGE_QUOTA_UNAVAILABLE when the check could not be completed.
     """
+    error_code = (
+        "USAGE_QUOTA_UNAVAILABLE"
+        if isinstance(e, UsageQuotaCheckUnavailable)
+        else "USAGE_QUOTA_NOT_ENTITLED"
+    )
     await abort_route_interceptor(
         grpc_context,
         StatusCode.PERMISSION_DENIED,
-        f"{str(e).rstrip('.')}. Error code: USAGE_QUOTA_NOT_ENTITLED",
+        f"{str(e).rstrip('.')}. Error code: {error_code}",
     )
 
 
