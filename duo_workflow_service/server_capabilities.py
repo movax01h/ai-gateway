@@ -22,6 +22,7 @@ _DWS_CAPABILITIES: list[CapabilityInfo] = [
     CapabilityInfo(name="tool_call_pattern_approval", metadata=""),
     CapabilityInfo(name="flow_semantic_versioning", metadata=""),
     CapabilityInfo(name="inline_flow_config_binding", metadata=""),
+    CapabilityInfo(name="fetch_flow_config", metadata=""),
 ]
 
 
