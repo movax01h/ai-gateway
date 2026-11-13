@@ -13,6 +13,36 @@ from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 _DEFAULT_COMMAND_TIMEOUT_SECONDS = 120
 
 
+def resolve_command_timeout(timeout: Optional[int] = None) -> Optional[int]:
+    """The timeout to send with a command action, or ``None`` for a client that cannot read one.
+
+    Older executors were compiled without the field. A timeout the caller chose is an error on such a client rather than
+    something to drop silently; the default is simply omitted.
+    """
+    if not is_client_capable("command_timeout"):
+        if timeout is not None:
+            raise ToolException(
+                "timeout parameter is not supported by this client version."
+            )
+        return None
+    return _DEFAULT_COMMAND_TIMEOUT_SECONDS if timeout is None else timeout
+
+
+def run_command_action(
+    program: str, arguments: list[str], timeout: Optional[int]
+) -> contract_pb2.Action:
+    run_command_kwargs: dict = {
+        "program": program,
+        "arguments": arguments,
+        "flags": [],
+    }
+    if timeout is not None:
+        run_command_kwargs["timeout"] = timeout
+    return contract_pb2.Action(
+        runCommand=contract_pb2.RunCommandAction(**run_command_kwargs)
+    )
+
+
 class RunCommandInput(BaseModel):
     program: str = Field(description="The name of bash program to execute eg: 'cp'")
     args: Optional[str] = Field(
@@ -55,28 +85,9 @@ class RunCommand(DuoBaseTool):
                 f"Invalid argument syntax: {e}. Check for unclosed quotes."
             )
 
-        run_command_kwargs: dict = {
-            "program": program,
-            "arguments": arguments,
-            "flags": [],
-        }
-
-        if timeout is None:
-            if is_client_capable("command_timeout"):
-                timeout = _DEFAULT_COMMAND_TIMEOUT_SECONDS
-
-        if timeout is not None:
-            if not is_client_capable("command_timeout"):
-                raise ToolException(
-                    "timeout parameter is not supported by this client version."
-                )
-            run_command_kwargs["timeout"] = timeout
-
         return await _execute_action(
             self.metadata,  # type: ignore
-            contract_pb2.Action(
-                runCommand=contract_pb2.RunCommandAction(**run_command_kwargs)
-            ),
+            run_command_action(program, arguments, resolve_command_timeout(timeout)),
         )
 
     def format_display_message(
@@ -120,15 +131,8 @@ class ShellCommand(DuoBaseTool):
     ) -> str:
         run_shell_kwargs: dict = {"command": command}
 
-        if timeout is None:
-            if is_client_capable("command_timeout"):
-                timeout = _DEFAULT_COMMAND_TIMEOUT_SECONDS
-
+        timeout = resolve_command_timeout(timeout)
         if timeout is not None:
-            if not is_client_capable("command_timeout"):
-                raise ToolException(
-                    "timeout parameter is not supported by this client version."
-                )
             run_shell_kwargs["timeout"] = timeout
 
         return await _execute_action(
