@@ -1,0 +1,14 @@
+project_id: {{project_id}}
+merge_request_iid: {{merge_request_iid}}
+diff_sha: {{diff_sha}}
+
+<classification_result>
+{{classification_result | tojson(indent=2)}}
+</classification_result>
+
+Call submit_merge_request_risk_classification with:
+- project_id: {{project_id}}
+- merge_request_iid: {{merge_request_iid}}
+- diff_sha: {{diff_sha}}, copied exactly, all 40 characters
+- claims: the "claims" array from classification_result, unchanged
+- summary: the "summary" field from classification_result, unchanged
