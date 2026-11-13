@@ -7,7 +7,7 @@ from gitlab_cloud_connector import GitLabUnitPrimitive
 from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 
-from ai_gateway.api.v1.models.get_definitions import router
+from ai_gateway.api.v1.models.get_definitions import _shared_effort_levels, router
 from ai_gateway.model_selection import UnitPrimitiveConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.types import DefaultModelEntry
@@ -39,6 +39,7 @@ def mock_model_config_fixture():
                 description="Fast, cost-effective responses.",
                 cost_indicator="$",
                 params={},
+                effort_levels=["low", "medium", "high", "max"],
             ),
             "model2": ChatLiteLLMDefinition(
                 name="Model 2",
@@ -48,6 +49,7 @@ def mock_model_config_fixture():
                 description="Fast, cost-effective responses.",
                 cost_indicator="$$",
                 params={},
+                effort_levels=["low", "medium", "high"],
             ),
             "model3": ChatLiteLLMDefinition(
                 name="Model 3",
@@ -133,6 +135,7 @@ def test_get_models_returns_correct_data(client):
         "description": "Fast, cost-effective responses.",
         "cost_indicator": "$",
         "requires_paid_credits": True,
+        "effort_levels": ["low", "medium", "high", "max"],
     }
     assert data["models"][1] == {
         "name": "Model 2 - Gemini Enterprise Agent Platform",
@@ -142,6 +145,7 @@ def test_get_models_returns_correct_data(client):
         "description": "Fast, cost-effective responses.",
         "cost_indicator": "$$",
         "requires_paid_credits": True,
+        "effort_levels": ["low", "medium", "high"],
     }
     # Models without a provider should not have a suffix appended.
     assert data["models"][2] == {
@@ -152,6 +156,7 @@ def test_get_models_returns_correct_data(client):
         "description": None,
         "cost_indicator": None,
         "requires_paid_credits": True,
+        "effort_levels": [],
     }
 
     # config1 has multiple default models:
@@ -183,6 +188,8 @@ def test_get_models_returns_correct_data(client):
         == "GitLab balances requests across model providers to maintain availability."
     )
     assert pseudo_model["cost_indicator"] == "$"
+    # The load-balanced default offers only the levels every member lists.
+    assert pseudo_model["effort_levels"] == ["low", "medium", "high"]
 
     # config2 has a single default model: default_model should point directly to it.
     resp1 = data["unit_primitives"][1]
@@ -433,3 +440,62 @@ def test_pseudo_model_requires_paid_credits_unless_every_default_is_free(
     )
 
     assert pseudo_model["requires_paid_credits"] is expected
+
+
+def _definition_with_levels(levels):
+    return ChatLiteLLMDefinition(
+        name="Model",
+        gitlab_identifier="model",
+        max_context_tokens=200000,
+        effort_levels=levels,
+    )
+
+
+@pytest.mark.parametrize(
+    ("members", "expected"),
+    [
+        pytest.param([], [], id="no_members"),
+        pytest.param(
+            [["low", "medium", "high", "max"], None],
+            [],
+            id="member_missing_from_llm_definitions",
+        ),
+        pytest.param(
+            [None, ["low", "medium", "high"]],
+            [],
+            id="first_member_missing_from_llm_definitions",
+        ),
+        pytest.param(
+            [["low", "medium", "high"], []],
+            [],
+            id="member_with_no_levels",
+        ),
+        pytest.param(
+            [["minimal", "low"], ["high", "xhigh"]],
+            [],
+            id="disjoint_levels",
+        ),
+        pytest.param(
+            [["low", "medium", "high", "max"], ["low", "medium", "high"]],
+            ["low", "medium", "high"],
+            id="subset",
+        ),
+        pytest.param(
+            [["low", "medium", "high"], ["medium", "high", "xhigh"]],
+            ["medium", "high"],
+            id="partial_overlap",
+        ),
+        pytest.param(
+            [["low", "high"]],
+            ["low", "high"],
+            id="single_member",
+        ),
+    ],
+)
+def test_shared_effort_levels(members, expected):
+    definitions = [
+        None if levels is None else _definition_with_levels(levels)
+        for levels in members
+    ]
+
+    assert _shared_effort_levels(definitions) == expected
