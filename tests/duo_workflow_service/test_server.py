@@ -1774,6 +1774,99 @@ async def test_execute_workflow_cancellation_handling(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cancel_error_message,expect_marked_closed",
+    [
+        ("Some other cancellation", True),
+        (AIO_CANCEL_STOP_WORKFLOW_REQUEST, False),
+        (AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST, False),
+    ],
+)
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_marks_client_stream_closed_on_client_cancellation(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    cancel_error_message,
+    expect_marked_closed,
+    start_workflow_client_event,
+    mock_context,
+    servicer,
+):
+    """A client cancellation fails outbox actions at once; a stop request keeps the stream usable."""
+
+    async def open_request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield start_workflow_client_event
+        # The client stream stays open, so only the cancellation can mark it closed.
+        await asyncio.Event().wait()
+
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = False
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_gitlab_status = "running"
+    mock_workflow.get_from_outbox = AsyncMock(
+        side_effect=asyncio.CancelledError(cancel_error_message)
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    result = servicer.ExecuteWorkflow(
+        open_request_iterator(),
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await anext(result)
+
+    assert mock_workflow.mark_client_stream_closed.called is expect_marked_closed
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_marks_client_stream_closed_when_client_stream_ends(
+    mock_resolve_flow,
+    mock_abstract_workflow_class,
+    start_request_iterator,
+    mock_context,
+    servicer,
+):
+    """When the client stream ends, outbox actions fail at once instead of waiting out their timeouts."""
+    client_stream_closed = asyncio.Event()
+
+    async def run_until_cancelled(_goal):
+        await asyncio.Event().wait()
+
+    async def get_from_outbox():
+        await client_stream_closed.wait()
+        return OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+
+    mock_workflow = mock_abstract_workflow_class.return_value
+    mock_workflow.is_done = False
+    mock_workflow.run = run_until_cancelled
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.last_gitlab_status = "running"
+    mock_workflow.mark_client_stream_closed = MagicMock(
+        side_effect=client_stream_closed.set
+    )
+    mock_workflow.get_from_outbox = get_from_outbox
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_abstract_workflow_class)
+
+    result = servicer.ExecuteWorkflow(
+        start_request_iterator,
+        mock_context,
+        internal_event_client=create_mock_internal_event_client(),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await anext(result)
+
+    mock_workflow.mark_client_stream_closed.assert_called()
+    mock_context.set_code.assert_called_once_with(grpc.StatusCode.CANCELLED)
+
+
+@pytest.mark.asyncio
 @patch("duo_workflow_service.server.AbstractWorkflow")
 @patch("duo_workflow_service.server.resolve_flow")
 @patch("duo_workflow_service.server.log_exception")

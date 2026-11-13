@@ -24,6 +24,15 @@ class OutgoingMessageTooLargeError(Exception):
     """The action payload exceeded the gRPC transport limit and was never sent."""
 
 
+class ClientStreamClosedError(Exception):
+    """The client stream is closed, so the executor can never answer this action."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Client stream is closed: the executor can no longer answer this action"
+        )
+
+
 class Outbox:
     """Class to manage outbound requests to clients."""
 
@@ -36,6 +45,7 @@ class Outbox:
             ActionRequestID, asyncio.Future[contract_pb2.ClientEvent] | None
         ] = {}
         self._legacy_action_response: dict[ActionRequestID, ActionType] = {}
+        self._client_stream_closed = False
 
     def put_action(
         self,
@@ -46,6 +56,21 @@ class Outbox:
 
         action.requestID = str(uuid4())
         action_type = action.WhichOneof("action")
+
+        if (
+            self._client_stream_closed
+            and action_type not in ACTION_TYPES_WITHOUT_RESPONSES
+        ):
+            # No response can arrive any more, so fail now instead of letting the caller
+            # wait for its own timeout (and retries) on an action nobody will answer.
+            log.warning(
+                "Not sending action: client stream is closed",
+                request_id=action.requestID,
+                action_class=action_type,
+            )
+            if result is not None and not result.done():
+                result.set_exception(ClientStreamClosedError())
+            return action.requestID
 
         if action_type not in ACTION_TYPES_WITHOUT_RESPONSES:
             self._action_response[action.requestID] = result
@@ -87,6 +112,25 @@ class Outbox:
             del self._action_response[request_id]
         if request_id in self._legacy_action_response:
             del self._legacy_action_response[request_id]
+
+    def mark_client_stream_closed(self) -> None:
+        """Fail every pending and future action that awaits a client response.
+
+        Once the client stream is closed, no ``ClientEvent`` can reach ``set_action_response``, so waiting on these
+        actions only burns their timeouts and retries.
+        """
+        if self._client_stream_closed:
+            return
+
+        self._client_stream_closed = True
+
+        pending_request_ids = list(self._action_response.keys())
+        log.warning(
+            "Client stream closed, failing pending actions",
+            pending_actions=len(pending_request_ids),
+        )
+        for request_id in pending_request_ids:
+            self.fail_action(request_id, ClientStreamClosedError())
 
     def set_action_response(self, event: contract_pb2.ClientEvent):
         """Set action response to the future object which is awaited by the caller."""

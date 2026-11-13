@@ -10,7 +10,11 @@ from langchain_core.tools import ToolException
 from structlog.testing import capture_logs
 
 from contract import contract_pb2
-from duo_workflow_service.executor.outbox import Outbox, OutgoingMessageTooLargeError
+from duo_workflow_service.executor.outbox import (
+    ClientStreamClosedError,
+    Outbox,
+    OutgoingMessageTooLargeError,
+)
 from duo_workflow_service.gitlab.executor_http_client import (
     RESOURCE_NOT_AVAILABLE_MESSAGE,
     ExecutorGitLabHttpClient,
@@ -553,6 +557,47 @@ async def test_graphql_exhausts_retries_on_repeated_timeouts(
 # ---------------------------------------------------------------------------
 # Tests for the DWS-side timeout on REST calls
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method_name, kwargs",
+    [
+        ("aget", {"path": "/api/v4/test"}),
+        ("apost", {"path": "/api/v4/test", "body": "{}"}),
+    ],
+)
+async def test_rest_call_fails_at_once_when_client_stream_is_closed(
+    mock_tenacity_sleep: AsyncMock, method_name: str, kwargs: dict
+):
+    """A request made after the client stream closed is never sent, retried or timed out."""
+    client = ExecutorGitLabHttpClient(Outbox(), rest_timeout=60)
+    client.outbox.mark_client_stream_closed()
+
+    with pytest.raises(ClientStreamClosedError):
+        await getattr(client, method_name)(**kwargs)
+
+    assert client.outbox._queue.empty()
+    mock_tenacity_sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pending_rest_call_fails_when_client_stream_closes(
+    mock_tenacity_sleep: AsyncMock,
+):
+    """A request already waiting on the executor fails as soon as the client stream closes, without waiting out its
+    timeout."""
+    client = ExecutorGitLabHttpClient(Outbox(), rest_timeout=60)
+    request = asyncio.create_task(client.apost(path="/api/v4/test", body="{}"))
+    # The action reaching the queue means the request is now waiting for a response.
+    await client.outbox.get()
+
+    client.outbox.mark_client_stream_closed()
+
+    with pytest.raises(ClientStreamClosedError):
+        await asyncio.wait_for(request, timeout=1)
+    mock_tenacity_sleep.assert_not_awaited()
+    assert client.outbox._action_response == {}
 
 
 @pytest.fixture(name="silent_executor_client")

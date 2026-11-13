@@ -573,6 +573,9 @@ class AbstractWorkflow(ABC):
     def fail_outbox_action(self, request_id: str, error: Exception):
         self._outbox.fail_action(request_id=request_id, error=error)
 
+    def mark_client_stream_closed(self) -> None:
+        self._outbox.mark_client_stream_closed()
+
     def set_action_response(self, event: contract_pb2.ClientEvent):
         self._outbox.set_action_response(event)
 
