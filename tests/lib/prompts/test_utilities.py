@@ -12,11 +12,14 @@ from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from lib.prompts.utilities import (
+    PromptSource,
     _security_suffix,
     _security_suffix_var,
     merge_leading_system_messages,
+    prompt_sources,
     prompt_template_to_messages,
     render_security_block,
+    resolve_prompt_template,
 )
 
 
@@ -409,3 +412,41 @@ class TestAutoAddHistoryPlaceholder:
 
         msg_types = [type(m).__name__ for m in rendered.messages]
         assert msg_types == ["SystemMessage", "SystemMessage", "HumanMessage"]
+
+
+class TestPromptSources:
+    def test_every_string_with_its_role_in_order(self):
+        sources = prompt_sources(
+            {
+                "system": ["static", "dynamic"],
+                "user": "{{ goal }}",
+                "placeholder": "history",
+            }
+        )
+
+        # A list expands into one source per entry; roles that aren't text are the caller's to skip.
+        assert sources == (
+            PromptSource("system", "static"),
+            PromptSource("system", "dynamic"),
+            PromptSource("user", "{{ goal }}"),
+            PromptSource("placeholder", "history"),
+        )
+
+    def test_empty_strings_are_skipped(self):
+        assert prompt_sources({"system": ["", "kept"], "user": ""}) == (
+            PromptSource("system", "kept"),
+        )
+
+
+class TestResolvePromptTemplate:
+    @pytest.mark.parametrize("tool_output_security", [True, False])
+    def test_the_prefix_is_what_the_old_format_renders(self, tool_output_security):
+        template = {"system": ["static", "dynamic"], "user": "{{ goal }}"}
+
+        resolved = resolve_prompt_template(
+            template, tool_output_security=tool_output_security
+        )
+
+        assert resolved.prefix == prompt_template_to_messages(
+            template, tool_output_security=tool_output_security
+        )

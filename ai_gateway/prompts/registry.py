@@ -527,12 +527,8 @@ class LocalPromptRegistry(BasePromptRegistry):
             ) from e
 
         variables: set[str] = set()
-        for template_msg in config.prompt_template.values():
-            items = [template_msg] if isinstance(template_msg, str) else template_msg
-
-            for item in items:
-                if item:
-                    variables.update(self._collect_jinja2_variables(item))
+        for source in config.sources():
+            variables.update(self._collect_jinja2_variables(source.text))
         return variables
 
     def _build_prompt(
