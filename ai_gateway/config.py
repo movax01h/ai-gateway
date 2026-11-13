@@ -563,6 +563,17 @@ class ConfigModelSelection(BaseModel):
             'Example: \'{"claude_sonnet_4_5_20250929_vertex": {"vertex_location": "us-east5"}}\''
         ),
     )
+    identifier_aliases: dict[str, str] = Field(
+        default_factory=lambda: {
+            "claude_sonnet_4_5_20250929": "claude_sonnet_4_5_20250929_bedrock",
+            "claude_sonnet_4_5_20250929_vertex": "claude_sonnet_4_5_20250929_bedrock",
+        },
+        description=(
+            "JSON object mapping a pinned gitlab_identifier to the identifier that serves it "
+            "for code completions and code generations. The target must be selectable for both features. "
+            'Example: \'{"claude_sonnet_4_5_20250929": "claude_sonnet_4_5_20250929_bedrock"}\''
+        ),
+    )
     model_releases: Optional[SecretStr] = Field(
         default=None,
         description=(

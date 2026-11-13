@@ -1458,7 +1458,13 @@ class TestCodeCompletions:
             ),
             (
                 "claude_sonnet_4_5_20250929",
-                "claude_sonnet_4_5_20250929",
+                "claude_sonnet_4_5_20250929_bedrock",
+                "anthropic",
+                False,
+            ),
+            (
+                "claude_sonnet_4_5_20250929_vertex",
+                "claude_sonnet_4_5_20250929_bedrock",
                 "anthropic",
                 False,
             ),
@@ -1504,7 +1510,7 @@ class TestCodeCompletions:
     # `claude-sonnet-4-20250514` for the anthropic provider before routing.
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.usefixtures("mock_post_processor")
-    def test_legacy_anthropic_model_name_routes_to_sonnet_5_5(
+    def test_legacy_anthropic_model_name_routes_to_bedrock_sonnet_4_5(
         self,
         mock_client: Mock,
         mock_prompt_ainvoke: Mock,
@@ -1529,7 +1535,7 @@ class TestCodeCompletions:
 
         body = response.json()
         assert body["model"]["engine"] == "anthropic"
-        assert body["model"]["name"] == "claude_sonnet_5_5"
+        assert body["model"]["name"] == "claude_sonnet_4_5_20250929_bedrock"
 
     @pytest.mark.parametrize("mock_model_responses", [True])
     @pytest.mark.parametrize(
@@ -3013,7 +3019,9 @@ class TestCompletionsIamRoleWithCustomModelsDisabled:
     "legacy_model_name",
     ["claude-sonnet-4-20250514", "claude-sonnet-4-5-20250929"],
 )
-def test_legacy_anthropic_completion_names_map_to_sonnet_5_5(legacy_model_name):
+def test_legacy_anthropic_completion_names_map_to_bedrock_sonnet_4_5(
+    legacy_model_name,
+):
     identifier = _get_gitlab_identifier(KindModelProvider.ANTHROPIC, legacy_model_name)
 
-    assert identifier == "claude_sonnet_5_5"
+    assert identifier == "claude_sonnet_4_5_20250929_bedrock"
