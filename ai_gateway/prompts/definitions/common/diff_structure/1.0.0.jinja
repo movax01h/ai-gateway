@@ -5,6 +5,7 @@ Git diff structure explanation:
   - `type`: "context" (unchanged), "added" (new code), or "deleted" (removed code)
   - `old_line`: line number before changes (empty for added lines)
   - `new_line`: line number after changes (empty for deleted lines)
+- A `<line type="nonewline">` tag is git's "\ No newline at end of file" marker, not a line of code. It means the line directly above it is the last line of that side of the file and has no trailing newline, and it repeats that line's `old_line`/`new_line`. Never anchor a comment to it.
 - `<chunk_header>` tags indicate change locations (e.g., "@@ -13,6 +16,7 @@")
 - When files are renamed, an optional `<renamed_files>` section lists each rename with `<file old_path="..." new_path="...">` tags
 </diff_structure>

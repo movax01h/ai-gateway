@@ -40,7 +40,8 @@ def walk_diff_lines(raw_diff: str) -> Iterator[tuple[str, int, int, str]]:
 
     `kind` is one of `chunk_header`, `nonewline`, `added`, `deleted` or
     `context`. The line numbers belong to the yielded line, not the running
-    counters. File metadata lines are skipped.
+    counters, except for `nonewline`: it yields the running counters, so take its
+    numbers from the line before it, which it describes. File metadata lines are skipped.
 
     Metadata is only skipped before the first hunk header. Inside a hunk a `+++`
     is an added line whose own text starts with `++`, and a `---` is a deleted
@@ -115,15 +116,19 @@ def format_diff_lines(
         return ""
 
     lines = []
+    old: int | str = ""
+    new: int | str = ""
     for kind, line_old, line_new, text in walk_diff_lines(raw_diff):
         if kind == "chunk_header":
             lines.append(f"<chunk_header>{text}</chunk_header>")
             continue
 
-        # An added line has no old number and a deleted line has no new one.
-        # A context or nonewline line carries both.
-        old = "" if kind == "added" else line_old
-        new = "" if kind == "deleted" else line_new
+        # A nonewline marker describes the line before it, so it repeats that
+        # line's numbers: only its side of the file lacks the trailing newline.
+        if kind != "nonewline":
+            # An added line has no old number and a deleted line has no new one.
+            old = "" if kind == "added" else line_old
+            new = "" if kind == "deleted" else line_new
         marked = (
             kind == "added" and changed_lines and (file_path, line_new) in changed_lines
         )
