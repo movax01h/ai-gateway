@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Awaitable, Callable, cast
 
 import structlog
-from fastapi import APIRouter, FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +21,7 @@ from starlette.responses import JSONResponse
 from starlette_context import context
 from starlette_context.middleware import RawContextMiddleware
 
+from ai.serving.rest.routes import mount_routes
 from ai_gateway.api.client_disconnect import (
     ClientDisconnectedError,
     client_disconnected_exception_handler,
@@ -39,12 +40,7 @@ from ai_gateway.api.middleware import (
 from ai_gateway.api.middleware.self_hosted_logging import (
     EnabledInstanceVerboseAiLogsHeaderPlugin,
 )
-from ai_gateway.api.monitoring import router as http_monitoring_router
 from ai_gateway.api.server_utils import extract_retry_after_header
-from ai_gateway.api.v1 import api_router as http_api_router_v1
-from ai_gateway.api.v2 import api_router as http_api_router_v2
-from ai_gateway.api.v3 import api_router as http_api_router_v3
-from ai_gateway.api.v4 import api_router as http_api_router_v4
 from ai_gateway.code_suggestions.processing.pre import PromptTooLongError
 from ai_gateway.config import Config, setup_litellm
 from ai_gateway.container import ContainerApplication
@@ -264,7 +260,7 @@ def create_fast_api_server(config: Config):
         auth_provider  # For readiness check
     )
     setup_custom_exception_handlers(fastapi_app)
-    setup_router(fastapi_app)
+    mount_routes(fastapi_app)
     setup_app_logging(fastapi_app)
     setup_prometheus_fastapi_instrumentator(fastapi_app)
     setup_profiling(config.google_cloud_profiler)
@@ -386,17 +382,6 @@ def setup_custom_exception_handlers(app: FastAPI):
         ClientDisconnectedError,
         cast(ExceptionHandler, client_disconnected_exception_handler),
     )
-
-
-def setup_router(app: FastAPI):
-    sub_router = APIRouter()
-    sub_router.include_router(http_api_router_v1, prefix="/v1")
-    sub_router.include_router(http_api_router_v2, prefix="/v2")
-    sub_router.include_router(http_api_router_v3, prefix="/v3")
-    sub_router.include_router(http_api_router_v4, prefix="/v4")
-    sub_router.include_router(http_monitoring_router)
-
-    app.include_router(sub_router)
 
 
 def setup_prometheus_fastapi_instrumentator(app: FastAPI):

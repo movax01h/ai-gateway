@@ -37,6 +37,7 @@ from litellm.exceptions import (
 from pydantic import ValidationError as PydanticValidationError
 
 import duo_workflow_service.workflows.registry as flow_registry
+from ai.serving.grpc.flows import register_served_flows
 from ai_gateway.config import Config, get_config, setup_litellm
 from ai_gateway.container import ContainerApplication
 from ai_gateway.model_metadata import TypeModelMetadata
@@ -58,9 +59,6 @@ from duo_workflow_service.agent_platform.utils.validation import FlowValidator
 from duo_workflow_service.agent_platform.v1.catalog.errors import (
     CatalogItemsFetchError,
     is_catalog_refusal,
-)
-from duo_workflow_service.agent_platform.v1.flows.flow_config import (
-    discover_feature_flow_configs,
 )
 from duo_workflow_service.asyncio_io_context import install_clean_io_handle_context
 from duo_workflow_service.components import tools_registry
@@ -2211,7 +2209,7 @@ def run(config: Config):
     setup_monitoring()
     setup_logging()
     # After observability setup, so a duplicate feature id is reported, not lost.
-    discover_feature_flow_configs()
+    register_served_flows()
     setup_profiling()
     loop = asyncio.get_event_loop()
     # Before validate_llm_access() opens the first pooled connection, so every

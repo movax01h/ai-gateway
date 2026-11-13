@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
-__all__ = ["default_features_dir", "default_project_root"]
+__all__ = ["FOUNDATIONAL_AGENTS_DOMAIN", "default_features_dir", "default_project_root"]
+
+# Domain under ai/features/ that fetch-foundational-agents writes AI Catalog flows into.
+FOUNDATIONAL_AGENTS_DOMAIN = "foundational_agents"
 
 # package depth of this module -> parents index of the project root
 _ROOT_DEPTH = __name__.count(".")

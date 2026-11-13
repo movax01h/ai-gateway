@@ -2,11 +2,8 @@
 
 A feature declares how it is served — the transport (gRPC / REST) and the
 deployable (AI Gateway / Duo Workflow Service) — in a ``serving.py`` module
-under its feature directory. The collector aggregates these declarations so the
-per-app composition can later query which features each deployable serves.
-
-This is the baseline form (declaration + collector). Consuming the collector
-from a per-app container is completed in the platform epic (#47).
+under its feature directory. The collector aggregates these declarations, and
+the serving adapters under ``ai/serving/`` read them.
 """
 
 import importlib.util

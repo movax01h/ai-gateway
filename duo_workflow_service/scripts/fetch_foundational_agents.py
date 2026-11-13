@@ -32,7 +32,7 @@ from duo_workflow_service.agent_platform.v1.flows import FlowConfig as V1FlowCon
 from duo_workflow_service.agent_platform.v1.flows.flow_config import (
     DEFAULT_FLOW_VERSION,
 )
-from lib.feature_roots import default_features_dir
+from lib.feature_roots import FOUNDATIONAL_AGENTS_DOMAIN, default_features_dir
 
 FETCH_AGENT_OPERATION_NAME = "aiCatalogAgent"
 FETCH_AGENT_QUERY = """
@@ -182,9 +182,9 @@ def fetch_foundational_agent(
     return reference, flow_config
 
 
-# Domain under ai/features/ that holds catalog-fetched flows. Each agent is a
-# regular feature dir, so flow-config discovery picks it up with no special case.
-FOUNDATIONAL_AGENTS_DIR = default_features_dir() / "foundational_agents"
+# Each agent is a regular feature dir without a serving.py. The Duo Workflow
+# Service serves every flow in this domain without one.
+FOUNDATIONAL_AGENTS_DIR = default_features_dir() / FOUNDATIONAL_AGENTS_DOMAIN
 
 # The list of agents the Docker images fetch at build time. It sits next to the
 # agents it describes, so `COPY ai/ ai/` ships it with the image.
@@ -213,12 +213,12 @@ def save_workflow_to_file(
 
         ai/features/foundational_agents/{agent_id}/config/{DEFAULT_FLOW_VERSION}.yml
 
-    Flow-config discovery registers it like any bundled feature. A fetched
-    agent must not share its name with a bundled feature (discovery fails at
-    boot) or with a legacy flow under ``V1FlowConfig.DIRECTORY_PATH`` (the
-    legacy copy wins at load time, so this function refuses to write it). An
-    experimental config keeps the legacy layout
-    ``{DIRECTORY_PATH}/{agent_id}/{DEFAULT_FLOW_VERSION}.yml``.
+    Flow-config discovery registers it like a bundled feature, but it needs no
+    ``serving.py``. A fetched agent must not share its name with a bundled
+    feature (discovery fails at boot) or with a legacy flow under
+    ``V1FlowConfig.DIRECTORY_PATH`` (the legacy copy wins at load time, so this
+    function refuses to write it). An experimental config keeps the legacy
+    layout ``{DIRECTORY_PATH}/{agent_id}/{DEFAULT_FLOW_VERSION}.yml``.
 
     **Current limitation — always saves as version 1.0.0**
 
