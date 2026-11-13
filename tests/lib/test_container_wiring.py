@@ -6,11 +6,15 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from typing import Sequence
 from unittest.mock import MagicMock
 
 import pytest
 from dependency_injector import containers, providers
 
+from duo_workflow_service.agent_platform.serving_surface import (
+    collect_serving_surfaces,
+)
 from lib.container_wiring import UnwiredDependencyError, wire_and_validate
 from tests.lib import wiring_fixtures, wiring_fixtures_unwired
 
@@ -92,30 +96,34 @@ def test_real_aigw_container_wires_clean():
     )
 
 
-def test_every_inject_site_is_wired_by_the_app_that_serves_it():
-    """A module outside the wired sets unwires silently, so pin the consumer side.
-
-    ai_gateway modules must be in AIGW's explicit list. duo_workflow_service and ai are wired recursively by DWS.
-    Anything else with a marker (lib/, or an ai/ module served by AIGW) must be classified below, which forces a
-    conscious wiring decision instead of a silent no-op.
-    """
-    from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
-    from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
-
-    assert "duo_workflow_service" in CONTAINER_APPLICATION_PACKAGES
-    assert "ai" in CONTAINER_APPLICATION_PACKAGES
-
-    # module -> how it is wired: "aigw" (must be in the AIGW module list),
-    # "dws" (covered by the recursive package wiring), or "doc-only" (the
-    # marker text appears only in prose).
-    classified = {
-        "lib.container_wiring": "doc-only",
+def _unwired_inject_sites(
+    repo_root: Path,
+    aigw_wired: set[str],
+    dws_packages: Sequence[str],
+    classified: dict[str, str],
+) -> list[str]:
+    """Return a problem line for each module with an injection marker that no app wires."""
+    dws_features = {
+        feature
+        for feature, surfaces in collect_serving_surfaces(
+            repo_root / "ai" / "features"
+        ).items()
+        if all(surface.deployable == "dws" for surface in surfaces)
     }
 
-    repo_root = Path(__file__).resolve().parents[2]
-    marker = re.compile(r"^\s*@inject\b|Provide\[|Provider\[|Closing\[", re.M)
-    aigw_wired = set(CONTAINER_APPLICATION_MODULES)
+    def wired_by_dws(module: str) -> bool:
+        if not any(
+            module == package or module.startswith(f"{package}.")
+            for package in dws_packages
+        ):
+            return False
+        parts = module.split(".")
+        # The DWS walk wires all of ai.features, but AIGW serves some features.
+        if parts[:2] == ["ai", "features"] and len(parts) > 3:
+            return parts[3] in dws_features
+        return True
 
+    marker = re.compile(r"^\s*@inject\b|Provide\[|Provider\[|Closing\[", re.M)
     problems = []
     for source_root in ("ai_gateway", "ai", "lib"):
         # rglob on a missing dir yields nothing, which would silently skip
@@ -137,15 +145,106 @@ def test_every_inject_site_is_wired_by_the_app_that_serves_it():
             elif kind == "aigw":
                 if module not in aigw_wired:
                     problems.append(f"{module}: classified aigw but not in the list")
-            elif kind == "dws":
-                continue  # covered by the recursive package wiring asserted above
+            elif wired_by_dws(module):
+                continue
             else:
                 problems.append(
-                    f"{module}: has an injection marker but is not classified; "
-                    "add it to the map above and wire it in the app that serves it"
+                    f"{module}: has an injection marker but no app wires it. If only DWS serves it, add its "
+                    "package to CONTAINER_APPLICATION_PACKAGES, or for an ai.features module declare only dws "
+                    "surfaces in the feature's serving.py. If AIGW serves it, classify it aigw in the map "
+                    "above and add it to CONTAINER_APPLICATION_MODULES"
                 )
+    return problems
 
+
+def test_every_inject_site_is_wired_by_the_app_that_serves_it():
+    """A module outside the wired sets unwires silently, so pin the consumer side.
+
+    ai_gateway modules must be in AIGW's explicit list. DWS wires duo_workflow_service and ai.features recursively, but
+    an ai.features module passes only if its feature's serving.py declares only dws surfaces. Anything else with a
+    marker (lib/, or an ai/ module served by AIGW) must be classified below, which forces a conscious wiring decision
+    instead of a silent no-op.
+    """
+    from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
+    from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
+
+    assert "duo_workflow_service" in CONTAINER_APPLICATION_PACKAGES
+    assert "ai.features" in CONTAINER_APPLICATION_PACKAGES
+    # Wiring imports every module under a package, and ai/apps/ must stay out.
+    assert not [
+        package
+        for package in CONTAINER_APPLICATION_PACKAGES
+        if package == "ai.apps"
+        or "ai.apps".startswith(f"{package}.")
+        or package.startswith("ai.apps.")
+    ]
+
+    # module -> how it is wired: "aigw" (must be in the AIGW module list) or
+    # "doc-only" (the marker text appears only in prose). Modules that the DWS
+    # walk wires need no entry.
+    classified = {
+        "lib.container_wiring": "doc-only",
+    }
+
+    problems = _unwired_inject_sites(
+        REPO_ROOT,
+        set(CONTAINER_APPLICATION_MODULES),
+        CONTAINER_APPLICATION_PACKAGES,
+        classified,
+    )
     assert not problems, "\n".join(problems)
+
+
+def test_wiring_scan_flags_a_marker_in_a_feature_aigw_serves(tmp_path):
+    for root in ("ai_gateway", "lib"):
+        (tmp_path / root).mkdir()
+    for feature, surfaces in (
+        ("served_by_aigw", [("rest", "aigw")]),
+        ("served_by_both", [("rest", "aigw"), ("grpc", "dws")]),
+        ("served_by_dws", [("grpc", "dws")]),
+    ):
+        feature_dir = tmp_path / "ai" / "features" / "code" / feature
+        feature_dir.mkdir(parents=True)
+        declared = ", ".join(
+            f"ServingSurface(transport={transport!r}, deployable={deployable!r})"
+            for transport, deployable in surfaces
+        )
+        (feature_dir / "serving.py").write_text(
+            "from duo_workflow_service.agent_platform.serving_surface import ServingSurface\n"
+            f"SERVING_SURFACE = [{declared}]\n"
+        )
+        (feature_dir / "tool.py").write_text("@inject\ndef tool(): ...\n")
+
+    problems = _unwired_inject_sites(
+        tmp_path,
+        aigw_wired=set(),
+        dws_packages=["duo_workflow_service", "ai.features"],
+        classified={},
+    )
+
+    assert sorted(problem.split(":")[0] for problem in problems) == [
+        "ai.features.code.served_by_aigw.tool",
+        "ai.features.code.served_by_both.tool",
+    ]
+
+
+def test_wiring_scan_flags_a_marker_outside_the_dws_packages(tmp_path):
+    for root in ("ai_gateway", "lib"):
+        (tmp_path / root).mkdir()
+    adapter = tmp_path / "ai" / "serving" / "grpc" / "adapter.py"
+    adapter.parent.mkdir(parents=True)
+    adapter.write_text("@inject\ndef adapter(): ...\n")
+
+    problems = _unwired_inject_sites(
+        tmp_path,
+        aigw_wired=set(),
+        dws_packages=["duo_workflow_service", "ai.features"],
+        classified={},
+    )
+
+    assert [problem.split(":")[0] for problem in problems] == [
+        "ai.serving.grpc.adapter"
+    ]
 
 
 def test_replays_unrelated_warnings():
