@@ -121,6 +121,7 @@ from lib.billing_events.service import LLMOperationType
 from lib.context import StarletteUser, current_model_metadata_context
 from lib.internal_events.client import InternalEventsClient
 from lib.prompts.utilities import (
+    ResolvedPromptTemplate,
     merge_leading_system_messages,
     prompt_template_to_messages,
     render_security_block,
@@ -911,7 +912,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             prompt_template_factory(model_provider, config)
             if prompt_template_factory
             else bind_model_variables(
-                self._build_prompt_template(config, tools),
+                ChatPromptTemplate.from_messages(
+                    self._resolve(config, tools).prefix, template_format="jinja2"
+                ),
                 model_provider,
                 model_metadata,
             )
@@ -1360,15 +1363,13 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             )
 
     @classmethod
-    def _build_prompt_template(
+    def _resolve(
         cls, config: PromptConfig, tools: Optional[List[BaseTool]] = None
-    ) -> ChatPromptTemplate:
-        messages = prompt_template_to_messages(
-            config.prompt_template,
-            tool_output_security=config.tool_output_security or bool(tools),
+    ) -> ResolvedPromptTemplate:
+        """Resolve the prompt's declared format once, into what it renders."""
+        return config.resolve(
+            tool_output_security=config.tool_output_security or bool(tools)
         )
-
-        return ChatPromptTemplate.from_messages(messages, template_format="jinja2")
 
 
 class BasePromptRegistry(ABC):

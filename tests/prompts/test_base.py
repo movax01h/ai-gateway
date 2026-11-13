@@ -313,49 +313,40 @@ configurable_unit_primitives:
         assert "effective_request_timeout" not in entry
         assert "request_timeout_source" not in entry
 
-    def test_build_prompt_template(self, prompt_config: PromptConfig):
-        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config)
+    def test_resolved_prefix(self, prompt_config: PromptConfig):
+        resolved = Prompt._resolve(prompt_config)
 
-        assert prompt_template == ChatPromptTemplate.from_messages(
-            [
-                ("system", "{% include 'system.jinja' %}"),
-                ("system", render_security_block().rstrip("\n")),
-                ("user", "{{content}}"),
-                MessagesPlaceholder("history", optional=True),
-            ],
-            template_format="jinja2",
-        )
+        assert resolved.prefix == [
+            ("system", "{% include 'system.jinja' %}"),
+            ("system", render_security_block().rstrip("\n")),
+            ("user", "{{content}}"),
+            MessagesPlaceholder("history", optional=True),
+        ]
 
     @pytest.mark.parametrize("tool_output_security", [False])
-    def test_build_prompt_template_skips_security_when_opted_out(
+    def test_resolved_prefix_skips_security_when_opted_out(
         self, prompt_config: PromptConfig
     ):
-        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config)
+        resolved = Prompt._resolve(prompt_config)
 
-        assert prompt_template == ChatPromptTemplate.from_messages(
-            [
-                ("system", "{% include 'system.jinja' %}"),
-                ("user", "{{content}}"),
-                MessagesPlaceholder("history", optional=True),
-            ],
-            template_format="jinja2",
-        )
+        assert resolved.prefix == [
+            ("system", "{% include 'system.jinja' %}"),
+            ("user", "{{content}}"),
+            MessagesPlaceholder("history", optional=True),
+        ]
 
     @pytest.mark.parametrize("tool_output_security", [False])
-    def test_build_prompt_template_keeps_security_when_tools_are_bound(
+    def test_resolved_prefix_keeps_security_when_tools_are_bound(
         self, prompt_config: PromptConfig, tools: list[BaseTool]
     ):
-        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config, tools)
+        resolved = Prompt._resolve(prompt_config, tools)
 
-        assert prompt_template == ChatPromptTemplate.from_messages(
-            [
-                ("system", "{% include 'system.jinja' %}"),
-                ("system", render_security_block().rstrip("\n")),
-                ("user", "{{content}}"),
-                MessagesPlaceholder("history", optional=True),
-            ],
-            template_format="jinja2",
-        )
+        assert resolved.prefix == [
+            ("system", "{% include 'system.jinja' %}"),
+            ("system", render_security_block().rstrip("\n")),
+            ("user", "{{content}}"),
+            MessagesPlaceholder("history", optional=True),
+        ]
 
     @pytest.mark.parametrize(
         ("template", "kwargs", "should_raise"),
@@ -636,19 +627,16 @@ configurable_unit_primitives:
     @pytest.mark.parametrize(
         "prompt_template", [{"with_messages_placeholder": True}], indirect=True
     )
-    def test_build_prompt_template_with_placeholder(self, prompt_config: PromptConfig):
-        prompt_template: Runnable = Prompt._build_prompt_template(prompt_config)
+    def test_resolved_prefix_with_placeholder(self, prompt_config: PromptConfig):
+        resolved = Prompt._resolve(prompt_config)
 
-        assert prompt_template == ChatPromptTemplate.from_messages(
-            [
-                ("system", "{% include 'system.jinja' %}"),
-                ("system", render_security_block().rstrip("\n")),
-                ("user", "{{content}}"),
-                MessagesPlaceholder("messages"),
-                MessagesPlaceholder("history", optional=True),
-            ],
-            template_format="jinja2",
-        )
+        assert resolved.prefix == [
+            ("system", "{% include 'system.jinja' %}"),
+            ("system", render_security_block().rstrip("\n")),
+            ("user", "{{content}}"),
+            MessagesPlaceholder("messages"),
+            MessagesPlaceholder("history", optional=True),
+        ]
 
     def test_instrumentator(self, model_engine: str, model_name: str, prompt: Prompt):
         assert prompt.instrumentator.labels == {

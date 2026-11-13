@@ -1,3 +1,5 @@
+from typing import Optional
+
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -8,11 +10,18 @@ from ai_gateway.model_selection.models import (
     OpenAIProviderParams,
 )
 from lib.billing_events.service import LLMOperationType
+from lib.prompts.utilities import (
+    PromptSource,
+    ResolvedPromptTemplate,
+    prompt_sources,
+    resolve_prompt_template,
+)
 
 __all__ = [
     "InMemoryPromptConfig",
     "ModelConfig",
     "PromptConfig",
+    "PromptFormat",
     "PromptProviderParams",
 ]
 
@@ -59,20 +68,53 @@ class ModelConfig(BaseModel):
     provider_params: PromptProviderParams | None = None
 
 
-class PromptConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class PromptFormat(BaseModel):
+    """What a prompt declares to render, shared by the registry's and the inline configs.
+
+    `Prompt` builds a model call from `resolve()`, and the registry collects an author's variables from `sources()`.
+    Other consumers still read `prompt_template` directly.
+    """
 
     name: str
+    prompt_template: dict[str, str | list[str]]
+    tool_output_security: bool = True
+
+    def sources(self) -> tuple[PromptSource, ...]:
+        """Every template string this prompt renders, with the role it was written in, without rendering anything."""
+        return prompt_sources(self.prompt_template)
+
+    def resolve(
+        self, tool_output_security: Optional[bool] = None
+    ) -> ResolvedPromptTemplate:
+        """Resolve this prompt's declared format into what it renders.
+
+        Args:
+            tool_output_security: Overrides the prompt's own setting, for a caller that binds tools.
+
+        Returns:
+            The resolved prompt.
+        """
+        return resolve_prompt_template(
+            self.prompt_template,
+            tool_output_security=(
+                self.tool_output_security
+                if tool_output_security is None
+                else tool_output_security
+            ),
+        )
+
+
+class PromptConfig(PromptFormat):
+    model_config = ConfigDict(extra="forbid")
+
     model: ModelConfig = ModelConfig()
     unit_primitive: GitLabUnitPrimitive
     # The feature setting in unit_primitives.yml that lists the models of this prompt version. Only for prompts that the
     # AI Gateway serves over HTTP. A prompt that only the Duo Workflow Service runs does not set it: the flow selects
     # the models of its prompts.
     models_from: str | None = None
-    prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
     operation_type: LLMOperationType = LLMOperationType.STANDARD
-    tool_output_security: bool = True
 
     @model_validator(mode="after")
     def validate_models_from(self) -> "PromptConfig":
@@ -97,18 +139,15 @@ class PromptConfig(BaseModel):
         return self
 
 
-class InMemoryPromptConfig(BaseModel):
+class InMemoryPromptConfig(PromptFormat):
     prompt_id: str
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
     model: ModelConfig | None = None
     unit_primitives: list[GitLabUnitPrimitive]
-    prompt_template: dict[str, str | list[str]]
     params: PromptParams | None = None
     operation_type: LLMOperationType = LLMOperationType.STANDARD
-    tool_output_security: bool = True
 
     def to_prompt_data(self) -> dict:
         params = self.model_dump(exclude={"prompt_id", "unit_primitives"})
