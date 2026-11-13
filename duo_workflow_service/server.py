@@ -209,9 +209,10 @@ from lib.jwt import (
 from lib.usage_quota import UsageQuotaEvent
 from lib.usage_quota.client import SKIP_USAGE_CUTOFF_CLAIM
 
-# "ai" is wired recursively so a feature moved under ai/features/ keeps its
-# DWS @inject sites resolving with no per-module bookkeeping.
-CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai"]
+# "ai.features" is wired recursively so a moved feature keeps its DWS @inject
+# sites resolving. The list must not include ai/apps/: wiring imports every
+# module it walks, and the AIGW root configures logging at import.
+CONTAINER_APPLICATION_PACKAGES = ["duo_workflow_service", "ai.features"]
 FLOW_CONFIG_ID_CLAIM = "flow_config_id"
 FLOW_VERSION_CLAIM = "flow_version"
 FLOW_CONFIG_SCHEMA_VERSION_CLAIM = "flow_config_schema_version"
