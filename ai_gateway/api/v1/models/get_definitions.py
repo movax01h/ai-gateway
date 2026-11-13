@@ -5,7 +5,7 @@ from starlette.responses import JSONResponse
 
 from ai_gateway.api.feature_category import feature_category
 from ai_gateway.model_metadata import DEFAULT_MODEL_REF_PREFIX
-from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
 from ai_gateway.model_selection.types import (
     DeprecationInfo,
     DevConfig,
@@ -40,6 +40,7 @@ class _GetModelResponseModel(BaseModel):
     description: str | None = None
     cost_indicator: str | None = None
     requires_paid_credits: bool = True
+    effort_levels: list[str] = []
 
 
 class _GetModelResponseUnitPrimitive(BaseModel):
@@ -62,6 +63,19 @@ class _GetModelResponseUnitPrimitive(BaseModel):
 class _GetModelResponse(BaseModel):
     models: list[_GetModelResponseModel]
     unit_primitives: list[_GetModelResponseUnitPrimitive]
+
+
+def _shared_effort_levels(definitions: list[LLMDefinition | None]) -> list[str]:
+    """Levels every member of a load-balanced default lists, in the first member's order."""
+    present = [definition for definition in definitions if definition is not None]
+    if not present or len(present) != len(definitions):
+        return []
+    first, *rest = present
+    return [
+        level
+        for level in first.effort_levels
+        if all(level in definition.effort_levels for definition in rest)
+    ]
 
 
 @router.get(
@@ -107,6 +121,9 @@ async def get_models():
                     or definition.requires_paid_credits
                     for model_id in default_models
                 ),
+                effort_levels=_shared_effort_levels(
+                    [llm_definitions.get(model_id) for model_id in default_models]
+                ),
             )
             values["default_model"] = pseudo_identifier
             # Surface the pseudo-model in the dropdown as the prominent default row;
@@ -141,6 +158,7 @@ async def get_models():
             description=definition.description,
             cost_indicator=definition.cost_indicator,
             requires_paid_credits=definition.requires_paid_credits,
+            effort_levels=list(definition.effort_levels),
         )
         for definition in llm_definitions.values()
     ]

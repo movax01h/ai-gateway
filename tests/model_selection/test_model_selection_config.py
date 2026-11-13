@@ -1,4 +1,6 @@
 # pylint: disable=too-many-lines  # large but cohesive test module for model selection config
+import functools
+import importlib.resources
 import json
 from pathlib import Path
 from textwrap import dedent
@@ -22,7 +24,11 @@ from ai_gateway.model_selection.model_selection_config import (
     UnitPrimitiveConfig,
 )
 from ai_gateway.model_selection.models import MAX_MODEL_RETRIES
-from ai_gateway.model_selection.types import DefaultModelEntry, DevConfig
+from ai_gateway.model_selection.types import (
+    EFFORT_LEVELS,
+    DefaultModelEntry,
+    DevConfig,
+)
 from lib.feature_flags.context import current_feature_flag_context
 
 
@@ -2194,3 +2200,229 @@ def test_model_restrictions_load_from_file_and_reload_on_refresh(selection_confi
         "some_flow"
     }
     selection_config.validate()
+
+
+class TestEffortLevels:
+    def test_rejects_unknown_level(self):
+        with pytest.raises(ValidationError):
+            ChatAnthropicDefinition(
+                name="m",
+                gitlab_identifier="m",
+                max_context_tokens=1,
+                params={},
+                effort_levels=["turbo"],
+            )
+
+    @pytest.mark.parametrize(
+        "levels", [["high", "low"], ["low", "low"]], ids=["unordered", "duplicate"]
+    )
+    def test_rejects_unordered_or_duplicate_levels(self, levels):
+        with pytest.raises(ValidationError, match="unique and ascending"):
+            ChatAnthropicDefinition(
+                name="m",
+                gitlab_identifier="m",
+                max_context_tokens=1,
+                params={},
+                effort_levels=levels,
+            )
+
+    def test_defaults_to_no_levels(self):
+        definition = ChatAnthropicDefinition(
+            name="m", gitlab_identifier="m", max_context_tokens=1, params={}
+        )
+        assert definition.effort_levels == []
+
+    @pytest.mark.parametrize(
+        ("model", "provider", "levels", "rejected"),
+        [
+            # Bedrock caps Claude effort at xhigh.
+            (
+                "bedrock/global.anthropic.claude-fable-5",
+                "bedrock",
+                ["high", "xhigh", "max"],
+                {"max"},
+            ),
+            # Flagged false for GPT-5.
+            ("gpt-5", None, ["minimal", "high", "xhigh"], {"xhigh"}),
+            # Listed explicitly for Kimi K3.
+            (
+                "accounts/fireworks/models/kimi-k3",
+                "fireworks_ai",
+                ["low", "medium", "high"],
+                {"medium"},
+            ),
+            # Unset flags count for nothing.
+            ("gemini-3.1-pro-preview", None, ["low", "medium", "high"], set()),
+        ],
+        ids=["bedrock_ceiling", "flag_false", "listed_levels", "no_data"],
+    )
+    def test_litellm_model_map_rejects_levels(self, model, provider, levels, rejected):
+        params = MagicMock(model=model, custom_llm_provider=provider)
+        definition = MagicMock(params=params, effort_levels=levels)
+
+        assert _levels_litellm_rejects(definition) == rejected
+
+
+# Levels each provider path accepts at the versions pinned in poetry.lock. The
+# Anthropic set is shared by the direct client and litellm's Vertex and Bedrock
+# paths; litellm folds `minimal` into `low`, so it is not offered on Claude.
+# litellm passes a Fireworks `reasoning_effort` through unchanged and Fireworks
+# models differ in the levels they take, so the per-model check narrows that path.
+_EFFORT_LEVELS_BY_PATH = {
+    "anthropic": {"low", "medium", "high", "xhigh", "max"},
+    "openai": {"none", "minimal", "low", "medium", "high", "xhigh", "max"},
+    "google_genai": {"minimal", "low", "medium", "high"},
+    "fireworks_ai": set(EFFORT_LEVELS),
+}
+_LITELLM_PATHS = {
+    "vertex_ai": "anthropic",
+    "bedrock": "anthropic",
+    "bedrock_mantle": "openai",
+    "fireworks_ai": "fireworks_ai",
+}
+# Selectable models on a reasoning path that deliberately list no levels.
+_EFFORT_LEVELS_EXEMPT = {
+    # The API rejects `output_config.effort` on these; litellm would turn a level
+    # into budgeted thinking, which conflicts with their temperature of 0.0.
+    "claude_sonnet_4_5_20250929",
+    "claude_sonnet_4_5_20250929_vertex",
+    "claude_sonnet_4_5_20250929_bedrock",
+    "claude_haiku_4_5_20251001",
+    "claude_haiku_4_5_20251001_vertex",
+    "claude_haiku_4_5_20251001_bedrock",
+    # Pre-4.6 on litellm: a level becomes budgeted `thinking`, not `output_config.effort`.
+    "claude_opus_4_5_20251101_vertex",
+    # Each variant pins one `thinking_level`; a user level would make the variants redundant.
+    "gemini_3_7_flash_vertex",
+    "gemini_3_7_flash_medium_vertex",
+    "gemini_3_7_flash_low_vertex",
+}
+
+
+def _effort_path(definition) -> str | None:
+    provider = str(definition.model_class_provider)
+    if provider in _EFFORT_LEVELS_BY_PATH:
+        return provider
+    if provider == "litellm":
+        return _LITELLM_PATHS.get(definition.params.custom_llm_provider or "")
+    return None
+
+
+# Per-level flags in litellm's model map. litellm leaves them unset on many models,
+# so only an explicit False counts against a declared level.
+_LITELLM_LEVEL_FLAGS = {
+    "none": "supports_none_reasoning_effort",
+    "minimal": "supports_minimal_reasoning_effort",
+    "xhigh": "supports_xhigh_reasoning_effort",
+    "max": "supports_max_reasoning_effort",
+}
+
+
+@functools.cache
+def _bundled_litellm_model_map() -> dict:
+    # The map bundled with the pinned litellm, not `litellm.model_cost`: litellm downloads
+    # the live map from GitHub at import, which would make this check follow upstream main.
+    bundled = importlib.resources.files("litellm").joinpath(
+        "model_prices_and_context_window_backup.json"
+    )
+    return json.loads(bundled.read_text())
+
+
+def _litellm_entry(definition) -> dict:
+    """The bundled litellm map entry for a definition's model, or {} when there is none."""
+    model = definition.params.model or ""
+    provider = getattr(definition.params, "custom_llm_provider", None)
+    candidates = [model]
+    if provider:
+        # Bedrock keeps its effort ceiling on the unprefixed key.
+        candidates = [model.removeprefix(f"{provider}/"), model, f"{provider}/{model}"]
+    model_map = _bundled_litellm_model_map()
+    return next((model_map[key] for key in candidates if key in model_map), {})
+
+
+def _levels_litellm_rejects(definition) -> set[str]:
+    """Declared levels that litellm's bundled model map says the model does not take."""
+    entry = _litellm_entry(definition)
+    declared = set(definition.effort_levels)
+    listed = entry.get("reasoning_effort_levels")
+    if listed is not None:
+        return declared - set(listed)
+    rejected = {
+        level
+        for level, flag in _LITELLM_LEVEL_FLAGS.items()
+        if entry.get(flag) is False
+    }
+    ceiling = entry.get("bedrock_output_config_effort_ceiling")
+    if ceiling in EFFORT_LEVELS:
+        rejected |= set(EFFORT_LEVELS[EFFORT_LEVELS.index(ceiling) + 1 :])
+    return declared & rejected
+
+
+def _needs_effort_levels(definition) -> bool:
+    """Whether a selectable model on this path has to declare levels or be exempted."""
+    path = _effort_path(definition)
+    if path == "fireworks_ai":
+        # Fireworks levels vary by model: only ones litellm lists levels for need them.
+        return "reasoning_effort_levels" in _litellm_entry(definition)
+    return path is not None
+
+
+def test_effort_levels_match_the_provider_path(selection_config):
+    """Declared levels must be ones the model's provider path accepts; other paths declare none."""
+    errors = []
+    for identifier, definition in selection_config.get_llm_definitions().items():
+        if not definition.effort_levels:
+            continue
+        path = _effort_path(definition)
+        if path is None:
+            errors.append(f"{identifier}: no reasoning parameter on this path")
+            continue
+        unsupported = set(definition.effort_levels) - _EFFORT_LEVELS_BY_PATH[path]
+        if unsupported:
+            errors.append(f"{identifier}: {sorted(unsupported)} not accepted by {path}")
+    assert not errors, "\n".join(errors)
+
+
+# Models whose entry in the bundled litellm map is wrong about effort. Drop an entry
+# once the pinned litellm ships the fix.
+_LITELLM_MAP_OUTDATED = {
+    # The bundled map marks xhigh as unsupported; litellm main has
+    # `supports_xhigh_reasoning_effort: true` (checked 2026-11-05).
+    "gpt_5_3_codex",
+}
+
+
+def test_effort_levels_agree_with_litellm_model_map(selection_config):
+    """No model declares a level that litellm's model map marks as unsupported for it."""
+    errors = [
+        f"{identifier}: litellm marks {sorted(rejected)} as unsupported"
+        for identifier, definition in selection_config.get_llm_definitions().items()
+        if definition.effort_levels
+        and identifier not in _LITELLM_MAP_OUTDATED
+        and (rejected := _levels_litellm_rejects(definition))
+    ]
+    assert not errors, "\n".join(errors)
+
+
+def test_selectable_models_on_a_reasoning_path_declare_effort_levels(
+    selection_config,
+):
+    """A new entry on a path with a reasoning parameter must list levels or be exempted here."""
+    llm_definitions = selection_config.get_llm_definitions()
+    missing = sorted(
+        {
+            model_id
+            for upc in selection_config.get_unit_primitive_config()
+            if upc.feature_setting == "duo_agent_platform"
+            for model_id in upc.selectable_models
+            if model_id in llm_definitions
+            and model_id not in _EFFORT_LEVELS_EXEMPT
+            and _needs_effort_levels(llm_definitions[model_id])
+            and not llm_definitions[model_id].effort_levels
+        }
+    )
+    assert not missing, (
+        "Selectable duo_agent_platform models without effort_levels: "
+        f"{missing}. Declare the levels the provider accepts, or add the "
+        "entry to _EFFORT_LEVELS_EXEMPT with a reason."
+    )
