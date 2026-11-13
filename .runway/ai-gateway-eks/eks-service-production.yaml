@@ -44,6 +44,9 @@ ai-gateway-eks:
       # current limits would reject. Switch to "enforce" once a week of data has sized the limits.
       AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE: "log"
       AIGW_PROMPTS__ACTOR_LIMIT_MODE: "log"
+      # Paid credit models gate, log mode: record which paid model requests would be denied
+      # for self-managed trials without purchased credits. Staging enforces first.
+      AIGW_MODEL_SELECTION__PAID_CREDIT_MODELS_GATE_MODE: "log"
 
   workloadSecrets:
     - name: env-vars

@@ -36,3 +36,6 @@ AIGW_REQUEST_BODY_LIMIT__MAX_BYTES: "16777216"
 # current limits would reject. Switch to "enforce" once a week of data has sized the limits.
 AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE: "log"
 AIGW_PROMPTS__ACTOR_LIMIT_MODE: "log"
+# Paid credit models gate, enforce: reject models marked requires_paid_credits for
+# self-managed trials without purchased GitLab Credits. Keep AI Gateway and DWS in sync.
+AIGW_MODEL_SELECTION__PAID_CREDIT_MODELS_GATE_MODE: "enforce"
