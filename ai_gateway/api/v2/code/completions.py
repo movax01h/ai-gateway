@@ -56,11 +56,13 @@ from ai_gateway.code_suggestions.processing.post.completions import (
     PostProcessorOperation,
     create_custom_model_post_processor,
 )
+from ai_gateway.code_suggestions.retired_models import remap_retired_identifier
 from ai_gateway.model_metadata import (
     IamRoleNotAllowedError,
     TypeModelMetadata,
     create_model_metadata,
 )
+from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.models import KindLiteLlmModel, KindModelProvider
 from ai_gateway.models.base import TokensConsumptionMetadata
 from ai_gateway.prompts import BasePromptRegistry
@@ -111,8 +113,9 @@ LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER = {
     "vertex-ai/codestral-2508": "codestral_2508_vertex",  # Set from the model provider handler for default case
     "fireworks_ai/codestral-2501": "codestral_2501_fireworks",
     "fireworks_ai/codestral-2508": "codestral_2508_fireworks",
-    "anthropic/claude-sonnet-4-20250514": "claude_sonnet_5_5",
-    "anthropic/claude-sonnet-4-5-20250929": "claude_sonnet_5_5",
+    # Both resolve through `AIGW_MODEL_SELECTION__IDENTIFIER_ALIASES`, like a pinned Sonnet 4.5.
+    "anthropic/claude-sonnet-4-20250514": "claude_sonnet_4_5_20250929",
+    "anthropic/claude-sonnet-4-5-20250929": "claude_sonnet_4_5_20250929",
 }
 
 
@@ -555,8 +558,8 @@ def _get_gitlab_identifier(
 ) -> Optional[str]:
     legacy_identifier = f"{model_provider}/{model_name}"
 
-    return LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER.get(
-        legacy_identifier, model_name
+    return remap_retired_identifier(
+        LEGACY_COMPLETION_MODEL_TO_GITLAB_IDENTIFIER.get(legacy_identifier, model_name)
     )
 
 
@@ -652,6 +655,13 @@ def _get_provider_config(
     )
 
 
+def _completion_provider(llm_definition: LLMDefinition) -> KindModelProvider:
+    # Bedrock serves several vendors. Claude there takes the same request shape as Claude on the Anthropic API.
+    if llm_definition.provider == "Bedrock" and "claude" in llm_definition.family:
+        return KindModelProvider.ANTHROPIC
+    return KindModelProvider.from_definition_provider(llm_definition.provider)
+
+
 def _build_code_completions(
     request: Request,
     payload: CompletionsRequestWithVersion,
@@ -682,16 +692,14 @@ def _build_code_completions(
         model_metadata = create_model_metadata(
             {
                 "provider": KindModelProvider.GITLAB,
-                "identifier": payload.model_name,
+                "identifier": remap_retired_identifier(payload.model_name),
                 "feature_setting": "code_completions",
                 "provider_keys": model_keys,
             },
             mock_model_responses=config.mock_model_responses(),
         )
 
-        actual_provider = KindModelProvider.from_definition_provider(
-            model_metadata.llm_definition.provider
-        )
+        actual_provider = _completion_provider(model_metadata.llm_definition)
         gitlab_identifier = model_metadata.llm_definition.gitlab_identifier
         # Update payload with legacy model_provider/name for completions code
         payload.model_provider = actual_provider
