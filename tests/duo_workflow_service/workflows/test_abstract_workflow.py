@@ -52,6 +52,7 @@ from duo_workflow_service.errors.typing import (
     WorkflowAlreadyFinishedException,
     WorkflowTokenRejectedError,
 )
+from duo_workflow_service.executor.outbox import ClientStreamClosedError
 from duo_workflow_service.gitlab.help_links import gitlab_web_url
 from duo_workflow_service.gitlab.url_parser import SESSION_URL_PATH
 from duo_workflow_service.tools import UNTRUSTED_MCP_WARNING
@@ -440,6 +441,17 @@ async def test_fail_outbox_action(workflow, mock_action):
     workflow.fail_outbox_action(item.requestID, Exception("Something went wrong"))
 
     assert item.requestID not in workflow._outbox._action_response
+
+
+@pytest.mark.asyncio
+async def test_mark_client_stream_closed(workflow):
+    result = asyncio.get_running_loop().create_future()
+    request_id = workflow._outbox.put_action(contract_pb2.Action(), result=result)
+
+    workflow.mark_client_stream_closed()
+
+    assert isinstance(result.exception(), ClientStreamClosedError)
+    assert request_id not in workflow._outbox._action_response
 
 
 @pytest.mark.asyncio

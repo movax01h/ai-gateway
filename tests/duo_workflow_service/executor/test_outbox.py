@@ -6,6 +6,7 @@ from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.executor.outbox import (
+    ClientStreamClosedError,
     Outbox,
     OutboxSignal,
     OutgoingMessageTooLargeError,
@@ -376,3 +377,64 @@ async def test_exact_http_responses_keeps_legacy_plain_text_responses():
     outbox.set_action_response(response)
 
     assert result.result() is response
+
+
+class TestMarkClientStreamClosed:
+    @pytest.mark.asyncio
+    async def test_fails_pending_actions(self):
+        outbox = Outbox()
+        http_result: asyncio.Future = asyncio.get_event_loop().create_future()
+        read_result: asyncio.Future = asyncio.get_event_loop().create_future()
+        outbox.put_action(_http_action(), result=http_result)
+        outbox.put_action(
+            contract_pb2.Action(runReadFile=contract_pb2.ReadFile(filepath="a")),
+            result=read_result,
+        )
+
+        outbox.mark_client_stream_closed()
+
+        for result in (http_result, read_result):
+            assert isinstance(result.exception(), ClientStreamClosedError)
+        assert not outbox._action_response
+        assert not outbox._legacy_action_response
+
+    @pytest.mark.asyncio
+    async def test_fails_later_actions_without_queueing_them(self):
+        outbox = Outbox()
+        outbox.mark_client_stream_closed()
+
+        with pytest.raises(ClientStreamClosedError):
+            await asyncio.wait_for(
+                outbox.put_action_and_wait_for_response(_http_action()), timeout=1
+            )
+
+        assert outbox._queue.empty()
+        assert not outbox._action_response
+        assert not outbox._legacy_action_response
+
+    def test_still_queues_actions_without_responses(self):
+        outbox = Outbox()
+        outbox.mark_client_stream_closed()
+
+        outbox.put_action(
+            contract_pb2.Action(newCheckpoint=contract_pb2.NewCheckpoint())
+        )
+
+        assert outbox._queue.qsize() == 1
+
+    @pytest.mark.asyncio
+    async def test_is_idempotent(self):
+        outbox = Outbox()
+        result: asyncio.Future = asyncio.get_event_loop().create_future()
+        outbox.put_action(_http_action(), result=result)
+
+        with capture_logs() as logs:
+            outbox.mark_client_stream_closed()
+            outbox.mark_client_stream_closed()
+
+        assert isinstance(result.exception(), ClientStreamClosedError)
+        assert [
+            log["event"]
+            for log in logs
+            if log["event"] == "Client stream closed, failing pending actions"
+        ] == ["Client stream closed, failing pending actions"]

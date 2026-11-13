@@ -1159,6 +1159,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
 
                 if event is None:
                     log.info("Skipping ClientEvent None")
+                    workflow.mark_client_stream_closed()
                     workflow_task.cancel("Client-side streaming has been closed.")
                     break
 
@@ -1360,6 +1361,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
                 context.set_code(grpc.StatusCode.CANCELLED)
                 context.set_details("RPC cancelled by client")
                 log.info("RPC cancelled by client", reason=err_str)
+                # Nothing reads the client stream any more, so actions sent while aborting
+                # (error checkpoint, audit events) would only wait out their timeouts.
+                workflow.mark_client_stream_closed()
 
             await abort_workflow(workflow_task, err)
             # Task cancellation must be reraised to the grpc server side so that the rpc task can be shutdown properly.

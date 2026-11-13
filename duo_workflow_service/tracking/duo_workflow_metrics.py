@@ -568,7 +568,9 @@ class DuoWorkflowMetrics:  # pylint: disable=too-many-instance-attributes,too-ma
             reason: Why the events were dropped before delivery. Expected values:
                 ``"http_error"`` (non-retryable HTTP status), ``"retries_exhausted"``,
                 ``"version_unsupported"``, ``"event_too_large"`` (a single event
-                exceeds the size cap), ``"cancelled"`` (final flush was cancelled).
+                exceeds the size cap), ``"cancelled"`` (final flush was cancelled),
+                ``"client_stream_closed"`` (the client stream closed, so no executor can
+                relay the batch).
             event_type: Type of the dropped event. Set for ``event_too_large``, which
                 drops one identified event; ``"unknown"`` for batch-level drops that
                 span mixed event types.
