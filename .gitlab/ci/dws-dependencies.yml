@@ -4,8 +4,10 @@
   changes:
     - duo_workflow_service/**/*
     - tests/duo_workflow_service/**/*
+    - tests/ai/apps/dws/**/*
     - contract/**/*
     - pyproject.toml
+    - ai/apps/dws/**/*
     - ai/features/code/developer/**/*
     - ai/features/code/developer_agent_prompt/**/*
     - ai/features/code/local_code_review/**/*
