@@ -1016,6 +1016,7 @@ async def test_list_capabilities(mock_context, servicer):
         {"name": "tool_call_pattern_approval", "metadata": ""},
         {"name": "flow_semantic_versioning", "metadata": ""},
         {"name": "inline_flow_config_binding", "metadata": ""},
+        {"name": "fetch_flow_config", "metadata": ""},
     ]
 
 
@@ -2041,6 +2042,7 @@ async def test_generate_token(
             "tool_call_pattern_approval",
             "flow_semantic_versioning",
             "inline_flow_config_binding",
+            "fetch_flow_config",
         ],
     )
 
@@ -2831,6 +2833,7 @@ async def test_generate_token_with_legacy_duo_workflow_execute_workflow_up(
             "tool_call_pattern_approval",
             "flow_semantic_versioning",
             "inline_flow_config_binding",
+            "fetch_flow_config",
         ],
     )
 
@@ -2860,6 +2863,7 @@ async def test_generate_token_returns_server_capabilities(
         "tool_call_pattern_approval",
         "flow_semantic_versioning",
         "inline_flow_config_binding",
+        "fetch_flow_config",
     ]
 
 
