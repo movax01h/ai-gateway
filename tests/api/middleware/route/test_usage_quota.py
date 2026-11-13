@@ -170,8 +170,9 @@ class TestDecoratorBasics:
 
         assert response.status_code == 403
         content = json.loads(response.body.decode())
-        assert content["error"] == "not_entitled"
-        assert content["error_code"] == "USAGE_QUOTA_NOT_ENTITLED"
+        assert content["error"] == "usage_quota_unavailable"
+        assert content["error_code"] == "USAGE_QUOTA_UNAVAILABLE"
+        assert content["message"] == "Usage quota check is temporarily unavailable."
 
     @pytest.mark.asyncio
     async def test_decorator_maps_insufficient_entitlements_to_403(

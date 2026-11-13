@@ -33,12 +33,15 @@ has_sufficient_usage_quota (decorator)
   │               │
   │               ├─► In-flight request for same key? → coalesce, await shared result
   │               │
+  │               ├─► Circuit breaker open? → deny without a request  (UsageQuotaCheckUnavailable raised)
+  │               │
   │               └─► HEAD /api/v1/consumers/resolve (CustomersDot)
   │                     ├─ 200 → allow, cache with Cache-Control max-age (or 1h fallback)
   │                     ├─ 402 → deny  (InsufficientCredits raised)
   │                     ├─ 403 → deny  (InsufficientEntitlements raised)
-  │                     ├─ other HTTP error (4xx/5xx) → deny  (UsageQuotaCheckUnavailable raised)
-  │                     └─ timeout, connection failure, or unexpected error → deny  (UsageQuotaCheckUnavailable raised)
+  │                     ├─ other 4xx or 5xx → deny  (UsageQuotaCheckUnavailable raised)
+  │                     ├─ 500, 502, 503, 504, timeout, or connection failure → retry once, then deny  (UsageQuotaCheckUnavailable raised)
+  │                     └─ unexpected error → deny  (UsageQuotaCheckUnavailable raised)
   │
   ├─► InsufficientCredits raised
   │     ├─ HTTP: 402 JSON response
@@ -63,6 +66,39 @@ The guard does not replace the signed `skip_usage_cutoff: false` claim from Rail
 details, see
 [ai-assist work item 2951](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/2951)
 and [GitLab work item 631119](https://gitlab.com/gitlab-org/gitlab/-/work_items/631119).
+
+## Retries and circuit breaker
+
+The check fails closed, so a transient CustomersDot failure denies the request. One retry,
+after a backoff of 100 to 200 ms, keeps short hiccups from denying entitled users.
+Concurrent checks for the same cache key share one fetch, retry included.
+
+During an outage, the retry would double both the requests to CustomersDot and the time
+each check waits. A circuit breaker in `lib/usage_quota/circuit_breaker.py` prevents that:
+
+- After 10 consecutive checks fail with a timeout, connection failure, or a 500, 502, 503,
+  or 504 response, even after the retry, the breaker opens.
+- While it's open, checks that miss the cache are denied immediately, without a request
+  to CustomersDot. Cached results are still served.
+- After 5 seconds, one probe check goes through. If CustomersDot answers, the breaker
+  closes. If the probe fails, the breaker opens for another 5 seconds.
+
+Any other answer from CustomersDot, including 402, 403, and 501, counts as success,
+because CustomersDot is reachable. The breaker state is per process. Checks denied by an open breaker are counted in
+`usage_quota_customersdot_requests_total{outcome="circuit_open"}`.
+
+## Error responses
+
+| Exception | HTTP (AI Gateway) | gRPC (Duo Workflow Service) | Error code |
+|---|---|---|---|
+| `InsufficientCredits` | 402 | `RESOURCE_EXHAUSTED` | `USAGE_QUOTA_EXCEEDED` |
+| `InsufficientEntitlements` | 403 | `PERMISSION_DENIED` | `USAGE_QUOTA_NOT_ENTITLED` |
+| `UsageQuotaCheckUnavailable` | 403 | `PERMISSION_DENIED` | `USAGE_QUOTA_UNAVAILABLE` |
+
+`UsageQuotaCheckUnavailable` uses the same status as `InsufficientEntitlements`, because
+clients only handle 402 and 403. The error code tells a check that couldn't complete apart
+from a denied entitlement: in the `error_code` field of HTTP responses, and at the end of
+the gRPC status message (`Error code: <code>`).
 
 ## Caching
 
