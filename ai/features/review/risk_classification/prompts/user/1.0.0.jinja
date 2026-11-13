@@ -1,0 +1,17 @@
+Merge Request IID: {{merge_request_iid}}
+
+Answer exactly one claim for every domain listed below.
+Use each domain's `name` value verbatim as the claim name.
+
+<risk_domains>
+{{domains | tojson(indent=2)}}
+</risk_domains>
+
+Here is the merge request diff.
+
+<merge_request_diff>
+{{mr_diffs}}
+</merge_request_diff>
+
+Answer every domain listed above.
+Respond with only the claims array and the summary, in the required output format.

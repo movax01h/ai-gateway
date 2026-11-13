@@ -1,0 +1,12 @@
+name: risk_classification
+model:
+  params:
+    max_tokens: 16_384
+unit_primitive: duo_agent_platform
+prompt_template:
+  system: |
+    {% include 'risk_classification/system/1.0.0.jinja' %}
+  user: |
+    {% include 'risk_classification/user/1.0.0.jinja' %}
+params:
+  timeout: 90
