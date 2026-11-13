@@ -168,6 +168,12 @@ engine), so the same feature is reachable over either protocol with no logic
 duplicated in the controller. Business logic lives in the feature, not the
 controller; serving is a thin edge.
 
+Today `ai/serving/grpc/flows.py` registers the flows whose `serving.py` declares
+gRPC on the Duo Workflow Service. A flow fetched from the AI Catalog has no
+`serving.py` and is always registered. `ai/serving/rest/routes.py` mounts the AI
+Gateway route table. The controllers are still in `ai_gateway/api/`, and the
+prompt routes do not read the declarations yet.
+
 ## Composition and dependency injection
 
 There is no single application container shared across deployables. Each deployable

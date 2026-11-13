@@ -18,7 +18,7 @@ design, and some parts of that design are not implemented yet.
 | Flow configuration | `ai/features/<domain>/<feature>/config/<version>.yml` | flow ID `<feature>` |
 | Feature tools | `ai/features/<domain>/<feature>/components/__init__.py`, in `FEATURE_TOOLS` | tools in the tools registry |
 | Tests | `ai/features/<domain>/<feature>/tests/` | collected by `pytest` |
-| Serving surface | `ai/features/<domain>/<feature>/serving.py`, in `SERVING_SURFACE` | not read at runtime yet |
+| Serving surface | `ai/features/<domain>/<feature>/serving.py`, in `SERVING_SURFACE` | the flows that the Duo Workflow Service serves |
 
 Follow these rules:
 
@@ -144,8 +144,8 @@ lint rejects it, so move the feature first.
    SERVING_SURFACE = [ServingSurface(transport="rest", deployable="aigw")]
    ```
 
-   Nothing reads this declaration at runtime yet. A test checks that a feature whose prompt
-   versions set `models_from` declares it.
+   The prompt routes do not read this declaration yet. A test checks that a feature whose
+   prompt versions set `models_from` declares it.
 
 1. Add the feature or its domain to `.gitlab/CODEOWNERS`.
 
@@ -197,7 +197,7 @@ lint rejects it, so move the feature first.
 1. Put the tests in `tests/`. `pytest` collects `ai/features/*/*/tests`.
 
 1. Declare the serving surface in `serving.py`, with `transport="grpc"` and
-   `deployable="dws"`.
+   `deployable="dws"`. Without it, the Duo Workflow Service fails at boot.
 
 1. Add the feature or its domain to `.gitlab/CODEOWNERS`.
 
@@ -311,7 +311,7 @@ Move the whole feature in one merge request:
    For a flow, run this command on `main` and on your branch, and compare the output:
 
    ```shell
-   poetry run python -c "from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig, discover_feature_flow_configs, list_flow_configs; discover_feature_flow_configs(); print(sorted(e['flow_version'] for e in list_flow_configs(FlowConfig) if e['flow_identifier'] == '<feature>'))"
+   poetry run python -c "from ai.serving.grpc.flows import register_served_flows; from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig, list_flow_configs; register_served_flows(); print(sorted(e['flow_version'] for e in list_flow_configs(FlowConfig) if e['flow_identifier'] == '<feature>'))"
    ```
 
 Two completed moves show the result:
