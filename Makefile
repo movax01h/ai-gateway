@@ -359,6 +359,7 @@ check-duo-workflow-flow-schema: duo-workflow-flow-schema
 .PHONY: duo-workflow-service-reload
 duo-workflow-service-reload:
 	poetry run watchmedo auto-restart \
+		--directory=./ai/apps/dws \
 		--directory=./duo_workflow_service \
 		--pattern="*.py" \
 		--recursive -- duo-workflow-service

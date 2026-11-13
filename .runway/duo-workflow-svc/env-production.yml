@@ -37,3 +37,6 @@ DUO_WORKFLOW_SHUTDOWN_GRACE_PERIOD_S: 5
 PYTHONFAULTHANDLER: 1
 PYTHONUNBUFFERED: 1
 AIGW_AUDIT_EVENT__ENABLED: "true"
+# Paid credit models gate, log mode: record which paid model requests would be denied
+# for self-managed trials without purchased credits. Staging enforces first.
+AIGW_MODEL_SELECTION__PAID_CREDIT_MODELS_GATE_MODE: "log"

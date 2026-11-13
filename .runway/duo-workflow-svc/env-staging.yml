@@ -37,3 +37,6 @@ AIGW_BILLING_EVENT__APP_ID: "gitlab_duo_workflow-billing"
 PYTHONFAULTHANDLER: 1
 PYTHONUNBUFFERED: 1
 AIGW_AUDIT_EVENT__ENABLED: "true"
+# Paid credit models gate, enforce: reject models marked requires_paid_credits for
+# self-managed trials without purchased GitLab Credits. Keep AI Gateway and DWS in sync.
+AIGW_MODEL_SELECTION__PAID_CREDIT_MODELS_GATE_MODE: "enforce"
