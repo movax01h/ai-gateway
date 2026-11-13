@@ -448,12 +448,15 @@ Use `glab` for MR/issue CLI operations (or the GitLab MCP tools, if available).
   Diff against `origin/main` (for example `git fetch origin main`, then
   `git diff origin/main...HEAD`), and never assume `main` resolves locally.
 - For conflict-resolution tasks with a restricted file scope, use
-  `git diff --name-only --diff-filter=U` to identify conflicts. Avoid merging
-  or rebasing unrelated target-branch changes into the work; verify every
-  changed path is in scope before committing or pushing, and stop if it is not.
-- Shell commands have a default timeout (often ~120s). Don't block a
-  single call with a long `sleep`. Instead, request a longer timeout if
-  your tool supports it, and poll in a bounded loop with an early break:
+  `git diff --name-only --diff-filter=U` to identify conflicts. After
+  `git merge origin/<target>`, `git diff --cached --name-only` lists every
+  file the target brought in, so it is not a scope check. Commit locally, then
+  confirm `git diff-tree --cc --name-only -r HEAD` (files that differ from both
+  parents) only lists conflicted files before pushing; stop if it does not.
+- Shell commands have a default timeout (often ~120s). A `git commit` or
+  `git push` that runs lefthook hooks can take over 60s (a 120s timeout was
+  hit on a merge commit), so give it 300s. Don't block a single call with a long `sleep`. Instead,
+  request a longer timeout if your tool supports it, and poll in a bounded loop with an early break:
   `for i in $(seq 1 5); do glab ci get ... | grep -q '^status:.*success' && break; sleep 30; done`.
   Budget the timeout when looping tests (`for i in $(seq 1 30); do pytest ...`): a run of
   ~10s each already exceeds 300s. Use fewer iterations or a longer timeout, and split a
