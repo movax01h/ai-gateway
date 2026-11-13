@@ -22,6 +22,7 @@ from duo_workflow_service.components.tools_registry import (
     _PREAPPROVED_CAPABILITY_TOOLS,
     _READ_ONLY_GITLAB_TOOLS,
     NO_OP_TOOLS,
+    Promotion,
     Toolset,
     ToolsRegistry,
     _effective_privileges,
@@ -359,6 +360,7 @@ _outbox = MagicMock(spec=Outbox)
                 "extract_lines_from_text",
                 "finalize_code_review_findings",
                 "detect_review_context_truncation",
+                "list_local_commits",
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
@@ -388,6 +390,7 @@ _outbox = MagicMock(spec=Outbox)
                 "extract_lines_from_text",
                 "finalize_code_review_findings",
                 "detect_review_context_truncation",
+                "list_local_commits",
                 "handover_tool",
                 "request_user_clarification_tool",
                 "clarification_question",
@@ -679,6 +682,7 @@ def test_registry_initialization_initialises_tools_with_correct_attributes(
         "get_glql_schema": tools.GetGlqlSchema(metadata=expected_metadata),
         "fetch_glql_schema": tools.FetchGlqlSchema(metadata=expected_metadata),
         "run_glql_query": tools.RunGLQLQuery(metadata=expected_metadata),
+        "list_local_commits": tools.ListLocalCommits(metadata=expected_metadata),
         "post_sast_fp_analysis_to_gitlab": PostSastFpAnalysisToGitlab(
             metadata=expected_metadata
         ),
@@ -1060,6 +1064,7 @@ def test_preapproved_tools_initialization(tool_metadata):
         "extract_lines_from_text",
         "finalize_code_review_findings",
         "detect_review_context_truncation",
+        "list_local_commits",
         "run_tests",
         "bl_discover_and_cluster",
     }
@@ -1145,6 +1150,7 @@ async def test_registry_configuration_with_preapproved_tools(
         "extract_lines_from_text",
         "finalize_code_review_findings",
         "detect_review_context_truncation",
+        "list_local_commits",
         "run_tests",
         "bl_discover_and_cluster",
     }
@@ -1254,6 +1260,7 @@ def test_toolset_method(
         mock_toolset_class.assert_called_once_with(
             pre_approved=expected_preapproved,
             promoted=set(),
+            promotable=set(),
             all_tools=expected_all_tools,
             tool_options={},
             approval_policy=registry,
@@ -3948,6 +3955,7 @@ _EXPECTED_CEILING_EXEMPT = [
     "list_instance_audit_events",
     "list_issue_notes",
     "list_issues",
+    "list_local_commits",
     "list_merge_request_diffs",
     "list_mr_discussions",
     "list_project_audit_events",
@@ -4029,9 +4037,8 @@ def _promotion_registry(tool_metadata, promoted_tools, **kwargs):
     kwargs.setdefault("enabled_tools", list(_ROW_PRIVILEGES))
     kwargs.setdefault("preapproved_tools", [])
     kwargs.setdefault("can_ask_user", True)
-    return ToolsRegistry(
-        tool_metadata=tool_metadata, promoted_tools=promoted_tools, **kwargs
-    )
+    promotion = Promotion(promoted_tools, kwargs.pop("promotable_tools", ()))
+    return ToolsRegistry(tool_metadata=tool_metadata, promotion=promotion, **kwargs)
 
 
 def test_promoted_tools_are_pre_approved(tool_metadata):
@@ -4190,3 +4197,67 @@ def test_removed_tools_log_omits_tools_promotion_re_adds(tool_metadata):
     assert len(removed) == 1
     assert "edit_file" not in removed[0]["tool_names"]
     assert "run_command" in removed[0]["tool_names"]
+
+
+def test_toolset_passes_the_promotable_subset(tool_metadata):
+    registry = _promotion_registry(
+        tool_metadata, [], promotable_tools=["edit_file", "not_requested"]
+    )
+
+    toolset = registry.toolset(["edit_file", "read_file"])
+
+    assert toolset.promotable == {"edit_file"}
+    assert toolset._promoted == set()
+
+
+def test_promotable_leaves_out_a_tool_pre_approved_another_way(tool_metadata):
+    """Promotion never covers such a tool, so a replayed auto_mode for it is forged or stale."""
+    registry = _promotion_registry(
+        tool_metadata,
+        [],
+        preapproved_tools=["read_write_files"],
+        promotable_tools=["edit_file", "run_command"],
+    )
+
+    assert registry.toolset(["edit_file", "run_command"]).promotable == {"run_command"}
+
+
+def test_promotable_uses_the_promotion_filter_without_the_mode_gates(tool_metadata):
+    """A session that cannot prompt still checks a replayed receipt, so only the gates differ."""
+    registry = _promotion_registry(
+        tool_metadata,
+        [],
+        can_ask_user=False,
+        promotable_tools=["edit_file", "run_command", "mkdir", "create_merge_request"],
+        ask_tools=["run_command"],
+        denied_tools=["mkdir"],
+    )
+
+    toolset = registry.toolset(["edit_file", "run_command", "create_merge_request"])
+
+    # ask, deny and a name outside the enabled tools are all dropped.
+    assert toolset.promotable == {"edit_file"}
+
+
+@pytest.mark.parametrize(
+    ("client_injected", "expected"), [(True, set()), (False, {"gitlab_create_issue"})]
+)
+def test_promotable_drops_client_injected_tools(
+    tool_metadata, client_injected, expected
+):
+    registry = _promotion_registry(
+        tool_metadata,
+        [],
+        promotable_tools=["gitlab_create_issue"],
+        enabled_tools=["run_mcp_tools"],
+        mcp_tools=_mcp_configs(
+            contract_pb2.McpTool(
+                name="gitlab_create_issue",
+                description="MCP tool",
+                inputSchema="{}",
+                client_injected=client_injected,
+            )
+        ),
+    )
+
+    assert registry.toolset(["gitlab_create_issue"]).promotable == expected

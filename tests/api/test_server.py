@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from structlog.testing import capture_logs
 
+from ai.serving.rest.routes import mount_routes
 from ai_gateway.api import create_fast_api_server, server
 from ai_gateway.api.client_disconnect import (
     ClientDisconnectedError,
@@ -177,9 +178,9 @@ class TestServerRoutes:
                 assert False
 
 
-def test_setup_router():
+def test_mount_routes():
     app = FastAPI()
-    server.setup_router(app)
+    mount_routes(app)
 
     routes = _flatten_routes(app)
     assert any(route.path == "/v2/code/completions" for route in routes)
@@ -191,7 +192,7 @@ def test_setup_router():
 
 def test_every_route_has_feature_category():
     app = FastAPI()
-    server.setup_router(app)
+    mount_routes(app)
 
     # Built-in docs routes (/docs, /openapi.json, ...) are plain Starlette routes, not APIRoute
     api_routes = [

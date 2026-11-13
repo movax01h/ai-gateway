@@ -41,8 +41,8 @@ The API version (v1, experimental) is already determined by the root path (`agen
 
 The `fetch-foundational-agents` script (`duo_workflow_service/scripts/fetch_foundational_agents.py`) reads the agents
 listed in `ai/features/foundational_agents/config/ai-catalog-agents.yml`, fetches each flow config from the GitLab AI Catalog and writes
-it as a feature under `ai/features/foundational_agents/`, so flow-config discovery registers it like any bundled
-feature. A fetched agent must not share its name with a bundled feature: discovery fails at boot on a duplicate flow
+it as a feature under `ai/features/foundational_agents/`. Flow-config discovery registers it like a bundled feature,
+but it needs no `serving.py`: the Duo Workflow Service serves every flow in that directory. A fetched agent must not share its name with a bundled feature: discovery fails at boot on a duplicate flow
 ID. Fetched agents are gitignored; the Docker images run the script at build time.
 
 **Usage:**

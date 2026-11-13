@@ -55,6 +55,19 @@ class TestDiscovery:
         )
         assert "prompt_only" not in roots
 
+    def test_include_skips_a_rejected_feature(self, tmp_path: Path):
+        features = tmp_path / "ai" / "features"
+        _write_flow(features, "insights", "kept", "1.0.0")
+        _write_flow(features, "insights", "dropped", "1.0.0")
+
+        flow_config.discover_feature_flow_configs(
+            features, include=lambda feature_dir: feature_dir.name == "kept"
+        )
+
+        roots = flow_config.FlowConfig.feature_config_roots()
+        assert "kept" in roots
+        assert "dropped" not in roots
+
     def test_missing_tree_is_silent(self, tmp_path: Path):
         flow_config.discover_feature_flow_configs(tmp_path / "nope")
         assert "anything" not in flow_config.FlowConfig.feature_config_roots()

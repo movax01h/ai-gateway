@@ -13,10 +13,15 @@ arriving with a poisoned ``.git/config`` could turn a read into arbitrary code
 execution. Do not drop one without replacing the guarantee.
 
 User-supplied text reaches git through exactly two shapes: paths, which are
-prefix-checked, denylist-checked and policy-checked, then passed after ``--`` with
-``--literal-pathspecs`` by every call site (asserted per tool, since ``_git`` cannot
-tell a path from a SHA); and refs, which ``_resolve_commit`` turns into a 40-hex SHA
-before any other command sees them. Nothing downstream of that is attacker-shaped.
+prefix-checked, denylist-checked and policy-checked, then passed after ``--`` as a
+root-anchored literal pathspec by every call site (asserted per tool, since ``_git``
+cannot tell a path from a SHA); and refs, which ``_resolve_commit`` turns into a 40-hex
+SHA before any other command sees them. Nothing downstream of that is attacker-shaped.
+
+Git finds its repository by walking up from the executor's directory, so a workspace
+that is not itself a repository would read whichever one encloses it, typically a
+dotfiles repository in the home directory. ``_resolve_commit`` refuses unless that
+directory is the root, or a tracked directory, of the repository git discovered.
 
 Lazy fetching is the one way these commands reach the network. In a partial clone, a
 command that needs a missing blob (``-S``, ``-M``, ``--follow``, any patch) fetches it
@@ -32,22 +37,30 @@ exits 128 with ``could not fetch ... from promisor remote`` or, if the child was
 gone when the command handed it the object ids, dies of SIGPIPE (seen on a loaded CI
 runner). The per-protocol pins stay as a second layer, because a repo-level
 ``protocol.<name>.allow=always`` beats the ``protocol.allow`` default.
+
+That guard exists only from git 2.29, when the lazy fetch became a child process; before
+that it ran inside the command and inherited nothing. So the boundary probes ``git
+version`` once per tool instance and refuses anything below ``GIT_FLOOR`` before a single
+command is sent. The floor is 2.31 rather than 2.29 because ``--diff-merges``, which the
+history tools pair with ``--name-status``, needs it anyway.
 """
 
 import re
-from typing import Any, ClassVar, Optional
+from typing import Any, ClassVar, NamedTuple, Optional
 
 from langchain_core.tools import ToolException
+from pydantic import PrivateAttr
 
-from contract import contract_pb2
 from duo_workflow_service.bl_security.executor_output import (
     EXIT_CODE_HEADER,
-    executor_truncated,
     strip_size_limit_notice,
 )
-from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.executor.action import _execute_action
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
+from duo_workflow_service.tools.command import (
+    resolve_command_timeout,
+    run_command_action,
+)
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.filesystem import validate_duo_context_exclusions
 
@@ -72,15 +85,18 @@ READ_ONLY_GIT_SUBCOMMANDS = frozenset(
     }
 )
 
+# The lazy-fetch guard below holds from 2.29; `--diff-merges=first-parent` needs 2.31.
+GIT_FLOOR = (2, 31)
+_GIT_VERSION_RE = re.compile(r"\Agit version (\d+)\.(\d+)")
+
 # Never rewrite the index opportunistically; pin the output format against user config
 # the parsers cannot read.
 GIT_GLOBAL_FLAGS = (
-    # git >= 2.15 and this module's floor: older git rejects the option before any subcommand runs.
+    # Needs git 2.15; the version probe runs with these flags too, so a git too old for
+    # any of them fails that probe and is refused by the same path.
     "--no-optional-locks",
     # Only pages onto a tty, but the executor decides that, not this tool.
     "--no-pager",
-    # Paths are data: without this a file named `*` is a pathspec matching every file.
-    "--literal-pathspecs",
     "-c",
     "diff.noprefix=false",
     "-c",
@@ -176,16 +192,6 @@ _REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 SHA_RE = re.compile(r"^[0-9a-f]{7,64}\Z")
 _FULL_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
-# Seconds, matching `RunCommand`'s default and the executor's own unit (the proto comment
-# claiming milliseconds is wrong; `CommandTimeoutSignal` multiplies by 1000).
-#
-# Needed because a result cap is not a work cap: `git log -S<string> -n20` stops after 20
-# *matches*, so a string with few or no matches walks the entire reachable history and
-# diffs every commit. Without this the action carries no limit at all ("absent means no
-# limit"), so a slow pickaxe on a large monorepo would stall an agent turn rather than
-# fail it.
-_GIT_TIMEOUT_SECONDS = 120
-
 
 def validate_ref(ref: str) -> str:
     """Return *ref* unchanged, or raise if it could be read as anything but a ref name.
@@ -201,6 +207,36 @@ def validate_ref(ref: str) -> str:
             "SHA; revision expressions such as 'HEAD~3' are not accepted."
         )
     return ref
+
+
+def literal_pathspec(path: str) -> str:
+    """Wrap a validated repository-relative path so git reads it as data, from the root.
+
+    Pathspecs resolve against git's working directory, and the executor need not run at
+    the repository root, so a bare path would silently match nothing (or the wrong file)
+    from a subdirectory. ``top`` anchors it at the root; ``literal`` keeps a file named
+    ``*`` from matching every file. The global ``--literal-pathspecs`` would do the latter
+    but disables this magic, so the guarantee lives on the one pathspec sent instead.
+    """
+    return f":(top,literal){path}"
+
+
+def exclusion_reason(path: str, policy: DiffExclusionPolicy) -> Optional[str]:
+    """Why a path git reported may not be shown, or ``None`` when it may.
+
+    Takes the policy rather than the project so a caller checking hundreds of paths builds it once.
+    """
+    try:
+        validate_duo_context_exclusions(path)
+    except ToolException:
+        return "excluded by Duo context exclusions"
+    if not policy.is_allowed(path):
+        return "excluded by project policy"
+    return None
+
+
+def path_is_excluded(path: str, policy: DiffExclusionPolicy) -> bool:
+    return exclusion_reason(path, policy) is not None
 
 
 def validate_repo_path(path: str, project: Any = None) -> str:
@@ -235,10 +271,26 @@ def validate_repo_path(path: str, project: Any = None) -> str:
     return path
 
 
+class ResolvedCommit(NamedTuple):
+    sha: str
+    shallow: bool
+
+
+_UNTRACKED_WORKSPACE_MESSAGE = (
+    "Error: the workspace folder is not a tracked directory of a git repository, so "
+    "local git history tools are unavailable here."
+)
+
+
+class GitTooOldError(ToolException):
+    """The checkout's git is below ``GIT_FLOOR`` or could not be probed; no command was sent."""
+
+
 class ReadOnlyGitTool(DuoBaseTool):
     """Base for tools that read the local checkout with git and never write to it."""
 
     allowed_git_subcommands: ClassVar[frozenset[str]] = frozenset()
+    _git_floor_met: bool = PrivateAttr(default=False)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -273,84 +325,122 @@ class ReadOnlyGitTool(DuoBaseTool):
         if subcommand in _DIFF_SUBCOMMANDS:
             options = [*DIFF_SAFETY_FLAGS, *options]
 
-        run_command_kwargs: dict = {
-            "program": "git",
-            "arguments": [*GIT_GLOBAL_FLAGS, subcommand, *options],
-            "flags": [],
-        }
-        # Older executors were compiled without the field, so it is opt-in by capability
-        # exactly as `RunCommand` does it.
-        if is_client_capable("command_timeout"):
-            run_command_kwargs["timeout"] = _GIT_TIMEOUT_SECONDS
-
         if self.metadata is None:
             raise ToolException(f"Error: {self.name} has no executor to run git with")
 
+        await self._require_git_floor(self.metadata)
+
+        # A result cap is not a work cap: `log -S` with few matches walks all history.
         raw = await _execute_action(
             self.metadata,
-            contract_pb2.Action(
-                runCommand=contract_pb2.RunCommandAction(**run_command_kwargs)
+            run_command_action(
+                "git",
+                [*GIT_GLOBAL_FLAGS, subcommand, *options],
+                resolve_command_timeout(),
             ),
         )
 
         return _unwrap_command_output(raw, argv[0])
 
-    async def _resolve_commit(self, ref: Optional[str]) -> str:
+    async def _require_git_floor(self, metadata: dict[str, Any]) -> None:
+        """Refuse a git older than ``GIT_FLOOR``, once per instance, before any command runs.
+
+        The lazy-fetch guard is only real from 2.29, so below the floor a poisoned partial clone would run its own
+        commands from a tool that never prompts. An answer that does not parse is refused too.
+        """
+        if self._git_floor_met:
+            return
+        raw = await _execute_action(
+            metadata,
+            run_command_action(
+                "git", [*GIT_GLOBAL_FLAGS, "version"], resolve_command_timeout()
+            ),
+        )
+        floor = ".".join(map(str, GIT_FLOOR))
+        try:
+            reported = _unwrap_command_output(raw, "version").strip()
+        except ToolException as exc:
+            raise GitTooOldError(
+                f"Error: {self.name} needs git {floor} or later and could not check "
+                f"this checkout's ({exc})"
+            ) from exc
+        found = _GIT_VERSION_RE.match(reported)
+        if found is None or tuple(map(int, found.groups())) < GIT_FLOOR:
+            raise GitTooOldError(
+                f"Error: {self.name} needs git {floor} or later; this checkout's git "
+                f"reports {reported[:40]!r}. Update git to review local history."
+            )
+        self._git_floor_met = True
+
+    async def _resolve_commit(self, ref: Optional[str]) -> ResolvedCommit:
         """Resolve *ref* (or HEAD) to a full SHA, the only place user text reaches git.
 
         Every other command receives the hex output of this call, so an argument that
         survived ``validate_ref`` still cannot influence a later argv position.
+
+        The same call reports whether the clone is shallow, and where the executor's
+        directory sits in the repository git discovered. GitLab CI's default
+        ``GIT_DEPTH`` makes the former true in ambient executors, and truncated history
+        reads exactly like an absent commit, so every tool needs the answer; riding on
+        this ``rev-parse`` saves each of them a round trip to the user's machine. The
+        latter feeds ``_require_tracked_workspace``.
         """
         validated = validate_ref(ref) if ref is not None else "HEAD"
 
         try:
-            raw = await self._git("rev-parse", "--verify", f"{validated}^{{commit}}")
+            raw = await self._git(
+                "rev-parse",
+                "--show-prefix",
+                "--is-shallow-repository",
+                "--verify",
+                f"{validated}^{{commit}}",
+            )
+        except GitTooOldError:
+            raise
         except ToolException as exc:
             # An unknown ref exits 128; the generic envelope error would otherwise win.
             raise ToolException(
                 f"Error: could not resolve {validated!r} to a commit in this checkout "
                 f"({exc})"
             ) from exc
-        resolved = raw.strip()
 
-        if not _FULL_SHA_RE.match(resolved):
+        # One line per option, in option order; the prefix line is empty at the root.
+        lines = raw.removesuffix("\n").split("\n")
+        if len(lines) != 3 or not _FULL_SHA_RE.match(lines[2]):
             raise ToolException(
                 f"Error: could not resolve {validated!r} to a commit in this checkout"
             )
+        prefix, probe, resolved = lines
 
-        return resolved
+        await self._require_tracked_workspace(prefix)
 
-    async def _is_shallow(self) -> bool:
-        """Whether history stops at a graft boundary.
+        # Anything but an explicit `false` counts as shallow: claiming complete history we
+        # cannot vouch for is the worse error.
+        return ResolvedCommit(sha=resolved, shallow=probe != "false")
 
-        Worth a call: GitLab CI's default ``GIT_DEPTH`` makes this true in ambient
-        executors, and a truncated history reads exactly like an absent commit.
+    async def _require_tracked_workspace(self, prefix: str) -> None:
+        """Refuse to read a repository the executor's directory merely sits inside.
+
+        ``--show-prefix`` is empty at a repository root, and inside a nested repository,
+        where discovery stops. It is non-empty for a subdirectory, which is a legitimate
+        place to run from only when the repository tracks it. ``HEAD:<prefix>`` with the
+        trailing slash git emits resolves only when the entry at that path is a tree, so
+        an untracked, ignored or not-yet-committed folder fails closed, and so does a
+        blob, symlink or submodule entry of the same name. The prefix is git's output
+        and always follows ``HEAD:``, so it cannot be option-shaped, but the message
+        stays fixed so that nothing about the enclosing repository travels back.
         """
+        if not prefix:
+            return
+        if "\0" in prefix:
+            raise ToolException(_UNTRACKED_WORKSPACE_MESSAGE)
+
         try:
-            raw = await self._git("rev-parse", "--is-shallow-repository")
+            tree = await self._git("rev-parse", "--verify", "--quiet", f"HEAD:{prefix}")
         except ToolException:
-            return True
-
-        # Anything but an explicit `false` is treated as shallow: claiming complete history
-        # we cannot vouch for is the worse error.
-        return raw.strip() != "false"
-
-
-# Git rejects the split `--format <fmt>` form itself; `-S` values are data, not a format.
-def _asks_for_signature(option: str) -> bool:
-    if option == "--show-signature":
-        return True
-    return option.startswith(("--format=", "--pretty")) and "%G" in option
-
-
-def _undoes_a_guarantee(option: str) -> bool:
-    name = option.partition("=")[0]
-    return name in _GUARANTEE_UNDOING_OPTIONS
-
-
-def output_was_truncated(raw: str) -> bool:
-    """Whether the executor cut this command's output, by either of its two mechanisms."""
-    return executor_truncated(raw)
+            raise ToolException(_UNTRACKED_WORKSPACE_MESSAGE) from None
+        if not _FULL_SHA_RE.match(tree.strip()):
+            raise ToolException(_UNTRACKED_WORKSPACE_MESSAGE)
 
 
 # The two lines a refused lazy fetch leaves behind: the fetch child's own, which is always
@@ -377,6 +467,18 @@ _PARTIAL_CLONE_MESSAGE = (
 )
 
 
+# Git rejects the split `--format <fmt>` form itself; `-S` values are data, not a format.
+def _asks_for_signature(option: str) -> bool:
+    if option == "--show-signature":
+        return True
+    return option.startswith(("--format=", "--pretty")) and "%G" in option
+
+
+def _undoes_a_guarantee(option: str) -> bool:
+    name = option.partition("=")[0]
+    return name in _GUARANTEE_UNDOING_OPTIONS
+
+
 def _diagnostics(body: str) -> str:
     if not body.strip():
         return "(no output)"
@@ -397,7 +499,7 @@ def _unwrap_command_output(raw: str, subcommand: str) -> str:
     that the body is an error rather than output. A failure relays only git's own
     diagnostic lines, never the output that preceded them. A response over the executor's size limit
     puts its notice *before* the header; that notice is kept on the returned body so
-    ``output_was_truncated`` still sees it. An executor that returns the output bare is
+    ``executor_truncated`` still sees it. An executor that returns the output bare is
     tolerated, so the tools work against both.
     """
     text = strip_size_limit_notice(raw)

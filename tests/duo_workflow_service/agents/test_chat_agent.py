@@ -24,7 +24,7 @@ from duo_workflow_service.audit_events.collector import AuditEventCollector
 from duo_workflow_service.audit_events.context import audit_collector_context
 from duo_workflow_service.audit_events.event_types import AuditEventType
 from duo_workflow_service.checkpointer.gitlab_workflow import _serialize_channel_blobs
-from duo_workflow_service.components.tools_registry import ToolsRegistry
+from duo_workflow_service.components.tools_registry import Promotion, ToolsRegistry
 from duo_workflow_service.conversation.history_optimizer.optimizers.compaction import (
     build_compaction_tool_card,
 )
@@ -1271,7 +1271,7 @@ async def test_promoted_tool_records_auto_mode_source(input, tool_metadata):
         enabled_tools=["read_write_files"],
         preapproved_tools=[],
         tool_metadata=tool_metadata,
-        promoted_tools=["edit_file"],
+        promotion=Promotion(promoted=["edit_file"]),
         can_ask_user=True,
     )
 
@@ -1303,6 +1303,68 @@ async def test_promoted_tool_records_auto_mode_source(input, tool_metadata):
         assert get_approval_source("call_promoted") == "auto_mode"
     finally:
         approval_sources.set(None)
+
+
+@pytest.mark.asyncio
+async def test_mixed_batch_persists_the_skip_sources(input, tool_metadata):
+    """The resume replays these, since the approval arrives as a new invocation."""
+    mock_model = Mock()
+    mock_model._is_auto_approved_by_agentic_mock_model = False
+    mock_prompt_adapter = Mock()
+    mock_prompt_adapter.get_model.return_value = mock_model
+    registry = ToolsRegistry(
+        enabled_tools=["read_write_files", "run_commands"],
+        preapproved_tools=[],
+        tool_metadata=tool_metadata,
+        promotion=Promotion(promoted=["edit_file"]),
+        can_ask_user=True,
+    )
+
+    chat_agent = ChatAgent(
+        name="Chat Agent",
+        prompt_adapter=mock_prompt_adapter,
+        tools_registry=registry,
+        system_template_override=None,
+        toolset=registry.toolset(["edit_file", "read_file", "run_command"]),
+        optimizer_pipeline=_make_passthrough_pipeline(),
+    )
+    ai_message = AIMessage(
+        content="mixed",
+        tool_calls=[
+            {
+                "name": "edit_file",
+                "args": {"file_path": "/a", "old_str": "a", "new_str": "b"},
+                "id": "call_promoted",
+                "type": "tool_call",
+            },
+            {
+                "name": "read_file",
+                "args": {"file_path": "/a"},
+                "id": "call_client_list",
+                "type": "tool_call",
+            },
+            {
+                "name": "run_command",
+                "args": {"program": "ls"},
+                "id": "call_prompted",
+                "type": "tool_call",
+            },
+        ],
+    )
+    chat_agent.prompt_adapter.get_response = AsyncMock(return_value=ai_message)
+
+    init_approval_sources()
+    try:
+        result = await chat_agent.run({**input, "preapproved_tools": ["read_file"]})
+    finally:
+        approval_sources.set(None)
+
+    assert result["status"] == WorkflowStatusEnum.TOOL_CALL_APPROVAL_REQUIRED
+    assert result["tool_call_approval_requested"] == ["call_prompted"]
+    assert result["tool_call_skip_sources"] == {
+        "call_promoted": "auto_mode",
+        "call_client_list": "preapproved_config",
+    }
 
 
 @pytest.mark.asyncio

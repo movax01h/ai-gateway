@@ -729,7 +729,9 @@ def test_web_search_requested_under_either_tool_set(
 
 
 def _gitlab_checkpoint_with_history(
-    conversation_history: dict, requested_ids: list | None = None
+    conversation_history: dict,
+    requested_ids: list | None = None,
+    skip_sources: dict | None = None,
 ) -> dict:
     """Build a GitLabCheckpoint dict in the real production shape.
 
@@ -742,18 +744,24 @@ def _gitlab_checkpoint_with_history(
 
     ``requested_ids`` populates the persisted ``tool_call_approval_requested``
     channel so the mixed-batch scoping can be exercised; omit it to mimic an
-    older checkpoint that predates the field.
+    older checkpoint that predates the field. ``skip_sources`` populates
+    ``tool_call_skip_sources`` the same way.
     """
     channel_values: dict = {"conversation_history": conversation_history}
     if requested_ids is not None:
         channel_values["tool_call_approval_requested"] = requested_ids
+    if skip_sources is not None:
+        channel_values["tool_call_skip_sources"] = skip_sources
     inner = {"channel_values": channel_values}
     return {"compressedCheckpoint": compress_checkpoint(inner)}  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
+# A requested list naming no call on the message is forged or corrupt, so it is
+# treated like a checkpoint predating the field and nothing is replayed.
+@pytest.mark.parametrize("requested_ids", [None, [], ["not-on-the-message"]])
 async def test_record_approved_tool_sources_defaults_to_user_explicit(
-    workflow_with_approval,
+    workflow_with_approval, requested_ids
 ):
     """On approval resume, the pending tool calls are attributed user_explicit (no client-sent source) so their
     ToolInvokedEvent stays attributed."""
@@ -768,7 +776,11 @@ async def test_record_approved_tool_sources_defaults_to_user_explicit(
             {"id": "c2", "name": "read_file", "args": {"path": "/a"}},
         ],
     )
-    checkpoint_tuple = _gitlab_checkpoint_with_history({"test_prompt": [pending]})
+    checkpoint_tuple = _gitlab_checkpoint_with_history(
+        {"test_prompt": [pending]},
+        requested_ids=requested_ids,
+        skip_sources={"c1": "auto_mode"},
+    )
 
     init_approval_sources()
     try:
@@ -853,20 +865,66 @@ async def test_record_approved_tool_sources_scopes_to_requested_calls(
 
 
 @pytest.mark.asyncio
-async def test_record_approved_tool_sources_loses_preapproved_attribution_across_real_resume(
+@pytest.mark.parametrize(
+    ("skip_sources", "expected_c1", "expected_c3", "promotable", "preapproved_tools"),
+    [
+        # A promoted call keeps auto_mode, and a reused session approval keeps
+        # session_approval, whatever mode the resume request is in (a person's
+        # "approve and enter auto mode" must not relabel the latter auto_mode).
+        (
+            {"c1": "auto_mode", "c3": "session_approval"},
+            "auto_mode",
+            "session_approval",
+            ["run_command"],
+            [],
+        ),
+        # The checkpoint is writable by the session owner, so a replayed source must
+        # be one this request backs.
+        ({"c1": "auto_mode"}, None, None, [], ["run_command"]),
+        # Backed by chat's own pre-approved list.
+        (
+            {"c1": "preapproved_config"},
+            "preapproved_config",
+            None,
+            [],
+            ["run_command"],
+        ),
+        # Only server-produced skip sources are replayed.
+        (
+            {"c1": "user_explicit", "c3": 5},
+            None,
+            None,
+            ["run_command"],
+            ["run_command"],
+        ),
+        # A checkpoint predating the field: nothing replayed, nothing guessed.
+        (None, None, None, ["run_command"], ["run_command"]),
+    ],
+    ids=[
+        "auto_and_session",
+        "auto_not_promotable",
+        "preapproved",
+        "invalid",
+        "old_checkpoint",
+    ],
+)
+async def test_record_approved_tool_sources_replays_persisted_skip_sources_across_real_resume(
     workflow_with_project,
+    skip_sources,
+    expected_c1,
+    expected_c3,
+    promotable,
+    preapproved_tools,
 ):
-    """KNOWN GAP (https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938), not
-    fixed here: a pre-approved / session-reused call's attribution does not actually survive to resume, because the
-    approval_sources registry is a per-invocation ContextVar (reset in GitLabWorkflow.__aenter__) and an approval
-    decision always arrives as a new invocation.
-
-    This reproduces that reset (unlike the sibling test above, which keeps using the same registry instance throughout)
-    and documents that the pre-approved call comes back unattributed.
-    """
+    """A call that skipped approval before the interrupt keeps the source recorded when the skip was decided, replayed
+    from the checkpoint rather than re-derived from the resume request (whose mode can differ)."""
     workflow = workflow_with_project
     workflow._agent = Mock()
     workflow._agent.name = "test_prompt"
+    workflow._agent.toolset = Toolset(
+        pre_approved=set(), all_tools={}, promotable=set(promotable)
+    )
+    workflow._preapproved_tools = preapproved_tools
     workflow._approval = contract_pb2.Approval(
         approval=contract_pb2.Approval.Approved(
             approval_source=contract_pb2.Approval.APPROVAL_SOURCE_USER_EXPLICIT,
@@ -878,26 +936,21 @@ async def test_record_approved_tool_sources_loses_preapproved_attribution_across
         tool_calls=[
             {"id": "c1", "name": "run_command", "args": {"command": "ls"}},
             {"id": "c2", "name": "read_file", "args": {"path": "/a"}},
+            {"id": "c3", "name": "edit_file", "args": {"path": "/a"}},
         ],
     )
-    # Only c2 required a fresh decision; c1 was pre-approved.
+    # Only c2 required a fresh decision.
     checkpoint_tuple = _gitlab_checkpoint_with_history(
-        {"test_prompt": [pending]}, requested_ids=["c2"]
+        {"test_prompt": [pending]}, requested_ids=["c2"], skip_sources=skip_sources
     )
 
-    # Pre-interrupt invocation: the agent attributes c1's skip, then the
-    # workflow pauses.
-    init_approval_sources()
-    record_approval_source("c1", "preapproved_config")
-    approval_sources.set(None)
-
-    # Post-interrupt invocation: a new workflow object, a fresh registry.
     init_approval_sources()
     try:
         workflow._record_approved_tool_sources(checkpoint_tuple)
 
-        assert get_approval_source("c1") is None
+        assert get_approval_source("c1") == expected_c1
         assert get_approval_source("c2") == "user_explicit"
+        assert get_approval_source("c3") == expected_c3
     finally:
         approval_sources.set(None)
 

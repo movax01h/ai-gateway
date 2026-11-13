@@ -8,19 +8,35 @@ from unittest.mock import patch
 import pytest
 from langchain_core.tools import ToolException
 
+from duo_workflow_service.bl_security.executor_output import executor_truncated
+from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
+from duo_workflow_service.tools.command import _DEFAULT_COMMAND_TIMEOUT_SECONDS
 from duo_workflow_service.tools.read_only_git import (
-    _GIT_TIMEOUT_SECONDS,
+    _UNTRACKED_WORKSPACE_MESSAGE,
     DIFF_SAFETY_FLAGS,
+    GIT_FLOOR,
     GIT_GLOBAL_FLAGS,
     READ_ONLY_GIT_SUBCOMMANDS,
     SHA_RE,
+    GitTooOldError,
     ReadOnlyGitTool,
-    output_was_truncated,
+    exclusion_reason,
+    literal_pathspec,
+    path_is_excluded,
     validate_ref,
     validate_repo_path,
 )
 
 RESOLVED = "1111111111111111111111111111111111111111"
+TREE = "3333333333333333333333333333333333333333"
+
+
+def resolver_output(
+    sha: str = RESOLVED, prefix: str = "", shallow: str = "false"
+) -> str:
+    """What the resolving rev-parse prints: the prefix line, the shallowness line, the SHA."""
+    return f"{prefix}\n{shallow}\n{sha}\n"
+
 
 # Every git subcommand that can write to the repository, the index, the filesystem or the
 # network. Asserted against the allowlist here rather than in each tool's test file, so
@@ -87,9 +103,104 @@ class _Recorder:
         return self.output
 
 
+class _Replies(_Recorder):
+    """A recorder that answers each action with the next canned output."""
+
+    def __init__(self, *outputs: str):
+        super().__init__()
+        self.outputs = list(outputs)
+
+    def __call__(self, metadata, action):
+        super().__call__(metadata, action)
+        return self.outputs.pop(0)
+
+
+GIT_VERSION_PROBE = [*GIT_GLOBAL_FLAGS, "version"]
+
+
 @pytest.fixture(name="probe")
 def probe_fixture():
-    return _Probe(metadata={"project": None})
+    # The floor is probed once per instance; these tests look at what follows it.
+    probe = _Probe(metadata={"project": None})
+    probe._git_floor_met = True
+    return probe
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reported",
+    [
+        "git version 2.25.1\n",
+        "git version 2.30.9\n",
+        "git version 1.9.1\n",
+        "",
+        "Exit code: 129\nerror: unknown option `no-optional-locks'\n",
+    ],
+    ids=["ubuntu 20.04", "just under", "ancient", "silence", "too old for a flag"],
+)
+async def test_git_below_the_floor_is_refused_before_any_command(reported):
+    """Below 2.29 the lazy fetch runs in-process and inherits no pin, so an old git is refused, not trusted."""
+    fresh = _Probe(metadata={"project": None})
+    recorder = _Recorder(output=reported)
+
+    with patch(
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
+    ):
+        with pytest.raises(GitTooOldError, match="needs git 2.31"):
+            await fresh._git("log", "-n1")
+
+    assert recorder.argvs == [GIT_VERSION_PROBE]
+
+
+@pytest.mark.asyncio
+async def test_the_resolver_relays_the_floor_refusal_unwrapped():
+    """The first command every tool sends is the resolver's; its ref message must not bury the real reason."""
+    fresh = _Probe(metadata={"project": None})
+    recorder = _Recorder(output="git version 2.25.1\n")
+
+    with patch(
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
+    ):
+        with pytest.raises(GitTooOldError) as excinfo:
+            await fresh._resolve_commit(None)
+
+    assert "could not resolve" not in str(excinfo.value)
+    assert recorder.argvs == [GIT_VERSION_PROBE]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reported",
+    [
+        "git version 2.31.0\n",
+        "git version 2.45.2 (Apple Git-154)\n",
+        "git version 3.0.0",
+    ],
+    ids=["at the floor", "vendor suffix", "next major"],
+)
+async def test_git_at_or_above_the_floor_is_probed_once(reported):
+    fresh = _Probe(metadata={"project": None})
+    recorder = _Replies(reported, "", "")
+
+    with patch(
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
+    ):
+        await fresh._git("log", "-n1")
+        await fresh._git("rev-parse", "HEAD")
+
+    assert [argv[len(GIT_GLOBAL_FLAGS)] for argv in recorder.argvs] == [
+        "version",
+        "log",
+        "rev-parse",
+    ]
+
+
+def test_the_floor_covers_the_lazy_fetch_guard_and_the_merge_flag():
+    assert GIT_FLOOR >= (2, 29)
+    assert GIT_FLOOR == (2, 31)
 
 
 def test_the_allowlist_contains_no_writing_subcommand():
@@ -167,13 +278,15 @@ async def test_textconv_is_disabled_at_the_egress_point(subcommand, injected):
         async def _execute(self, **kwargs) -> str:
             return ""
 
-    recorder = _Recorder(output=f"{RESOLVED}\n")
+    recorder = _Recorder(output=resolver_output())
+    wide = _Wide(metadata={"project": None})
+    wide._git_floor_met = True
 
     with patch(
         "duo_workflow_service.tools.read_only_git._execute_action",
         side_effect=recorder,
     ):
-        await _Wide(metadata={"project": None})._git(subcommand, RESOLVED)
+        await wide._git(subcommand, RESOLVED)
 
     argv = recorder.argvs[0][len(GIT_GLOBAL_FLAGS) :]
     assert argv[0] == subcommand
@@ -193,13 +306,13 @@ async def test_every_action_carries_a_timeout(probe):
             side_effect=recorder,
         ),
         patch(
-            "duo_workflow_service.tools.read_only_git.is_client_capable",
+            "duo_workflow_service.tools.command.is_client_capable",
             return_value=True,
         ),
     ):
         await probe._git("log", "-n1")
 
-    assert recorder.timeouts == [_GIT_TIMEOUT_SECONDS]
+    assert recorder.timeouts == [_DEFAULT_COMMAND_TIMEOUT_SECONDS]
 
 
 @pytest.mark.asyncio
@@ -212,7 +325,7 @@ async def test_an_older_executor_is_not_sent_a_field_it_cannot_parse(probe):
             side_effect=recorder,
         ),
         patch(
-            "duo_workflow_service.tools.read_only_git.is_client_capable",
+            "duo_workflow_service.tools.command.is_client_capable",
             return_value=False,
         ),
     ):
@@ -226,7 +339,6 @@ async def test_an_older_executor_is_not_sent_a_field_it_cannot_parse(probe):
     [
         "--no-optional-locks",
         "--no-pager",
-        "--literal-pathspecs",
         "diff.noprefix=false",
         "diff.mnemonicPrefix=false",
         "diff.suppressBlankEmpty=false",
@@ -265,13 +377,13 @@ def test_every_transport_is_refused_by_name(transport):
 async def test_the_exit_code_envelope_is_stripped_before_parsing(probe):
     """The executor prefixes output with its exit code; left on, every parser here reads it as the opening line of
     data."""
-    recorder = _Recorder(output=f"Exit code: 0\n{RESOLVED}\n")
+    recorder = _Recorder(output=f"Exit code: 0\n{resolver_output()}")
 
     with patch(
         "duo_workflow_service.tools.read_only_git._execute_action",
         side_effect=recorder,
     ):
-        assert await probe._resolve_commit("main") == RESOLVED
+        assert (await probe._resolve_commit("main")).sha == RESOLVED
 
 
 @pytest.mark.asyncio
@@ -407,7 +519,7 @@ async def test_a_size_limited_response_is_reported_as_truncated(probe):
     ):
         body = await probe._git("log", "-p")
 
-    assert output_was_truncated(body)
+    assert executor_truncated(body)
     assert "Exit code" not in body
     assert body.endswith("diff --git a/a b/a\n")
 
@@ -415,26 +527,13 @@ async def test_a_size_limited_response_is_reported_as_truncated(probe):
 @pytest.mark.asyncio
 async def test_a_bare_executor_response_is_tolerated(probe):
     """An executor that returns output without an envelope must keep working."""
-    recorder = _Recorder(output=f"{RESOLVED}\n")
+    recorder = _Recorder(output=resolver_output())
 
     with patch(
         "duo_workflow_service.tools.read_only_git._execute_action",
         side_effect=recorder,
     ):
-        assert await probe._resolve_commit("main") == RESOLVED
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("diff --git a/a b/a\n[... output truncated: 2 of 9 KB shown]\nrest\n", True),
-        ("diff --git a/a b/a\n+[... output truncated: not at line start]\n", False),
-        ("clean output\n", False),
-    ],
-)
-def test_executor_truncation_is_detected(raw, expected):
-    """A diff line is always prefixed, so only the executor can start one with `[`."""
-    assert output_was_truncated(raw) is expected
+        assert (await probe._resolve_commit("main")).sha == RESOLVED
 
 
 @pytest.mark.parametrize(
@@ -503,6 +602,39 @@ def test_a_path_that_normalises_to_nothing_is_rejected(path):
         validate_repo_path(path)
 
 
+@pytest.mark.parametrize("path", ["app/*.rb", "app/a.rb", ":weird", "a)b.rb"])
+def test_a_pathspec_is_root_anchored_and_literal(path):
+    """Pathspecs resolve against git's cwd, which need not be the repository root, and a path is data, not a glob."""
+    assert literal_pathspec(path) == f":(top,literal){path}"
+
+
+def test_the_global_literal_flag_is_absent_because_it_disables_the_top_magic():
+    assert "--literal-pathspecs" not in GIT_GLOBAL_FLAGS
+
+
+@pytest.mark.parametrize(
+    ("path", "project", "reason"),
+    [
+        ("app/a.rb", None, None),
+        (".env", None, "excluded by Duo context exclusions"),
+        (".ssh/id_rsa", None, "excluded by Duo context exclusions"),
+        (
+            "secrets/keys.yml",
+            {"exclusion_rules": ["secrets/*"]},
+            "excluded by project policy",
+        ),
+        ("app/a.rb", {"exclusion_rules": ["secrets/*"]}, None),
+    ],
+)
+def test_paths_git_reports_are_checked_against_both_exclusion_sources(
+    path, project, reason
+):
+    policy = DiffExclusionPolicy(project)
+
+    assert exclusion_reason(path, policy) == reason
+    assert path_is_excluded(path, policy) is (reason is not None)
+
+
 def test_a_path_excluded_by_project_policy_is_rejected():
     project = {"exclusion_rules": ["secrets/*"]}
 
@@ -514,21 +646,27 @@ def test_a_path_excluded_by_project_policy_is_rejected():
 
 @pytest.mark.asyncio
 async def test_a_ref_is_resolved_to_a_full_sha_before_any_other_command(probe):
-    recorder = _Recorder(output=f"{RESOLVED}\n")
+    recorder = _Recorder(output=resolver_output())
 
     with patch(
         "duo_workflow_service.tools.read_only_git._execute_action",
         side_effect=recorder,
     ):
-        assert await probe._resolve_commit("main") == RESOLVED
+        assert (await probe._resolve_commit("main")).sha == RESOLVED
 
     argv = recorder.argvs[0][len(GIT_GLOBAL_FLAGS) :]
-    assert argv == ["rev-parse", "--verify", "main^{commit}"]
+    assert argv == [
+        "rev-parse",
+        "--show-prefix",
+        "--is-shallow-repository",
+        "--verify",
+        "main^{commit}",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_resolution_defaults_to_head(probe):
-    recorder = _Recorder(output=f"{RESOLVED}\n")
+    recorder = _Recorder(output=resolver_output())
 
     with patch(
         "duo_workflow_service.tools.read_only_git._execute_action",
@@ -541,21 +679,21 @@ async def test_resolution_defaults_to_head(probe):
 
 @pytest.mark.asyncio
 async def test_a_sha256_repository_resolves(probe):
-    recorder = _Recorder(output=f"{'a' * 64}\n")
+    recorder = _Recorder(output=resolver_output(sha="a" * 64))
 
     with patch(
         "duo_workflow_service.tools.read_only_git._execute_action",
         side_effect=recorder,
     ):
-        assert await probe._resolve_commit("main") == "a" * 64
+        assert (await probe._resolve_commit("main")).sha == "a" * 64
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("output", ["not a sha\n", f"{'a' * 41}\n", f"{'a' * 63}\n"])
+@pytest.mark.parametrize("sha", ["not a sha", "a" * 41, "a" * 63])
 async def test_an_unresolvable_ref_raises_rather_than_passing_text_downstream(
-    probe, output
+    probe, sha
 ):
-    recorder = _Recorder(output=output)
+    recorder = _Recorder(output=resolver_output(sha=sha))
 
     with patch(
         "duo_workflow_service.tools.read_only_git._execute_action",
@@ -583,34 +721,120 @@ async def test_an_option_shaped_ref_never_reaches_git(probe):
 @pytest.mark.parametrize(
     ("output", "expected"),
     [
-        ("true\n", True),
-        ("false\n", False),
-        # An option echo from an unexpected git reads as shallow, not as complete.
-        ("--is-shallow-repository\n", True),
-        ("", True),
+        (resolver_output(shallow="true"), True),
+        (resolver_output(shallow="false"), False),
+        # Claiming complete history we cannot vouch for is the worse error, so a probe
+        # line that is anything but an explicit `false` counts as shallow.
+        (resolver_output(shallow="--is-shallow-repository"), True),
     ],
 )
-async def test_shallowness_is_read_from_git(probe, output, expected):
+async def test_shallowness_is_read_from_the_resolving_rev_parse(
+    probe, output, expected
+):
     recorder = _Recorder(output=output)
 
     with patch(
         "duo_workflow_service.tools.read_only_git._execute_action",
         side_effect=recorder,
     ):
-        assert await probe._is_shallow() is expected
+        assert (await probe._resolve_commit("main")).shallow is expected
 
 
 @pytest.mark.asyncio
-async def test_an_unanswerable_shallowness_probe_assumes_truncation(probe):
-    """Claiming complete history we cannot vouch for is the worse error."""
-
-    def failing(_metadata, _action):
-        raise ToolException("git too old")
+@pytest.mark.parametrize(
+    "output",
+    [
+        f"{RESOLVED}\n",
+        f"false\n{RESOLVED}\n",
+        f"\nfalse\n{RESOLVED}\nextra\n",
+        # A newline in the subdirectory's name splits the prefix line in two.
+        f"line\nbreak/\nfalse\n{RESOLVED}\n",
+    ],
+)
+async def test_resolver_output_of_the_wrong_shape_is_refused(probe, output):
+    """The output is one line per option, so any other shape means the prefix and SHA cannot be told apart."""
+    recorder = _Recorder(output=output)
 
     with patch(
-        "duo_workflow_service.tools.read_only_git._execute_action", side_effect=failing
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
     ):
-        assert await probe._is_shallow() is True
+        with pytest.raises(ToolException, match="could not resolve 'main' to a commit"):
+            await probe._resolve_commit("main")
+
+    assert len(recorder.argvs) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_repository_root_needs_no_workspace_check(probe):
+    recorder = _Recorder(output=resolver_output())
+
+    with patch(
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
+    ):
+        assert (await probe._resolve_commit("main")).sha == RESOLVED
+
+    assert len(recorder.argvs) == 1
+    assert not any(arg.startswith("HEAD:") for arg in recorder.argvs[0])
+
+
+@pytest.mark.asyncio
+async def test_a_tracked_subdirectory_is_checked_with_the_prefix_git_emitted(probe):
+    """The trailing slash git prints is kept: `HEAD:<dir>/` resolves only when the entry is a tree."""
+    recorder = _Replies(resolver_output(prefix="app/lib/"), f"{TREE}\n")
+
+    with patch(
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
+    ):
+        assert (await probe._resolve_commit("main")).sha == RESOLVED
+
+    check = recorder.argvs[1][len(GIT_GLOBAL_FLAGS) :]
+    assert check == ["rev-parse", "--verify", "--quiet", "HEAD:app/lib/"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Exit code: 1\n",
+        "Exit code: 128\nfatal: path 'projects/foo' exists on disk, but not in 'HEAD'\n",
+        "Exit code: 0\nnot an object name\n",
+    ],
+)
+async def test_an_untracked_subdirectory_is_refused_without_relaying_gits_output(
+    probe, reply
+):
+    recorder = _Replies(resolver_output(prefix="projects/foo/"), reply)
+
+    with patch(
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
+    ):
+        with pytest.raises(ToolException) as excinfo:
+            await probe._resolve_commit("main")
+
+    assert str(excinfo.value) == _UNTRACKED_WORKSPACE_MESSAGE
+    assert excinfo.value.__cause__ is None
+    assert [argv[len(GIT_GLOBAL_FLAGS)] for argv in recorder.argvs] == [
+        "rev-parse",
+        "rev-parse",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_prefix_containing_nul_is_refused_before_dispatch(probe):
+    recorder = _Recorder(output=resolver_output(prefix="a\0b/"))
+
+    with patch(
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
+    ):
+        with pytest.raises(ToolException, match="not a tracked directory"):
+            await probe._resolve_commit("main")
+
+    assert len(recorder.argvs) == 1
 
 
 @pytest.mark.asyncio
@@ -1045,7 +1269,7 @@ async def test_a_real_sha256_repository_is_usable(probe, tmp_path: Path):
         "duo_workflow_service.tools.read_only_git._execute_action",
         side_effect=_envelope_executor(repo),
     ):
-        resolved = await probe._resolve_commit(None)
+        resolved = (await probe._resolve_commit(None)).sha
 
     assert len(resolved) == 64
     assert SHA_RE.match(resolved)

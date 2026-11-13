@@ -62,7 +62,10 @@ def register_flow_config_root(flow_id: str, config_dir: Path) -> None:
     _FEATURE_FLOW_ROOTS[flow_id] = config_dir
 
 
-def discover_feature_flow_configs(features_dir: Optional[Path] = None) -> None:
+def discover_feature_flow_configs(
+    features_dir: Optional[Path] = None,
+    include: Optional[Callable[[Path], bool]] = None,
+) -> None:
     """Register the ``config/`` dir of each feature under ``ai/features/<domain>/<feature>/``.
 
     A feature without a ``config/`` dir (for example a prompt-only feature) is
@@ -71,6 +74,9 @@ def discover_feature_flow_configs(features_dir: Optional[Path] = None) -> None:
     Args:
         features_dir: Root directory to scan for feature config dirs. Defaults
             to the repo's ``ai/features`` tree when not provided.
+        include: Called with each feature dir that has a ``config/`` dir. A
+            feature dir it returns ``False`` for is skipped. ``None`` registers
+            every feature.
 
     Raises:
         ValueError: If two features register the same flow id with different
@@ -85,7 +91,7 @@ def discover_feature_flow_configs(features_dir: Optional[Path] = None) -> None:
 
     for feature_dir in root.glob("*/*"):
         config_dir = feature_dir / "config"
-        if config_dir.is_dir():
+        if config_dir.is_dir() and (include is None or include(feature_dir)):
             register_flow_config_root(feature_dir.name, config_dir)
 
 

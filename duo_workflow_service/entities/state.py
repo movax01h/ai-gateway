@@ -451,6 +451,9 @@ class ChatWorkflowState(TypedDict):
     # How many tool calls of the latest model response run, or None for all. Stored so the approval and the
     # resumed run agree even if the flag changes in between.
     max_tool_calls: NotRequired[Optional[int]]
+    # Approval source of each call in that AIMessage that skipped approval, keyed by tool-call
+    # id; replayed on approval resume since the per-invocation registry doesn't survive it.
+    tool_call_skip_sources: NotRequired[dict[str, str] | None]
 
 
 DuoWorkflowStateType = Union[WorkflowState, ChatWorkflowState]

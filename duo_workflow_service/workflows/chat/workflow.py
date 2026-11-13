@@ -848,15 +848,10 @@ class Workflow(AbstractWorkflow):
 
         Only the calls persisted in ``tool_call_approval_requested`` (those that needed a
         fresh decision) are attributed with the client's source, leaving pre-approved /
-        session-reused calls in the same mixed batch untouched. A checkpoint predating
-        that field falls back to attributing every call.
-
-        KNOWN GAP: those other calls' own attributions were recorded in the
-        *pre-interrupt* invocation, but the approval_sources registry is a per-invocation
-        ContextVar reset in ``GitLabWorkflow.__aenter__``, so they do not actually survive
-        to this point and surface as ``approval_source: null``. Tracked in
-        https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938
-        (see ``test_record_approved_tool_sources_loses_preapproved_attribution_across_real_resume``).
+        session-reused calls in the same mixed batch untouched. Those replay the source
+        persisted in ``tool_call_skip_sources`` (see ``Toolset.replay_skip_source``). Without the
+        requested field every call is attributed; without the skip sources those calls stay unattributed
+        (https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/issues/2938).
 
         Best-effort: any failure here (corrupt checkpoint payload, unexpected state shape)
         is logged and swallowed rather than disturbing the already-decided approval flow.
@@ -882,10 +877,22 @@ class Workflow(AbstractWorkflow):
                 return
 
             tool_calls = getattr(last_message, "tool_calls", []) or []
-            requested_ids = channel_values.get("tool_call_approval_requested")
+            requested_ids = channel_values.get("tool_call_approval_requested") or []
+            # Ids that are not on the message cannot have been prompted for; with none
+            # left every call is attributed, as for a checkpoint predating the field.
+            decided_ids = [
+                tool_call.get("id")
+                for tool_call in tool_calls
+                if isinstance(requested_ids, list)
+                and tool_call.get("id") in requested_ids
+            ]
+            skip_sources = channel_values.get("tool_call_skip_sources") or {}
             for tool_call in tool_calls:
                 tool_call_id = tool_call.get("id")
-                if requested_ids is not None and tool_call_id not in requested_ids:
+                if decided_ids and tool_call_id not in decided_ids:
+                    self._agent.toolset.replay_skip_source(
+                        tool_call, skip_sources, self._preapproved_tools or []
+                    )
                     continue
                 record_approval_source(tool_call_id, source)
                 record_approval_policy_ref(tool_call_id, policy_ref)
