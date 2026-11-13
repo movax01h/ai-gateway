@@ -1,0 +1,119 @@
+version: "v1"
+
+environment: ambient
+
+components:
+  # Step 1: Fetch the MR diff only (no file content) - cheap first pass.
+  - name: "fetch_mr_diffs"
+    type: DeterministicStepComponent
+    tool_name: "build_review_merge_request_context"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "true"
+        as: "only_diffs"
+        literal: true
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 2: Answer one claim per risk domain Rails asked about. The response
+  # schema enforces {claims: [{name, value, evidence}], summary} - there is no
+  # score or confidence field, so the model cannot emit one even if asked to.
+  # Every tool reads through the API at the diff head SHA, so the flow can run
+  # without a repository checkout. Adding a checkout tool such as read_file
+  # needs a new major version.
+  - name: "classify_risk"
+    type: AgentComponent
+    prompt_id: "risk_classification"
+    prompt_version: "^2.0.0"
+    response_schema_id: "risk_classification_claims"
+    response_schema_version: "^1.0.0"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_diff_sha"
+        as: "diff_sha"
+      - from: "context:inputs.agent_platform_risk_classification_context.domains"
+        as: "domains"
+      - from: "context:fetch_mr_diffs.tool_responses"
+        as: "mr_diffs"
+    toolset:
+      - "get_repository_file"
+      - "list_repository_tree"
+    # Most merge requests are classified from the diff alone, so a few file reads are enough.
+    # The limit is soft: at the limit, the agent still gets wrap-up cycles to give its answer.
+    max_cycles: 10
+    identical_tool_call_limit: 3
+    ui_log_events:
+      - "on_agent_reasoning"
+      - "on_agent_final_answer"
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+  # Step 3: Write the claims back to GitLab. Scoring happens server-side.
+  # The response schema already validated the claims, so they go to the tool as they are,
+  # without a model call that could change them.
+  - name: "submit_risk_classification"
+    type: DeterministicStepComponent
+    tool_name: "submit_merge_request_risk_classification"
+    inputs:
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "context:inputs.agent_platform_resource_context.merge_request_diff_sha"
+        as: "diff_sha"
+      - from: "context:classify_risk.final_answer.claims"
+        as: "claims"
+      - from: "context:classify_risk.final_answer.summary"
+        as: "summary"
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "fetch_mr_diffs"
+    condition:
+      input: "context:fetch_mr_diffs.execution_result"
+      routes:
+        "success": "classify_risk"
+        "default_route": "abort"
+  - from: "classify_risk"
+    to: "submit_risk_classification"
+  - from: "submit_risk_classification"
+    condition:
+      input: "context:submit_risk_classification.execution_result"
+      routes:
+        "success": "end"
+        "default_route": "abort"
+
+flow:
+  entry_point: "fetch_mr_diffs"
+  inputs:
+    - category: agent_platform_resource_context
+      version_constraint: "^1.1.0"
+      input_schema:
+        merge_request_id:
+          type: string
+          description: IID of the merge request being classified.
+        merge_request_diff_sha:
+          type: string
+          description: >
+            The full SHA of the diff revision being classified. GitLab stores it
+            with the claims so a score is always attributed to the revision it
+            was computed from, and rejects a submission that names any other.
+    - category: agent_platform_risk_classification_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        domains:
+          type: array
+          description: >
+            The risk domains to answer a claim about, each with a name and a description.
+            The agent answers exactly one true/false claim per entry, keyed by name, and
+            Rails weights each answer by that domain's severity. This is a flow input
+            rather than a fixed list so that custom domains need no change here.
