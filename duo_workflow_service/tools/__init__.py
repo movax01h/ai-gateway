@@ -22,6 +22,7 @@ from .filesystem import *
 from .findings import *
 from .bl_prioritize_and_cap import *
 from .git import *
+from .git_history import *
 from .handover import *
 from .issue import *
 from .job import *
