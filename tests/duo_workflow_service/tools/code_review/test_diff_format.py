@@ -1,3 +1,5 @@
+import pytest
+
 from duo_workflow_service.tools.code_review.diff_format import (
     format_diff_lines,
     format_file_diff,
@@ -66,20 +68,46 @@ def test_format_diff_lines_binary_file():
     assert format_diff_lines("Binary files differ") == ""
 
 
-def test_format_diff_lines_no_newline_at_end():
-    raw_diff = """@@ -1,2 +1,2 @@
-line 1
--line 2
-\\ No newline at end of file
-+line 2"""
+@pytest.mark.parametrize(
+    "raw_diff,expected_marker",
+    [
+        (
+            "@@ -1,2 +1,2 @@\n line 1\n-line 2\n\\ No newline at end of file\n+line 2",
+            '<line type="nonewline" old_line="2" new_line="">\\ No newline at end of file</line>',
+        ),
+        (
+            "@@ -1,2 +1,2 @@\n line 1\n-line 2\n+line 2\n\\ No newline at end of file",
+            '<line type="nonewline" old_line="" new_line="2">\\ No newline at end of file</line>',
+        ),
+        (
+            "@@ -1,2 +1,2 @@\n-line 1\n+line one\n line 2\n\\ No newline at end of file",
+            '<line type="nonewline" old_line="2" new_line="2">\\ No newline at end of file</line>',
+        ),
+    ],
+    ids=["after_deleted", "after_added", "after_context"],
+)
+def test_format_diff_lines_no_newline_marker_takes_the_preceding_line(
+    raw_diff, expected_marker
+):
+    assert expected_marker in format_diff_lines(raw_diff).split("\n")
 
-    result = format_diff_lines(raw_diff)
 
-    assert '<line type="context"' in result
-    assert '<line type="deleted"' in result
-    assert '<line type="nonewline"' in result
-    assert "No newline at end of file" in result
-    assert '<line type="added"' in result
+def test_format_diff_lines_no_newline_marker_on_both_sides():
+    raw_diff = (
+        "@@ -1,2 +1,2 @@\n line 1\n-line 2\n\\ No newline at end of file\n"
+        "+line two\n\\ No newline at end of file"
+    )
+
+    markers = [
+        line
+        for line in format_diff_lines(raw_diff).split("\n")
+        if line.startswith('<line type="nonewline"')
+    ]
+
+    assert markers == [
+        '<line type="nonewline" old_line="2" new_line="">\\ No newline at end of file</line>',
+        '<line type="nonewline" old_line="" new_line="2">\\ No newline at end of file</line>',
+    ]
 
 
 def test_format_diff_lines_keeps_dashed_content_lines():
