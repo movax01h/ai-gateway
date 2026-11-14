@@ -302,6 +302,26 @@ class TestChatAnthropic:
         assert sent[-1] == expected_last
 
     @pytest.mark.parametrize(
+        ("model", "expect_temperature"),
+        [
+            pytest.param("claude-sonnet-5-5", False, id="5.5-sonnet"),
+            pytest.param("claude-opus-4-7", False, id="4.7-opus"),
+            pytest.param("claude-sonnet-4-6", True, id="4.6-sonnet"),
+            pytest.param("claude-sonnet-4-5-20250929", True, id="4.5-sonnet"),
+        ],
+    )
+    def test_deprecated_temperature_is_omitted(self, model, expect_temperature):
+        chat = ChatAnthropic(
+            async_client=AsyncAnthropic(api_key="test-key"),
+            model=model,
+            temperature=0.2,
+        )
+
+        payload = chat._get_request_payload([HumanMessage(content="hello")])
+
+        assert ("temperature" in payload) is expect_temperature
+
+    @pytest.mark.parametrize(
         ("model", "messages", "expected_system", "expected_messages"),
         [
             pytest.param(

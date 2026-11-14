@@ -25,6 +25,7 @@ from ai_gateway.models.v2._model_compat import (
     remove_trailing_assistant_message,
     supports_assistant_prefill,
 )
+from ai_gateway.models.v2.chat_litellm import is_deprecated_temperature_model
 
 __all__ = ["ChatAnthropic"]
 
@@ -202,6 +203,9 @@ class ChatAnthropic(_LChatAnthropic):
         payload = remove_blank_text_blocks(
             super()._get_request_payload(input_, stop=stop, **kwargs)
         )
+
+        if is_deprecated_temperature_model(self.model):
+            payload.pop("temperature", None)
 
         if supports_assistant_prefill(self.model):
             return payload
