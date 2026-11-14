@@ -38,7 +38,11 @@ from ai_gateway.models.v2.web_search_policy import (
 )
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM as _LChatLiteLLM
 
-__all__ = ["ChatLiteLLM", "litellm_supports_native_web_search"]
+__all__ = [
+    "ChatLiteLLM",
+    "is_deprecated_temperature_model",
+    "litellm_supports_native_web_search",
+]
 
 log = structlog.stdlib.get_logger("chat_litellm")
 
@@ -170,14 +174,14 @@ def _remove_deprecated_temperature_parameters(kwargs: Dict[str, Any]) -> None:
     https://gitlab.com/gitlab-org/gitlab/-/work_items/601614
     """
     model = kwargs.get("model")
-    if not model or not _is_deprecated_temperature_model(model):
+    if not model or not is_deprecated_temperature_model(model):
         return
     if kwargs.get("temperature") is None:
         return
     del kwargs["temperature"]
 
 
-def _is_deprecated_temperature_model(model: str) -> bool:
+def is_deprecated_temperature_model(model: str) -> bool:
     """Check whether the model deprecated the temperature parameter."""
     if AnthropicConfig._is_opus_4_7_model(model):
         return True

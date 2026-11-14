@@ -18,6 +18,11 @@ __all__ = [
 
 AGENT = "agent"
 
+# The frozen generation prompts prefill `<new_code>` and stop at `</new_code>`. Claude 4.6+
+# rejects prefill, so the turn is re-roled (`remove_trailing_assistant_message`) and the model
+# writes the opening tag itself; the stop sequence still removes the closing one.
+_NEW_CODE_OPEN = "<new_code>"
+
 
 class AgentModel(TextGenModelBase):
     def __init__(
@@ -60,7 +65,9 @@ class AgentModel(TextGenModelBase):
 
         response = await self.prompt.ainvoke(params)
 
-        response_content = self._format_response_content(str(response.content)) or ""
+        # `.text` skips the thinking blocks Claude 5.x emits without being asked.
+        text = response.text.removeprefix(_NEW_CODE_OPEN)
+        response_content = self._format_response_content(text) or ""
 
         score = 10**5
         if response.response_metadata and "score" in response.response_metadata:
@@ -93,9 +100,20 @@ class AgentModel(TextGenModelBase):
         self,
         params: dict,
     ) -> AsyncIterator[TextGenModelChunk]:
+        # Hold back the head of the stream until the opening tag is ruled in or out.
+        head: Optional[str] = ""
         async for chunk in self.prompt.astream(params):
-            chunk_content = self._format_response_content(str(chunk.content)) or ""
-            yield TextGenModelChunk(text=chunk_content)
+            text: str = chunk.text
+            if head is not None:
+                head += text
+                if len(head) < len(_NEW_CODE_OPEN) and _NEW_CODE_OPEN.startswith(head):
+                    continue
+                text, head = head.removeprefix(_NEW_CODE_OPEN), None
+            if text:
+                yield TextGenModelChunk(text=self._format_response_content(text) or "")
+
+        if head:
+            yield TextGenModelChunk(text=self._format_response_content(head) or "")
 
     def _format_response_content(self, text: Optional[str]) -> Optional[str]:
         if text and self.prompt.model_name == "mixtral":

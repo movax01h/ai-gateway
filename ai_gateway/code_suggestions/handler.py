@@ -491,18 +491,14 @@ async def code_generation(
     else:
         # If model_provider is specified in payload but no prompt_id, use it to override model_metadata
         if model_provider and not model_metadata:
-            if model_provider == KindModelProvider.ANTHROPIC:
-                model_metadata = create_model_metadata(
-                    {"provider": "gitlab", "identifier": "claude_sonnet_4_5_20250929"},
-                    mock_model_responses=(
-                        config.mock_model_responses() if config else False
-                    ),
-                )
-            elif model_provider == KindModelProvider.VERTEX_AI:
+            if model_provider in (
+                KindModelProvider.ANTHROPIC,
+                KindModelProvider.VERTEX_AI,
+            ):
                 model_metadata = create_model_metadata(
                     {
                         "provider": "gitlab",
-                        "identifier": "claude_sonnet_4_5_20250929_vertex",
+                        "identifier": "claude_sonnet_4_5_20250929_bedrock",
                     },
                     mock_model_responses=(
                         config.mock_model_responses() if config else False
