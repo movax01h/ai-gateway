@@ -920,8 +920,8 @@ class TestEditorContentGeneration:
     @pytest.mark.parametrize(
         ("model_provider", "expected_model"),
         [
-            ("anthropic", "claude_sonnet_4_5_20250929"),
-            ("vertex-ai", "claude_sonnet_4_5_20250929_vertex"),
+            ("anthropic", "claude_sonnet_4_5_20250929_bedrock"),
+            ("vertex-ai", "claude_sonnet_4_5_20250929_bedrock"),
         ],
     )
     def test_legacy_generation_model_provider_override(

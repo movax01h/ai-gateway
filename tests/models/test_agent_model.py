@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 from ai_gateway.model_selection import LLMDefinition
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
@@ -16,7 +16,10 @@ class TestAgentModel:  # pylint: disable=too-many-public-methods
     @pytest.fixture(name="prompt")
     def prompt_fixture(self) -> Prompt:
         async def _stream_prompt(*_args, **_kwargs):
-            for action in [AsyncMock(content="part 1"), AsyncMock(content="part 2")]:
+            for action in [
+                AIMessageChunk(content="part 1"),
+                AIMessageChunk(content="part 2"),
+            ]:
                 yield action
 
         prompt = MagicMock(spec=Prompt)
@@ -55,8 +58,8 @@ class TestAgentModel:  # pylint: disable=too-many-public-methods
     def mixtral_prompt_fixture(self) -> Prompt:
         async def _stream_prompt(*_args, **_kwargs):
             for action in [
-                AsyncMock(content="part\\_1"),
-                AsyncMock(content="part\\_2"),
+                AIMessageChunk(content="part\\_1"),
+                AIMessageChunk(content="part\\_2"),
             ]:
                 yield action
 
@@ -162,7 +165,7 @@ class TestAgentModel:  # pylint: disable=too-many-public-methods
         prompt = MagicMock(spec=Prompt)
         prompt.name = "test"
         prompt.ainvoke = AsyncMock(
-            side_effect=lambda *_args, **_kwargs: AsyncMock(
+            side_effect=lambda *_args, **_kwargs: AIMessage(
                 content="test content", response_metadata={"score": None}
             )
         )
@@ -180,7 +183,7 @@ class TestAgentModel:  # pylint: disable=too-many-public-methods
         prompt = MagicMock(spec=Prompt)
         prompt.name = "test"
         prompt.ainvoke = AsyncMock(
-            side_effect=lambda *_args, **_kwargs: AsyncMock(
+            side_effect=lambda *_args, **_kwargs: AIMessage(
                 content="test content", response_metadata={"score": 0.0}
             )
         )
@@ -198,7 +201,7 @@ class TestAgentModel:  # pylint: disable=too-many-public-methods
         prompt = MagicMock(spec=Prompt)
         prompt.name = "test"
         prompt.ainvoke = AsyncMock(
-            side_effect=lambda *_args, **_kwargs: AsyncMock(
+            side_effect=lambda *_args, **_kwargs: AIMessage(
                 content="test content", response_metadata={"score": 0.999}
             )
         )
@@ -217,7 +220,7 @@ class TestAgentModel:  # pylint: disable=too-many-public-methods
         prompt.name = "test"
         prompt.model_name = "test-model"
         prompt.ainvoke = AsyncMock(
-            side_effect=lambda *_args, **_kwargs: AsyncMock(
+            side_effect=lambda *_args, **_kwargs: AIMessage(
                 content="test content", response_metadata={}
             )
         )
@@ -227,6 +230,90 @@ class TestAgentModel:  # pylint: disable=too-many-public-methods
 
         assert isinstance(response, TextGenModelOutput)
         assert response.metadata is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("content", "expected_text"),
+        [
+            pytest.param(
+                "<new_code>\nreturn a + b\n", "\nreturn a + b\n", id="open-tag"
+            ),
+            pytest.param("return a + b", "return a + b", id="no-tag"),
+            pytest.param(
+                "x = '<new_code>'\n", "x = '<new_code>'\n", id="inner-tag-kept"
+            ),
+            pytest.param("<new_code>a</new_code>", "a</new_code>", id="close-tag-kept"),
+            pytest.param(
+                [
+                    {"type": "thinking", "thinking": "plan", "signature": "sig"},
+                    {"type": "text", "text": "<new_code>\nreturn a + b\n"},
+                ],
+                "\nreturn a + b\n",
+                id="thinking-block-dropped",
+            ),
+        ],
+    )
+    async def test_generate_strips_the_opening_tag(
+        self, params, content, expected_text
+    ):
+        prompt = MagicMock(spec=Prompt)
+        prompt.name = "test"
+        prompt.ainvoke = AsyncMock(
+            return_value=AIMessage(content=content, response_metadata={})
+        )
+
+        model = AgentModel(prompt)
+        response = await model.generate(params, stream=False)
+
+        assert response.text == expected_text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("chunks", "expected_chunks"),
+        [
+            pytest.param(
+                ["", "<new_code>", "\ndef f():", "\n    pass"],
+                ["\ndef f():", "\n    pass"],
+                id="tag-in-its-own-chunk",
+            ),
+            pytest.param(
+                ["<new", "_code>ret", "urn a + b"],
+                ["ret", "urn a + b"],
+                id="tag-split-across-chunks",
+            ),
+            pytest.param(["return a", " + b"], ["return a", " + b"], id="no-tag"),
+            pytest.param(
+                ["<new_code>a</new_code>", "b"],
+                ["a</new_code>", "b"],
+                id="close-tag-kept",
+            ),
+            pytest.param(["<new"], ["<new"], id="stream-ends-on-partial-open-tag"),
+            pytest.param(
+                [
+                    [{"type": "thinking", "thinking": "plan", "index": 0}],
+                    [{"type": "text", "text": "<new_code>", "index": 1}],
+                    [{"type": "text", "text": "\ndef f():", "index": 1}],
+                ],
+                ["\ndef f():"],
+                id="thinking-chunks-dropped",
+            ),
+        ],
+    )
+    async def test_generate_stream_strips_the_opening_tag(
+        self, params, chunks, expected_chunks
+    ):
+        async def _stream_prompt(*_args, **_kwargs):
+            for content in chunks:
+                yield AIMessageChunk(content=content)
+
+        prompt = MagicMock(spec=Prompt)
+        prompt.name = "test"
+        prompt.astream = MagicMock(side_effect=_stream_prompt)
+
+        model = AgentModel(prompt)
+        response = await model.generate(params, stream=True)
+
+        assert [chunk.text async for chunk in response] == expected_chunks
 
 
 class TestAgentModelOutputBudget:
