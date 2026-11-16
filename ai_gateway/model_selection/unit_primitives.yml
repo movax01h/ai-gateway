@@ -18,9 +18,6 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -57,9 +54,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -69,9 +63,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -81,9 +72,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -93,9 +81,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -105,7 +90,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -115,7 +99,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -125,7 +108,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -135,7 +117,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6_vertex"
   - feature_setting: "duo_chat_explain_vulnerability"
     unit_primitives:
@@ -143,9 +124,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6_vertex"
   - feature_setting: "code_suggestions"
     unit_primitives:
@@ -154,7 +132,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_bedrock"
       - "claude_sonnet_4_6_vertex"
@@ -167,7 +144,6 @@ configurable_unit_primitives:
     selectable_models:
       - "claude_haiku_4_5_20251001"
       - "claude_haiku_4_5_20251001_bedrock"
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -177,7 +153,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -187,7 +162,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -197,9 +171,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -212,9 +183,6 @@ configurable_unit_primitives:
       small: claude_haiku_4_5_20251001_vertex
       large: claude_sonnet_5_5_vertex
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -308,9 +276,6 @@ configurable_unit_primitives:
       - "claude_haiku_5_5"
       - "claude_haiku_5_5_bedrock"
       - "claude_haiku_5_5_vertex"
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -412,9 +377,6 @@ configurable_unit_primitives:
           - unused
       classifier: claude_haiku_4_5_20251001_vertex
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
-      - "claude_sonnet_4_5_20250929_vertex"
-      - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -496,7 +458,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -506,7 +467,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -516,7 +476,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -548,7 +507,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_vertex"
       - "claude_sonnet_4_6_bedrock"
@@ -635,7 +593,6 @@ configurable_unit_primitives:
       - "claude_opus_5_5"
       - "claude_opus_5_5_bedrock"
       - "claude_opus_5_5_vertex"
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_bedrock"
       - "claude_sonnet_4_6_vertex"
