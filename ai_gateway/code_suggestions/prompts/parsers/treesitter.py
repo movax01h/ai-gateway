@@ -2,7 +2,7 @@ import asyncio
 from typing import Optional, override
 
 from tree_sitter import Node, Tree
-from tree_sitter_languages import get_parser
+from tree_sitter_language_pack import SupportedLanguage, get_parser
 
 from ai_gateway.code_suggestions.processing.ops import (
     LanguageId,
@@ -30,6 +30,42 @@ from ai_gateway.code_suggestions.prompts.parsers.function_signatures import (
 )
 from ai_gateway.code_suggestions.prompts.parsers.imports import ImportVisitorFactory
 from ai_gateway.code_suggestions.prompts.parsers.treetraversal import tree_dfs
+
+SUPPORTED_GRAMMARS: frozenset[SupportedLanguage] = frozenset(
+    {
+        "bash",
+        "c",
+        "commonlisp",
+        "cpp",
+        "csharp",
+        "dockerfile",
+        "elisp",
+        "elixir",
+        "elm",
+        "erlang",
+        "fortran",
+        "go",
+        "hack",
+        "haskell",
+        "hcl",
+        "java",
+        "javascript",
+        "julia",
+        "kotlin",
+        "lua",
+        "objc",
+        "ocaml",
+        "perl",
+        "php",
+        "python",
+        "r",
+        "ruby",
+        "rust",
+        "scala",
+        "sql",
+        "typescript",
+    }
+)
 
 
 class CodeParser(BaseCodeParser):
@@ -75,7 +111,7 @@ class CodeParser(BaseCodeParser):
         Returns None if there are no rules for the language or no relevant context was found.
         """
         node = self._context_near_cursor(point)
-        if not node:
+        if not node or node.text is None:
             return None
 
         point_in_node = convert_point_to_relative_point_in_node(node, point)
@@ -141,11 +177,13 @@ class CodeParser(BaseCodeParser):
             raise ValueError(f"Unsupported language: {lang_id}")
 
         lang_def = ProgramLanguage.from_language_id(lang_id)
+        if lang_def.grammar_name not in SUPPORTED_GRAMMARS:
+            raise ValueError(f"Unsupported language: {lang_id}")
 
         try:
             parser = get_parser(lang_def.grammar_name)
             tree = parser.parse(bytes(content, "utf8"))
-        except (AttributeError, TypeError) as ex:
+        except (AttributeError, TypeError, LookupError) as ex:
             raise ValueError(f"Unsupported code content: {ex!s}")
 
         return cls(tree, lang_id)

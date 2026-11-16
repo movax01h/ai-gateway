@@ -6,6 +6,8 @@ from ai_gateway.code_suggestions.prompts.parsers.base import BaseVisitor, Point
 
 __all__ = ["ErrorBlocksVisitor", "MinAllowedBlockVisitor"]
 
+_LINE_COMMENT_TYPES = frozenset({"line_comment", "doc_comment"})
+
 
 class MinAllowedBlockVisitor(BaseVisitor):
     def __init__(self, target_point: Point, min_block_size: int = 2):
@@ -31,6 +33,8 @@ class MinAllowedBlockVisitor(BaseVisitor):
         return start_row < target_row < end_row
 
     def _is_block_candidate(self, node: Node) -> bool:
+        if node.type in _LINE_COMMENT_TYPES:
+            return False
         if node.end_point[0] - node.start_point[0] + 1 >= self.min_block_size:
             return True
         return False

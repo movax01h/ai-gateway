@@ -41,7 +41,7 @@ _ALL_LANGS = {
         frozenset({"cpp"}),
     ),
     _LanguageDef(
-        LanguageId.CSHARP, "c_sharp", "C#", frozenset({"cs"}), frozenset({"csharp"})
+        LanguageId.CSHARP, "csharp", "C#", frozenset({"cs"}), frozenset({"csharp"})
     ),
     _LanguageDef(LanguageId.GO, "go", "Go", frozenset({"go"}), frozenset({"go"})),
     _LanguageDef(
