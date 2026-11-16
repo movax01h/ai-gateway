@@ -1008,6 +1008,31 @@ def test_normalize_project_id_rejects_invalid_url(project_id, error):
 
 
 @pytest.mark.parametrize(
+    "group_id,expected",
+    [
+        ("13", "13"),
+        ("group/subgroup", "group%2Fsubgroup"),
+        ("group%2Fsubgroup", "group%2Fsubgroup"),
+        (" /group/subgroup/ ", "group%2Fsubgroup"),
+        ("https://gitlab.com/group/subgroup", "group%2Fsubgroup"),
+        ("https://gitlab.com/groups/group/subgroup", "group%2Fsubgroup"),
+        ("https://gitlab.com/groups/group/subgroup/-/epics", "group%2Fsubgroup"),
+    ],
+)
+def test_normalize_group_id(group_id, expected):
+    tool = DummyTool(metadata={"gitlab_host": "gitlab.com"})
+
+    assert tool._normalize_group_id(group_id) == expected
+
+
+def test_normalize_group_id_rejects_other_host():
+    tool = DummyTool(metadata={"gitlab_host": "gitlab.example.com"})
+
+    with pytest.raises(GitLabUrlParseError, match="does not match gitlab_host"):
+        tool._normalize_group_id("https://gitlab.com/groups/group")
+
+
+@pytest.mark.parametrize(
     "url",
     [None, "https://gitlab.example.com/namespace/project"],
 )
