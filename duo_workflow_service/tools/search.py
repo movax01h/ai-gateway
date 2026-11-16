@@ -8,6 +8,7 @@ import structlog
 from langchain.tools import ToolException
 from pydantic import BaseModel, Field
 
+from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 
@@ -80,8 +81,18 @@ class GitLabSearchBase(DuoBaseTool):
     async def _execute(self, *args: Any, **kwargs: Any) -> str:
         pass
 
+    def _search_resource_id(self, id: str, search_type: str = "projects") -> str:
+        try:
+            if search_type == "groups":
+                return self._normalize_group_id(id)
+            return self._normalize_project_id(id)
+        except GitLabUrlParseError as e:
+            raise ToolException(f"Failed to parse 'id': {e!s}") from e
+
     async def _perform_search(self, id: str, params: dict, search_type: str) -> str:
-        url = f"/api/v4/{search_type}/{id}/search"
+        resource_id = self._search_resource_id(id, search_type)
+
+        url = f"/api/v4/{search_type}/{resource_id}/search"
         response = await self.gitlab_client.aget(path=url, params=params)
 
         body = self._process_http_response("search", response, log)
@@ -497,7 +508,7 @@ class BlobSearch(_BlobSearchBase):
         if sort:
             params["sort"] = sort
 
-        url = f"/api/v4/projects/{id}/search"
+        url = f"/api/v4/projects/{self._search_resource_id(id)}/search"
 
         response = await self.gitlab_client.aget(
             path=url, params=params, parse_json=True

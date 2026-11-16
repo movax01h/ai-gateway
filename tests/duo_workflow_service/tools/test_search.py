@@ -279,6 +279,104 @@ class TestSearch:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
+        "project_id, expected_path",
+        [
+            ("123", "/api/v4/projects/123/search"),
+            (
+                "group/subgroup/project",
+                "/api/v4/projects/group%2Fsubgroup%2Fproject/search",
+            ),
+            (
+                "group%2Fsubgroup%2Fproject",
+                "/api/v4/projects/group%2Fsubgroup%2Fproject/search",
+            ),
+        ],
+    )
+    async def test_blob_search_encodes_project_path(
+        self, project_id, expected_path, metadata, gitlab_client_mock
+    ):
+        gitlab_client_mock.aget.side_effect = create_mock_aget([])
+
+        tool = BlobSearch(metadata=metadata)
+
+        await tool._arun(id=project_id, search="authorize")
+
+        gitlab_client_mock.aget.assert_called_once_with(
+            path=expected_path,
+            params={
+                "scope": "blobs",
+                "search": "authorize",
+                "per_page": BLOB_SEARCH_DEFAULT_PER_PAGE,
+                "page": 1,
+            },
+            parse_json=True,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "search_type, search_id, expected_path",
+        [
+            ("projects", "group/project", "/api/v4/projects/group%2Fproject/search"),
+            ("projects", "group%2Fproject", "/api/v4/projects/group%2Fproject/search"),
+            ("groups", "group/subgroup", "/api/v4/groups/group%2Fsubgroup/search"),
+            (
+                "groups",
+                "https://gitlab.com/groups/group/subgroup",
+                "/api/v4/groups/group%2Fsubgroup/search",
+            ),
+        ],
+    )
+    async def test_search_encodes_project_and_group_paths(
+        self, search_type, search_id, expected_path, gitlab_client_mock
+    ):
+        gitlab_client_mock.aget.side_effect = create_mock_aget([])
+
+        tool = IssueSearch(
+            metadata={"gitlab_client": gitlab_client_mock, "gitlab_host": "gitlab.com"}
+        )
+
+        await tool._arun(id=search_id, search="bug", search_type=search_type)
+
+        gitlab_client_mock.aget.assert_called_once_with(
+            path=expected_path,
+            params={"scope": "issues", "search": "bug"},
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "search_type, search_id",
+        [
+            ("projects", "https://gitlab.example.com/group/project"),
+            ("groups", "https://gitlab.example.com/groups/group"),
+        ],
+    )
+    async def test_search_rejects_id_from_another_host(
+        self, search_type, search_id, gitlab_client_mock
+    ):
+        tool = IssueSearch(
+            metadata={"gitlab_client": gitlab_client_mock, "gitlab_host": "gitlab.com"}
+        )
+
+        with pytest.raises(ToolException, match="Failed to parse 'id'"):
+            await tool._arun(id=search_id, search="bug", search_type=search_type)
+
+        gitlab_client_mock.aget.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_blob_search_rejects_id_from_another_host(self, gitlab_client_mock):
+        tool = BlobSearch(
+            metadata={"gitlab_client": gitlab_client_mock, "gitlab_host": "gitlab.com"}
+        )
+
+        with pytest.raises(ToolException, match="Failed to parse 'id'"):
+            await tool._arun(
+                id="https://gitlab.example.com/group/project", search="authorize"
+            )
+
+        gitlab_client_mock.aget.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
         "search_params, optional_params, mock_response",
         [
             (
