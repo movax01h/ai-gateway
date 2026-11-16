@@ -447,7 +447,7 @@ class ReadOnlyGitTool(DuoBaseTool):
 # present, and the parent's, which is absent when the parent died of SIGPIPE instead (see
 # the module docstring). Anchored so that either phrase inside a commit message or path
 # cannot hide the real error behind the partial-clone one.
-_REFUSED_LAZY_FETCH = re.compile(
+REFUSED_LAZY_FETCH = re.compile(
     r"^fatal: fetch\.parallel cannot be negative$"
     r"|^(?:fatal|error): could not fetch \S+ from promisor remote$",
     re.MULTILINE,
@@ -459,7 +459,7 @@ _REFUSED_LAZY_FETCH = re.compile(
 _DIAGNOSTIC_LINE = re.compile(r"^(?:fatal|error|warning|usage|hint): .*$", re.MULTILINE)
 _MAX_DIAGNOSTIC_LINES = 5
 
-_PARTIAL_CLONE_MESSAGE = (
+PARTIAL_CLONE_MESSAGE = (
     "Error: this checkout is a partial clone and git {subcommand} needs objects it does "
     "not have locally. Fetching them on demand is disabled here because it would run "
     "programs named in the repository's own config. Retrying will not help; use the "
@@ -479,7 +479,8 @@ def _undoes_a_guarantee(option: str) -> bool:
     return name in _GUARANTEE_UNDOING_OPTIONS
 
 
-def _diagnostics(body: str) -> str:
+def diagnostics(body: str) -> str:
+    """Git's own lines about a failure, capped; never the output it printed before dying."""
     if not body.strip():
         return "(no output)"
     lines = _DIAGNOSTIC_LINE.findall(body)
@@ -512,9 +513,9 @@ def _unwrap_command_output(raw: str, subcommand: str) -> str:
     body = text[header.end() :]
     code = header.group(1)
     if code != "0":
-        if _REFUSED_LAZY_FETCH.search(body):
-            raise ToolException(_PARTIAL_CLONE_MESSAGE.format(subcommand=subcommand))
-        detail = _diagnostics(body)
+        if REFUSED_LAZY_FETCH.search(body):
+            raise ToolException(PARTIAL_CLONE_MESSAGE.format(subcommand=subcommand))
+        detail = diagnostics(body)
         raise ToolException(f"Error: git {subcommand} exited with {code}: {detail}")
 
     return notice + body
