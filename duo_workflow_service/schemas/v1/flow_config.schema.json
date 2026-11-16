@@ -339,27 +339,68 @@
     },
     "InMemoryPromptConfig": {
       "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "prompt_template": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "prompt_template"
+          ]
+        },
+        {
+          "properties": {
+            "template": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "template"
+          ]
+        }
+      ],
       "properties": {
         "name": {
           "title": "Name",
           "type": "string"
         },
         "prompt_template": {
-          "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                ]
               },
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              }
-            ]
-          },
-          "title": "Prompt Template",
-          "type": "object"
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Template"
+        },
+        "template": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Template"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "tool_output_security": {
           "default": true,
@@ -406,7 +447,6 @@
       },
       "required": [
         "name",
-        "prompt_template",
         "prompt_id",
         "unit_primitives"
       ],
@@ -709,6 +749,70 @@
         }
       },
       "title": "PromptProviderParams",
+      "type": "object"
+    },
+    "SystemPart": {
+      "additionalProperties": false,
+      "description": "One part of the system prompt, in the advanced form.",
+      "properties": {
+        "text": {
+          "pattern": "\\S",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SystemPart",
+      "type": "object"
+    },
+    "SystemPrompt": {
+      "additionalProperties": false,
+      "description": "The system prompt in the advanced form: one system message, written as parts in order.\n\n`type` names what kind of system content this is, and it's required, so a later kind joins with a name of its\nown and nothing has to be inferred. The parts are content blocks of the one system message. Claude receives them\nas separate blocks, with the cache breakpoint after the first, so the first part holds what stays the same across\nsessions and is read from the prompt cache. Other models get the parts joined into one system prompt, as today.",
+      "properties": {
+        "type": {
+          "const": "system_message",
+          "title": "Type",
+          "type": "string"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/SystemPart"
+          },
+          "minItems": 1,
+          "title": "Parts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "parts"
+      ],
+      "title": "SystemPrompt",
+      "type": "object"
+    },
+    "Template": {
+      "additionalProperties": false,
+      "description": "A prompt in the format that flow versions on the chat engine declare.\n\n`system` renders on every model call and is never stored. It's a string, or a `SystemPrompt` when it has more\nthan one part. The keys fix the roles, so a prompt can't put a user or assistant turn where the platform doesn't\nexpect one.",
+      "properties": {
+        "system": {
+          "anyOf": [
+            {
+              "pattern": "\\S",
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/SystemPrompt"
+            }
+          ],
+          "title": "System"
+        }
+      },
+      "required": [
+        "system"
+      ],
+      "title": "Template",
       "type": "object"
     }
   },

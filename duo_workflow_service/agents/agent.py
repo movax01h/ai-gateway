@@ -52,7 +52,9 @@ log = structlog.stdlib.get_logger("agent_v2")
 class AgentPromptTemplate(Runnable[dict, PromptValue]):
     def __init__(self, _model_provider: ModelClassProvider, config: PromptConfig):
         self.agent_name = config.name
-        self.preamble_messages = prompt_template_to_messages(config.prompt_template)
+        self.preamble_messages = prompt_template_to_messages(
+            config.legacy_prompt_template
+        )
 
     @override
     def invoke(

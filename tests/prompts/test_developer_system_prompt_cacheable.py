@@ -8,11 +8,19 @@ prompt cache again (https://gitlab.com/gitlab-org/gitlab/-/work_items/628100).
 """
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
+from gitlab_cloud_connector import GitLabUnitPrimitive
+from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.prompt_values import PromptValue
+from langchain_core.runnables import RunnableSequence
 
-from ai_gateway.prompts.base import jinja_env
+from ai_gateway.prompts.base import Prompt, jinja_env
+from ai_gateway.prompts.config import ModelClassProvider
+from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.config.template import SystemPart, SystemPrompt, Template
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
 from lib.version import resolve_version
 
@@ -35,6 +43,30 @@ def _flow_prompt_system(config: Path, prompt_name: str):
         return prompt["prompt_template"]["system"]
 
     return load
+
+
+async def _prefix(
+    config: PromptConfig, provider: ModelClassProvider
+) -> list[tuple[str, Any]]:
+    """What the model receives before history, cache markers included."""
+    prompt = Prompt(
+        model_provider=provider,
+        model_factory=lambda **_: _FakeModel(responses=[]),  # type: ignore[arg-type]
+        config=config,
+    )
+    chain = cast(RunnableSequence, prompt.bound)
+    before_the_model: RunnableSequence = RunnableSequence(*chain.steps[:-1])
+    rendered: PromptValue = await before_the_model.ainvoke(
+        {"history": [], **_SESSIONS[0], "plan_enabled": False}
+    )
+
+    return [(type(m).__name__, m.content) for m in rendered.to_messages()]
+
+
+class _FakeModel(FakeMessagesListChatModel):
+    @property
+    def _identifying_params(self) -> dict:
+        return {"model": "fake-model"}
 
 
 _DEVELOPER_CONFIGS = _CODE_FEATURES / "developer" / "config"
@@ -95,3 +127,43 @@ def test_instructions_are_identical_across_sessions(system, plan_enabled: bool) 
         for value in session.values():
             assert str(value) not in instructions[0]
             assert str(value) in context
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [ModelClassProvider.ANTHROPIC, ModelClassProvider.LITE_LLM],
+    ids=["claude keeps its breakpoints", "models without breakpoints merge"],
+)
+@pytest.mark.asyncio
+async def test_the_template_format_sends_the_same_system_prompt(provider) -> None:
+    """Writing `developer/3.0.0`'s system prompt in the `template` format changes nothing the model receives.
+
+    The instructions and the session context stay two system messages, so the breakpoint keeps sitting on the
+    instructions and a second session still reads them from the cache.
+    """
+    discover_feature_prompts()
+    system = _LAYOUTS["developer/3.0.0"]()
+    name = "developer_agent_prompt"
+    unit_primitive = GitLabUnitPrimitive.DUO_AGENT_PLATFORM
+
+    old = await _prefix(
+        PromptConfig(
+            name=name, unit_primitive=unit_primitive, prompt_template={"system": system}
+        ),
+        provider,
+    )
+    new = await _prefix(
+        PromptConfig(
+            name=name,
+            unit_primitive=unit_primitive,
+            template=Template(
+                system=SystemPrompt(
+                    type="system_message",
+                    parts=[SystemPart(text=text) for text in system],
+                )
+            ),
+        ),
+        provider,
+    )
+
+    assert old == new

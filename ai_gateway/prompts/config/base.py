@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Self
 
 from gitlab_cloud_connector import GitLabUnitPrimitive
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -9,20 +9,20 @@ from ai_gateway.model_selection.models import (
     LiteLLMProviderParams,
     OpenAIProviderParams,
 )
-from lib.billing_events.service import LLMOperationType
-from lib.prompts.utilities import (
-    PromptSource,
-    ResolvedPromptTemplate,
-    prompt_sources,
-    resolve_prompt_template,
+from ai_gateway.prompts.config.formats import (
+    LegacyTemplate,
+    PromptTemplateFormat,
+    parse_format,
 )
+from ai_gateway.prompts.config.template import Template
+from lib.billing_events.service import LLMOperationType
 
 __all__ = [
     "InMemoryPromptConfig",
     "ModelConfig",
     "PromptConfig",
-    "PromptFormat",
     "PromptProviderParams",
+    "TemplateDeclaration",
 ]
 
 
@@ -68,43 +68,67 @@ class ModelConfig(BaseModel):
     provider_params: PromptProviderParams | None = None
 
 
-class PromptFormat(BaseModel):
-    """What a prompt declares to render, shared by the registry's and the inline configs.
+class TemplateDeclaration(BaseModel):
+    """The fields under which a prompt declares its template, shared by the registry's and the inline configs.
 
-    `Prompt` builds a model call from `resolve()`, and the registry collects an author's variables from `sources()`.
-    Other consumers still read `prompt_template` directly.
+    A prompt is written as `prompt_template` or `template`, never both and never neither. The keys stay as the
+    published schema has them; `prompt_format` is the one object every consumer reads instead of either key, so
+    nothing downstream branches on the syntax. Consumers that only understand the old format read
+    `legacy_prompt_template`, which refuses a `template` prompt.
     """
 
+    # The one-format rule, for the published schema that authors validate against in the AI Catalog and their editor.
+    # A branch matches when its key holds an object, so an explicit `null` counts as not declared, as in Pydantic.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "oneOf": [
+                {"required": [key], "properties": {key: {"type": "object"}}}
+                for key in ("prompt_template", "template")
+            ]
+        }
+    )
+
     name: str
-    prompt_template: dict[str, str | list[str]]
+    prompt_template: dict[str, str | list[str]] | None = None
+    template: Template | None = None
     tool_output_security: bool = True
 
-    def sources(self) -> tuple[PromptSource, ...]:
-        """Every template string this prompt renders, with the role it was written in, without rendering anything."""
-        return prompt_sources(self.prompt_template)
+    @model_validator(mode="after")
+    def validate_one_format(self) -> Self:
+        parse_format(self.prompt_template, self.template)
+        return self
 
-    def resolve(
-        self, tool_output_security: Optional[bool] = None
-    ) -> ResolvedPromptTemplate:
-        """Resolve this prompt's declared format into what it renders.
+    @property
+    def prompt_format(self) -> PromptTemplateFormat:
+        """The one format this prompt declares, resolved from whichever key it was written under.
 
-        Args:
-            tool_output_security: Overrides the prompt's own setting, for a caller that binds tools.
+        Read from the fields on every access rather than stored when the config validates, so a copy made with
+        `model_copy(update=...)`, which skips validation, can't carry the format of the original.
+        """
+        return parse_format(self.prompt_template, self.template)
+
+    @property
+    def legacy_prompt_template(self) -> dict[str, str | list[str]]:
+        """The old format's roles, for consumers that read only it.
 
         Returns:
-            The resolved prompt.
+            The declared `prompt_template`.
+
+        Raises:
+            ValueError: When the prompt declares `template`, which only agent flows render. An empty prompt would
+                otherwise reach the model with no error.
         """
-        return resolve_prompt_template(
-            self.prompt_template,
-            tool_output_security=(
-                self.tool_output_security
-                if tool_output_security is None
-                else tool_output_security
-            ),
-        )
+        prompt_format = self.prompt_format
+        if not isinstance(prompt_format, LegacyTemplate):
+            raise ValueError(
+                f"Prompt '{self.name}' declares 'template', which only agent flows render. "
+                "This consumer reads 'prompt_template'."
+            )
+
+        return prompt_format.roles
 
 
-class PromptConfig(PromptFormat):
+class PromptConfig(TemplateDeclaration):
     model_config = ConfigDict(extra="forbid")
 
     model: ModelConfig = ModelConfig()
@@ -139,7 +163,7 @@ class PromptConfig(PromptFormat):
         return self
 
 
-class InMemoryPromptConfig(PromptFormat):
+class InMemoryPromptConfig(TemplateDeclaration):
     prompt_id: str
 
     model_config = ConfigDict(extra="forbid")

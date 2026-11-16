@@ -8,6 +8,7 @@ from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 from pydantic import ValidationError
 
+from ai_gateway.prompts.config.base import InMemoryPromptConfig
 from duo_workflow_service.agent_platform import experimental, v1
 from duo_workflow_service.agent_platform.constants import (
     CHAT_PARTIAL_ENVIRONMENT,
@@ -1002,6 +1003,29 @@ def engine_owned_factory(config):
         )
 
 
+@pytest.mark.parametrize(
+    "environment",
+    [CHAT_PARTIAL_ENVIRONMENT, "ambient"],
+)
+def test_a_template_prompt_is_refused_while_no_runtime_renders_it(environment):
+    # The schema and the AI Catalog's validation accept the format from here on, so a flow could be saved with it
+    # before anything renders it. It would run with no system prompt and no user message, and say nothing.
+    config = engine_owned_chat_partial_config(
+        environment=environment,
+        prompts=[
+            InMemoryPromptConfig(
+                prompt_id="chat_agent_prompt",
+                name="Chat agent",
+                unit_primitives=["duo_chat"],
+                template={"system": "instructions"},
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="which no flow runtime renders yet"):
+        flow_factory(Mock(), config)
+
+
 def test_engine_table_ships_empty():
     assert ENGINE_OWNED_CONFIG_VERSIONS == frozenset()
 
@@ -1223,6 +1247,20 @@ def test_the_served_definition_is_not_changed():
 def test_only_v1_definitions_are_accepted(version):
     with pytest.raises(ValueError, match="must have version 'v1'"):
         flow_config_from_fetched_definition(_fetched_definition(version=version))
+
+
+def test_a_fetched_definition_with_a_template_prompt_is_refused():
+    # Built here, it would fail later with an obscure error instead of this one.
+    definition = _fetched_definition()
+    definition["prompts"][0] = {
+        "prompt_id": "fetched_prompt",
+        "name": "Fetched prompt",
+        "unit_primitives": ["duo_agent_platform"],
+        "template": {"system": "You help."},
+    }
+
+    with pytest.raises(ValueError, match="which no flow runtime renders yet"):
+        flow_config_from_fetched_definition(definition)
 
 
 def test_a_chat_partial_definition_is_rejected():

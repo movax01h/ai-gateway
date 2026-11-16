@@ -55,10 +55,10 @@ variables render the same in either.
 
 ### 2. The keys fix the roles
 
-- **`system`** renders one system message, from its parts in order. Anthropic, for one, takes system content only at
-  the top, and this keeps it there.
-- **`message`** renders one user message per claim, so it fits right after history and never leaves an assistant
-  message for the next call to continue. It's capped at one entry for now, which leaves room to extend it.
+- **`system`** is one system message at the top of the call. Its parts, if it has several, are content blocks of
+  that message, in order. Anthropic, for one, takes system content only at the top, and this keeps it there.
+- **`message`** is one template string that renders one user message per claim, so it fits right after history and
+  never leaves an assistant message for the next call to continue.
 - **A tail before every call.** A component in a flow that opts in calls the model only after rendering at least one
   tail, so the prefix is never the last thing sent.
 
@@ -70,26 +70,61 @@ rules, and the component enforces the third.
 - A new-format prompt uses a top-level `template` key instead of `prompt_template`. A prompt that has both is
   rejected. The key is the marker, so there's no `format` or `version` field, and nothing is inferred from which roles
   appear.
-- `template` holds `system` and an optional `message`, each a list of entries. There's no history placeholder.
-- An entry is a part: an object with a `type` and its `content`. A string is sugar for `{type: text, content: ...}`.
-  That's a change from `prompt_template`, where a `system` list means separate system messages: under `template`,
-  it's the parts of one.
-  Parts map one to one to LangChain content blocks, so new part types (audio, files) are additive. Media parts hold
-  references, which turn into bytes only when the model call is built (ADR-002 §6).
-- The platform appends the claimed messages' attachments after `message`'s parts, in the same user message, as
-  `assemble_user_message` does today.
+- `template` holds `system` and an optional `message`. There's no history placeholder.
+- **The default is what every provider supports.** Every provider takes one system prompt, so the format exposes
+  that, and anything only some providers offer needs the advanced form. `system` comes in two forms:
+
+  ```yaml
+  # Simple: one string.
+  template:
+    system: "You are a helpful agent."
+
+  # Advanced: the system prompt in parts.
+  template:
+    system:
+      type: system_message
+      parts:
+        - text: "You are a helpful agent."        # stable instructions
+        - text: "The project is {{ project }}."   # per-session context
+  ```
+
+  - `type` is required in the advanced form, so a later kind of system content joins with a name of its own and
+    nothing has to be inferred. A list under `system` is refused for the same reason.
+  - A part is its `text`. Options on a part, such as where caching ends, can be added later: unknown keys are
+    refused today, so adding one breaks no config.
+- **`system` is one system message, and its parts are content blocks, in order.** Each model gets them as it gets a
+  `prompt_template.system` list today:
+  - Claude receives them as separate blocks, with the cache breakpoint on the first, so the stable instructions are
+    cached and the per-session part behind them isn't.
+  - Other models get the parts joined into one system prompt (`merges_system_messages`).
+
+  So moving a prompt to the new format doesn't change what any model receives, and the caching from
+  [!7793](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/7793)
+  needs no new code. Caching the first part is today's behavior and the default for now; the default can change to
+  fit most prompts, and explicit control can join as an option on a part once there's a case for it.
+- `message` is one template string for now. A structured form can follow later, the way `system` has one
+  (`{type: ..., parts: [...]}`), for example for attachments or other content types. A string stays valid then, so
+  adding it breaks no config. Media hold references, which turn into bytes only when the model call is built
+  (ADR-002 §6).
+- The platform appends the claimed messages' attachments after the rendered `message`, in the same user message, as
+  `assemble_user_message` does today. Not yet on the engine path: there the first message carries only its text, and
+  a follow-up adds attachments.
 - Every model-family variant of a prompt version declares the same format.
 - Only agent-flow consumers read `template`. Other consumers of the shared `PromptConfig` keep reading
-  `prompt_template`.
+  `prompt_template`, and refuse a `template` prompt instead of sending an empty one.
+- Only prompts declared inline in a flow may use `template` for now. The prompt registry refuses a prompt file that
+  declares it: a flow that references a prompt file can't be routed by its format before the prompt is loaded.
 - The new format renders through the same `Prompt` path as the old one, so one place decides the layout. The
-  tool-output security block is its own system message after `system`'s, and `Prompt` merges them per model
-  (`merges_system_messages`), as it does today
+  tool-output security block follows `system`'s parts, and each model gets it as it does today: Claude as another
+  block, other models joined into the one system prompt (`merges_system_messages`)
   ([!7709](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/7709)).
 - Author system content renders before anything per-session, and nothing per-turn renders before history.
   Per-session author content goes in a later part of `system`, so the first part stays the same across sessions.
-- Cache breakpoints are per message today (`default_cache_control_injection_points`). A breakpoint on the whole system
-  message would cache the per-session parts too, so the new format needs a breakpoint after the first part (open
-  question below). A test renders two sessions and compares the bytes through that part.
+- A breakpoint on the whole system prompt would cache the per-session parts too, so the breakpoint sits on the first
+  part. As an implementation note: `Prompt` builds one LangChain system message per part, as it does for a
+  `prompt_template.system` list, and the existing breakpoint on the first of them
+  (`default_cache_control_injection_points`) is the one we want, so no new cache code is needed. A test renders two
+  sessions and compares the bytes through that part.
 
 The agreed shape, on a generic prompt with the default `message`. The `chat/agent` migration renders its legacy
 parity partials in `message` instead (§5):
@@ -102,19 +137,21 @@ model:
 unit_primitive: duo_chat
 template:
   system:
-    - type: text
-      content: |
-        {% include 'chat/agent/partials/system_static/1.0.0.jinja' %}
-    - |
-      {% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}
-  message:
-    - "{{ inbound_messages.text }}"
+    type: system_message
+    parts:
+      - text: |
+          {% include 'chat/agent/partials/system_static/1.0.0.jinja' %}
+      - text: |
+          {% include 'chat/agent/partials/system_dynamic/1.0.0.jinja' %}
+  message: "{{ inbound_messages.text }}"
 ```
 
 ### 4. One prompt object serves both formats
 
-The registry resolves a prompt once into a typed object: a per-call render, a tail render or none, and the variables
-each one uses. Callers don't branch on format:
+A prompt config exposes the format it declares as one object, whichever key it was written under, and `Prompt`
+resolves that object once into what it renders: a per-call render, and a tail render or none. The same object lists
+the strings it renders, block by block, which is what the variable check and the security scan read. Callers don't
+branch on format:
 
 - **New format:** the per-call render is `system`, and `message` renders once per claim.
 - **Old format:** the per-call render is today's whole template, with `user` and history wherever it puts them, and
@@ -201,8 +238,8 @@ Classifying old-format layouts lives here, as a migration aid, not in the runtim
   same goes for `workflow/*`.
 - **Authors learn a second format.** The validator's messages and the docs have to make that cheap.
 - **Caching.** The prefix stays stable across calls as long as per-turn values stay out of it, and a template change
-  never rewrites stored messages. The breakpoint after `system`'s first part (§3) is new work, and it has to land
-  before a prompt that puts per-session content in a later part, such as `developer/4.0.0`, moves.
+  never rewrites stored messages. The breakpoint sits on `system`'s first part (§3), so it covers the author's
+  instructions and nothing per-session, as today, and no new cache code is needed.
 - **One user message per claim.** Messages claimed together render into one user message, so two quick steers don't
   produce consecutive user messages.
 - **A prefix that renders `goal` repeats the first message once,** in the system prompt and in the first tail. Chat
@@ -212,10 +249,9 @@ Classifying old-format layouts lives here, as a migration aid, not in the runtim
 
 ## Open questions
 
-- Whether attachments get a part type of their own in `message`, so the author places them, instead of the platform
+- Whether attachments get a place of their own in a structured `message`, so the author places them, instead of the platform
   appending them.
-- How the breakpoint after `system`'s first part lands: a per-part breakpoint, or `Prompt` sending the parts as
-  separate system messages to models with `uses_cache_breakpoints`, the inverse of `merges_system_messages`.
+
 - How a batch orders a pending directive, such as `/compact`, against the messages around it.
 - How providers treat a user message right after tool results, which some send as a user turn. Batching makes it one
   user message per claim, and a self-hosted smoke test settles the rest before steering ships.

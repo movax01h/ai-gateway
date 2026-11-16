@@ -34,7 +34,9 @@ def decision_prompt_template_factory(
         that `OpenAIDecisionsModel` takes.
     """
     template = ChatPromptTemplate.from_messages(
-        prompt_template_to_messages(config.prompt_template, tool_output_security=False),
+        prompt_template_to_messages(
+            config.legacy_prompt_template, tool_output_security=False
+        ),
         template_format="jinja2",
     )
 

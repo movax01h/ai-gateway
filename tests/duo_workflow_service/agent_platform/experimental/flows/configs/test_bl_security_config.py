@@ -154,7 +154,7 @@ def _stage_tiers(stage: str) -> dict:
 
 def _prompt_system(prompt_id: str) -> str:
     prompt = next(p for p in (_config().prompts or []) if p.prompt_id == prompt_id)
-    return str(prompt.prompt_template["system"])
+    return str(prompt.legacy_prompt_template["system"])
 
 
 def _cwes(text: str) -> set[str]:
