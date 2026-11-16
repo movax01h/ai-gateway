@@ -22,6 +22,8 @@ _ALLOWED_HEADERS_TO_DOWNSTREAM = ["content-type"]
 
 _UPSTREAM_SERVICE = KindModelProvider.VERTEX_AI.value
 
+_GLOBAL_LOCATION = "global"
+
 
 class PathParams(BaseModel):
     model_name: str
@@ -97,6 +99,23 @@ def _load_allowed_upstream_models() -> list[str]:
     return google_models + config.get_proxy_models_for_provider(_UPSTREAM_SERVICE)
 
 
+def _load_upstream_locations() -> dict[str, str]:
+    """Return the `prompt_params.vertex_location` of each proxy model that sets one."""
+    return {
+        llm_def.params.model: llm_def.prompt_params.vertex_location
+        for llm_def in ModelSelectionConfig.instance().get_llm_definitions().values()
+        if llm_def.proxy_provider == _UPSTREAM_SERVICE
+        and llm_def.params.model
+        and llm_def.prompt_params.vertex_location
+    }
+
+
+def _endpoint_for_location(location: str) -> str:
+    if location == _GLOBAL_LOCATION:
+        return "aiplatform.googleapis.com"
+    return f"{location}-aiplatform.googleapis.com"
+
+
 def _build_headers_to_upstream() -> dict[str, str]:
     return {"Authorization": f"Bearer {access_token()}"}
 
@@ -113,7 +132,12 @@ class VertexAIProxyModelFactory(BaseProxyModelFactory):
     async def factory(self, request: fastapi.Request) -> ProxyModel:
         path_params = PathParams.try_from_request(request)
 
-        upstream_path = _get_upstream_path(path_params, self.project, self.location)
+        base_url, location = self._base_url, self.location
+        if configured := _load_upstream_locations().get(path_params.model_name):
+            base_url = f"https://{_endpoint_for_location(configured)}"
+            location = configured
+
+        upstream_path = _get_upstream_path(path_params, self.project, location)
 
         json_body = await extract_json_body(request)
         stream = _get_stream_flag(path_params, json_body)
@@ -128,7 +152,7 @@ class VertexAIProxyModelFactory(BaseProxyModelFactory):
         enforce_model_allowlist(request, path_params.model_name)
 
         return ProxyModel(
-            base_url=self._base_url,
+            base_url=base_url,
             model_name=path_params.model_name,
             upstream_path=upstream_path,
             stream=stream,
