@@ -49,6 +49,7 @@ from ai_gateway.model_selection import (
     ensure_restricted_model_access,
 )
 from ai_gateway.prompts import BasePromptRegistry
+from ai_gateway.response_schemas.registry import schema_index
 from contract import contract_pb2, contract_pb2_grpc
 from duo_workflow_service.agent_platform.utils.exceptions import (
     FlowConfigLimitExceededError,
@@ -2212,8 +2213,9 @@ def run(config: Config):
     setup_error_tracking()
     setup_monitoring()
     setup_logging()
-    # After observability setup, so a duplicate feature id is reported, not lost.
+    # After observability setup, so a duplicate feature or schema id is reported, not lost.
     register_served_flows()
+    schema_index()
     setup_profiling()
     loop = asyncio.get_event_loop()
     # Before validate_llm_access() opens the first pooled connection, so every
