@@ -63,16 +63,6 @@
 
 # SAST vulnerability resolution flow and prompts
 /ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/response_schemas/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/response_schemas/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/response_schemas/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-
-# SAST false positive detection response schemas
-/ai_gateway/response_schemas/definitions/sast_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/response_schemas/definitions/validate_sast_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-
-# Secret false positive detection response schema
-/ai_gateway/response_schemas/definitions/secret_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
 
 # Dependency bump resolution flows and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump/ @mbenayoun @gitlab-org/govern/agentic-security-flows
@@ -167,16 +157,6 @@
 
 # SAST vulnerability resolution flow and prompts
 /ai_gateway/prompts/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/response_schemas/definitions/resolve_sast_*/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/response_schemas/definitions/validate_sast_fix_has_changes/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/response_schemas/definitions/ensure_clean_git_state/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-
-# SAST false positive detection response schemas
-/ai_gateway/response_schemas/definitions/sast_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-/ai_gateway/response_schemas/definitions/validate_sast_vulnerability/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/static-analysis
-
-# Secret false positive detection response schema
-/ai_gateway/response_schemas/definitions/secret_fp_detection/ @mbenayoun @gitlab-org/govern/agentic-security-flows @gitlab-org/secure/secret-detection
 
 # Dependency bump resolution flows and prompts
 /duo_workflow_service/agent_platform/v1/flows/configs/resolve_dependency_bump/ @mbenayoun @gitlab-org/govern/agentic-security-flows

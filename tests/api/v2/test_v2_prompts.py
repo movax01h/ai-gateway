@@ -16,6 +16,7 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
+from ai_gateway.model_selection import PromptNotServedOverHttpError
 from ai_gateway.model_selection.model_selection_config import (
     ChatAmazonQDefinition,
     ChatLiteLLMDefinition,
@@ -23,6 +24,10 @@ from ai_gateway.model_selection.model_selection_config import (
 from ai_gateway.model_selection.models import ChatAmazonQParams, ChatLiteLLMParams
 from lib.context import TokenUsage
 from tests.conftest import FakeModel
+
+# `mock_registry_get` returns the `test` prompt, which declares no `models_from`. The prompt routes refuse such a
+# version outside `log` and `off` mode, so the tests run in `log` mode unless a test picks another mode.
+pytestmark = pytest.mark.usefixtures("feature_allowlist_mode")
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -426,6 +431,27 @@ class TestPromptFeatureCategory:
         assert response.status_code == 200
         [access_log] = [log for log in cap_logs if log.get("method") == "POST"]
         assert access_log.get("meta.feature_category") == "vulnerability_management"
+
+
+@pytest.mark.usefixtures("frozen_datetime_now", "mock_registry_get", "cloud_gateway")
+@pytest.mark.parametrize("feature_allowlist_mode", ["fallback"], indirect=True)
+class TestPromptVersionWithoutModelsFrom:
+    """The `test` prompt of `mock_registry_get` declares no `models_from`."""
+
+    def test_refuses_the_version(self, mock_client, feature_allowlist_mode):
+        response = mock_client.post(
+            "/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json={"inputs": {"name": "John", "age": 20}},
+        )
+
+        assert response.status_code == 403
+        assert response.json() == {
+            "detail": str(PromptNotServedOverHttpError("test", None))
+        }
 
 
 class TestUnauthorizedScopes:

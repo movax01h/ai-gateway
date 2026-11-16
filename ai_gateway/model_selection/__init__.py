@@ -2,6 +2,7 @@ from .errors import (
     FeatureSettingRequiredError,
     ModelNotAllowedForFeatureError,
     ModelSelectionError,
+    PromptNotServedOverHttpError,
     ProviderNotServedError,
 )
 from .model_selection_config import (
@@ -26,6 +27,7 @@ __all__ = [
     "ModelSelectionError",
     "ModelTagEntry",
     "PaidCreditsModelAccessError",
+    "PromptNotServedOverHttpError",
     "PromptParams",
     "ProviderNotServedError",
     "RestrictedModelAccessError",

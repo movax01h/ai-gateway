@@ -1494,11 +1494,25 @@ class BasePromptRegistry(ABC):
 
         # Only record internal events once we know the user has access to the Unit Primitive
         if track_event:
-            self.internal_event_client.track_event(
-                f"request_{authorized_unit_primitive}", category=internal_event_category
-            )
+            self.track_request(authorized_unit_primitive, internal_event_category)
 
         return prompt
+
+    def track_request(
+        self, unit_primitive: GitLabUnitPrimitive | str, internal_event_category: str
+    ) -> None:
+        """Record the internal event of a request for ``unit_primitive``.
+
+        ``get_on_behalf`` records it unless the caller passes ``track_event=False``. A caller that can still refuse the
+        request after ``get_on_behalf`` passes ``track_event=False``, and records the request once it serves it.
+
+        Args:
+            unit_primitive: The unit primitive that the request was authorized for.
+            internal_event_category: The category of the internal event.
+        """
+        self.internal_event_client.track_event(
+            f"request_{unit_primitive}", category=internal_event_category
+        )
 
     @staticmethod
     def _collect_jinja2_variables(template: str) -> set[str]:
