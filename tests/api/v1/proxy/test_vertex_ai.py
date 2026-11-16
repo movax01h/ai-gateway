@@ -1,5 +1,7 @@
-from unittest.mock import ANY, AsyncMock, patch
+import json
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
+import httpx
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, GitLabUnitPrimitive, UserClaims
 
@@ -142,6 +144,78 @@ class TestProxyVertexAI:
                 "orbit_called": False,
             },
         )
+
+    @pytest.mark.parametrize(
+        ("action", "content_type", "body_prefix"),
+        [
+            ("generateContent", "application/json", ""),
+            ("streamGenerateContent?alt=sse", "text/event-stream", "data: "),
+        ],
+    )
+    def test_gemini_billing_event(
+        self,
+        mock_client,
+        mock_send_billing_event,
+        mock_proxy_async_client,
+        unit_primitive,
+        action,
+        content_type,
+        body_prefix,
+    ):
+        """A Gemini response is sent to the global endpoint and billed with its token usage."""
+        upstream_response = {
+            "candidates": [
+                {
+                    "content": {"role": "model", "parts": [{"text": "ready"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 7,
+                "candidatesTokenCount": 3,
+                "totalTokenCount": 10,
+            },
+        }
+        mock_proxy_async_client.send.return_value = httpx.Response(
+            status_code=200,
+            headers={"Content-Type": content_type},
+            content=f"{body_prefix}{json.dumps(upstream_response)}\r\n\r\n".encode(),
+            request=Mock(),
+        )
+
+        with patch("ai_gateway.proxy.clients.vertex_ai.access_token"):
+            response = mock_client.post(
+                "/proxy/vertex-ai/v1/projects/PROJECT/locations/LOCATION/"
+                f"publishers/google/models/gemini-4-argon:{action}",
+                headers={
+                    "Authorization": "Bearer 12345",
+                    "X-Gitlab-Authentication-Type": "oidc",
+                    "X-Gitlab-Unit-Primitive": unit_primitive,
+                    "X-Gitlab-Instance-Id": "1",
+                    "X-Gitlab-Project-Id": "1",
+                    "X-Gitlab-Namespace-Id": "1",
+                    "x-gitlab-root-namespace-id": "1",
+                },
+                json={"contents": [{"role": "user", "parts": [{"text": "Hi"}]}]},
+            )
+
+        assert response.status_code == 200
+        assert json.dumps(upstream_response) in response.text
+
+        upstream_url = mock_proxy_async_client.send.call_args[0][0].url
+        assert upstream_url.host == "aiplatform.googleapis.com"
+        assert "/locations/global/publishers/google/models/gemini-4-argon:" in str(
+            upstream_url
+        )
+
+        mock_send_billing_event.assert_called_once()
+        operations = mock_send_billing_event.call_args.kwargs["metadata"][
+            "llm_operations"
+        ]
+        assert [
+            (op["model_id"], op["prompt_tokens"], op["completion_tokens"])
+            for op in operations
+        ] == [("gemini-4-argon", 7, 3)]
 
 
 class TestUnauthorizedScopes:
