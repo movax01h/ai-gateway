@@ -34,7 +34,10 @@ from ai_gateway.prompts import LocalPromptRegistry, Prompt, feature_roots
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
-from ai_gateway.prompts.registry import feature_setting_for_prompt_id
+from ai_gateway.prompts.registry import (
+    LEGACY_MODEL_MAPPING,
+    feature_setting_for_prompt_id,
+)
 from ai_gateway.prompts.typing import Model, TypeModelFactory, TypePromptTemplateFactory
 from ai_gateway.vendor.langchain_litellm.litellm import ChatLiteLLM
 from tests.prompts.prompt_dirs import (
@@ -2392,6 +2395,18 @@ class TestDefaultModelOfAPromptVersion:
             match="Prompt 'classify_goal_tier' has no default model. Send `model_metadata` with a `feature_setting`.",
         ):
             repo_registry._default_model_metadata("classify_goal_tier", "^1.0.0")
+
+    def test_serves_base_for_a_legacy_version_without_changing_the_shared_definition(
+        self, repo_registry: LocalPromptRegistry
+    ):
+        config = ModelSelectionConfig.instance()
+        identifier = LEGACY_MODEL_MAPPING["chat/agent"]["1.0.0"]
+        family = list(config.get_model(identifier).family)
+
+        metadata = repo_registry._default_model_metadata("chat/agent", "1.0.0")
+
+        assert metadata.llm_definition.family == ["base"]
+        assert config.get_model(identifier).family == family
 
     def test_serves_the_default_of_the_prompt_id_for_a_version_without_models_from(
         self, repo_registry: LocalPromptRegistry
