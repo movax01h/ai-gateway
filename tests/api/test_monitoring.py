@@ -5,7 +5,7 @@ import pytest
 from dependency_injector import containers, providers
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from tree_sitter_languages import get_parser
+from tree_sitter_language_pack import get_parser
 
 from ai_gateway.api import create_fast_api_server
 from ai_gateway.api.monitoring import execute_default_code_completions, validated

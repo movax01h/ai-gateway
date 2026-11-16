@@ -116,6 +116,15 @@ class RubyCommentVisitor(BaseCommentVisitor):
 class RustCommentVisitor(BaseCommentVisitor):
     _TARGET_SYMBOLS = [
         "line_comment",
+        "block_comment",
+        "//",
+        "/*",
+        "*/",
+        "outer_doc_comment_marker",
+        "inner_doc_comment_marker",
+        "doc_comment",
+        "/",
+        "!",
         "source_file",
     ]
 

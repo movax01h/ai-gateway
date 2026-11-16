@@ -78,6 +78,18 @@ const writeStringBackwards = (inpStr) => {
 const reverseString = (inpStr) => {
   let outStr = '';
 """
+
+RUST_SAMPLE_1 = """
+fn main() {
+    let total = 1;
+}
+
+/// Adds one.
+/// Second line.
+fn add(x: i32) -> i32 {
+    x + 1
+}
+"""
 # editorconfig-checker-enable
 
 
@@ -97,6 +109,10 @@ const reverseString = (inpStr) => {
         (RUBY_SAMPLE_1, (7, 4), LanguageId.RUBY, [(7, 4), (9, 7)]),
         # Return the end of block only
         (JAVASCRIPT_SAMPLE_1, (12, 14), LanguageId.JS, [(12, 14), (13, 1)]),
+        # Keep the function that follows the doc comment lines
+        (RUST_SAMPLE_1, (4, 0), LanguageId.RUST, [(4, 0), (8, 1)]),
+        # Keep the function when the cursor is on the line after a doc comment
+        (RUST_SAMPLE_1, (6, 0), LanguageId.RUST, [(6, 0), (8, 1)]),
     ],
 )
 @pytest.mark.asyncio

@@ -105,6 +105,11 @@ class RepositoryFileBaseTool(DuoBaseTool):
             # Use the values from the URL
             return url_project_id, url_ref, url_file_path, errors
         except GitLabUrlParseError as e:
+            # A project root URL is enough when ref and file_path are passed separately
+            if ref and file_path:
+                project_id, errors = self._validate_project_url(url, project_id)
+                return project_id, ref, file_path, errors
+
             errors.append(f"Failed to parse URL: {e!s}")
             return project_id, ref, file_path, errors
 
