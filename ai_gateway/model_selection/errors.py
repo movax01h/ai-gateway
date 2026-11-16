@@ -5,10 +5,13 @@ None of these subclass ``ValueError``: ``ModelConfigMiddleware``, the Duo Workfl
 model. A denial must reach the client instead of being replaced silently.
 """
 
+from typing import Optional
+
 __all__ = [
     "FeatureSettingRequiredError",
     "ModelNotAllowedForFeatureError",
     "ModelSelectionError",
+    "PromptNotServedOverHttpError",
     "ProviderNotServedError",
 ]
 
@@ -46,3 +49,20 @@ class ProviderNotServedError(ModelSelectionError):
             f"This gateway does not serve models from provider '{provider}'"
         )
         self.provider = provider
+
+
+class PromptNotServedOverHttpError(ModelSelectionError):
+    """A prompt route was called for a prompt version that declares no ``models_from``."""
+
+    def __init__(self, prompt_id: str, prompt_version: Optional[str]) -> None:
+        version = (
+            f"version '{prompt_version}'" if prompt_version else "the default version"
+        )
+        super().__init__(
+            f"Prompt '{prompt_id}', {version}, is not served over HTTP. The prompt routes serve only the prompt "
+            "versions that declare `models_from`. This version runs only in the Duo Workflow Service or behind "
+            "another route, so do not add `models_from` to call it. To call it over HTTP on a local AI Gateway, set "
+            "AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP=log."
+        )
+        self.prompt_id = prompt_id
+        self.prompt_version = prompt_version

@@ -23,6 +23,7 @@ from ai_gateway.api.feature_category import (
 from ai_gateway.async_dependency_resolver import get_config, get_prompt_registry
 from ai_gateway.feature_allowlist import (
     check_client_model_metadata,
+    check_prompt_served_over_http,
     note_prompt_feature,
     prompt_model_check_context,
 )
@@ -153,7 +154,25 @@ async def _invoke(
             prompt_request.prompt_version,
             internal_event_category=internal_event_category,
             disallowed_issuers=[CloudConnectorConfig().service_name],
+            # A refused request is not recorded. The route records the request once it serves the version.
+            track_event=False,
         )
+        # Check after the registry resolves the version, so that a prompt or a version that does not resolve keeps its
+        # own error.
+        if (
+            prompt_registry.models_from(
+                prompt_id,
+                prompt_request.prompt_version,
+                current_model_metadata_context.get(),
+            )
+            is None
+        ):
+            check_prompt_served_over_http(
+                prompt_id,
+                prompt_request.prompt_version,
+                log_context={"path": request.url.path},
+            )
+        prompt_registry.track_request(prompt.unit_primitive, internal_event_category)
     except ModelSelectionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ParseConstraintError:
