@@ -15,7 +15,7 @@ Registration strips the prompt-id prefix, so a self-namespaced include such as
 
 from pathlib import Path
 
-from lib.feature_roots import default_features_dir
+from lib.feature_roots import feature_subdirs
 from lib.subprompts_index import read_subprompts_index
 
 __all__ = [
@@ -137,26 +137,13 @@ def discover_feature_prompts(features_dir: Path | None = None) -> None:
             ``subprompts_index.yml`` is malformed or lists a directory without
             ``base/``.
     """
-    root = features_dir or default_features_dir()
-    shared_root = root.parent / "shared"
-
-    # Each tree is guarded on its own: ai/shared/ can exist without ai/features/.
-    if root.is_dir():
-        for feature_dir in sorted(root.glob("*/*")):
-            prompts_dir = feature_dir / "prompts"
-            if prompts_dir.is_dir():
-                register_prompt_root(feature_dir.name, prompts_dir)
-                register_prompt_root(
-                    f"{feature_dir.parent.name}/{feature_dir.name}", prompts_dir
-                )
-                subprompts = read_subprompts_index(prompts_dir)
-                for prompt_id, prompt_dir in subprompts.items():
-                    register_prompt_root(prompt_id, prompt_dir)
-                if subprompts:
-                    _NESTED_PROMPT_ROOTS[prompts_dir] = tuple(subprompts.values())
-
-    if shared_root.is_dir():
-        for shared_dir in sorted(shared_root.glob("*")):
-            prompts_dir = shared_dir / "prompts"
-            if prompts_dir.is_dir():
-                register_prompt_root(shared_dir.name, prompts_dir)
+    for found in feature_subdirs("prompts", features_dir):
+        register_prompt_root(found.name, found.path)
+        if found.shared:
+            continue
+        register_prompt_root(f"{found.domain}/{found.name}", found.path)
+        subprompts = read_subprompts_index(found.path)
+        for prompt_id, prompt_dir in subprompts.items():
+            register_prompt_root(prompt_id, prompt_dir)
+        if subprompts:
+            _NESTED_PROMPT_ROOTS[found.path] = tuple(subprompts.values())

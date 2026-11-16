@@ -11,6 +11,7 @@ from pyfakefs.fake_filesystem import FakeFilesystem
 
 from ai_gateway.response_schemas import ResponseSchemaRegistry
 from ai_gateway.response_schemas.base import BaseAgentOutput
+from ai_gateway.response_schemas.registry import schema_index
 
 
 # Clear the cache before and after each test
@@ -21,11 +22,13 @@ def clear_schema_cache():
 
     if cache_clear is not None:
         cache_clear()
+    schema_index.cache_clear()
 
     yield
 
     if cache_clear is not None:
         cache_clear()
+    schema_index.cache_clear()
 
 
 # editorconfig-checker-disable
@@ -271,14 +274,14 @@ class TestResponseSchemaRegistry:
     def test_empty_schema_directory_raises_error(
         self, fs: FakeFilesystem, registry: ResponseSchemaRegistry
     ):
-        """Test error when schema dir exists but has no JSON files."""
+        """Test that a base dir without JSON files defines no schema."""
         ai_gateway_dir = Path(__file__).parent.parent.parent / "ai_gateway"
         empty_dir = (
             ai_gateway_dir / "response_schemas" / "definitions" / "empty/schema/base"
         )
         fs.create_dir(empty_dir)
 
-        with pytest.raises(ValueError, match="No JSON files found"):
+        with pytest.raises(ValueError, match="Schema not found"):
             registry.get("empty/schema", "1.0.0")
 
     def test_dev_version_excluded_from_caret_constraint(
@@ -311,6 +314,7 @@ class TestResponseSchemaRegistry:
             "../../secret",
             "general/../../../../etc/passwd",
             "../../../../../../tmp",
+            "../definitions/general/structured_response",
         ],
     )
     def test_path_traversal_attack(
@@ -318,6 +322,72 @@ class TestResponseSchemaRegistry:
         registry: ResponseSchemaRegistry,
         malicious_path: str,
     ):
-        """Test that path traversal attempts are blocked."""
-        with pytest.raises(ValueError, match="path traversal detected"):
+        """Test that an ID is only an index key, so a path in it finds nothing."""
+        with pytest.raises(ValueError, match="Schema not found"):
             registry.get(malicious_path, "1.0.0")
+
+
+_REPO_ROOT = Path(__file__).parent.parent.parent
+_FEATURE_SCHEMAS = _REPO_ROOT / "ai" / "features" / "review" / "my_review" / "schemas"
+_SCHEMA_JSON = '{"title": "moved_tool", "type": "object", "properties": {}}'
+
+
+class TestSchemaRoots:
+    @pytest.mark.parametrize(
+        "schemas_dir",
+        [_FEATURE_SCHEMAS, _REPO_ROOT / "ai" / "shared" / "my_shared" / "schemas"],
+    )
+    def test_resolves_schema_from_feature_and_shared_roots(
+        self, fs: FakeFilesystem, registry: ResponseSchemaRegistry, schemas_dir: Path
+    ):
+        fs.create_file(schemas_dir / "my_schema/base/1.0.0.json", contents=_SCHEMA_JSON)
+
+        assert registry.get("my_schema", "^1.0.0").tool_title == "moved_tool"
+
+    @pytest.mark.parametrize(
+        "copy_root",
+        [
+            _REPO_ROOT / "ai_gateway" / "response_schemas" / "definitions",
+            _REPO_ROOT / "ai" / "features" / "chat" / "my_chat" / "schemas",
+            _REPO_ROOT / "ai" / "shared" / "my_shared" / "schemas",
+        ],
+    )
+    def test_id_defined_in_two_roots_fails(
+        self, fs: FakeFilesystem, registry: ResponseSchemaRegistry, copy_root: Path
+    ):
+        for root in (_FEATURE_SCHEMAS, copy_root):
+            fs.create_file(root / "my_schema/base/1.0.0.json", contents=_SCHEMA_JSON)
+
+        with pytest.raises(ValueError, match="Duplicate schema id 'my_schema'"):
+            registry.get("my_schema", "1.0.0")
+
+    def test_nested_id_defined_in_two_roots_fails(
+        self, fs: FakeFilesystem, registry: ResponseSchemaRegistry
+    ):
+        fs.create_file(
+            _FEATURE_SCHEMAS / "general/structured_response/base/1.0.0.json",
+            contents=_SCHEMA_JSON,
+        )
+
+        with pytest.raises(
+            ValueError, match="Duplicate schema id 'general/structured_response'"
+        ):
+            registry.get("test/optional_fields", "1.0.0")
+
+    def test_empty_base_dir_left_by_a_move_is_not_a_duplicate(
+        self, fs: FakeFilesystem, registry: ResponseSchemaRegistry
+    ):
+        fs.create_dir(_FEATURE_SCHEMAS / "general/structured_response/base")
+
+        assert registry.get("general/structured_response", "1.0.0")
+
+    def test_index_is_built_once_for_all_instances(self, mock_fs):
+        ResponseSchemaRegistry().get("general/structured_response", "1.0.0")
+        ResponseSchemaRegistry().get("test/optional_fields", "1.0.0")
+
+        assert schema_index.cache_info().misses == 1
+
+
+def test_checked_in_schema_ids_are_unique_across_roots():
+    # Indexes the real tree, nested IDs included; a duplicate ID raises.
+    assert schema_index()

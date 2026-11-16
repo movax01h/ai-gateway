@@ -15,6 +15,8 @@ design, and some parts of that design are not implemented yet.
 | Prompt | `ai/features/<domain>/<feature>/prompts/<family>/<version>.yml`, plus `.jinja` includes | prompt IDs `<feature>` and `<domain>/<feature>` |
 | One of several prompts of a feature | `ai/features/<domain>/<feature>/prompts/<directory>/<family>/<version>.yml`, listed in `prompts/subprompts_index.yml` | the prompt ID that the index lists |
 | Shared prompt | `ai/shared/<name>/prompts/<family>/<version>.yml`, plus `.jinja` includes | prompt ID `<name>` |
+| Response schema | `ai/features/<domain>/<feature>/schemas/<schema_id>/base/<version>.json` | response schema ID `<schema_id>` |
+| Shared response schema | `ai/shared/<name>/schemas/<schema_id>/base/<version>.json` | response schema ID `<schema_id>` |
 | Flow configuration | `ai/features/<domain>/<feature>/config/<version>.yml` | flow ID `<feature>` |
 | Feature tools | `ai/features/<domain>/<feature>/components/__init__.py`, in `FEATURE_TOOLS` | tools in the tools registry |
 | Tests | `ai/features/<domain>/<feature>/tests/` | collected by `pytest` |
@@ -92,10 +94,20 @@ same: `ai/shared/common/prompts/` serves `common/tool_output_security/1.0.0.jinj
 
 Keep `ai/shared/` small. A definition that only one feature uses belongs in that feature.
 
-### Not supported yet
+### Response schemas
 
-Response schemas cannot live in a feature or in `ai/shared/`. They stay in
-`ai_gateway/response_schemas/definitions/`.
+The directory under `schemas/` is the response schema ID, so a schema keeps its ID when it
+moves from `ai_gateway/response_schemas/definitions/`. A flow configuration needs no change.
+A schema that several features use goes to `ai/shared/<name>/schemas/`.
+
+A response schema ID must be unique across `ai/features/`, `ai/shared/`, and
+`ai_gateway/response_schemas/definitions/`, nested IDs such as `analysis/code_review`
+included. When two directories define the same ID, the Duo Workflow Service fails at boot, and
+`tests/response_schemas/test_registry.py` catches the duplicate in CI.
+
+Move every version of a schema in one merge request. The registry does not combine versions
+from two directories, so a `2.0.0.json` in a feature and a `1.0.0.json` left in
+`definitions/` is a duplicate ID.
 
 ## Add a version to a legacy feature
 
@@ -249,8 +261,8 @@ Before you start, check where the feature goes:
   to `ai/features/chat/react/`, and `workflow/planner` goes to `ai/features/workflow/planner/`.
 - A shared prompt goes to `ai/shared/<name>/prompts/`. This includes the include-only
   directories such as `common/`.
-- A feature with response schemas moves its prompts and its configuration. Its schemas stay
-  in `ai_gateway/response_schemas/definitions/`.
+- A response schema moves to the `schemas/` directory of its feature, or to
+  `ai/shared/<name>/schemas/` when several features use it.
 - Ask the group that owns the feature to review the move.
 
 Move the whole feature in one merge request:
@@ -269,6 +281,8 @@ Move the whole feature in one merge request:
    git mv ai_gateway/prompts/definitions/<name> ai/shared/<name>/prompts
    # a flow
    git mv duo_workflow_service/agent_platform/v1/flows/configs/<feature> ai/features/<domain>/<feature>/config
+   # a response schema
+   git mv ai_gateway/response_schemas/definitions/<schema_id> ai/features/<domain>/<feature>/schemas/<schema_id>
    ```
 
    Includes such as `<feature>/system/1.0.0.jinja` or `chat/react/system/1.0.0.jinja` keep

@@ -1,5 +1,5 @@
 import json
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import NamedTuple, Type
 
@@ -7,12 +7,58 @@ import structlog.stdlib
 
 from ai_gateway.response_schemas.base import BaseAgentOutput, BaseResponseSchemaRegistry
 from ai_gateway.response_schemas.converter import json_schema_to_pydantic
+from lib.feature_roots import feature_subdirs
 from lib.version import resolve_version
 
-__all__ = ["ResponseSchemaRegistered", "ResponseSchemaRegistry"]
+__all__ = [
+    "ResponseSchemaRegistered",
+    "ResponseSchemaRegistry",
+    "schema_index",
+    "schema_roots",
+]
 
 
 log = structlog.stdlib.get_logger("schema_registry")
+
+
+def schema_roots() -> list[Path]:
+    """Return every dir that holds ``<schema_id>/base/<version>.json`` files.
+
+    The roots are ``definitions/`` next to this module, each
+    ``ai/features/<domain>/<feature>/schemas/``, and each ``ai/shared/<name>/schemas/``.
+    """
+    roots = [(Path(__file__).parent / "definitions").resolve()]
+    roots += [found.path for found in feature_subdirs("schemas")]
+    return roots
+
+
+@cache
+def schema_index() -> dict[str, Path]:
+    """Map each schema ID to its ``base/`` dir, across every schema root.
+
+    The ID is the path from the root to the dir that holds ``base/``, so
+    ``analysis/code_review/base/`` has the ID ``analysis/code_review``. A ``base/``
+    dir without a ``.json`` file, such as one that a move leaves behind, is skipped.
+    The index is built once per process; tests clear it with
+    ``schema_index.cache_clear()``.
+
+    Raises:
+        ValueError: If two roots define the same ID. A copy left behind after a
+            move would otherwise decide which version a flow gets by scan order.
+    """
+    index: dict[str, Path] = {}
+    for root in schema_roots():
+        for base_dir in sorted(root.rglob("base")):
+            if not base_dir.is_dir() or not any(base_dir.glob("*.json")):
+                continue
+            schema_id = base_dir.parent.relative_to(root).as_posix()
+            if schema_id in index:
+                raise ValueError(
+                    f"Duplicate schema id {schema_id!r}: defined in "
+                    f"{index[schema_id]} and {base_dir}"
+                )
+            index[schema_id] = base_dir
+    return index
 
 
 class ResponseSchemaRegistered(NamedTuple):
@@ -22,8 +68,6 @@ class ResponseSchemaRegistered(NamedTuple):
 
 
 class ResponseSchemaRegistry(BaseResponseSchemaRegistry):
-    key_schema_type_base: str = "base"
-
     @lru_cache(maxsize=30)
     def get(self, schema_id: str, schema_version: str) -> Type[BaseAgentOutput]:
         """Get a Pydantic model from a specific JSON schema definition."""
@@ -38,19 +82,17 @@ class ResponseSchemaRegistry(BaseResponseSchemaRegistry):
             raise ValueError(f"Failed to load schema '{schema_id}': {e}") from e
 
     def _resolve_id(self, schema_id: str) -> Path:
-        """Find schema directory path."""
-        base_path = Path(__file__).parent
-        schema_path = (
-            base_path / "definitions" / schema_id / self.key_schema_type_base
-        ).resolve()
+        """Return the ``base/`` dir that :func:`schema_index` lists for ``schema_id``.
 
-        # Assert containment — the resolved path must still be inside base_path
-        if not schema_path.is_relative_to(base_path.resolve()):
-            raise ValueError("Invalid schema_id: path traversal detected")
+        ``schema_id`` is only a key into the index, so it never builds a path.
 
-        if not schema_path.exists():
-            raise FileNotFoundError(f"Schema not found: {schema_path}")
-
+        Raises:
+            ValueError: If two roots define the same schema ID.
+            FileNotFoundError: If no root defines ``schema_id``.
+        """
+        schema_path = schema_index().get(schema_id)
+        if schema_path is None:
+            raise FileNotFoundError("Schema not found")
         return schema_path
 
     def _load_schema_definition(
