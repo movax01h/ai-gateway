@@ -27,28 +27,22 @@ def test_prompt_config_rejects_max_retries_outside_cap(max_retries):
         PromptConfig.model_validate(_prompt_config(max_retries))
 
 
-@pytest.mark.parametrize(
-    ("declared", "override", "has_security_block"),
-    [
-        (True, None, True),
-        (False, None, False),
-        (False, True, True),
-        (True, False, False),
-    ],
-    ids=["own_setting_on", "own_setting_off", "override_on", "override_off"],
-)
-def test_resolve_takes_the_override_or_the_prompt_setting(
-    declared, override, has_security_block
+@pytest.mark.parametrize("tool_output_security", [True, False])
+def test_the_format_renders_with_the_security_setting_it_is_given(
+    tool_output_security,
 ):
+    # The config's own `tool_output_security` is the caller's to pass: `Prompt._resolve` combines it with whether
+    # tools are bound, which `tests/prompts/test_base.py` covers.
     config = PromptConfig(
         name="x",
         unit_primitive="duo_chat",
         prompt_template={"system": "instructions"},
-        tool_output_security=declared,
     )
 
-    prefix = config.resolve(tool_output_security=override).prefix
+    prefix = config.prompt_format.resolve(
+        tool_output_security=tool_output_security
+    ).prefix
 
     assert (
         len(prefix) == 3
-    ) is has_security_block  # system, security block, history placeholder
+    ) is tool_output_security  # system, security block, history placeholder

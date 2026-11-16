@@ -527,7 +527,7 @@ class LocalPromptRegistry(BasePromptRegistry):
             ) from e
 
         variables: set[str] = set()
-        for source in config.sources():
+        for source in config.prompt_format.sources():
             variables.update(self._collect_jinja2_variables(source.text))
         return variables
 
@@ -650,4 +650,14 @@ class LocalPromptRegistry(BasePromptRegistry):
         """
 
         with open(version_file, "r") as fp:
-            return PromptConfig(**yaml.safe_load(fp))
+            config = PromptConfig(**yaml.safe_load(fp))
+
+        # Only inline flow prompts may use `template` for now. A flow that references a prompt file can't be told
+        # apart from one on the old format before the prompt is loaded, so it wouldn't run on the chat engine, and
+        # its model would get the system prompt with nothing to answer.
+        if config.template is not None:
+            raise ValueError(
+                f"{version_file}: 'template' is only available for prompts declared inline in a flow for now"
+            )
+
+        return config

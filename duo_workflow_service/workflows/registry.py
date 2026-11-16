@@ -20,6 +20,7 @@ from google.protobuf import struct_pb2
 from google.protobuf.json_format import MessageToDict
 
 from ai_gateway.prompts.config.base import InMemoryPromptConfig
+from ai_gateway.prompts.config.formats import parse_format
 from duo_workflow_service.agent_platform.constants import (
     CHAT_PARTIAL_ENVIRONMENT,
 )
@@ -293,31 +294,30 @@ def _validate_flow_config_prompts(
     except TypeError:
         return
 
-    # Validate only actual prompt text roles, not metadata/placeholders
-    # Roles that contain actual prompt content to validate
+    # Validate only actual prompt text roles, not metadata/placeholders. The new format's `system` block is text by
+    # construction, so it is covered by the same role.
     prompt_text_roles = {"system", "user", "assistant", "function"}
 
     # Validate each prompt configuration
     for prompt_config in prompts_iter:
         # Extract prompt_id and prompt_template from various formats
-        if isinstance(prompt_config, InMemoryPromptConfig):
-            prompt_id = prompt_config.prompt_id
-            prompt_template = prompt_config.prompt_template
-        elif isinstance(prompt_config, dict):
-            prompt_id = prompt_config.get("prompt_id", "unknown")
-            prompt_template = prompt_config.get("prompt_template", {})
-        else:
-            # Handle objects with attributes (e.g., Pydantic models, test mocks)
-            prompt_id = getattr(prompt_config, "prompt_id", "unknown")
-            prompt_template = getattr(prompt_config, "prompt_template", {})
+        # Every config reaching here has built its prompts, so a raw mapping would be a bug, not a format to
+        # handle: resolving one would fail inside a security scan, which is the worst place for an AttributeError.
+        prompt_id = getattr(prompt_config, "prompt_id", "unknown")
+        prompt_template = getattr(prompt_config, "prompt_template", None)
+        template = getattr(prompt_config, "template", None)
 
-        for role, text in prompt_template.items():
-            # Skip non-text roles (e.g., "placeholder: history" is metadata, not content)
+        # A role's parts are scanned joined, so a pattern that opens in one part and closes in the next, such as an
+        # HTML comment, is still caught.
+        texts_by_role: dict[str, list[str]] = {}
+        for source in parse_format(prompt_template, template).sources():
+            texts_by_role.setdefault(source.block, []).append(source.text)
+
+        for role, texts in texts_by_role.items():
+            text = "\n".join(texts)
+            # Skip non-text roles (e.g. "placeholder: history" is metadata, not content)
             if role not in prompt_text_roles:
                 continue
-
-            if isinstance(text, list):
-                text = "\n".join(text)
 
             if text and isinstance(text, str):
                 try:
@@ -341,6 +341,37 @@ def _validate_flow_config_prompts(
                         f"  - Hidden unicode characters\n"
                         f"Please remove these patterns from your prompt configuration."
                     ) from e
+
+
+def _refuse_template_prompts(
+    config: Union[
+        ExperimentalFlowConfig,
+        ExperimentalPartialFlowConfig,
+        V1FlowConfig,
+        V1PartialFlowConfig,
+    ],
+) -> None:
+    """Reject a config whose prompts declare `template`, while nothing renders it.
+
+    The format is accepted by the config schema and by the AI Catalog's validation from this change on, but no
+    runtime reads it yet: a flow built from such a prompt would run with no system prompt and no user message, and
+    say nothing about it. Refusing here turns that into an error the author sees. The MR that teaches the chat
+    engine to render the format replaces this with the route to it.
+
+    Raises:
+        ValueError: When any prompt in the config declares `template`.
+    """
+    try:
+        prompts = list(getattr(config, "prompts", None) or [])
+    except TypeError:  # A Mock in a test isn't iterable, as in the security scan above.
+        return
+
+    for prompt_config in prompts:
+        if getattr(prompt_config, "template", None) is not None:
+            raise ValueError(
+                f"Prompt '{getattr(prompt_config, 'prompt_id', 'unknown')}' declares the 'template' format, "
+                "which no flow runtime renders yet"
+            )
 
 
 def _engine_owned_chat_factory(
@@ -390,6 +421,7 @@ def flow_factory(
 ) -> FlowFactory:
     # Validate all prompts for security issues before creating the flow
     _validate_flow_config_prompts(config)
+    _refuse_template_prompts(config)
 
     if config.environment != CHAT_PARTIAL_ENVIRONMENT:
         return partial(flow_cls, config=config)
@@ -437,7 +469,7 @@ def flow_factory(
         else:
             prompt_template = prompt_template_override.get("prompt_template", {})
 
-        args["system_template_override"] = prompt_template.get("system")
+        args["system_template_override"] = (prompt_template or {}).get("system")
 
     return partial(chat.Workflow, **args)
 
@@ -575,6 +607,7 @@ def flow_config_from_fetched_definition(definition: Dict[str, Any]) -> V1FlowCon
 
     config = V1FlowConfig(**config_dict)
     _validate_flow_config_prompts(config)
+    _refuse_template_prompts(config)
     return config
 
 

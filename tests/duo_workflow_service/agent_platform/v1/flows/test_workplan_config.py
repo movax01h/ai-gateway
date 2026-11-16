@@ -221,7 +221,7 @@ def _rendered_system_prompt(config: FlowConfig, component: dict) -> str:
     )
     assert config.prompts is not None
     prompt = next(p for p in config.prompts if p.prompt_id == component["prompt_id"])
-    system = prompt.prompt_template["system"]
+    system = prompt.legacy_prompt_template["system"]
     assert isinstance(system, str)
 
     return jinja2_formatter(
@@ -321,7 +321,7 @@ class TestReadinessScoreFeedback:
         prompt = next(
             p for p in config.prompts or [] if p.prompt_id == cls.SUPERVISOR_PROMPT_ID
         )
-        system = prompt.prompt_template["system"]
+        system = prompt.legacy_prompt_template["system"]
         assert isinstance(system, str)
         return system
 

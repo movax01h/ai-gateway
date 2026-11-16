@@ -161,7 +161,7 @@ class TestDefaultCacheControlAppliedToPrompts:
         model_kwargs = Prompt._build_model_kwargs(
             params=PromptParams(timeout=60),
             model_metadata=None,
-            prompt_template={"system": "You are helpful.", "user": "Hi"},
+            has_prompt=True,
             model_class_provider=ModelClassProvider.LITE_LLM,
         )
 
@@ -178,11 +178,7 @@ class TestDefaultCacheControlAppliedToPrompts:
         model_kwargs = Prompt._build_model_kwargs(
             params=PromptParams(timeout=60),
             model_metadata=None,
-            prompt_template={
-                "system": "You are helpful.",
-                "user": "Hi",
-                "placeholder": "history",
-            },
+            has_prompt=True,
             model_class_provider=ModelClassProvider.LITE_LLM,
         )
 
@@ -200,11 +196,7 @@ class TestDefaultCacheControlAppliedToPrompts:
         model_kwargs = Prompt._build_model_kwargs(
             params=PromptParams(timeout=60),
             model_metadata=None,
-            prompt_template={
-                "system": "You are helpful.",
-                "user": "Hi",
-                "placeholder": "history",
-            },
+            has_prompt=True,
             model_class_provider=ModelClassProvider.LITE_LLM,
         )
 
@@ -226,7 +218,7 @@ class TestDefaultCacheControlAppliedToPrompts:
         model_kwargs = Prompt._build_model_kwargs(
             params=PromptParams(timeout=60),
             model_metadata=None,
-            prompt_template={"system": "You are helpful.", "user": "Hi"},
+            has_prompt=True,
             model_class_provider=provider,
         )
 
@@ -246,7 +238,7 @@ class TestDefaultCacheControlAppliedToPrompts:
         model_kwargs = Prompt._build_model_kwargs(
             params=PromptParams(timeout=60),
             model_metadata=None,
-            prompt_template=None,
+            has_prompt=False,
             model_class_provider=provider,
         )
 
@@ -269,7 +261,7 @@ class TestDefaultCacheControlAppliedToPrompts:
         model_kwargs = Prompt._build_model_kwargs(
             params=PromptParams(timeout=60),
             model_metadata=None,
-            prompt_template={"system": "You are helpful.", "user": "Hi"},
+            has_prompt=True,
             model_class_provider=provider,
         )
 
@@ -285,11 +277,7 @@ class TestDefaultCacheControlAppliedToPrompts:
         model_kwargs = Prompt._build_model_kwargs(
             params=PromptParams(cache_control_injection_points=explicit_points),
             model_metadata=None,
-            prompt_template={
-                "system": "You are helpful.",
-                "user": "Hi",
-                "placeholder": "history",
-            },
+            has_prompt=True,
             model_class_provider=ModelClassProvider.LITE_LLM,
         )
 
@@ -313,7 +301,7 @@ class TestDefaultCacheControlAppliedToPrompts:
         model_kwargs = Prompt._build_model_kwargs(
             params=PromptParams(timeout=60),
             model_metadata=model_metadata,
-            prompt_template={"system": "You are helpful.", "user": "Hi"},
+            has_prompt=True,
             model_class_provider=ModelClassProvider.LITE_LLM,
         )
 
@@ -333,7 +321,7 @@ class TestDefaultCacheControlAppliedToPrompts:
         model_kwargs = Prompt._build_model_kwargs(
             params=PromptParams(timeout=60),
             model_metadata=model_metadata,
-            prompt_template={"system": "You are helpful.", "user": "Hi"},
+            has_prompt=True,
             model_class_provider=ModelClassProvider.LITE_LLM,
         )
 

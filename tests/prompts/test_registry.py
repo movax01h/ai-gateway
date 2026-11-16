@@ -1629,6 +1629,20 @@ class TestLocalPromptRegistry:  # pylint: disable=too-many-public-methods
         assert kwargs.get("max_tokens_override") == expected_override
 
 
+def test_a_prompt_file_cannot_declare_template(tmp_path: Path):
+    # A flow that references a prompt file can't be routed by its format, so the file would run on the old path
+    # and the model would get the system prompt with nothing to answer.
+    version_file = tmp_path / "1.0.0.yml"
+    version_file.write_text(
+        "name: Test prompt\nunit_primitive: duo_chat\ntemplate:\n  system: instructions\n"
+    )
+
+    with pytest.raises(ValueError, match="only available for prompts declared inline"):
+        LocalPromptRegistry._process_version_file(  # pylint: disable=protected-access
+            version_file
+        )
+
+
 class TestGetRequiredVariables:
     _PROMPT_BASE_DIR = (
         Path(__file__).parent.parent.parent / "ai_gateway" / "prompts" / "definitions"

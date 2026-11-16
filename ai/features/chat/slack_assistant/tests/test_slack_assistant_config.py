@@ -57,7 +57,7 @@ def _rendered_user_prompt(additional_context: list[AdditionalContext]) -> str:
 
     assert config.prompts is not None
     prompt = next(p for p in config.prompts if p.prompt_id == agent["prompt_id"])
-    user = prompt.prompt_template["user"]
+    user = prompt.legacy_prompt_template["user"]
     assert isinstance(user, str)
     return jinja2_formatter(user, **variables)
 
