@@ -23,10 +23,8 @@ __all__ = [
     "PromptSource",
     "ResolvedPromptTemplate",
     "merge_leading_system_messages",
-    "prompt_sources",
     "prompt_template_to_messages",
     "render_security_block",
-    "resolve_prompt_template",
 ]
 
 _SECURITY_TEMPLATE_SOURCE = (
@@ -183,28 +181,6 @@ class PromptSource(NamedTuple):
     text: str
 
 
-def prompt_sources(
-    prompt_template: dict[str, str | list[str]],
-) -> tuple[PromptSource, ...]:
-    """Every template string a prompt renders, with the role it was written in, without rendering anything.
-
-    What collecting an author's variables reads, so it doesn't build messages or the security block just to see the
-    strings.
-
-    Args:
-        prompt_template: The role-to-template mapping.
-
-    Returns:
-        The non-empty strings, in declaration order, a list value expanded into one source per entry.
-    """
-    return tuple(
-        PromptSource(role, text)
-        for role, value in prompt_template.items()
-        for text in ([value] if isinstance(value, str) else value)
-        if text
-    )
-
-
 @dataclass(frozen=True)
 class ResolvedPromptTemplate:
     """What a prompt renders on every model call, with its format resolved away.
@@ -218,23 +194,3 @@ class ResolvedPromptTemplate:
     """
 
     prefix: Sequence[MessageLikeRepresentation]
-
-
-def resolve_prompt_template(
-    prompt_template: dict[str, str | list[str]],
-    tool_output_security: bool = True,
-) -> ResolvedPromptTemplate:
-    """Resolve a prompt's declared format once, into what it renders.
-
-    Args:
-        prompt_template: The role-to-template mapping.
-        tool_output_security: When True, the tool-output security block joins the system messages.
-
-    Returns:
-        The resolved prompt.
-    """
-    return ResolvedPromptTemplate(
-        prefix=prompt_template_to_messages(
-            prompt_template, tool_output_security=tool_output_security
-        )
-    )

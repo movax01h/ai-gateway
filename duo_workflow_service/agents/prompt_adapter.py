@@ -45,7 +45,7 @@ VALID_SLASH_COMMANDS = ["explain", "refactor", "tests", "fix"]
 class ChatAgentPromptTemplate(Runnable[ChatWorkflowState, PromptValue]):
     def __init__(self, model_provider: ModelClassProvider, config: PromptConfig):
         self.model_provider = model_provider
-        self.prompt_template = config.prompt_template
+        self.prompt_template = config.legacy_prompt_template
 
     def is_slash_command_format(self, message):
         return is_slash_command(message.content)

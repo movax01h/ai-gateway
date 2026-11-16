@@ -248,7 +248,7 @@ class ReActPlainTextParser(BaseCumulativeTransformOutputParser):
 class ReActPromptTemplate(Runnable[ReActAgentInputs, PromptValue]):
     def __init__(self, model_provider: ModelClassProvider, config: PromptConfig):
         self.model_provider = model_provider
-        self.prompt_template = config.prompt_template
+        self.prompt_template = config.legacy_prompt_template
         self.model_config = config.model
 
     @override

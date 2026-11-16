@@ -21,7 +21,7 @@ def system_prompt_fixture() -> str:
     config = FlowConfig.from_yaml_config(FLOW_NAME, None)
     prompts = config.prompts
     assert prompts is not None
-    system = prompts[0].prompt_template["system"]
+    system = prompts[0].legacy_prompt_template["system"]
     assert isinstance(system, str)
     return system
 

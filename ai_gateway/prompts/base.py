@@ -822,7 +822,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         **kwargs: Any,
     ):
         model_kwargs = self._build_model_kwargs(
-            config.params, model_metadata, config.prompt_template, model_provider
+            config.params,
+            model_metadata,
+            config.prompt_format.renders_prompt,
+            model_provider,
         )
 
         llm_definition = model_metadata.llm_definition if model_metadata else None
@@ -1029,7 +1032,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     def _build_model_kwargs(
         params: PromptParams | None,
         model_metadata: Optional[TypeModelMetadata],
-        prompt_template: dict[str, str | list[str]] | None = None,
+        has_prompt: bool = False,
         model_class_provider: str | None = None,
     ) -> MutableMapping[str, Any]:
         model_kwargs = {
@@ -1039,7 +1042,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
 
         if (
             CACHE_CONTROL_INJECTION_POINTS_KEY not in model_kwargs
-            and prompt_template
+            and has_prompt
             and should_inject_default_cache_control(model_class_provider, model_kwargs)
         ):
             model_kwargs[CACHE_CONTROL_INJECTION_POINTS_KEY] = (
@@ -1367,7 +1370,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
         cls, config: PromptConfig, tools: Optional[List[BaseTool]] = None
     ) -> ResolvedPromptTemplate:
         """Resolve the prompt's declared format once, into what it renders."""
-        return config.resolve(
+        return config.prompt_format.resolve(
             tool_output_security=config.tool_output_security or bool(tools)
         )
 
