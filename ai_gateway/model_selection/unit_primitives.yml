@@ -27,7 +27,6 @@ configurable_unit_primitives:
     default_models:
       - identifier: "claude_sonnet_4_6_vertex"
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_4_6"
       - "claude_sonnet_4_6_bedrock"
@@ -41,7 +40,6 @@ configurable_unit_primitives:
       - identifier: "codestral_2508_vertex"
         weight: 25
     selectable_models:
-      - "claude_sonnet_4_5_20250929"
       - "claude_sonnet_4_5_20250929_bedrock"
       - "claude_sonnet_5_5"
       - "claude_sonnet_5_5_vertex"
