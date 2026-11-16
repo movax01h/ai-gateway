@@ -35,7 +35,7 @@ Each layer only uses entities from the layer directly below it (enforced via CI 
 - **LiteLLM**: Unified interface for multiple LLM providers
 - **Anthropic**: Claude model integration
 - **Google Cloud AI Platform**: Vertex AI integration
-- **Tree-sitter** + tree-sitter-languages: Code parsing for suggestions
+- **Tree-sitter** + tree-sitter-language-pack: Code parsing for suggestions
 - **Transformers**: Tokenization
 - **gRPC**: Communication protocol for Duo Workflow Service
 - **Python-GitLab**: GitLab API client
