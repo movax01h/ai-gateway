@@ -6,6 +6,7 @@ import fastapi
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
+from ai_gateway.model_selection import ModelSelectionConfig
 from ai_gateway.proxy.clients import ProxyClient, VertexAIProxyModelFactory
 from ai_gateway.proxy.clients.vertex_ai import PathParams
 
@@ -190,6 +191,109 @@ def test_allowed_upstream_models_includes_anthropic():
     # which the previous name-shape heuristic silently excluded.
     assert "claude-opus-4-8" in allowed_models
     assert "claude-sonnet-4-6" in allowed_models
+
+    assert "gemini-4-argon" in allowed_models
+    assert "gemini-3.8-flash" in allowed_models
+    assert "gemini-3.5-flash" in allowed_models
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("publisher", "model_name", "action"),
+    [
+        ("google", "gemini-4-argon", "streamGenerateContent?alt=sse"),
+        ("google", "gemini-3.8-flash", "streamGenerateContent?alt=sse"),
+        ("google", "gemini-3.5-flash", "streamGenerateContent?alt=sse"),
+        ("anthropic", "claude-sonnet-4-5@20250929", "streamRawPredict"),
+    ],
+)
+async def test_models_yml_vertex_location_selects_global_endpoint(
+    vertex_factory, request_factory, publisher, model_name, action
+):
+    """Models with `vertex_location: global` in models.yml go to the global endpoint."""
+    request = request_factory(
+        request_url=(
+            "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/locations/LOCATION/"
+            f"publishers/{publisher}/models/{model_name}:{action}"
+        ),
+        request_body=b"{}",
+        request_headers={"content-type": "application/json"},
+    )
+
+    with patch("ai_gateway.proxy.clients.vertex_ai.access_token"):
+        model = await vertex_factory.factory(request)
+
+    assert model.base_url == "https://aiplatform.googleapis.com"
+    assert model.upstream_path == (
+        f"/v1/projects/my-project/locations/global/publishers/{publisher}/models/"
+        f"{model_name}:{action}"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("vertex_location", "expected_base_url", "expected_location"),
+    [
+        (
+            "europe-west2",
+            "https://europe-west2-aiplatform.googleapis.com",
+            "europe-west2",
+        ),
+        ("global", "https://aiplatform.googleapis.com", "global"),
+        # No model-level location: keep the gateway's own endpoint and region.
+        (None, "https://my-location-aiplatform.googleapis.com", "my-location"),
+    ],
+)
+async def test_vertex_location_override(
+    monkeypatch,
+    vertex_factory,
+    request_factory,
+    vertex_location,
+    expected_base_url,
+    expected_location,
+):
+    """A deployment's prompt_params override decides the proxy endpoint too."""
+    monkeypatch.setattr(ModelSelectionConfig, "_instance", None)
+    config = ModelSelectionConfig(
+        default_models_override={},
+        prompt_params_override={
+            "gemini_4_argon_vertex": {"vertex_location": vertex_location}
+        },
+    )
+    request = request_factory(
+        request_url=(
+            "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/locations/LOCATION/"
+            "publishers/google/models/gemini-4-argon:generateContent"
+        ),
+        request_body=b"{}",
+        request_headers={"content-type": "application/json"},
+    )
+
+    with (
+        patch.object(ModelSelectionConfig, "instance", return_value=config),
+        patch("ai_gateway.proxy.clients.vertex_ai.access_token"),
+    ):
+        model = await vertex_factory.factory(request)
+
+    assert model.base_url == expected_base_url
+    assert model.upstream_path == (
+        f"/v1/projects/my-project/locations/{expected_location}/publishers/google/models/"
+        "gemini-4-argon:generateContent"
+    )
+
+
+def test_upstream_locations_only_cover_vertex_proxy_models():
+    """Locations come only from vertex-ai proxy definitions that set one."""
+    from ai_gateway.proxy.clients.vertex_ai import _load_upstream_locations
+
+    locations = _load_upstream_locations()
+
+    assert locations["gemini-4-argon"] == "global"
+    assert locations["claude-sonnet-4-5@20250929"] == "global"
+    # Not tagged for the Vertex proxy, even though it sets vertex_location.
+    assert "claude-opus-5-5" not in locations
+    # Legacy text models have no model-level location.
+    assert "text-embedding-005" not in locations
 
 
 class TestPathParams:
@@ -394,12 +498,6 @@ class TestUpstreamPathGeneration:
                 "locations/LOCATION/publishers/google/models/codestral-2501:streamRawPredict",
                 "/publishers/google/models/codestral-2501:streamRawPredict",
             ),
-            # Anthropic models
-            (
-                "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
-                "locations/LOCATION/publishers/anthropic/models/claude-sonnet-4-5@20250929:streamRawPredict",
-                "/publishers/anthropic/models/claude-sonnet-4-5@20250929:streamRawPredict",
-            ),
             # With SSE flag
             (
                 "http://0.0.0.0:5052/v1/proxy/vertex-ai/v1/projects/PROJECT/"
@@ -429,6 +527,7 @@ class TestUpstreamPathGeneration:
             assert model.upstream_path.startswith(
                 "/v1/projects/my-project/locations/my-location"
             )
+            assert model.base_url == "https://my-location-aiplatform.googleapis.com"
 
 
 @pytest.mark.asyncio

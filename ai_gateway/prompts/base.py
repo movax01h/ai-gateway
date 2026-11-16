@@ -788,6 +788,9 @@ class BasePromptCallbackHandler:
 
 ANTHROPIC_ONLY_MODEL_KWARGS = ("context_management", "thinking", "output_config")
 
+# The Google GenAI client is created for a fixed Vertex location and rejects these kwargs.
+_GOOGLE_GENAI_UNSUPPORTED_MODEL_KWARGS = ("vertex_location",)
+
 
 class Prompt(RunnableBinding[Any, BaseMessage]):
     name: str
@@ -849,6 +852,10 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
 
         if not self._is_anthropic_provider(model_provider, config.model.params):
             for key in ANTHROPIC_ONLY_MODEL_KWARGS:
+                model_kwargs.pop(key, None)
+
+        if model_provider == ModelClassProvider.GOOGLE_GENAI:
+            for key in _GOOGLE_GENAI_UNSUPPORTED_MODEL_KWARGS:
                 model_kwargs.pop(key, None)
 
         model = self._build_model(

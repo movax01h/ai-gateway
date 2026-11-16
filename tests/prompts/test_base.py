@@ -54,11 +54,13 @@ from ai_gateway.model_selection import ModelSelectionConfig, PromptParams
 from ai_gateway.model_selection.model_selection_config import (
     ChatAmazonQDefinition,
     ChatAnthropicDefinition,
+    ChatGoogleGenAIDefinition,
     ChatLiteLLMDefinition,
 )
 from ai_gateway.model_selection.models import (
     BaseModelParams,
     ChatAnthropicParams,
+    ChatGoogleGenAIParams,
     ChatLiteLLMParams,
     ChatOpenAIParams,
     ModelClassProvider,
@@ -2105,6 +2107,57 @@ configurable_unit_primitives:
             assert anthropic_only_kwarg in bind_kwargs
         else:
             assert anthropic_only_kwarg not in bind_kwargs
+
+    @pytest.mark.parametrize(
+        ("model_provider", "expect_kwarg"),
+        [
+            (ModelClassProvider.GOOGLE_GENAI, False),
+            (ModelClassProvider.LITE_LLM, True),
+        ],
+    )
+    def test_vertex_location_filtered_for_google_genai(
+        self,
+        model_provider: ModelClassProvider,
+        model_config: ModelConfig,
+        prompt_name: str,
+        unit_primitive: GitLabUnitPrimitive,
+        prompt_template: dict[str, str | list[str]],
+        model_factory: TypeModelFactory,
+        model: FakeModel,
+        expect_kwarg: bool,
+    ):
+        """The model definition's vertex_location reaches LiteLLM but not the Google GenAI client."""
+        model_metadata = ModelMetadata(
+            provider="gitlab",
+            name="gemini_4_argon_vertex",
+            llm_definition=ChatGoogleGenAIDefinition(
+                name="Gemini 4 Argon",
+                gitlab_identifier="gemini_4_argon_vertex",
+                max_context_tokens=1_000_000,
+                params=ChatGoogleGenAIParams(model="gemini-4-argon"),
+                prompt_params=PromptParams(vertex_location="global"),
+            ),
+            friendly_name="Gemini 4 Argon",
+        )
+        prompt_config = PromptConfig(
+            name=prompt_name,
+            model=model_config,
+            unit_primitive=unit_primitive,
+            prompt_template=prompt_template,
+        )
+
+        with mock.patch.object(FakeModel, "bind") as mock_bind:
+            mock_bind.return_value = model
+
+            Prompt(
+                model_provider=model_provider,
+                model_factory=model_factory,
+                config=prompt_config,
+                model_metadata=model_metadata,
+            )
+
+        bind_kwargs = mock_bind.call_args.kwargs
+        assert ("vertex_location" in bind_kwargs) is expect_kwarg
 
 
 def _requests_for(model_name: str) -> float:
