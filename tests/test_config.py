@@ -1693,3 +1693,50 @@ class TestAnthropicFacilitatorKey:
         monkeypatch.delenv("ANTHROPIC_FACILITATOR_KEY", raising=False)
 
         assert Config(_env_file=None).anthropic_facilitator_key is None
+
+
+class TestValidateRequired:
+    """Startup check for settings that otherwise only fail at request time."""
+
+    def test_raises_when_signing_key_missing(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config = Config(_env_file=None)
+
+            with pytest.raises(ValueError, match="AIGW_SELF_SIGNED_JWT__SIGNING_KEY"):
+                config.validate_required()
+
+    def test_passes_when_signing_key_set(self):
+        values = {"AIGW_SELF_SIGNED_JWT__SIGNING_KEY": "a-signing-key"}
+
+        with mock.patch.dict(os.environ, values, clear=True):
+            Config(_env_file=None).validate_required()
+
+    def test_validation_key_is_optional(self):
+        """The validation key only holds the outgoing key during a rotation."""
+        values = {
+            "AIGW_SELF_SIGNED_JWT__SIGNING_KEY": "a-signing-key",
+            "AIGW_SELF_SIGNED_JWT__VALIDATION_KEY": "",
+        }
+
+        with mock.patch.dict(os.environ, values, clear=True):
+            Config(_env_file=None).validate_required()
+
+    def test_skipped_when_external_auth_is_bypassed(self):
+        with mock.patch.dict(
+            os.environ, {"AIGW_AUTH__BYPASS_EXTERNAL": "true"}, clear=True
+        ):
+            Config(_env_file=None).validate_required()
+
+    def test_skipped_for_self_hosted_custom_models(self):
+        """Self-hosted gateways validate tokens through GitLab's OIDC provider."""
+        with mock.patch.dict(
+            os.environ, {"AIGW_CUSTOM_MODELS__ENABLED": "true"}, clear=True
+        ):
+            Config(_env_file=None).validate_required()
+
+    def test_not_run_when_config_is_constructed(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.object(Config, "validate_required") as mock_validate:
+                Config(_env_file=None)
+
+            mock_validate.assert_not_called()

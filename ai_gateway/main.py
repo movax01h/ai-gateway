@@ -14,6 +14,7 @@ logger = get_logger("run_app")
 
 def run_app():
     config = get_config()
+    config.validate_required()
 
     ssl_certfile: str | None = None
     ssl_keyfile: str | None = None
