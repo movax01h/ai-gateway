@@ -17,7 +17,10 @@ from ai_gateway.model_metadata import (
     ModelMetadata,
     TypeModelMetadata,
 )
-from ai_gateway.model_selection import ModelSelectionConfig
+from ai_gateway.model_selection import (
+    ModelSelectionConfig,
+    PromptNotServedOverHttpError,
+)
 from ai_gateway.model_selection.model_selection_config import (
     ChatAmazonQDefinition,
     ChatLiteLLMDefinition,
@@ -25,6 +28,10 @@ from ai_gateway.model_selection.model_selection_config import (
 from ai_gateway.model_selection.models import ChatAmazonQParams, ChatLiteLLMParams
 from lib.version import MAX_VERSION_QUERY_LENGTH
 from tests.conftest import FakeModel
+
+# `mock_registry_get` returns the `test` prompt, which declares no `models_from`. The prompt routes refuse such a
+# version outside `log` and `off` mode, so the tests run in `log` mode unless a test picks another mode.
+pytestmark = pytest.mark.usefixtures("feature_allowlist_mode")
 
 
 @pytest.fixture(name="fast_api_router", scope="class")
@@ -506,6 +513,145 @@ class TestModelsOfThePromptInFallbackMode:
             .get_unit_primitive_config_map()[models_from]
             .default_model_identifiers[0]
         )
+
+
+@pytest.mark.usefixtures("frozen_datetime_now", "cloud_gateway")
+class TestPromptVersionWithoutModelsFrom:
+    """The route serves a prompt version without `models_from` only in `log` and `off` mode.
+
+    The `test` prompt of `mock_registry_get` declares no `models_from`.
+    """
+
+    @pytest.fixture(name="fast_api_router", scope="class")
+    def fast_api_router_fixture(self):
+        # ModelConfigMiddleware leaves the check to the route only under the `/v1/prompts/` path.
+        router = APIRouter()
+        router.include_router(api_router, prefix="/v1")
+        return router
+
+    @staticmethod
+    def _post(mock_client, model_metadata: Optional[dict[str, Any]] = None):
+        body: dict[str, Any] = {
+            "inputs": {"name": "John", "age": 20},
+            "prompt_version": "^1.0.0",
+        }
+        if model_metadata:
+            body["model_metadata"] = model_metadata
+        return mock_client.post(
+            "/v1/prompts/test",
+            headers={
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+            },
+            json=body,
+        )
+
+    @staticmethod
+    def _refusals(cap_logs) -> list[dict[str, Any]]:
+        return [
+            log for log in cap_logs if log.get("reason") == "prompt_without_models_from"
+        ]
+
+    @pytest.mark.parametrize(
+        "feature_allowlist_mode", ["fallback", "enforce"], indirect=True
+    )
+    @pytest.mark.parametrize(
+        "client_model_metadata",
+        [
+            pytest.param(None, id="without-model-metadata"),
+            pytest.param(
+                {"provider": "gitlab", "feature_setting": "duo_chat"},
+                id="with-model-metadata",
+            ),
+        ],
+    )
+    def test_refuses_the_version(
+        self,
+        mock_client,
+        mock_registry_get,
+        mock_track_internal_event,
+        feature_allowlist_mode,
+        client_model_metadata,
+    ):
+        with capture_logs() as cap_logs:
+            response = self._post(mock_client, client_model_metadata)
+
+        assert response.status_code == 403
+        assert response.json() == {
+            "detail": str(PromptNotServedOverHttpError("test", "^1.0.0"))
+        }
+        mock_track_internal_event.assert_not_called()
+        assert self._refusals(cap_logs) == [
+            {
+                "event": "Model allowlist mismatch",
+                "log_level": "warning",
+                "path": "/v1/prompts/test",
+                "prompt_id": "test",
+                "reason": "prompt_without_models_from",
+                "mode": feature_allowlist_mode,
+                "outcome": "refused",
+                "enforce_outcome": "refused",
+                "surface": "http",
+            }
+        ]
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["log"], indirect=True)
+    def test_serves_the_version_and_logs_the_refusal_in_log_mode(
+        self,
+        mock_client,
+        mock_registry_get,
+        mock_track_internal_event,
+        feature_allowlist_mode,
+        unit_primitive,
+    ):
+        with capture_logs() as cap_logs:
+            response = self._post(mock_client)
+
+        assert response.status_code == 200
+        [refusal] = self._refusals(cap_logs)
+        assert refusal["outcome"] == "served"
+        assert refusal["enforce_outcome"] == "refused"
+        mock_track_internal_event.assert_called_once_with(
+            f"request_{unit_primitive.value}",
+            category="ai_gateway.api.v1.prompts.invoke",
+        )
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["off"], indirect=True)
+    def test_serves_the_version_in_off_mode(
+        self, mock_client, mock_registry_get, feature_allowlist_mode
+    ):
+        with capture_logs() as cap_logs:
+            response = self._post(mock_client)
+
+        assert response.status_code == 200
+        assert not self._refusals(cap_logs)
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+    def test_serves_the_version_on_a_gateway_with_custom_models(
+        self,
+        mock_client,
+        mock_registry_get,
+        feature_allowlist_mode,
+        custom_models_gateway,
+    ):
+        response = self._post(mock_client)
+
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("feature_allowlist_mode", ["enforce"], indirect=True)
+    @pytest.mark.parametrize(
+        ("compatible_versions", "expected_status"),
+        [
+            pytest.param(None, 404, id="unknown-prompt"),
+            pytest.param([], 400, id="version-that-does-not-resolve"),
+        ],
+    )
+    def test_answers_a_prompt_that_does_not_resolve_as_before(
+        self, mock_client, mock_registry_get, feature_allowlist_mode, expected_status
+    ):
+        response = self._post(mock_client)
+
+        assert response.status_code == expected_status
 
 
 class TestMisdirectedRequest:

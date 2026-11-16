@@ -614,7 +614,16 @@ uses `duo_chat`. The registry picks the default model of a request without model
 The route reads `models_from` from the prompt that the ID loads, so each spelling of the ID that loads the prompt,
 for example `chat/explain_code/` or `review/review_merge_request`, gets the same allowlist.
 
-For a version without `models_from`, the check still uses the client's `feature_setting`, and the route logs a
+In `fallback` and `enforce` mode, the routes refuse a call to a prompt version without `models_from` with HTTP 403,
+with or without model metadata (`check_prompt_served_over_http` in `ai_gateway/feature_allowlist.py`). Such a version
+runs only in the Duo Workflow Service or behind another route, and over HTTP its client could select the allowlist with
+`feature_setting`. The routes refuse the call after the registry resolves the version, so a prompt or a version that
+does not resolve keeps its own error, such as HTTP 400 or 422. The refusal is logged as a `Model allowlist mismatch`
+with the reason `prompt_without_models_from` and the `prompt_id`. `log` mode serves the call and logs the same event.
+`off` mode and a gateway that serves custom models skip the refusal, because only the self-hosted connection test calls
+`model_configuration/check`, which declares no `models_from`.
+
+In `log` mode, the check of a version without `models_from` uses the client's `feature_setting`, and the route logs a
 `Model allowlist note` when a named model would not pass the allowlist of the feature that `feature_setting_for_prompt_id`
 derives from the first part of the prompt ID: `prompt_feature_unknown` when the derived feature does not exist, and
 `prompt_feature_model_not_allowed` when its allowlist does not have the model. The note has the `prompt_id`, and its
@@ -622,9 +631,10 @@ derives from the first part of the prompt ID: `prompt_feature_unknown` when the 
 derived feature gets no note.
 
 When you add a prompt that GitLab Rails or another client calls on the prompt routes, set `models_from` in each of its
-versions to the feature setting that the client sends for it. Otherwise add it to `_GRAPH_NODE_PROMPT_IDS`,
-`_IN_PROCESS_PROMPT_IDS` or `_PROMPTS_WITHOUT_MODELS_FROM` in `tests/prompts/test_registry.py`.
-`test_every_prompt_declares_its_models_or_is_listed` fails until you do.
+versions to the feature setting that the client sends for it. The routes refuse a version without it. Add any other
+prompt to `_GRAPH_NODE_PROMPT_IDS`, `_IN_PROCESS_PROMPT_IDS` or `_PROMPTS_WITHOUT_MODELS_FROM` in
+`tests/prompts/test_registry.py`. `test_every_prompt_declares_its_models_or_is_listed` fails until you do one or the
+other.
 
 On the Duo Workflow Service, `ModelMetadataInterceptor` runs the check on the default model that it resolves from the
 `x-gitlab-agent-platform-model-metadata` header. It passes no feature, so the client's `feature_setting` selects the
@@ -681,11 +691,11 @@ variable, so you can set both in the same environment:
 |------|-----------|
 | `off` | No check. |
 | `log` | Log mismatches, change nothing. |
-| `fallback` | Serve the feature's default model instead of a model that is not allowed. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. This is the default on both surfaces. |
-| `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. |
+| `fallback` | Serve the feature's default model instead of a model that is not allowed. A named model without a `feature_setting` on HTTP, or with an unknown one, falls back to the prompt's default model. Refuse a prompt route call to a prompt version without `models_from` with HTTP 403. This is the default on both surfaces. |
+| `enforce` | Reject a model that is not allowed: HTTP 403, gRPC `PERMISSION_DENIED`. Refuse a prompt route call to a prompt version without `models_from` with HTTP 403. |
 
 Every mismatch is logged as `Model allowlist mismatch` with a `reason` (`provider_not_served`, `model_not_allowed`,
-`feature_mismatch`, `missing_feature_setting`, `unknown_feature`), the `mode`, the
+`feature_mismatch`, `missing_feature_setting`, `unknown_feature`, `prompt_without_models_from`), the `mode`, the
 `surface` (`http` or `dws`), the `feature_setting` the check used (the route's feature when the route passes one, else
 the client's), the `client_feature_setting` as the client sent it, the `requested_name` and `requested_identifier` as
 the client sent them, the `checked_identifier` of the model that the check got, the `served_identifier` of the model

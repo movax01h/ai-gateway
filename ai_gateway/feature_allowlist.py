@@ -8,10 +8,11 @@ header, and the routes that build metadata from their own payload, such as the l
 
 The allowlist is the one of the feature that the call site serves. A call site that passes no feature
 uses the client's ``feature_setting``, so the client can name the feature whose allowlist suits it.
-The HTTP prompt routes pass the ``models_from`` of the prompt version that runs. The client's feature
-stays for a version without ``models_from``, and on the Duo Workflow Service until it derives the feature
-from the flow. For a version without ``models_from``, ``note_prompt_feature`` logs where the feature
-derived from the prompt ID would not allow the requested model.
+The HTTP prompt routes pass the ``models_from`` of the prompt version that runs, and
+``check_prompt_served_over_http`` refuses a version without ``models_from`` in ``fallback`` and ``enforce``
+mode. The client's feature stays for such a version in ``log`` mode, and on the Duo Workflow Service until it
+derives the feature from the flow. For a version without ``models_from``, ``note_prompt_feature`` logs where
+the feature derived from the prompt ID would not allow the requested model.
 
 A gateway without custom models serves GitLab-managed models only. Over HTTP it accepts ``gitlab``
 and ``amazon_q``, which GitLab Rails sends, and ``anthropic``, ``vertex-ai`` and ``fireworks_ai``,
@@ -56,6 +57,7 @@ from ai_gateway.model_selection import (
     ModelNotAllowedForFeatureError,
     ModelSelectionConfig,
     ModelSelectionError,
+    PromptNotServedOverHttpError,
     ProviderNotServedError,
     UnitPrimitiveConfig,
 )
@@ -67,6 +69,7 @@ __all__ = [
     "ClientModelRequest",
     "PromptModelCheck",
     "check_client_model_metadata",
+    "check_prompt_served_over_http",
     "dws_client_model_request_context",
     "note_prompt_feature",
     "prompt_model_check_context",
@@ -551,6 +554,54 @@ def note_prompt_feature(
     )
     if check is not None:
         check.note_prompt_feature(metadata)
+
+
+def check_prompt_served_over_http(
+    prompt_id: str,
+    prompt_version: Optional[str],
+    *,
+    log_context: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Refuse a prompt route call to a prompt version that declares no ``models_from``.
+
+    Only the prompt versions that clients call over HTTP declare ``models_from``. Another version runs only in the Duo
+    Workflow Service or behind another route, and over HTTP its client could pick the allowlist with
+    ``feature_setting``. The prompt routes call this for each such call, with or without model metadata, once the
+    registry resolves the version. ``fallback`` and ``enforce`` mode refuse the call, and ``log`` mode logs it.
+    ``off`` mode and a gateway that serves custom models skip it: only the self-hosted connection test calls
+    ``model_configuration/check``, which declares no ``models_from``.
+
+    Args:
+        prompt_id: Identifier of the prompt, from the route path.
+        prompt_version: Version constraint of the request, or ``None`` for the default version.
+        log_context: Extra fields for the log event, such as ``path``. The check's own fields win over a key with the
+            same name.
+
+    Raises:
+        PromptNotServedOverHttpError: In ``fallback`` and ``enforce`` mode.
+    """
+    config = get_config()
+    mode = config.model_selection.feature_allowlist_mode_http
+    if mode == "off" or config.custom_models.enabled:
+        return
+
+    context = {
+        key: value for key, value in (log_context or {}).items() if key != "event"
+    }
+    log.warning(
+        _MISMATCH_EVENT,
+        **{
+            **context,
+            "reason": "prompt_without_models_from",
+            "mode": mode,
+            "outcome": _REFUSED_UNLESS_LOG[mode],
+            "enforce_outcome": _REFUSED_UNLESS_LOG["enforce"],
+            "surface": "http",
+            "prompt_id": prompt_id,
+        },
+    )
+    if mode != "log":
+        raise PromptNotServedOverHttpError(prompt_id, prompt_version)
 
 
 def _new_check(

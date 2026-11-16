@@ -191,8 +191,14 @@ setting in `unit_primitives.yml` whose models the version can run on.
   `amazon_q_integration`.
 
 The prompt routes check the client's model against the `models_from` of the version that runs, and the registry picks
-the default model of a request without model metadata from it. For a version without `models_from`, the check uses the
-client's `feature_setting`, and the default model comes from the first part of the prompt ID.
+the default model of a request without model metadata from it. The routes refuse a version without `models_from` with
+HTTP 403 in the `fallback` and `enforce` modes of `AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP` (see
+[Feature allowlist for GitLab-managed models](model_selection.md#feature-allowlist-for-gitlab-managed-models)). In
+`log` mode they serve it: the check uses the client's `feature_setting`, and the default model comes from the first
+part of the prompt ID.
+
+To call a prompt without `models_from` over HTTP on a local AI Gateway, for example the prompt of a flow component, set
+`AIGW_MODEL_SELECTION__FEATURE_ALLOWLIST_MODE_HTTP=log`. Do not add `models_from` to call it.
 
 - A prompt with more than one model family must declare one `models_from` in all of them. In `fallback` mode the
   check can serve another model, and its family can resolve another version. A test checks this.
