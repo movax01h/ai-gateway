@@ -235,6 +235,76 @@ async def test_get_file_errors(tool, input_params, mock_setup, expected_error_co
 
 
 @pytest.mark.asyncio
+async def test_get_file_project_root_url_with_ref_and_file_path(
+    tool, gitlab_client_mock
+):
+    gitlab_client_mock.aget.return_value = GitLabHttpResponse(
+        status_code=200,
+        body={"content": base64.b64encode(b"file content").decode("utf-8")},
+        headers={"content-type": "application/json"},
+    )
+
+    result = await tool._arun(
+        url="https://gitlab.com/group/subgroup/project",
+        ref="abc123",
+        file_path="src/app.py",
+    )
+
+    gitlab_client_mock.aget.assert_called_once_with(
+        path="/api/v4/projects/group%2Fsubgroup%2Fproject/repository/files/src%2Fapp.py",
+        params={"ref": "abc123"},
+        parse_json=True,
+    )
+    assert json.loads(result) == {"content": "file content"}
+
+
+@pytest.mark.parametrize(
+    "input_params,expected_error",
+    [
+        (
+            {"url": "https://gitlab.com/namespace/project", "file_path": "a.py"},
+            "Could not parse repository file URL",
+        ),
+        (
+            {
+                "url": "https://gitlab.com/namespace/project",
+                "project_id": "other/project",
+                "ref": "main",
+                "file_path": "a.py",
+            },
+            "Project ID mismatch",
+        ),
+        (
+            {
+                "url": "https://example.com/namespace/project",
+                "ref": "main",
+                "file_path": "a.py",
+            },
+            "Failed to parse URL",
+        ),
+        (
+            {"url": "https://gitlab.com/", "ref": "main", "file_path": "a.py"},
+            "Could not extract project path from URL",
+        ),
+    ],
+    ids=[
+        "missing ref",
+        "project id mismatch",
+        "unparsable project url",
+        "url without project path",
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_file_project_root_url_errors(
+    tool, gitlab_client_mock, input_params, expected_error
+):
+    with pytest.raises(ToolException, match=expected_error):
+        await tool._arun(**input_params)
+
+    gitlab_client_mock.aget.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_get_file_api_exception_propagates(tool, gitlab_client_mock):
     """Test that API exceptions propagate instead of being swallowed."""
     gitlab_client_mock.aget.side_effect = Exception("API error")
