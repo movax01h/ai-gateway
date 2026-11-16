@@ -425,6 +425,7 @@ def test_run(custom_models_enabled, vertex_project, should_validate_llm):
         patch(
             "duo_workflow_service.server.register_served_flows"
         ) as mock_register_served_flows,
+        patch("duo_workflow_service.server.schema_index") as mock_schema_index,
         patch("duo_workflow_service.server.setup_profiling") as mock_setup_profiling,
         patch(
             "duo_workflow_service.server.setup_error_tracking"
@@ -455,6 +456,7 @@ def test_run(custom_models_enabled, vertex_project, should_validate_llm):
         mock_setup_monitoring.assert_called_once()
         mock_setup_logging.assert_called_once()
         mock_register_served_flows.assert_called_once_with()
+        mock_schema_index.assert_called_once_with()
 
         if should_validate_llm:
             mock_validate_llm_access.assert_called_once()
@@ -483,6 +485,7 @@ def test_run_installs_clean_io_handle_context_before_llm_validation(
     with (
         patch("duo_workflow_service.server.setup_container"),
         patch("duo_workflow_service.server.register_served_flows"),
+        patch("duo_workflow_service.server.schema_index"),
         patch("duo_workflow_service.server.setup_profiling"),
         patch("duo_workflow_service.server.setup_error_tracking"),
         patch("duo_workflow_service.server.setup_monitoring"),
@@ -527,6 +530,7 @@ class TestRunMockUsageQuotaServer:
             patch("duo_workflow_service.server.setup_container"),
             # Keep the module-global flow-config root registry out of run() tests.
             patch("duo_workflow_service.server.register_served_flows"),
+            patch("duo_workflow_service.server.schema_index"),
             patch("duo_workflow_service.server.setup_profiling"),
             patch("duo_workflow_service.server.setup_error_tracking"),
             patch("duo_workflow_service.server.setup_monitoring"),

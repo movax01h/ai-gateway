@@ -151,8 +151,10 @@ and `components/`.
 
 - The **prompt registry** resolves `<prompt_id>` across these roots; lookups are
   lazy and on demand.
-- The **response-schema registry** resolves `<schema_id>` the same way, asserting
-  path containment per root.
+- The **response-schema registry** indexes the schema IDs under these roots and
+  `ai_gateway/response_schemas/definitions/` once, then resolves `<schema_id>` by
+  lookup in the index, so an ID never builds a path. An ID that two roots define
+  fails the index build.
 - The **flow config loader** discovers configs across feature directories and
   resolves a flow by identifier. Cross-flow references are resolved through the
   registry by identifier, not by relative path between feature directories.
@@ -266,7 +268,7 @@ A shared definition uses the feature layout without the domain level:
 `ai/shared/<name>/prompts/` registers the prompt ID `<name>`. Include-only
 directories work the same way, so `ai/shared/common/prompts/` serves includes
 such as `common/tool_output_security/1.0.0.jinja`. A shared name must not match a
-feature name. Response schemas are not read from `ai/shared/` yet.
+feature name. A shared response schema goes to `ai/shared/<name>/schemas/<schema_id>/`.
 
 ## Model selection
 
@@ -382,8 +384,8 @@ ai/features/pipeline/fix_pipeline/
     push_changes/
     summarize_changes/
   schemas/
-    decide_approach/
-    decide_comment/
+    fix_pipeline_context/
+    fix_pipeline_decide_fix/
   components/        # feature-specific tools/nodes, if any
   tests/
 ```
@@ -391,7 +393,7 @@ ai/features/pipeline/fix_pipeline/
 - Prompt and schema identifiers keep a feature prefix (`fix_pipeline_create_plan`)
   because the registry namespace is flat: the directory provides organization, the
   identifier provides uniqueness. `prompts/subprompts_index.yml` maps each prompt
-  identifier to its directory. See
+  identifier to its directory. A directory under `schemas/` is a schema identifier. See
   [Several prompts in one feature](adding_and_moving_features.md#several-prompts-in-one-feature).
 - Shared prompts it uses (`commit_changes`, `create_repository_branch`) live in
   `ai/shared/`, since several flows reference them.

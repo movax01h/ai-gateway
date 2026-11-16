@@ -4,7 +4,7 @@ A feature with several file-based prompts keeps each one in ``prompts/<directory
 
 .. code-block:: yaml
 
-    project_activity_fetch_issues_new: fetch_issues_new
+    my_flow_fetch_issues: fetch_issues
 
 The index is a flat YAML mapping with one ``<prompt_id>: <directory>`` entry on each line. The AI Gateway, the scripts
 under ``scripts/``, and the tests read it without a YAML library, so this module accepts only that line format, plus

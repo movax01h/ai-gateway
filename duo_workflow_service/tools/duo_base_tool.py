@@ -274,6 +274,21 @@ class DuoBaseTool(BaseTool):
 
         return quote(unquote(project_id).strip().strip("/"), safe="")
 
+    def _normalize_group_id(self, group_id: str) -> str:
+        """Return ``group_id`` in the form the REST API expects in ``/groups/:id``.
+
+        Works like ``_normalize_project_id``, except that a full URL goes through ``GitLabUrlParser.parse_group_url``,
+        which also accepts the ``/groups/...`` form of a group URL.
+
+        Raises:
+            GitLabUrlParseError: If ``group_id`` is a URL for another host or has no group path.
+        """
+        parsed = urlparse(group_id.strip())
+        if parsed.scheme and parsed.netloc:
+            return GitLabUrlParser.parse_group_url(parsed.geturl(), self.gitlab_host)
+
+        return quote(unquote(group_id).strip().strip("/"), safe="")
+
     def _validate_project_url(
         self, url: Optional[str], project_id: Optional[int | str]
     ) -> ProjectURLValidationResult:
