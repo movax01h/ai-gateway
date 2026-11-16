@@ -1,6 +1,8 @@
-"""Tests for ai_gateway.main.run_app TLS integration."""
+"""Tests for ai_gateway.main.run_app."""
 
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from ai_gateway.config import ConfigFastApi, ConfigTLS
 from ai_gateway.main import run_app
@@ -61,3 +63,32 @@ class TestRunAppTLS:
         assert kwargs["ssl_certfile"] == str(cert)
         assert kwargs["ssl_keyfile"] == str(key)
         assert kwargs["ssl_ciphers"] == str(ciphers)
+
+
+class TestRunAppValidation:
+    @patch("ai_gateway.main.uvicorn.run")
+    @patch("ai_gateway.main.get_config")
+    def test_validates_config_before_starting_server(
+        self, mock_get_config, mock_uvicorn_run
+    ):
+        config = _make_config(tls_enabled=False)
+        mock_get_config.return_value = config
+
+        run_app()
+
+        config.validate_required.assert_called_once_with()
+        mock_uvicorn_run.assert_called_once()
+
+    @patch("ai_gateway.main.uvicorn.run")
+    @patch("ai_gateway.main.get_config")
+    def test_does_not_start_server_when_validation_fails(
+        self, mock_get_config, mock_uvicorn_run
+    ):
+        config = _make_config(tls_enabled=False)
+        config.validate_required.side_effect = ValueError("missing setting")
+        mock_get_config.return_value = config
+
+        with pytest.raises(ValueError, match="missing setting"):
+            run_app()
+
+        mock_uvicorn_run.assert_not_called()

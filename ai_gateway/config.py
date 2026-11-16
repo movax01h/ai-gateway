@@ -959,6 +959,26 @@ class Config(BaseSettings):
         os.environ["CLOUD_CONNECTOR_SERVICE_NAME"] = self.cloud_connector_service_name
         # pylint: enable=direct-environment-variable-reference
 
+    def validate_required(self) -> None:
+        """Fail at startup when a required setting is missing.
+
+        Run from `run_app`, not `__init__`, so building a `Config` in tests stays cheap.
+        """
+        if self.auth.bypass_external:
+            return
+
+        # Self-hosted gateways validate tokens through their GitLab's OIDC
+        # provider and may never have needed a signing key.
+        if self.custom_models.enabled:
+            return
+
+        # The validation key only holds the outgoing key during a rotation.
+        if not self.self_signed_jwt.signing_key:
+            raise ValueError(
+                "AIGW_SELF_SIGNED_JWT__SIGNING_KEY must be set unless "
+                "AIGW_AUTH__BYPASS_EXTERNAL or AIGW_CUSTOM_MODELS__ENABLED is true"
+            )
+
     def _apply_global_configs(self, parent: BaseModel, children: list[BaseModel]):
         """Set a parent config to child configs if the field value is not specified."""
         for field in parent.model_fields_set:
