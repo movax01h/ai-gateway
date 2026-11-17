@@ -193,6 +193,8 @@ def test_allowed_upstream_models_includes_anthropic():
     assert "claude-sonnet-4-6" in allowed_models
 
     assert "gemini-4-argon" in allowed_models
+    assert "gemini-4-carbon" in allowed_models
+    assert "gemini-4-hydrogen" in allowed_models
     assert "gemini-3.8-flash" in allowed_models
     assert "gemini-3.5-flash" in allowed_models
 
@@ -202,6 +204,8 @@ def test_allowed_upstream_models_includes_anthropic():
     ("publisher", "model_name", "action"),
     [
         ("google", "gemini-4-argon", "streamGenerateContent?alt=sse"),
+        ("google", "gemini-4-carbon", "streamGenerateContent?alt=sse"),
+        ("google", "gemini-4-hydrogen", "streamGenerateContent?alt=sse"),
         ("google", "gemini-3.8-flash", "streamGenerateContent?alt=sse"),
         ("google", "gemini-3.5-flash", "streamGenerateContent?alt=sse"),
         ("anthropic", "claude-sonnet-4-5@20250929", "streamRawPredict"),
@@ -289,6 +293,8 @@ def test_upstream_locations_only_cover_vertex_proxy_models():
     locations = _load_upstream_locations()
 
     assert locations["gemini-4-argon"] == "global"
+    assert locations["gemini-4-carbon"] == "global"
+    assert locations["gemini-4-hydrogen"] == "global"
     assert locations["claude-sonnet-4-5@20250929"] == "global"
     # Not tagged for the Vertex proxy, even though it sets vertex_location.
     assert "claude-opus-5-5" not in locations
