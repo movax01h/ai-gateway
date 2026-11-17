@@ -63,7 +63,7 @@ async def test_unique_contributor_count(
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "How many unique contributors did this project have in the last 30 days?",
+        "How many unique contributors did the gitlab-org/gitlab project have in the last 30 days?",
     )
 
     result.assert_has_tool_calls().assert_called_tool(schema_tool_name)

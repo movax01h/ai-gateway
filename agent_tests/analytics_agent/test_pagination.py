@@ -6,12 +6,15 @@ Validates proper pagination behavior for different query types.
 import pytest
 
 from agent_tests.helpers import ask_agent
+from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 
 from .helpers import (
     SAMPLE_ISSUES,
     SAMPLE_MRS,
     generate_issues,
+    glql_http_error,
     glql_response,
+    mock_glql_responder,
     mock_glql_response,
 )
 
@@ -93,24 +96,32 @@ async def test_full_analysis_paginates(
             )
         )
 
-    page1 = glql_response(
-        generate_issues(100),
-        count=250,
-        has_next_page=True,
-        end_cursor="cursor_page_1",
-    )
-    page2 = glql_response(
-        generate_issues(100),
-        count=250,
-        has_next_page=True,
-        end_cursor="cursor_page_2",
-    )
-    page3 = glql_response(
-        generate_issues(50),
-        count=250,
-        has_next_page=False,
-    )
-    mock_glql_response(mock_gitlab_client, [page1, page2, page3])
+    pages = {
+        None: glql_response(
+            generate_issues(100, start=1),
+            count=250,
+            has_next_page=True,
+            end_cursor="cursor_page_1",
+        ),
+        "cursor_page_1": glql_response(
+            generate_issues(100, start=101),
+            count=250,
+            has_next_page=True,
+            end_cursor="cursor_page_2",
+        ),
+        "cursor_page_2": glql_response(
+            generate_issues(50, start=201),
+            count=250,
+            has_next_page=False,
+        ),
+    }
+
+    def respond(_glql_yaml: str, after: str | None) -> GitLabHttpResponse:
+        if after not in pages:
+            return glql_http_error(f"Invalid cursor: {after}")
+        return GitLabHttpResponse(status_code=200, body=pages[after])
+
+    mock_glql_responder(mock_gitlab_client, respond)
 
     result = await ask_agent(
         analytics_agent,
