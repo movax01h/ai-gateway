@@ -50,7 +50,7 @@ build-docker-model-gateway-arch:
   rules: *skip-on-version-tag-rules
   variables:
     BUILD_TAG: "${TARGET_IMAGE}"
-    BUILD_EXTRA_ARGS: "--build-arg GITLAB_API_TOKEN=$GITLAB_API_TOKEN"
+    BUILD_EXTRA_ARGS: "--secret id=gitlab_api_token,env=GITLAB_API_TOKEN"
 
 build-docker-model-gateway:
   stage: build
@@ -179,7 +179,7 @@ build:self-hosted-ai-gateway-latest-image:
   variables:
     BUILD_FILE: docker/fips/Dockerfile
     BUILD_TAG: "${FIPS_TARGET_IMAGE}"
-    BUILD_EXTRA_ARGS: "--build-arg GITLAB_API_TOKEN=$GITLAB_API_TOKEN --build-context hardening=https://gitlab.com/gitlab-org/build/CNG.git#v18.3.5:hardening"
+    BUILD_EXTRA_ARGS: "--secret id=gitlab_api_token,env=GITLAB_API_TOKEN --build-context hardening=https://gitlab.com/gitlab-org/build/CNG.git#v18.3.5:hardening"
 
 build:ai-gateway-fips-base-image-arch:
   extends: .build-fips-base-image-arch
