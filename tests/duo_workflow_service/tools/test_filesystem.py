@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.tools import ToolException
+from structlog.testing import capture_logs
 
 from contract import contract_pb2
 from duo_workflow_service.entities.image_response import (
@@ -16,6 +17,7 @@ from duo_workflow_service.entities.image_response import (
 from duo_workflow_service.executor.action import ToolExceptionWithResponse
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.policies.file_exclusion_policy import FileExclusionPolicy
+from duo_workflow_service.security.secret_redaction import REDACTED_PLACEHOLDER
 from duo_workflow_service.tools.filesystem import (  # Mkdir,
     _UPLOAD_HINT_BARE,
     DEFAULT_CONTEXT_EXCLUSIONS,
@@ -137,6 +139,80 @@ async def test_write_file(mock_project):
     action = mock_outbox.put_action_and_wait_for_response.call_args[0][0]
     assert action.runWriteFile.filepath == path
     assert action.runWriteFile.contents == contents
+
+
+WRITE_ADVICE = (
+    "To copy or move a file, use cp or mv instead of rewriting its content. "
+    "To change an existing file, use edit_file on lines that hold "
+    f"no {REDACTED_PLACEHOLDER}."
+)
+EDIT_ADVICE = (
+    f"Edit only lines that hold no {REDACTED_PLACEHOLDER}, "
+    "with a short old_str and new_str."
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "args", "advice"),
+    [
+        (
+            WriteFile,
+            ("./f", f"k: '{REDACTED_PLACEHOLDER}'"),
+            WRITE_ADVICE,
+        ),
+        (
+            EditFile,
+            ("./f", "k: 'x'", f"k: '{REDACTED_PLACEHOLDER}'"),
+            EDIT_ADVICE,
+        ),
+        (
+            EditFile,
+            ("./f", REDACTED_PLACEHOLDER, REDACTED_PLACEHOLDER * 2),
+            EDIT_ADVICE,
+        ),
+    ],
+)
+async def test_write_tools_refuse_added_redactions(mock_project, tool, args, advice):
+    outbox = MagicMock()
+    outbox.put_action_and_wait_for_response = AsyncMock(
+        return_value=create_mock_client_event_with_response("ok")
+    )
+
+    with (
+        capture_logs() as cap_logs,
+        pytest.raises(ToolException, match="Refused") as refusal,
+    ):
+        await tool(metadata={"outbox": outbox, "project": mock_project})._arun(*args)
+
+    assert advice in str(refusal.value)
+    assert [
+        (log["event"], log["log_level"], log["added"], log["new_path"], log["tool"])
+        for log in cap_logs
+    ] == [
+        (
+            "write_refused_added_redaction",
+            "warning",
+            1,
+            tool is WriteFile,
+            tool.model_fields["name"].default,
+        )
+    ]
+    assert not outbox.put_action_and_wait_for_response.called
+
+
+@pytest.mark.asyncio
+async def test_edit_file_keeps_existing_redactions(mock_project):
+    outbox = MagicMock()
+    outbox.put_action_and_wait_for_response = AsyncMock(
+        return_value=create_mock_client_event_with_response("ok")
+    )
+
+    await EditFile(metadata={"outbox": outbox, "project": mock_project})._arun(
+        "./f", REDACTED_PLACEHOLDER, REDACTED_PLACEHOLDER
+    )
+
+    assert outbox.put_action_and_wait_for_response.called
 
 
 @pytest.mark.asyncio
