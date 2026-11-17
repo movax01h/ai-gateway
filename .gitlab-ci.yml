@@ -201,6 +201,9 @@ include:
 
   - component: ${CI_SERVER_FQDN}/gitlab-org/components/danger-review/danger-review@2.1.0
     rules:
+      # The security mirror's job token allowlist rejects the component's cross-project git fetch (#3731)
+      - if: $CI_PROJECT_ID == "39903947" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID == "61869127"
+        when: never
       - if: $CI_SERVER_HOST == "gitlab.com"
   - component: $CI_SERVER_FQDN/gitlab-org/analytics-section/analytics-instrumentation/ci-components/internal_events_validation@v1.1.0
     rules:
