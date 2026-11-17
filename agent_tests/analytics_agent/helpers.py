@@ -589,38 +589,119 @@ SAMPLE_PIPELINE_ANALYTICS_PERCENTILES = [
 
 EMPTY_RESPONSE: list[dict[str, Any]] = []
 
-REALISTIC_ISSUE_TITLES = [
-    "Fix authentication timeout in SSO login flow",
-    "Add dark mode support for the dashboard",
-    "Performance regression in search API",
-    "Update documentation for CI/CD pipeline",
-    "Security vulnerability in file upload",
-    "Implement two-factor authentication",
-    "Bug: merge request approval not working",
-    "Add GraphQL support for project queries",
-    "Improve error handling in webhook delivery",
-    "Refactor database connection pooling",
-    "Add audit logging for admin actions",
-    "Fix memory leak in background jobs",
-    "Implement rate limiting for API endpoints",
-    "Update dependencies to latest versions",
-    "Add support for custom project templates",
-    "Bug: notification emails not being sent",
-    "Improve accessibility of the web interface",
-    "Add bulk operations for issue management",
-    "Fix timezone handling in scheduled jobs",
-    "Implement caching for frequently accessed data",
+# Product areas and kinds of work for generate_issues. 25 areas x 10 kinds give 250 distinct issues, so a paginated
+# analysis never sees the same title twice. Repeated titles or pages are what a model flags as synthetic data.
+_ISSUE_AREAS = [
+    ("SSO login", "devops::govern"),
+    ("merge request approvals", "devops::create"),
+    ("pipeline editor", "devops::verify"),
+    ("issue boards", "devops::plan"),
+    ("container registry", "devops::package"),
+    ("webhook delivery", "devops::foundations"),
+    ("Gitaly RPCs", "devops::systems"),
+    ("search API", "devops::foundations"),
+    ("project imports", "devops::foundations"),
+    ("group milestones", "devops::plan"),
+    ("dependency scanning", "devops::secure"),
+    ("audit events", "devops::govern"),
+    ("runner registration", "devops::verify"),
+    ("wiki pages", "devops::plan"),
+    ("code owners", "devops::create"),
+    ("vulnerability report", "devops::secure"),
+    ("package registry", "devops::package"),
+    ("release notes", "devops::deploy"),
+    ("deploy keys", "devops::create"),
+    ("notification emails", "devops::plan"),
+    ("epic roadmap", "devops::plan"),
+    ("Service Desk", "devops::plan"),
+    ("repository mirroring", "devops::create"),
+    ("value stream analytics", "devops::plan"),
+    ("merge trains", "devops::verify"),
+]
+
+# (title, description, type label); {area} is filled from _ISSUE_AREAS.
+_ISSUE_WORK_KINDS = [
+    (
+        "Fix timeout in {area}",
+        "Requests to {area} time out after 60 seconds on large projects since the 19.2 release.",
+        "type::bug",
+    ),
+    (
+        "Performance regression in {area}",
+        "p95 latency for {area} roughly doubled after 19.2. Profiling points at an N+1 query.",
+        "type::bug",
+    ),
+    (
+        "Improve error handling in {area}",
+        "Failures in {area} show a generic 500 page. Users need an error message they can act on.",
+        "type::maintenance",
+    ),
+    (
+        "Add GraphQL support for {area}",
+        "Only the REST API exposes {area}. Add GraphQL types and mutations so the frontend can migrate.",
+        "type::feature",
+    ),
+    (
+        "Add audit logging for {area}",
+        "Changes to {area} are not recorded as audit events, which compliance customers need as evidence.",
+        "type::feature",
+    ),
+    (
+        "Update documentation for {area}",
+        "The {area} docs still describe the behavior before 19.0 and miss the new settings.",
+        "type::maintenance",
+    ),
+    (
+        "Regression in {area} after upgrading to 19.3",
+        "Several self-managed customers report that {area} stopped working after upgrading to 19.3.",
+        "type::bug",
+    ),
+    (
+        "Refactor {area} service layer",
+        "The {area} code mixes controller and service logic. Split it so it can be unit tested.",
+        "type::maintenance",
+    ),
+    (
+        "Add rate limiting to {area}",
+        "A single client can saturate {area} with requests. Add a per-user rate limit.",
+        "type::feature",
+    ),
+    (
+        "Accessibility issues in {area}",
+        "Screen readers cannot reach the main actions in {area}, and focus order skips the dialogs.",
+        "type::bug",
+    ),
 ]
 
 
-def generate_issues(count: int) -> list[dict[str, Any]]:
-    """Generate a list of sample issues with realistic titles."""
-    return [
-        {
-            "id": f"gid://gitlab/Issue/{i}",
-            "iid": str(i),
-            "title": REALISTIC_ISSUE_TITLES[i % len(REALISTIC_ISSUE_TITLES)],
-            "state": "opened",
-        }
-        for i in range(1, count + 1)
-    ]
+def generate_issues(count: int, start: int = 1) -> list[dict[str, Any]]:
+    """Generate sample issues with distinct titles, descriptions and labels.
+
+    Args:
+        count: Number of issues to generate
+        start: IID of the first issue. Pages of one result set pass consecutive ranges so no IID repeats.
+
+    Returns:
+        Issues with IIDs start..start+count-1. Up to 250 consecutive issues have distinct titles.
+    """
+    issues = []
+    for iid in range(start, start + count):
+        index = iid - 1
+        area, stage_label = _ISSUE_AREAS[index % len(_ISSUE_AREAS)]
+        # Offsetting the kind by the area position spreads every kind over every area, so each block of 25 issues
+        # mixes kinds and 250 consecutive issues never repeat an (area, kind) pair.
+        kind = (index // len(_ISSUE_AREAS) + index % len(_ISSUE_AREAS)) % len(
+            _ISSUE_WORK_KINDS
+        )
+        title, description, type_label = _ISSUE_WORK_KINDS[kind]
+        issues.append(
+            {
+                "id": f"gid://gitlab/Issue/{iid}",
+                "iid": str(iid),
+                "title": title.format(area=area),
+                "description": description.format(area=area),
+                "state": "opened",
+                "labels": {"nodes": [{"title": type_label}, {"title": stage_label}]},
+            }
+        )
+    return issues

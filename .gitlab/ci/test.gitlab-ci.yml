@@ -111,8 +111,8 @@ tests:agents:analytics:
     - when: manual
   parallel:
     matrix:
-      - EXECUTION_MODEL: "claude-sonnet-4-6"
-      - EXECUTION_MODEL: "claude-opus-4-7"
+      - EXECUTION_MODEL: "claude-sonnet-5-5"
+      - EXECUTION_MODEL: "claude-opus-5-5"
 
 # Benchmark baseline for the Flow Creation foundational agent. Runs a single
 # execution model: the baseline is defined against one model so that scores stay

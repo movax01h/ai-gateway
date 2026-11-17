@@ -234,7 +234,7 @@ async def test_title_field_included_when_requested(
     result = await ask_agent(
         analytics_agent,
         initial_state,
-        "Create a view called 'Critical Bugs' for high priority bugs in the gitlab-org group",
+        "Create a view called 'Critical Bugs' for open issues labeled ~bug and ~critical in the gitlab-org group",
     )
 
     result.assert_has_tool_calls().assert_called_tool(schema_tool_name)
