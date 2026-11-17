@@ -18,6 +18,7 @@ from lib.prompts.utilities import (
     prompt_template_to_messages,
     render_security_block,
 )
+from lib.session_owner import set_session_owner_username
 
 
 class TestMergeLeadingSystemMessages:
@@ -217,6 +218,45 @@ class TestPromptTemplateToMessages:
         assert isinstance(result[2], MessagesPlaceholder)
         assert result[2].variable_name == "history"
         assert result[2].optional is True
+
+
+class TestSessionOwnerBlock:
+    @pytest.fixture(name="isolated_context")
+    def isolated_context_fixture(self):
+        return contextvars.copy_context()
+
+    def test_names_the_session_owner_inside_the_security_block(self, isolated_context):
+        def run():
+            set_session_owner_username("jane.doe")
+            with patch("lib.prompts.utilities.get_workflow_id", return_value="abc-123"):
+                return render_security_block(), _security_suffix()
+
+        block, suffix = isolated_context.run(run)
+
+        assert f"<session_owner_{suffix}>" in block
+        assert "This session belongs to the GitLab user @jane.doe." in block
+        assert block.index("<tool_output_policy_") < block.index("<session_owner_")
+
+    def test_is_absent_without_a_session_owner(self, isolated_context):
+        def run():
+            with patch("lib.prompts.utilities.get_workflow_id", return_value="abc-123"):
+                return render_security_block()
+
+        assert "session_owner" not in isolated_context.run(run)
+
+    def test_reaches_a_prompt_once_through_the_security_message(self, isolated_context):
+        def run():
+            set_session_owner_username("jane.doe")
+            template = {"system": "You are a helpful assistant", "user": "Hi"}
+            return prompt_template_to_messages(template)
+
+        result = isolated_context.run(run)
+        carrying = [
+            i for i, message in enumerate(result) if "@jane.doe" in str(message)
+        ]
+
+        assert carrying == [1]
+        assert result[1][0] == "system"
 
 
 class TestSecuritySuffix:

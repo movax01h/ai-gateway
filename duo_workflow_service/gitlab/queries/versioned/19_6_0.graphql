@@ -6,6 +6,10 @@ query(
     duoWorkflowWorkflows(workflowId: $workflowId) {
         nodes {
             statusName
+            user {
+                username
+                human
+            }
             projectId
             project {
                 id
