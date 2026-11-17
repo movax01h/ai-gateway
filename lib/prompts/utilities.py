@@ -9,7 +9,7 @@ import os
 from contextvars import ContextVar
 from dataclasses import dataclass
 from importlib import resources
-from typing import NamedTuple, Sequence, cast
+from typing import NamedTuple, Optional, Sequence, cast
 
 from jinja2 import BaseLoader, Environment
 from langchain_core.messages import SystemMessage
@@ -175,22 +175,35 @@ def prompt_template_to_messages(
 
 
 class PromptSource(NamedTuple):
-    """One template string a prompt renders, with the block it was written in."""
+    """One template string a prompt renders, with the block it was written in.
+
+    Attributes:
+        block: The role or block the string was written in, such as `system`, `user` or `message`.
+        text: The template source.
+        provided_by_engine: Variables the component that renders this block passes to it at render, which an author
+            never provides. The format only records which block they belong to; it supplies none of them, and a
+            render without them still fails. Nothing downstream matches on block names.
+    """
 
     block: str
     text: str
+    provided_by_engine: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
 class ResolvedPromptTemplate:
-    """What a prompt renders on every model call, with its format resolved away.
+    """What a prompt renders, with its format resolved away.
 
-    Whatever builds a model call reads this instead of the raw `prompt_template`, so a second prompt format can
-    resolve into the same object.
+    Whatever builds a model call reads this instead of the raw `prompt_template` or `template`, so it sees the same
+    object either way.
 
     Attributes:
         prefix: The messages sent on every model call, including the history placeholder: where the author put
             it, or last.
+        tail: The one user message rendered per batch of messages a component claims together and stored in its
+            history, or None for a prompt in the old format, which stores no message of its own. One message, not a
+            sequence: a structured `message` block renders as content blocks of this message, never as several.
     """
 
     prefix: Sequence[MessageLikeRepresentation]
+    tail: Optional[MessageLikeRepresentation] = None

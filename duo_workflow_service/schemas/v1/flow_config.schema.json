@@ -794,7 +794,7 @@
     },
     "Template": {
       "additionalProperties": false,
-      "description": "A prompt in the format that flow versions on the chat engine declare.\n\n`system` renders on every model call and is never stored. It's a string, or a `SystemPrompt` when it has more\nthan one part. The keys fix the roles, so a prompt can't put a user or assistant turn where the platform doesn't\nexpect one.",
+      "description": "A prompt in the format that flow versions on the chat engine declare.\n\n`system` renders on every model call and is never stored. It's a string, or a `SystemPrompt` when it has more\nthan one part. `message` renders once for each batch of messages a component claims together, into one user\nmessage stored in that component's history, so a template change never rewrites what the model already saw.\n`{{ inbound_messages.text }}` joins the batch's texts; `{% for message in inbound_messages %}` frames each message\non its own. It's one string for now; a structured form can follow the way `system` has one, and a string stays\nvalid then. The keys fix the roles, so a prompt can't put a user or assistant turn where the platform doesn't\nexpect one.",
       "properties": {
         "system": {
           "anyOf": [
@@ -807,6 +807,19 @@
             }
           ],
           "title": "System"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "pattern": "\\S",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
         }
       },
       "required": [
