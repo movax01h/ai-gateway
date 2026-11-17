@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.tools import ToolException
+from structlog.testing import capture_logs
 
 from duo_workflow_service.gitlab.gitlab_api import Project
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
+from duo_workflow_service.security.secret_redaction import REDACTED_PLACEHOLDER
 from duo_workflow_service.tools.commit import (
     CommitBaseTool,
     CommitResourceInput,
@@ -1163,6 +1165,150 @@ async def test_create_commit_with_partial_edit(
         path="/api/v4/projects/24/repository/commits",
         body=json.dumps(expected_params),
     )
+
+
+MOVE_ADVICE = (
+    "To move a file, use a move action without content. "
+    f"A file that holds {REDACTED_PLACEHOLDER} cannot be copied with create_commit."
+)
+EDIT_ADVICE = (
+    f"Update only lines that hold no {REDACTED_PLACEHOLDER}, "
+    "with a short old_str and new_str."
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("actions", "advice"),
+    [
+        (
+            [{"action": "create", "file_path": "f", "content": REDACTED_PLACEHOLDER}],
+            MOVE_ADVICE,
+        ),
+        (
+            [
+                {
+                    "action": "move",
+                    "file_path": "f",
+                    "previous_path": "g",
+                    "content": REDACTED_PLACEHOLDER,
+                }
+            ],
+            MOVE_ADVICE,
+        ),
+        (
+            [{"action": "update", "file_path": "f", "content": REDACTED_PLACEHOLDER}],
+            EDIT_ADVICE,
+        ),
+        (
+            [
+                {
+                    "action": "update",
+                    "file_path": "f",
+                    "old_str": "a",
+                    "new_str": REDACTED_PLACEHOLDER,
+                }
+            ],
+            EDIT_ADVICE,
+        ),
+        (
+            [
+                {"action": "delete", "file_path": "g"},
+                {"action": "create", "file_path": "f", "content": REDACTED_PLACEHOLDER},
+            ],
+            MOVE_ADVICE,
+        ),
+        (
+            [
+                {
+                    "action": "update",
+                    "file_path": "f",
+                    "content": REDACTED_PLACEHOLDER,
+                    "old_str": REDACTED_PLACEHOLDER,
+                    "new_str": REDACTED_PLACEHOLDER,
+                }
+            ],
+            EDIT_ADVICE,
+        ),
+    ],
+)
+async def test_create_commit_refuses_added_redactions(
+    gitlab_client_mock, metadata, commit_data, actions, advice
+):
+    gitlab_client_mock.aget = AsyncMock(
+        return_value=GitLabHttpResponse(200, {"content": ""})
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=create_http_response(commit_data))
+
+    with (
+        capture_logs() as cap_logs,
+        pytest.raises(ToolException, match="Refused") as refusal,
+    ):
+        await CreateCommit(metadata=metadata)._arun(
+            project_id=24,
+            branch="main",
+            commit_message="m",
+            actions=[CreateCommitAction(**action) for action in actions],
+        )
+
+    assert advice in str(refusal.value)
+    assert f"{actions[-1]['action']} of f adds" in str(refusal.value)
+    assert [(log["tool"], log["new_path"], log["added"]) for log in cap_logs] == [
+        ("create_commit", advice == MOVE_ADVICE, 1)
+    ]
+    assert not gitlab_client_mock.apost.called
+
+
+@pytest.mark.asyncio
+async def test_create_commit_compares_content_with_nothing(
+    gitlab_client_mock, metadata, commit_data
+):
+    existing = base64.b64encode(f"k: '{REDACTED_PLACEHOLDER}'".encode()).decode()
+    gitlab_client_mock.aget = AsyncMock(
+        return_value=GitLabHttpResponse(200, {"content": existing})
+    )
+    gitlab_client_mock.apost = AsyncMock(return_value=create_http_response(commit_data))
+    action = CreateCommitAction(
+        action="update", file_path="f", content=f"k: '{REDACTED_PLACEHOLDER}'"
+    )
+
+    with pytest.raises(ToolException, match="Refused"):
+        await CreateCommit(metadata=metadata)._arun(
+            project_id=24, branch="main", commit_message="m", actions=[action]
+        )
+
+    assert not gitlab_client_mock.apost.called
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"action": "update", "file_path": "f", "content": "k: 'x'"},
+        {"action": "move", "file_path": "f", "previous_path": "g"},
+        {
+            "action": "update",
+            "file_path": "f",
+            "old_str": REDACTED_PLACEHOLDER,
+            "new_str": REDACTED_PLACEHOLDER,
+        },
+    ],
+)
+async def test_create_commit_allows_writes_without_added_redactions(
+    gitlab_client_mock, metadata, commit_data, fields
+):
+    body = {"content": base64.b64encode(REDACTED_PLACEHOLDER.encode()).decode()}
+    gitlab_client_mock.aget = AsyncMock(return_value=GitLabHttpResponse(200, body))
+    gitlab_client_mock.apost = AsyncMock(return_value=create_http_response(commit_data))
+
+    await CreateCommit(metadata=metadata)._arun(
+        project_id=24,
+        branch="main",
+        commit_message="m",
+        actions=[CreateCommitAction(**fields)],
+    )
+
+    assert gitlab_client_mock.apost.called
 
 
 @pytest.mark.asyncio

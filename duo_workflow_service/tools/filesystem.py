@@ -29,8 +29,10 @@ from duo_workflow_service.policies.file_exclusion_policy import (
     CONTEXT_EXCLUSION_MESSAGE,
     FileExclusionPolicy,
 )
+from duo_workflow_service.security.secret_redaction import REDACTED_PLACEHOLDER
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
+from duo_workflow_service.tools.utils import added_redactions, adds_redactions
 from lib.context import gitlab_user_id, language_server_version
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
 
@@ -38,6 +40,7 @@ DEFAULT_READ_FILE_OFFSET = 0
 DEFAULT_READ_FILE_LIMIT = 2000
 
 _security_log = structlog.stdlib.get_logger("security")
+logger = structlog.stdlib.get_logger(__name__)
 
 # Trusted path segments for globally-installed agent skills, Duo plugins, and Duo config.
 # Read-only tools need to access absolute paths (e.g. ~/.agents/skills/<skill>/SKILL.md or
@@ -956,6 +959,20 @@ class WriteFile(DuoBaseTool):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
         validate_duo_context_exclusions(file_path)
+        if adds_redactions(contents, ""):
+            logger.warning(
+                "write_refused_added_redaction",
+                added=added_redactions(contents, ""),
+                new_path=True,
+                tool=self.name,
+            )
+            raise ToolException(
+                f"Refused: contents hold {REDACTED_PLACEHOLDER}, which marks a value "
+                "you cannot see, and writing it would replace the real value. "
+                "To copy or move a file, use cp or mv instead of rewriting its content. "
+                "To change an existing file, use edit_file on lines that hold no "
+                f"{REDACTED_PLACEHOLDER}."
+            )
 
         return await _execute_action(
             self.metadata,  # type: ignore
@@ -1142,6 +1159,19 @@ class EditFile(DuoBaseTool):
             return FileExclusionPolicy.format_llm_exclusion_message([file_path])
 
         validate_duo_context_exclusions(file_path)
+        if adds_redactions(new_str, old_str):
+            logger.warning(
+                "write_refused_added_redaction",
+                added=added_redactions(new_str, old_str),
+                new_path=False,
+                tool=self.name,
+            )
+            raise ToolException(
+                f"Refused: new_str adds {REDACTED_PLACEHOLDER}, which marks a value "
+                "you cannot see, and writing it would replace the real value. "
+                f"Edit only lines that hold no {REDACTED_PLACEHOLDER}, "
+                "with a short old_str and new_str."
+            )
 
         return await _execute_action(
             self.metadata,  # type: ignore

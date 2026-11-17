@@ -10,9 +10,11 @@ from pydantic import BaseModel, Field
 
 from duo_workflow_service.gitlab.url_parser import GitLabUrlParseError, GitLabUrlParser
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
+from duo_workflow_service.security.secret_redaction import REDACTED_PLACEHOLDER
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
 from duo_workflow_service.tools.gitlab_resource_input import ProjectResourceInput
+from duo_workflow_service.tools.utils import added_redactions, adds_redactions
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -653,6 +655,35 @@ class CreateCommit(CommitBaseTool):
 
         base_ref = start_branch or start_sha or default_branch or "main"
         ref_to_fetch = branch if branch_exists else base_ref
+
+        for action in actions:
+            old_str, new_str, content = (
+                action.old_str or "",
+                action.new_str or "",
+                action.content or "",
+            )
+            if adds_redactions(new_str, old_str) or adds_redactions(content, ""):
+                new_path = action.action in {"create", "move"}
+                logger.warning(
+                    "write_refused_added_redaction",
+                    added=added_redactions(new_str, old_str)
+                    + added_redactions(content, ""),
+                    new_path=new_path,
+                    tool=self.name,
+                )
+                advice = (
+                    "To move a file, use a move action without content. "
+                    f"A file that holds {REDACTED_PLACEHOLDER} cannot be copied "
+                    "with create_commit."
+                    if new_path
+                    else f"Update only lines that hold no {REDACTED_PLACEHOLDER}, "
+                    "with a short old_str and new_str."
+                )
+                raise ToolException(
+                    f"Refused: {action.action} of {action.file_path} adds "
+                    f"{REDACTED_PLACEHOLDER}, which marks a value you cannot see, "
+                    f"and writing it would replace the real value. {advice}"
+                )
 
         actions = await self._merge_duplicate_update_actions(
             project_id=project_id,

@@ -3,8 +3,14 @@ from abc import abstractmethod
 
 import pytest
 
+from duo_workflow_service.security.secret_redaction import REDACTED_PLACEHOLDER
 from duo_workflow_service.tools.duo_base_tool import DuoBaseTool
-from duo_workflow_service.tools.utils import get_all_ops_tools, get_all_subclasses
+from duo_workflow_service.tools.utils import (
+    added_redactions,
+    adds_redactions,
+    get_all_ops_tools,
+    get_all_subclasses,
+)
 
 
 @pytest.fixture(name="test_classes")
@@ -82,3 +88,20 @@ def test_get_all_ops_tools(test_classes):
         "edit_tool",
         "search_tool_b",
     }
+
+
+@pytest.mark.parametrize(
+    ("written", "replaced", "expected"),
+    [
+        (REDACTED_PLACEHOLDER, "", True),
+        (REDACTED_PLACEHOLDER * 2, REDACTED_PLACEHOLDER, True),
+        (REDACTED_PLACEHOLDER, REDACTED_PLACEHOLDER, False),
+        ("value", REDACTED_PLACEHOLDER, False),
+        ("value", "", False),
+    ],
+)
+def test_adds_redactions_returns_whether_placeholders_are_added(
+    written, replaced, expected
+):
+    assert adds_redactions(written, replaced) is expected
+    assert added_redactions(written, replaced) == (1 if expected else 0)
