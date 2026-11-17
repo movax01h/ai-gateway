@@ -21,21 +21,17 @@ __all__ = [
 # string with the task's writes.
 TaskId = NewType("TaskId", str)
 
-# Joins a place in the flow's address tree to the ID of one running instance of it, as in
-# `developer_agent/review_agent#call-7`.
-_INSTANCE_SEPARATOR = "#"
-
 
 @dataclass(frozen=True, slots=True)
 class Claimant:
     """Which pending messages are a task's to claim.
 
     A task takes the messages and directives addressed to its `recipient`, the unaddressed ones when it
-    `accepts_unaddressed`, and the answers whose `in_reply_to` it holds. An address names a place in the flow's tree,
-    such as `developer_agent/review_agent`, and one running instance of it adds `#` and an ID. A message addressed to a
-    place also reaches its instances, but never the places below it. An answer is found only by its `in_reply_to`,
-    never by address. Each selector is optional, so a gate can claim an answer without taking what's addressed to its
-    agent.
+    `accepts_unaddressed`, and the answers whose `in_reply_to` it holds. An address names exactly one claimant: a
+    top-level component, such as `developer_agent`, or one run of a component it dispatches, such as
+    `developer_agent/review_agent#call-7`. Nothing else matches it, so runs of one component never take each other's
+    messages. An answer is found only by its `in_reply_to`, never by address. Each selector is optional, so a gate can
+    claim an answer without taking what's addressed to its agent.
     """
 
     recipient: Optional[str] = None
@@ -51,9 +47,7 @@ class Claimant:
             return self.accepts_unaddressed
         if self.recipient is None:
             return False
-        return self.recipient == message.recipient or self.recipient.startswith(
-            message.recipient + _INSTANCE_SEPARATOR
-        )
+        return self.recipient == message.recipient
 
 
 @dataclass(frozen=True, slots=True)

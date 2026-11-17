@@ -111,22 +111,24 @@ class TestClaim:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("recipient", "expected"),
+        ("claimant", "expected"),
         [
-            ("developer_agent", ("to-developer-agent",)),
-            ("developer_agent/review_agent", ("to-review-agent",)),
-            ("developer_agent/review_agent#call-7", ("to-review-agent", "to-call-7")),
-            ("developer_agent/review", ("to-review",)),
+            (Claimant(recipient="developer_agent"), ("to-developer-agent",)),
+            (Claimant(recipient="developer_agent/review_agent#call-7"), ("to-call-7",)),
+            (Claimant(recipient="developer_agent/review_agent#call-8"), ("to-call-8",)),
+            (Claimant(recipient="developer_agent/review"), ("to-review",)),
+            (Claimant(recipient="developer"), ()),
         ],
         ids=[
-            "a place, not the places below it",
-            "a place, not what's addressed to one of its instances",
-            "an instance, and what's addressed to its place",
-            "a place whose name another place's starts with",
+            "a top-level component, not what it dispatches",
+            "one run, not its component or the run beside it",
+            "the run beside it",
+            "a component whose name another one's starts with",
+            "a name that another component's starts with",
         ],
     )
-    async def test_an_address_reaches_its_place_and_its_instances(
-        self, recipient: str, expected: tuple[str, ...]
+    async def test_an_address_names_one_claimant(
+        self, claimant: Claimant, expected: tuple[str, ...]
     ):
         inbox = _inbox(
             _message("to-developer-agent", "developer_agent"),
@@ -136,7 +138,7 @@ class TestClaim:
             _message("to-call-8", "developer_agent/review_agent#call-8"),
         )
 
-        assert _ids(inbox.claim(TASK, Claimant(recipient=recipient))) == expected
+        assert _ids(inbox.claim(TASK, claimant)) == expected
 
     @pytest.mark.asyncio
     async def test_a_claimed_message_is_gone_for_every_other_task(self):
