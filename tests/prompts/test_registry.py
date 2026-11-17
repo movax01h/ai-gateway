@@ -2100,7 +2100,6 @@ _PROMPTS_WITHOUT_MODELS_FROM: frozenset[str] = (
             # The Duo Workflow Service runs these.
             "create_merge_request",
             "create_repository_branch",
-            "list_available_tools",
             "programming_agent",
             "push_to_remote",
             "recommend_reviewers_assign",
