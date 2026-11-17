@@ -7,8 +7,11 @@ from ai_gateway.prompts.config.formats import (
     LegacyTemplate,
     parse_format,
 )
-from ai_gateway.prompts.config.template import Template
-from lib.prompts.utilities import PromptSource, prompt_template_to_messages
+from ai_gateway.prompts.config.template import DEFAULT_MESSAGE_TEMPLATE, Template
+from lib.prompts.utilities import (
+    PromptSource,
+    prompt_template_to_messages,
+)
 
 
 class TestLegacyTemplate:
@@ -44,6 +47,10 @@ class TestLegacyTemplate:
             roles, tool_output_security=tool_output_security
         )
 
+    def test_resolve_has_no_tail(self):
+        # The old format renders whole on every call and stores no message of its own.
+        assert LegacyTemplate({"user": "{{ goal }}"}).resolve(True).tail is None
+
 
 class TestTemplate:
     @pytest.mark.parametrize(
@@ -72,17 +79,49 @@ class TestTemplate:
             tool_output_security=tool_output_security,
         )
 
-    def test_sources_are_the_system_parts_in_order(self):
+    @pytest.mark.parametrize(
+        ("message", "tail"),
+        [
+            (
+                "<m>{{ inbound_messages.text }}</m>",
+                ("user", "<m>{{ inbound_messages.text }}</m>"),
+            ),
+            (None, ("user", DEFAULT_MESSAGE_TEMPLATE)),
+        ],
+        ids=["the author's block", "the platform default"],
+    )
+    def test_the_tail_is_one_user_message(self, message, tail):
+        # One message, not a list of them: a structured block renders as its content blocks later (ADR-004 §3).
+        assert Template(system="a", message=message).resolve(True).tail == tail
+
+    def test_sources_mark_inbound_messages_as_engine_provided_in_message_only(self):
         template = Template(
             system={
                 "type": "system_message",
                 "parts": [{"text": "static"}, {"text": "{{ project }}"}],
-            }
+            },
+            message="{{ inbound_messages.text }}",
         )
 
         assert template.sources() == (
             PromptSource("system", "static"),
             PromptSource("system", "{{ project }}"),
+            PromptSource(
+                "message",
+                "{{ inbound_messages.text }}",
+                provided_by_engine=frozenset({"inbound_messages"}),
+            ),
+        )
+
+    def test_sources_include_the_platform_default_message(self):
+        # What `resolve` renders is what the checks read, the default block included.
+        assert Template(system="a").sources() == (
+            PromptSource("system", "a"),
+            PromptSource(
+                "message",
+                DEFAULT_MESSAGE_TEMPLATE,
+                provided_by_engine=frozenset({"inbound_messages"}),
+            ),
         )
 
 
@@ -147,7 +186,7 @@ class TestConfigsExposeOneFormat:
             prompt_id="p",
             name="p",
             unit_primitives=["duo_chat"],
-            template={"system": "a"},
+            template={"system": "a", "message": "{{ inbound_messages.text }}"},
         )
 
         data = config.to_prompt_data()

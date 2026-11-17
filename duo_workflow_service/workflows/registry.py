@@ -294,9 +294,9 @@ def _validate_flow_config_prompts(
     except TypeError:
         return
 
-    # Validate only actual prompt text roles, not metadata/placeholders. The new format's `system` block is text by
-    # construction, so it is covered by the same role.
-    prompt_text_roles = {"system", "user", "assistant", "function"}
+    # Validate only actual prompt text roles, not metadata/placeholders. The new format's blocks are text by
+    # construction, so both of them are in here too.
+    prompt_text_roles = {"system", "user", "assistant", "function", "message"}
 
     # Validate each prompt configuration
     for prompt_config in prompts_iter:

@@ -530,10 +530,7 @@ class LocalPromptRegistry(BasePromptRegistry):
                 f"(version '{prompt_version}'): {e}"
             ) from e
 
-        variables: set[str] = set()
-        for source in config.prompt_format.sources():
-            variables.update(self._collect_jinja2_variables(source.text))
-        return variables
+        return self._required_variables(config.prompt_format)
 
     def _build_prompt(
         self,

@@ -1,29 +1,50 @@
-"""The `template` prompt format: a prompt declares it, and the model receives what it would from `prompt_template`.
+"""The `template` prompt format, end to end: a prompt declares it, an agent renders its messages through it.
 
-These run against the real prompt pipeline, with only the model faked, because what matters is the bytes the model would
-receive.
+These run against the real prompt pipeline, with only the model faked, because what matters is the bytes the model
+would receive. `TestThroughTheFlowRegistry` is the one that goes through the registry a flow actually resolves its
+inline prompts with; the rest build `Prompt` directly.
 """
 
 from itertools import takewhile
+from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import jsonschema
 import pytest
+import yaml
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableSequence
 from pydantic import ValidationError
 
+from ai_gateway.config import ConfigModelLimits
 from ai_gateway.prompts.base import Prompt
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig, Template
 from ai_gateway.prompts.config.formats import parse_format
 from ai_gateway.prompts.feature_roots import discover_feature_prompts
-from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
+from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
+from ai_gateway.prompts.registry import LocalPromptRegistry
+from duo_workflow_service.agent_platform.core.inbox.message import (
+    InvalidInput,
+    User,
+    inbound_message,
+)
+from duo_workflow_service.agent_platform.core.inbox.view import (
+    InboundMessagesView,
+    inbound_messages_view,
+)
+from duo_workflow_service.agent_platform.v1.flows.flow_config import (
+    FlowConfig,
+    PartialFlowConfig,
+)
 from duo_workflow_service.schemas.v1.flow_config_schema import (
     FlowConfigJsonSchemaGenerator,
 )
+from lib.internal_events.client import InternalEventsClient
+
+_HERE = Path(__file__).parent
 
 
 def _parts(*texts: str) -> dict[str, Any]:
@@ -102,6 +123,20 @@ async def _prefix(prompt: Prompt, variables: dict[str, Any]) -> list[tuple[str, 
     return [(type(message).__name__, message.content) for message in prefix]
 
 
+def _batch(*texts: str) -> InboundMessagesView:
+    """What the engine hands the `message` block for the messages claimed together: one message per text."""
+    messages = [
+        inbound_message(
+            id=f"m{index}", content=[{"type": "text", "text": text}], sender=User()
+        )
+        for index, text in enumerate(texts)
+    ]
+
+    return inbound_messages_view(
+        message for message in messages if not isinstance(message, InvalidInput)
+    )
+
+
 class TestTheFormat:
     def test_a_prompt_declares_one_format(self):
         with pytest.raises(ValueError, match="not both"):
@@ -173,6 +208,45 @@ class TestTheFormat:
         ):
             parse_format(None, None)
 
+    @pytest.mark.parametrize(
+        ("written", "error"),
+        [
+            ("  ", "needs text"),
+            (["{{ inbound_messages.text }}"], "valid string"),
+            ({"type": "text", "content": "x"}, "valid string"),
+        ],
+        ids=["a blank string", "a list", "an object"],
+    )
+    def test_what_message_refuses(self, written, error):
+        # One string for now; a structured form can follow the way `system` has one, and a string stays valid then.
+        with pytest.raises(ValidationError, match=error):
+            Template(system="a", message=written)
+
+    @staticmethod
+    def _message_schema() -> dict:
+        schema = FlowConfig.model_json_schema(
+            schema_generator=FlowConfigJsonSchemaGenerator
+        )
+        return {
+            **schema["$defs"]["Template"]["properties"]["message"],
+            "$defs": schema["$defs"],
+        }
+
+    def test_the_published_schema_and_pydantic_accept_the_same_message(self):
+        jsonschema.validate("{{ inbound_messages.text }}", self._message_schema())
+        Template(system="a", message="{{ inbound_messages.text }}")
+
+    @pytest.mark.parametrize(
+        "written",
+        [" ", ["{{ inbound_messages.text }}"], {"type": "text", "content": "x"}],
+        ids=["a blank string", "a list", "an object"],
+    )
+    def test_the_published_schema_and_pydantic_refuse_the_same_message(self, written):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(written, self._message_schema())
+        with pytest.raises(ValidationError):
+            Template(system="a", message=written)
+
 
 class TestWhatTheModelSees:
     def test_the_parts_are_built_as_a_prompt_template_system_list_is(self):
@@ -188,6 +262,18 @@ class TestWhatTheModelSees:
             "session context",
         ]
         assert "tool_output_policy" in system[2].text
+
+    def test_no_user_message_renders_on_every_call(self):
+        prompt = _prompt(
+            {"system": "instructions", "message": "{{ inbound_messages.text }}"}
+        )
+
+        value = prompt.prompt_tpl.invoke({"history": [HumanMessage(content="hi")]})
+
+        # The only user message is the one in history, rendered once and stored.
+        assert [m.text for m in value.to_messages() if isinstance(m, HumanMessage)] == [
+            "hi"
+        ]
 
 
 class TestCachingDoesNotRegress:
@@ -261,6 +347,142 @@ class TestCachingDoesNotRegress:
             _prompt_for(ModelClassProvider.ANTHROPIC, _config(**declared))
 
         assert build.call_args.args[2] is has_prompt
+
+
+class TestTheTail:
+    @pytest.mark.asyncio
+    async def test_it_renders_the_messages_it_is_given(self):
+        prompt = _prompt(
+            {"system": "x", "message": "<user>{{ inbound_messages.text }}</user>"}
+        )
+
+        rendered = await prompt.render_message(
+            {"inbound_messages": _batch("fix the pipeline")}
+        )
+
+        assert isinstance(rendered, HumanMessage)
+        assert rendered.text == "<user>fix the pipeline</user>"
+
+    @pytest.mark.asyncio
+    async def test_messages_claimed_together_render_as_one(self):
+        prompt = _prompt({"system": "x"})
+
+        rendered = await prompt.render_message(
+            {"inbound_messages": _batch("first", "second")}
+        )
+
+        # No `message` block: the platform default renders them as they were sent.
+        assert rendered.text == "first\n\nsecond"
+
+    @pytest.mark.asyncio
+    async def test_a_template_can_iterate_the_messages(self):
+        prompt = _prompt(
+            {
+                "system": "x",
+                "message": (
+                    "{% for message in inbound_messages %}[{{ message.type }}] "
+                    "{{ message.text }}{% endfor %}"
+                ),
+            }
+        )
+
+        rendered = await prompt.render_message(
+            {"inbound_messages": _batch("one", "two")}
+        )
+
+        assert rendered.text == "[message] one[message] two"
+
+    @pytest.mark.asyncio
+    async def test_author_and_model_variables_render_in_the_message_block(self):
+        # The tail gets every variable the prefix gets: the author's inputs and the model variables bound on it.
+        prompt = _prompt(
+            {
+                "system": "x",
+                "message": "[{{ goal }} | {{ model_friendly_name }}] {{ inbound_messages.text }}",
+            }
+        )
+
+        rendered = await prompt.render_message(
+            {"goal": "fix CI", "inbound_messages": _batch("use rspec")}
+        )
+
+        assert rendered.text == "[fix CI | Unknown] use rspec"
+
+    @pytest.mark.asyncio
+    async def test_a_render_with_no_text_is_refused(self):
+        # An approval with no feedback has no text, so the default block renders nothing. This is the backstop:
+        # the component decides from the messages, before rendering, whether there is anything to render.
+        prompt = _prompt({"system": "x"})
+        approval = inbound_message(
+            id="a1", content=[], sender=User(), in_reply_to="call-1", choice="approve"
+        )
+        assert not isinstance(approval, InvalidInput)
+
+        with pytest.raises(ValueError, match="rendered an empty message"):
+            await prompt.render_message(
+                {"inbound_messages": inbound_messages_view([approval])}
+            )
+
+    @pytest.mark.asyncio
+    async def test_an_old_format_prompt_has_no_tail(self):
+        prompt = _prompt_for(
+            ModelClassProvider.ANTHROPIC,
+            _config(prompt_template={"system": "a", "user": "{{ goal }}"}),
+        )
+
+        with pytest.raises(ValueError, match="not in the 'template' format"):
+            await prompt.render_message({})
+
+
+@pytest.fixture(name="registry")
+def registry_fixture(model):
+    """The registry a flow builds in `Flow._use_config`, over the real local one."""
+    shared = LocalPromptRegistry.from_local_yaml(
+        prompt_template_factories={},
+        # The shared `model_metadata` fixture selects a LiteLLM model, as model selection does for a flow.
+        model_factories={ModelClassProvider.LITE_LLM: lambda **_: model},
+        internal_event_client=Mock(spec=InternalEventsClient),
+        model_limits=ConfigModelLimits(),
+        custom_models_enabled=False,
+    )
+
+    return InMemoryPromptRegistry(shared)
+
+
+@pytest.fixture(name="model")
+def model_fixture():
+    return _FakeModel(
+        responses=[
+            AIMessage(content="The job fails on a missing variable."),
+            AIMessage(content="Pushed the fix."),
+        ]
+    )
+
+
+class TestThroughTheFlowRegistry:
+    """The path a flow takes: an inline prompt, registered as `Flow._use_config` does, resolved as a component would.
+
+    One test, end to end. The rules it goes through are each pinned on their own in `tests/prompts/test_in_memory_registry.py`
+    and `TestTheTail`.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_flow_renders_a_message_through_an_inline_template_prompt(
+        self, registry, fixture_config, model_metadata
+    ):
+        for prompt in fixture_config.prompts or []:
+            registry.register_prompt(prompt.prompt_id, prompt.to_prompt_data())
+
+        # The component's build-time check: `goal` is the author's, the messages are the engine's.
+        assert registry.get_required_variables("agent_prompt", None) == {"goal"}
+
+        # An inline prompt names no model; model selection hands the component one at runtime.
+        resolved = registry.get("agent_prompt", None, model_metadata=model_metadata)
+        rendered = await resolved.render_message(
+            {"goal": "the pipeline", "inbound_messages": _batch("Why does it fail?")}
+        )
+
+        assert rendered.text == "Why does it fail?"
 
 
 class TestWhatTheOldFormatStillSees:
@@ -338,6 +560,18 @@ class TestWhatTheOldFormatStillSees:
             jsonschema.validate(written, {**block, "$defs": schema["$defs"]})
         with pytest.raises(ValidationError):
             Template(system=written)
+
+
+@pytest.fixture(name="fixture_config")
+def fixture_config_fixture():
+    return _load_fixture()
+
+
+def _load_fixture(**overrides: Any):
+    """The fixture config, as a flow would hold it."""
+    data = yaml.safe_load((_HERE / "chat_partial_template.yml").read_text()) | overrides
+
+    return PartialFlowConfig(**data).to_config()
 
 
 @pytest.fixture(autouse=True, scope="module")

@@ -9,6 +9,7 @@ from typing import (
     Awaitable,
     Callable,
     List,
+    Mapping,
     MutableMapping,
     NamedTuple,
     NoReturn,
@@ -50,7 +51,7 @@ from jinja2.sandbox import ImmutableSandboxedEnvironment
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.callbacks.usage import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.prompt_values import PromptValue
 from langchain_core.prompts import ChatPromptTemplate, string
@@ -109,6 +110,7 @@ from ai_gateway.prompts.caching import (
     should_inject_default_cache_control,
 )
 from ai_gateway.prompts.config.base import ModelConfig, PromptConfig
+from ai_gateway.prompts.config.formats import PromptTemplateFormat
 from ai_gateway.prompts.feature_roots import (
     LEGACY_INCLUDE_ALIASES,
     feature_prompt_root,
@@ -800,6 +802,9 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
     unit_primitive: GitLabUnitPrimitive
     operation_type: LLMOperationType = LLMOperationType.STANDARD
     prompt_tpl: Runnable[Any, PromptValue]
+    # The tail: renders each batch of messages the component claims once, into that component's history. `None`
+    # means the prompt is in the old format, so the component renders the messages itself, as it does today.
+    message_tpl: Optional[Runnable[Any, PromptValue]] = None
     internal_event_client: Optional[InternalEventsClient] = None
     limits: Optional[ModelLimits] = None
     internal_event_extra: dict[str, Any] = {}
@@ -918,17 +923,29 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
                     **(bind_tools_params or {}),
                 )
 
-        prompt_tpl: Runnable[Any, PromptValue] = (
-            prompt_template_factory(model_provider, config)
-            if prompt_template_factory
-            else bind_model_variables(
+        prompt_tpl: Runnable[Any, PromptValue]
+        # The tail. `None` means the prompt is in the old format; a `template` prompt always has one.
+        message_tpl: Optional[Runnable[Any, PromptValue]] = None
+        if prompt_template_factory:
+            prompt_tpl = prompt_template_factory(model_provider, config)
+        else:
+            # One resolution for both blocks, so a model variable renders the same in either.
+            resolved = self._resolve(config, tools)
+            prompt_tpl = bind_model_variables(
                 ChatPromptTemplate.from_messages(
-                    self._resolve(config, tools).prefix, template_format="jinja2"
+                    resolved.prefix, template_format="jinja2"
                 ),
                 model_provider,
                 model_metadata,
             )
-        )
+            if resolved.tail is not None:
+                message_tpl = bind_model_variables(
+                    ChatPromptTemplate.from_messages(
+                        [resolved.tail], template_format="jinja2"
+                    ),
+                    model_provider,
+                    model_metadata,
+                )
         # A decision template returns the `{"input", "questions"}` request, not chat messages, so it has none to merge.
         if (
             config.operation_type != LLMOperationType.DECISION
@@ -990,6 +1007,7 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             operation_type=config.operation_type,
             bound=chain,
             prompt_tpl=prompt_tpl,
+            message_tpl=message_tpl,
             requested_model=(
                 model_kwargs.get("model")
                 if model_metadata and model_metadata.is_custom_model
@@ -1381,6 +1399,36 @@ class Prompt(RunnableBinding[Any, BaseMessage]):
             tool_output_security=config.tool_output_security or bool(tools)
         )
 
+    async def render_message(self, variables: Mapping[str, Any]) -> HumanMessage:
+        """Render the tail once, into the one user message a component stores in its history per claimed batch.
+
+        Args:
+            variables: The same variables the prefix gets, plus `inbound_messages`.
+
+        Returns:
+            The user message to append to the component's history.
+
+        Raises:
+            ValueError: When the prompt is not in the `template` format, so it has no tail, or when the render has no
+                text at all, which a model either rejects or answers with nothing. The second is a backstop, not the
+                check that a batch has something to say: an author's framing around a batch with no text still renders
+                text. The component decides from the messages, before calling this, whether there is anything to
+                render.
+        """
+        if self.message_tpl is None:
+            raise ValueError(
+                f"Prompt '{self.name}' has no 'message' block to render: it is not in the 'template' format"
+            )
+
+        # The tail is one user message by construction (`ResolvedPromptTemplate.tail`), so exactly one comes out.
+        (rendered,) = (await self.message_tpl.ainvoke(variables)).to_messages()
+        if not rendered.text.strip():
+            raise ValueError(
+                f"Prompt '{self.name}' rendered an empty message: nothing in it has text"
+            )
+
+        return cast(HumanMessage, rendered)
+
 
 class BasePromptRegistry(ABC):
     internal_event_client: InternalEventsClient
@@ -1520,6 +1568,27 @@ class BasePromptRegistry(ABC):
         self.internal_event_client.track_event(
             f"request_{unit_primitive}", category=internal_event_category
         )
+
+    @classmethod
+    def _required_variables(cls, prompt_format: PromptTemplateFormat) -> set[str]:
+        """The variables an author must provide for a prompt, whichever format it declares.
+
+        Every source's variables, minus the ones the engine passes to that source's block. The format marks those on
+        the source itself, so this reads no block names.
+
+        Args:
+            prompt_format: The prompt's declared format.
+
+        Returns:
+            Flat set of variable names, ``{% include %}`` directives followed recursively.
+        """
+        variables: set[str] = set()
+        for source in prompt_format.sources():
+            variables.update(
+                cls._collect_jinja2_variables(source.text) - source.provided_by_engine
+            )
+
+        return variables
 
     @staticmethod
     def _collect_jinja2_variables(template: str) -> set[str]:

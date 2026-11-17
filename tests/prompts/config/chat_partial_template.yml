@@ -1,0 +1,31 @@
+# The smallest chat-partial flow whose prompt uses the `template` format: one agent, a system block and a message
+# block. Deliberately not a copy of a shipped flow, so these tests say what the format needs and nothing else.
+version: "v1"
+environment: chat-partial
+
+components:
+  - name: "agent"
+    type: AgentComponent
+    prompt_id: "agent_prompt"
+    inputs:
+      - from: "context:goal"
+        as: "goal"
+    toolset: []
+
+prompts:
+  - name: "agent_prompt"
+    prompt_id: "agent_prompt"
+    # No model, as in shipped flows: model selection provides one at runtime, as `model_metadata`.
+    model:
+    unit_primitives:
+      - duo_agent_platform
+    template:
+      # Each part is its own system message, so the first one stays identical across sessions and is read from
+      # the prompt cache.
+      system:
+        type: system_message
+        parts:
+          - text: "You answer questions about a project."
+          - text: "The project is {{ goal }}."
+      # Rendered once for each batch of messages the agent claims together, and stored in its history.
+      message: "{{ inbound_messages.text }}"
