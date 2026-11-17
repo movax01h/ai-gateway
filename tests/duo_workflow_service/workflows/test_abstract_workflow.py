@@ -79,6 +79,7 @@ from lib.internal_events.context import EventContext, current_event_context
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from lib.langsmith_tracing import set_langsmith_trace_headers
 from lib.language_server import LanguageServerVersion
+from lib.session_owner import get_session_owner_username
 from lib.verbose_ai_logs import extended_logging_context
 
 
@@ -677,6 +678,54 @@ async def test_compile_and_run_graph_merges_jwt_pre_approved_tools(
 
     assert "read_file" in workflow._preapproved_tools
     assert "create_issue" in workflow._preapproved_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("issuer", "expected"),
+    [("https://gitlab.com", "jane.doe"), ("gitlab-duo-workflow-service", None)],
+)
+@patch.dict(os.environ, {"CLOUD_CONNECTOR_SERVICE_NAME": "gitlab-duo-workflow-service"})
+@patch("duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+async def test_compile_and_run_graph_sets_the_session_owner(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    _mock_convert_mcp_tools,
+    mock_fetch_workflow_and_container_data,
+    workflow_config,
+    issuer,
+    expected,
+):
+    mock_tools_registry.return_value = MagicMock()
+    mock_checkpointer = AsyncMock()
+    mock_checkpointer.initial_status_event = "START"
+    mock_gitlab_workflow.return_value.__aenter__.return_value = mock_checkpointer
+    workflow_config["session_owner_username"] = "jane.doe"
+    workflow = MockWorkflow(
+        "id",
+        {},
+        GLReportingEventContext.from_workflow_definition("software_development"),
+        CloudConnectorUser(
+            authenticated=True, claims=UserClaims(gitlab_realm="saas", issuer=issuer)
+        ),
+    )
+
+    # The run executes in its own context, so read the value inside it, at the next step after the fetch.
+    seen = []
+
+    async def record_owner():
+        seen.append(get_session_owner_username())
+
+    with patch.object(workflow, "_merge_governance_policies", side_effect=record_owner):
+        await workflow._compile_and_run_graph("Test goal")
+
+    assert seen == [expected], (
+        "A client holding a DWS-issued token runs the GitLab API request itself, "
+        "so only a Workhorse session may name the owner"
+    )
+    mock_fetch_workflow_and_container_data.assert_called_once()
 
 
 @pytest.mark.asyncio

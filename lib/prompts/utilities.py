@@ -18,6 +18,7 @@ from langchain_core.prompts import MessagesPlaceholder
 from langchain_core.prompts.chat import MessageLikeRepresentation
 
 from lib.context.workflow import get_workflow_id
+from lib.session_owner.prompt import render_session_owner_block
 
 __all__ = [
     "PromptSource",
@@ -70,11 +71,19 @@ def _security_suffix() -> str:
 def render_security_block() -> str:
     """Render the tool output security block with a randomized per-session suffix.
 
+    When GitLab named the session owner, the block also states who they are. Every agent gets its system messages
+    through here, so this is the one place the identity enters a prompt.
+
     Returns:
         The rendered security block string.
     """
     suffix = _security_suffix()
-    return _security_template.render(suffix=suffix) + "\n\n"
+    block = _security_template.render(suffix=suffix) + "\n\n"
+
+    if session_owner_block := render_session_owner_block(suffix):
+        block += session_owner_block + "\n\n"
+
+    return block
 
 
 def _is_system_message(message: MessageLikeRepresentation) -> bool:
