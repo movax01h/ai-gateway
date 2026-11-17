@@ -33,10 +33,11 @@ ai-gateway-eks:
       # https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3404
       AIGW_REQUEST_BODY_LIMIT__MAX_BYTES: "16777216"
       GOOGLE_APPLICATION_CREDENTIALS: "/secrets/gcp-service-account/credentials.json"
-      # Per-actor in-flight limits, log mode: serve every request and record which ones the
-      # current limits would reject. Switch to "enforce" once a week of data has sized the limits.
+      # Per-actor in-flight limits. Code suggestions run in log mode: serve every request and
+      # record which ones the current limits would reject. Prompts run in enforce mode: answer
+      # 429 when a limit is hit.
       AIGW_CODE_SUGGESTIONS__ACTOR_LIMIT_MODE: "log"
-      AIGW_PROMPTS__ACTOR_LIMIT_MODE: "log"
+      AIGW_PROMPTS__ACTOR_LIMIT_MODE: "enforce"
       # Paid credit models gate, enforce: reject models marked requires_paid_credits for
       # self-managed trials without purchased GitLab Credits. Keep AI Gateway and DWS in sync.
       AIGW_MODEL_SELECTION__PAID_CREDIT_MODELS_GATE_MODE: "enforce"
