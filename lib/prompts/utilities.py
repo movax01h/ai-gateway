@@ -180,8 +180,9 @@ class PromptSource(NamedTuple):
     Attributes:
         block: The role or block the string was written in, such as `system`, `user` or `message`.
         text: The template source.
-        provided_by_engine: Variables the engine passes to this block, which an author never provides. The format
-            that declares the block says which, so nothing downstream matches on block names.
+        provided_by_engine: Variables the component that renders this block passes to it at render, which an author
+            never provides. The format only records which block they belong to; it supplies none of them, and a
+            render without them still fails. Nothing downstream matches on block names.
     """
 
     block: str
