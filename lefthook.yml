@@ -13,13 +13,19 @@ pre-commit:
         # Filter out auto-generated protobuf files that cannot be linted
         export STAGED_FILES="$(echo '{staged_files}' | tr ' ' '\n' | grep -v 'contract_pb2\.py' | tr '\n' ' ')"
 
-        make check-mypy LINT_WORKING_DIR="$STAGED_FILES"
+        # The script's exit status is that of its last command, so record each
+        # status; otherwise a failing check-mypy is masked by the checks below.
+        status=0
+
+        make check-mypy LINT_WORKING_DIR="$STAGED_FILES" || status=1
 
         # Run all other parts of lint-code (everything except check-mypy)
         make check-ruff check-pylint check-codespell check-docformatter check-editorconfig \
         LINT_WORKING_DIR="$STAGED_FILES" \
         CODESPELL_LINT_WORKING_DIR="$STAGED_FILES" \
-        EDITORCONFIG_LINT_WORKING_DIR="$STAGED_FILES"
+        EDITORCONFIG_LINT_WORKING_DIR="$STAGED_FILES" || status=1
+
+        exit $status
     check-duo-workflow-flow-schema:
       glob: "*.py"
       run: |
