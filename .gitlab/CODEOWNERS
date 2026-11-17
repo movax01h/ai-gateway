@@ -29,6 +29,7 @@
 
 # Insights features under ai/features/ are co-owned by Platform Insights
 /ai/features/insights/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/analytics-section/platform-insights/engineers
+/agent_tests/analytics_agent/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/analytics-section/platform-insights/engineers
 
 # Semantic Code Search under /ai/features/semantic_search/
 /ai/features/semantic_search/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/semantic-code-search
@@ -123,6 +124,7 @@
 
 # Insights features under ai/features/
 /ai/features/insights/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/analytics-section/platform-insights/engineers
+/agent_tests/analytics_agent/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/analytics-section/platform-insights/engineers
 
 # Semantic Code Search under /ai/features/semantic_search/
 /ai/features/semantic_search/ @gitlab-org/maintainers/duo-workflow-service @gitlab-org/ai-powered/ai-platform/ai-core-infra/semantic-code-search
