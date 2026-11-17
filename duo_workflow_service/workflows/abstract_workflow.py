@@ -143,6 +143,7 @@ from lib.internal_events.context import current_event_context
 from lib.internal_events.event_enum import EventEnum, EventLabelEnum
 from lib.langsmith_tracing import get_langsmith_trace_headers
 from lib.language_server import LanguageServerVersion
+from lib.session_owner import set_session_owner_username
 from lib.verbose_ai_logs import is_extended_logging_enabled
 
 # Constants
@@ -1023,6 +1024,13 @@ class AbstractWorkflow(ABC):
                 workflow_id=self._workflow_id,
                 tool_access_policies_project_id=self._requested_project_id(),
                 with_tool_access_policies=self._loads_tool_access_policies(),
+            )
+
+            # A client with a DWS-issued token runs the GitLab API request itself, so it could forge the owner.
+            set_session_owner_username(
+                None
+                if _token_issued_by_dws(self._user)
+                else self._workflow_config.get("session_owner_username")
             )
 
             await self._merge_governance_policies()

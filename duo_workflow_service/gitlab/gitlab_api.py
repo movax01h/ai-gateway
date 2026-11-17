@@ -82,6 +82,16 @@ class WorkflowConfig(TypedDict):
     features: NotRequired[WorkflowFeatures]
     source_type: NotRequired[Optional[str]]
     tool_access_policies: NotRequired[Optional[dict]]
+    session_owner_username: NotRequired[Optional[str]]
+
+
+def _human_owner_username(workflow: dict) -> Optional[str]:
+    """The owner's username, only when GitLab says the owner is human.
+
+    GitLab before the `ai_workflows` scope on `human` returns null for it, so those sessions get no owner.
+    """
+    owner = workflow.get("user") or {}
+    return owner.get("username") if owner.get("human") is True else None
 
 
 def _group_allows_web_search(project_data: dict, namespace_data: dict) -> bool:
@@ -238,6 +248,7 @@ async def fetch_workflow_and_container_data(
         stalled=workflow.get("stalled", None),
         source_type=source_type,
         tool_access_policies=workflow.get("toolAccessPolicies"),
+        session_owner_username=_human_owner_username(workflow),
         features={
             "foundational_flows": {
                 "enabled": status_check.get("foundationalFlowsEnabled", True),

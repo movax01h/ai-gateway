@@ -1,5 +1,6 @@
 # This test module covers the full prompt_adapter surface area and exceeds the line limit.
 # pylint: disable=too-many-lines
+import contextvars
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
@@ -34,6 +35,7 @@ from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.context import gitlab_version
 from lib.feature_flags import current_feature_flag_context
 from lib.feature_flags.context import FeatureFlag
+from lib.session_owner import set_session_owner_username
 
 REPO_ROOT = Path(__file__).parents[3]
 ORBIT_AGENT_CONFIG = (
@@ -136,6 +138,34 @@ Base chat for {{ gitlab_instance_url }}.
     security_message = messages[1]
     assert isinstance(security_message, SystemMessage)
     assert "<tool_output_policy_" in security_message.content
+
+
+@patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")
+def test_chat_agent_prompt_template_names_the_session_owner_once(
+    mock_get_model_metadata,
+    sample_chat_workflow_state: ChatWorkflowState,
+):
+    mock_get_model_metadata.return_value = None
+    prompt_config = PromptConfig(
+        name="Chat Agent",
+        unit_primitive=GitLabUnitPrimitive.DUO_CHAT,
+        prompt_template={
+            "system_static": "Base chat.",
+            "user": "{{ message.content }}",
+        },
+    )
+    template = ChatAgentPromptTemplate(ModelClassProvider.ANTHROPIC, prompt_config)
+
+    def run():
+        set_session_owner_username("jane.doe")
+        return template.invoke(sample_chat_workflow_state, agent_name="test_agent")
+
+    messages = contextvars.copy_context().run(run).to_messages()
+    carrying = [i for i, m in enumerate(messages) if "@jane.doe" in str(m.content)]
+
+    # In the security message, after the cached static message.
+    assert carrying == [1]
+    assert isinstance(messages[1], SystemMessage)
 
 
 @patch("duo_workflow_service.agents.prompt_adapter.get_model_metadata")

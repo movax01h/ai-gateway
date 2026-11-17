@@ -138,6 +138,44 @@ async def test_fetch_workflow_and_container_data_success():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("user", "expected"),
+    [
+        ({"username": "jane.doe", "human": True}, "jane.doe"),
+        ({"username": "duo-developer", "human": False}, None),
+        # GitLab before the ai_workflows scope on `human` returns null for it.
+        ({"username": "jane.doe", "human": None}, None),
+        (None, None),
+    ],
+)
+async def test_fetch_workflow_and_container_data_session_owner(user, expected):
+    gitlab_client = AsyncMock()
+    gitlab_client.graphql.return_value = {
+        "duoWorkflowWorkflows": {
+            "nodes": [
+                {
+                    "statusName": "created",
+                    "projectId": "gid://gitlab/Project/123",
+                    "project": {
+                        "id": "gid://gitlab/Project/123",
+                        "name": "test-project",
+                        "httpUrlToRepo": "http://example.com/test-project.git",
+                        "webUrl": "http://example.com/test-project",
+                    },
+                    "user": user,
+                }
+            ]
+        }
+    }
+
+    _, _, workflow_config = await fetch_workflow_and_container_data(
+        gitlab_client, "111"
+    )
+
+    assert workflow_config["session_owner_username"] == expected
+
+
+@pytest.mark.asyncio
 async def test_fetch_workflow_and_container_data_no_workflow():
     gitlab_client = AsyncMock()
 
