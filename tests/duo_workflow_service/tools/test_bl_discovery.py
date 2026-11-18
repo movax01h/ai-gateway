@@ -405,6 +405,32 @@ class TestExecute:
         assert _execute(files_per_unit=3, max_units=0) == []
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(
+            {"globs": ["lib/gw/**/*.rb"], "anchor_patterns": ["(unclosed"]},
+            id="uncompilable",
+        ),
+        pytest.param({"globs": [], "anchor_patterns": []}, id="empty"),
+        pytest.param(
+            {"globs": ["lib/gw/**/*.rb"], "anchor_patterns": [r"gw\.rb$"]}, id="ok"
+        ),
+    ],
+)
+def test_the_tuner_answer_is_logged_once_per_list(monkeypatch, answer):
+    _install(monkeypatch, "lib/gw/a.rb\napp/models/user.rb")
+    with structlog.testing.capture_logs() as logs:
+        _execute(
+            files_per_unit=2,
+            max_units=5,
+            extra_globs=answer["globs"],
+            extra_anchor_patterns=answer["anchor_patterns"],
+        )
+    echoed = [e["list"] for e in logs if e["event"] == "bl_discover tuner answer"]
+    assert sorted(echoed) == ["anchor_patterns", "globs"]
+
+
 @pytest.mark.parametrize("scan_effort", ["high", None, "ludicrous"])
 def test_execute_hands_select_units_the_tier_or_the_configured_knobs(
     monkeypatch, scan_effort
@@ -951,6 +977,51 @@ class TestLogging:
         out = next(e for e in logs if e["event"] == "bl_discover_and_cluster output")
         assert out["extra_anchor_regexes"] == patterns
         assert any("capped" in e["event"] for e in logs)
+
+    def test_a_small_pool_with_no_extra_patterns_warns(self, monkeypatch):
+        _install(monkeypatch, "app/auth.py\n")
+        with structlog.testing.capture_logs() as logs:
+            _execute(files_per_unit=8, max_units=5)
+        warned = [e for e in logs if e["event"] == "bl_tuner_empty_with_small_pool"]
+        assert [(w["log_level"], w["candidates"]) for w in warned] == [("warning", 1)]
+
+    def test_no_warning_with_accepted_patterns_or_a_large_pool(self, monkeypatch):
+        _install(monkeypatch, "app/auth.py\n")
+        with structlog.testing.capture_logs() as logs:
+            _execute(files_per_unit=8, max_units=5, extra_globs=["app/auth.py"])
+        assert not [e for e in logs if e["event"] == "bl_tuner_empty_with_small_pool"]
+        big = "".join(f"app/auth{i}.py\n" for i in range(bl.SMALL_POOL + 1))
+        _install(monkeypatch, big)
+        with structlog.testing.capture_logs() as logs:
+            _execute(files_per_unit=8, max_units=5)
+        assert not [e for e in logs if e["event"] == "bl_tuner_empty_with_small_pool"]
+
+    def test_the_warning_boundary_is_exactly_the_small_pool(self, monkeypatch):
+        def warned(n):
+            _install(monkeypatch, "".join(f"app/auth{i}.py\n" for i in range(n)))
+            with structlog.testing.capture_logs() as logs:
+                _execute(files_per_unit=8, max_units=5)
+            return [e for e in logs if e["event"] == "bl_tuner_empty_with_small_pool"]
+
+        assert [w["candidates"] for w in warned(bl.SMALL_POOL)] == [bl.SMALL_POOL]
+        assert not warned(bl.SMALL_POOL + 1)
+
+    def test_no_warning_when_an_anchor_pattern_was_accepted(self, monkeypatch):
+        _install(monkeypatch, "app/auth.py\n")
+        with structlog.testing.capture_logs() as logs:
+            _execute(files_per_unit=8, max_units=5, extra_anchor_patterns=[r"\Aapp/"])
+        assert not [e for e in logs if e["event"] == "bl_tuner_empty_with_small_pool"]
+
+    def test_an_over_broad_anchor_pattern_names_its_reason(self, monkeypatch):
+        bulk = "".join(f"bulk/b{i}.ext\n" for i in range(51))
+        _install(monkeypatch, bulk)
+        with structlog.testing.capture_logs() as logs:
+            _execute(files_per_unit=8, max_units=5, extra_anchor_patterns=[r"\Abulk/"])
+        warned = next(e for e in logs if "too many files" in e["event"])
+        assert (warned["list"], warned["reason"]) == (
+            "anchor_patterns",
+            "too_broad_matches_over_50",
+        )
 
     def test_only_the_tool_class_is_exported(self):
         assert bl.__all__ == ["BlDiscoverAndCluster"]

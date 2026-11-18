@@ -631,6 +631,21 @@ _UNSAFE_GLOB_CHARS = "[]?" + chr(92)
 _RE_TYPE = type(re.compile(""))
 
 
+# How many tuner items are echoed to the log, and how much of each.
+_LOG_ITEM_LIMIT = 20
+_LOG_ITEM_CHARS = 200
+
+
+def _log_dropped(kind: str, item: Any, reason: str) -> None:
+    """Log one tuner item that validation discarded, with the list it came from."""
+    _log.info(
+        "bl_discover extra pattern dropped",
+        list=kind,
+        reason=reason,
+        item=str(item)[:_LOG_ITEM_CHARS],
+    )
+
+
 def _extra_items(value: Optional[Any], json_key: str) -> List[str]:
     """Normalise a caller-supplied value to a list of non-empty strings.
 
@@ -640,11 +655,24 @@ def _extra_items(value: Optional[Any], json_key: str) -> List[str]:
     if isinstance(value, dict):
         value = value.get(json_key)
     if not isinstance(value, (list, tuple)):
+        _log.info(
+            "bl_discover tuner answer not a list",
+            list=json_key,
+            answer_type="missing" if value is None else type(value).__name__,
+        )
         return []
+    # The raw answer, before any validation, so an empty or dropped result explains itself.
+    _log.info(
+        "bl_discover tuner answer",
+        list=json_key,
+        count=len(value),
+        items=[str(v)[:_LOG_ITEM_CHARS] for v in value[:_LOG_ITEM_LIMIT]],
+    )
     out: List[str] = []
     for item in value:
         if not isinstance(item, str):
             # A non-string entry means this is not a pattern list at all.
+            _log_dropped(json_key, item, "not_a_string")
             return []
         item = item.strip()
         if item:
@@ -683,6 +711,8 @@ def resolve_extra_globs(value: Optional[Any]) -> List[str]:
     if len(items) > MAX_EXTRA_GLOBS:
         _log.info(
             "bl_discover extra_globs over the cap -- no additions",
+            list="globs",
+            reason="list_over_limit",
             supplied=len(items),
             cap=MAX_EXTRA_GLOBS,
         )
@@ -691,15 +721,19 @@ def resolve_extra_globs(value: Optional[Any]) -> List[str]:
     out: List[str] = []
     for pattern in items:
         if len(pattern) > MAX_EXTRA_PATTERN_CHARS:
+            _log_dropped("globs", pattern, "too_long")
             continue
         if any(c in pattern for c in _UNSAFE_GLOB_CHARS):
+            _log_dropped("globs", pattern, "bad_syntax")
             continue
         pattern = _normalize_glob(pattern)
         if pattern in seen:
             continue
         if _glob_is_not_a_glob(pattern):
+            _log_dropped("globs", pattern, "bare_word")
             continue
         if _glob_is_too_broad(pattern):
+            _log_dropped("globs", pattern, "all_wildcard")
             continue
         seen.add(pattern)
         out.append(pattern)
@@ -717,9 +751,11 @@ def resolve_extra_anchor_patterns(value: Optional[Any]) -> List[Any]:
         The compiled patterns; one that does not compile is dropped on its own. ``[]`` when the input is unrecognized
         or over ``MAX_EXTRA_ANCHOR_PATTERNS``.
     """
+    # A tuple is what a caller hands back after resolving: even an empty one is already resolved, and must not log
+    # the tuner answer a second time. An empty list is still a raw answer, so it falls through to be logged.
     if (
         isinstance(value, (list, tuple))
-        and value
+        and (value or isinstance(value, tuple))
         and all(isinstance(v, _RE_TYPE) for v in value)
     ):
         return list(value)
@@ -729,6 +765,8 @@ def resolve_extra_anchor_patterns(value: Optional[Any]) -> List[Any]:
     if len(items) > MAX_EXTRA_ANCHOR_PATTERNS:
         _log.info(
             "bl_discover extra_anchor_patterns over the cap -- no additions",
+            list="anchor_patterns",
+            reason="list_over_limit",
             supplied=len(items),
             cap=MAX_EXTRA_ANCHOR_PATTERNS,
         )
@@ -740,15 +778,19 @@ def resolve_extra_anchor_patterns(value: Optional[Any]) -> List[Any]:
             continue
         seen.add(pattern)
         if len(pattern) > MAX_EXTRA_PATTERN_CHARS:
+            _log_dropped("anchor_patterns", pattern, "too_long")
             continue
         if not _ANCHOR_RE_LITERAL.search(pattern):
             # Only wildcards/anchors/separators: matches every path.
+            _log_dropped("anchor_patterns", pattern, "all_wildcard")
             continue
         try:
             out.append(re.compile(pattern))
         except re.error as e:
             _log.info(
                 "bl_discover extra anchor pattern does not compile -- dropped",
+                list="anchor_patterns",
+                reason="regex_compile_error",
                 pattern=pattern,
                 err=str(e),
             )
@@ -775,6 +817,8 @@ def cap_extra_anchor_files(
     kept = added[:MAX_EXTRA_ANCHOR_FILES]
     _log.warning(
         "bl_discover extra anchor patterns add too many files -- capped",
+        list="anchor_patterns",
+        reason="cap_200_files",
         kept=len(kept),
         dropped=len(added) - len(kept),
         cap=MAX_EXTRA_ANCHOR_FILES,
