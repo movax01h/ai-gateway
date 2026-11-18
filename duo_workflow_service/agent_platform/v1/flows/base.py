@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Dict, NoReturn, Optional, cast, override
@@ -7,6 +8,7 @@ from uuid import uuid4
 import jsonschema
 from dependency_injector.wiring import Provide, inject
 from gitlab_cloud_connector import CloudConnectorUser
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command, Overwrite
@@ -16,6 +18,7 @@ from ai_gateway.prompts import BasePromptRegistry, InMemoryPromptRegistry
 from ai_gateway.response_schemas import InlineResponseSchemaRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
 from contract import contract_pb2
+from duo_workflow_service.agent_platform.core.inbox import RunInbox
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -66,6 +69,7 @@ from duo_workflow_service.interceptors.route import support_self_hosted_billing
 from duo_workflow_service.tracking.errors import log_workflow_failure
 from duo_workflow_service.workflows.abstract_workflow import (
     AbstractWorkflow,
+    GraphInvocation,
 )
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
@@ -351,6 +355,40 @@ class Flow(AbstractWorkflow):
             },
             agent_context_limits={},
         )
+
+    def _delivers_through_inbox(self) -> bool:
+        """Whether this flow's runs get a run inbox to take their input from.
+
+        A version opts in by declaring a prompt in the `template` format, which has no `user` part to render the input
+        from. Any other version renders `goal` itself and gets no inbox.
+        """
+        return any(prompt.template is not None for prompt in self._config.prompts or [])
+
+    @override
+    async def _resolve_graph_invocation(
+        self,
+        *,
+        compiled_graph: Any,
+        graph_config: RunnableConfig,
+        goal: str,
+        status_event: str,
+        checkpoint_tuple: Any,
+    ) -> GraphInvocation:
+        """Hand a run that delivers through an inbox its inbox, which starts empty.
+
+        Any other run gets no inbox and takes its input as it did before.
+        """
+        invocation = await super()._resolve_graph_invocation(
+            compiled_graph=compiled_graph,
+            graph_config=graph_config,
+            goal=goal,
+            status_event=status_event,
+            checkpoint_tuple=checkpoint_tuple,
+        )
+        if not self._delivers_through_inbox():
+            return invocation
+
+        return replace(invocation, context=RunInbox())
 
     @override
     def _support_namespace_level_workflow(self) -> bool:

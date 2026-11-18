@@ -336,10 +336,20 @@ def _first_party_untrusted_reason(
 
 @dataclass(frozen=True)
 class GraphInvocation:
-    """The input and config one run of the compiled graph streams from."""
+    """The input, config and runtime context one run of the compiled graph streams from."""
 
     graph_input: Any
     graph_config: RunnableConfig
+    # Handed to every node as `runtime.context`.
+    context: Any = None
+
+    @property
+    def context_kwargs(self) -> dict[str, Any]:
+        """The keyword argument that hands the graph its runtime context.
+
+        Empty when there is none, so a run without one streams with the arguments it always has.
+        """
+        return {} if self.context is None else {"context": self.context}
 
 
 class AbstractWorkflow(ABC):
@@ -1175,6 +1185,7 @@ class AbstractWorkflow(ABC):
                     config=graph_config,
                     stream_mode=["values", "messages", "updates"],
                     durability=self._checkpoint_durability(),
+                    **invocation.context_kwargs,
                 ):
                     if type == "values":
                         self._record_first_response_metric()
@@ -1423,11 +1434,11 @@ class AbstractWorkflow(ABC):
     ) -> GraphInvocation:
         """Resolve what this run streams from, once the graph is compiled.
 
-        The default streams ``get_graph_input`` with ``graph_config`` unchanged. Override this to decide with the
-        compiled graph in hand, for example to read the checkpoint tip through ``aget_state``, or to point the run at
-        another checkpoint. An override hands the entries it does not handle to ``super()``, and derives any config it
-        returns from ``graph_config`` so the callbacks and the recursion limit carry over. The failure handlers receive
-        the returned config.
+        The default streams ``get_graph_input`` with ``graph_config`` unchanged and no runtime context. Override this to
+        decide with the compiled graph in hand, for example to read the checkpoint tip through ``aget_state``, to point
+        the run at another checkpoint, or to hand the nodes a runtime context such as the run's inbox. An override hands
+        the entries it does not handle to ``super()``, and derives any config it returns from ``graph_config`` so the
+        callbacks and the recursion limit carry over. The failure handlers receive the returned config.
         """
         graph_input = await self.get_graph_input(goal, status_event, checkpoint_tuple)
         return GraphInvocation(graph_input=graph_input, graph_config=graph_config)

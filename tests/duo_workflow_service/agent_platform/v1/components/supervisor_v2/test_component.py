@@ -1,13 +1,28 @@
 """Test suite for SupervisorAgentComponentV2."""
 
+from typing import Optional
 from unittest.mock import Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
-from langgraph.graph import END
+from gitlab_cloud_connector import CloudConnectorUser, UserClaims
+from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.graph import END, StateGraph
+from structlog.testing import capture_logs
 
+from ai_gateway.prompts.registry import LocalPromptRegistry
+from ai_gateway.response_schemas import BaseResponseSchemaRegistry
+from duo_workflow_service.agent_platform.core.inbox import (
+    Address,
+    Claimant,
+    Message,
+    RunInbox,
+    TaskId,
+    TextPart,
+    User,
+)
 from duo_workflow_service.agent_platform.utils.exceptions import ModelRefusalError
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
+    AgentComponent,
     AgentComponentBase,
     MaxCyclesConfig,
     RoutingError,
@@ -17,18 +32,25 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
 )
 from duo_workflow_service.agent_platform.v1.components.supervisor_v2.component import (
     SubagentConfig,
+    SupervisorAgentComponentV2,
     extract_subagent_names,
+)
+from duo_workflow_service.agent_platform.v1.components.supervisor_v2.delegate_task import (
+    DelegateTask,
 )
 from duo_workflow_service.agent_platform.v1.components.supervisor_v2.ui_log import (
     UILogEventsSupervisor,
 )
-from duo_workflow_service.agent_platform.v1.state import FlowStateKeys
+from duo_workflow_service.agent_platform.v1.state import FlowState, FlowStateKeys
 from duo_workflow_service.agent_platform.v1.state.base import NoneIOKey
-from duo_workflow_service.entities.state import MessageTypeEnum
+from duo_workflow_service.entities.state import MessageTypeEnum, WorkflowStatusEnum
+from duo_workflow_service.tools.toolset import Toolset
 from duo_workflow_service.tracking.subagent_delegation import (
     DelegationRejectionReason,
     SubagentDelegationTracker,
 )
+from lib.events import GLReportingEventContext
+from lib.internal_events import InternalEventsClient
 
 from .conftest import (
     _AGENT_COMPONENT_MODULE,
@@ -412,6 +434,38 @@ class TestSupervisorAgentComponentV2Attach:
         }
         assert developer_name in added_node_names
         assert tester_name in added_node_names
+
+    def test_the_supervisor_claims_as_a_top_level_component(
+        self,
+        all_node_mocks,
+        mock_router,
+        base_flow_state,
+        supervisor_name,
+        make_supervisor,
+    ):
+        _compile(make_supervisor(), mock_router)
+
+        assert all_node_mocks["agent"].claimant(base_flow_state) == Claimant(
+            recipient=Address.of(supervisor_name), accepts_unaddressed=True
+        )
+
+    def test_each_dispatched_run_gets_its_own_address(
+        self,
+        all_node_mocks,  # pylint: disable=unused-argument  # activates the node mocks
+        mock_router,
+        mock_sub_agents,
+        supervisor_name,
+        developer_name,
+        make_supervisor,
+    ):
+        _compile(make_supervisor(), mock_router)
+
+        address = mock_sub_agents[developer_name].compile_as_subagent.call_args.kwargs[
+            "address"
+        ]
+        assert address({"context": {"_delegation_call_id": "call-7"}}) == (
+            Address.of(supervisor_name).child(developer_name, "call-7")
+        )
 
 
 class TestSupervisorExecutionFlow:
@@ -953,3 +1007,154 @@ class TestSupervisorV2IdenticalToolCallLimit:
 
         call_kwargs = mock_tool_node_cls.call_args[1]
         assert call_kwargs["identical_call_max_wrap_up_retries"] == expected
+
+
+class _ScriptedPrompt:
+    """A prompt whose model answers from a script, so real components run with nothing else faked."""
+
+    binds_web_search = False
+
+    def __init__(self, script):
+        self._script = script
+        self.model = Mock(model_name="claude-3-sonnet")
+
+    async def ainvoke(self, input, config=None):
+        return self._script(input.get("history") or [])
+
+
+def _delegates_to_both_then_finishes(history):
+    if any(isinstance(message, ToolMessage) for message in history):
+        return AIMessage(content="Both subagents finished.")
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": f"delegate-{name}",
+                "name": DelegateTask.tool_title,
+                "args": {
+                    "subagent_name": name,
+                    "description": f"The {name} task",
+                    "prompt": f"Do the {name} task",
+                },
+            }
+            for name in ("developer", "tester")
+        ],
+    )
+
+
+class TestDispatchedRunsClaimFromTheParentsInbox:
+    """A real supervisor dispatches two real subagents, and each run claims at its own address.
+
+    Nothing hands a dispatched run an inbox: it claims from the one its parent's run was given, which reaches it as
+    LangGraph's runtime context. Only the model is scripted, so an upgrade that stops passing the context down fails
+    here.
+    """
+
+    @pytest.fixture(name="graph")
+    def graph_fixture(self):
+        scripts = {
+            "supervisor": _delegates_to_both_then_finishes,
+            "developer": lambda _history: AIMessage(content="developer is done."),
+            "tester": lambda _history: AIMessage(content="tester is done."),
+        }
+        prompts = Mock(spec=LocalPromptRegistry)
+        prompts.get_on_behalf.side_effect = lambda _user, prompt_id, *_a, **_k: (
+            _ScriptedPrompt(scripts[prompt_id])
+        )
+        prompts.get_required_variables.return_value = set()
+        toolset = Mock(spec=Toolset)
+        toolset.__contains__ = Mock(return_value=False)
+        toolset.bindable = []
+        toolset.denied_tools = set()
+        fields = {
+            "flow_id": "1",
+            "flow_type": GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
+            "user": CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(scopes=["duo_workflow_execute_workflow"]),
+            ),
+            "inputs": [],
+            "prompt_registry": prompts,
+            "internal_event_client": Mock(spec=InternalEventsClient),
+            "schema_registry": Mock(spec=BaseResponseSchemaRegistry),
+            "toolset": toolset,
+        }
+        subagents = {
+            name: AgentComponent(
+                name=name, description=f"The {name}.", prompt_id=name, **fields
+            )
+            for name in ("developer", "tester")
+        }
+        supervisor = SupervisorAgentComponentV2(
+            **fields,
+            name="supervisor",
+            prompt_id="supervisor",
+            subagents=[{"name": name} for name in subagents],
+            max_delegations=None,
+            subagent_components=subagents,
+        )
+        router = Mock()
+        router.route.return_value = END
+        graph = StateGraph(FlowState, context_schema=RunInbox)
+        supervisor.attach(graph, router)
+        graph.set_entry_point(supervisor.__entry_hook__())
+
+        return graph.compile()
+
+    @staticmethod
+    def _message(id: str, recipient: Optional[Address]) -> Message:
+        return Message(
+            id=id,
+            content=(TextPart(type="text", text=f"Text of {id}"),),
+            sender=User(),
+            recipient=str(recipient) if recipient else None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_each_run_claims_what_is_addressed_to_it_and_nothing_else(
+        self, graph
+    ):
+        supervisor = Address.of("supervisor")
+        developer_run = supervisor.child("developer", "delegate-developer")
+        tester_run = supervisor.child("tester", "delegate-tester")
+        another_run = supervisor.child("developer", "an-earlier-call")
+        inbox = RunInbox()
+        for id, recipient in (
+            ("for-nobody", None),
+            ("for-the-developer-run", developer_run),
+            ("for-the-tester-run", tester_run),
+            ("for-another-run", another_run),
+        ):
+            inbox.put(self._message(id, recipient))
+
+        with capture_logs() as logs:
+            await graph.ainvoke(
+                {
+                    "status": WorkflowStatusEnum.EXECUTION,
+                    "conversation_history": {},
+                    "ui_chat_log": [],
+                    "context": {"goal": "Ship the feature", "inputs": {}},
+                    "agent_context_limits": {},
+                },
+                context=inbox,
+            )
+
+        claimed_by = {
+            log["agent"]: log["message_ids"]
+            for log in logs
+            if log["event"] == "Claimed messages from the run's inbox"
+        }
+        assert claimed_by == {
+            "supervisor#agent": ["for-nobody"],
+            "developer#agent": ["for-the-developer-run"],
+            "tester#agent": ["for-the-tester-run"],
+        }
+        # A run of the same subagent that isn't going takes nothing, and no other run takes what is its own.
+        assert [
+            message.id
+            for message in inbox.claim(
+                TaskId("a-later-task"), Claimant(recipient=another_run)
+            )
+        ] == ["for-another-run"]

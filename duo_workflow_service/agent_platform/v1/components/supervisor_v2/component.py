@@ -1,4 +1,4 @@
-from typing import Any, ClassVar, Optional, Self, TypedDict, override
+from typing import Any, Callable, ClassVar, Optional, Self, TypedDict, override
 
 from dependency_injector.wiring import inject
 from langchain_core.messages import AIMessage, BaseMessage
@@ -11,6 +11,7 @@ from duo_workflow_service.agent_platform.constants import (
     INTERACTIVE_ENVIRONMENTS,
     NODE_ROLE_SEPARATOR,
 )
+from duo_workflow_service.agent_platform.core.inbox import Address
 from duo_workflow_service.agent_platform.utils.tool_event_tracker import (
     ToolEventTracker,
 )
@@ -41,6 +42,7 @@ from duo_workflow_service.agent_platform.v1.components.supervisor_v2.nodes impor
     SubagentDispatchNode,
 )
 from duo_workflow_service.agent_platform.v1.components.supervisor_v2.nodes.delegation_shared import (
+    DELEGATION_CALL_ID_CONTEXT_KEY,
     SUBSESSION_RUNS_CONTEXT_KEY,
 )
 from duo_workflow_service.agent_platform.v1.components.supervisor_v2.ui_log import (
@@ -423,6 +425,17 @@ class SupervisorAgentComponentV2(AgentComponentBase):
             optional=True,
         )
 
+    def _address_of_run(self, agent_name: str) -> Callable[[FlowState], Address]:
+        """Build the resolver of one dispatched run's inbox address.
+
+        A run is named by the ``delegate_task`` call that dispatched it, which
+        ``DelegationPrepareNode`` seeds in the run's own state.
+        """
+        call_id_key = IOKey(target="context", subkeys=[DELEGATION_CALL_ID_CONTEXT_KEY])
+        return lambda state: Address.of(self.name).child(
+            agent_name, call_id_key.value_from_state(state)
+        )
+
     def _build_prompt(
         self,
         tools: list,
@@ -555,7 +568,9 @@ class SupervisorAgentComponentV2(AgentComponentBase):
         # limitation; the fix is to scope that accumulation per invocation (or to
         # compile per dispatch).
         subagent_graphs: dict[str, CompiledStateGraph] = {
-            agent_name: subagent.compile_as_subagent()
+            agent_name: subagent.compile_as_subagent(
+                address=self._address_of_run(agent_name)
+            )
             for agent_name, subagent in self.subagent_components.items()
         }
         dispatch_nodes = {
@@ -617,6 +632,7 @@ class SupervisorAgentComponentV2(AgentComponentBase):
         )
 
         # --- Add supervisor nodes to graph ---
+        node_agent.claimant = self._claimant
         graph.add_node(self.__entry_hook__(), node_agent.run)
         graph.add_node(node_tools.name, node_tools.run)
         graph.add_node(node_final_response.name, node_final_response.run)

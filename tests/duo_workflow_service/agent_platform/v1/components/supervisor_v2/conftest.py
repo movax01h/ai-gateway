@@ -387,7 +387,7 @@ class RoutingMockSubagentComponent:
         self._answer = answer or f"{name} finished the task."
         self._error = error
 
-    def compile_as_subagent(self):
+    def compile_as_subagent(self, address):
         def _run(state):
             if self._error is not None:
                 raise self._error

@@ -7,6 +7,7 @@ from langgraph.graph import StateGraph
 
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
+from duo_workflow_service.agent_platform.core.inbox import RunInbox
 from duo_workflow_service.agent_platform.utils.flow import (
     filter_pre_approvals_by_policy,
 )
@@ -33,7 +34,12 @@ from duo_workflow_service.tools import Toolset
 from lib.events import GLReportingEventContext
 from lib.internal_events.client import InternalEventsClient
 
-__all__ = ["FlowGraphBuilder"]
+__all__ = ["FlowGraph", "FlowGraphBuilder"]
+
+
+# The graph a flow compiles to. Its runtime context is the run's inbox (see `build`), but a component's `attach` takes
+# any `StateGraph`, so the context type stays open here instead of repeating `RunInbox` in every component.
+FlowGraph = StateGraph[Any, Any, Any, Any]
 
 
 class FlowGraphBuilder:
@@ -82,14 +88,15 @@ class FlowGraphBuilder:
         # config. `Flow.__init__` normalizes a request without items to `CatalogItems()`.
         self._catalog_items = catalog_items
 
-    def build(self, flow_config: FlowConfig) -> StateGraph:
+    def build(self, flow_config: FlowConfig) -> FlowGraph:
         """Build the graph for ``flow_config``, entry point set, ready to compile."""
         if flow_config.flow.entry_point is None:
             raise ValueError(
                 "Can not build flow graph: entry_point is not defined in the flow config."
             )
 
-        graph = StateGraph(FlowState)
+        # The run's inbox arrives as runtime context, which a node reads to claim the messages it receives.
+        graph = StateGraph(FlowState, context_schema=RunInbox)
         components = self._build_components(flow_config, graph)
         self._build_routers(flow_config, components, graph)
 
@@ -99,7 +106,7 @@ class FlowGraphBuilder:
         return graph
 
     def _build_components(
-        self, flow_config: FlowConfig, graph: StateGraph
+        self, flow_config: FlowConfig, graph: FlowGraph
     ) -> dict[str, BaseComponent]:
         components = self._seed_terminal_components(graph)
 
@@ -241,7 +248,7 @@ class FlowGraphBuilder:
         self,
         flow_config: FlowConfig,
         components: dict[str, BaseComponent],
-        graph: StateGraph,
+        graph: FlowGraph,
     ) -> None:
         """Build and attach routers to the graph based on configuration.
 
@@ -340,7 +347,7 @@ class FlowGraphBuilder:
             "user": self._user,
         }
 
-    def _seed_terminal_components(self, graph: StateGraph) -> dict[str, BaseComponent]:
+    def _seed_terminal_components(self, graph: FlowGraph) -> dict[str, BaseComponent]:
         """Attach the terminal components no config declares, and seed the pool with them.
 
         A name absent from the returned pool is not routable: v1 seeds both
