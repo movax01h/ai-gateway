@@ -1,28 +1,13 @@
-from logging.config import dictConfig
+"""Deprecated import location, moved to ``ai.apps.aigw.app``."""
 
-from fastapi import FastAPI
+import warnings
 
-from ai_gateway.api import create_fast_api_server
-from ai_gateway.config import get_config
-from ai_gateway.prometheus import start_metrics_server
-from ai_gateway.structured_logging import setup_logging
+from ai.apps.aigw.app import get_app, get_config
 
-config = get_config()
+warnings.warn(
+    "ai_gateway.app has moved to ai.apps.aigw.app",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-# configure logging
-dictConfig(config.fastapi.uvicorn_logger)
-
-
-def get_app() -> FastAPI:
-    setup_logging(config.logging, config.custom_models.enabled)
-    start_metrics_server(config)
-
-    if config.mock_usage_credits:
-        from lib.usage_quota.mock_server import (  # pylint: disable=import-outside-toplevel
-            start_mock_server,
-        )
-
-        start_mock_server(port=config.mock_usage_quota_server.port)
-
-    app = create_fast_api_server(config)
-    return app
+__all__ = ["get_app", "get_config"]

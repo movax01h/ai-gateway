@@ -24,6 +24,7 @@ from starlette.middleware import Middleware
 from starlette_context.middleware import RawContextMiddleware
 from transformers import PreTrainedTokenizerFast
 
+from ai.apps.aigw.server import CONTAINER_APPLICATION_MODULES
 from ai_gateway import structured_logging
 from ai_gateway.api.middleware import (
     AccessLogMiddleware,
@@ -32,7 +33,6 @@ from ai_gateway.api.middleware import (
 )
 from ai_gateway.api.middleware.internal_event import InternalEventMiddleware
 from ai_gateway.api.middleware.route import usage_quota
-from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
 from ai_gateway.config import Config, ConfigModelLimits, get_config
 from ai_gateway.container import ContainerApplication
 from ai_gateway.feature_allowlist import dws_client_model_request_context

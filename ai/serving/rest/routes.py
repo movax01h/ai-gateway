@@ -11,7 +11,7 @@ def mount_routes(app: FastAPI) -> None:
     Args:
         app: The FastAPI application to add the route table to.
     """
-    # ai_gateway.api.server imports this module, so these imports cannot be top-level.
+    # ai.apps.aigw.server imports this module, so these imports cannot be top-level.
     # pylint: disable=import-outside-toplevel
     from ai_gateway.api.monitoring import router as http_monitoring_router
     from ai_gateway.api.v1 import api_router as http_api_router_v1

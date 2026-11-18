@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from tree_sitter_language_pack import get_parser
 
-from ai_gateway.api import create_fast_api_server
+from ai.apps.aigw.server import create_fast_api_server
 from ai_gateway.api.monitoring import execute_default_code_completions, validated
 from ai_gateway.config import Config
 from ai_gateway.models import ModelAPIError

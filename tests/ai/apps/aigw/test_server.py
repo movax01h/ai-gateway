@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import os
 import socket
 from unittest import mock
@@ -13,8 +14,19 @@ from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from structlog.testing import capture_logs
 
+from ai.apps.aigw import server
+from ai.apps.aigw.server import (
+    assume_role_exception_handler,
+    create_fast_api_server,
+    custom_http_exception_handler,
+    model_api_exception_handler,
+    prompt_too_long_exception_handler,
+    restricted_model_access_exception_handler,
+    setup_custom_exception_handlers,
+    setup_gcp_service_account,
+    validation_exception_handler,
+)
 from ai.serving.rest.routes import mount_routes
-from ai_gateway.api import create_fast_api_server, server
 from ai_gateway.api.client_disconnect import (
     ClientDisconnectedError,
     client_disconnected_exception_handler,
@@ -25,16 +37,6 @@ from ai_gateway.api.middleware import (
     MiddlewareAuthentication,
     ModelConfigMiddleware,
     RequestBodyLimitMiddleware,
-)
-from ai_gateway.api.server import (
-    assume_role_exception_handler,
-    custom_http_exception_handler,
-    model_api_exception_handler,
-    prompt_too_long_exception_handler,
-    restricted_model_access_exception_handler,
-    setup_custom_exception_handlers,
-    setup_gcp_service_account,
-    validation_exception_handler,
 )
 from ai_gateway.code_suggestions.processing.pre import PromptTooLongError
 from ai_gateway.config import (
@@ -121,7 +123,7 @@ def fastapi_server_app_fixture(auth_enabled) -> FastAPI:
             "ai_gateway.api.v2.code.completions",
             "ai_gateway.api.v3.code.completions",
             "ai_gateway.api.v4.code.suggestions",
-            "ai_gateway.api.server",
+            "ai.apps.aigw.server",
             "ai_gateway.api.monitoring",
             "ai_gateway.async_dependency_resolver",
         ],
@@ -338,9 +340,7 @@ async def test_lifespan(config, app, unused_port, monkeypatch, vertex_project):
     mock_service.aclose = AsyncMock()
     mock_container_app.return_value.usage_quota.service.return_value = mock_service
 
-    monkeypatch.setattr(
-        "ai_gateway.api.server.ContainerApplication", mock_container_app
-    )
+    monkeypatch.setattr("ai.apps.aigw.server.ContainerApplication", mock_container_app)
     monkeypatch.setattr(asyncio, "get_running_loop", MagicMock())
 
     config.fastapi.metrics_port = unused_port
@@ -634,7 +634,7 @@ def test_custom_http_exception_handler(app):
 
     client = TestClient(app)
 
-    with patch("ai_gateway.api.server.context") as mock_context:
+    with patch("ai.apps.aigw.server.context") as mock_context:
         response = client.get("/test")
 
         mock_context.__setitem__.assert_called_once_with(
@@ -801,8 +801,8 @@ def test_setup_gcp_service_account(service_account_json_key, should_create_cred_
         assert not os.path.exists("/tmp/gcp-service-account.json")
 
 
-@patch("ai_gateway.api.server.context")
-@patch("ai_gateway.api.server.can_log_request_data")
+@patch("ai.apps.aigw.server.context")
+@patch("ai.apps.aigw.server.can_log_request_data")
 def test_validation_exception_handler_without_log_request_data(
     mock_can_log_request_data, mock_context, app
 ):
@@ -820,8 +820,8 @@ def test_validation_exception_handler_without_log_request_data(
     assert not mock_context.__setitem__.called
 
 
-@patch("ai_gateway.api.server.context")
-@patch("ai_gateway.api.server.can_log_request_data")
+@patch("ai.apps.aigw.server.context")
+@patch("ai.apps.aigw.server.can_log_request_data")
 def test_validation_exception_handler_with_log_request_data(
     mock_can_log_request_data, mock_context, app
 ):
@@ -852,10 +852,10 @@ async def test_lifespan_wires_and_validates():
     app.state.config = config
 
     with (
-        patch("ai_gateway.api.server.ContainerApplication") as mock_container,
-        patch("ai_gateway.api.server.wire_and_validate") as mock_wire,
-        patch("ai_gateway.api.server.discover_feature_prompts"),
-        patch("ai_gateway.api.server.setup_litellm"),
+        patch("ai.apps.aigw.server.ContainerApplication") as mock_container,
+        patch("ai.apps.aigw.server.wire_and_validate") as mock_wire,
+        patch("ai.apps.aigw.server.discover_feature_prompts"),
+        patch("ai.apps.aigw.server.setup_litellm"),
     ):
         mock_container.return_value.usage_quota.service.return_value.aclose = (
             AsyncMock()
@@ -877,10 +877,10 @@ async def test_lifespan_snowplow_shutdown():
     app.state.config = config
 
     with (
-        patch("ai_gateway.api.server.ContainerApplication") as mock_container,
-        patch("ai_gateway.api.server.wire_and_validate"),
-        patch("ai_gateway.api.server.discover_feature_prompts"),
-        patch("ai_gateway.api.server.setup_litellm"),
+        patch("ai.apps.aigw.server.ContainerApplication") as mock_container,
+        patch("ai.apps.aigw.server.wire_and_validate"),
+        patch("ai.apps.aigw.server.discover_feature_prompts"),
+        patch("ai.apps.aigw.server.setup_litellm"),
     ):
         mock_container.return_value.usage_quota.service.return_value.aclose = (
             AsyncMock()
@@ -900,10 +900,10 @@ async def test_lifespan_snowplow_shutdown_exception():
     app.state.config = config
 
     with (
-        patch("ai_gateway.api.server.ContainerApplication") as mock_container,
-        patch("ai_gateway.api.server.wire_and_validate"),
-        patch("ai_gateway.api.server.discover_feature_prompts"),
-        patch("ai_gateway.api.server.setup_litellm"),
+        patch("ai.apps.aigw.server.ContainerApplication") as mock_container,
+        patch("ai.apps.aigw.server.wire_and_validate"),
+        patch("ai.apps.aigw.server.discover_feature_prompts"),
+        patch("ai.apps.aigw.server.setup_litellm"),
     ):
         mock_container.return_value.usage_quota.service.return_value.aclose = (
             AsyncMock()
@@ -925,3 +925,85 @@ async def test_lifespan_snowplow_shutdown_exception():
     ]
     assert len(warning_logs) == 1
     assert warning_logs[0]["error"] == "snowplow unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("client", "event"),
+    [
+        ("billing_event", "Failed to shutdown billing events client"),
+        ("internal_event", "Failed to shutdown internal events client"),
+    ],
+)
+async def test_lifespan_client_shutdown_exception(client, event):
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = False
+    app = MagicMock()
+    app.state.config = config
+
+    with (
+        patch("ai.apps.aigw.server.ContainerApplication") as mock_container,
+        patch("ai.apps.aigw.server.wire_and_validate"),
+        patch("ai.apps.aigw.server.discover_feature_prompts"),
+        patch("ai.apps.aigw.server.setup_litellm"),
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        shutdown = getattr(mock_container.return_value, client).client.return_value
+        shutdown.shutdown.side_effect = RuntimeError("unavailable")
+
+        with capture_logs() as cap_logs:
+            async with server.lifespan(app):
+                pass
+
+    assert [log["error"] for log in cap_logs if log.get("event") == event] == [
+        "unavailable"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_thread_monitoring():
+    config = MagicMock()
+    config.instrumentator.thread_monitoring_enabled = True
+    config.instrumentator.thread_monitoring_interval = 7
+    app = MagicMock()
+    app.state.config = config
+    loop = MagicMock()
+
+    with (
+        patch("ai.apps.aigw.server.ContainerApplication") as mock_container,
+        patch("ai.apps.aigw.server.wire_and_validate"),
+        patch("ai.apps.aigw.server.discover_feature_prompts"),
+        patch("ai.apps.aigw.server.setup_litellm"),
+        patch("ai.apps.aigw.server.asyncio.get_running_loop", return_value=loop),
+        patch(
+            "ai.apps.aigw.server.monitor_threads", new_callable=MagicMock
+        ) as mock_monitor_threads,
+    ):
+        mock_container.return_value.usage_quota.service.return_value.aclose = (
+            AsyncMock()
+        )
+        async with server.lifespan(app):
+            pass
+
+    mock_monitor_threads.assert_called_once_with(loop, interval=7)
+    loop.create_task.assert_called_once_with(mock_monitor_threads.return_value)
+
+
+def test_deprecated_paths_reexport_create_fast_api_server():
+    import ai_gateway.api  # pylint: disable=import-outside-toplevel
+    import ai_gateway.api.server  # pylint: disable=import-outside-toplevel
+
+    with pytest.warns(DeprecationWarning, match="ai.apps.aigw.server"):
+        deprecated = importlib.reload(ai_gateway.api.server)
+    with pytest.warns(DeprecationWarning, match="ai.apps.aigw.server"):
+        from_package = ai_gateway.api.create_fast_api_server
+
+    assert deprecated.create_fast_api_server is create_fast_api_server
+    assert from_package is create_fast_api_server
+    assert (
+        deprecated.CONTAINER_APPLICATION_MODULES is server.CONTAINER_APPLICATION_MODULES
+    )
+    with pytest.raises(AttributeError, match="no attribute 'missing'"):
+        getattr(ai_gateway.api, "missing")
