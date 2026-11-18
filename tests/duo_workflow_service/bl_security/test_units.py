@@ -1097,6 +1097,94 @@ class TestResolveExtraAnchorPatterns:
         ]
 
 
+class TestTunerAnswerLogging:
+    def _drops(self, logs):
+        return [
+            (e["list"], e["reason"], e["item"])
+            for e in logs
+            if e["event"] == "bl_discover extra pattern dropped"
+        ]
+
+    def test_the_raw_answer_is_logged_before_validation(self):
+        answer = {"globs": ["a/*.rb", "off"], "anchor_patterns": []}
+        with structlog.testing.capture_logs() as logs:
+            assert bl_units.resolve_extra_globs(answer) == ["a/*.rb"]
+        raw = next(e for e in logs if e["event"] == "bl_discover tuner answer")
+        assert (raw["list"], raw["count"]) == ("globs", 2)
+        assert raw["items"] == ["a/*.rb", "off"]
+
+    def test_the_echo_is_bounded(self):
+        many = ["x%d/*.rb" % i for i in range(30)]
+        with structlog.testing.capture_logs() as logs:
+            bl_units.resolve_extra_globs(many + ["*" + "a" * 300])
+        raw = next(e for e in logs if e["event"] == "bl_discover tuner answer")
+        assert raw["count"] == 31
+        assert len(raw["items"]) == 20
+        with structlog.testing.capture_logs() as logs:
+            bl_units.resolve_extra_globs(["*" + "a" * 300])
+        raw = next(e for e in logs if e["event"] == "bl_discover tuner answer")
+        assert len(raw["items"][0]) == 200
+
+    def test_every_dropped_glob_names_its_reason(self):
+        over_long = "*" + "a" * bl_units.MAX_EXTRA_PATTERN_CHARS
+        with structlog.testing.capture_logs() as logs:
+            got = bl_units.resolve_extra_globs(
+                ["ok/*.rb", over_long, "a[b].rb", "off", "**/*"]
+            )
+        assert got == ["ok/*.rb"]
+        reasons = [(lst, why) for lst, why, _ in self._drops(logs)]
+        assert reasons == [
+            ("globs", "too_long"),
+            ("globs", "bad_syntax"),
+            ("globs", "bare_word"),
+            ("globs", "all_wildcard"),
+        ]
+        assert all(len(item) <= 200 for _, _, item in self._drops(logs))
+
+    def test_every_dropped_anchor_pattern_names_its_reason(self):
+        over_long = "a" * (bl_units.MAX_EXTRA_PATTERN_CHARS + 1)
+        with structlog.testing.capture_logs() as logs:
+            out = bl_units.resolve_extra_anchor_patterns(
+                [r"_ok\.rb$", over_long, ".*", "(unclosed"]
+            )
+        assert [p.pattern for p in out] == [r"_ok\.rb$"]
+        drops = self._drops(logs)
+        assert [(lst, why) for lst, why, _ in drops] == [
+            ("anchor_patterns", "too_long"),
+            ("anchor_patterns", "all_wildcard"),
+        ]
+        compile_err = next(e for e in logs if "does not compile" in e["event"])
+        assert compile_err["reason"] == "regex_compile_error"
+
+    def test_a_non_string_item_and_an_over_limit_list_are_named(self):
+        with structlog.testing.capture_logs() as logs:
+            assert bl_units.resolve_extra_globs(["a/*.rb", 7]) == []
+        assert self._drops(logs) == [("globs", "not_a_string", "7")]
+        too_many = ["g%d/*.rb" % i for i in range(bl_units.MAX_EXTRA_GLOBS + 1)]
+        with structlog.testing.capture_logs() as logs:
+            assert bl_units.resolve_extra_globs(too_many) == []
+        over = next(e for e in logs if "over the cap" in e["event"])
+        assert (over["list"], over["reason"]) == ("globs", "list_over_limit")
+        too_many = ["p%d$" % i for i in range(bl_units.MAX_EXTRA_ANCHOR_PATTERNS + 1)]
+        with structlog.testing.capture_logs() as logs:
+            assert bl_units.resolve_extra_anchor_patterns(too_many) == []
+        over = next(e for e in logs if "over the cap" in e["event"])
+        assert (over["list"], over["reason"]) == ("anchor_patterns", "list_over_limit")
+
+    def test_a_missing_or_non_list_answer_is_named(self):
+        for answer, kind in [
+            (None, "missing"),
+            ({"anchor_patterns": []}, "missing"),
+            ("off", "str"),
+        ]:
+            with structlog.testing.capture_logs() as logs:
+                assert bl_units.resolve_extra_globs(answer) == []
+            lines = [
+                e for e in logs if e["event"] == "bl_discover tuner answer not a list"
+            ]
+            assert [(e["list"], e["answer_type"]) for e in lines] == [("globs", kind)]
+
+
 class TestCapExtraAnchorFiles:
     CAP = bl_units.MAX_EXTRA_ANCHOR_FILES
     BUILT_IN = ["app/controllers/a_controller.rb", "app/controllers/z_controller.rb"]
@@ -1126,6 +1214,10 @@ class TestCapExtraAnchorFiles:
         warned = [e for e in logs if "add too many files" in e["event"]]
         assert len(warned) == 1
         assert (warned[0]["kept"], warned[0]["dropped"]) == (self.CAP, 25)
+        assert (warned[0]["list"], warned[0]["reason"]) == (
+            "anchor_patterns",
+            "cap_200_files",
+        )
 
     def test_built_in_anchors_are_untouched_and_not_counted(self):
         extra = tuple(

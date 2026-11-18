@@ -53,6 +53,11 @@ __all__ = ["BlDiscoverAndCluster"]
 
 _log = structlog.stdlib.get_logger("bl_discovery")
 
+# A pool this small with no accepted extra patterns is worth a greppable warning.
+# 10 is a deliberately loose threshold so the warning is easy to grep, not a tuned limit:
+# the one measured failing run had a single candidate.
+SMALL_POOL = 10
+
 
 def _wire_pattern(pattern: str) -> str:
     """The ``find_files`` spelling of a glob.
@@ -358,6 +363,8 @@ class BlDiscoverAndCluster(DuoBaseTool):
                 if len(matches) > MAX_FILES_PER_ANCHOR_PATTERN:
                     _log.warning(
                         "bl_discover anchor pattern matches too many files -- none added",
+                        list="anchor_patterns",
+                        reason="too_broad_matches_over_50",
                         pattern=rx.pattern,
                         matched=len(matches),
                         cap=MAX_FILES_PER_ANCHOR_PATTERN,
@@ -395,6 +402,15 @@ class BlDiscoverAndCluster(DuoBaseTool):
             _log.info(
                 "bl_discover content_filter unavailable -- keeping every candidate",
                 candidates=candidates_before,
+            )
+
+        if not add_globs and not n_anchor_patterns and len(candidates) <= SMALL_POOL:
+            _log.warning(
+                "bl_tuner_empty_with_small_pool",
+                project_id=project_id,
+                branch=branch,
+                candidates=len(candidates),
+                small_pool=SMALL_POOL,
             )
 
         cover_first = resolve_coverage_first(coverage_first)
