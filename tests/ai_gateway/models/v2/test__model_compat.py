@@ -11,8 +11,9 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from pydantic import HttpUrl
 
-from ai_gateway.model_metadata import ModelMetadata
+from ai_gateway.model_metadata import ModelMetadata, create_model_metadata
 from ai_gateway.model_selection.model_selection_config import (
     ChatLiteLLMDefinition,
     ModelSelectionConfig,
@@ -24,6 +25,7 @@ from ai_gateway.models.v2._model_compat import (
     TOOL_IMAGES_BANNER,
     _model_supports_vision,
     current_model_supports_vision,
+    drop_unsupported_reasoning_content,
     flatten_assistant_content,
     hoist_tool_result_images,
     model_supports_vision,
@@ -789,6 +791,193 @@ class TestChatLiteLLMFlattenIntegration:
 
         assert all("function_call" not in message for message in message_dicts)
         assert message_dicts[1]["tool_calls"][0]["id"] == "call_1"
+
+
+REASONING_TOOL_CALLS = [
+    {
+        "id": "call_1",
+        "type": "function",
+        "function": {"name": "get_issue", "arguments": '{"id": 1}'},
+    }
+]
+
+
+def reasoning_assistant_message(**extra) -> dict:
+    return {
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "I should call the tool first.",
+        "tool_calls": REASONING_TOOL_CALLS,
+        **extra,
+    }
+
+
+class TestDropUnsupportedReasoningContent:
+    """Groq rejects `reasoning_content` on assistant messages (#3248); every other provider keeps it."""
+
+    @pytest.mark.parametrize(
+        "provider",
+        [
+            # Self-hosted default tag: servers for DeepSeek, Kimi, Qwen, GLM accept the field.
+            "custom_openai",
+            # Self-hosted `openai/` and `openai_like/` identifiers resolve to `openai` with the customer's endpoint.
+            "openai",
+            "fireworks_ai",
+            "deepseek",
+            "moonshot",
+            "minimax",
+            "bedrock_mantle",
+            "hosted_vllm",
+            "anthropic",
+            "vertex_ai",
+            "bedrock",
+            # Unlisted providers keep today's echo: a 400 is loud, a quiet loss of reasoning is not.
+            "some_future_provider",
+            None,
+        ],
+    )
+    def test_echo_providers_are_untouched(self, provider):
+        messages = [
+            {"role": "user", "content": "look at issue 1"},
+            reasoning_assistant_message(),
+        ]
+
+        assert drop_unsupported_reasoning_content(messages, provider) is messages
+
+    @pytest.mark.parametrize("provider", ["groq"])
+    def test_rejecting_providers_drop_the_field(self, provider):
+        user = {"role": "user", "content": "look at issue 1"}
+        tool = {"role": "tool", "tool_call_id": "call_1", "content": "issue 1"}
+        messages = [
+            user,
+            reasoning_assistant_message(),
+            tool,
+            reasoning_assistant_message(content="Done.", name="duo"),
+        ]
+
+        result = drop_unsupported_reasoning_content(messages, provider)
+
+        assert result == [
+            user,
+            {"role": "assistant", "content": "", "tool_calls": REASONING_TOOL_CALLS},
+            tool,
+            {
+                "role": "assistant",
+                "content": "Done.",
+                "tool_calls": REASONING_TOOL_CALLS,
+                "name": "duo",
+            },
+        ]
+
+    def test_input_messages_are_not_mutated(self):
+        assistant = reasoning_assistant_message()
+        messages = [assistant]
+
+        drop_unsupported_reasoning_content(messages, "groq")
+
+        assert messages == [reasoning_assistant_message()]
+
+    def test_returns_input_when_no_message_carries_the_field(self):
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ]
+
+        result = drop_unsupported_reasoning_content(messages, "groq")
+
+        assert result is messages
+
+    def test_non_assistant_roles_are_kept(self):
+        # The converter only echoes the field on assistant messages; leave other roles alone.
+        user = {"role": "user", "content": "hi", "reasoning_content": "unrelated"}
+        messages = [user, reasoning_assistant_message()]
+
+        result = drop_unsupported_reasoning_content(messages, "groq")
+
+        assert result[0] is user
+        assert "reasoning_content" not in result[1]
+
+
+class TestChatLiteLLMReasoningContentIntegration:
+    """The gate must apply on the real request-assembly path, not just the helper."""
+
+    HISTORY = [
+        HumanMessage(content="look at issue 1"),
+        AIMessage(
+            content="",
+            additional_kwargs={
+                "reasoning_content": "I should call the tool first.",
+                "tool_calls": REASONING_TOOL_CALLS,
+            },
+        ),
+        ToolMessage(content="issue 1", tool_call_id="call_1"),
+    ]
+
+    def convert(self, provider):
+        chat = ChatLiteLLM(model="minimaxai/minimax-m2.7", custom_llm_provider=provider)
+        return self.assistant_dicts(chat)
+
+    def assistant_dicts(self, chat):
+        message_dicts, _ = chat._create_message_dicts(self.HISTORY, stop=None)
+        return [m for m in message_dicts if m["role"] == "assistant"]
+
+    def convert_self_hosted(self, identifier):
+        """Run a self-hosted identifier through ModelMetadata.to_params(), as the gateway does."""
+        params = create_model_metadata(
+            {
+                "provider": "litellm",
+                # The family the #3248 customer uses: "Self-Hosted General Models".
+                "name": "general",
+                "endpoint": HttpUrl("https://llm.example.com/v1"),
+                "identifier": identifier,
+            }
+        ).to_params()
+        return params, self.assistant_dicts(ChatLiteLLM(**params))
+
+    @pytest.mark.parametrize("provider", ["groq"])
+    def test_rejecting_providers_do_not_receive_reasoning_content(self, provider):
+        (assistant,) = self.convert(provider)
+
+        assert "reasoning_content" not in assistant
+        assert assistant["tool_calls"][0]["id"] == "call_1"
+
+    @pytest.mark.parametrize(
+        "provider",
+        ["custom_openai", "openai", "fireworks_ai", "deepseek", "moonshot", "minimax"],
+    )
+    def test_echo_providers_receive_reasoning_content(self, provider):
+        (assistant,) = self.convert(provider)
+
+        assert assistant["reasoning_content"] == "I should call the tool first."
+
+    @pytest.mark.usefixtures("custom_models_gateway")
+    @pytest.mark.parametrize(
+        ("identifier", "resolved_provider"),
+        [
+            ("minimax-m2.7", "custom_openai"),
+            ("custom_openai/minimaxai/minimax-m2.7", "custom_openai"),
+            ("openai/minimaxai/minimax-m2.7", "openai"),
+            ("openai_like/minimaxai/minimax-m2.7", "openai"),
+        ],
+    )
+    def test_self_hosted_identifiers_keep_reasoning_content(
+        self, identifier, resolved_provider
+    ):
+        params, (assistant,) = self.convert_self_hosted(identifier)
+
+        assert params["custom_llm_provider"] == resolved_provider
+        assert params["api_base"] == "https://llm.example.com/v1"
+        assert assistant["reasoning_content"] == "I should call the tool first."
+
+    @pytest.mark.usefixtures("custom_models_gateway")
+    def test_self_hosted_groq_prefix_drops_reasoning_content(self):
+        # The #3248 fix for a self-hosted model served through Groq: the prefix, with the customer's endpoint.
+        params, (assistant,) = self.convert_self_hosted("groq/minimaxai/minimax-m2.7")
+
+        assert params["custom_llm_provider"] == "groq"
+        assert params["api_base"] == "https://llm.example.com/v1"
+        assert "reasoning_content" not in assistant
+        assert assistant["tool_calls"][0]["id"] == "call_1"
 
 
 class TestStripImageBlocksForNonVisionModel:

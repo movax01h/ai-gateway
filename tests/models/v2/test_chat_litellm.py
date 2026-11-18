@@ -1803,6 +1803,155 @@ class TestReasoningContentRoundTrip:
         assert assistant_dicts[0]["tool_calls"][0]["id"] == "call_1"
 
 
+class TestReasoningContentMultiTurnByProvider:
+    """Regression for #3248: a tool loop must not echo reasoning_content to providers that reject it.
+
+    Groq returns reasoning in `reasoning`, and LiteLLM renames it to `reasoning_content` on the way in. The second request
+    must not send the renamed field back to Groq, but must keep echoing it for every other provider, including
+    `custom_openai`, the default tag for self-hosted models.
+    """
+
+    TOOL_CALL = {
+        "index": 0,
+        "id": "call_1",
+        "type": "function",
+        "function": {"name": "get_issue", "arguments": '{"id": 1}'},
+    }
+
+    @staticmethod
+    def _tool_call_stream():
+        # Built through litellm's own types, so the `reasoning` -> `reasoning_content` rename is the real one.
+        yield litellm.ModelResponseStream(
+            choices=[
+                litellm.types.utils.StreamingChoices(
+                    index=0,
+                    delta=Delta(
+                        role="assistant", reasoning="I should call the tool first."
+                    ),
+                )
+            ]
+        )
+        yield litellm.ModelResponseStream(
+            choices=[
+                litellm.types.utils.StreamingChoices(
+                    index=0,
+                    delta=Delta(
+                        tool_calls=[TestReasoningContentMultiTurnByProvider.TOOL_CALL]
+                    ),
+                    finish_reason="tool_calls",
+                )
+            ]
+        )
+
+    @staticmethod
+    def _tool_call_response() -> dict:
+        # LiteLLM's non-streaming response after it renamed Groq's `reasoning`.
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "reasoning_content": "I should call the tool first.",
+                        "tool_calls": [
+                            {
+                                k: v
+                                for k, v in TestReasoningContentMultiTurnByProvider.TOOL_CALL.items()
+                                if k != "index"
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                    "index": 0,
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    @staticmethod
+    def _final_response() -> dict:
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Done."},
+                    "finish_reason": "stop",
+                    "index": 0,
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    async def _second_request_assistant(self, provider: str, streaming: bool) -> dict:
+        """Run a two-turn tool loop and return the assistant message of the second request."""
+        requests: list[list[dict]] = []
+
+        async def acompletion(**kwargs):
+            requests.append(kwargs["messages"])
+            if len(requests) > 1:
+                return self._final_response()
+            if kwargs.get("stream"):
+                return _async_iter(self._tool_call_stream())
+            return self._tool_call_response()
+
+        chat = ChatLiteLLM(
+            model="minimaxai/minimax-m2.7",
+            custom_llm_provider=provider,
+            streaming=streaming,
+            max_retries=0,
+        )
+
+        with patch.object(
+            chat.client, "acompletion", new=AsyncMock(side_effect=acompletion)
+        ):
+            first = await chat.ainvoke([HumanMessage(content="look at issue 1")])
+            assert (
+                first.additional_kwargs["reasoning_content"]
+                == "I should call the tool first."
+            )
+            assert first.tool_calls[0]["id"] == "call_1"
+
+            history = [
+                HumanMessage(content="look at issue 1"),
+                first,
+                ToolMessage(content="issue 1", tool_call_id="call_1"),
+            ]
+            chat.streaming = False
+            second = await chat.ainvoke(history)
+
+        assert second.content == "Done."
+        (assistant,) = [m for m in requests[1] if m["role"] == "assistant"]
+        assert assistant["tool_calls"][0]["id"] == "call_1"
+        return assistant
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("streaming", [True, False])
+    @pytest.mark.parametrize("provider", ["groq"])
+    async def test_second_request_drops_reasoning_for_rejecting_providers(
+        self, provider, streaming
+    ):
+        assistant = await self._second_request_assistant(provider, streaming)
+
+        assert "reasoning_content" not in assistant
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("streaming", [True, False])
+    @pytest.mark.parametrize(
+        "provider",
+        ["custom_openai", "openai", "fireworks_ai", "deepseek", "moonshot", "minimax"],
+    )
+    async def test_second_request_echoes_reasoning_for_other_providers(
+        self, provider, streaming
+    ):
+        assistant = await self._second_request_assistant(provider, streaming)
+
+        assert assistant["reasoning_content"] == "I should call the tool first."
+
+
+async def _async_iter(items):
+    for item in items:
+        yield item
+
+
 class TestUserIdentityHeader:
     @pytest.fixture(name="chat")
     def chat_fixture(self):

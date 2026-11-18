@@ -458,8 +458,10 @@ def _convert_message_to_dict(message: BaseMessage) -> dict:
             message_dict["tool_calls"] = message.additional_kwargs["tool_calls"]
         # Echo reasoning_content back for providers that require it in multi-turn
         # tool loops (Fireworks, Moonshot, MiniMax; DeepSeek-style APIs 400
-        # without it). Only endpoints that emitted the field ever receive it
-        # back, so no provider gating is needed. Truthiness check mirrors the
+        # without it). LiteLLM also fills the field from `reasoning` (Groq) and
+        # `<think>` tags, and some endpoints (Groq) reject it, so the
+        # v2 ChatLiteLLM removes it for those providers in
+        # `drop_unsupported_reasoning_content`. Truthiness check mirrors the
         # inbound paths, which only store non-empty values.
         if message.additional_kwargs.get("reasoning_content"):
             message_dict["reasoning_content"] = message.additional_kwargs[
