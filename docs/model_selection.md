@@ -485,6 +485,11 @@ Keyword rules are routing hints and never a security boundary: they are sensitiv
 
 When the `duo_developer_model_routing` feature flag is enabled for a request, Duo Workflow Service routes the request once, when the workflow starts and before the flow is built, so every turn of the flow runs on the same model.
 It reads the task: the title and description of the triggering issue or merge request (from the `agent_platform_resource_context` additional context), otherwise the goal of the `StartWorkflowRequest`.
+A session started by a mention is read differently, because the comment is the task:
+
+- The task is the discussion that ends with the mention (`triggering_conversation` in the `agent_platform_trigger_context` additional context).
+- The issue or merge request is added after it as context.
+
 The model behind the `classifier` tag, or the `small` tag when no `classifier` tag is configured, then classifies the task with the `classify_goal_tier` prompt, answering `small`, `large`, or `unsure` under a three-second timeout.
 A `small` or `large` answer makes that tag's model the request's `default`.
 `unsure`, a timeout, or an error keeps the configured `default_models`, and requests that name an explicit model `identifier` are never routed.
