@@ -3,25 +3,37 @@ import copy
 import importlib
 from dataclasses import fields, replace
 from datetime import datetime
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, call, patch
 
 import litellm
 import pytest
 from anthropic import APIStatusError
 from langchain_core.exceptions import ContextOverflowError
+from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Overwrite
 
 from ai_gateway.prompts import Prompt
+from ai_gateway.prompts.config import ModelClassProvider
+from ai_gateway.prompts.config.base import PromptConfig
+from ai_gateway.prompts.config.template import Template
 from duo_workflow_service.agent_platform.core.inbox import (
     Address,
+    Answer,
     Claimant,
     Message,
     RunInbox,
     TaskId,
     TextPart,
     User,
+)
+from duo_workflow_service.agent_platform.core.inbox.message import (
+    Decision,
+    InboundMessage,
+    InvalidInput,
+    inbound_message,
 )
 from duo_workflow_service.agent_platform.utils.exceptions import ModelRefusalError
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
@@ -723,6 +735,13 @@ class TestAgentNodeClaim:
     DEVELOPER = Claimant(recipient=Address.of("developer"), accepts_unaddressed=True)
     LATER = TaskId("a-later-task")
 
+    @pytest.fixture(autouse=True)
+    def _a_prompt_that_renders_messages(self, mock_prompt):
+        mock_prompt.message_tpl = Mock()
+        mock_prompt.render_message = AsyncMock(
+            return_value=HumanMessage(content="rendered")
+        )
+
     @staticmethod
     def _message(id: str, recipient: str | None = None) -> Message:
         return Message(
@@ -800,23 +819,6 @@ class TestAgentNodeClaim:
             TaskId("the-other-run"),
             Claimant(recipient=Address.of("supervisor").child("developer", "call-2")),
         ) == (for_another_run,)
-
-    @pytest.mark.asyncio
-    async def test_without_a_claimant_it_claims_nothing(
-        self,
-        mock_prompt,
-        agent_node,
-        base_flow_state,
-        mock_get_vars_from_state,  # pylint: disable=unused-argument  # activates the mock
-        _mock_predefined_runtime_variables,
-    ):
-        unaddressed = self._message("unaddressed")
-        inbox = self._inbox(unaddressed)
-
-        await self._run(agent_node, base_flow_state, inbox)
-
-        mock_prompt.ainvoke.assert_called_once()
-        assert inbox.claim(self.LATER, self.DEVELOPER) == (unaddressed,)
 
     @pytest.mark.asyncio
     async def test_without_an_inbox_it_runs_as_before(
@@ -4582,3 +4584,234 @@ class TestAgentNodeSelfHostedBilling:
         # Calls 3 and 4 follow a model reply, so each one is billed.
         assert mock_prompt.ainvoke.call_count == 4
         assert billing_outbox.put_action_and_wait_for_response.call_count == 3
+
+
+class _FakeModel(FakeMessagesListChatModel):
+    """A fake that also answers what the prompt layer asks of a real model."""
+
+    @property
+    def _identifying_params(self) -> dict[str, Any]:
+        return {"model": "fake-model"}
+
+
+def _messages(*texts: str, recipient: str | None = None) -> list[InboundMessage]:
+    messages = [
+        inbound_message(
+            id=f"m{index}",
+            content=[{"type": "text", "text": text}],
+            sender=User(),
+            recipient=recipient,
+        )
+        for index, text in enumerate(texts)
+    ]
+
+    return [message for message in messages if not isinstance(message, InvalidInput)]
+
+
+def _inbox(*messages: InboundMessage) -> RunInbox:
+    inbox = RunInbox()
+    for message in messages:
+        inbox.put(message)
+
+    return inbox
+
+
+def _prompt(template: dict[str, Any]) -> Prompt:
+    config = PromptConfig(
+        name="test_prompt",
+        unit_primitive="duo_agent_platform",
+        template=Template(**template),
+    )
+    model = _FakeModel(responses=[AIMessage(content="answer")])
+
+    return Prompt(
+        model_provider=ModelClassProvider.ANTHROPIC,
+        model_factory=lambda **_: model,  # type: ignore[arg-type]
+        config=config,
+    )
+
+
+class TestTheAgentRendersWhatItReceives:
+    """The agent is attached to a real `StateGraph`, and the inbox reaches it as the run's runtime context."""
+
+    @pytest.fixture(name="node")
+    def node_fixture(self, prompt):
+        node = AgentNode(
+            flow_id="flow-1",
+            flow_type=GLReportingEventContext.from_workflow_definition(
+                "software_development"
+            ),
+            name="agent#agent",
+            prompt=prompt,
+            inputs=[],
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history",
+                factory=lambda _: IOKey(
+                    target="conversation_history", subkeys=["agent"]
+                ),
+            ),
+            internal_event_client=None,
+            invoke_config={},
+            optimizer_pipeline=_NoOptimizer(),
+        )
+        # What a top-level component gives its agent.
+        node.claimant = lambda _state: Claimant(
+            recipient=Address.of("agent"), accepts_unaddressed=True
+        )
+
+        return node
+
+    @pytest.fixture(name="prompt")
+    def prompt_fixture(self):
+        return _prompt(
+            {
+                "system": "instructions",
+                "message": "<msg>{{ inbound_messages.text }}</msg>",
+            }
+        )
+
+    @staticmethod
+    def _state(history: list[Any] | None = None) -> dict[str, Any]:
+        return {
+            FlowStateKeys.CONVERSATION_HISTORY: {"agent": history or []},
+            FlowStateKeys.CONTEXT: {},
+            FlowStateKeys.STATUS: "Execution",
+        }
+
+    @staticmethod
+    async def _run(node: AgentNode, state: dict[str, Any], inbox: RunInbox | None):
+        graph = StateGraph(FlowState, context_schema=RunInbox)
+        graph.add_node("agent", node.run)
+        graph.add_edge(START, "agent")
+        graph.add_edge("agent", END)
+
+        return await graph.compile().ainvoke(cast(FlowState, state), context=inbox)
+
+    @staticmethod
+    def _texts(result: dict[str, Any]) -> list[str]:
+        return [m.text for m in result[FlowStateKeys.CONVERSATION_HISTORY]["agent"]]
+
+    @pytest.mark.asyncio
+    async def test_it_renders_what_it_claimed_from_the_inbox(self, node):
+        inbox = _inbox(*_messages("fix the pipeline"))
+
+        result = await self._run(node, self._state(), inbox)
+
+        assert self._texts(result) == ["<msg>fix the pipeline</msg>", "answer"]
+
+    @pytest.mark.asyncio
+    async def test_it_renders_every_pending_message_together(self, node):
+        inbox = _inbox(*_messages("fix the pipeline", "on my branch"))
+
+        result = await self._run(node, self._state(), inbox)
+
+        assert self._texts(result) == [
+            "<msg>fix the pipeline\n\non my branch</msg>",
+            "answer",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_an_agent_that_does_not_take_unaddressed_messages_leaves_one(
+        self, node
+    ):
+        # A subagent: the user's message isn't its to take.
+        node.claimant = lambda _state: Claimant(recipient=Address.of("agent"))
+        inbox = _inbox(*_messages("fix the pipeline"))
+
+        result = await self._run(node, self._state([HumanMessage(content="hi")]), inbox)
+
+        assert self._texts(result) == ["hi", "answer"]
+        assert inbox.claim(TaskId("later"), Claimant(accepts_unaddressed=True))
+
+    @pytest.mark.asyncio
+    async def test_an_agent_no_component_gave_a_claimant_fails_the_run(self, node):
+        # Its prompt renders messages, so running on would drop them without a word.
+        node.claimant = None
+        inbox = _inbox(*_messages("fix the pipeline"))
+
+        with pytest.raises(RuntimeError, match="gave it no claimant"):
+            await self._run(node, self._state(), inbox)
+
+        assert inbox.claim(TaskId("later"), Claimant(accepts_unaddressed=True))
+
+    @pytest.mark.asyncio
+    async def test_a_claim_with_no_text_renders_nothing(self, node):
+        # An approval with no feedback. The author's framing would render around nothing, so nothing is rendered.
+        approval = Answer(
+            id="approval", in_reply_to="question-1", decision=Decision(choice="approve")
+        )
+        node.claimant = lambda _state: Claimant(in_reply_to="question-1")
+
+        result = await self._run(
+            node, self._state([HumanMessage(content="hi")]), _inbox(approval)
+        )
+
+        assert self._texts(result) == ["hi", "answer"]
+
+    @pytest.mark.asyncio
+    async def test_a_message_is_claimed_once_per_run(self, node):
+        inbox = _inbox(*_messages("fix the pipeline"))
+
+        await self._run(node, self._state(), inbox)
+        second = await self._run(node, self._state(), inbox)
+
+        # A new task finds nothing left: the first one claimed it.
+        assert self._texts(second) == ["answer"]
+
+    @pytest.mark.asyncio
+    async def test_it_leaves_history_alone_when_nothing_arrived(self, node):
+        result = await self._run(
+            node, self._state([HumanMessage(content="hi")]), _inbox()
+        )
+
+        assert self._texts(result) == ["hi", "answer"]
+
+    @pytest.mark.asyncio
+    async def test_it_runs_without_an_inbox(self, node):
+        result = await self._run(node, self._state([HumanMessage(content="hi")]), None)
+
+        assert self._texts(result) == ["hi", "answer"]
+
+    @pytest.mark.asyncio
+    async def test_it_leaves_a_message_addressed_elsewhere_in_the_inbox(self, node):
+        inbox = _inbox(*_messages("for the reviewer", recipient="reviewer"))
+
+        result = await self._run(node, self._state([HumanMessage(content="hi")]), inbox)
+
+        assert self._texts(result) == ["hi", "answer"]
+
+    @pytest.mark.asyncio
+    async def test_it_claims_a_message_addressed_to_its_component(self, node):
+        inbox = _inbox(*_messages("for the agent", recipient="agent"))
+
+        result = await self._run(node, self._state(), inbox)
+
+        assert self._texts(result) == ["<msg>for the agent</msg>", "answer"]
+
+    @pytest.mark.asyncio
+    async def test_an_old_format_prompt_leaves_a_pending_message_alone(self, node):
+        # It renders the first message itself, from `goal`, so it must not get it a second time.
+        node.claimant = None
+        node._prompt = Prompt(  # pylint: disable=protected-access
+            model_provider=ModelClassProvider.ANTHROPIC,
+            model_factory=lambda **_: _FakeModel(
+                responses=[AIMessage(content="answer")]
+            ),
+            config=PromptConfig(
+                name="old",
+                unit_primitive="duo_agent_platform",
+                prompt_template={"system": "x"},
+            ),
+        )
+        inbox = _inbox(*_messages("fix the pipeline"))
+
+        result = await self._run(node, self._state([HumanMessage(content="hi")]), inbox)
+
+        assert self._texts(result) == ["hi", "answer"]
+        # Still pending, for a component whose prompt does render it.
+        assert inbox.claim(TaskId("later"), Claimant(accepts_unaddressed=True))
+
+
+class _NoOptimizer:
+    async def optimize(self, history):
+        return history, []

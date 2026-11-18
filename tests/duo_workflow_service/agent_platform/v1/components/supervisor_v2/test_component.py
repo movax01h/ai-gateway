@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 from structlog.testing import capture_logs
 
@@ -1013,10 +1013,15 @@ class _ScriptedPrompt:
     """A prompt whose model answers from a script, so real components run with nothing else faked."""
 
     binds_web_search = False
+    # Any `message` block: an agent claims only what its prompt can render.
+    message_tpl = Mock()
 
     def __init__(self, script):
         self._script = script
         self.model = Mock(model_name="claude-3-sonnet")
+
+    async def render_message(self, variables):
+        return HumanMessage(content=variables["inbound_messages"].text)
 
     async def ainvoke(self, input, config=None):
         return self._script(input.get("history") or [])

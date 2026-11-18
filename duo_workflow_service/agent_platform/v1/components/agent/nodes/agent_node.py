@@ -25,6 +25,7 @@ from pydantic import ConfigDict, Field, ValidationError
 
 from ai_gateway.models.v2._model_compat import model_supports_vision
 from ai_gateway.prompts import Prompt
+from ai_gateway.prompts.config.template import INBOUND_MESSAGES_VARIABLE
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from duo_workflow_service.agent_platform.core.inbox import (
     Claimant,
@@ -32,6 +33,7 @@ from duo_workflow_service.agent_platform.core.inbox import (
     RunInbox,
     current_task_id,
 )
+from duo_workflow_service.agent_platform.core.inbox.view import inbound_messages_view
 from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -654,7 +656,8 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
         The inbox arrives as the graph's runtime context, and the claim is keyed by this node's task ID, so a task that
         runs again in the same run reads the same messages back. Which messages are this agent's is the owning
-        component's call.
+        component's call. An agent whose prompt has no `message` block can't render one, so it claims nothing and
+        leaves the message for whoever can.
 
         Args:
             state: The flow state the node runs on, which a subagent's address is resolved from.
@@ -662,12 +665,56 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
 
         Returns:
             The claimed messages: answers first, then the rest in arrival order. Empty when the run has no inbox or
-            the agent has no claimant.
+            the prompt has no `message` block.
+
+        Raises:
+            RuntimeError: When the prompt has a `message` block and no component said what the agent claims. Its
+                messages would never reach the model, and nothing else would say so.
         """
-        if runtime is None or runtime.context is None or self.claimant is None:
+        if runtime is None or runtime.context is None:
             return ()
+        if self._prompt.message_tpl is None:
+            return ()
+        if self.claimant is None:
+            raise RuntimeError(
+                f"Agent '{self.name}' renders messages from the run's inbox, but its component gave it no claimant"
+            )
 
         return runtime.context.claim(current_task_id(runtime), self.claimant(state))
+
+    async def _render_inbound_messages(
+        self, messages: Sequence[InboundMessage], variables: dict[str, Any]
+    ) -> list[BaseMessage]:
+        """Render the messages this agent claimed, together, into the one message its history keeps.
+
+        The engine delivers a message and never renders it: the prompt's `message` block decides how it reads, so a
+        flow author can frame every message, not only the first.
+
+        Args:
+            messages: The messages the agent claimed.
+            variables: The prompt variables this call renders with.
+
+        Returns:
+            The rendered message to append to history, or nothing when no claimed message has text.
+        """
+        view = inbound_messages_view(messages)
+        if not view.text:
+            # Nothing for the model to read. The prompt's own check only catches a render with no text at all, which
+            # an author's framing would hide, so the decision is taken here, from the messages.
+            return []
+
+        # One dict, merged in the same order as the model call below, so an input that shadows a runtime variable
+        # behaves the same in both renders instead of raising here.
+        rendered = await self._prompt.render_message(
+            {
+                **self._prompt_template_inputs,
+                **variables,
+                **self._predefined_runtime_variables(),
+                INBOUND_MESSAGES_VARIABLE: view,
+            }
+        )
+
+        return [rendered]
 
     async def run(
         self,
@@ -685,6 +732,10 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         history_iokey = self._conversation_history_key.to_iokey(state)
         history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)
+        history = [
+            *history,
+            *await self._render_inbound_messages(claimed, variables),
+        ]
         # Count before the trimmer drops empty replies: each text-only turn is its own run.
         text_only_turns = self._text_only_turns(history)
 
