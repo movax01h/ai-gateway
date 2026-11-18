@@ -10,6 +10,10 @@ pre-commit:
     lint-python:
       glob: "*.py"
       run: |
+        # Fail on the first failing check: without this, only the last make
+        # command's exit status counts and a mypy failure is silently ignored.
+        set -e
+
         # Filter out auto-generated protobuf files that cannot be linted
         export STAGED_FILES="$(echo '{staged_files}' | tr ' ' '\n' | grep -v 'contract_pb2\.py' | tr '\n' ' ')"
 
@@ -54,6 +58,10 @@ pre-commit:
       exclude:
         - "*.py"
       run: |
+        # Fail on the first failing check: without this, only the last make
+        # command's exit status counts and a codespell failure is silently ignored.
+        set -e
+
         export STAGED_FILES="$(echo '{staged_files}')"
         make check-codespell CODESPELL_LINT_WORKING_DIR="$STAGED_FILES"
         make check-editorconfig EDITORCONFIG_LINT_WORKING_DIR="$STAGED_FILES"
