@@ -1,0 +1,53 @@
+version: "v1"
+environment: ambient
+components:
+  - name: "suggest_reviewers"
+    type: OneOffComponent
+    prompt_id: "recommend_reviewers_assign"
+    prompt_version: "3.0.0-dev"
+    inputs:
+      - from: "context:inputs.agent_platform_resource_context.merge_request_id"
+        as: "merge_request_iid"
+      - from: "context:project_id"
+        as: "project_id"
+      - from: "context:inputs.agent_platform_recommend_reviewers_context"
+        as: "reviewer_data"
+    toolset:
+      - "post_suggested_reviewers"
+    max_correction_attempts: 3
+    ui_log_events:
+      - "on_tool_execution_success"
+      - "on_tool_execution_failed"
+
+routers:
+  - from: "suggest_reviewers"
+    to: "end"
+
+flow:
+  entry_point: "suggest_reviewers"
+  inputs:
+    - category: agent_platform_recommend_reviewers_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        current_reviewers:
+          type: array
+        approval_rules:
+          type: array
+        merger_required:
+          type: boolean
+          optional: true
+        suggested_set:
+          type: array
+          optional: true
+        signals:
+          type: array
+          optional: true
+          description: >
+            Extra facts about candidates, each with a name and a description. Each candidate
+            carries its values in its own signals object. This is a flow input rather than
+            fixed fields so that Rails can add a signal with no change here.
+    - category: agent_platform_resource_context
+      version_constraint: "^1.0.0"
+      input_schema:
+        merge_request_id:
+          type: string
