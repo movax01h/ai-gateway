@@ -40,7 +40,7 @@ which define layers present in the system as well as their relations with each o
 For the Code Suggestions feature, most of the code is hosted at `/ai_gateway`.
 In that directory, the following artifacts can be of interest:
 
-1. `app.py` - main entry point for web application
+1. `app.py` - deprecated shim. The main entry point for the web application is `ai/apps/aigw/app.py`.
 1. `code_suggestions/processing/base.py` - that contains base classes for ModelEngine.
 1. `api/v2/endpoints/code.py` - that houses implementation of main production Code Suggestions API
 1. `api/v2/experimental/code.py` - implements experimental endpoints that route requests to fixed external models for experimentation and testing

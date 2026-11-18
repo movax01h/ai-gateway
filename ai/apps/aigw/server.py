@@ -1,0 +1,421 @@
+import asyncio
+import os
+from contextlib import asynccontextmanager
+from typing import Awaitable, Callable, cast
+
+import structlog
+from fastapi import FastAPI, Request, Response
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from gitlab_cloud_connector import (
+    CompositeProvider,
+    GitLabOidcProvider,
+    LocalAuthProvider,
+)
+from prometheus_fastapi_instrumentator import Instrumentator, metrics
+from starlette import status
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware import Middleware
+from starlette.responses import JSONResponse
+from starlette_context import context
+from starlette_context.middleware import RawContextMiddleware
+
+from ai.serving.rest.routes import mount_routes
+from ai_gateway.api.client_disconnect import (
+    ClientDisconnectedError,
+    client_disconnected_exception_handler,
+)
+from ai_gateway.api.middleware import (
+    AccessLogMiddleware,
+    ActorLimitMiddleware,
+    DistributedTraceMiddleware,
+    FeatureFlagMiddleware,
+    InternalEventMiddleware,
+    MiddlewareAuthentication,
+    ModelConfigMiddleware,
+    RequestBodyLimitMiddleware,
+    RequestMetadataMiddleware,
+)
+from ai_gateway.api.middleware.self_hosted_logging import (
+    EnabledInstanceVerboseAiLogsHeaderPlugin,
+)
+from ai_gateway.api.server_utils import extract_retry_after_header
+from ai_gateway.code_suggestions.processing.pre import PromptTooLongError
+from ai_gateway.config import Config, setup_litellm
+from ai_gateway.container import ContainerApplication
+from ai_gateway.instrumentators.threads import monitor_threads
+from ai_gateway.model_selection import RestrictedModelAccessError
+from ai_gateway.models import ModelAPIError
+from ai_gateway.models.base import ModelAPICallError
+from ai_gateway.profiling import setup_profiling
+from ai_gateway.prompts.feature_roots import discover_feature_prompts
+from ai_gateway.structured_logging import can_log_request_data, setup_app_logging
+from lib.aws_assume_role import AssumeRoleError
+from lib.container_wiring import wire_and_validate
+
+__all__ = [
+    "create_fast_api_server",
+]
+
+_SKIP_ENDPOINTS = [
+    "/monitoring/healthz",
+    "/monitoring/ready",
+    "/metrics",
+    "/v1/models/definitions",
+]
+_CODE_SUGGESTIONS_PATH_PREFIXES = (
+    "/v2/completions",
+    "/v2/code/",
+    "/v3/code/",
+    "/v4/code/",
+)
+_CODE_SUGGESTIONS_MAX_BODY_BYTES = 600_000
+# Proxy requests are larger than the others (up to about 17 MiB) and never carry
+# model_metadata, so the general request body limit leaves them out.
+_PROXY_PATH_PREFIXES = ("/v1/proxy/",)
+_PROMPTS_PATH_PREFIXES = (
+    "/v1/prompts/",
+    "/v2/prompts/",
+)
+CONTAINER_APPLICATION_MODULES = [
+    "ai_gateway.api.v1.embeddings.code_embeddings",
+    "ai_gateway.api.v1.search.docs",
+    "ai_gateway.api.v2.code.completions",
+    "ai_gateway.api.v3.code.completions",
+    "ai_gateway.api.v4.code.suggestions",
+    "ai_gateway.code_suggestions.handler",
+    "ai.apps.aigw.server",
+    "ai_gateway.api.monitoring",
+    "ai_gateway.async_dependency_resolver",
+    "ai_gateway.api.middleware.route.usage_quota",
+    "ai_gateway.api.v1.proxy.request",
+]
+
+ExceptionHandler = Callable[[Request, Exception], Awaitable[Response]]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    config = app.state.config
+    container_application = ContainerApplication()
+    wire_and_validate(container_application, modules=CONTAINER_APPLICATION_MODULES)
+    container_application.config.from_dict(config.model_dump())
+
+    # Register moved feature prompts at boot so a duplicate feature id fails
+    # startup rather than the first prompt request.
+    discover_feature_prompts()
+
+    if config.instrumentator.thread_monitoring_enabled:
+        loop = asyncio.get_running_loop()
+        loop.create_task(
+            monitor_threads(
+                loop, interval=config.instrumentator.thread_monitoring_interval
+            )
+        )
+
+    setup_litellm(config)
+
+    yield
+
+    await container_application.usage_quota.service().aclose()
+
+    try:
+        container_application.billing_event.client().shutdown()
+    except Exception as e:
+        structlog.stdlib.get_logger("billing_events_client").warning(
+            "Failed to shutdown billing events client", error=str(e)
+        )
+    try:
+        container_application.internal_event.client().shutdown()
+    except Exception as e:
+        structlog.stdlib.get_logger("internal_events_client").warning(
+            "Failed to shutdown internal events client", error=str(e)
+        )
+    try:
+        container_application.snowplow.client().shutdown()
+    except Exception as e:
+        structlog.stdlib.get_logger("snowplow_client").warning(
+            "Failed to shutdown Snowplow client", error=str(e)
+        )
+
+
+def _oidc_providers(config: Config) -> dict[str, str]:
+    """Return the OIDC key sources: GitLab's own keys always, and the Customers Portal keys unless custom models are
+    enabled, in which case only when `AIGW_CUSTOMER_PORTAL_URL` is explicitly set to a non-empty value.
+    """
+    oidc_providers = {"Gitlab": config.gitlab_url}
+
+    if not config.custom_models.enabled or (
+        config.customer_portal_url and "customer_portal_url" in config.model_fields_set
+    ):
+        oidc_providers["CustomersDot"] = config.customer_portal_url
+
+    return oidc_providers
+
+
+def _request_body_limit(config: Config) -> list[Middleware]:
+    """Return the request body limit for every HTTP route except the proxy routes.
+
+    The limit is off (an empty list) unless ``AIGW_REQUEST_BODY_LIMIT__MAX_BYTES`` is set. GitLab.com sets it, so a
+    caller cannot make the gateway buffer and parse a very large body on these routes. Self-hosted gateways keep the
+    default.
+    """
+    max_bytes = config.request_body_limit.max_bytes
+    if not max_bytes:
+        return []
+
+    return [
+        Middleware(
+            RequestBodyLimitMiddleware,
+            max_bytes=max_bytes,
+            path_prefixes=("/",),
+            excluded_prefixes=_PROXY_PATH_PREFIXES,
+        )
+    ]
+
+
+def create_fast_api_server(config: Config):
+    auth_provider = CompositeProvider(
+        [
+            LocalAuthProvider(
+                structlog,
+                signing_key=config.self_signed_jwt.signing_key,
+                validation_key=config.self_signed_jwt.validation_key,
+            ),
+            GitLabOidcProvider(structlog, oidc_providers=_oidc_providers(config)),
+        ],
+        structlog,
+        bypass_auth_jwt_signature=config.auth.bypass_jwt_signature,
+    )
+
+    fastapi_app = FastAPI(
+        title="GitLab AI Gateway",
+        description="GitLab AI Gateway API to execute AI actions",
+        openapi_url=config.fastapi.openapi_url,
+        docs_url=config.fastapi.docs_url,
+        redoc_url=config.fastapi.redoc_url,
+        swagger_ui_parameters={"defaultModelsExpandDepth": -1},
+        lifespan=lifespan,
+        middleware=[
+            Middleware(
+                RawContextMiddleware,
+                plugins=(EnabledInstanceVerboseAiLogsHeaderPlugin(),),
+            ),
+            Middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_methods=["POST"],
+                allow_headers=["*"],
+            ),
+            Middleware(
+                AccessLogMiddleware,
+                skip_endpoints=[],
+            ),
+            Middleware(
+                DistributedTraceMiddleware,
+                skip_endpoints=_SKIP_ENDPOINTS,
+                environment=config.environment,
+            ),
+            MiddlewareAuthentication(
+                auth_provider,
+                bypass_auth=config.auth.bypass_external,
+                bypass_auth_with_header=config.auth.bypass_external_with_header,
+                skip_endpoints=_SKIP_ENDPOINTS,
+            ),
+            Middleware(RequestMetadataMiddleware),
+            Middleware(
+                FeatureFlagMiddleware,
+                disallowed_flags=config.feature_flags.disallowed_flags,
+            ),
+            Middleware(
+                InternalEventMiddleware,
+                skip_endpoints=_SKIP_ENDPOINTS,
+                environment=config.environment,
+            ),
+            Middleware(
+                RequestBodyLimitMiddleware,
+                max_bytes=_CODE_SUGGESTIONS_MAX_BODY_BYTES,
+                path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
+            ),
+            *_request_body_limit(config),
+            Middleware(
+                ActorLimitMiddleware,
+                limits=config.code_suggestions,
+                path_prefixes=_CODE_SUGGESTIONS_PATH_PREFIXES,
+                control_name="code_suggestions_actor_limit",
+            ),
+            Middleware(
+                ActorLimitMiddleware,
+                limits=config.prompts,
+                path_prefixes=_PROMPTS_PATH_PREFIXES,
+                control_name="prompts_actor_limit",
+            ),
+            Middleware(ModelConfigMiddleware, skip_endpoints=_SKIP_ENDPOINTS),
+        ],
+    )
+
+    fastapi_app.state.config = config
+    fastapi_app.state.cloud_connector_auth_provider = (
+        auth_provider  # For readiness check
+    )
+    setup_custom_exception_handlers(fastapi_app)
+    mount_routes(fastapi_app)
+    setup_app_logging(fastapi_app)
+    setup_prometheus_fastapi_instrumentator(fastapi_app)
+    setup_profiling(config.google_cloud_profiler)
+    setup_gcp_service_account(config)
+
+    return fastapi_app
+
+
+async def custom_http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> Response:
+    context["http_exception_details"] = str(exc)
+    return await http_exception_handler(request, exc)
+
+
+async def model_api_exception_handler(request: Request, exc: ModelAPIError) -> Response:
+    if isinstance(exc, ModelAPICallError) and exc.code == 429:
+        wrapped_exception = StarletteHTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please try again later.",
+        )
+
+        # When a 429 error is returned from some API, like Anthropic
+        # the response includes a retry-after header
+        # which we propagate to the client
+        # https://docs.anthropic.com/en/api/rate-limits#response-headers
+        retry_after = extract_retry_after_header(exc)
+
+        response = await http_exception_handler(request, wrapped_exception)
+
+        if retry_after:
+            response.headers["Retry-After"] = retry_after
+
+        return response
+
+    # Default to 503 for all other error types
+    wrapped_exception = StarletteHTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Inference failed",
+    )
+    return await http_exception_handler(request, wrapped_exception)
+
+
+async def restricted_model_access_exception_handler(
+    request: Request, exc: RestrictedModelAccessError
+) -> Response:
+    return await http_exception_handler(
+        request,
+        StarletteHTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)),
+    )
+
+
+async def validation_exception_handler(
+    request: Request,  # pylint: disable=unused-argument
+    exc: RequestValidationError,
+) -> JSONResponse:
+    if can_log_request_data():
+        context["exception_message"] = str(exc)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": str(exc.errors())},
+        )
+
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={"detail": "Validation error"},
+    )
+
+
+async def assume_role_exception_handler(
+    request: Request, exc: AssumeRoleError
+) -> Response:
+    # The role ARN is left out of the response: it stays in the logs, and the STS
+    # error code is enough for the caller to tell what went wrong.
+    return await http_exception_handler(
+        request,
+        StarletteHTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Failed to assume the requested IAM role: "
+                f"{exc.error_code or 'Unknown'}"
+            ),
+        ),
+    )
+
+
+async def prompt_too_long_exception_handler(
+    request: Request, exc: PromptTooLongError
+) -> Response:
+    return await http_exception_handler(
+        request,
+        StarletteHTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ),
+    )
+
+
+def setup_custom_exception_handlers(app: FastAPI):
+    app.add_exception_handler(
+        StarletteHTTPException, cast(ExceptionHandler, custom_http_exception_handler)
+    )
+    app.add_exception_handler(
+        PromptTooLongError, cast(ExceptionHandler, prompt_too_long_exception_handler)
+    )
+    app.add_exception_handler(
+        ModelAPIError, cast(ExceptionHandler, model_api_exception_handler)
+    )
+    app.add_exception_handler(
+        AssumeRoleError, cast(ExceptionHandler, assume_role_exception_handler)
+    )
+    app.add_exception_handler(
+        RequestValidationError, cast(ExceptionHandler, validation_exception_handler)
+    )
+    app.add_exception_handler(
+        RestrictedModelAccessError,
+        cast(ExceptionHandler, restricted_model_access_exception_handler),
+    )
+    app.add_exception_handler(
+        ClientDisconnectedError,
+        cast(ExceptionHandler, client_disconnected_exception_handler),
+    )
+
+
+def setup_prometheus_fastapi_instrumentator(app: FastAPI):
+    instrumentator = Instrumentator(
+        should_group_status_codes=True,
+        should_ignore_untemplated=True,
+        should_respect_env_var=False,
+        should_instrument_requests_inprogress=False,
+        excluded_handlers=_SKIP_ENDPOINTS,
+    )
+    instrumentator.add(
+        metrics.latency(
+            should_include_handler=True,
+            should_include_method=True,
+            should_include_status=True,
+            should_exclude_streaming_duration=True,
+            buckets=(0.5, 1, 2.5, 5, 10, 30, 60),
+        )
+    )
+    instrumentator.instrument(app)
+
+
+def setup_gcp_service_account(config: Config):
+    """Inject service account credential from the `AIGW_GOOGLE_CLOUD_PLATFORM__SERVICE_ACCOUNT_JSON_KEY` environment
+    variable.
+
+    This method should only be used for testing purpose such as CI/CD pipelines. For production environment, we don't
+    use this method but use Application Default Credentials (ADC) authentication instead.
+    """
+    if config.google_cloud_platform.service_account_json_key:
+        with open("/tmp/gcp-service-account.json", "w") as f:
+            f.write(config.google_cloud_platform.service_account_json_key.strip("'"))
+            # pylint: disable=direct-environment-variable-reference
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = (
+                "/tmp/gcp-service-account.json"
+            )
+            # pylint: enable=direct-environment-variable-reference

@@ -89,7 +89,7 @@ def test_real_dws_container_wires_clean():
 def test_real_aigw_container_wires_clean():
     # Every @inject target in AIGW's explicit module list resolves at boot.
     _validate_wiring_in_subprocess(
-        "from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES\n"
+        "from ai.apps.aigw.server import CONTAINER_APPLICATION_MODULES\n"
         "from ai_gateway.container import ContainerApplication\n"
         "from lib.container_wiring import wire_and_validate\n"
         "wire_and_validate(ContainerApplication(), modules=CONTAINER_APPLICATION_MODULES)\n"
@@ -165,7 +165,7 @@ def test_every_inject_site_is_wired_by_the_app_that_serves_it():
     marker (lib/, or an ai/ module served by AIGW) must be classified below, which forces a conscious wiring decision
     instead of a silent no-op.
     """
-    from ai_gateway.api.server import CONTAINER_APPLICATION_MODULES
+    from ai.apps.aigw.server import CONTAINER_APPLICATION_MODULES
     from duo_workflow_service.server import CONTAINER_APPLICATION_PACKAGES
 
     assert "duo_workflow_service" in CONTAINER_APPLICATION_PACKAGES
