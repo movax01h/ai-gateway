@@ -370,6 +370,61 @@ def _join_text_blocks(content: list) -> str:
     )
 
 
+# Providers known to reject `reasoning_content` on assistant messages with a
+# 400. The field is not part of the OpenAI spec, and LiteLLM fills
+# `reasoning_content` from other fields too: `reasoning` (Groq, Cerebras, newer
+# vLLM) and inline `<think>` tags. So the endpoint that produced the reasoning
+# may never have sent the field, and may reject it when it is echoed back.
+#
+# Every other provider keeps the echo: DeepSeek, Moonshot, Fireworks and
+# MiniMax need it back in multi-turn tool loops, and `custom_openai` is the
+# default tag for self-hosted models (DeepSeek, Kimi, Qwen, GLM, ...) whose
+# servers accept it. `openai` stays too: self-hosted `openai/` and
+# `openai_like/` identifiers resolve to it with the customer's own endpoint.
+# A missing echo quietly degrades reasoning, while a 400 is loud and is fixed
+# by giving the self-hosted model identifier the matching provider prefix
+# (for example `groq/<model>`).
+# See https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3248
+# and the per-provider mapping planned in
+# https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/work_items/3577
+_REASONING_CONTENT_REJECTING_PROVIDERS = frozenset({"groq"})
+
+
+def drop_unsupported_reasoning_content(
+    messages: list[dict], custom_llm_provider: Optional[str]
+) -> list[dict]:
+    """Remove ``reasoning_content`` from assistant messages for providers that reject it.
+
+    The LiteLLM converter sets the field on assistant messages so that reasoning carries over between turns for
+    providers that need it. Request-time only, never persisted: the message history keeps the reasoning, so a
+    conversation that moves to a provider that accepts the field still has it.
+
+    Args:
+        messages: Message dicts from the LiteLLM converter.
+        custom_llm_provider: litellm provider tag used for the gate.
+
+    Returns:
+        A new list without ``reasoning_content`` on assistant messages, or ``messages`` itself when the provider
+        accepts the field or no message carries it.
+    """
+    if custom_llm_provider not in _REASONING_CONTENT_REJECTING_PROVIDERS:
+        return messages
+    if not any(
+        message.get("role") == "assistant" and "reasoning_content" in message
+        for message in messages
+    ):
+        return messages
+
+    return [
+        (
+            {k: v for k, v in message.items() if k != "reasoning_content"}
+            if message.get("role") == "assistant"
+            else message
+        )
+        for message in messages
+    ]
+
+
 # No model identifier: the model repeats what it reads, and a deployment path is noise to the user.
 IMAGE_OMITTED_NOTICE = (
     "[image omitted: the selected model does not support image input]"
