@@ -23,6 +23,7 @@
     - ai_gateway/prompts/base.py
     - ai_gateway/prompts/config/base.py
     - ai_gateway/prompts/config/formats.py
+    - ai_gateway/prompts/config/template.py
     - ai_gateway/prompts/model_variables.py
     - ai_gateway/prompts/registry.py
     - ai_gateway/response_schemas/*.py
