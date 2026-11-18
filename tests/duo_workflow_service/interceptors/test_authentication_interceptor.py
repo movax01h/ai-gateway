@@ -2,6 +2,7 @@
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import grpc
 import pytest
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 
@@ -237,7 +238,7 @@ async def test_intercept_service_auth_enabled(
         pytest.param({"gitlab_root_namespace_id": -1}, id="claim_is_negative"),
     ],
 )
-async def test_intercept_service_allows_saas_without_root_namespace_id(
+async def test_intercept_service_rejects_saas_without_root_namespace_id(
     _mock_cloud_connector_ready,
     mock_continuation,
     handler_call_details,
@@ -254,9 +255,19 @@ async def test_intercept_service_allows_saas_without_root_namespace_id(
         ),
     ):
         interceptor = AuthenticationInterceptor(mock_config)
-        await interceptor.intercept_service(mock_continuation, handler_call_details)
+        handler = await interceptor.intercept_service(
+            mock_continuation, handler_call_details
+        )
 
-    mock_continuation.assert_awaited_once()
+    context = AsyncMock()
+    assert handler.unary_unary is not None
+    await handler.unary_unary(None, context)
+
+    mock_continuation.assert_not_awaited()
+    context.abort.assert_awaited_once_with(
+        grpc.StatusCode.UNAUTHENTICATED,
+        "SaaS token is missing a valid gitlab_root_namespace_id claim",
+    )
 
 
 @patch.dict(os.environ, {"DUO_WORKFLOW_AUTH__ENABLED": "true"})

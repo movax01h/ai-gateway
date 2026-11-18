@@ -549,6 +549,60 @@ invalid_authentication_token_type_error = {
                 "token_issuer",
             ],
         ),
+        (
+            {
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "saas",
+                "X-Gitlab-Root-Namespace-Id": "42",
+            },
+            None,
+            401,
+            CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(
+                    scopes=["feature1", "feature3"],
+                    subject="1234",
+                    gitlab_realm="saas",
+                    gitlab_instance_id="1234",
+                ),
+            ),
+            {"error": "SaaS token is missing a valid gitlab_root_namespace_id claim"},
+            [
+                "auth_duration_s",
+                "auth_error_details",
+                "http_exception_details",
+                "token_issuer",
+            ],
+        ),
+        (
+            {
+                "Authorization": "Bearer 12345",
+                "X-Gitlab-Authentication-Type": "oidc",
+                "X-GitLab-Instance-Id": "1234",
+                "X-GitLab-Realm": "saas",
+            },
+            None,
+            200,
+            CloudConnectorUser(
+                authenticated=True,
+                claims=UserClaims(
+                    scopes=["feature1", "feature3"],
+                    subject="1234",
+                    gitlab_realm="saas",
+                    gitlab_instance_id="1234",
+                    extra={"gitlab_root_namespace_id": 42},
+                ),
+            ),
+            {
+                "authenticated": True,
+                "is_debug": False,
+                "scopes": ["feature1", "feature3"],
+                "token": "12345",
+            },
+            ["auth_duration_s", "token_issuer"],
+        ),
     ],
 )
 async def test_failed_authorization_logging(

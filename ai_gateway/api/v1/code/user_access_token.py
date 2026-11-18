@@ -1,6 +1,5 @@
 from typing import Annotated, Optional
 
-import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from gitlab_cloud_connector import (
     CloudConnectorConfig,
@@ -20,20 +19,13 @@ from ai_gateway.async_dependency_resolver import (
 from lib.context import StarletteUser, get_current_user
 from lib.events import FeatureQualifiedNameStatic
 from lib.internal_events import InternalEventsClient
-from lib.jwt import (
-    GITLAB_ROOT_NAMESPACE_ID_CLAIM,
-    instance_uid_claim,
-    root_namespace_id_from_claims_extra,
-    root_namespace_id_from_header,
-)
+from lib.jwt import instance_uid_claim, root_namespace_id_from_claims_extra
 from lib.usage_quota import UsageQuotaEvent
 
 __all__ = [
     "router",
 ]
 
-
-log = structlog.stdlib.get_logger("user_access_token")
 
 router = APIRouter()
 
@@ -59,9 +51,6 @@ async def user_access_token(
     x_gitlab_namespace_id: Annotated[
         Optional[str], Header()
     ] = None,  # This is the value of X_GITLAB_NAMESPACE_ID_HEADER
-    x_gitlab_root_namespace_id: Annotated[
-        Optional[str], Header()
-    ] = None,  # This is the value of X_GITLAB_ROOT_NAMESPACE_ID_HEADER
 ):
     unit_primitives = [
         GitLabUnitPrimitive.COMPLETE_CODE,
@@ -96,23 +85,13 @@ async def user_access_token(
     # We can only trust the provided headers when the auth token is from SaaS
     # Otherwise, a user can perform a direct call to AIGW and specify arbitrary values
     if user_claims.gitlab_realm == "saas":
-        root_namespace_id = root_namespace_id_from_claims_extra(extra_claims)
-        if root_namespace_id is None:
-            root_namespace_id = root_namespace_id_from_header(
-                x_gitlab_root_namespace_id
-            )
-            log.warning(
-                "gitlab_root_namespace_id claim unusable, falling back to header",
-                claim_value=extra_claims.get(GITLAB_ROOT_NAMESPACE_ID_CLAIM),
-                header_value=x_gitlab_root_namespace_id,
-                resolved=root_namespace_id,
-            )
-
         extra_claims.update(
             {
                 "gitlab_project_id": x_gitlab_project_id,
                 "gitlab_namespace_id": x_gitlab_namespace_id,
-                "gitlab_root_namespace_id": root_namespace_id,
+                "gitlab_root_namespace_id": root_namespace_id_from_claims_extra(
+                    extra_claims
+                ),
             }
         )
 

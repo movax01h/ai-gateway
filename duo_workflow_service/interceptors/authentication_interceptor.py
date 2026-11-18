@@ -8,7 +8,6 @@ import grpc
 import structlog
 from gitlab_cloud_connector import (
     AuthProvider,
-    CloudConnectorUser,
     CompositeProvider,
     GitLabOidcProvider,
     LocalAuthProvider,
@@ -24,8 +23,9 @@ from lib.context import cloud_connector_token_context_var
 from lib.context.model import paid_credit_models_allowed_ctx
 from lib.jwt import (
     GITLAB_ROOT_NAMESPACE_ID_CLAIM,
+    MISSING_SAAS_ROOT_NAMESPACE_CLAIM_ERROR,
+    lacks_saas_root_namespace_claim,
     paid_credit_models_allowed_from_claims_extra,
-    root_namespace_id_from_claims_extra,
 )
 
 logger = structlog.get_logger(__name__)
@@ -92,7 +92,7 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
 
         # This check runs only for authenticated users; the error check above
         # ensures cloud_connector_user is valid before we inspect its claims.
-        if not self._has_valid_saas_root_namespace_claim(cloud_connector_user):
+        if lacks_saas_root_namespace_claim(cloud_connector_user.claims):
             claims = cloud_connector_user.claims
             logger.warning(
                 "gitlab_root_namespace_id claim unusable for SaaS request",
@@ -103,6 +103,10 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
                     else None
                 ),
             )
+            return abort_handler(
+                grpc.StatusCode.UNAUTHENTICATED,
+                MISSING_SAAS_ROOT_NAMESPACE_CLAIM_ERROR,
+            )
 
         claims = cloud_connector_user.claims
         paid_credit_models_allowed_ctx.set(
@@ -112,13 +116,6 @@ class AuthenticationInterceptor(grpc.aio.ServerInterceptor):
         )
         current_user.set(cloud_connector_user)
         return await continuation(handler_call_details)
-
-    def _has_valid_saas_root_namespace_claim(self, user: CloudConnectorUser) -> bool:
-        claims = user.claims
-        if not claims or claims.gitlab_realm != "saas":
-            return True
-
-        return root_namespace_id_from_claims_extra(claims.extra) is not None
 
     def _init_oidc_auth_provider(self, custom_models_enabled: bool) -> AuthProvider:
         gitlab_url: str = oidc_gitlab_url()

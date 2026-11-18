@@ -1,6 +1,8 @@
 import pytest
+from gitlab_cloud_connector import UserClaims
 
 from lib.jwt import (
+    lacks_saas_root_namespace_claim,
     parse_root_namespace_id,
     root_namespace_id_from_claims_extra,
     root_namespace_id_from_header,
@@ -65,3 +67,19 @@ class TestRootNamespaceIdFromClaimsExtra:
     )
     def test_returns_validated_claim(self, extra, expected):
         assert root_namespace_id_from_claims_extra(extra) == expected
+
+
+@pytest.mark.parametrize(
+    "claims,expected",
+    [
+        (None, False),
+        (UserClaims(gitlab_realm="self-managed"), False),
+        (
+            UserClaims(gitlab_realm="saas", extra={"gitlab_root_namespace_id": 42}),
+            False,
+        ),
+        (UserClaims(gitlab_realm="saas"), True),
+    ],
+)
+def test_lacks_saas_root_namespace_claim(claims, expected):
+    assert lacks_saas_root_namespace_claim(claims) is expected
