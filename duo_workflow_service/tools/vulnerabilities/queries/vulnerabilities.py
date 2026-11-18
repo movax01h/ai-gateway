@@ -282,9 +282,9 @@ __TRACKED_REF_FRAGMENT__
     }
     """
 
-LIST_VULNERABILITIES_QUERY = """query($projectFullPath: ID!, $first: Int, $after: String, $severity: [VulnerabilitySeverity!], $reportType: [VulnerabilityReportType!]) {
+LIST_VULNERABILITIES_QUERY = """query($projectFullPath: ID!, $first: Int, $after: String, $severity: [VulnerabilitySeverity!], $reportType: [VulnerabilityReportType!], $state: [VulnerabilityState!]) {
     project(fullPath: $projectFullPath) {
-        vulnerabilities(first: $first, after: $after, severity: $severity, reportType: $reportType) {
+        vulnerabilities(first: $first, after: $after, severity: $severity, reportType: $reportType, state: $state) {
             pageInfo {
                 hasNextPage
                 endCursor

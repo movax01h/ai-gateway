@@ -24,6 +24,7 @@ from duo_workflow_service.tools.security import (
     RevertToDetectedVulnerabilityInput,
     VulnerabilityReportType,
     VulnerabilitySeverity,
+    VulnerabilityState,
 )
 
 
@@ -137,6 +138,7 @@ class TestListVulnerabilitiesInput:
 
         assert input_data.severity is None
         assert input_data.report_type is None
+        assert input_data.state is None
         assert input_data.per_page == 100
         assert input_data.page == 1
         assert input_data.fetch_all_pages is True
@@ -268,6 +270,62 @@ class TestListVulnerabilities:
         call_args = gitlab_client_mock.apost.call_args
         body = json.loads(call_args.kwargs["body"])
         assert body["variables"]["reportType"] == ["SAST", "DAST"]
+
+    async def test_state_filtering(
+        self, gitlab_client_mock, metadata, vulnerability_data
+    ):
+        """Test filtering by multiple states."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "project": {
+                        "vulnerabilities": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": vulnerability_data,
+                        }
+                    }
+                }
+            }
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        await tool.arun(
+            {
+                "project_full_path": "namespace/project",
+                "state": [
+                    VulnerabilityState.DETECTED,
+                    VulnerabilityState.CONFIRMED,
+                ],
+            }
+        )
+
+        call_args = gitlab_client_mock.apost.call_args
+        body = json.loads(call_args.kwargs["body"])
+        assert body["variables"]["state"] == ["DETECTED", "CONFIRMED"]
+
+    async def test_no_state_filter_by_default(
+        self, gitlab_client_mock, metadata, vulnerability_data
+    ):
+        """Test that no state filter is sent when state is not specified."""
+        gitlab_client_mock.apost = AsyncMock(
+            return_value={
+                "data": {
+                    "project": {
+                        "vulnerabilities": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": vulnerability_data,
+                        }
+                    }
+                }
+            }
+        )
+
+        tool = ListVulnerabilities(metadata=metadata)
+        await tool.arun({"project_full_path": "namespace/project"})
+
+        call_args = gitlab_client_mock.apost.call_args
+        body = json.loads(call_args.kwargs["body"])
+        assert "state" not in body["variables"]
 
     async def test_fp_detection_status_in_response(self, gitlab_client_mock, metadata):
         """Test that latestFlag is included in vulnerability response."""
@@ -548,6 +606,13 @@ class TestDisplayMessageFormatting:
 
         assert "severity: HIGH" in message
         assert "report type: SAST" in message
+
+        args = ListVulnerabilitiesInput(
+            project_full_path="namespace/project",
+            state=[VulnerabilityState.DETECTED, VulnerabilityState.CONFIRMED],
+        )
+        message = tool.format_display_message(args)
+        assert "state: DETECTED, CONFIRMED" in message
 
 
 class TestEnumCoverage:

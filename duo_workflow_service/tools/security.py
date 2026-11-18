@@ -57,6 +57,15 @@ class FpDetectionStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class VulnerabilityState(StrEnum):
+    """Valid vulnerability states."""
+
+    DETECTED = "DETECTED"
+    CONFIRMED = "CONFIRMED"
+    DISMISSED = "DISMISSED"
+    RESOLVED = "RESOLVED"
+
+
 __all__ = [
     "ConfirmVulnerability",
     "CreateVulnerabilityIssue",
@@ -86,6 +95,15 @@ class ListVulnerabilitiesInput(BaseModel):
         description="""
         Filter vulnerabilities by report types. Can specify multiple values (e.g., [SAST, DAST]).
         If not specified, all report types will be returned.
+        """,
+    )
+    state: Optional[list[VulnerabilityState]] = Field(
+        default=None,
+        description="""
+        Filter vulnerabilities by state. Can specify multiple values (e.g., [DETECTED, CONFIRMED]).
+        DETECTED means the vulnerability is still detected and needs triage.
+        Use [DETECTED, CONFIRMED] to exclude vulnerabilities that are already resolved or dismissed.
+        If not specified, all states will be returned.
         """,
     )
     per_page: Optional[int] = Field(
@@ -130,6 +148,7 @@ class ListVulnerabilities(DuoBaseTool):
     The tool supports filtering vulnerabilities by:
     - Severity levels (can specify multiple: CRITICAL, HIGH, MEDIUM, LOW, INFO, UNKNOWN)
     - Report type (SAST, DAST, DEPENDENCY_SCANNING, etc.)
+    - State (DETECTED, CONFIRMED, DISMISSED, RESOLVED)
 
     The tool exposes FP detection metadata in the latestFlag field including:
     - Detection status and confidence scores
@@ -160,6 +179,12 @@ class ListVulnerabilities(DuoBaseTool):
             severity=[VulnerabilitySeverity.CRITICAL]
             report_type=[VulnerabilityReportType.SAST]
         )
+
+    - List only vulnerabilities that still need action (exclude resolved and dismissed):
+        list_vulnerabilities(
+            project_full_path="namespace/project",
+            state=[VulnerabilityState.DETECTED, VulnerabilityState.CONFIRMED]
+        )
     """
     args_schema: Type[BaseModel] = ListVulnerabilitiesInput
 
@@ -170,6 +195,7 @@ class ListVulnerabilities(DuoBaseTool):
         per_page = kwargs.pop("per_page", 100)
         severity = kwargs.pop("severity", None)
         report_type = kwargs.pop("report_type", None)
+        state = kwargs.pop("state", None)
 
         all_vulnerabilities: list[dict[str, Any]] = []
         cursor = None
@@ -188,6 +214,9 @@ class ListVulnerabilities(DuoBaseTool):
 
             if report_type:
                 variables["reportType"] = [rt.value for rt in report_type]
+
+            if state:
+                variables["state"] = [st.value for st in state]
 
             response = await self.gitlab_client.apost(
                 path="/api/graphql",
@@ -264,6 +293,8 @@ class ListVulnerabilities(DuoBaseTool):
             filters.append(
                 f"report type: {', '.join([rt.value for rt in args.report_type])}"
             )
+        if args.state:
+            filters.append(f"state: {', '.join([st.value for st in args.state])}")
 
         if filters:
             message += f" ({', '.join(filters)})"
