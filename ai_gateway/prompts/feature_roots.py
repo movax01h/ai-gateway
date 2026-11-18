@@ -33,6 +33,10 @@ __all__ = [
 LEGACY_INCLUDE_ALIASES: dict[str, str] = {
     "common/api_assistant/system/1.0.0.jinja": "slack_assistant/common/api_assistant/system/1.0.0.jinja",
     "common/branch_naming/1.0.0.jinja": "developer/common/branch_naming/1.0.0.jinja",
+    "common/code_review_previous_review/1.0.0.jinja": "code_review/common/code_review_previous_review/1.0.0.jinja",
+    "common/code_review_previous_review_rules/1.0.0.jinja": "code_review/common/code_review_previous_review_rules/1.0.0.jinja",
+    "common/code_review_reconciliation/1.0.0.jinja": "code_review/common/code_review_reconciliation/1.0.0.jinja",
+    "common/code_review_scope_handling/1.0.0.jinja": "code_review/common/code_review_scope_handling/1.0.0.jinja",
     "common/developer/system/1.0.0.jinja": "developer/common/system/1.0.0.jinja",
     "common/git_commits/1.0.0.jinja": "developer/common/git_commits/1.0.0.jinja",
     "common/merge_request_guidelines/1.0.0.jinja": "developer/common/merge_request_guidelines/1.0.0.jinja",

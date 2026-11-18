@@ -16,7 +16,6 @@
 
 # Duo Code Review flows, tools, and prompts
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/ (see work item 2853)
 /ai/features/review/ @kinsingh @wanpol @iamphill @marc_shaw
@@ -114,7 +113,6 @@
 
 # Duo Code Review flow configs, tools, and prompts
 /duo_workflow_service/tools/code_review/ @kinsingh @wanpol @iamphill @marc_shaw
-/ai_gateway/prompts/definitions/common/code_review_*/ @kinsingh @wanpol @iamphill @marc_shaw
 
 # Duo Code Review migration targets under ai/features/review/
 /ai/features/review/ @kinsingh @wanpol @iamphill @marc_shaw
