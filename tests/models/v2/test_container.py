@@ -207,8 +207,12 @@ async def test_google_chat_gen_vertex_ai_client_not_shared_across_resolutions():
         "ai_gateway.models.v2.container.connect_google_gen_vertex_ai",
         side_effect=lambda *_args, **_kwargs: MagicMock(spec=Client),
     ) as mock_connect:
-        model_a = container.google_chat_gen_vertex_ai_global_fn(model="gemini-2.5-pro")
-        model_b = container.google_chat_gen_vertex_ai_global_fn(model="gemini-2.5-pro")
+        model_a = container.google_chat_gen_vertex_ai_global_fn(
+            model="gemini-3.1-pro-preview"
+        )
+        model_b = container.google_chat_gen_vertex_ai_global_fn(
+            model="gemini-3.1-pro-preview"
+        )
 
     assert mock_connect.call_count == 2
     assert model_a.client is not model_b.client
@@ -238,8 +242,12 @@ async def test_google_chat_gen_vertex_ai_http_client_shared_across_resolutions()
             spec=Client, http_client=kwargs.get("http_client")
         ),
     ):
-        model_a = container.google_chat_gen_vertex_ai_global_fn(model="gemini-2.5-pro")
-        model_b = container.google_chat_gen_vertex_ai_global_fn(model="gemini-2.5-pro")
+        model_a = container.google_chat_gen_vertex_ai_global_fn(
+            model="gemini-3.1-pro-preview"
+        )
+        model_b = container.google_chat_gen_vertex_ai_global_fn(
+            model="gemini-3.1-pro-preview"
+        )
 
     assert model_a.client.http_client is model_b.client.http_client
     assert model_a.client.http_client is container.google_gen_vertex_ai_http_client()

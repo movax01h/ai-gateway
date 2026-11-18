@@ -364,7 +364,7 @@ class TestHoistToolResultImages:
             ("fireworks_ai", "accounts/gitlab/deployments/x"),
             ("hosted_vllm", "qwen-vl"),
             ("vertex_ai", "gemini-2.5-flash"),
-            ("gemini", "gemini-2.5-pro"),
+            ("gemini", "gemini-3.1-pro-preview"),
         ],
     )
     def test_gate_opens_for_verbatim_tool_transport_providers(self, provider, model):

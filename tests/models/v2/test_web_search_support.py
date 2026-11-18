@@ -100,7 +100,7 @@ def test_native_only_offer_is_dropped_for_models_that_cannot_search(model, kept)
     [
         (_model(ModelClassProvider.ANTHROPIC, "claude-sonnet-4-6"), True),
         (_model(ModelClassProvider.OPENAI, "gpt-5.2"), True),
-        (_model(ModelClassProvider.GOOGLE_GENAI, "gemini-2.5-pro"), False),
+        (_model(ModelClassProvider.GOOGLE_GENAI, "gemini-3.1-pro-preview"), False),
         (_model(ModelClassProvider.AMAZON_Q), False),
         # LiteLLM is per model: Vertex runs Anthropic's server-side tools but isn't cleared for
         # them, Bedrock doesn't run them.
