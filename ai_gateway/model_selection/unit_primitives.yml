@@ -662,3 +662,44 @@ configurable_unit_primitives:
       - "gpt_6_astra"
       - "gpt_6_luna"
       - "gpt_6_sol"
+
+# The features of each flow that the Duo Workflow Service ships, by the name of the flow without its version. The first
+# feature is the main feature of the flow, and the others are the features that GitLab Rails also sends for it. A
+# flat-rate flow lists one feature only. Keep the flows sorted alphabetically. See
+# docs/model_selection.md#features-of-each-flow.
+flows:
+  agentic_chat: [duo_agent_platform_agentic_chat]
+  analytics_agent: [duo_agent_platform_agentic_chat]
+  bl_security: [bl_security]
+  business_context_security_guidelines: [duo_agent_platform]
+  chat: [duo_agent_platform_agentic_chat]
+  ci_expert_agent: [duo_agent_platform_agentic_chat]
+  code_review: [review_merge_request_dap]
+  convert_to_gitlab_ci: [duo_agent_platform]
+  convert_to_gl_ci: [duo_agent_platform]
+  # The old name of standard_code_review. Workflows that started under it can resume with the new feature.
+  deep_code_review: [review_merge_request_dap_deep, review_merge_request_dap_standard]
+  developer: [duo_developer, duo_agent_platform_agentic_chat, duo_agent_platform]
+  duo_permissions_assistant: [duo_agent_platform_agentic_chat]
+  duo_planner: [duo_agent_platform_agentic_chat]
+  fix_pipeline: [duo_agent_platform]
+  flow_creator: [duo_agent_platform_agentic_chat]
+  gitlab_duo_mention_assistant: [review_merge_request_dap, review_merge_request_dap_standard, review_merge_request_dap_deep]
+  issue_to_merge_request: [duo_agent_platform]
+  onboarding_guide: [duo_agent_platform_agentic_chat]
+  orbit_agent: [duo_agent_platform_agentic_chat]
+  readiness_score: [duo_agent_platform]
+  recommend_reviewers: [recommend_reviewers_assign]
+  resolve_dependency_bump: [resolve_dependency_bump]
+  resolve_sast_vulnerability: [sast_vulnerability_resolution]
+  risk_classification: [risk_classification]
+  sast_fp_detection: [sast_vulnerability_fp_detection]
+  secrets_fp_detection: [secret_vulnerability_fp_detection]
+  security_analyst_agent: [duo_agent_platform_agentic_chat]
+  security_review: [security_review]
+  skillguard_scan: [duo_agent_platform]
+  slack_assistant: [duo_agent_platform_agentic_chat]
+  software_development: [duo_agent_platform_agentic_chat]
+  standard_code_review: [review_merge_request_dap_standard]
+  support_assistant: [duo_agent_platform_agentic_chat]
+  workplan: [duo_agent_platform]

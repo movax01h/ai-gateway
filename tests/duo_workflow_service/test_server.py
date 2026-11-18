@@ -104,6 +104,7 @@ from duo_workflow_service.interceptors.model_metadata_interceptor import (
 from duo_workflow_service.interceptors.trusted_restricted_issuers import (
     TrustedRestrictedIssuerVerifier,
 )
+from duo_workflow_service.model_scope import CLIENT_FLOW_FEATURES
 from duo_workflow_service.security.exceptions import SecurityException
 from duo_workflow_service.server import (
     CATALOG_FETCH_FAILED_DETAILS,
@@ -7541,6 +7542,76 @@ async def test_execute_workflow_logs_the_client_feature_of_the_flow(
     assert entry["client_feature_setting"] == "duo_agent_platform_agentic_chat"
     assert entry["served_identifier"] == "claude_sonnet_5_5_vertex"
     assert entry["flow"] == "developer/v1"
+    assert entry["client_flow"] is False
+    assert entry["flow_features"] == [
+        "duo_developer",
+        "duo_agent_platform_agentic_chat",
+        "duo_agent_platform",
+    ]
+    assert entry["flow_check"] == "unchanged"
+
+
+@pytest.mark.asyncio
+@patch("duo_workflow_service.server.AbstractWorkflow")
+@patch("duo_workflow_service.server.resolve_flow")
+async def test_execute_workflow_logs_an_inline_flow_as_a_client_flow(
+    mock_resolve_flow, mock_workflow_class, mock_context, simple_flow_config
+):
+    """An inline flow can have any name, so it gets the client flow features, not the entry of its name."""
+    flow_config = struct_pb2.Struct()
+    flow_config.update(simple_flow_config)
+    current_user.set(
+        CloudConnectorUser(
+            authenticated=True,
+            claims=UserClaims(
+                scopes=["duo_agent_platform"],
+                extra={"flow_config_digest": _flow_config_digest(flow_config)},
+            ),
+        )
+    )
+    details = MagicMock()
+    details.invocation_metadata = [
+        (
+            ModelMetadataInterceptor.X_GITLAB_AGENT_PLATFORM_MODEL_METADATA,
+            json.dumps({"provider": "gitlab", "feature_setting": "duo_developer"}),
+        )
+    ]
+    await ModelMetadataInterceptor().intercept_service(AsyncMock(), details)
+
+    mock_workflow = mock_workflow_class.return_value
+    mock_workflow.is_done = True
+    mock_workflow.run = AsyncMock()
+    mock_workflow.cleanup = AsyncMock()
+    mock_workflow.get_from_outbox = AsyncMock(
+        return_value=OutboxSignal.NO_MORE_OUTBOUND_REQUESTS
+    )
+    mock_resolve_flow.return_value = ResolvedFlow(factory=mock_workflow_class)
+
+    async def request_iterator() -> AsyncIterable[contract_pb2.ClientEvent]:
+        yield contract_pb2.ClientEvent(
+            startRequest=contract_pb2.StartWorkflowRequest(
+                workflowID="123",
+                # The name of a shipped flow, which an inline flow must not get the entry of.
+                workflowDefinition="developer/v1",
+                flowConfig=simple_flow_config,
+                flowConfigSchemaVersion="v1",
+            )
+        )
+
+    with capture_logs() as logs:
+        result = DuoWorkflowService().ExecuteWorkflow(
+            request_iterator(),
+            mock_context,
+            internal_event_client=create_mock_internal_event_client(),
+        )
+        with pytest.raises(StopAsyncIteration):
+            await anext(result)
+
+    [entry] = [entry for entry in logs if entry["event"] == "Flow model feature"]
+    assert entry["flow"] == "developer/v1"
+    assert entry["client_flow"] is True
+    assert entry["flow_features"] == list(CLIENT_FLOW_FEATURES)
+    assert entry["flow_check"] == "feature_default"
 
 
 @pytest.mark.asyncio

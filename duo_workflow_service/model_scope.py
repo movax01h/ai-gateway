@@ -6,7 +6,8 @@ the flat rate. This module takes the feature from the name the workflow is bille
 every model of the request inside that feature's allowlist.
 
 For every other flow, the allowlist still uses the client's feature. ``log_flow_model_feature`` logs that feature next to
-the flow, so the move to the flow's own feature can be measured before it changes anything.
+the flow and the features of the flow, with what a check against the flow's features would do, so the move to the
+flow's own features can be measured before it changes anything.
 """
 
 from typing import Optional
@@ -15,10 +16,14 @@ import structlog
 from gitlab_cloud_connector import CloudConnectorUser
 
 from ai_gateway.config import get_config
-from ai_gateway.feature_allowlist import dws_client_model_request_context
+from ai_gateway.feature_allowlist import (
+    ClientModelRequest,
+    dws_client_model_request_context,
+)
 from ai_gateway.model_metadata import (
     AmazonQModelMetadata,
     ModelMetadataByTag,
+    TypeModelMetadata,
     build_default_feature_setting_metadata,
     build_model_metadata_by_tag,
 )
@@ -30,7 +35,9 @@ from lib.context.model import (
 )
 
 __all__ = [
+    "CLIENT_FLOW_FEATURES",
     "FLAT_RATE_FLOW_FEATURE_SETTINGS",
+    "flow_features",
     "log_flow_model_feature",
     "scope_flat_rate_flow_models",
 ]
@@ -45,6 +52,66 @@ FLAT_RATE_FLOW_FEATURE_SETTINGS: dict[str, str] = {
     "sast_fp_detection": "sast_vulnerability_fp_detection",
     "secrets_fp_detection": "secret_vulnerability_fp_detection",
 }
+
+# The features of a flow that the client sends as a config: an inline `flowConfig` or a fetched AI Catalog flow. The
+# client chooses the name of such a flow, so the name does not select an entry of the `flows` map. GitLab Rails sends
+# `duo_agent_platform` for these flows, and `duo_agent_platform_agentic_chat` when chat runs them.
+CLIENT_FLOW_FEATURES: tuple[str, ...] = (
+    "duo_agent_platform",
+    "duo_agent_platform_agentic_chat",
+)
+
+
+def flow_features(
+    feature_qualified_name: Optional[str], *, client_flow: bool
+) -> tuple[str, ...]:
+    """Return the features that a flow runs as, main feature first.
+
+    Args:
+        feature_qualified_name: The name the workflow is billed as, such as ``code_review/v1``.
+        client_flow: Whether the client sent the flow as a config, inline or as a fetched AI Catalog flow.
+
+    Returns:
+        The entry of the flow's name, without its version, in the ``flows`` map of ``unit_primitives.yml``. A flow that
+        the client sent gets ``CLIENT_FLOW_FEATURES`` instead, except a flow with a flat-rate name. Empty for a flow
+        without an entry.
+    """
+    flow = (feature_qualified_name or "").split("/", 1)[0]
+    # A flat-rate flow is billed by its name, so its models follow the name too, also for a flow that the client sent.
+    # scope_flat_rate_flow_models does the same.
+    if client_flow and flow not in BILL_ONCE_PER_WORKFLOW_FEATURES:
+        return CLIENT_FLOW_FEATURES
+
+    return ModelSelectionConfig.instance().get_flow_features().get(flow, ())
+
+
+def _flow_check(
+    request: ClientModelRequest,
+    served: Optional[TypeModelMetadata],
+    features: tuple[str, ...],
+) -> str:
+    """Return what a check of the request's default model against the flow's features would do. It changes nothing.
+
+    The tag models are not checked: they come from the config of a feature, not from the client. The values are:
+
+    - ``no_entry``: the flow has no features to check against.
+    - ``unchanged``: the flow lists the client's feature, or the request is Amazon Q, which carries its own role.
+    - ``feature_default``: the request names no model, or the interceptor kept none. The main feature's default runs.
+    - ``allowed``: the main feature of the flow allows the model that passed the interceptor.
+    - ``replaced``: the main feature does not allow it. ``fallback`` replaces it, and ``enforce`` refuses the request.
+    """
+    if not features:
+        return "no_entry"
+    if request.feature_setting in features or isinstance(served, AmazonQModelMetadata):
+        return "unchanged"
+    if not request.pinned or served is None:
+        return "feature_default"
+
+    main_feature = features[0]
+    allowed = ModelSelectionConfig.instance().allowed_models_for_feature(main_feature)
+    return (
+        "allowed" if served.llm_definition.gitlab_identifier in allowed else "replaced"
+    )
 
 
 def scope_flat_rate_flow_models(
@@ -120,24 +187,42 @@ def scope_flat_rate_flow_models(
 
 
 def log_flow_model_feature(
-    feature_qualified_name: Optional[str], workflow_definition: Optional[str]
+    feature_qualified_name: Optional[str],
+    workflow_definition: Optional[str],
+    *,
+    client_flow: bool,
 ) -> None:
     """Log the feature of the client's model metadata next to the flow that runs.
 
     The allowlist checks the model against the client's ``feature_setting``. This line shows, for each flow, which
-    feature clients send and which model passed the check. It changes nothing.
+    feature clients send, which model passed the check, the features of the flow, and what a check against the flow's
+    features would do. It changes nothing.
 
     Nothing is logged for a request without model metadata, and on a gateway that serves custom models.
 
     Args:
         feature_qualified_name: The name the workflow is billed as, such as ``code_review/v1``.
         workflow_definition: The workflow definition of the start request.
+        client_flow: Whether the client sent the flow as a config, inline or as a fetched AI Catalog flow.
     """
     request = dws_client_model_request_context.get()
     if request is None or get_config().custom_models.enabled:
         return
 
     served = current_model_metadata_context.get()
+    try:
+        features = flow_features(feature_qualified_name, client_flow=client_flow)
+        flow_check = _flow_check(request, served, features)
+    except ValueError as error:
+        # This line changes nothing, so a broken flows map or feature must not stop the workflow. A pydantic
+        # ValidationError is a ValueError too.
+        log.warning(
+            "Flow features not available",
+            flow=feature_qualified_name,
+            error=str(error),
+        )
+        features, flow_check = (), "error"
+
     log.info(
         "Flow model feature",
         flow=feature_qualified_name,
@@ -148,4 +233,7 @@ def log_flow_model_feature(
         requested_name=request.name,
         requested_identifier=request.identifier,
         served_identifier=served.llm_definition.gitlab_identifier if served else None,
+        client_flow=client_flow,
+        flow_features=list(features),
+        flow_check=flow_check,
     )

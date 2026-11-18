@@ -789,6 +789,104 @@ def test_validate_with_error(selection_config, fs: FakeFilesystem):
     assert "third_non_existent_model" in error_message
 
 
+def _create_config_with_flows(fs: FakeFilesystem, flows: str) -> None:
+    """Write a valid models.yml, and a unit_primitives.yml with one feature and the given `flows` map."""
+    model_selection_dir = (
+        Path(__file__).parent.parent.parent / "ai_gateway" / "model_selection"
+    )
+
+    # editorconfig-checker-disable
+    fs.create_file(
+        model_selection_dir / "models.yml",
+        contents=dedent("""
+            models:
+              - name: Model One
+                gitlab_identifier: model_1
+                requires_paid_credits: false
+                max_context_tokens: 200000
+                model_class_provider: anthropic
+                cost_indicator: "$"
+                description: "Model one description."
+                params:
+                  model: provider-model-1
+            """),
+    )
+    fs.create_file(
+        model_selection_dir / "unit_primitives.yml",
+        contents=dedent("""
+            configurable_unit_primitives:
+              - feature_setting: "test_config"
+                unit_primitives:
+                  - "ask_commit"
+                default_models:
+                  - "model_1"
+                selectable_models:
+                  - "model_1"
+            """)
+        + dedent(flows),
+    )
+    # editorconfig-checker-enable
+
+
+# editorconfig-checker-disable
+def test_get_flow_features(selection_config, fs: FakeFilesystem):
+    _create_config_with_flows(
+        fs,
+        """
+        flows:
+          my_flow: [test_config]
+        """,
+    )
+
+    assert selection_config.get_flow_features() == {"my_flow": ("test_config",)}
+
+
+@pytest.mark.usefixtures("mock_fs")
+def test_get_flow_features_without_a_flows_map(selection_config):
+    assert selection_config.get_flow_features() == {}
+
+
+def test_validate_with_valid_flow_features(selection_config, fs: FakeFilesystem):
+    _create_config_with_flows(
+        fs,
+        """
+        flows:
+          my_flow: [test_config]
+        """,
+    )
+
+    selection_config.validate()
+
+
+def test_validate_rejects_invalid_flow_features(selection_config, fs: FakeFilesystem):
+    _create_config_with_flows(
+        fs,
+        """
+        flows:
+          empty_flow: []
+          repeated_flow: [test_config, test_config]
+          unknown_flow: [not_a_feature]
+        """,
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        selection_config.validate()
+
+    error_message = str(excinfo.value)
+    assert "Flow 'empty_flow' in the flows map lists no feature" in error_message
+    assert (
+        "Flow 'repeated_flow' in the flows map lists a feature more than once"
+        in error_message
+    )
+    assert (
+        "Flow 'unknown_flow' in the flows map lists 'not_a_feature', which is not a feature setting"
+        in error_message
+    )
+
+
+# editorconfig-checker-enable
+
+
 def test_validate_default_model_not_in_selectable_models(
     selection_config, fs: FakeFilesystem
 ):

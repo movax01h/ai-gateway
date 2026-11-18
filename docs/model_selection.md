@@ -719,8 +719,50 @@ To roll back a stricter mode, set the variable of that surface to `log`. For exa
 
 At each workflow start, the Duo Workflow Service also logs `Flow model feature` (logger `model_scope`) with the `flow`,
 the `client_feature_setting` and `pinned` value of the request, and the `served_identifier` that passed the check. It
-shows which feature the clients of each flow send, and changes nothing. A request without model metadata is not
-logged.
+also has `client_flow`, which is true for a flow that the client sent as a config, the `flow_features` of the flow (see
+[Features of each flow](#features-of-each-flow)), and the `flow_check`. The `flow_check` tells what a check of the
+request against the flow's features would do. The line shows which feature the clients of each flow send, and changes
+nothing. A request without model metadata is not logged.
+
+The `flow_check` is about the default model of the request. The tag models come from the config of a feature, not from
+the client, so a check against the flow's main feature would build them from that feature whenever the flow does not
+list the client's feature. The `flow_check` values are:
+
+- `unchanged`: the flow lists the client's feature, or the request is Amazon Q.
+- `allowed`: the main feature of the flow allows the model that passed the check.
+- `replaced`: the main feature of the flow does not allow that model. `fallback` mode would serve the main feature's
+  model, and `enforce` mode would refuse the request.
+- `feature_default`: the request names no model, or the check kept no model. The main feature's default model would be
+  served.
+- `no_entry`: the flow has no features.
+- `error`: the features of the flow are not available, for example because the `flows` map is not valid. The service
+  logs a `Flow features not available` warning, and the workflow runs as before.
+
+### Features of each flow
+
+The `flows` map in `unit_primitives.yml` lists the features of each flow that the Duo Workflow Service ships. The key is
+the name of the flow without its version, for example `code_review` for `code_review/v1`. The first feature is the main
+feature of the flow: the `ai_feature` of its foundational flow definition in GitLab Rails, or
+`duo_agent_platform_agentic_chat` for a chat agent. The other features are the features that GitLab Rails also sends
+for the flow, for example when chat runs the `developer` flow.
+
+```yaml
+flows:
+  code_review: [review_merge_request_dap]
+  developer: [duo_developer, duo_agent_platform_agentic_chat, duo_agent_platform]
+```
+
+A flow that the client sends as a config, as an inline `flowConfig` or as a fetched AI Catalog flow, can have any name.
+So it gets `CLIENT_FLOW_FEATURES` (`duo_agent_platform`, then `duo_agent_platform_agentic_chat` for chat) from
+`duo_workflow_service/model_scope.py`, and its name does not select an entry of the map. A flow with a flat-rate name
+is the exception: it is billed by its name, so it gets the entry of that name, as in `scope_flat_rate_flow_models`.
+
+The map changes no model yet. The `Flow model feature` log shows what a check against it would do.
+
+When you add a flow, add its name and features to the map. `TestFlowFeatures` in
+`tests/duo_workflow_service/test_model_scope.py` fails for a shipped flow that the map does not list, and for an entry
+that is not a shipped flow. A flat-rate flow (`BILL_ONCE_PER_WORKFLOW_FEATURES`) must list exactly one feature, because
+it is billed by the name of the flow. `ModelSelectionConfig.validate()` checks that every feature in the map exists.
 
 ### Find the requests that `enforce` mode would refuse
 
