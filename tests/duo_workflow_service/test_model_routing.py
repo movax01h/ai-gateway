@@ -11,6 +11,7 @@ from ai_gateway.model_selection import ModelSelectionConfig
 from duo_workflow_service import model_routing
 from duo_workflow_service.gitlab.http_client import GitLabHttpResponse
 from duo_workflow_service.model_routing import (
+    CLASSIFIER_MAX_CHARS,
     RoutingDecision,
     RoutingOutcome,
     resource_task_text,
@@ -209,6 +210,84 @@ async def test_resource_task_text_when_the_request_fails():
     ]
 
     assert await resource_task_text(client, {"id": 3}, context) == ""
+
+
+COMMENT = '<message id="9" author="@dev">\n@duo-developer fix the typo in the README\n</message>'
+RESOURCE = "Fix scheduler deadlock\n\nA concurrency fix"
+
+
+def _triggered_context(event_type, resource_type="merge_request", conversation=COMMENT):
+    """The envelopes Rails sends for a session triggered on an issue or merge request."""
+    context = [
+        AdditionalContext(
+            category="agent_platform_resource_context",
+            content=json.dumps({"resource_type": resource_type, "resource_id": "7"}),
+        )
+    ]
+    if event_type:
+        trigger = {"event_type": event_type, "triggering_conversation": conversation}
+        context.append(
+            AdditionalContext(
+                category="agent_platform_trigger_context",
+                content=json.dumps({k: v for k, v in trigger.items() if v}),
+            )
+        )
+    return context
+
+
+async def _route_triggered(answer, context, goal="the goal"):
+    client = Mock()
+    title, description = RESOURCE.split("\n\n")
+    client.aget = AsyncMock(
+        return_value=GitLabHttpResponse(
+            200, json.dumps({"title": title, "description": description})
+        )
+    )
+    ainvoke = AsyncMock(return_value=AIMessage(content=answer))
+    decision = await route_default_model(
+        goal, client, {"id": 3}, context, Mock(), _registry(ainvoke)
+    )
+    return decision, ainvoke.call_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flag_on", "routable_context")
+async def test_a_mention_is_classified_by_its_comment_with_the_resource_as_context():
+    decision, inputs = await _route_triggered("large", _triggered_context("mention"))
+
+    assert inputs["goal"].startswith(COMMENT)
+    assert inputs["goal"].endswith(RESOURCE)
+    assert (inputs["hint_tag"], inputs["hint_keyword"]) == ("small", "typo")
+    assert decision.tag == "large"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flag_on", "routable_context")
+@pytest.mark.parametrize("event_type", ["assign", None])
+async def test_other_triggers_are_classified_by_the_resource(event_type):
+    _, inputs = await _route_triggered("large", _triggered_context(event_type))
+
+    assert inputs["goal"] == RESOURCE
+    assert (inputs["hint_tag"], inputs["hint_keyword"]) == ("large", "concurrency")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("flag_on", "routable_context")
+@pytest.mark.parametrize(
+    ("conversation", "goal"),
+    [
+        ("earlier message " * 1000 + COMMENT, "the goal"),
+        (None, "<gitlab_context>how to answer</gitlab_context>" + COMMENT),
+    ],
+)
+async def test_a_mention_keeps_the_end_of_the_discussion(conversation, goal):
+    _, inputs = await _route_triggered(
+        "large", _triggered_context("mention", conversation=conversation), goal
+    )
+
+    request = inputs["goal"].split("\n\nFor context only")[0]
+    assert request.endswith(COMMENT)
+    assert len(inputs["goal"]) <= CLASSIFIER_MAX_CHARS
 
 
 @pytest.mark.asyncio

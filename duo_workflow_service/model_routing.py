@@ -1,8 +1,10 @@
 """Per-request model routing for Duo Developer.
 
 Reads the task once, before the flow is built: the triggering issue or merge request when there is
-one, otherwise the goal. A small model picks the tag, with any BM25 `models_for_tags` keyword match
-passed to it as a hint. The chosen tag's model becomes the request default.
+one, otherwise the goal. For a mention the task is the discussion that ends with the comment, and
+the issue or merge request is only context. A small model picks the tag, with any BM25
+`models_for_tags` keyword match passed to it as a hint. The chosen tag's model becomes the request
+default.
 """
 
 import asyncio
@@ -92,13 +94,33 @@ async def route_default_model(
     if not is_feature_enabled(FeatureFlag.DUO_DEVELOPER_MODEL_ROUTING):
         return None
     try:
-        task = (
-            await resource_task_text(http_client, project, additional_context) or goal
+        resource = await resource_task_text(http_client, project, additional_context)
+        trigger = envelope_fields(additional_context, "agent_platform_trigger_context")
+        if trigger.get("event_type") != "mention":
+            return await route_default_model_by_classifier(
+                resource or goal, user, prompt_registry
+            )
+
+        conversation = trigger.get("triggering_conversation") or goal
+        return await route_default_model_by_classifier(
+            conversation[-CLASSIFIER_MAX_CHARS:],
+            user,
+            prompt_registry,
+            context=resource,
         )
-        return await route_default_model_by_classifier(task, user, prompt_registry)
     except Exception as e:
         log.warning("Model routing failed; keeping the default", error=str(e))
         return None
+
+
+def envelope_fields(
+    additional_context: Optional[list[AdditionalContext]], category: str
+) -> dict:
+    """Fields of the `additional_context` envelope in `category`, or {} when there is none."""
+    envelope = next(
+        (c for c in additional_context or [] if c.category == category), None
+    )
+    return json.loads(envelope.content) if envelope and envelope.content else {}
 
 
 async def resource_task_text(
@@ -107,15 +129,7 @@ async def resource_task_text(
     additional_context: Optional[list[AdditionalContext]],
 ) -> str:
     """Title and description of the triggering issue or merge request, or "" when there is none."""
-    envelope = next(
-        (
-            c
-            for c in additional_context or []
-            if c.category == "agent_platform_resource_context"
-        ),
-        None,
-    )
-    fields = json.loads(envelope.content) if envelope and envelope.content else {}
+    fields = envelope_fields(additional_context, "agent_platform_resource_context")
     path = RESOURCE_PATHS.get(fields.get("resource_type", ""))
     resource_id = str(fields.get("resource_id", ""))
     # The envelope comes from the client, so only an ASCII numeric IID may reach the API path.
@@ -135,11 +149,15 @@ async def resource_task_text(
 
 
 async def route_default_model_by_classifier(
-    task: str, user: CloudConnectorUser, prompt_registry: BasePromptRegistry
+    task: str,
+    user: CloudConnectorUser,
+    prompt_registry: BasePromptRegistry,
+    context: str = "",
 ) -> Optional[RoutingDecision]:
     """Ask the classifier (or small) tag's model for a tag.
 
-    Unsure, a timeout or an error keeps the default.
+    The classifier reads `context` after the task, and keyword hints come from the task alone. Unsure, a timeout
+    or an error keeps the default.
     """
     metadata_by_tag = current_model_metadata_with_size_context.get()
     if metadata_by_tag is None or not metadata_by_tag.feature_setting:
@@ -158,6 +176,9 @@ async def route_default_model_by_classifier(
     if classifier_model is None:
         return None
 
+    text = (
+        f"{task}\n\nFor context only, it was left on:\n{context}" if context else task
+    )
     started, answer = time.monotonic(), "error"
     try:
         prompt = prompt_registry.get_on_behalf(
@@ -170,7 +191,7 @@ async def route_default_model_by_classifier(
         message = await asyncio.wait_for(
             prompt.ainvoke(
                 {
-                    "goal": task[:CLASSIFIER_MAX_CHARS],
+                    "goal": text[:CLASSIFIER_MAX_CHARS],
                     "hint_tag": hint_tag,
                     "hint_keyword": hint_keyword,
                 }
