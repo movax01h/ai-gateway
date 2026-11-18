@@ -1,0 +1,78 @@
+{#- A rule's candidates are its free approvers. Busy approvers are added only when a rule has fewer free approvers than it needs. The sandbox blocks macros, so the two loops repeat the still_needed and pool rules: change both together. -#}
+Recommend reviewers for merge request !{{ merge_request_iid }} in project {{ project_id }}.
+{%- set current_ids = reviewer_data.current_reviewers | map(attribute='id') | list %}
+{%- set rules = reviewer_data.approval_rules %}
+{%- set rule_rows %}
+{%- for r in rules %}
+{%- set still_needed = r.approvals_required - (r.eligible_approvers | selectattr('id', 'in', current_ids) | list | length) %}
+{%- set eligible = r.eligible_approvers | rejectattr('id', 'in', current_ids) | list %}
+{%- set free = eligible | rejectattr('busy') | list %}
+{%- set pool = free if free | length >= still_needed else free + (eligible | selectattr('busy') | list) %}
+{%- if still_needed > 0 %}
+{{ r.id }}|{{ r.type }}|{{ (r.section or '') | replace('|', '/') | replace('\n', ' ') }}|{{ r.name | replace('|', '/') | replace('\n', ' ') }}|{{ still_needed }}|{{ pool | map(attribute='id') | join(',') or 'none' }}
+{%- endif %}
+{%- endfor %}
+{%- endset %}
+{%- set candidate_ids %},
+{%- for r in rules %}
+{%- set still_needed = r.approvals_required - (r.eligible_approvers | selectattr('id', 'in', current_ids) | list | length) %}
+{%- set eligible = r.eligible_approvers | rejectattr('id', 'in', current_ids) | list %}
+{%- set free = eligible | rejectattr('busy') | list %}
+{%- set pool = free if free | length >= still_needed else free + (eligible | selectattr('busy') | list) %}
+{%- if still_needed > 0 %}
+{{- pool | map(attribute='id') | join(',') }},
+{%- endif %}
+{%- endfor %}
+{%- endset %}
+{%- set users = rules | map(attribute='eligible_approvers') | sum(start=[]) | unique(attribute='id') | list %}
+{#- Rails adds these fields behind feature flags. A column or line only appears when Rails sends its field, so without any of them this renders exactly like 2.1.0. -#}
+{%- set has_cost = users | selectattr('cost', 'defined') | list | length > 0 %}
+{%- set has_can_merge = users | selectattr('can_merge', 'defined') | list | length > 0 %}
+{#- Rails declares each signal once with a description and sends its values per candidate. Only declared signals render, in the declared order, so a new signal needs no change here. -#}
+{%- set signals = reviewer_data.signals if reviewer_data.signals is defined and reviewer_data.signals else [] %}
+{#- The sandbox blocks macros, namespace() and method calls, so the header and each row cell are built as named strings. -#}
+{%- set signal_header %}{% for s in signals %}|{{ s.name | replace('|', '/') | replace('\n', ' ') }}{% endfor %}{% endset %}
+{#- Sorting compares costs, so a candidate without one would fail the render. -#}
+{%- set sort_by_cost = has_cost and users | rejectattr('cost', 'defined') | list | length == 0 %}
+{%- set users = users | sort(attribute='cost' if sort_by_cost else 'pending_reviews') %}
+{%- if not rule_rows %}
+
+No approval rules need reviewers. Every rule already has enough reviewers, so call post_suggested_reviewers with an empty suggestions list.
+{%- elif not (candidate_ids | replace(',', '')) %}
+
+Approval rules need reviewers, but no candidates are available. Call post_suggested_reviewers with an empty suggestions list.
+{%- else %}
+{%- if signals %}
+
+Signals (name: what it measures):
+{%- for s in signals %}
+- {{ s.name | replace('|', '/') | replace('\n', ' ') }}: {{ (s.description or '') | replace('\n', ' ') }}
+{%- endfor %}
+{%- endif %}
+
+Candidates (id|pending_reviews{{ '|cost' if has_cost }}{{ '|can_merge' if has_can_merge }}{{ signal_header }}|local_time|last_activity_on|status):
+{%- for u in users if (',' ~ u.id ~ ',') in candidate_ids %}
+{%- set cost_cell = ('|' ~ (u.cost if u.cost is defined else '')) if has_cost else '' %}
+{%- set can_merge_cell = ('|' ~ ('yes' if u.can_merge == true else ('no' if u.can_merge == false else ''))) if has_can_merge else '' %}
+{%- set values = u.signals if u.signals is defined and u.signals else {} %}
+{%- set signal_cells %}
+{%- for s in signals %}
+{%- set v = values[s.name] if s.name in values else none -%}
+|{{ 'yes' if v is sameas true else ('no' if v is sameas false else ('' if v is none else v | string | replace('|', '/') | replace('\n', ' '))) }}
+{%- endfor %}
+{%- endset %}
+{%- set status = ['busy' if u.busy else '', u.status_emoji, u.status_message] | select | join(' ') | replace('|', '/') | replace('\n', ' ') | trim %}
+{{ u.id }}|{{ u.pending_reviews }}{{ cost_cell }}{{ can_merge_cell }}{{ signal_cells }}|{{ u.local_time or '' }}|{{ u.last_activity_on or '' }}|{{ status }}
+{%- endfor %}
+
+Approval rules that need reviewers (id|type|section|name|still_needed|candidate_ids):
+{{- rule_rows }}
+{%- if reviewer_data.merger_required %}
+
+A reviewer who can merge is required: neither the author nor a current reviewer can merge this merge request.
+{%- endif %}
+{%- if reviewer_data.suggested_set %}
+
+Suggested set (ids): {{ reviewer_data.suggested_set | join(',') }}
+{%- endif %}
+{%- endif %}
