@@ -18,6 +18,7 @@ from ai_gateway.response_schemas import (
 from ai_gateway.response_schemas.base import BaseAgentOutput
 from ai_gateway.response_schemas.registry import ResponseSchemaRegistry
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
+from duo_workflow_service.agent_platform.core.inbox import Address, Claimant
 from duo_workflow_service.agent_platform.utils.exceptions import (
     ModelRefusalError,
     NotifiableAgentException,
@@ -1944,6 +1945,52 @@ class TestAgentComponentCompaction:
                 agent_call_kwargs["optimizer_pipeline"]
                 is mock_build_pipeline.return_value
             )
+
+
+class TestAgentComponentClaimant:
+    """A component tells its agent which inbox messages are the agent's to take."""
+
+    @pytest.fixture(name="claimant_of")
+    def claimant_of_fixture(
+        self,
+        mock_agent_node_cls,
+        mock_tool_node_cls,  # pylint: disable=unused-argument  # activates the node mock
+        mock_final_response_node_cls,  # pylint: disable=unused-argument  # activates the node mock
+        mock_router,
+        base_flow_state,
+    ):
+        def _claimant_of(component) -> Claimant:
+            component.attach(StateGraph(FlowState), mock_router)
+            return mock_agent_node_cls.return_value.claimant(base_flow_state)
+
+        return _claimant_of
+
+    def test_a_top_level_component_takes_unaddressed_messages_and_its_own_address(
+        self, make_agent_component, claimant_of, component_name
+    ):
+        assert claimant_of(make_agent_component()) == Claimant(
+            recipient=Address.of(component_name), accepts_unaddressed=True
+        )
+
+    def test_a_subagent_bound_to_a_supervisor_takes_no_unaddressed_messages(
+        self, make_agent_component, claimant_of, component_name
+    ):
+        component = make_agent_component(description="A test subagent.")
+        component.bind_to_supervisor(
+            conversation_history_key=RuntimeIOKey(
+                alias="conversation_history", factory=Mock()
+            ),
+            output_key=RuntimeIOKey(alias="final_answer", factory=Mock()),
+            goal_key=RuntimeIOKey(alias="goal", factory=Mock()),
+            tool_approval_decision_key=RuntimeIOKey(
+                alias="tool_approval_decision", factory=Mock()
+            ),
+            cycle_count_key=RuntimeIOKey(alias="cycle_count", factory=Mock()),
+        )
+
+        assert claimant_of(component) == Claimant(
+            recipient=Address.of(component_name), accepts_unaddressed=False
+        )
 
 
 class TestAgentComponentBindToSupervisor:

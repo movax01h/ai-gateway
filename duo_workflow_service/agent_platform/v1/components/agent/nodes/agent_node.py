@@ -1,7 +1,17 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from http import HTTPStatus
-from typing import Any, ClassVar, Literal, NamedTuple, Optional, Sequence, Type, cast
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Literal,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Type,
+    cast,
+)
 from uuid import uuid4
 
 import structlog
@@ -9,12 +19,19 @@ from anthropic import APIStatusError as AnthropicAPIStatusError
 from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
 from openai import APIStatusError as OpenAIAPIStatusError
 from pydantic import ConfigDict, Field, ValidationError
 
 from ai_gateway.models.v2._model_compat import model_supports_vision
 from ai_gateway.prompts import Prompt
 from ai_gateway.response_schemas.base import BaseAgentOutput
+from duo_workflow_service.agent_platform.core.inbox import (
+    Claimant,
+    InboundMessage,
+    RunInbox,
+    current_task_id,
+)
 from duo_workflow_service.agent_platform.node_naming import component_name_from_node
 from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     UILogEventsAgent,
@@ -284,6 +301,9 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
         trim_ui_chat_log: bool = True,
         wrap_up_prompt: Optional[WrapUpPrompt] = None,
     ):
+        # Which inbox messages this agent takes, set by the component that owns the node. Without one the agent
+        # claims nothing.
+        self.claimant: Optional[Callable[[FlowState], Claimant]] = None
         self._flow_id = flow_id
         self._flow_type = flow_type
         self.name = name
@@ -627,7 +647,41 @@ class AgentNode:  # pylint: disable=too-many-instance-attributes
             )
         return answer_rejections
 
-    async def run(self, state: FlowState) -> dict:
+    def _claim_inbound_messages(
+        self, state: FlowState, runtime: Optional[Runtime[Optional[RunInbox]]]
+    ) -> tuple[InboundMessage, ...]:
+        """Claim the messages this agent takes from the run's inbox.
+
+        The inbox arrives as the graph's runtime context, and the claim is keyed by this node's task ID, so a task that
+        runs again in the same run reads the same messages back. Which messages are this agent's is the owning
+        component's call.
+
+        Args:
+            state: The flow state the node runs on, which a subagent's address is resolved from.
+            runtime: The runtime LangGraph hands the node, or ``None`` when the node is called outside a graph.
+
+        Returns:
+            The claimed messages: answers first, then the rest in arrival order. Empty when the run has no inbox or
+            the agent has no claimant.
+        """
+        if runtime is None or runtime.context is None or self.claimant is None:
+            return ()
+
+        return runtime.context.claim(current_task_id(runtime), self.claimant(state))
+
+    async def run(
+        self,
+        state: FlowState,
+        runtime: Optional[Runtime[Optional[RunInbox]]] = None,
+    ) -> dict:
+        claimed = self._claim_inbound_messages(state, runtime)
+        if claimed:
+            # Claimed before the model call, so nothing else in the run takes what is this agent's.
+            log.info(
+                "Claimed messages from the run's inbox",
+                agent=self.name,
+                message_ids=[message.id for message in claimed],
+            )
         history_iokey = self._conversation_history_key.to_iokey(state)
         history = history_iokey.value_from_state(state) or []
         variables = get_vars_from_state(self._inputs, state)

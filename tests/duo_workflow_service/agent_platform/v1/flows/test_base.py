@@ -16,6 +16,7 @@ from ai_gateway.prompts.in_memory_registry import InMemoryPromptRegistry
 from ai_gateway.response_schemas.config import InlineResponseSchemaConfig
 from contract import contract_pb2
 from duo_workflow_service.agent_platform.constants import RECURSION_LIMIT
+from duo_workflow_service.agent_platform.core.inbox import RunInbox
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -72,7 +73,11 @@ from duo_workflow_service.gitlab.gitlab_instance_info_service import GitLabInsta
 from duo_workflow_service.interceptors.route.usage_billing import (
     PromptRegistrySelfHostedBillingSupport,
 )
-from duo_workflow_service.workflows.abstract_workflow import TraceableException
+from duo_workflow_service.workflows.abstract_workflow import (
+    AbstractWorkflow,
+    GraphInvocation,
+    TraceableException,
+)
 from duo_workflow_service.workflows.type_definitions import AdditionalContext
 from lib.events import GLReportingEventContext
 from lib.internal_events.context import (
@@ -3121,3 +3126,60 @@ class TestPrepareCompileFetchesCatalogAgents:
         assert raised.value.ui_message == ui_message
         assert raised.value.internal_detail == str(error)
         assert raised.value.__cause__ is error
+
+
+def _prompt_config(**declared: Any) -> InMemoryPromptConfig:
+    return InMemoryPromptConfig(
+        prompt_id="agent_prompt",
+        name="agent_prompt",
+        unit_primitives=["duo_agent_platform"],
+        **declared,
+    )
+
+
+_TEMPLATE_PROMPTS = [_prompt_config(template={"system": "instructions"})]
+_OLD_FORMAT_PROMPTS = [
+    _prompt_config(prompt_template={"system": "a", "user": "{{ goal }}"})
+]
+
+
+def _flow_with_prompts(prompts: list[InMemoryPromptConfig] | None) -> Flow:
+    flow = Flow.__new__(Flow)
+    flow._config = Mock(spec=FlowConfig, prompts=prompts)
+
+    return flow
+
+
+class TestTheRunGetsAnInbox:
+    """A run on the `template` format gets an inbox.
+
+    No other run gets one.
+    """
+
+    @staticmethod
+    async def _invocation(prompts):
+        base = GraphInvocation(graph_input={"status": "x"}, graph_config={})
+        with patch.object(
+            AbstractWorkflow, "_resolve_graph_invocation", AsyncMock(return_value=base)
+        ):
+            return await _flow_with_prompts(prompts)._resolve_graph_invocation(
+                compiled_graph=Mock(),
+                graph_config={},
+                goal="fix the pipeline",
+                status_event="START",
+                checkpoint_tuple=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_a_run_on_the_template_format_gets_an_inbox(self):
+        invocation = await self._invocation(_TEMPLATE_PROMPTS)
+
+        assert isinstance(invocation.context, RunInbox)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prompts", [_OLD_FORMAT_PROMPTS, [], None])
+    async def test_a_run_on_the_old_format_gets_no_inbox(self, prompts):
+        # A node that asks whether its run has an inbox gets "no", so it takes its input as it did before.
+        invocation = await self._invocation(prompts)
+
+        assert invocation.context is None

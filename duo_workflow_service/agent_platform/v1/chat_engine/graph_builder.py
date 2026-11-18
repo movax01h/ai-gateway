@@ -1,14 +1,15 @@
 from typing import override
 
-from langgraph.graph import StateGraph
-
 from duo_workflow_service.agent_platform.v1.components.base import (
     AbortComponent,
     BaseComponent,
     EndComponent,
 )
 from duo_workflow_service.agent_platform.v1.flows.flow_config import FlowConfig
-from duo_workflow_service.agent_platform.v1.flows.graph_builder import FlowGraphBuilder
+from duo_workflow_service.agent_platform.v1.flows.graph_builder import (
+    FlowGraph,
+    FlowGraphBuilder,
+)
 from duo_workflow_service.entities.state import WorkflowStatusEnum
 
 __all__ = ["ChatGraphBuilder"]
@@ -29,7 +30,7 @@ class ChatGraphBuilder(FlowGraphBuilder):
     """
 
     @override
-    def _seed_terminal_components(self, graph: StateGraph) -> dict[str, BaseComponent]:
+    def _seed_terminal_components(self, graph: FlowGraph) -> dict[str, BaseComponent]:
         # ``abort`` is restated because the parent attaches both terminals in
         # one method and LangGraph does not allow replacing an attached node.
         end_component = EndComponent(
@@ -48,7 +49,7 @@ class ChatGraphBuilder(FlowGraphBuilder):
         self,
         flow_config: FlowConfig,
         components: dict[str, BaseComponent],
-        graph: StateGraph,
+        graph: FlowGraph,
     ) -> None:
         """Attach the declared routers once every turn is known to be able to end.
 

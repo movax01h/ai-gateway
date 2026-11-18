@@ -5,6 +5,7 @@ from typing import NewType, Optional
 from langgraph.runtime import Runtime
 from langgraph.typing import ContextT
 
+from duo_workflow_service.agent_platform.core.inbox.address import Address
 from duo_workflow_service.agent_platform.core.inbox.message import (
     Answer,
     InboundMessage,
@@ -34,7 +35,7 @@ class Claimant:
     claim an answer without taking what's addressed to its agent.
     """
 
-    recipient: Optional[str] = None
+    recipient: Optional[Address] = None
     accepts_unaddressed: bool = False
     in_reply_to: Optional[str] = None
 
@@ -47,7 +48,9 @@ class Claimant:
             return self.accepts_unaddressed
         if self.recipient is None:
             return False
-        return self.recipient == message.recipient
+        # A message's recipient arrives as a string. Only the engine makes an address, so the comparison is on the
+        # address's own spelling.
+        return str(self.recipient) == message.recipient
 
 
 @dataclass(frozen=True, slots=True)

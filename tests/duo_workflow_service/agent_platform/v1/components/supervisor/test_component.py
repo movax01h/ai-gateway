@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END
 from pydantic import ValidationError
 
+from duo_workflow_service.agent_platform.core.inbox import Address, Claimant
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     AgentComponentBase,
     MaxCyclesConfig,
@@ -131,6 +132,24 @@ class TestSupervisorAgentComponentInit:
         """
         supervisor = make_supervisor(delegation_batch_size=10)
         assert not hasattr(supervisor, "delegation_batch_size")
+
+
+class TestSupervisorClaimant:
+    """The supervisor is the flow's top-level component, so its agent takes what names nobody."""
+
+    def test_the_supervisor_claims_as_a_top_level_component(
+        self,
+        all_node_mocks,
+        mock_router,
+        base_flow_state,
+        supervisor_name,
+        make_supervisor,
+    ):
+        _compile(make_supervisor(), mock_router)
+
+        assert all_node_mocks["agent"].claimant(base_flow_state) == Claimant(
+            recipient=Address.of(supervisor_name), accepts_unaddressed=True
+        )
 
 
 class TestSupervisorExecutionFlow:

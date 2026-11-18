@@ -9,6 +9,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import RetryPolicy, Send
 
 from duo_workflow_service.agent_platform.core.inbox import (
+    Address,
     Answer,
     Claimant,
     Component,
@@ -23,7 +24,7 @@ from duo_workflow_service.agent_platform.core.inbox import (
     current_task_id,
 )
 
-DEVELOPER = Claimant(recipient="developer", accepts_unaddressed=True)
+DEVELOPER = Claimant(recipient=Address.of("developer"), accepts_unaddressed=True)
 
 
 def _task(id: str) -> TaskId:
@@ -83,11 +84,11 @@ class TestClaim:
     @pytest.mark.parametrize(
         ("claimant", "expected"),
         [
-            (Claimant(recipient="developer"), ("to-developer", "compact")),
+            (Claimant(recipient=Address.of("developer")), ("to-developer", "compact")),
             (DEVELOPER, ("to-developer", "unaddressed", "compact")),
             (Claimant(accepts_unaddressed=True), ("unaddressed",)),
             (
-                Claimant(recipient="developer", in_reply_to="ai-1"),
+                Claimant(recipient=Address.of("developer"), in_reply_to="ai-1"),
                 ("reply-to-ai-1", "second-reply-to-ai-1", "to-developer", "compact"),
             ),
             (Claimant(in_reply_to="ai-1"), ("reply-to-ai-1", "second-reply-to-ai-1")),
@@ -113,17 +114,32 @@ class TestClaim:
     @pytest.mark.parametrize(
         ("claimant", "expected"),
         [
-            (Claimant(recipient="developer_agent"), ("to-developer-agent",)),
-            (Claimant(recipient="developer_agent/review_agent#call-7"), ("to-call-7",)),
-            (Claimant(recipient="developer_agent/review_agent#call-8"), ("to-call-8",)),
-            (Claimant(recipient="developer_agent/review"), ("to-review",)),
-            (Claimant(recipient="developer"), ()),
+            (
+                Claimant(recipient=Address.of("developer_agent")),
+                ("to-developer-agent",),
+            ),
+            (
+                Claimant(
+                    recipient=Address.of("developer_agent").child(
+                        "review_agent", "call-7"
+                    )
+                ),
+                ("to-call-7",),
+            ),
+            (
+                Claimant(
+                    recipient=Address.of("developer_agent").child(
+                        "review_agent", "call-8"
+                    )
+                ),
+                ("to-call-8",),
+            ),
+            (Claimant(recipient=Address.of("developer")), ()),
         ],
         ids=[
             "a top-level component, not what it dispatches",
             "one run, not its component or the run beside it",
             "the run beside it",
-            "a component whose name another one's starts with",
             "a name that another component's starts with",
         ],
     )
@@ -146,9 +162,9 @@ class TestClaim:
         inbox.claim(_task("agent"), DEVELOPER)
 
         assert inbox.claim(_task("sibling"), DEVELOPER) == ()
-        assert _ids(inbox.claim(_task("reviewer"), Claimant(recipient="reviewer"))) == (
-            "to-reviewer",
-        )
+        assert _ids(
+            inbox.claim(_task("reviewer"), Claimant(recipient=Address.of("reviewer")))
+        ) == ("to-reviewer",)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -164,7 +180,7 @@ class TestClaim:
         inbox.put(_message("steer-1"))
 
         # A rerun builds its task and claimant again.
-        again = Claimant(recipient="developer", accepts_unaddressed=True)
+        again = Claimant(recipient=Address.of("developer"), accepts_unaddressed=True)
         assert _ids(claimed) == expected
         assert _ids(inbox.claim(_task("task-1"), again)) == expected
         assert _ids(inbox.claim(_task("next-step"), DEVELOPER)) == ("steer-1",)
@@ -175,7 +191,7 @@ class TestClaim:
         inbox.claim(TASK, DEVELOPER)
 
         with pytest.raises(ValueError, match="claimed as"):
-            inbox.claim(TASK, Claimant(recipient="reviewer"))
+            inbox.claim(TASK, Claimant(recipient=Address.of("reviewer")))
 
 
 class TestPut:
@@ -186,7 +202,9 @@ class TestPut:
         inbox.put(_message("m-1", "developer"))
 
         # The first put had no address, so a claimant that only takes its own address finds nothing.
-        assert _ids(inbox.claim(TASK, Claimant(recipient="developer"))) == ()
+        assert (
+            _ids(inbox.claim(TASK, Claimant(recipient=Address.of("developer")))) == ()
+        )
         assert _ids(inbox.claim(_task("task-2"), DEVELOPER)) == ("m-1",)
 
     @pytest.mark.asyncio
@@ -213,7 +231,7 @@ class TestRowsClaimedBy:
             rows=("row-1", "row-2"),
         )
         task_claims = inbox.claim(
-            TASK, Claimant(recipient="developer", in_reply_to="ai-1")
+            TASK, Claimant(recipient=Address.of("developer"), in_reply_to="ai-1")
         )
         inbox.claim(_task("task-2"), Claimant(accepts_unaddressed=True))
 
@@ -293,7 +311,9 @@ class TestClaimsInAGraph:
         claims: list[tuple[InboundMessage, ...]] = []
 
         async def agent(state: _State, *, runtime: Runtime) -> _State:
-            claimant = Claimant(recipient="developer", accepts_unaddressed=True)
+            claimant = Claimant(
+                recipient=Address.of("developer"), accepts_unaddressed=True
+            )
             claims.append(inbox.claim(current_task_id(runtime), claimant))
             if len(claims) == 1:
                 inbox.put(_message("steer-1"))
@@ -353,7 +373,7 @@ class TestClaimsInAGraph:
 
         async def dispatch(state: _State, *, runtime: Runtime) -> _State:
             tasks["dispatch"] = current_task_id(runtime)
-            inbox.claim(tasks["dispatch"], Claimant(recipient="supervisor"))
+            inbox.claim(tasks["dispatch"], Claimant(recipient=Address.of("supervisor")))
             await nested_graph.ainvoke({})
             return {"done": True}
 
@@ -383,7 +403,9 @@ class TestClaimsInAGraph:
         async def subagent(state: _State, *, runtime: Runtime[RunInbox]) -> _State:
             nested_inboxes.append(runtime.context)
             nested_tasks.append(current_task_id(runtime))
-            runtime.context.claim(nested_tasks[0], Claimant(recipient="developer"))
+            runtime.context.claim(
+                nested_tasks[0], Claimant(recipient=Address.of("developer"))
+            )
             return {"done": True}
 
         nested = StateGraph(_State, context_schema=RunInbox)

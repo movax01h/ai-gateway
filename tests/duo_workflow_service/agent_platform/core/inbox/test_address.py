@@ -105,6 +105,6 @@ class TestEscapedNamesClaimApart:
         ):
             inbox.put(_message(id, str(address)))
 
-        claimed = inbox.claim(TaskId("task-1"), Claimant(recipient=str(claimant)))
+        claimed = inbox.claim(TaskId("task-1"), Claimant(recipient=claimant))
 
         assert tuple(message.id for message in claimed) == expected

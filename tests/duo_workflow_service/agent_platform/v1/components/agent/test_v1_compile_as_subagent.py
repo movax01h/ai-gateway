@@ -9,6 +9,7 @@ import pytest
 from langgraph.graph import END
 from langgraph.graph.state import CompiledStateGraph
 
+from duo_workflow_service.agent_platform.core.inbox import Address, Claimant
 from duo_workflow_service.agent_platform.v1.components.agent.component import (
     SUBSESSION_ID_CONTEXT_KEY,
     AgentComponent,
@@ -18,6 +19,11 @@ from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node im
 )
 from duo_workflow_service.agent_platform.v1.state.base import RuntimeIOKey
 from duo_workflow_service.entities import WorkflowStatusEnum
+
+
+def _run_address(state) -> Address:
+    """The address of one dispatched run, as a supervisor would resolve it."""
+    return Address.of("supervisor").child("subagent", state["context"]["call_id"])
 
 
 @pytest.fixture(name="make_agent_component")
@@ -63,7 +69,7 @@ class TestCompileAsSubagentUiChatLog:
             "duo_workflow_service.agent_platform.v1.components.agent.component.AgentNode",
             wraps=AgentNode,
         ) as agent_node_cls:
-            subagent_component.compile_as_subagent()
+            subagent_component.compile_as_subagent(address=_run_address)
 
         assert agent_node_cls.call_args.kwargs["trim_ui_chat_log"] is False
 
@@ -74,32 +80,32 @@ class TestCompileAsSubagentValidation:
     def test_requires_description(self, make_agent_component):
         component = make_agent_component()
         with pytest.raises(ValueError, match="must have a description"):
-            component.compile_as_subagent()
+            component.compile_as_subagent(address=_run_address)
 
     def test_succeeds_with_description(self, subagent_component):
         # Should not raise.
-        subagent_component.compile_as_subagent()
+        subagent_component.compile_as_subagent(address=_run_address)
 
 
 class TestCompileAsSubagentGraphStructure:
     """Tests for the graph compile_as_subagent produces."""
 
     def test_returns_compiled_state_graph(self, subagent_component):
-        compiled = subagent_component.compile_as_subagent()
+        compiled = subagent_component.compile_as_subagent(address=_run_address)
         assert isinstance(compiled, CompiledStateGraph)
 
     def test_entry_point_is_the_component_entry_hook(self, subagent_component):
-        compiled = subagent_component.compile_as_subagent()
+        compiled = subagent_component.compile_as_subagent(address=_run_address)
         assert subagent_component.__entry_hook__() in compiled.nodes
 
     def test_graph_has_no_checkpointer(self, subagent_component):
         """No checkpointer of its own -- relies on config forwarding for nested-Pregel inheritance."""
-        compiled = subagent_component.compile_as_subagent()
+        compiled = subagent_component.compile_as_subagent(address=_run_address)
         assert compiled.checkpointer is None
 
     def test_final_response_node_is_present(self, subagent_component):
         """The standard 3-node ReAct loop (agent/tools/final_response) is still fully wired."""
-        compiled = subagent_component.compile_as_subagent()
+        compiled = subagent_component.compile_as_subagent(address=_run_address)
         assert f"{subagent_component.name}#final_response" in compiled.nodes
         assert f"{subagent_component.name}#tools" in compiled.nodes
 
@@ -109,7 +115,7 @@ class TestCompileAsSubagentGraphStructure:
         ``SubagentDispatchNode`` reads that status back rather than inferring completion from ``ainvoke`` having
         returned, so the node has to exist and has to be what ``final_response`` hands off to.
         """
-        compiled = subagent_component.compile_as_subagent()
+        compiled = subagent_component.compile_as_subagent(address=_run_address)
 
         assert "terminate_flow" in compiled.nodes
         # `final_response`'s conditional edge carries no path map, so the target
@@ -130,7 +136,7 @@ class TestCompileAsSubagentGraphStructure:
         self, subagent_component
     ):
         """The status write itself, exercised rather than inferred from the topology."""
-        compiled = subagent_component.compile_as_subagent()
+        compiled = subagent_component.compile_as_subagent(address=_run_address)
 
         result = await compiled.nodes["terminate_flow"].ainvoke(
             {"status": WorkflowStatusEnum.EXECUTION}
@@ -140,7 +146,7 @@ class TestCompileAsSubagentGraphStructure:
 
     def test_does_not_mutate_bind_to_supervisor_state(self, subagent_component):
         """compile_as_subagent is a distinct mechanism from bind_to_supervisor -- it must not set that flag."""
-        subagent_component.compile_as_subagent()
+        subagent_component.compile_as_subagent(address=_run_address)
         assert not subagent_component._is_bound_to_supervisor
 
 
@@ -150,7 +156,7 @@ class TestCompileAsSubagentSessionIdKey:
     def test_session_id_key_reads_from_subsession_id_context_key(
         self, subagent_component
     ):
-        subagent_component.compile_as_subagent()
+        subagent_component.compile_as_subagent(address=_run_address)
 
         resolved = subagent_component._session_id_key.to_iokey({})
         assert resolved.target == "context"
@@ -158,7 +164,7 @@ class TestCompileAsSubagentSessionIdKey:
 
     def test_session_id_key_is_optional(self, subagent_component):
         """Must not KeyError when a caller invokes without setting the subsession ID."""
-        subagent_component.compile_as_subagent()
+        subagent_component.compile_as_subagent(address=_run_address)
 
         resolved = subagent_component._session_id_key.to_iokey({})
         state = {
@@ -171,7 +177,7 @@ class TestCompileAsSubagentSessionIdKey:
         assert resolved.value_from_state(state) is None
 
     def test_session_id_key_resolves_value_set_by_caller(self, subagent_component):
-        subagent_component.compile_as_subagent()
+        subagent_component.compile_as_subagent(address=_run_address)
 
         resolved = subagent_component._session_id_key.to_iokey({})
         state = {
@@ -206,3 +212,33 @@ class TestCompileAsSubagentIndependenceFromBindToSupervisor:
         )
 
         assert component._is_bound_to_supervisor
+
+
+class TestCompileAsSubagentClaimant:
+    """A dispatched run takes only what's addressed to it, never what names no recipient."""
+
+    @staticmethod
+    def _claimant(component, state, address) -> Claimant:
+        with patch(
+            "duo_workflow_service.agent_platform.v1.components.agent.component.AgentNode"
+        ) as agent_node_cls:
+            agent_node_cls.return_value.name = f"{component.name}#agent"
+            component.compile_as_subagent(address=address)
+        return agent_node_cls.return_value.claimant(state)
+
+    def test_a_dispatched_run_takes_only_its_own_address(
+        self, subagent_component, component_name
+    ):
+        def run_address(state):
+            return Address.of("supervisor").child(
+                component_name, state["context"]["call_id"]
+            )
+
+        claimant = self._claimant(
+            subagent_component, {"context": {"call_id": "call-1"}}, address=run_address
+        )
+
+        assert claimant == Claimant(
+            recipient=Address.of("supervisor").child(component_name, "call-1"),
+            accepts_unaddressed=False,
+        )

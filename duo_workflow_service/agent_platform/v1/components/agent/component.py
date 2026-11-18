@@ -1,6 +1,7 @@
 from typing import (
     Annotated,
     Any,
+    Callable,
     ClassVar,
     Literal,
     Optional,
@@ -36,6 +37,7 @@ from duo_workflow_service.agent_platform.constants import (
     INTERACTIVE_ENVIRONMENTS,
     NODE_ROLE_SEPARATOR,
 )
+from duo_workflow_service.agent_platform.core.inbox import Address, Claimant
 from duo_workflow_service.agent_platform.utils.exceptions import (
     NotifiableAgentException,
 )
@@ -295,6 +297,8 @@ class AgentComponentBase(BaseComponent):
     _cycle_count_key: RuntimeIOKey = PrivateAttr()
     _max_cycles_threshold: int = PrivateAttr()
     _iteration_warning_offset: Optional[int] = PrivateAttr()
+    # Set for a subagent, whose address its dispatcher makes for each run of it.
+    _run_address: Optional[Callable[[FlowState], Address]] = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def initialize_tool_approval_decision_key(self) -> Self:
@@ -632,6 +636,26 @@ class AgentComponentBase(BaseComponent):
 
         raise RoutingError(f"Unexpected approval decision: {decision}")
 
+    def _inbox_address(self, state: FlowState) -> Address:
+        """Where this component claims from the run's inbox: its own name, or the run its dispatcher started."""
+        if self._run_address is not None:
+            return self._run_address(state)
+        return Address.of(self.name)
+
+    def _accepts_unaddressed(self) -> bool:
+        """Whether this component takes inbox messages that name no recipient.
+
+        A subagent never does.
+        """
+        return self._run_address is None
+
+    def _claimant(self, state: FlowState) -> Claimant:
+        """Which inbox messages this component's agent takes."""
+        return Claimant(
+            recipient=self._inbox_address(state),
+            accepts_unaddressed=self._accepts_unaddressed(),
+        )
+
     def _attach_tool_approval_nodes(
         self,
         graph: StateGraph,
@@ -861,6 +885,10 @@ class AgentComponent(AgentComponentBase):
 
         return self
 
+    @override
+    def _accepts_unaddressed(self) -> bool:
+        return super()._accepts_unaddressed() and not self._is_bound_to_supervisor
+
     def bind_to_supervisor(
         self,
         *,
@@ -924,7 +952,9 @@ class AgentComponent(AgentComponentBase):
         ]
         self.inputs.append(goal_key)
 
-    def compile_as_subagent(self) -> CompiledStateGraph:
+    def compile_as_subagent(
+        self, address: Callable[[FlowState], Address]
+    ) -> CompiledStateGraph:
         """Compile this component's ReAct loop as an independent, standalone subgraph.
 
         Alternative to ``bind_to_supervisor``, used by
@@ -997,6 +1027,11 @@ class AgentComponent(AgentComponentBase):
         tracked as follow-up work; single-subagent and
         sequential-multi-subagent delegation are unaffected.
 
+        Args:
+            address: Resolves the address of one run of this subagent from the
+                state its dispatcher seeded, since a run's ID exists only once
+                it's dispatched.
+
         Raises:
             ValueError: If ``description`` is not set (required so the
                 supervisor's ``delegate_task`` tool can describe this subagent
@@ -1007,6 +1042,7 @@ class AgentComponent(AgentComponentBase):
                 f"AgentComponent '{self.name}' must have a description to be used as a subagent."
             )
 
+        self._run_address = address
         self._session_id_key = RuntimeIOKey(
             alias="session_id",
             factory=lambda _: IOKey(
@@ -1219,6 +1255,7 @@ class AgentComponent(AgentComponentBase):
             internal_event_client=self.internal_event_client,
         )
 
+        node_agent.claimant = self._claimant
         graph.add_node(self.__entry_hook__(), node_agent.run)
         graph.add_node(node_tools.name, node_tools.run)
         graph.add_node(node_final_response.name, node_final_response.run)

@@ -10,9 +10,19 @@ import pytest
 from anthropic import APIStatusError
 from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.graph import END, START, StateGraph
 from langgraph.types import Overwrite
 
 from ai_gateway.prompts import Prompt
+from duo_workflow_service.agent_platform.core.inbox import (
+    Address,
+    Claimant,
+    Message,
+    RunInbox,
+    TaskId,
+    TextPart,
+    User,
+)
 from duo_workflow_service.agent_platform.utils.exceptions import ModelRefusalError
 from duo_workflow_service.agent_platform.v1.components.agent.nodes.agent_node import (
     _LITELLM_EMPTY_CONTENT_PLACEHOLDER,
@@ -28,6 +38,7 @@ from duo_workflow_service.agent_platform.v1.components.agent.ui_log import (
     agent_tools_ui_log_writer_class,
 )
 from duo_workflow_service.agent_platform.v1.state import (
+    FlowState,
     FlowStateKeys,
     IOKey,
     RuntimeIOKey,
@@ -704,6 +715,125 @@ class TestAgentNode:
             f"{AgentFinalOutput.tool_title} raised validation error:"
             in retry_messages_history[1].content
         )
+
+
+class TestAgentNodeClaim:
+    """An agent takes what is its own from the run's inbox, which reaches it as the graph's runtime context."""
+
+    DEVELOPER = Claimant(recipient=Address.of("developer"), accepts_unaddressed=True)
+    LATER = TaskId("a-later-task")
+
+    @staticmethod
+    def _message(id: str, recipient: str | None = None) -> Message:
+        return Message(
+            id=id,
+            content=(TextPart(type="text", text=f"Text of {id}"),),
+            sender=User(),
+            recipient=recipient,
+        )
+
+    @staticmethod
+    def _inbox(*messages: Message) -> RunInbox:
+        inbox = RunInbox()
+        for message in messages:
+            inbox.put(message)
+
+        return inbox
+
+    @staticmethod
+    async def _run(agent_node, state, inbox):
+        graph = StateGraph(FlowState, context_schema=RunInbox)
+        graph.add_node("agent", agent_node.run)
+        graph.add_edge(START, "agent")
+        graph.add_edge("agent", END)
+
+        return await graph.compile().ainvoke(state, context=inbox)
+
+    @pytest.mark.asyncio
+    async def test_it_claims_what_its_component_says_is_its_own(
+        self,
+        agent_node,
+        base_flow_state,
+        mock_get_vars_from_state,  # pylint: disable=unused-argument  # activates the mock
+        _mock_predefined_runtime_variables,
+    ):
+        unaddressed = self._message("unaddressed")
+        own = self._message("own", "developer")
+        for_another = self._message("for-another", "tester")
+        inbox = self._inbox(unaddressed, for_another, own)
+        agent_node.claimant = lambda _state: self.DEVELOPER
+
+        await self._run(agent_node, base_flow_state, inbox)
+
+        # Nothing of the agent's is left for a later task, and what's addressed elsewhere is.
+        assert inbox.claim(self.LATER, self.DEVELOPER) == ()
+        assert inbox.claim(
+            TaskId("the-tester"), Claimant(recipient=Address.of("tester"))
+        ) == (for_another,)
+
+    @pytest.mark.asyncio
+    async def test_the_claimant_is_resolved_from_the_state_the_node_runs_on(
+        self,
+        agent_node,
+        base_flow_state,
+        mock_get_vars_from_state,  # pylint: disable=unused-argument  # activates the mock
+        _mock_predefined_runtime_variables,
+    ):
+        # A subagent's address exists only in the state its dispatcher seeded.
+        this_run = Claimant(
+            recipient=Address.of("supervisor").child("developer", "call-1")
+        )
+        own = self._message("own", str(this_run.recipient))
+        for_another_run = self._message("another", "supervisor/developer#call-2")
+        inbox = self._inbox(own, for_another_run)
+        agent_node.claimant = lambda state: Claimant(
+            recipient=Address.of("supervisor").child(
+                "developer", state["context"]["call_id"]
+            )
+        )
+        state = {**base_flow_state, "context": {"call_id": "call-1"}}
+
+        await self._run(agent_node, state, inbox)
+
+        assert inbox.claim(self.LATER, this_run) == ()
+        assert inbox.claim(
+            TaskId("the-other-run"),
+            Claimant(recipient=Address.of("supervisor").child("developer", "call-2")),
+        ) == (for_another_run,)
+
+    @pytest.mark.asyncio
+    async def test_without_a_claimant_it_claims_nothing(
+        self,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        mock_get_vars_from_state,  # pylint: disable=unused-argument  # activates the mock
+        _mock_predefined_runtime_variables,
+    ):
+        unaddressed = self._message("unaddressed")
+        inbox = self._inbox(unaddressed)
+
+        await self._run(agent_node, base_flow_state, inbox)
+
+        mock_prompt.ainvoke.assert_called_once()
+        assert inbox.claim(self.LATER, self.DEVELOPER) == (unaddressed,)
+
+    @pytest.mark.asyncio
+    async def test_without_an_inbox_it_runs_as_before(
+        self,
+        mock_prompt,
+        agent_node,
+        base_flow_state,
+        mock_get_vars_from_state,  # pylint: disable=unused-argument  # activates the mock
+        _mock_predefined_runtime_variables,
+    ):
+        claimant = Mock(return_value=self.DEVELOPER)
+        agent_node.claimant = claimant
+
+        await self._run(agent_node, base_flow_state, None)
+
+        mock_prompt.ainvoke.assert_called_once()
+        claimant.assert_not_called()
 
 
 class TestAgentNodeContextLimits:

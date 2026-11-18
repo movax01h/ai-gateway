@@ -15,6 +15,7 @@ from langgraph.graph import StateGraph
 
 from ai_gateway.prompts import BasePromptRegistry
 from ai_gateway.response_schemas.base import BaseResponseSchemaRegistry
+from duo_workflow_service.agent_platform.core.inbox import RunInbox
 from duo_workflow_service.agent_platform.v1.catalog import CatalogItems
 from duo_workflow_service.agent_platform.v1.components.base import (
     BaseComponent,
@@ -192,6 +193,7 @@ class TestFlowGraphBuilder:
             )
 
         assert {"agent_entry_node", "terminate_flow", "abort_flow"} <= set(graph.nodes)
+        assert graph.context_schema is RunInbox
 
         graph.compile()
 

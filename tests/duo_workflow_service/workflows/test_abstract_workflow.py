@@ -133,13 +133,16 @@ class ConfigCapturingGraph:
         self.captured_input: Any = "UNSET"
         self.captured_config: Any = None
         self.captured_durability: Any = "UNSET"
+        self.captured_context: Any = "UNSET"
 
     async def astream(  # pylint: disable=unused-argument  # astream() signature
-        self, input, config, stream_mode, durability=None
+        self, input, config, stream_mode, durability=None, **kwargs
     ):
         self.captured_input = input
         self.captured_config = config
         self.captured_durability = durability
+        # Absent unless the invocation carries one, as with LangGraph's own `context=` argument.
+        self.captured_context = kwargs.get("context", "UNSET")
         yield "updates", {"step1": {"key": "value"}}
 
 
@@ -3119,6 +3122,38 @@ async def test_compile_and_run_graph_stop_recovery_default_behaves_like_retry(
     assert graph.captured_input == expected_input
     assert "checkpoint_id" not in graph.captured_config["configurable"]
     mock_checkpointer.checkpoints_reversed.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@patch("duo_workflow_service.workflows.abstract_workflow.GitLabWorkflow")
+@patch("duo_workflow_service.workflows.abstract_workflow.ToolsRegistry.configure")
+@pytest.mark.parametrize(
+    ("context", "expected"),
+    [(None, "UNSET"), ("the run's inbox", "the run's inbox")],
+    ids=["no_context_is_not_passed", "context_reaches_the_graph"],
+)
+async def test_compile_and_run_graph_passes_the_resolved_context(
+    mock_tools_registry,
+    mock_gitlab_workflow,
+    workflow,
+    context,
+    expected,
+):
+    """The graph gets a runtime context only when the invocation carries one, so other graphs stream as before."""
+    mock_tools_registry.return_value = MagicMock()
+    _checkpointer(mock_gitlab_workflow)
+    graph = ConfigCapturingGraph()
+    workflow._compile = MagicMock(return_value=graph)
+    workflow._resolve_graph_invocation = AsyncMock(
+        return_value=GraphInvocation(
+            graph_input={}, graph_config={"configurable": {}}, context=context
+        )
+    )
+
+    await workflow._compile_and_run_graph("goal")
+
+    assert graph.captured_context == expected
 
 
 def _pinning_invocation_resolver() -> AsyncMock:

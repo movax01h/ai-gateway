@@ -781,6 +781,7 @@ class SupervisorAgentComponent(AgentComponentBase):
         )
 
         # --- Add supervisor nodes to graph ---
+        node_agent.claimant = self._claimant
         graph.add_node(self.__entry_hook__(), node_agent.run)
         graph.add_node(node_tools.name, node_tools.run)
         graph.add_node(node_final_response.name, node_final_response.run)
