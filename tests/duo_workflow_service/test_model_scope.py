@@ -1,22 +1,28 @@
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import yaml
 from gitlab_cloud_connector import CloudConnectorUser, UserClaims
 from structlog.testing import capture_logs
 
 from ai_gateway.config import get_config
 from ai_gateway.model_metadata import FireworksModelMetadata, ModelMetadata
 from ai_gateway.model_selection import ModelSelectionConfig
+from duo_workflow_service.agent_platform.v1.flows import flow_config
 from duo_workflow_service.interceptors.authentication_interceptor import current_user
 from duo_workflow_service.interceptors.model_metadata_interceptor import (
     ModelMetadataInterceptor,
 )
 from duo_workflow_service.model_scope import (
+    CLIENT_FLOW_FEATURES,
     FLAT_RATE_FLOW_FEATURE_SETTINGS,
+    flow_features,
     log_flow_model_feature,
     scope_flat_rate_flow_models,
 )
+from duo_workflow_service.workflows import registry
 from lib.billing_events import BILL_ONCE_PER_WORKFLOW_FEATURES
 from lib.context.model import (
     current_model_metadata_context,
@@ -25,6 +31,11 @@ from lib.context.model import (
 
 FABLE = "claude_fable_5"
 CODE_REVIEW = "code_review/v1"
+# The foundational agents that the image build fetches into ai/features/foundational_agents/.
+FOUNDATIONAL_AGENTS_PATH = (
+    Path(__file__).parents[2]
+    / "ai/features/foundational_agents/config/ai-catalog-agents.yml"
+)
 REVIEW_FEATURE = "review_merge_request_dap"
 NOT_ALLOWED = "Flat-rate flow model not allowed, switched to the feature default"
 USER = CloudConnectorUser(
@@ -329,7 +340,9 @@ class TestLogFlowModelFeature:
         )
 
         with capture_logs() as logs:
-            log_flow_model_feature("security_review/v1", "security_review/v1")
+            log_flow_model_feature(
+                "security_review/v1", "security_review/v1", client_flow=False
+            )
 
         assert self._logged(logs) == [
             {
@@ -343,6 +356,9 @@ class TestLogFlowModelFeature:
                 "requested_name": None,
                 "requested_identifier": FABLE,
                 "served_identifier": FABLE,
+                "client_flow": False,
+                "flow_features": ["security_review"],
+                "flow_check": "replaced",
             }
         ]
 
@@ -351,7 +367,7 @@ class TestLogFlowModelFeature:
         await _resolve_header({"provider": "gitlab", "name": FABLE})
 
         with capture_logs() as logs:
-            log_flow_model_feature("developer/v1", "developer/v1")
+            log_flow_model_feature("developer/v1", "developer/v1", client_flow=False)
 
         [entry] = self._logged(logs)
         assert entry["client_feature_setting"] is None
@@ -366,7 +382,7 @@ class TestLogFlowModelFeature:
         await ModelMetadataInterceptor().intercept_service(AsyncMock(), details)
 
         with capture_logs() as logs:
-            log_flow_model_feature("chat", "chat")
+            log_flow_model_feature("chat", "chat", client_flow=False)
 
         assert self._logged(logs) == []
 
@@ -381,7 +397,7 @@ class TestLogFlowModelFeature:
         await _resolve_header(raw)
 
         with capture_logs() as logs:
-            log_flow_model_feature("chat", "chat")
+            log_flow_model_feature("chat", "chat", client_flow=False)
 
         assert self._logged(logs) == []
 
@@ -393,7 +409,7 @@ class TestLogFlowModelFeature:
         monkeypatch.setattr(get_config().custom_models, "enabled", True)
 
         with capture_logs() as logs:
-            log_flow_model_feature("chat", "chat")
+            log_flow_model_feature("chat", "chat", client_flow=False)
 
         assert self._logged(logs) == []
 
@@ -408,6 +424,223 @@ class TestLogFlowModelFeature:
         )
         before = current_model_metadata_with_size_context.get()
 
-        log_flow_model_feature(CODE_REVIEW, CODE_REVIEW)
+        log_flow_model_feature(CODE_REVIEW, CODE_REVIEW, client_flow=False)
 
         assert current_model_metadata_with_size_context.get() is before
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("raw", "flow", "client_flow", "flow_check"),
+        [
+            (
+                {"provider": "gitlab", "feature_setting": REVIEW_FEATURE},
+                CODE_REVIEW,
+                False,
+                "unchanged",
+            ),
+            (
+                {"provider": "gitlab", "feature_setting": "duo_agent_platform"},
+                CODE_REVIEW,
+                False,
+                "feature_default",
+            ),
+            (
+                {"provider": "gitlab", "name": "claude_sonnet_5_5_vertex"},
+                CODE_REVIEW,
+                False,
+                "allowed",
+            ),
+            (
+                {"provider": "gitlab", "name": FABLE},
+                CODE_REVIEW,
+                False,
+                "replaced",
+            ),
+            (
+                {"provider": "gitlab", "feature_setting": REVIEW_FEATURE},
+                "not_a_flow/v1",
+                False,
+                "no_entry",
+            ),
+            (
+                {"provider": "gitlab", "feature_setting": "duo_agent_platform"},
+                "ai_catalog_agent",
+                True,
+                "unchanged",
+            ),
+            (
+                {
+                    "provider": "gitlab",
+                    "feature_setting": "duo_agent_platform_agentic_chat",
+                },
+                "ai_catalog_agent",
+                True,
+                "unchanged",
+            ),
+            (
+                {"provider": "gitlab", "feature_setting": "duo_developer"},
+                "developer/v1",
+                True,
+                "feature_default",
+            ),
+            (
+                {"provider": "gitlab", "feature_setting": "duo_agent_platform"},
+                CODE_REVIEW,
+                True,
+                "feature_default",
+            ),
+            (
+                {"provider": "gitlab", "feature_setting": REVIEW_FEATURE},
+                CODE_REVIEW,
+                True,
+                "unchanged",
+            ),
+        ],
+        ids=[
+            "client-feature-listed",
+            "default-of-another-feature",
+            "replay-allowed-by-main-feature",
+            "replay-not-allowed-by-main-feature",
+            "flow-without-entry",
+            "client-flow-with-its-feature",
+            "client-flow-run-by-chat",
+            "client-flow-named-after-a-shipped-flow",
+            "client-flow-named-after-a-flat-rate-flow",
+            "client-flow-named-after-a-flat-rate-flow-with-its-feature",
+        ],
+    )
+    async def test_logs_what_the_flow_check_would_do(
+        self, raw, flow, client_flow, flow_check
+    ):
+        await _resolve_header(raw)
+
+        with capture_logs() as logs:
+            log_flow_model_feature(flow, flow, client_flow=client_flow)
+
+        [entry] = self._logged(logs)
+        assert entry["client_flow"] is client_flow
+        assert entry["flow_check"] == flow_check
+
+    @pytest.mark.asyncio
+    async def test_logs_amazon_q_as_unchanged(self):
+        await _resolve_header(
+            {
+                "provider": "amazon_q",
+                "name": "amazon_q",
+                "role_arn": "arn:aws:iam::123456789012:role/q",
+            }
+        )
+
+        with capture_logs() as logs:
+            log_flow_model_feature(CODE_REVIEW, CODE_REVIEW, client_flow=False)
+
+        [entry] = self._logged(logs)
+        assert entry["flow_check"] == "unchanged"
+
+    @pytest.mark.asyncio
+    async def test_logs_an_error_when_the_flow_features_are_not_available(self):
+        await _resolve_header(
+            {
+                "provider": "gitlab",
+                "identifier": FABLE,
+                "feature_setting": "duo_agent_platform",
+            }
+        )
+
+        with (
+            patch.object(
+                ModelSelectionConfig.instance(),
+                "get_flow_features",
+                side_effect=ValueError("broken flows map"),
+            ),
+            capture_logs() as logs,
+        ):
+            log_flow_model_feature(CODE_REVIEW, CODE_REVIEW, client_flow=False)
+
+        [entry] = self._logged(logs)
+        assert entry["flow_features"] == []
+        assert entry["flow_check"] == "error"
+        assert {
+            "event": "Flow features not available",
+            "log_level": "warning",
+            "flow": CODE_REVIEW,
+            "error": "broken flows map",
+        } in logs
+
+
+def _shipped_flows() -> set[str]:
+    """Every flow that the Duo Workflow Service runs without a client flow config, by name without its version."""
+    with patch.dict(flow_config._FEATURE_FLOW_ROOTS):
+        flow_config.discover_feature_flow_configs()
+        flows = {config["flow_identifier"] for config in registry.list_configs()}
+    agents = yaml.safe_load(FOUNDATIONAL_AGENTS_PATH.read_text())["agents"]
+    return (
+        flows
+        | set(registry._WORKFLOWS_LOOKUP)
+        | {agent["reference"] for agent in agents}
+    )
+
+
+class TestFlowFeatures:
+    def test_every_shipped_flow_has_features(self):
+        missing = (
+            _shipped_flows()
+            - ModelSelectionConfig.instance().get_flow_features().keys()
+        )
+
+        assert not missing, (
+            f"Add these flows to the flows map in unit_primitives.yml: {sorted(missing)}"
+        )
+
+    def test_every_listed_flow_is_shipped(self):
+        stale = (
+            ModelSelectionConfig.instance().get_flow_features().keys()
+            - _shipped_flows()
+        )
+
+        assert not stale, (
+            f"Remove these flows from the flows map in unit_primitives.yml: {sorted(stale)}"
+        )
+
+    @pytest.mark.parametrize("flow", sorted(BILL_ONCE_PER_WORKFLOW_FEATURES))
+    def test_a_flat_rate_flow_runs_as_one_feature(self, flow):
+        assert flow_features(f"{flow}/v1", client_flow=False) == (
+            FLAT_RATE_FLOW_FEATURE_SETTINGS[flow],
+        )
+
+    @pytest.mark.parametrize("feature_setting", CLIENT_FLOW_FEATURES)
+    def test_every_client_flow_feature_exists(self, feature_setting):
+        assert (
+            feature_setting
+            in ModelSelectionConfig.instance().get_unit_primitive_config_map()
+        )
+
+    @pytest.mark.parametrize(
+        ("flow", "client_flow", "features"),
+        [
+            (
+                "developer/v1",
+                False,
+                (
+                    "duo_developer",
+                    "duo_agent_platform_agentic_chat",
+                    "duo_agent_platform",
+                ),
+            ),
+            ("chat", False, ("duo_agent_platform_agentic_chat",)),
+            ("developer/v1", True, CLIENT_FLOW_FEATURES),
+            (CODE_REVIEW, True, (REVIEW_FEATURE,)),
+            ("not_a_flow/v1", False, ()),
+            (None, False, ()),
+        ],
+        ids=[
+            "versioned",
+            "legacy",
+            "client-flow",
+            "client-flow-with-a-flat-rate-name",
+            "no-entry",
+            "no-name",
+        ],
+    )
+    def test_flow_features(self, flow, client_flow, features):
+        assert flow_features(flow, client_flow=client_flow) == features

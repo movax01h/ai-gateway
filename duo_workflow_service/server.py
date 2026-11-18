@@ -1026,7 +1026,9 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         )
         # Log the client's feature before the flat-rate check replaces the models.
         log_flow_model_feature(
-            gl_event_context.feature_qualified_name, workflow_definition
+            gl_event_context.feature_qualified_name,
+            workflow_definition,
+            client_flow=bool(gl_event_context.feature_ai_catalog_item),
         )
         # A flat-rate flow is billed once whatever models it runs, so its models come from the allowlist of the
         # feature it is billed as, not from the client's choice.

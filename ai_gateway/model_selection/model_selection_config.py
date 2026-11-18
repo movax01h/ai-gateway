@@ -100,6 +100,9 @@ MODELS_CONFIG_PATH = BASE_PATH / "models.yml"
 UNIT_PRIMITIVE_CONFIG_PATH = BASE_PATH / "unit_primitives.yml"
 MODEL_RESTRICTIONS_CONFIG_PATH = BASE_PATH / "model_restrictions.yml"
 
+# The `flows` map of unit_primitives.yml: the name of each flow, without its version, and its features.
+_FLOW_FEATURES_ADAPTER = TypeAdapter(dict[str, list[str]])
+
 
 class PromptParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -405,7 +408,9 @@ class ModelSelectionConfig:
         model_releases: Optional[str] = None,
     ) -> None:
         self._llm_definitions: Optional[dict[str, LLMDefinition]] = None
+        self._unit_primitives_file: Optional[dict[str, Any]] = None
         self._unit_primitive_configs: Optional[dict[str, UnitPrimitiveConfig]] = None
+        self._flow_features: Optional[dict[str, tuple[str, ...]]] = None
         self._model_restrictions: Optional[list[ModelRestriction]] = None
         self._default_models_override: dict[str, list[str]] = default_models_override
         self._model_params_override: dict[str, dict] = model_params_override or {}
@@ -512,10 +517,17 @@ class ModelSelectionConfig:
             return base
         return {**base, **self._env_llm_definitions}
 
+    def _get_unit_primitives_file(self) -> dict[str, Any]:
+        """Parse ``unit_primitives.yml`` once for its feature settings and its ``flows`` map."""
+        if self._unit_primitives_file is None:
+            with open(UNIT_PRIMITIVE_CONFIG_PATH, "r") as f:
+                self._unit_primitives_file = yaml.safe_load(f)
+
+        return self._unit_primitives_file
+
     def get_unit_primitive_config_map(self) -> dict[str, UnitPrimitiveConfig]:
         if not self._unit_primitive_configs:
-            with open(UNIT_PRIMITIVE_CONFIG_PATH, "r") as f:
-                config_data = yaml.safe_load(f)
+            config_data = self._get_unit_primitives_file()
 
             self._unit_primitive_configs = {
                 data["feature_setting"]: UnitPrimitiveConfig(**data)
@@ -529,6 +541,25 @@ class ModelSelectionConfig:
                     ]
 
         return self._unit_primitive_configs
+
+    def get_flow_features(self) -> dict[str, tuple[str, ...]]:
+        """Return the features of each flow that this gateway ships, from the ``flows`` map of ``unit_primitives.yml``.
+
+        The key is the name of the flow without its version, for example ``code_review`` for ``code_review/v1``. The
+        first feature is the main feature of the flow.
+
+        Returns:
+            Mapping of flow name to its features, main feature first. Empty when the file has no ``flows`` map.
+        """
+        if self._flow_features is None:
+            flows = _FLOW_FEATURES_ADAPTER.validate_python(
+                self._get_unit_primitives_file().get("flows") or {}
+            )
+            self._flow_features = {
+                flow: tuple(features) for flow, features in flows.items()
+            }
+
+        return self._flow_features
 
     def get_model_restrictions(self) -> list[ModelRestriction]:
         if self._model_restrictions is None:
@@ -656,6 +687,25 @@ class ModelSelectionConfig:
                 f"The following models ids are used but are not defined in models.yml: {', '.join(errors)}"
             ]
         return []
+
+    def _validate_flow_features(
+        self, unit_primitive_configs: Iterable[UnitPrimitiveConfig]
+    ) -> list[str]:
+        feature_settings = {config.feature_setting for config in unit_primitive_configs}
+        errors: list[str] = []
+        for flow, features in self.get_flow_features().items():
+            if not features:
+                errors.append(f"Flow '{flow}' in the flows map lists no feature")
+            if len(set(features)) != len(features):
+                errors.append(
+                    f"Flow '{flow}' in the flows map lists a feature more than once"
+                )
+            errors.extend(
+                f"Flow '{flow}' in the flows map lists '{feature}', which is not a feature setting"
+                for feature in features
+                if feature not in feature_settings
+            )
+        return errors
 
     def _validate_default_models_are_selectable(
         self, unit_primitive_configs: Iterable[UnitPrimitiveConfig]
@@ -884,6 +934,7 @@ class ModelSelectionConfig:
             ),
             *self._validate_restricted_models(unit_primitive_configs, models),
             *self._validate_paid_credit_models(unit_primitive_configs, models),
+            *self._validate_flow_features(unit_primitive_configs),
         ]
 
         if error_messages:
@@ -892,7 +943,9 @@ class ModelSelectionConfig:
     def refresh(self):
         """Refresh the configuration by reloading from source files."""
         self._llm_definitions = None
+        self._unit_primitives_file = None
         self._unit_primitive_configs = None
+        self._flow_features = None
         self._match_index = None
         self._resolved_match_index = None
         self._model_restrictions = None
