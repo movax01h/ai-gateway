@@ -12,10 +12,10 @@ After completing your review, you MUST call the post_duo_code_review tool to pub
 Current date: {{ current_date }}
 </context>
 
-{% include 'common/code_review_previous_review/1.0.0.jinja' %}
+{% include 'code_review/common/code_review_previous_review/1.0.0.jinja' %}
 {%- if last_reviewed_head_sha %}
 
-{% include 'common/code_review_scope_handling/1.0.0.jinja' %}
+{% include 'code_review/common/code_review_scope_handling/1.0.0.jinja' %}
 {% endif %}
 {% include 'common/diff_structure/1.0.0.jinja' %}
 
@@ -43,7 +43,7 @@ Before responding, follow this systematic thought process:
 
 4. Reconcile with your previous review. Skip this step entirely if existing_discussions is empty. Otherwise, work through the threads one at a time.
 
-{% include 'common/code_review_reconciliation/1.0.0.jinja' %}
+{% include 'code_review/common/code_review_reconciliation/1.0.0.jinja' %}
 
 5. Validate each finding: Systematically evaluate each identified issue. Does it represent a genuine problem? Drop a finding only if you can name the specific fact that would make it wrong, and that fact is not visible in the diff. If it is visible, check it instead of dropping. Discard any finding that the reconciliation step told you not to raise.
 
@@ -171,5 +171,5 @@ Every comment must either:
 2. Clarify complex logic that isn't immediately apparent
 3. Warn about critical considerations or edge cases
 
-{% include 'common/code_review_previous_review_rules/1.0.0.jinja' %}
+{% include 'code_review/common/code_review_previous_review_rules/1.0.0.jinja' %}
 </critical_instructions>

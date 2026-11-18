@@ -149,10 +149,6 @@ ai_gateway/prompts/definitions/classify_goal_tier/base
 ai_gateway/prompts/definitions/commit_changes/base
 ai_gateway/prompts/definitions/commit_changes/system
 ai_gateway/prompts/definitions/commit_changes/user
-ai_gateway/prompts/definitions/common/code_review_previous_review
-ai_gateway/prompts/definitions/common/code_review_previous_review_rules
-ai_gateway/prompts/definitions/common/code_review_reconciliation
-ai_gateway/prompts/definitions/common/code_review_scope_handling
 ai_gateway/prompts/definitions/common/commit_message_guidelines
 ai_gateway/prompts/definitions/common/diff_structure
 ai_gateway/prompts/definitions/common/fix_pipeline_failure_categories
