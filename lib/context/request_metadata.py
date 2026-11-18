@@ -41,6 +41,9 @@ client_capabilities: ContextVar[set[str]] = ContextVar(
     "client_capabilities", default=set()
 )
 
+# agent_mode is the client's asserted `AgentMode`, stored as its contract.proto number.
+agent_mode: ContextVar[int] = ContextVar("agent_mode", default=0)
+
 
 def _language_server_version_label() -> str:
     lsp_version = language_server_version.get()

@@ -134,7 +134,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
     AdditionalContext,
 )
-from lib.context import client_type
+from lib.context import agent_mode, client_type
 from lib.context.orbit import is_orbit_tool
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import FeatureFlag, is_feature_enabled
@@ -154,6 +154,14 @@ DEBUG = os.getenv("DEBUG")
 MAX_MESSAGES_TO_DISPLAY = 5
 # Same bound the executor HTTP client puts on a GraphQL round trip.
 SESSION_DROP_TIMEOUT_S = 10.0
+# Modes this build knows. Any other value falls back to the auto_mode capability.
+_KNOWN_AGENT_MODES = frozenset(
+    {
+        contract_pb2.AGENT_MODE_BUILD,
+        contract_pb2.AGENT_MODE_PLAN,
+        contract_pb2.AGENT_MODE_AUTO,
+    }
+)
 
 
 def _claim_requests_ceiling(raw: Any) -> bool:
@@ -878,7 +886,7 @@ class AbstractWorkflow(ABC):
             return
         if governance_active:
             self._promotable_tools = sorted(requested)
-        engaged = is_client_capable(AUTO_MODE_CAPABILITY)
+        engaged = self._auto_mode_engaged()
         if not (governance_active and can_ask_user and engaged):
             self.log.debug(
                 "Not promoting default-ask tools for this turn",
@@ -893,6 +901,27 @@ class AbstractWorkflow(ABC):
             promoted_count=len(self._promoted_tools),
         )
         self.log.debug("Promoted default-ask tools", tool_names=self._promoted_tools)
+
+    def _auto_mode_engaged(self) -> bool:
+        """Whether this turn runs in auto mode.
+
+        Falls back to the deprecated `auto_mode` capability for a client or Workhorse
+        that predates `agent_mode`.
+        """
+        capability = is_client_capable(AUTO_MODE_CAPABILITY)
+        mode = agent_mode.get()
+        if mode not in _KNOWN_AGENT_MODES:
+            return capability
+        engaged = mode == contract_pb2.AGENT_MODE_AUTO
+        # A missing capability is the expected shape once clients stop sending it. Only a
+        # capability that claims auto against another mode is a real conflict.
+        if capability and not engaged:
+            self.log.info(
+                "agent_mode and the auto_mode capability disagree, using agent_mode",
+                agent_mode=contract_pb2.AgentMode.Name(mode),
+                auto_mode_capability=capability,
+            )
+        return engaged
 
     def _extract_trace_output(self, state: dict | None) -> str | None:
         """Extract the final response content from ui_chat_log for LangSmith tracing.

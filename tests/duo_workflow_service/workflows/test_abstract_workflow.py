@@ -71,7 +71,7 @@ from duo_workflow_service.workflows.type_definitions import (
     AIO_CANCEL_INFRA_STOP_WORKFLOW_REQUEST,
     AIO_CANCEL_STOP_WORKFLOW_REQUEST,
 )
-from lib.context import client_capabilities, client_type, gitlab_version
+from lib.context import agent_mode, client_capabilities, client_type, gitlab_version
 from lib.events import GLReportingEventContext
 from lib.feature_flags.context import current_feature_flag_context
 from lib.internal_events import InternalEventAdditionalProperties
@@ -5053,18 +5053,27 @@ def test_outbox_matches_http_responses_by_id_only_on_governed_versions(gate):
 
 
 @contextlib.contextmanager
-def _client_capabilities(capabilities, gl_version="19.6.0"):
+def _client_capabilities(
+    capabilities, gl_version="19.6.0", mode=contract_pb2.AGENT_MODE_UNSPECIFIED
+):
     caps_token = client_capabilities.set(set(capabilities))
     version_token = gitlab_version.set(gl_version)
+    mode_token = agent_mode.set(mode)
     try:
         yield
     finally:
         client_capabilities.reset(caps_token)
         gitlab_version.reset(version_token)
+        agent_mode.reset(mode_token)
 
 
 async def _run_with_promotion(
-    claim, workflow_config, capabilities, can_ask=True, gl_version="19.6.0"
+    claim,
+    workflow_config,
+    capabilities,
+    can_ask=True,
+    gl_version="19.6.0",
+    mode=contract_pb2.AGENT_MODE_UNSPECIFIED,
 ):
     """Run the graph on an auto mode turn and return what ToolsRegistry.configure received and the workflow."""
     workflow_config["allow_agent_to_request_user"] = can_ask
@@ -5076,7 +5085,7 @@ async def _run_with_promotion(
         ),
     )
     with (
-        _client_capabilities(capabilities, gl_version),
+        _client_capabilities(capabilities, gl_version, mode),
         patch(
             "duo_workflow_service.workflows.abstract_workflow.convert_mcp_tools_to_configs"
         ),
@@ -5135,6 +5144,83 @@ async def test_promote_applies_only_on_an_auto_mode_turn_that_can_prompt(
     )
 
     assert kwargs["promoted_tools"] == expected
+
+
+_PROMOTED = ["create_file_with_contents", "edit_file"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    ("mode", "capabilities", "expected"),
+    [
+        # Field only: client sends agent_mode but not the capability.
+        (contract_pb2.AGENT_MODE_AUTO, [], _PROMOTED),
+        # Capability only: a client released before the field, or a Workhorse that drops it.
+        (contract_pb2.AGENT_MODE_UNSPECIFIED, ["auto_mode"], _PROMOTED),
+        # Both, as a current client sends them.
+        (contract_pb2.AGENT_MODE_AUTO, ["auto_mode"], _PROMOTED),
+        # Neither.
+        (contract_pb2.AGENT_MODE_UNSPECIFIED, [], []),
+        # A known mode other than auto never promotes, with or without the capability.
+        (contract_pb2.AGENT_MODE_BUILD, ["auto_mode"], []),
+        (contract_pb2.AGENT_MODE_PLAN, ["auto_mode"], []),
+        (contract_pb2.AGENT_MODE_BUILD, [], []),
+        # A mode this build does not know falls back to the capability.
+        (99, ["auto_mode"], _PROMOTED),
+        (99, [], []),
+    ],
+)
+async def test_promote_reads_agent_mode_before_the_auto_mode_capability(
+    workflow_config, mode, capabilities, expected
+):
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(_PROMOTE_CLAIM), workflow_config, capabilities, mode=mode
+    )
+
+    assert kwargs["promoted_tools"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+@pytest.mark.parametrize(
+    ("mode", "capabilities", "logged"),
+    [
+        (contract_pb2.AGENT_MODE_BUILD, ["auto_mode"], True),
+        (contract_pb2.AGENT_MODE_AUTO, [], False),
+        (contract_pb2.AGENT_MODE_AUTO, ["auto_mode"], False),
+        (contract_pb2.AGENT_MODE_BUILD, [], False),
+    ],
+)
+async def test_agent_mode_logs_only_a_capability_that_claims_auto_against_it(
+    workflow_config, mode, capabilities, logged
+):
+    with capture_logs() as logs:
+        await _run_with_promotion(
+            json.dumps(_PROMOTE_CLAIM), workflow_config, capabilities, mode=mode
+        )
+
+    messages = [entry["event"] for entry in logs]
+    assert (
+        "agent_mode and the auto_mode capability disagree, using agent_mode" in messages
+    ) is logged
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("mock_fetch_workflow_and_container_data")
+async def test_promote_with_agent_mode_works_on_a_gitlab_before_capabilities(
+    workflow_config,
+):
+    """Only a Workhorse that knows the field forwards it, so the 18.7 capability guard does not apply."""
+    kwargs, _ = await _run_with_promotion(
+        json.dumps(_PROMOTE_CLAIM),
+        workflow_config,
+        [],
+        gl_version="18.6.0",
+        mode=contract_pb2.AGENT_MODE_AUTO,
+    )
+
+    assert kwargs["promoted_tools"] == _PROMOTED
 
 
 @pytest.mark.asyncio

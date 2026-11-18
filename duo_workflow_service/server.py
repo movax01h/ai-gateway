@@ -174,7 +174,7 @@ from lib.billing_events.validation import (
     validate_billing_event_context,
 )
 from lib.container_wiring import wire_and_validate
-from lib.context import client_capabilities, language_server_version
+from lib.context import agent_mode, client_capabilities, language_server_version
 from lib.context.model import (
     current_model_metadata_context,
     current_model_metadata_with_size_context,
@@ -791,6 +791,7 @@ class DuoWorkflowService(contract_pb2_grpc.DuoWorkflowServicer):
         monitoring_context.workflow_definition = start_req.workflowDefinition
 
         client_capabilities.set(set(start_req.clientCapabilities))
+        agent_mode.set(start_req.agent_mode)
 
         try:
             flow_request = normalize_flow_request(
