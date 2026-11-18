@@ -5,12 +5,15 @@ from unittest.mock import patch
 
 import pytest
 from langchain_core.tools import ToolException
+from pydantic import ValidationError
 
 from duo_workflow_service.components.tools_registry import _READ_ONLY_FILE_TOOLS
 from duo_workflow_service.security.tool_output_security import ToolTrustLevel
 from duo_workflow_service.tools.git_history import (
     _LOG_FIELDS,
+    _MAX_COMMITS,
     _MAX_FILES_PER_COMMIT,
+    _MAX_PICKAXE_LENGTH,
     _SPLICE_FLOOR_BYTES,
     ListLocalCommits,
     ListLocalCommitsInput,
@@ -87,6 +90,8 @@ def _subcommand_index(argv: List[str]) -> int:
     return index
 
 
+SECRET = "AWS_SECRET=hunter2"
+
 _RAISE = object()
 
 
@@ -153,6 +158,15 @@ def responses(**overrides: str) -> Dict[str, str]:
     return base
 
 
+@pytest.fixture(autouse=True)
+def _timeout_capable_client():
+    """Tests exercise an executor that accepts a timeout unless they say otherwise."""
+    with patch(
+        "duo_workflow_service.tools.git_history.is_client_capable", return_value=True
+    ):
+        yield
+
+
 async def run(tool_cls, fake: FakeGit, project: Optional[dict] = None, **kwargs) -> str:
     tool = tool_cls(metadata={"project": project})
     with patch(
@@ -182,6 +196,7 @@ class TestReadOnlyGuarantee:
         ("tool_cls", "kwargs"),
         [
             (ListLocalCommits, {"path": "app/a.rb", "include_changed_files": True}),
+            (ListLocalCommits, {"contains_change": "token", "ref": "main"}),
         ],
     )
     async def test_no_argument_shape_emits_a_writing_command(self, tool_cls, kwargs):
@@ -214,6 +229,27 @@ class TestArgumentInjection:
             (ListLocalCommits, {"path": "../../etc/passwd"}, "path traversal"),
             (ListLocalCommits, {"path": ".env"}, "Duo Context Exclusion"),
             (ListLocalCommits, {"path": ".git/config"}, "Duo Context Exclusion"),
+            (ListLocalCommits, {"contains_change": ""}, "must not be empty"),
+            (
+                ListLocalCommits,
+                {"contains_change": "x" * (_MAX_PICKAXE_LENGTH + 1)},
+                "at most 200 characters",
+            ),
+            (
+                ListLocalCommits,
+                {"contains_change": "token\x00"},
+                "cannot contain control characters",
+            ),
+            (
+                ListLocalCommits,
+                {"contains_change": "token\n"},
+                "fragment of a single line",
+            ),
+            (
+                ListLocalCommits,
+                {"contains_change": "token\x7f"},
+                "cannot contain control characters",
+            ),
         ],
     )
     async def test_a_rejected_argument_dispatches_nothing(
@@ -225,6 +261,32 @@ class TestArgumentInjection:
             await run(tool_cls, fake, **kwargs)
 
         assert fake.argvs == []
+
+    @pytest.mark.asyncio
+    async def test_a_pickaxe_is_refused_on_a_client_without_timeouts(self):
+        """`-n` caps results, not work; without a timeout a rare string walks the whole history unbounded, and a
+        pathspec narrows the diffs git computes, not the commits it walks."""
+        fake = FakeGit(responses())
+
+        with patch(
+            "duo_workflow_service.tools.git_history.is_client_capable",
+            return_value=False,
+        ):
+            with pytest.raises(ToolException, match="Update the client"):
+                await run(ListLocalCommits, fake, contains_change="token")
+            with pytest.raises(ToolException, match="Update the client"):
+                await run(ListLocalCommits, fake, contains_change="token", path="app")
+            await run(ListLocalCommits, fake)
+
+        assert len([a for a in fake.argvs if "log" in a]) == 1
+
+    @pytest.mark.asyncio
+    async def test_an_indented_fragment_is_searched_as_pasted(self):
+        fake = FakeGit(responses())
+
+        await run(ListLocalCommits, fake, contains_change="\tvalidate_token")
+
+        assert "-S\tvalidate_token" in fake.argv_for("log")
 
 
 class TestArgvShape:
@@ -316,6 +378,24 @@ class TestShallowClones:
         assert "A app/a.rb" not in result
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("shallow", [True, False], ids=["shallow", "full"])
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{}, {"contains_change": "needle"}],
+        ids=["plain listing", "pickaxe"],
+    )
+    async def test_only_a_shallow_clone_turns_the_root_diff_off(self, shallow, kwargs):
+        """At a graft git diffs against nothing, so the graft matches any pickaxe and lists the whole tree; a true root
+        in a full clone is where a string began and must keep matching."""
+        fake = FakeGit(responses(**{"rev-parse": rev_parse(shallow=shallow)}))
+
+        await run(ListLocalCommits, fake, **kwargs)
+
+        argv = fake.argv_for("log")
+        assert (argv[:2] == ["-c", "log.showRoot=false"]) is shallow
+        assert argv[_subcommand_index(argv)] == "log"
+
+    @pytest.mark.asyncio
     async def test_a_root_commit_in_a_full_clone_keeps_its_files(self):
         raw = log_record(
             "aaaaaaaaaaaa", "2026-09-08", "Ada", "root", parents=""
@@ -346,6 +426,249 @@ class TestShallowClones:
         result = await run(ListLocalCommits, fake, limit=5)
 
         assert "history_may_be_incomplete" not in result
+
+    @pytest.mark.asyncio
+    async def test_an_empty_pickaxe_on_a_shallow_clone_refuses_to_answer(self):
+        """A missing commit and a grafted-away commit are different answers, and only the first would be acted on."""
+        fake = FakeGit(responses(**{"rev-parse": rev_parse(shallow=True), "log": ""}))
+
+        result = await run(ListLocalCommits, fake, contains_change="guard_token")
+
+        assert "<history_may_be_incomplete>" in result
+        assert "not proof the string never existed" in result
+        assert "provenance of that line as unknown" in result
+
+    @pytest.mark.asyncio
+    async def test_an_empty_pickaxe_on_a_full_clone_is_an_answer(self):
+        fake = FakeGit(responses(**{"log": ""}))
+
+        result = await run(ListLocalCommits, fake, contains_change="guard_token")
+
+        assert 'count="0"' in result
+        assert "<history_may_be_incomplete>" not in result
+
+
+class TestPickaxeExclusions:
+    @pytest.mark.asyncio
+    async def test_a_project_policy_exclusion_also_withholds_a_match(self):
+        """The denylist is covered against real git; this is the other exclusion source."""
+        raw = log_record("aaaaaaaaaaaa", "2026-09-08", "Ada", "add key") + name_status(
+            "A", "secrets/keys.yml"
+        )
+        fake = FakeGit(responses(**{"log": raw}))
+
+        result = await run(
+            ListLocalCommits,
+            fake,
+            project={"exclusion_rules": ["secrets/*"]},
+            contains_change="BEGIN PRIVATE KEY",
+        )
+
+        assert 'count="0"' in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "entry",
+        [("R100", ".env", "config.txt"), ("R100", "config.txt", ".env")],
+        ids=["excluded source", "excluded destination"],
+    )
+    async def test_a_rename_with_one_excluded_endpoint_is_withheld_whole(self, entry):
+        """Checking only the destination would confirm the string by where a denylisted file was renamed to."""
+        raw = log_record("aaaaaaaaaaaa", "2026-09-08", "Ada", "move") + name_status(
+            *entry
+        )
+
+        hit = await run(
+            ListLocalCommits, FakeGit(responses(log=raw)), contains_change="token"
+        )
+        miss = await run(
+            ListLocalCommits, FakeGit(responses(log="")), contains_change="token"
+        )
+
+        assert hit == miss
+        assert 'count="0"' in hit
+
+    @pytest.mark.asyncio
+    async def test_an_older_reviewable_match_survives_newer_excluded_ones(self):
+        """Git applies `-n` before the filter, so fetching only `limit` would drop the newest excluded matches and never
+        reach a real one behind them."""
+        raw = (
+            "".join(
+                log_record(f"{i:012x}", "2026-09-08", "Ada", "secret churn")
+                + name_status("M", ".env")
+                for i in range(5)
+            )
+            + log_record("aaaaaaaaaaaa", "2026-01-01", "Bo", "real match")
+            + name_status("M", "app/a.rb")
+        )
+        fake = FakeGit(responses(**{"log": raw}))
+
+        result = await run(ListLocalCommits, fake, contains_change="token", limit=2)
+
+        assert "real match" in result
+        assert ".env" not in result
+        assert 'count="1"' in result
+
+    @pytest.mark.asyncio
+    async def test_a_truncated_pickaxe_fails_closed(self):
+        """The filter reads each commit's file list, and a splice can land inside one, so an excluded path in the cut
+        part would be invisible and let the commit through."""
+        raw = executor_sized(
+            log_record("aaaaaaaaaaaa", "2026-09-08", "Ada", "mass rename")
+            + name_status("M", "app/a.rb")
+            + f"\n{_MARKER}\n"
+        )
+        fake = FakeGit(responses(**{"log": raw}))
+
+        result = await run(ListLocalCommits, fake, contains_change="secret")
+
+        assert "mass rename" not in result
+        assert 'count="0"' in result
+        assert "not proof the string never existed" in result
+        assert "too large to return is dropped whole" in result
+        assert "cut the middle out of this output" not in result
+
+    @pytest.mark.asyncio
+    async def test_a_truncated_page_of_excluded_hits_reads_like_a_miss(self):
+        """The truncation notice is computed before the filter, so on its own it would say the excluded matches were
+        many."""
+        hit_raw = executor_sized(
+            log_record("aaaaaaaaaaaa", "2026-09-08", "Ada", "rotate")
+            + name_status("M", ".env")
+            + f"\n{_MARKER}\n"
+        )
+        hit = await run(
+            ListLocalCommits, FakeGit(responses(log=hit_raw)), contains_change="token"
+        )
+        miss = await run(
+            ListLocalCommits, FakeGit(responses(log="")), contains_change="token"
+        )
+
+        assert hit == miss
+
+    @pytest.mark.asyncio
+    async def test_a_shallow_full_page_of_excluded_hits_reads_like_a_miss(self):
+        """`seen` reaching the fetch cap would otherwise drop the shallow banner only for a string with many excluded
+        matches."""
+        hit_raw = "".join(
+            log_record(f"{i:012x}", "2026-09-08", "Ada", "rotate")
+            + name_status("M", ".env")
+            for i in range(_MAX_COMMITS)
+        )
+        hit = await run(
+            ListLocalCommits,
+            FakeGit(responses(log=hit_raw, **{"rev-parse": rev_parse(shallow=True)})),
+            contains_change="token",
+        )
+        miss = await run(
+            ListLocalCommits,
+            FakeGit(responses(log="", **{"rev-parse": rev_parse(shallow=True)})),
+            contains_change="token",
+        )
+
+        assert hit == miss
+        assert "<history_may_be_incomplete>" in hit
+
+    @pytest.mark.asyncio
+    async def test_a_truncated_plain_listing_still_returns_its_commits(self):
+        """Failing closed is specific to the pickaxe; a plain listing leaks nothing, so dropping its results would be a
+        regression for no gain."""
+        raw = executor_sized(
+            log_record("aaaaaaaaaaaa", "2026-09-08", "Ada", "mass rename")
+            + name_status("M", "app/a.rb")
+            + f"\n{_MARKER}\n"
+        )
+        fake = FakeGit(responses(**{"log": raw}))
+
+        result = await run(ListLocalCommits, fake, limit=5)
+
+        assert "mass rename" in result
+        assert "cut the middle out of this output" in result
+
+    @pytest.mark.asyncio
+    async def test_a_pickaxe_over_fetches_so_the_filter_has_room(self):
+        fake = FakeGit(responses())
+
+        await run(ListLocalCommits, fake, contains_change="token", limit=2)
+
+        assert f"-n{_MAX_COMMITS}" in fake.argv_for("log")
+
+    @pytest.mark.asyncio
+    async def test_a_plain_listing_does_not_over_fetch(self):
+        """Nothing is filtered without a pickaxe, so the extra walk would buy nothing."""
+        fake = FakeGit(responses())
+
+        await run(ListLocalCommits, fake, limit=2)
+
+        assert "-n2" in fake.argv_for("log")
+
+    @pytest.mark.asyncio
+    async def test_the_rendered_list_still_honours_the_requested_limit(self):
+        raw = "".join(
+            log_record(f"{i:012x}", "2026-09-08", "Ada", f"c{i}")
+            + name_status("M", "app/a.rb")
+            for i in range(5)
+        )
+        fake = FakeGit(responses(**{"log": raw}))
+
+        result = await run(ListLocalCommits, fake, contains_change="token", limit=2)
+
+        assert 'count="2"' in result
+
+    @pytest.mark.asyncio
+    async def test_an_empty_pickaxe_never_claims_the_string_never_existed(self):
+        """Absence can mean filtered or grafted away, and the wording must not reveal
+        which -- that would confirm the search string."""
+        fake = FakeGit(responses(**{"log": ""}))
+
+        result = await run(ListLocalCommits, fake, contains_change="AWS_SECRET=x")
+
+        assert "not proof the string never existed" in result
+        assert "excluded" in result
+        assert "withheld" not in result
+
+    @pytest.mark.asyncio
+    async def test_the_empty_wording_is_identical_whether_or_not_anything_filtered(
+        self,
+    ):
+        """The oracle is closed only if these two answers are indistinguishable."""
+        filtered = FakeGit(
+            responses(
+                **{
+                    "log": log_record("aaaaaaaaaaaa", "2026-01-01", "A", "x")
+                    + name_status("M", ".env")
+                }
+            )
+        )
+        nothing = FakeGit(responses(**{"log": ""}))
+
+        a = await run(ListLocalCommits, filtered, contains_change="secret")
+        b = await run(ListLocalCommits, nothing, contains_change="secret")
+
+        assert a == b
+
+    @pytest.mark.asyncio
+    async def test_a_pickaxe_asks_for_the_file_list_even_when_not_rendering_it(self):
+        """The paths are what the filter reads, so they are fetched regardless."""
+        fake = FakeGit(responses())
+
+        await run(ListLocalCommits, fake, contains_change="token")
+
+        argv = fake.argv_for("log")
+        assert "--name-status" in argv
+        assert "--diff-merges=first-parent" in argv
+
+    @pytest.mark.asyncio
+    async def test_a_pickaxe_does_not_render_files_unless_asked(self):
+        raw = log_record("aaaaaaaaaaaa", "2026-09-08", "Ada", "x") + name_status(
+            "M", "app/a.rb"
+        )
+        fake = FakeGit(responses(**{"log": raw}))
+
+        result = await run(ListLocalCommits, fake, contains_change="token")
+
+        assert 'count="1"' in result
+        assert "M app/a.rb" not in result
 
 
 class TestWorkspaceBoundary:
@@ -385,10 +708,15 @@ class TestWorkspaceBoundary:
         assert fake.argv_for("log")[-1] == ":(top,literal)app/a.rb"
 
 
-def _git(cwd: Path, *argv: str) -> None:
-    subprocess.run(
-        ["git", *argv], cwd=cwd, check=True, capture_output=True, env=_GIT_ENV
-    )
+def _git(cwd: Path, *argv: str) -> str:
+    return subprocess.run(
+        ["git", *argv],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        env=_GIT_ENV,
+        text=True,
+    ).stdout
 
 
 def _commit(repo: Path, message: str) -> None:
@@ -425,9 +753,9 @@ def _executor_in(cwd: Path, argvs: List[List[str]]):
     return execute
 
 
-async def _list_from(cwd: Path, **kwargs) -> tuple[str, List[List[str]]]:
+async def _run_real(tool_cls, cwd: Path, **kwargs) -> tuple[str, List[List[str]]]:
     argvs: List[List[str]] = []
-    tool = ListLocalCommits(metadata={"project": None})
+    tool = tool_cls(metadata={"project": None})
     with patch(
         "duo_workflow_service.tools.read_only_git._execute_action",
         side_effect=_executor_in(cwd, argvs),
@@ -486,7 +814,7 @@ class TestRepositoryDiscovery:
         workspace = make_workspace(home)
 
         with pytest.raises(ToolException) as excinfo:
-            await _list_from(workspace)
+            await _run_real(ListLocalCommits, workspace)
 
         assert str(excinfo.value) == _UNTRACKED_WORKSPACE_MESSAGE
         assert "hunter2" not in str(excinfo.value)
@@ -518,8 +846,8 @@ class TestRepositoryDiscovery:
         (sub / "file.rb").write_text("puts 1\n")
         _commit(home, "feat: sub")
 
-        from_root, _ = await _list_from(home, path="sub/file.rb")
-        from_sub, _ = await _list_from(sub, path="sub/file.rb")
+        from_root, _ = await _run_real(ListLocalCommits, home, path="sub/file.rb")
+        from_sub, _ = await _run_real(ListLocalCommits, sub, path="sub/file.rb")
 
         assert "feat: sub" in from_sub
         assert from_sub == from_root
@@ -531,7 +859,7 @@ class TestRepositoryDiscovery:
         (nested / "app.rb").write_text("puts 2\n")
         _commit(nested, "feat: nested only")
 
-        result, _ = await _list_from(nested)
+        result, _ = await _run_real(ListLocalCommits, nested)
 
         assert "feat: nested only" in result
         assert "hunter2" not in result
@@ -571,8 +899,12 @@ class TestShallowClonesWithRealGit:
         shallow = tmp_path / "shallow"
         _git(tmp_path, "clone", "-q", "--depth=2", f"file://{repo}", str(shallow))
 
-        cut, _ = await _list_from(shallow, include_changed_files=True, limit=3)
-        full, _ = await _list_from(repo, include_changed_files=True, limit=3)
+        cut, _ = await _run_real(
+            ListLocalCommits, shallow, include_changed_files=True, limit=3
+        )
+        full, _ = await _run_real(
+            ListLocalCommits, repo, include_changed_files=True, limit=3
+        )
 
         assert 'count="3"' in cut
         assert "<history_may_be_incomplete>" in cut
@@ -602,8 +934,8 @@ class TestCaseSensitivity:
         (repo / "app" / "a.rb").write_text("puts 1\n")
         _commit(repo, "feat: a")
 
-        exact, _ = await _list_from(repo, path="app/a.rb")
-        aliased, _ = await _list_from(repo, path="App/A.rb")
+        exact, _ = await _run_real(ListLocalCommits, repo, path="app/a.rb")
+        aliased, _ = await _run_real(ListLocalCommits, repo, path="App/A.rb")
 
         assert "feat: a" in exact
         assert 'count="0"' in aliased
@@ -1146,6 +1478,16 @@ class TestToolSelection:
 
 
 class TestDisplayMessages:
+    @pytest.mark.parametrize(
+        "value", ["", "x" * (_MAX_PICKAXE_LENGTH + 1), "token\n", "token\x7f"]
+    )
+    def test_the_schema_rejects_what_execute_would_so_the_display_never_sees_it(
+        self, value
+    ):
+        """The display message is built from the parsed schema, so a cap only in `_execute` leaves it unguarded."""
+        with pytest.raises(ValidationError):
+            ListLocalCommitsInput(contains_change=value)
+
     def test_history_display_names_its_scope(self):
         tool = ListLocalCommits(metadata={})
 
@@ -1153,3 +1495,195 @@ class TestDisplayMessages:
             tool.format_display_message(ListLocalCommitsInput(path="app/a.rb"))
             == "List local commit history for app/a.rb"
         )
+        assert (
+            tool.format_display_message(ListLocalCommitsInput(contains_change="tok"))
+            == "Find local commits changing 'tok'"
+        )
+
+
+@pytest.fixture(name="repo")
+def repo_fixture(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", ".")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    return repo
+
+
+@pytest.mark.asyncio
+async def test_a_pickaxe_cannot_confirm_a_secret_in_an_excluded_file(repo: Path):
+    """`-S` matches a substring, so probing prefixes walks a secret out one character at a time.
+
+    A commit touching only excluded paths must therefore never surface, and a correct guess must be indistinguishable
+    from a wrong one.
+    """
+    (repo / ".env").write_text(f"{SECRET}\n")
+    (repo / "app.rb").write_text("puts 1\n")
+    _commit(repo, "add env and app")
+
+    hit, _ = await _run_real(ListLocalCommits, repo, contains_change=SECRET)
+    prefix, _ = await _run_real(ListLocalCommits, repo, contains_change=SECRET[:-1])
+    miss, _ = await _run_real(ListLocalCommits, repo, contains_change="AWS_SECRET=zzz")
+
+    assert 'count="0"' in hit
+    # The oracle is closed only if a correct prefix looks exactly like a wrong guess.
+    assert 'count="0"' in prefix
+    assert 'count="0"' in miss
+
+
+@pytest.mark.asyncio
+async def test_a_subject_forging_a_record_cannot_reopen_the_oracle(repo: Path):
+    """A subject carrying the old record separator used to produce a chunk the parser took for a commit, and that chunk
+    took the real commit's file list -- so the real commit, which touched `.env`, passed the exclusion filter.
+
+    Every separator in the format is a NUL now, which a commit message cannot carry.
+    """
+    (repo / ".env").write_text(f"{SECRET}\n")
+    (repo / "app.rb").write_text("x\n")
+    _git(repo, "add", "-A")
+    forged = "real commit\x1eabcdef123456\x1f2026-01-01\x1fMallory\x1fforged subject"
+    _git(repo, "commit", "-qm", forged)
+
+    hit, _ = await _run_real(ListLocalCommits, repo, contains_change=SECRET)
+    miss, _ = await _run_real(ListLocalCommits, repo, contains_change="AWS_SECRET=zzz")
+
+    assert 'count="0"' in hit
+    # Identical apart from the echoed query: the wording must not vary with the data.
+    assert hit.replace(SECRET, "?") == miss.replace("AWS_SECRET=zzz", "?")
+
+
+@pytest.mark.asyncio
+async def test_a_path_scoped_pickaxe_is_withheld_across_a_rename_from_an_excluded_file(
+    repo: Path,
+):
+    """`--follow` rewrites the pathspec mid-walk: searched through `config.rb`, the match is in the commit that added
+    `.env`, and git reports it under that name.
+
+    The filter sees the excluded path and the commit is withheld; the same walk through a reviewable rename proves
+    `--follow` did cross it.
+    """
+    (repo / ".env").write_text(f"{SECRET}\n")
+    (repo / "app.rb").write_text("validate_token(x)\n")
+    _commit(repo, "add env and app")
+    _git(repo, "mv", ".env", "config.rb")
+    _git(repo, "mv", "app.rb", "lib.rb")
+    _commit(repo, "rename both")
+
+    hit, _ = await _run_real(
+        ListLocalCommits, repo, contains_change=SECRET, path="config.rb"
+    )
+    miss, _ = await _run_real(
+        ListLocalCommits, repo, contains_change="AWS_SECRET=zzz", path="config.rb"
+    )
+    control, _ = await _run_real(
+        ListLocalCommits, repo, contains_change="validate_token", path="lib.rb"
+    )
+
+    assert 'count="0"' in hit
+    assert hit.replace(SECRET, "?") == miss.replace("AWS_SECRET=zzz", "?")
+    assert 'count="1"' in control
+    assert "add env and app" in control
+
+
+@pytest.mark.asyncio
+async def test_a_pickaxe_never_matches_the_graft(repo: Path, tmp_path: Path):
+    """At the boundary git diffs the graft against nothing, so `-S` would match it for a string an older commit
+    introduced, and its entry would list a tree large enough to overflow the page and take the real hit with it.
+
+    The hit in the complete commit survives; the full clone names the commit the string began in.
+    """
+    for index in range(1200):
+        (repo / f"lib/generated/module_{index:04d}").mkdir(parents=True)
+        (repo / f"lib/generated/module_{index:04d}/implementation.rb").write_text("x\n")
+    (repo / "a.rb").write_text("needle\n")
+    _commit(repo, "introduce needle")
+    (repo / "b.rb").write_text("needle again\n")
+    _commit(repo, "reuse needle")
+    shallow = tmp_path / "shallow"
+    _git(tmp_path, "clone", "-q", "--depth=2", f"file://{repo}", str(shallow))
+    graft_entry = _git(
+        shallow, "log", "--name-status", "--pickaxe-all", "-Sneedle", "HEAD~1"
+    )
+
+    cut, _ = await _run_real(ListLocalCommits, shallow, contains_change="needle")
+    full, _ = await _run_real(ListLocalCommits, repo, contains_change="needle")
+
+    assert len(graft_entry.encode()) > _SPLICE_FLOOR_BYTES
+    assert 'count="1"' in cut
+    assert "reuse needle" in cut
+    assert "introduce needle" not in cut
+    assert "<history_may_be_incomplete>" in cut
+    assert 'count="2"' in full
+    assert "introduce needle" in full
+
+
+@pytest.mark.asyncio
+async def test_a_pickaxe_still_finds_a_match_in_a_reviewable_file(repo: Path):
+    """The filter must not swallow the feature."""
+    (repo / "app.rb").write_text("validate_token(x)\n")
+    _commit(repo, "add validation")
+
+    result, _ = await _run_real(
+        ListLocalCommits, repo, contains_change="validate_token"
+    )
+
+    assert 'count="1"' in result
+    assert "add validation" in result
+
+
+@pytest.mark.asyncio
+async def test_a_commit_touching_both_is_withheld(repo: Path):
+    """Which file the string matched in is unknowable from the output, so a mixed commit is dropped too -- the same all-
+    or-nothing posture as rename endpoints."""
+    (repo / ".env").write_text(f"{SECRET}\n")
+    (repo / "app.rb").write_text(f"# {SECRET}\n")
+    _commit(repo, "add both")
+
+    result, _ = await _run_real(ListLocalCommits, repo, contains_change=SECRET)
+
+    assert 'count="0"' in result
+
+
+@pytest.mark.asyncio
+async def test_a_mixed_commit_is_withheld_when_only_the_reviewable_file_matches(
+    repo: Path,
+):
+    """Without --pickaxe-all git lists only the matching file, so the filter would never see `.env` here and the
+    commit's presence would say whether the excluded diff also holds the string."""
+    (repo / ".env").write_text("unrelated\n")
+    (repo / "app.rb").write_text("validate_token(x)\n")
+    _commit(repo, "add both")
+
+    result, argvs = await _run_real(
+        ListLocalCommits, repo, contains_change="validate_token"
+    )
+
+    assert any("--pickaxe-all" in argv for argv in argvs)
+    assert 'count="0"' in result
+
+
+@pytest.mark.asyncio
+async def test_a_merge_commit_pickaxe_lists_files_and_never_a_patch(repo: Path):
+    """`--diff-merges=first-parent` implies `-p`; only its pairing with `--name-status` keeps a merge's patch out of the
+    listing, so the pairing is pinned here against real git."""
+    (repo / "a.rb").write_text("base\n")
+    _git(repo, "add", "a.rb")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "checkout", "-qb", "side")
+    (repo / "b.rb").write_text("needle\n")
+    _git(repo, "add", "b.rb")
+    _git(repo, "commit", "-qm", "side")
+    _git(repo, "checkout", "-q", "-")
+    (repo / "a.rb").write_text("base\nmore\n")
+    _git(repo, "commit", "-qam", "main moves on")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+
+    result, _ = await _run_real(
+        ListLocalCommits, repo, contains_change="needle", include_changed_files=True
+    )
+
+    assert "merge side" in result
+    assert "A b.rb" in result
+    assert "diff --git" not in result
+    assert "+needle" not in result

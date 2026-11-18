@@ -21,12 +21,13 @@ import re
 from typing import Any, ClassVar, List, Optional, Tuple, Type
 
 from langchain_core.tools import ToolException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from duo_workflow_service.bl_security.executor_output import (
     executor_truncated,
     strip_size_limit_notice,
 )
+from duo_workflow_service.client_capabilities import is_client_capable
 from duo_workflow_service.policies.diff_exclusion_policy import DiffExclusionPolicy
 from duo_workflow_service.tools.read_only_git import (
     DIFF_FLAGS,
@@ -34,6 +35,7 @@ from duo_workflow_service.tools.read_only_git import (
     ReadOnlyGitTool,
     exclusion_reason,
     literal_pathspec,
+    path_is_excluded,
     validate_repo_path,
 )
 
@@ -42,6 +44,9 @@ __all__ = [
 ]
 
 _MAX_COMMITS = 100
+_MAX_PICKAXE_LENGTH = 200
+# Tab stays: indented code is the normal thing to paste. A NUL would never reach git.
+_CONTROL_CHARACTER_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
 
 
 _MAX_FILES_PER_COMMIT = 20
@@ -89,7 +94,11 @@ _SHALLOW_BANNER = (
     "from this result may still exist; absence here is not evidence.\n"
     "</history_may_be_incomplete>"
 )
-# At a graft git has no parent to diff against and lists the whole tree as added.
+# At a graft git has no parent to diff against, so it lists the whole tree as added and
+# matches a pickaxe for any string in it: a false origin whose entry alone can overflow
+# the page. Turning the root diff off leaves the commit listed with no diff at all. Only
+# on a shallow clone: a true root is where a string began.
+_SHALLOW_LOG_CONFIG = ("log.showRoot=false",)
 _GRAFT_NOTE = (
     "(at the shallow clone's boundary: its parents are not available, so its file list "
     "would be the whole tree, not what it changed)"
@@ -213,10 +222,21 @@ def _changed_files(changes: List[Change], policy: DiffExclusionPolicy) -> List[s
     return _cap(entries, _MAX_FILES_PER_COMMIT)
 
 
+def _touches_excluded(changes: List[Change], policy: DiffExclusionPolicy) -> bool:
+    """Whether any path a commit changed is denylisted or policy-excluded.
+
+    Both endpoints of a rename count: a commit that renames a denylisted file to an
+    innocuous name must be withheld whole, or the search string is confirmed by its
+    destination.
+    """
+    return any(path_is_excluded(path, policy) for _, paths in changes for path in paths)
+
+
 def _collect(
     records: List[Record],
     policy: DiffExclusionPolicy,
     include_changed_files: bool,
+    contains_change: Optional[str],
     truncated: bool,
     shallow: bool,
 ) -> Tuple[List[_Commit], bool]:
@@ -233,13 +253,20 @@ def _collect(
         if _spans_splice(fields, changes, truncated) or not SHA_RE.match(short_sha):
             if truncated:
                 break
-            return _collect(records, policy, include_changed_files, True, shallow)
+            return _collect(
+                records, policy, include_changed_files, contains_change, True, shallow
+            )
+        # `-S` matches a substring of the diff, so probing prefixes of a secret walks it
+        # out one character at a time. Dropping every commit that touches an excluded
+        # path closes that: a string that only ever lived in `.env` yields nothing
+        # whether or not the guess was right. Silently, and only here -- saying
+        # "withheld" would confirm the match and rebuild the oracle.
+        if contains_change is not None and _touches_excluded(changes, policy):
+            continue
         changed_files: List[str] = []
         if include_changed_files:
-            if shallow and not parents.split():
-                changed_files = [_GRAFT_NOTE]
-            else:
-                changed_files = _changed_files(changes, policy)
+            graft = shallow and not parents.split()
+            changed_files = [_GRAFT_NOTE] if graft else _changed_files(changes, policy)
         commits.append(
             _Commit(
                 short_sha=short_sha,
@@ -279,6 +306,17 @@ class ListLocalCommitsInput(BaseModel):
         le=_MAX_COMMITS,
         description="Maximum number of commits to return.",
     )
+    contains_change: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=_MAX_PICKAXE_LENGTH,
+        description=(
+            "Return only commits that added or removed this exact string. The way to "
+            "find the commit that introduced or deleted a specific line. Pass `path` as "
+            "well whenever you know roughly where the string lives: unscoped, this "
+            "searches the whole history and is the slowest call in this toolset."
+        ),
+    )
     include_changed_files: bool = Field(
         default=False,
         description=(
@@ -287,13 +325,26 @@ class ListLocalCommitsInput(BaseModel):
         ),
     )
 
+    # The schema is also what the display message is built from, so the constraints
+    # live here and `_execute` repeats them for a caller that bypasses the schema.
+    @field_validator("contains_change")
+    @classmethod
+    def _single_line(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and _CONTROL_CHARACTER_RE.search(value):
+            raise ValueError(
+                "contains_change must be a fragment of a single line and cannot "
+                "contain control characters"
+            )
+        return value
+
 
 class ListLocalCommits(ReadOnlyGitTool):
     name: str = "list_local_commits"
     description: str = (
         "List commits from the local git checkout, newest first, for judging whether "
         "code the change removed or rewrote was load-bearing.\n"
-        "Scope it to the file you are investigating with `path`.\n"
+        "Scope it to the file you are investigating with `path`; use `contains_change` "
+        "to find the commit that introduced or removed a specific line.\n"
         "Reads the checkout on disk, so it sees local commits that were never pushed. "
         "Prefer this over list_commits when reviewing a local checkout; use "
         "list_commits for a project that is not checked out.\n"
@@ -302,7 +353,9 @@ class ListLocalCommits(ReadOnlyGitTool):
         "file move. A moved directory's earlier history is not followed.\n"
         "Examples:\n"
         "- list_local_commits(path='app/models/user.rb')\n"
-        "- list_local_commits(path='app/models/user.rb', include_changed_files=True)"
+        "- list_local_commits(path='app/models/user.rb', include_changed_files=True)\n"
+        "- list_local_commits(contains_change='validate_token', path='app/models/user.rb')\n"
+        "- list_local_commits(contains_change='validate_token')  # whole history, slowest"
     )
     args_schema: Type[BaseModel] = ListLocalCommitsInput
     allowed_git_subcommands: ClassVar[frozenset[str]] = frozenset({"rev-parse", "log"})
@@ -316,29 +369,67 @@ class ListLocalCommits(ReadOnlyGitTool):
                 f"Error: limit must be a whole number, not {kwargs.get('limit')!r}"
             ) from exc
         limit = min(max(limit, 1), _MAX_COMMITS)
+        contains_change = kwargs.get("contains_change")
         include_changed_files = bool(kwargs.get("include_changed_files"))
 
         if path is not None:
             path = validate_repo_path(path, self.project)
 
+        if contains_change is not None:
+            if not contains_change:
+                raise ToolException("Error: contains_change must not be empty")
+            if len(contains_change) > _MAX_PICKAXE_LENGTH:
+                raise ToolException(
+                    f"Error: contains_change must be at most {_MAX_PICKAXE_LENGTH} "
+                    "characters; search for a distinctive fragment of the line"
+                )
+            if _CONTROL_CHARACTER_RE.search(contains_change):
+                raise ToolException(
+                    "Error: contains_change must be a fragment of a single line and "
+                    "cannot contain control characters"
+                )
+            # `-n` caps results, not work: with few matches git walks every commit, a
+            # pathspec narrows the diffs but not the walk, and only a client that accepts
+            # a timeout can stop it.
+            if not is_client_capable("command_timeout"):
+                raise ToolException(
+                    "Error: this client cannot bound a long-running command, and a "
+                    "contains_change search can walk the whole history. Update the "
+                    "client to search history by content."
+                )
+
         resolved, shallow_clone = await self._resolve_commit(kwargs.get("ref"))
 
         argv: List[str] = ["log", *DIFF_FLAGS, "-z", "--date=short", "--abbrev=12"]
         argv.append(_LOG_FORMAT)
-        argv.append(f"-n{limit}")
+        # Over-fetch when results will be filtered, because git applies `-n` before the
+        # exclusion filter below: if the newest matches all touch excluded paths, a
+        # `-n{limit}` fetch yields nothing and an older reviewable match is never seen.
+        # Nearly free for the case that matters -- a rare string makes git walk the whole
+        # history to find even one match, so a larger cap costs no extra walking.
+        fetch_limit = _MAX_COMMITS if contains_change is not None else limit
+        argv.append(f"-n{fetch_limit}")
         if path is not None:
             # --follow takes exactly one pathspec, which is why `path` is not a list.
             argv.append("--follow")
-        if include_changed_files:
+        if include_changed_files or contains_change is not None:
             # Paired deliberately: without _MERGE_FLAG a merge lists no files at all,
             # and without --name-status the same flag dumps every merge's full patch.
+            # Forced for a pickaxe even when the caller wants no file list, because the
+            # paths are what `_touches_excluded` filters on.
             argv.extend(["--name-status", _MERGE_FLAG])
+        if contains_change is not None:
+            # Without --pickaxe-all the file list holds only the matching files, so a
+            # commit touching an excluded file would pass the filter on a reviewable hit.
+            argv.extend(["--pickaxe-all", f"-S{contains_change}"])
         argv.append(resolved)
         argv.append("--")
         if path is not None:
             argv.append(literal_pathspec(path))
 
-        raw = await self._git(*argv)
+        raw = await self._git(
+            *argv, config=_SHALLOW_LOG_CONFIG if shallow_clone else ()
+        )
         # A spliced record loses its leading SHA, so the guard below drops it and the
         # count comes out plausible but short. Reachable with a large `limit` and file
         # lists on a repository whose commits touch many files.
@@ -363,15 +454,34 @@ class ListLocalCommits(ReadOnlyGitTool):
             records,
             DiffExclusionPolicy(self.project),
             include_changed_files,
+            contains_change,
             truncated,
             shallow_clone,
         )
+
+        if contains_change is not None:
+            if truncated:
+                # A splice can land inside a `--name-status` block, hiding an excluded
+                # path from the filter, so the whole page is dropped rather than noticed.
+                commits = []
+            # `truncated` describes git's output before the filter ran, so a notice keyed
+            # on it would tell a correct guess from a wrong one. The empty pickaxe text
+            # names the cause unconditionally instead.
+            truncated = False
+
+        commits = commits[:limit]
 
         # A full page proves nothing: at a graft git goes on filling the page from other
         # branches, so commits behind it that are newer than the last one listed go
         # missing without a shortfall, and with a pathspec the graft itself may be unlisted.
         return self._render(
-            commits, path, resolved, include_changed_files, shallow_clone, truncated
+            commits,
+            path,
+            resolved,
+            contains_change,
+            include_changed_files,
+            shallow_clone,
+            truncated,
         )
 
     def _render(
@@ -379,6 +489,7 @@ class ListLocalCommits(ReadOnlyGitTool):
         commits: List[_Commit],
         path: Optional[str],
         resolved: str,
+        contains_change: Optional[str],
         include_changed_files: bool,
         shallow: bool,
         truncated: bool = False,
@@ -390,11 +501,13 @@ class ListLocalCommits(ReadOnlyGitTool):
             notices.append(_WAS_TRUNCATED)
 
         if not commits:
-            return self._render_empty(path, notices)
+            return self._render_empty(path, contains_change, notices)
 
         attrs = [f'ref="{resolved[:12]}"', f'count="{len(commits)}"']
         if path is not None:
             attrs.insert(1, f'path="{_attr(path)}"')
+        if contains_change is not None:
+            attrs.append(f'contains_change="{_attr(contains_change)}"')
 
         body = "\n".join(commit.render() for commit in commits)
         rendered = (
@@ -412,7 +525,28 @@ class ListLocalCommits(ReadOnlyGitTool):
         return "\n".join([*notices, rendered])
 
     @staticmethod
-    def _render_empty(path: Optional[str], notices: List[str]) -> str:
+    def _render_empty(
+        path: Optional[str], contains_change: Optional[str], notices: List[str]
+    ) -> str:
+        # An empty pickaxe never asserts absence. Three things can hide a real match: a
+        # graft boundary, the exclusion filter, and a page too large to return. The
+        # wording is deliberately the same whichever applied -- saying which would
+        # confirm the search string and hand back the extraction oracle the filter
+        # exists to close.
+        if contains_change is not None:
+            rendered = (
+                f'<git_history count="0">\n'
+                "No commit in the available history adds or removes "
+                f"{_neutralise(contains_change)!r}. That is not proof the string never "
+                "existed: commits touching excluded paths are never reported, the search "
+                "covers a bounded number of commits, and a result too large to return is "
+                "dropped whole; narrowing with `path` helps with the last two. Treat the "
+                "provenance of that line as unknown and say so in any finding that "
+                "depends on it.\n"
+                "</git_history>"
+            )
+            return "\n".join([*notices, rendered])
+
         scope = f" touching {_neutralise(path)!r}" if path else ""
         rendered = (
             f'<git_history count="0">\nNo commits{scope}. If a path was '
@@ -425,5 +559,7 @@ class ListLocalCommits(ReadOnlyGitTool):
     def format_display_message(
         self, args: ListLocalCommitsInput, _tool_response: Any = None
     ) -> str:
+        if args.contains_change:
+            return f"Find local commits changing '{args.contains_change}'"
         target = args.path or "the repository"
         return f"List local commit history for {target}"

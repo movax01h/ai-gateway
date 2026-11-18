@@ -258,6 +258,49 @@ async def test_every_action_carries_the_global_flags_first(probe):
 
 
 @pytest.mark.asyncio
+async def test_a_per_call_setting_sits_between_the_global_flags_and_the_subcommand(
+    probe,
+):
+    recorder = _Recorder()
+
+    with patch(
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
+    ):
+        await probe._git("log", "-n1", config=("log.showRoot=false",))
+
+    assert recorder.argvs == [
+        [
+            *GIT_GLOBAL_FLAGS,
+            "-c",
+            "log.showRoot=false",
+            "log",
+            *DIFF_SAFETY_FLAGS,
+            "-n1",
+        ]
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "setting",
+    ["log.showSignature=true", "DIFF.submodule=diff", "protocol.allow=always"],
+)
+async def test_a_per_call_setting_cannot_override_a_pinned_one(probe, setting):
+    """Git honours the last `-c` for a key, and the per-call ones come last."""
+    recorder = _Recorder()
+
+    with patch(
+        "duo_workflow_service.tools.read_only_git._execute_action",
+        side_effect=recorder,
+    ):
+        with pytest.raises(ToolException, match="undoes a guarantee"):
+            await probe._git("log", "-n1", config=(setting,))
+
+    assert recorder.argvs == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("subcommand", "injected"), [("log", True), ("show", True), ("rev-parse", False)]
 )

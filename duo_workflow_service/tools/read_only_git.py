@@ -12,11 +12,14 @@ flags below are what make that safe, and each one blocks a specific way a checko
 arriving with a poisoned ``.git/config`` could turn a read into arbitrary code
 execution. Do not drop one without replacing the guarantee.
 
-User-supplied text reaches git through exactly two shapes: paths, which are
+User-supplied text reaches git through exactly three shapes: paths, which are
 prefix-checked, denylist-checked and policy-checked, then passed after ``--`` as a
 root-anchored literal pathspec by every call site (asserted per tool, since ``_git``
-cannot tell a path from a SHA); and refs, which ``_resolve_commit`` turns into a 40-hex
-SHA before any other command sees them. Nothing downstream of that is attacker-shaped.
+cannot tell a path from a SHA); refs, which ``_resolve_commit`` turns into a 40-hex
+SHA before any other command sees them; and the pickaxe string, which is capped in
+length, refused if it carries a control character, and attached to its flag as the
+single ``-S<value>`` token, so git can never read it as an option of its own. Nothing
+downstream of that is attacker-shaped.
 
 Git finds its repository by walking up from the executor's directory, so a workspace
 that is not itself a repository would read whichever one encloses it, typically a
@@ -46,7 +49,7 @@ history tools pair with ``--name-status``, needs it anyway.
 """
 
 import re
-from typing import Any, ClassVar, NamedTuple, Optional
+from typing import Any, ClassVar, NamedTuple, Optional, Tuple
 
 from langchain_core.tools import ToolException
 from pydantic import PrivateAttr
@@ -183,6 +186,10 @@ _DIFF_SUBCOMMANDS = frozenset({"log", "show"})
 _GUARANTEE_UNDOING_OPTIONS = frozenset(
     {"--ext-diff", "--textconv", "--output", "--submodule"}
 )
+# A per-call setting rides after the global ones, and git honours the last spelling.
+_PINNED_CONFIG_KEYS = frozenset(
+    flag.partition("=")[0].lower() for flag in GIT_GLOBAL_FLAGS if "=" in flag
+)
 
 DIFF_FLAGS = ("--no-color", "-M")
 
@@ -303,7 +310,8 @@ class ReadOnlyGitTool(DuoBaseTool):
                 f"READ_ONLY_GIT_SUBCOMMANDS: {sorted(escaping)}"
             )
 
-    async def _git(self, *argv: str) -> str:
+    async def _git(self, *argv: str, config: Tuple[str, ...] = ()) -> str:
+        """Run a read-only git *argv*; *config* holds ``key=value`` settings for this call only."""
         if not argv or argv[0] not in self.allowed_git_subcommands:
             raise ToolException(
                 f"Error: git {argv[0] if argv else ''} is not a read-only command "
@@ -322,6 +330,12 @@ class ReadOnlyGitTool(DuoBaseTool):
                     f"Error: {self.name} must not pass git {option!r}; it undoes a "
                     "guarantee of this boundary"
                 )
+        for setting in config:
+            if setting.partition("=")[0].lower() in _PINNED_CONFIG_KEYS:
+                raise ToolException(
+                    f"Error: {self.name} must not set git {setting!r}; it undoes a "
+                    "guarantee of this boundary"
+                )
         if subcommand in _DIFF_SUBCOMMANDS:
             options = [*DIFF_SAFETY_FLAGS, *options]
 
@@ -335,7 +349,7 @@ class ReadOnlyGitTool(DuoBaseTool):
             self.metadata,
             run_command_action(
                 "git",
-                [*GIT_GLOBAL_FLAGS, subcommand, *options],
+                [*GIT_GLOBAL_FLAGS, *_config_flags(config), subcommand, *options],
                 resolve_command_timeout(),
             ),
         )
@@ -373,7 +387,7 @@ class ReadOnlyGitTool(DuoBaseTool):
         self._git_floor_met = True
 
     async def _resolve_commit(self, ref: Optional[str]) -> ResolvedCommit:
-        """Resolve *ref* (or HEAD) to a full SHA, the only place user text reaches git.
+        """Resolve *ref* (or HEAD) to a full SHA, the only place a user-written ref reaches git.
 
         Every other command receives the hex output of this call, so an argument that
         survived ``validate_ref`` still cannot influence a later argv position.
@@ -477,6 +491,10 @@ def _asks_for_signature(option: str) -> bool:
 def _undoes_a_guarantee(option: str) -> bool:
     name = option.partition("=")[0]
     return name in _GUARANTEE_UNDOING_OPTIONS
+
+
+def _config_flags(config: Tuple[str, ...]) -> list[str]:
+    return [token for setting in config for token in ("-c", setting)]
 
 
 def diagnostics(body: str) -> str:
