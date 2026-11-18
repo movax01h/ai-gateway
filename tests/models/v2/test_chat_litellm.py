@@ -3,6 +3,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import litellm
 import pytest
 from langchain_core.callbacks import get_usage_metadata_callback
@@ -23,12 +24,14 @@ from ai_gateway.config import ConfigBedrockGuardrail
 from ai_gateway.models.guardrails import BEDROCK_GUARDRAIL_PROVIDERS
 from ai_gateway.models.v2._model_compat import PREVIOUS_ASSISTANT_CONTEXT_PREFIX
 from ai_gateway.models.v2.chat_litellm import (
+    _TEMPERATURE_REJECTING_MODELS,
     _WEB_SEARCH_UNAVAILABLE_NOTE,
     ChatLiteLLM,
     _drop_unsupported_web_search,
     _force_gpt_5_max_completion_tokens,
     _litellm_maps_reasoning_effort,
     _litellm_maps_web_search,
+    _remember_temperature_rejecting_model,
     _remove_deprecated_temperature_parameters,
     _rewrite_trailing_assistant_prefill,
     litellm_supports_native_web_search,
@@ -1258,6 +1261,211 @@ class TestDeprecatedTemperatureRemoval:
         assert result == "ok"
         super_kwargs = super_call.call_args.kwargs
         assert "temperature" not in super_kwargs
+
+
+class TestDeprecatedTemperatureFallback:
+    """Identifiers that don't name the model fall back to retrying without temperature."""
+
+    MODEL = (
+        "bedrock/converse/arn:aws:bedrock:eu-west-1:123456789012:"
+        "application-inference-profile/abcdef123456"
+    )
+    TEMPERATURE_ERROR = (
+        'BedrockException - {"message":"The model returned the following errors: '
+        '`temperature` is deprecated for this model."}'
+    )
+
+    @pytest.fixture(autouse=True)
+    def _forget_learned_models(self):
+        _TEMPERATURE_REJECTING_MODELS.clear()
+        yield
+        _TEMPERATURE_REJECTING_MODELS.clear()
+
+    @staticmethod
+    def _bad_request(message):
+        return litellm.BadRequestError(
+            message=message,
+            model=TestDeprecatedTemperatureFallback.MODEL,
+            llm_provider="bedrock",
+        )
+
+    async def _call(self, side_effect, **kwargs):
+        chat = ChatLiteLLM(model=self.MODEL, custom_llm_provider="bedrock")
+        with patch.object(
+            _LChatLiteLLM, "acompletion_with_retry", new=AsyncMock()
+        ) as mock_parent:
+            mock_parent.side_effect = side_effect
+            result = await chat.acompletion_with_retry(
+                model=self.MODEL,
+                custom_llm_provider="bedrock",
+                messages=[{"role": "user", "content": "hi"}],
+                **kwargs,
+            )
+        return result, mock_parent
+
+    @pytest.mark.asyncio
+    async def test_retries_without_temperature(self):
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            result, mock_parent = await self._call(
+                [self._bad_request(self.TEMPERATURE_ERROR), "response"],
+                temperature=0.1,
+            )
+
+        assert result == "response"
+        assert mock_parent.call_count == 2
+        assert mock_parent.call_args_list[0].kwargs["temperature"] == 0.1
+        retried = mock_parent.call_args_list[1].kwargs
+        assert "temperature" not in retried
+        assert retried["model"] == self.MODEL
+        assert retried["messages"] == [{"role": "user", "content": "hi"}]
+        mock_log.warning.assert_called_once()
+        assert mock_log.warning.call_args.kwargs["model"] == self.MODEL
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("message", "kwargs"),
+        [
+            pytest.param("prompt is too long", {"temperature": 0.1}, id="other-error"),
+            pytest.param(
+                "temperature: range: 0..1", {"temperature": 5}, id="invalid-temperature"
+            ),
+            pytest.param(TEMPERATURE_ERROR, {}, id="no-temperature"),
+            pytest.param(
+                TEMPERATURE_ERROR, {"temperature": None}, id="temperature-none"
+            ),
+        ],
+    )
+    async def test_reraises(self, message, kwargs):
+        with pytest.raises(litellm.BadRequestError):
+            await self._call([self._bad_request(message)], **kwargs)
+
+    @pytest.mark.asyncio
+    async def test_reraises_when_retry_also_fails(self):
+        with pytest.raises(litellm.BadRequestError):
+            await self._call(
+                [
+                    self._bad_request(self.TEMPERATURE_ERROR),
+                    self._bad_request(self.TEMPERATURE_ERROR),
+                ],
+                temperature=0.1,
+            )
+
+    @pytest.mark.asyncio
+    async def test_later_requests_drop_temperature_up_front(self):
+        await self._call(
+            [self._bad_request(self.TEMPERATURE_ERROR), "first"], temperature=0.1
+        )
+
+        with patch("ai_gateway.models.v2.chat_litellm.log") as mock_log:
+            result, mock_parent = await self._call(["second"], temperature=0.1)
+
+        assert result == "second"
+        mock_parent.assert_called_once()
+        assert "temperature" not in mock_parent.call_args.kwargs
+        mock_log.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_other_models_still_send_temperature(self):
+        await self._call(
+            [self._bad_request(self.TEMPERATURE_ERROR), "first"], temperature=0.1
+        )
+
+        chat = ChatLiteLLM(model="claude-sonnet-4-6", custom_llm_provider="bedrock")
+        with patch.object(
+            _LChatLiteLLM, "acompletion_with_retry", new=AsyncMock(return_value="ok")
+        ) as mock_parent:
+            await chat.acompletion_with_retry(
+                model="claude-sonnet-4-6",
+                custom_llm_provider="bedrock",
+                temperature=0.1,
+            )
+
+        assert mock_parent.call_args.kwargs["temperature"] == 0.1
+
+    def test_learned_models_are_capped(self):
+        with patch(
+            "ai_gateway.models.v2.chat_litellm._TEMPERATURE_REJECTING_MODELS_MAX", 2
+        ):
+            for model in ("a", "b", "c"):
+                _remember_temperature_rejecting_model(model)
+
+        assert _TEMPERATURE_REJECTING_MODELS == {"a", "b"}
+
+
+class TestDeprecatedTemperatureFallbackThroughLiteLLM:
+    """Run real LiteLLM Bedrock code against a fake HTTP layer, with the kwargs a self-hosted Claude prompt sends.
+
+    The prompt registry binds the identifier as `converse/<ARN>` with `custom_llm_provider=bedrock`. Only
+    `httpx.AsyncClient.send` is faked, so LiteLLM's own status checks and exception mapping decide whether the retry
+    fires. `tests/prompts/test_registry.py` covers the same retry for real prompt definitions.
+    """
+
+    ARN = "arn:aws:bedrock:eu-west-1:123456789012:application-inference-profile/abcdef123456"
+    ERROR_BODY = {
+        "message": "The model returned the following errors: `temperature` is deprecated for this model."
+    }
+    OK_BODY = {
+        "output": {"message": {"role": "assistant", "content": [{"text": "hello"}]}},
+        "stopReason": "end_turn",
+        "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+    }
+
+    @pytest.fixture(autouse=True)
+    def _env(self, monkeypatch):
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAFAKE")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "fake")
+        monkeypatch.setenv("AWS_REGION_NAME", "eu-west-1")
+        _TEMPERATURE_REJECTING_MODELS.clear()
+        yield
+        _TEMPERATURE_REJECTING_MODELS.clear()
+
+    @pytest.fixture(name="sent_inference_configs")
+    def sent_inference_configs_fixture(self):
+        """Fake Bedrock: reject any request that carries temperature, accept the rest."""
+        sent: list[dict] = []
+
+        async def send(_client, request, **_kwargs):
+            inference_config = json.loads(request.content).get("inferenceConfig", {})
+            sent.append(inference_config)
+            if "temperature" in inference_config:
+                return httpx.Response(400, json=self.ERROR_BODY, request=request)
+            if request.url.path.endswith("/converse-stream"):
+                # A second 4xx is enough: it proves the retry was sent without temperature.
+                return httpx.Response(418, json={"message": "stop"}, request=request)
+            return httpx.Response(200, json=self.OK_BODY, request=request)
+
+        with patch.object(httpx.AsyncClient, "send", new=send):
+            yield sent
+
+    def _chat(self):
+        return ChatLiteLLM(
+            model=f"converse/{self.ARN}",
+            custom_llm_provider="bedrock",
+            temperature=0.0,
+            max_tokens=32_768,
+            max_retries=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_invoke_retries_without_temperature(self, sent_inference_configs):
+        result = await self._chat().ainvoke([HumanMessage(content="hi")])
+
+        assert result.content == "hello"
+        assert sent_inference_configs == [
+            {"temperature": 0.0, "maxTokens": 32_768},
+            {"maxTokens": 32_768},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_stream_retries_without_temperature(self, sent_inference_configs):
+        with pytest.raises(litellm.BadRequestError, match="stop"):
+            async for _ in self._chat().astream([HumanMessage(content="hi")]):
+                pass
+
+        assert sent_inference_configs == [
+            {"temperature": 0.0, "maxTokens": 32_768},
+            {"maxTokens": 32_768},
+        ]
 
 
 class TestTrailingAssistantPrefillRewrite:

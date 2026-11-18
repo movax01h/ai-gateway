@@ -1,12 +1,16 @@
 # pylint: disable=too-many-lines
+import json
+from functools import partial
 from pathlib import Path
 from typing import Any, Sequence, Type, cast
 from unittest.mock import Mock, patch
 
+import httpx
 import pytest
 import yaml
 from langchain.tools import BaseTool
 from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.prompts.chat import MessageLikeRepresentation
 from langchain_core.runnables import (
@@ -19,6 +23,7 @@ from langchain_core.runnables import (
 from pydantic import BaseModel, HttpUrl, SecretStr
 from pyfakefs.fake_filesystem import FakeFilesystem
 
+from ai_gateway.chat.agents import ReActPromptTemplate
 from ai_gateway.config import ConfigModelLimits, get_config
 from ai_gateway.integrations.amazon_q.chat import ChatAmazonQ
 from ai_gateway.integrations.amazon_q.client import AmazonQClientFactory
@@ -27,10 +32,16 @@ from ai_gateway.model_selection import LLMDefinition, ModelSelectionConfig
 from ai_gateway.model_selection.model_selection_config import ChatLiteLLMDefinition
 from ai_gateway.model_selection.models import ChatLiteLLMParams
 from ai_gateway.models.litellm import KindLiteLlmModel
+from ai_gateway.models.v2 import chat_litellm
 from ai_gateway.models.v2.completion_litellm import CompletionLiteLLM
 from ai_gateway.models.v2.embedding_litellm import EmbeddingLiteLLM
 from ai_gateway.models.v2.openai_decisions import OpenAIDecisionsModel
-from ai_gateway.prompts import LocalPromptRegistry, Prompt, feature_roots
+from ai_gateway.prompts import (
+    InMemoryPromptRegistry,
+    LocalPromptRegistry,
+    Prompt,
+    feature_roots,
+)
 from ai_gateway.prompts.base import TemplateNotFoundError
 from ai_gateway.prompts.config import ModelClassProvider
 from ai_gateway.prompts.config.base import PromptConfig
@@ -2390,3 +2401,129 @@ class TestDefaultModelOfAPromptVersion:
             .get_unit_primitive_config_map()["workflow"]
             .default_model_identifiers[0]
         )
+
+
+class TestSelfHostedModelThatRejectsTemperature:
+    """Prompts retry without `temperature` when a self-hosted model rejects it.
+
+    A Bedrock application inference profile ARN doesn't name the model, so `ChatLiteLLM` can't strip `temperature` up
+    front for models that deprecated it, such as Claude Opus 4.8. It learns this from Bedrock's error instead. These
+    tests build real prompts with the model metadata GitLab sends for a self-hosted model with family Claude, and fake
+    only `httpx.AsyncClient.send`, so LiteLLM's own Bedrock code decides whether the retry fires.
+    https://gitlab.com/gitlab-org/gitlab/-/work_items/633025
+    """
+
+    ARN = "arn:aws:bedrock:eu-west-1:123456789012:application-inference-profile/abcdef123456"
+
+    @pytest.fixture(autouse=True)
+    def _self_hosted_bedrock(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAFAKE")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "fake")
+        monkeypatch.setenv("AWS_REGION_NAME", "eu-west-1")
+        monkeypatch.setattr(get_config().custom_models, "enabled", True)
+        monkeypatch.setattr(chat_litellm, "_TEMPERATURE_REJECTING_MODELS", set())
+
+    @pytest.fixture(name="sent_inference_configs")
+    def sent_inference_configs_fixture(self):
+        """Fake Bedrock that rejects any request carrying `temperature` and accepts the rest."""
+        sent: list[dict] = []
+        error = {
+            "message": "The model returned the following errors: `temperature` is deprecated for this model."
+        }
+        ok = {
+            "output": {
+                "message": {"role": "assistant", "content": [{"text": "hello"}]}
+            },
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
+        }
+
+        async def send(_client, request, **_kwargs):
+            inference_config = json.loads(request.content).get("inferenceConfig", {})
+            sent.append(inference_config)
+            if "temperature" in inference_config:
+                return httpx.Response(400, json=error, request=request)
+            return httpx.Response(200, json=ok, request=request)
+
+        with patch.object(httpx.AsyncClient, "send", new=send):
+            yield sent
+
+    @pytest.fixture(name="prompt_registry")
+    def prompt_registry_fixture(self, internal_event_client):
+        return LocalPromptRegistry.from_local_yaml(
+            # The factories that `ai_gateway/prompts/container.py` registers for these prompts.
+            prompt_template_factories={
+                "chat/react": ReActPromptTemplate,
+                "chat/agent": "duo_workflow_service.agents.prompt_adapter.ChatAgentPromptTemplate",
+            },
+            model_factories={
+                ModelClassProvider.LITE_LLM: partial(
+                    chat_litellm.ChatLiteLLM, custom_models_enabled=True, max_retries=0
+                )
+            },
+            internal_event_client=internal_event_client,
+            model_limits=ConfigModelLimits(),
+            custom_models_enabled=True,
+        )
+
+    @pytest.fixture(name="self_hosted_claude")
+    def self_hosted_claude_fixture(self):
+        return create_model_metadata(
+            {
+                "provider": "bedrock",
+                "name": "claude_3",
+                "identifier": f"bedrock/converse/{self.ARN}",
+            }
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "prompt_id",
+        [
+            # Classic chat sets `temperature` in the prompt definition, so the `claude_3` params override can't
+            # remove it.
+            pytest.param("chat/react", id="classic-chat"),
+            # Agentic chat gets `temperature` from the `claude_3` model definition.
+            pytest.param("chat/agent", id="agentic-chat"),
+        ],
+    )
+    async def test_prompt_definition_retries_without_temperature(
+        self, prompt_registry, self_hosted_claude, sent_inference_configs, prompt_id
+    ):
+        prompt = prompt_registry.get(
+            prompt_id, "^1.0.0", model_metadata=self_hosted_claude, tools=[]
+        )
+
+        result = await prompt.bound.last.ainvoke([HumanMessage(content="hi")])
+
+        assert result.content == "hello"
+        assert ["temperature" in config for config in sent_inference_configs] == [
+            True,
+            False,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_flow_inline_prompt_retries_without_temperature(
+        self, prompt_registry, self_hosted_claude, sent_inference_configs
+    ):
+        """A flow config `prompts:` entry takes its model from the model metadata, so `claude_3` sets `temperature`."""
+        flow_registry = InMemoryPromptRegistry(prompt_registry)
+        flow_registry.register_prompt(
+            "inline",
+            {
+                "prompt_id": "inline",
+                "model": {"params": {"model_class_provider": "litellm"}},
+                "prompt_template": {"system": "You are helpful", "user": "{{goal}}"},
+            },
+        )
+        prompt = flow_registry.get(
+            "inline", None, model_metadata=self_hosted_claude, tools=[]
+        )
+
+        result = await prompt.bound.last.ainvoke([HumanMessage(content="hi")])
+
+        assert result.content == "hello"
+        assert ["temperature" in config for config in sent_inference_configs] == [
+            True,
+            False,
+        ]
